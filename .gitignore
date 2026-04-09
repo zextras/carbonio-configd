@@ -1,0 +1,53 @@
+# SPDX-FileCopyrightText: 2026 Zextras <https://www.zextras.com>
+#
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# Binaries
+/configd
+bin/
+
+# Build artifacts
+artifacts/
+*.deb
+*.rpm
+
+# Test reports
+tests.xml
+TEST*.xml
+/cover*.out
+/cover*.html
+linter.out
+
+# Profiling
+profiles/
+benchmarks/
+
+# IDE and AI tools
+.idea/
+.amazonq/
+.claude/
+.github/prompts/
+.github/skills/
+.opencode/
+.omc/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# AI assistant files
+/AGENTS.md
+/CLAUDE.md
+PHASE-*.md
+SESSION-*.md
+session-*.md
+ZMSTAT-*.md
+
+# External submodule (changes tracked separately)
+carbonio-core-utils/
+
+# Proxy analysis (temporary)
+carbonio-proxy/
+
+# OpenSpec (managed externally)
+openspec/

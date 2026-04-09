@@ -1,0 +1,21 @@
+# SPDX-FileCopyrightText: 2026 Zextras <https://www.zextras.com>
+#
+# SPDX-License-Identifier: AGPL-3.0-only
+
+[Unit]
+Description=Carbonio Config Daemon
+Documentation=https://github.com/zextras/carbonio-configd
+PartOf=carbonio-appserver.target carbonio-directory-server.target carbonio-mta.target carbonio-proxy.target
+
+After=network-online.target carbonio-openldap.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=zextras
+ExecStart=/opt/zextras/bin/configd
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=carbonio-appserver.target carbonio-directory-server.target carbonio-mta.target carbonio-proxy.target

@@ -1,0 +1,164 @@
+# SPDX-FileCopyrightText: 2026 Zextras <https://www.zextras.com>
+#
+# SPDX-License-Identifier: AGPL-3.0-only
+
+pkgname="carbonio-configd"
+pkgver="1.0.0"
+pkgrel="1"
+pkgdesc="High-performance configuration daemon for Carbonio with service management and legacy wrappers"
+arch=('x86_64')
+maintainer="Zextras <packages@zextras.com>"
+copyright=('2026, Zextras <https://www.zextras.com>')
+license=("AGPL-3.0-only")
+url="https://github.com/zextras"
+section="mail"
+priority="optional"
+options=('!strip')
+makedepends=(
+  'upx'
+)
+makedepends__apt=(
+  'upx-ucl'
+)
+depends__apt=(
+  "libsystemd0"
+  "polkitd"
+)
+depends__ubuntu_noble=(
+  "libsystemd0"
+  "polkitd"
+)
+depends__yum=(
+  "systemd-libs"
+  "polkit"
+)
+depends__rocky_9=(
+  "systemd-libs"
+  "polkit"
+)
+source=(
+  "${pkgname}-completion.bash"
+  "${pkgname}-legacy.service"
+  "${pkgname}-wrappers-completion.bash"
+  "${pkgname}.rules"
+  "${pkgname}.service"
+)
+sha256sums=(
+  'a16bbcc3f76bacb1d1d630c2163055b444f8154c3e2b98100c395758cf9cc6bb'
+  'a99be05172ba6451310cc8a12e23f8e63fc84c157b28d55ee3ebf33d608dc609'
+  '57fd0c840d4fcc30e900d44119b0b1d2e763ec14da0818f25661ee4464a0e521'
+  '5ff9518736ae4db0c9f40ade5ef9497021089d6f19511f979278ff6edd4903a6'
+  '815e0cce27972243604a57723b7c0b893c821bf9c81ca50e9b450bde4ab17e87'
+)
+
+_package_common() {
+  install -Dm755 "${srcdir}/configd" \
+    "${pkgdir}/opt/zextras/bin/configd"
+
+  # Polkit policy — allow zextras to manage carbonio systemd units
+  install -Dm644 "${srcdir}/${pkgname}.rules" \
+    "${pkgdir}/usr/share/polkit-1/rules.d/50-carbonio-configd.rules"
+
+  # Bash completion (system-wide and zextras user)
+  install -Dm644 "${srcdir}/${pkgname}-completion.bash" \
+    "${pkgdir}/usr/share/bash-completion/completions/configd"
+  install -Dm644 "${srcdir}/${pkgname}-completion.bash" \
+    "${pkgdir}/opt/zextras/common/share/bash-completion/completions/configd"
+
+  # Bash completion for compatibility wrappers
+  install -Dm644 "${srcdir}/${pkgname}-wrappers-completion.bash" \
+    "${pkgdir}/usr/share/bash-completion/completions/configd-wrappers"
+  install -Dm644 "${srcdir}/${pkgname}-wrappers-completion.bash" \
+    "${pkgdir}/opt/zextras/common/share/bash-completion/completions/configd-wrappers"
+}
+
+_package_legacy() {
+  install -Dm644 "${srcdir}/${pkgname}-legacy.service" \
+    "${pkgdir}/lib/systemd/system/carbonio-configd.service"
+}
+
+_package_systemd() {
+  install -Dm644 "${srcdir}/${pkgname}.service" \
+    "${pkgdir}/lib/systemd/system/carbonio-configd.service"
+}
+
+build() {
+  cd "$(dirname "$(find /project -name "yap.json" -print -quit)")/.."
+  CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
+    -o "${srcdir}/configd" ./cmd/configd/
+
+  # Compress with UPX to reduce binary size by ~70%
+  upx "${srcdir}/configd"
+}
+
+package() {
+  _package_common
+  _package_systemd
+}
+
+package__rocky_8() {
+  _package_common
+  _package_legacy
+}
+
+package__rocky_9() {
+  _package_common
+  _package_systemd
+}
+
+package__ubuntu_jammy() {
+  _package_common
+  _package_legacy
+}
+
+package__ubuntu_noble() {
+  _package_common
+  _package_systemd
+}
+
+postinst__apt() {
+  if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload &>/dev/null || :
+    if [ "$1" = "configure" ] && [ -z "$2" ]; then
+      systemctl enable carbonio-configd.service &>/dev/null || :
+    fi
+  fi
+}
+
+postinst__yum() {
+  if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload &>/dev/null || :
+    if [ $1 -eq 1 ]; then
+      systemctl enable carbonio-configd.service &>/dev/null || :
+    fi
+  fi
+}
+
+prerm__apt() {
+  if [ -d /run/systemd/system ]; then
+    case "$1" in
+      remove)
+        systemctl --no-reload disable --now carbonio-configd.service &>/dev/null || :
+        ;;
+      upgrade)
+        systemctl --no-reload stop carbonio-configd.service &>/dev/null || :
+        ;;
+    esac
+  fi
+}
+
+prerm__yum() {
+  if [ -d /run/systemd/system ]; then
+    if [ $1 -eq 0 ]; then
+      systemctl --no-reload disable --now carbonio-configd.service &>/dev/null || :
+    else
+      systemctl --no-reload stop carbonio-configd.service &>/dev/null || :
+    fi
+  fi
+}
+
+postrm() {
+  if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload >/dev/null 2>&1 || :
+  fi
+}

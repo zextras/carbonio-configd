@@ -1,0 +1,231 @@
+# SPDX-FileCopyrightText: 2026 Zextras <https://www.zextras.com>
+#
+# SPDX-License-Identifier: AGPL-3.0-only
+
+version: "2"
+
+run:
+  timeout: 10m
+  issues-exit-code: 1
+  # Lint test files by default; exclusions below carve out only the rules that
+  # do not make sense for test code, with explicit justification.
+  tests: true
+
+linters:
+  enable:
+    - asciicheck
+    - bodyclose
+    - copyloopvar
+    - cyclop
+    - dupl
+    - durationcheck
+    - errcheck
+    - errorlint
+    - gochecknoinits
+    - goconst
+    - gocritic
+    - gocyclo
+    - gosec
+    - govet
+    - ineffassign
+    - lll
+    - misspell
+    - modernize
+    - nakedret
+    - nestif
+    - nilerr
+    - nilnil
+    - noctx
+    - predeclared
+    - revive
+    - staticcheck
+    - testpackage
+    - thelper
+    - unconvert
+    - unparam
+    - unused
+    - wastedassign
+    - whitespace
+    - wsl_v5
+
+  disable:
+    - depguard
+    - exhaustruct
+    - forbidigo
+    - forcetypeassert
+    - funlen
+    - gochecknoglobals
+    - gomoddirectives
+    - mnd
+    - wrapcheck
+
+  settings:
+    cyclop:
+      max-complexity: 15
+
+    dupl:
+      threshold: 80
+
+    goconst:
+      min-len: 3
+      min-occurrences: 3
+
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+        - style
+      disabled-checks:
+        - paramTypeCombine
+        - whyNoLint
+
+    gocyclo:
+      min-complexity: 15
+
+    gosec:
+      severity: medium
+      confidence: medium
+      excludes:
+        - G204 # Subprocess with variable
+        - G301 # Poor file permissions
+        - G302 # Poor file permissions
+
+    lll:
+      line-length: 120
+
+    revive:
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: dot-imports
+        - name: empty-block
+        - name: error-return
+        - name: error-strings
+        - name: errorf
+        - name: exported
+        - name: increment-decrement
+        - name: indent-error-flow
+        - name: package-comments
+        - name: range
+        - name: receiver-naming
+        - name: superfluous-else
+        - name: var-naming
+
+    staticcheck:
+      checks:
+        - all
+
+  exclusions:
+    generated: strict
+
+    rules:
+      # Skip all linting for generated protobuf files.
+      - path: ".*\\.pb\\.go$"
+        linters:
+          - asciicheck
+          - bodyclose
+          - copyloopvar
+          - cyclop
+          - dupl
+          - durationcheck
+          - errcheck
+          - errorlint
+          - gochecknoinits
+          - goconst
+          - gocritic
+          - gocyclo
+          - gosec
+          - govet
+          - ineffassign
+          - lll
+          - misspell
+          - nakedret
+          - nestif
+          - nilerr
+          - nilnil
+          - noctx
+          - predeclared
+          - revive
+          - staticcheck
+          - testpackage
+          - thelper
+          - unconvert
+          - unparam
+          - unused
+          - wastedassign
+          - whitespace
+
+      # Skip all linting for other generated files.
+      - path: ".*_generated\\.go$"
+        linters:
+          - asciicheck
+          - bodyclose
+          - copyloopvar
+          - cyclop
+          - dupl
+          - durationcheck
+          - errcheck
+          - errorlint
+          - gochecknoinits
+          - goconst
+          - gocritic
+          - gocyclo
+          - gosec
+          - govet
+          - ineffassign
+          - lll
+          - misspell
+          - nakedret
+          - nestif
+          - nilerr
+          - nilnil
+          - noctx
+          - predeclared
+          - revive
+          - staticcheck
+          - thelper
+          - unconvert
+          - unparam
+          - unused
+          - wastedassign
+          - whitespace
+
+      # Narrow, documented exclusions for *_test.go files.
+      # Rationale:
+      #   - cyclop/gocyclo/nestif: table-driven subtests often exceed
+      #     complexity thresholds without real maintenance cost.
+      #   - dupl/goconst: repetitive fixtures are clearer inline than extracted.
+      #   - lll: assertion messages commonly exceed the line-length budget.
+      #   - gosec: test data frequently uses permissive file modes / fixed creds.
+      #   - revive: unexported helpers in _test.go don't need doc comments.
+      #   - errcheck: tests routinely ignore errors on Close/Setenv/etc.
+      #     Meaningful assertions are made via require/assert; deferred cleanup
+      #     errors are intentionally ignored.
+      #   - errorlint: tests compare errors using == or unwrap manually where
+      #     it improves test readability.
+      #   - testpackage: project convention uses same-package tests to access
+      #     unexported helpers for unit coverage.
+      #   - wsl_v5/thelper/modernize/gocritic/noctx/unparam/unused: style and
+      #     structural rules that add noise without correctness value in tests.
+      # Core static analysis (staticcheck/govet/ineffassign/nilerr) remains
+      # enabled on test files.
+      - path: "_test\\.go$"
+        linters:
+          - cyclop
+          - dupl
+          - errcheck
+          - errorlint
+          - goconst
+          - gocritic
+          - gocyclo
+          - gosec
+          - lll
+          - modernize
+          - nestif
+          - noctx
+          - revive
+          - testpackage
+          - thelper
+          - unparam
+          - unused
+          - wsl_v5
