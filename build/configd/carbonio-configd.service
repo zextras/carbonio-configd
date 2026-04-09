@@ -1,0 +1,111 @@
+# SPDX-FileCopyrightText: 2026 Zextras <https://www.zextras.com>
+#
+# SPDX-License-Identifier: AGPL-3.0-only
+
+[Unit]
+Description=Carbonio Config Daemon
+Documentation=https://docs.zextras.com
+PartOf=carbonio-appserver.target carbonio-directory-server.target carbonio-mta.target carbonio-proxy.target
+
+# Ensure network and LDAP are available
+After=network-online.target carbonio-openldap.service
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=zextras
+EnvironmentFile=-/opt/zextras/data/systemd.env
+ExecStartPre=nc -z $ldap_domain $ldap_port
+ExecStart=/opt/zextras/bin/configd
+ExecReload=/bin/kill -HUP $MAINPID
+NotifyAccess=main
+
+# Watchdog: configd pings every WatchdogSec/2; systemd restarts it if silent.
+# The watchdog only activates after READY=1, so slow startup is not penalised.
+WatchdogSec=120
+
+# Startup may take long on first run (LDAP queries, config rewrites).
+# configd sends READY=1 after the first successful loop iteration.
+TimeoutStartSec=120
+TimeoutStopSec=10
+KillMode=mixed
+KillSignal=SIGTERM
+
+# Restart policy
+Restart=on-failure
+RestartSec=3
+StartLimitInterval=300
+StartLimitBurst=5
+
+# Resource limits
+MemoryMax=512M
+MemoryHigh=384M
+CPUQuota=80%
+TasksMax=256
+
+# OOM protection (negative = less likely to be killed, range: -1000 to 1000)
+OOMScoreAdjust=-500
+
+# ── Security: Filesystem ──────────────────────────────────────────────
+ProtectSystem=strict
+ReadWritePaths=/opt/zextras/data /opt/zextras/log /opt/zextras/conf /run/carbonio
+ProtectHome=yes
+PrivateTmp=yes
+UMask=0027
+
+# ── Security: Process isolation ───────────────────────────────────────
+PrivateDevices=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+
+# ── Security: Privilege restrictions ──────────────────────────────────
+NoNewPrivileges=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RemoveIPC=yes
+
+# Drop all capabilities — configd runs as unprivileged zextras user
+# and child processes (systemctl, postconf, zm*ctl) communicate via
+# D-Bus / pipes, not kernel capabilities.
+CapabilityBoundingSet=
+
+# ── Security: Namespace restrictions ──────────────────────────────────
+RestrictNamespaces=yes
+
+# ── Security: Network ────────────────────────────────────────────────
+# configd needs: AF_INET/AF_INET6 (LDAP, listener port 7171),
+# AF_UNIX (sd_notify socket, local IPC).
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+# ── Security: System call filtering ──────────────────────────────────
+# @system-service covers all syscalls a typical service needs, including
+# clone (goroutines), socket, read/write, mmap, etc.
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# ── Security: Memory restrictions ─────────────────────────────────────
+# NOTE: MemoryDenyWriteExecute=yes is DISABLED because child processes
+# (zmlocalconfig, zmprov) invoke Java which requires W^X for JIT.
+# This is a documented security trade-off for Java compatibility.
+#MemoryDenyWriteExecute=yes
+
+# Environment
+Environment=TMPDIR=/opt/zextras/data/tmp
+Environment=GOMAXPROCS=4
+WorkingDirectory=/opt/zextras
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=carbonio-configd
+
+[Install]
+WantedBy=carbonio-appserver.target carbonio-directory-server.target carbonio-mta.target carbonio-proxy.target

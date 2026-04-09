@@ -1,0 +1,61 @@
+// SPDX-FileCopyrightText: 2026 Zextras <https://www.zextras.com>
+//
+// SPDX-License-Identifier: AGPL-3.0-only
+
+// Allow the zextras user to start/stop/restart/reload the exact set of
+// Carbonio systemd units managed by configd.
+//
+// Security hardening:
+// - Explicit unit allowlist (no prefix match) prevents privilege escalation
+//   via attacker-created carbonio-*.service units
+// - unit/verb are null-guarded (action.lookup can return null)
+// - Administrative verbs (enable, disable, mask, preset) are explicitly
+//   denied (NO) on managed units so no other polkit rule can escalate them
+polkit.addRule(function(action, subject) {
+    var allowedUnits = [
+        "carbonio-memcached.service",
+        "carbonio-policyd.service",
+        "carbonio-stats.service",
+        "carbonio-opendkim.service",
+        "carbonio-freshclam.service",
+        "carbonio-clamd.service",
+        "carbonio-saslauthd.service",
+        "carbonio-milter.service",
+        "carbonio-mailthreat.service",
+        "carbonio-antivirus.service",
+        "carbonio-antispam.service",
+        "carbonio-postfix.service",
+        "carbonio-nginx.service",
+        "carbonio-appserver.service",
+        "carbonio-openldap.service",
+        "carbonio-configd.service",
+        "service-discover.service"
+    ];
+
+    var operationalVerbs = [
+        "start", "stop", "restart", "reload",
+        "try-restart", "try-reload-or-restart"
+    ];
+
+    if (action.id !== "org.freedesktop.systemd1.manage-units") {
+        return polkit.Result.NOT_HANDLED;
+    }
+
+    if (subject.user !== "zextras") {
+        return polkit.Result.NOT_HANDLED;
+    }
+
+    var unit = action.lookup("unit") || "";
+    if (allowedUnits.indexOf(unit) === -1) {
+        return polkit.Result.NOT_HANDLED;
+    }
+
+    // For units we own: explicitly deny administrative verbs so no other
+    // rule can escalate them for the zextras user.
+    var verb = action.lookup("verb") || "";
+    if (operationalVerbs.indexOf(verb) === -1) {
+        return polkit.Result.NO;
+    }
+
+    return polkit.Result.YES;
+});

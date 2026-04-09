@@ -1,0 +1,11 @@
+{
+  "name": "carbonio-configd",
+  "description": "High-performance configuration daemon for Carbonio",
+  "buildDir": "/tmp/",
+  "output": "artifacts",
+  "projects": [
+    {
+      "name": "configd"
+    }
+  ]
+}
