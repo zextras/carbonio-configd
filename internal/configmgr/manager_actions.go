@@ -103,17 +103,17 @@ func (cm *ConfigManager) compileSectionRestarts(
 			continue
 		}
 
-		// Special handling for opendkim and archiving from Jython
-		switch {
-		case restartService == "archiving" && !state.IsTrueValue(serviceConfig[restartService]):
-			logger.DebugContext(ctx, "Service not enabled, skipping stop", "service", restartService)
-		case restartService == "opendkim" && state.IsTrueValue(serviceConfig["mta"]):
+		// Special handling for opendkim carried over from Jython: if the MTA is
+		// enabled we force a restart of opendkim rather than stopping it.
+		if restartService == "opendkim" && state.IsTrueValue(serviceConfig["mta"]) {
 			logger.DebugContext(ctx, "Adding restart opendkim")
 			cm.State.CurRestarts(restartService, -1)
-		default:
-			logger.DebugContext(ctx, "Adding stop", "service", restartService)
-			cm.State.CurRestarts(restartService, 0)
+
+			continue
 		}
+
+		logger.DebugContext(ctx, "Adding stop", "service", restartService)
+		cm.State.CurRestarts(restartService, 0)
 	}
 }
 

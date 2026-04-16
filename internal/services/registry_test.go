@@ -169,7 +169,7 @@ func TestRegistryCoversAllSystemdMap(t *testing.T) {
 		if LookupService(name) == nil {
 			// Some systemdMap entries like "mailboxd" and "service" are aliases
 			// Only check core service names
-			if name != "mailboxd" && name != "service" && name != "archiving" {
+			if name != "mailboxd" && name != "service" {
 				t.Logf("Note: systemdMap entry %q not in registry (may be alias)", name)
 			}
 		}

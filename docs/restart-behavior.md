@@ -53,7 +53,6 @@ When systemd is not detected (`UseSystemd = false`), only the `zm*ctl` scripts a
 | `amavis` | `zmamavisdctl` |
 | `antispam` | `zmantispamctl` |
 | `antivirus` | `zmclamdctl` |
-| `archiving` | `zmamavisdctl` |
 | `cbpolicyd` | `zmcbpolicydctl` |
 | `ldap` | `ldap` |
 | `mailbox` | `zmstorectl` |

@@ -58,7 +58,6 @@ func getDefaultCommandMap() map[string]string {
 		"amavis":    binPath + "/zmamavisdctl",
 		"antispam":  binPath + "/zmantispamctl",
 		"antivirus": binPath + "/zmclamdctl",
-		"archiving": binPath + "/zmamavisdctl",
 		"cbpolicyd": binPath + "/zmcbpolicydctl",
 		"ldap":      binPath + "/ldap",
 		"mailbox":   binPath + "/zmstorectl",

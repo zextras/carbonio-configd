@@ -389,7 +389,7 @@ func TestExeMap(t *testing.T) {
 	// Test that all expected keys exist
 	expectedKeys := []string{
 		"POSTCONF", "POSTCONFD", "PROXY", "STATS",
-		"ARCHIVING", "MEMCACHED", "MTA", "ANTISPAM", "AMAVIS", "ANTIVIRUS",
+		"MEMCACHED", "MTA", "ANTISPAM", "AMAVIS", "ANTIVIRUS",
 		"SASL", "MAILBOXD", "SERVICE", "LDAP", "MAILBOX", "CBPOLICYD",
 		"OPENDKIM",
 		// NOTE: PROXYGEN removed - using pure Go implementation
@@ -411,7 +411,7 @@ func TestCommandsMap(t *testing.T) {
 	// Test that all expected commands exist
 	expectedCommands := []string{
 		"gs:enabled", "gs", "localconfig", "gacf", "gamau", "garpu", "garpb",
-		"postconf", "postconfd", "proxygen", "proxy", "stats", "archiving", "memcached",
+		"postconf", "postconfd", "proxygen", "proxy", "stats", "memcached",
 		"mta", "antispam", "antivirus", "amavis", "opendkim", "cbpolicyd",
 		"sasl", "mailboxd", "service", "ldap", "mailbox",
 	}

@@ -802,16 +802,16 @@ func TestWatchdog_FailedRestartLeavesUntracked(t *testing.T) {
 	wd := NewWatchdog(cfg)
 
 	// Setup
-	wd.AddService(context.Background(), "archiving")
-	wd.SetServiceEnabled(context.Background(), "archiving", true)
+	wd.AddService(context.Background(), "amavis")
+	wd.SetServiceEnabled(context.Background(), "amavis", true)
 
 	// Verify initially tracked
-	if !wd.IsServiceTracked("archiving") {
+	if !wd.IsServiceTracked("amavis") {
 		t.Fatal("Service should be tracked initially")
 	}
 
 	// Service fails
-	mockWithFailedProcess.setRunning("archiving", false)
+	mockWithFailedProcess.setRunning("amavis", false)
 
 	// Start watchdog
 	wd.Start(context.Background())
@@ -826,12 +826,12 @@ func TestWatchdog_FailedRestartLeavesUntracked(t *testing.T) {
 	}
 
 	// Service should be removed from tracking after failed restart
-	if wd.IsServiceTracked("archiving") {
+	if wd.IsServiceTracked("amavis") {
 		t.Error("Service should be removed from tracking after failed restart")
 	}
 
 	// Service should still be down
-	if mockWithFailedProcess.isRunning("archiving") {
+	if mockWithFailedProcess.isRunning("amavis") {
 		t.Error("Service should not be running after failed restart")
 	}
 }

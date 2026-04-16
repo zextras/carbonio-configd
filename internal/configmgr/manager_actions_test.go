@@ -1398,33 +1398,6 @@ func TestCompileSectionActions(t *testing.T) {
 		}
 	})
 
-	t.Run("skip stop for archiving service when not enabled", func(t *testing.T) {
-		cm := &ConfigManager{
-			mainConfig: &config.Config{
-				BaseDir:  "/tmp",
-				Hostname: "testhost",
-			},
-			State:      state.NewState(),
-			ServiceMgr: newMockServiceManager(),
-			Cache:      cacheInstance,
-		}
-		cm.State.FirstRun = false
-
-		section := &config.MtaConfigSection{
-			Name:     "mta",
-			Restarts: map[string]bool{"archiving": true},
-		}
-
-		// Don't add archiving to ServiceConfig - absence means disabled
-
-		cm.compileSectionActions(ctx, "mta", section, nil, cm.State.ForcedConfig, cm.State.FirstRun, cm.State.ServerConfig.ServiceConfig)
-
-		// Check that archiving was NOT added
-		if len(cm.State.CurrentActions.Restarts) != 0 {
-			t.Errorf("Expected 0 restarts for disabled archiving, got %d", len(cm.State.CurrentActions.Restarts))
-		}
-	})
-
 	t.Run("add opendkim restart when mta is enabled", func(t *testing.T) {
 		cm := &ConfigManager{
 			mainConfig: &config.Config{

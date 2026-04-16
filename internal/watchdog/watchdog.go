@@ -272,7 +272,7 @@ func (w *Watchdog) getTrackedServices() []string {
 	commonServices := []string{
 		"ldap", "mailbox", "mailboxd", "memcached", "proxy",
 		"antispam", "antivirus", "cbpolicyd", "amavis", "opendkim",
-		"archiving", "mta", "sasl", "stats",
+		"mta", "sasl", "stats",
 	}
 
 	serviceList := make([]string, 0, len(commonServices))
