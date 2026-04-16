@@ -20,11 +20,11 @@ import (
 	"github.com/zextras/carbonio-configd/internal/systemd"
 )
 
-
 const (
 	serviceCliComponent = "service-cli"
 	errUnknownService   = "unknown service: %s"
 )
+
 // NoRewrite disables config rewriting before service start.
 var NoRewrite bool
 

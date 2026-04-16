@@ -150,68 +150,60 @@ func NewConfig() (*Config, error) {
 	return c, nil
 }
 
+// localStr sets *dst to data[key] when the key is present.
+func localStr(data map[string]string, key string, dst *string) {
+	if v, ok := data[key]; ok {
+		*dst = v
+	}
+}
+
+// localInt sets *dst to the integer value of data[key] when present and parseable.
+func localInt(data map[string]string, key string, dst *int) {
+	if v, ok := data[key]; ok && v != "" {
+		if i, err := strconv.Atoi(v); err == nil {
+			*dst = i
+		}
+	}
+}
+
+// localBoolTrue sets *dst to true when data[key] equals "TRUE" (case-insensitive).
+func localBoolTrue(data map[string]string, key string, dst *bool) {
+	if v, ok := data[key]; ok {
+		*dst = strings.EqualFold(v, "TRUE")
+	}
+}
+
+// localBoolNotFalse sets *dst to false only when data[key] equals "FALSE" (case-insensitive).
+func localBoolNotFalse(data map[string]string, key string, dst *bool) {
+	if v, ok := data[key]; ok {
+		*dst = !strings.EqualFold(v, "FALSE")
+	}
+}
+
 // SetVals updates config values based on provided local configuration.
 // This function mirrors the setVals method in conf.py.
-//
-//nolint:gocyclo,cyclop // Configuration mapping requires checking many fields
 func (c *Config) SetVals(localConfig *LocalConfig) {
-	if val, ok := localConfig.Data["ldap_is_master"]; ok {
-		c.LdapIsMaster = strings.EqualFold(val, "TRUE")
-	}
+	data := localConfig.Data
 
-	if val, ok := localConfig.Data["ldap_root_password"]; ok {
-		c.LdapRootPassword = val
-	}
-
-	if val, ok := localConfig.Data["ldap_master_url"]; ok {
-		c.LdapMasterURL = val
-	}
+	localBoolTrue(data, "ldap_is_master", &c.LdapIsMaster)
+	localStr(data, "ldap_root_password", &c.LdapRootPassword)
+	localStr(data, "ldap_master_url", &c.LdapMasterURL)
 
 	// Default to true for security. Only disable if explicitly set to FALSE.
 	c.LdapStartTLSRequired = true
+	localBoolNotFalse(data, "ldap_starttls_required", &c.LdapStartTLSRequired)
 
-	if val, ok := localConfig.Data["ldap_starttls_required"]; ok {
-		if strings.EqualFold(val, "FALSE") {
-			c.LdapStartTLSRequired = false
-		}
-	}
+	localInt(data, "zmconfigd_log_level", &c.LogLevel)
+	localInt(data, "zmconfigd_interval", &c.Interval)
+	localInt(data, "zmconfigd_watchdog_interval", &c.WatchdogInterval)
 
-	if val, ok := localConfig.Data["zmconfigd_log_level"]; ok {
-		if i, err := strconv.Atoi(val); err == nil {
-			c.LogLevel = i
-		}
-	}
+	localBoolNotFalse(data, "zmconfigd_skip_idle_polls", &c.SkipIdlePolls)
+	localBoolTrue(data, "zmconfigd_debug", &c.Debug)
+	localBoolNotFalse(data, "zmconfigd_watchdog", &c.Watchdog)
+	localBoolNotFalse(data, "zmconfigd_enable_config_restarts", &c.RestartConfig)
 
-	if val, ok := localConfig.Data["zmconfigd_interval"]; ok && val != "" {
-		if i, err := strconv.Atoi(val); err == nil {
-			c.Interval = i
-		}
-	}
-
-	if val, ok := localConfig.Data["zmconfigd_watchdog_interval"]; ok && val != "" {
-		if i, err := strconv.Atoi(val); err == nil {
-			c.WatchdogInterval = i
-		}
-	}
-
-	if val, ok := localConfig.Data["zmconfigd_skip_idle_polls"]; ok {
-		c.SkipIdlePolls = !strings.EqualFold(val, "FALSE")
-	}
-
-	if val, ok := localConfig.Data["zmconfigd_debug"]; ok {
-		c.Debug = strings.EqualFold(val, "TRUE")
-	}
-
-	if val, ok := localConfig.Data["zmconfigd_watchdog"]; ok {
-		c.Watchdog = !strings.EqualFold(val, "FALSE")
-	}
-
-	if val, ok := localConfig.Data["zmconfigd_enable_config_restarts"]; ok {
-		c.RestartConfig = !strings.EqualFold(val, "FALSE")
-	}
-
-	if val, ok := localConfig.Data["zmconfigd_watchdog_services"]; ok {
-		c.WdList = strings.Fields(val)
+	if v, ok := data["zmconfigd_watchdog_services"]; ok {
+		c.WdList = strings.Fields(v)
 	}
 
 	// Note: Log level changes require reinitialization of the logger

@@ -772,75 +772,33 @@ func (s *State) SetRequestedConfig(ctx context.Context, section string) {
 	s.AddRequestedConfigs(ctx, []string{section})
 }
 
+// mapsEqual reports whether two maps have identical keys and values.
+func mapsEqual[V comparable](a, b map[string]V) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	for k, v := range a {
+		if bv, ok := b[k]; !ok || bv != v {
+			return false
+		}
+	}
+
+	return true
+}
+
 // CompareActions compares current and previous actions to determine what changed.
 // Returns true if any actions differ between current and previous state.
-//
-//nolint:gocyclo,cyclop // requires comparing multiple action types and states
 func (s *State) CompareActions() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Compare rewrites
-	if len(s.CurrentActions.Rewrites) != len(s.PreviousActions.Rewrites) {
-		return true
-	}
-
-	for key, val := range s.CurrentActions.Rewrites {
-		if prevVal, ok := s.PreviousActions.Rewrites[key]; !ok || prevVal != val {
-			return true
-		}
-	}
-
-	// Compare postconf
-	if len(s.CurrentActions.Postconf) != len(s.PreviousActions.Postconf) {
-		return true
-	}
-
-	for key, val := range s.CurrentActions.Postconf {
-		if prevVal, ok := s.PreviousActions.Postconf[key]; !ok || prevVal != val {
-			return true
-		}
-	}
-
-	// Compare postconfd
-	if len(s.CurrentActions.Postconfd) != len(s.PreviousActions.Postconfd) {
-		return true
-	}
-
-	for key, val := range s.CurrentActions.Postconfd {
-		if prevVal, ok := s.PreviousActions.Postconfd[key]; !ok || prevVal != val {
-			return true
-		}
-	}
-
-	// Compare services
-	if len(s.CurrentActions.Services) != len(s.PreviousActions.Services) {
-		return true
-	}
-
-	for key, val := range s.CurrentActions.Services {
-		if prevVal, ok := s.PreviousActions.Services[key]; !ok || prevVal != val {
-			return true
-		}
-	}
-
-	// Compare LDAP
-	if len(s.CurrentActions.Ldap) != len(s.PreviousActions.Ldap) {
-		return true
-	}
-
-	for key, val := range s.CurrentActions.Ldap {
-		if prevVal, ok := s.PreviousActions.Ldap[key]; !ok || prevVal != val {
-			return true
-		}
-	}
-
-	// Compare proxygen
-	if s.CurrentActions.Proxygen != s.PreviousActions.Proxygen {
-		return true
-	}
-
-	return false
+	return !mapsEqual(s.CurrentActions.Rewrites, s.PreviousActions.Rewrites) ||
+		!mapsEqual(s.CurrentActions.Postconf, s.PreviousActions.Postconf) ||
+		!mapsEqual(s.CurrentActions.Postconfd, s.PreviousActions.Postconfd) ||
+		!mapsEqual(s.CurrentActions.Services, s.PreviousActions.Services) ||
+		!mapsEqual(s.CurrentActions.Ldap, s.PreviousActions.Ldap) ||
+		s.CurrentActions.Proxygen != s.PreviousActions.Proxygen
 }
 
 // SaveCurrentToPrevious copies current actions to previous actions.

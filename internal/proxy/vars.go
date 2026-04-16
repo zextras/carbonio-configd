@@ -90,59 +90,70 @@ func (g *Generator) RegisterVariables(_ context.Context) {
 	g.registerXMPPVariables()
 }
 
-// LookupValue resolves a variable's value from the appropriate configuration source
-//
-//nolint:gocyclo,cyclop // requires checking multiple configuration sources and fallbacks
+// lookupAttr returns the value of attr from data.
+// Returns ("", false) when attr is empty; safe on nil maps.
+func lookupAttr(data map[string]string, attr string) (string, bool) {
+	if attr == "" {
+		return "", false
+	}
+
+	v, ok := data[attr]
+
+	return v, ok
+}
+
+// LookupValue resolves a variable's value from the appropriate configuration source.
 func (g *Generator) LookupValue(ctx context.Context, v *Variable) (any, error) {
 	ctx = logger.ContextWithComponentOnce(ctx, "proxy")
-	// If custom resolver is defined, use it
+
 	if v.CustomResolver != nil {
 		return v.CustomResolver(ctx)
 	}
 
-	// Check override type to determine where to look for value
+	// Extract nil-safe data maps once. Indexing a nil map is safe in Go.
+	var globalData, serverData, localData map[string]string
+	if g.GlobalConfig != nil {
+		globalData = g.GlobalConfig.Data
+	}
+
+	if g.ServerConfig != nil {
+		serverData = g.ServerConfig.Data
+	}
+
+	if g.LocalConfig != nil {
+		localData = g.LocalConfig.Data
+	}
+
 	switch v.OverrideType {
 	case OverrideConfig:
-		// Try global config first
-		if g.GlobalConfig != nil && v.Attribute != "" {
-			if val, ok := g.GlobalConfig.Data[v.Attribute]; ok {
-				logger.DebugContext(ctx, "LookupValue found in GlobalConfig",
-					"keyword", v.Keyword,
-					"value", val,
-					"attribute", v.Attribute)
-
-				return g.convertValue(ctx, val, v.ValueType)
-			}
-
-			logger.DebugContext(ctx, "LookupValue not found in GlobalConfig, using default",
+		if val, ok := lookupAttr(globalData, v.Attribute); ok {
+			logger.DebugContext(ctx, "LookupValue found in GlobalConfig",
 				"keyword", v.Keyword,
-				"default_value", v.DefaultValue)
+				"value", val,
+				"attribute", v.Attribute)
+
+			return g.convertValue(ctx, val, v.ValueType)
 		}
+
+		logger.DebugContext(ctx, "LookupValue not found in GlobalConfig, using default",
+			"keyword", v.Keyword,
+			"default_value", v.DefaultValue)
 
 	case OverrideServer:
-		// Try server config first
-		if g.ServerConfig != nil && v.Attribute != "" {
-			if val, ok := g.ServerConfig.Data[v.Attribute]; ok {
-				return g.convertValue(ctx, val, v.ValueType)
-			}
+		if val, ok := lookupAttr(serverData, v.Attribute); ok {
+			return g.convertValue(ctx, val, v.ValueType)
 		}
-		// Fall back to global config
-		if g.GlobalConfig != nil && v.Attribute != "" {
-			if val, ok := g.GlobalConfig.Data[v.Attribute]; ok {
-				return g.convertValue(ctx, val, v.ValueType)
-			}
+
+		if val, ok := lookupAttr(globalData, v.Attribute); ok {
+			return g.convertValue(ctx, val, v.ValueType)
 		}
 
 	case OverrideLocalConfig:
-		// Try local config first
-		if g.LocalConfig != nil && v.Attribute != "" {
-			if val, ok := g.LocalConfig.Data[v.Attribute]; ok {
-				return g.convertValue(ctx, val, v.ValueType)
-			}
+		if val, ok := lookupAttr(localData, v.Attribute); ok {
+			return g.convertValue(ctx, val, v.ValueType)
 		}
 	}
 
-	// Return default value if no override found
 	return v.DefaultValue, nil
 }
 

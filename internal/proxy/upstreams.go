@@ -16,11 +16,11 @@ import (
 	"github.com/zextras/carbonio-configd/internal/logger"
 )
 
-
 const (
 	errGetAllServers = "failed to get all servers: %w"
 	serverNamePrefix = "# name "
 )
+
 // MemcacheServer represents a memcached server
 type MemcacheServer struct {
 	Hostname string // zimbraServiceHostname
@@ -34,6 +34,68 @@ type serverData struct {
 	mailMode     string
 	mailPort     int
 	mailSSLPort  int
+}
+
+// mcServerData holds memcached server attributes during parsing.
+type mcServerData struct {
+	hostname      string
+	hasMemcached  bool
+	memcachedPort int
+}
+
+// applyServerAttr updates cur with a parsed key/value attribute pair.
+func applyServerAttr(key, value string, cur *serverData) {
+	switch key {
+	case "zimbraServiceHostname":
+		cur.hostname = value
+	case "zimbraReverseProxyLookupTarget":
+		cur.lookupTarget = strings.EqualFold(value, "TRUE")
+	case "zimbraMailMode":
+		cur.mailMode = strings.ToLower(value)
+	case "zimbraMailPort":
+		if port, err := strconv.Atoi(value); err == nil {
+			cur.mailPort = port
+		}
+	case "zimbraMailSSLPort":
+		if port, err := strconv.Atoi(value); err == nil {
+			cur.mailSSLPort = port
+		}
+	}
+}
+
+// appendValidUpstream appends an UpstreamServer if cur qualifies as a proxy backend.
+func appendValidUpstream(servers *[]UpstreamServer, cur serverData, portSelector func(serverData) UpstreamServer) {
+	if cur.hostname == "" || !cur.lookupTarget {
+		return
+	}
+
+	s := portSelector(cur)
+	if s.Port > 0 {
+		*servers = append(*servers, s)
+	}
+}
+
+// applyMcAttr updates cur with a parsed key/value attribute pair.
+func applyMcAttr(key, value string, cur *mcServerData) {
+	switch key {
+	case "zimbraServiceHostname":
+		cur.hostname = value
+	case "zimbraServiceEnabled":
+		if value == "memcached" {
+			cur.hasMemcached = true
+		}
+	case "zimbraMemcachedBindPort":
+		if port, err := strconv.Atoi(value); err == nil {
+			cur.memcachedPort = port
+		}
+	}
+}
+
+// appendValidMcServer appends a MemcacheServer if cur has memcached enabled.
+func appendValidMcServer(servers *[]MemcacheServer, cur mcServerData) {
+	if cur.hostname != "" && cur.hasMemcached && cur.memcachedPort > 0 {
+		*servers = append(*servers, MemcacheServer{Hostname: cur.hostname, Port: cur.memcachedPort})
+	}
 }
 
 // getAllReverseProxyBackends queries all servers that should be reverse proxy backends.
@@ -68,80 +130,36 @@ func (g *Generator) parseReverseProxyBackendsSSL(output string) []UpstreamServer
 	return g.parseReverseProxyBackendsGeneric(output, g.buildUpstreamServerSSL)
 }
 
-// parseReverseProxyBackendsGeneric is a generic helper for parsing reverse proxy backends
-// It accepts a port selector function to determine which port to use for each server
-//
-//nolint:gocyclo,cyclop // requires parsing multiple server attributes and states
+// parseReverseProxyBackendsGeneric is a generic helper for parsing reverse proxy backends.
+// It accepts a port selector function to determine which port to use for each server.
 func (g *Generator) parseReverseProxyBackendsGeneric(
 	output string,
 	portSelector func(serverData) UpstreamServer) []UpstreamServer {
 	var servers []UpstreamServer
 
 	scanner := bufio.NewScanner(strings.NewReader(output))
-
-	var current serverData
+	current := serverData{mailPort: 80, mailSSLPort: 443}
 
 	for scanner.Scan() {
-		line := scanner.Text()
-		trimmed := strings.TrimSpace(line)
-
+		trimmed := strings.TrimSpace(scanner.Text())
 		if trimmed == "" {
 			continue
 		}
 
-		// Skip comment lines
 		if strings.HasPrefix(trimmed, "#") {
-			// Process previous server if it was a lookup target
-			if current.hostname != "" && current.lookupTarget {
-				server := portSelector(current)
-				if server.Port > 0 {
-					servers = append(servers, server)
-				}
-			}
-
-			// Reset for new server
-			current = serverData{
-				mailPort:    80,  // Default HTTP port
-				mailSSLPort: 443, // Default HTTPS port
-			}
+			appendValidUpstream(&servers, current, portSelector)
+			current = serverData{mailPort: 80, mailSSLPort: 443}
 
 			continue
 		}
 
-		// Parse attribute lines (all attributes are on separate lines with "key: value" format)
 		parts := strings.SplitN(trimmed, ":", 2)
-		if len(parts) != 2 {
-			continue
-		}
-
-		key := strings.TrimSpace(parts[0])
-		value := strings.TrimSpace(parts[1])
-
-		switch key {
-		case "zimbraServiceHostname":
-			current.hostname = value
-		case "zimbraReverseProxyLookupTarget":
-			current.lookupTarget = strings.EqualFold(value, "TRUE")
-		case "zimbraMailMode":
-			current.mailMode = strings.ToLower(value)
-		case "zimbraMailPort":
-			if port, err := strconv.Atoi(value); err == nil {
-				current.mailPort = port
-			}
-		case "zimbraMailSSLPort":
-			if port, err := strconv.Atoi(value); err == nil {
-				current.mailSSLPort = port
-			}
+		if len(parts) == 2 {
+			applyServerAttr(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), &current)
 		}
 	}
 
-	// Process last server
-	if current.hostname != "" && current.lookupTarget {
-		server := portSelector(current)
-		if server.Port > 0 {
-			servers = append(servers, server)
-		}
-	}
+	appendValidUpstream(&servers, current, portSelector)
 
 	return servers
 }
@@ -303,78 +321,33 @@ func (g *Generator) getAllMemcachedServers(ctx context.Context) ([]MemcacheServe
 	return servers, nil
 }
 
-// parseMemcachedServers parses zmprov gas output to find servers with memcached service enabled
-//
-//nolint:gocyclo,cyclop // requires parsing multiple server attributes and service checks
+// parseMemcachedServers parses zmprov gas output to find servers with memcached service enabled.
 func (g *Generator) parseMemcachedServers(output string) []MemcacheServer {
 	var servers []MemcacheServer
 
 	scanner := bufio.NewScanner(strings.NewReader(output))
-
-	type mcServerData struct {
-		hostname      string
-		hasMemcached  bool
-		memcachedPort int
-	}
-
-	var current mcServerData
+	current := mcServerData{memcachedPort: 11211}
 
 	for scanner.Scan() {
-		line := scanner.Text()
-		trimmed := strings.TrimSpace(line)
-
+		trimmed := strings.TrimSpace(scanner.Text())
 		if trimmed == "" {
 			continue
 		}
 
-		// Skip comment lines (mark new server)
 		if strings.HasPrefix(trimmed, "#") {
-			// Process previous server if it has memcached
-			if current.hostname != "" && current.hasMemcached && current.memcachedPort > 0 {
-				servers = append(servers, MemcacheServer{
-					Hostname: current.hostname,
-					Port:     current.memcachedPort,
-				})
-			}
-
-			// Reset for new server
-			current = mcServerData{
-				memcachedPort: 11211, // Default memcached port
-			}
+			appendValidMcServer(&servers, current)
+			current = mcServerData{memcachedPort: 11211}
 
 			continue
 		}
 
-		// Parse attribute lines (all attributes are "key: value" format)
 		parts := strings.SplitN(trimmed, ":", 2)
-		if len(parts) != 2 {
-			continue
-		}
-
-		key := strings.TrimSpace(parts[0])
-		value := strings.TrimSpace(parts[1])
-
-		switch key {
-		case "zimbraServiceHostname":
-			current.hostname = value
-		case "zimbraServiceEnabled":
-			if value == "memcached" {
-				current.hasMemcached = true
-			}
-		case "zimbraMemcachedBindPort":
-			if port, err := strconv.Atoi(value); err == nil {
-				current.memcachedPort = port
-			}
+		if len(parts) == 2 {
+			applyMcAttr(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), &current)
 		}
 	}
 
-	// Process last server
-	if current.hostname != "" && current.hasMemcached && current.memcachedPort > 0 {
-		servers = append(servers, MemcacheServer{
-			Hostname: current.hostname,
-			Port:     current.memcachedPort,
-		})
-	}
+	appendValidMcServer(&servers, current)
 
 	return servers
 }

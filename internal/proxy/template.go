@@ -112,6 +112,23 @@ func (tp *TemplateProcessor) LoadTemplate(ctx context.Context, name string) (*Te
 	}, nil
 }
 
+// parseExplodeDirective checks whether the first line of lines is an explode directive.
+// Returns the explode type, args, remaining lines, and ok=true when the directive is present.
+func (tp *TemplateProcessor) parseExplodeDirective(
+	lines []string,
+) (explodeType, explodeArgs string, remaining []string, ok bool) {
+	if len(lines) == 0 {
+		return "", "", nil, false
+	}
+
+	matches := tp.explodePattern.FindStringSubmatch(lines[0])
+	if matches == nil {
+		return "", "", nil, false
+	}
+
+	return matches[1], matches[2], lines[1:], true
+}
+
 // ProcessTemplate processes a template with variable substitution
 func (tp *TemplateProcessor) ProcessTemplate(ctx context.Context, tmpl *Template) (string, error) {
 	ctx = logger.ContextWithComponentOnce(ctx, "proxy")
@@ -124,26 +141,16 @@ func (tp *TemplateProcessor) ProcessTemplate(ctx context.Context, tmpl *Template
 	writer := bufio.NewWriter(output)
 
 	// Check if first line contains explode directive
-	//nolint:nestif // Explode directive requires nested processing of template iterations
-	if len(tmpl.Lines) > 0 {
-		if matches := tp.explodePattern.FindStringSubmatch(tmpl.Lines[0]); matches != nil {
-			// Handle explode directive - process the rest of the template for each iteration
-			explodeType := matches[1] // "domain" or "server"
-			explodeArgs := matches[2] // arguments in parentheses
-
-			// Process the rest of template (skip first line with directive)
-			remainingLines := tmpl.Lines[1:]
-
-			if err := tp.processExplode(ctx, explodeType, explodeArgs, remainingLines, writer); err != nil {
-				return "", fmt.Errorf("error processing explode directive: %w", err)
-			}
-
-			if err := writer.Flush(); err != nil {
-				return "", fmt.Errorf("error flushing output: %w", err)
-			}
-
-			return output.String(), nil
+	if explodeType, explodeArgs, remaining, ok := tp.parseExplodeDirective(tmpl.Lines); ok {
+		if err := tp.processExplode(ctx, explodeType, explodeArgs, remaining, writer); err != nil {
+			return "", fmt.Errorf("error processing explode directive: %w", err)
 		}
+
+		if err := writer.Flush(); err != nil {
+			return "", fmt.Errorf("error flushing output: %w", err)
+		}
+
+		return output.String(), nil
 	}
 
 	// No explode directive - process template normally
@@ -1051,7 +1058,7 @@ func formatValue(value any) string {
 			return "on"
 		}
 
-		return "off"
+		return nginxOff
 	case []string:
 		return strings.Join(v, " ")
 	default:

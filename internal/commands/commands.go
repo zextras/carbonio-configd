@@ -91,67 +91,60 @@ func (c *Command) resetState() {
 	c.Error = ""
 }
 
+// applyQuoteChar processes a quote rune for splitCommandArgs.
+// Returns the updated inQuote/quoteChar state; appends an empty arg when an
+// empty quoted segment is closed.
+func applyQuoteChar(
+	r, quoteChar rune,
+	inQuote bool,
+	current *strings.Builder,
+	args *[]string,
+) (newInQuote bool, newQuoteChar rune) {
+	switch {
+	case !inQuote:
+		return true, r
+	case r == quoteChar:
+		if current.Len() == 0 {
+			*args = append(*args, "")
+		}
+
+		return false, 0
+	default:
+		current.WriteRune(r)
+
+		return inQuote, quoteChar
+	}
+}
+
 // splitCommandArgs splits a command string into argv preserving quoted and
-// escaped segments. It is a small state machine (quoted/escaped/whitespace)
-// whose branches are intrinsic to the grammar, so linters that flag
-// cyclomatic/nested complexity are silenced with rationale.
-//
-//nolint:gocyclo,cyclop,nestif // Intrinsic tokenizer complexity: quote/escape/whitespace state machine
-func splitCommandArgs(cmdStr string) ([]string, error) { // NOSONAR
+// escaped segments.
+func splitCommandArgs(cmdStr string) ([]string, error) {
 	var (
-		args    []string
-		current strings.Builder
+		args      []string
+		current   strings.Builder
+		inQuote   bool
+		quoteChar rune
+		escaped   bool
 	)
 
-	inQuote := false
-	quoteChar := rune(0)
-	escaped := false
-
 	for _, r := range cmdStr {
-		if escaped {
+		switch {
+		case escaped:
 			current.WriteRune(r)
 
 			escaped = false
-
-			continue
-		}
-
-		if r == '\\' {
+		case r == '\\':
 			escaped = true
-			continue
-		}
-
-		if r == '"' || r == '\'' {
-			switch {
-			case !inQuote:
-				inQuote = true
-				quoteChar = r
-			case r == quoteChar:
-				inQuote = false
-				quoteChar = 0
-
-				if current.Len() == 0 {
-					args = append(args, "")
-
-					current.Reset()
-				}
-			default:
-				current.WriteRune(r)
-			}
-
-			continue
-		}
-
-		if !inQuote && (r == ' ' || r == '\t') {
+		case r == '"' || r == '\'':
+			inQuote, quoteChar = applyQuoteChar(r, quoteChar, inQuote, &current, &args)
+		case !inQuote && (r == ' ' || r == '\t'):
 			if current.Len() > 0 {
 				args = append(args, current.String())
 				current.Reset()
 			}
-
-			continue
+		default:
+			current.WriteRune(r)
 		}
-
-		current.WriteRune(r)
 	}
 
 	if inQuote {
@@ -515,17 +508,38 @@ func (e *CommandExecutor) garpu(ctx context.Context, args ...string) (string, er
 		"https://%s:7072/service/extension/nginx-lookup", "garpu")
 }
 
-//nolint:gocyclo,cyclop // Complex LDAP query with multiple attribute checks and filtering
+// buildBackendURL returns the HTTPS backend URL for a server attribute map.
+// Returns ("", false) when the server does not qualify as a reverse proxy backend.
+func buildBackendURL(attrs map[string]string) (string, bool) {
+	hostname := attrs[zimbraServiceHostname]
+	if hostname == "" {
+		return "", false
+	}
+
+	if !strings.EqualFold(attrs["zimbraReverseProxyLookupTarget"], "TRUE") {
+		return "", false
+	}
+
+	mailMode, hasMail := attrs["zimbraMailMode"]
+	if !hasMail || mailMode == "" {
+		return "", false
+	}
+
+	httpsPort := attrs["zimbraMailSSLPort"]
+	if httpsPort == "" {
+		httpsPort = "443"
+	}
+
+	return fmt.Sprintf("https://%s:%s", hostname, httpsPort), true
+}
+
 func (e *CommandExecutor) garpb(ctx context.Context, args ...string) (string, error) {
 	logger.DebugContext(ctx, "Executing garpb (getAllReverseProxyBackends) command")
 
-	// Use native LDAP client
 	if e.ldapClient == nil {
 		return "", stderrors.New(errLDAPNotInitialized)
 	}
 
-	// Query all servers with zimbraReverseProxyLookupTarget=TRUE and valid zimbraMailMode
-	// Build backend URLs (https://hostname:port)
 	servers, err := e.ldapClient.GetAllServersWithAttributes()
 	if err != nil {
 		return "", fmt.Errorf("garpb: failed to query servers: %w", err)
@@ -534,30 +548,8 @@ func (e *CommandExecutor) garpb(ctx context.Context, args ...string) (string, er
 	var backends []string
 
 	for _, serverAttrs := range servers {
-		// Get hostname
-		hostname, ok := serverAttrs[zimbraServiceHostname]
-		if !ok || hostname == "" {
-			continue
-		}
-
-		// Check if reverse proxy target
-		isReverseProxyTarget := false
-		if val, ok := serverAttrs["zimbraReverseProxyLookupTarget"]; ok && strings.EqualFold(val, "TRUE") {
-			isReverseProxyTarget = true
-		}
-
-		// Get mail mode
-		mailMode, hasMail := serverAttrs["zimbraMailMode"]
-
-		// Get HTTPS port
-		httpsPort := serverAttrs["zimbraMailSSLPort"]
-		if httpsPort == "" {
-			httpsPort = "443"
-		}
-
-		// Add backend if conditions are met
-		if isReverseProxyTarget && hasMail && mailMode != "" {
-			backends = append(backends, fmt.Sprintf("https://%s:%s", hostname, httpsPort))
+		if url, ok := buildBackendURL(serverAttrs); ok {
+			backends = append(backends, url)
 		}
 	}
 

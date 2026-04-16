@@ -18,8 +18,6 @@ import (
 
 // mailboxCustomStart builds and executes the Java command for zmmailboxd.
 // Mirrors the logic in carbonio-appserver.service + legacy zmmailboxdctl.
-//
-//nolint:gocyclo // legacy-compatible launcher assembly is inherently branchy
 func mailboxCustomStart(ctx context.Context, def *ServiceDef) error {
 	lc, err := localconfig.LoadResolvedConfig()
 	if err != nil {

@@ -151,125 +151,125 @@ func (cm *ConfigManager) initNativeLdapClient(ctx context.Context) {
 	}
 }
 
+// lookupVarKey checks GlobalConfig → MiscConfig → ServerConfig for key.
+func (cm *ConfigManager) lookupVarKey(key string) (string, bool) {
+	if val, ok := cm.State.GlobalConfig.Data[key]; ok {
+		return val, true
+	}
+
+	if val, ok := cm.State.MiscConfig.Data[key]; ok {
+		return val, true
+	}
+
+	if val, ok := cm.State.ServerConfig.Data[key]; ok {
+		return val, true
+	}
+
+	return "", false
+}
+
+// lookupFileKey returns the value for key from the file cache or disk.
+func (cm *ConfigManager) lookupFileKey(ctx context.Context, key string) (string, error) {
+	if val, ok := cm.State.FileCache[key]; ok {
+		logger.DebugContext(ctx, "Loaded from cache", "key", key, "value", val)
+
+		return val, nil
+	}
+
+	filePath := cm.mainConfig.BaseDir + "/conf/" + key
+
+	//nolint:gosec // G304: File path comes from trusted configuration
+	contentBytes, err := os.ReadFile(filePath)
+	if err != nil {
+		logger.ErrorContext(ctx, "Error reading file", "file_path", filePath, "error", err)
+
+		return "", fmt.Errorf("error reading file %s: %w", filePath, err)
+	}
+
+	var filteredLines []string
+
+	for line := range strings.SplitSeq(string(contentBytes), "\n") {
+		if t := strings.TrimSpace(cm.Transformer.Transform(ctx, line)); t != "" {
+			filteredLines = append(filteredLines, t)
+		}
+	}
+
+	value := strings.Join(filteredLines, ", ")
+	cm.State.FileCache[key] = value
+
+	logger.DebugContext(ctx, "Loaded file content", "key", key, "value", value)
+
+	return value, nil
+}
+
+// lookupMappedFileKey resolves a MAPFILE or MAPLOCAL key to its filesystem path.
+func (cm *ConfigManager) lookupMappedFileKey(ctx context.Context, cfgType, key string) (string, error) {
+	mappedPath, ok := state.MAPPEDFILES[key]
+	if !ok {
+		logger.WarnContext(ctx, "Key not in MAPPEDFILES", "config_type", cfgType, "key", key)
+
+		return "", fmt.Errorf("key '%s' not in MAPPEDFILES", key)
+	}
+
+	fullPath := cm.mainConfig.BaseDir + "/" + mappedPath
+
+	var value string
+
+	if _, err := os.Stat(fullPath); err == nil {
+		value = fullPath
+	} else if !os.IsNotExist(err) {
+		logger.ErrorContext(ctx, "Error stating file", "file_path", fullPath, "error", err)
+
+		return "", fmt.Errorf("error stating file %s: %w", fullPath, err)
+	}
+
+	logger.DebugContext(ctx, "Mapped file lookup result",
+		"config_type", cfgType, "key", key, "value", value)
+
+	return value, nil
+}
+
 // LookUpConfig retrieves a configuration value based on its type and key.
 // This method implements the lookup.ConfigLookup interface.
-//
-//nolint:gocyclo,cyclop // Config lookup requires checking multiple sources and fallbacks
 func (cm *ConfigManager) LookUpConfig(ctx context.Context, cfgType, key string) (string, error) {
 	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
-	logger.DebugContext(ctx, "Looking up config key",
-		"key", key,
-		"config_type", cfgType)
+	logger.DebugContext(ctx, "Looking up config key", "key", key, "config_type", cfgType)
 
 	var (
 		value string
 		found bool
+		err   error
 	)
 
 	switch cfgType {
 	case configTypeVAR:
-		// Check GlobalConfig, MiscConfig, ServerConfig in that order
-		if val, ok := cm.State.GlobalConfig.Data[key]; ok {
-			value = val
-			found = true
-		} else if val, ok := cm.State.MiscConfig.Data[key]; ok {
-			value = val
-			found = true
-		} else if val, ok := cm.State.ServerConfig.Data[key]; ok {
-			value = val
-			found = true
-		}
+		value, found = cm.lookupVarKey(key)
 	case configTypeLOCAL:
-		if val, ok := cm.State.LocalConfig.Data[key]; ok {
-			value = val
-			found = true
-		}
+		value, found = cm.State.LocalConfig.Data[key]
 	case configTypeFILE:
-		// Read from file cache or load from disk
-		if val, ok := cm.State.FileCache[key]; ok {
-			value = val
-			found = true
-
-			logger.DebugContext(ctx, "Loaded from cache",
-				"key", key,
-				"value", value)
-		} else {
-			filePath := cm.mainConfig.BaseDir + "/conf/" + key
-
-			//nolint:gosec // G304: File path comes from trusted configuration
-			contentBytes, err := os.ReadFile(filePath)
-			if err != nil {
-				logger.ErrorContext(ctx, "Error reading file",
-					"file_path", filePath,
-					"error", err)
-
-				return "", fmt.Errorf("error reading file %s: %w", filePath, err)
-			}
-
-			lines := strings.Split(string(contentBytes), "\n")
-			filteredLines := []string{}
-
-			for _, line := range lines {
-				// Apply transformation using the Transformer
-				transformedLine := cm.Transformer.Transform(ctx, line)
-
-				trimmedLine := strings.TrimSpace(transformedLine)
-				if trimmedLine != "" {
-					filteredLines = append(filteredLines, trimmedLine)
-				}
-			}
-
-			value = strings.Join(filteredLines, ", ")
-			cm.State.FileCache[key] = value
-			found = true
-
-			logger.DebugContext(ctx, "Loaded file content",
-				"key", key,
-				"value", value)
+		value, err = cm.lookupFileKey(ctx, key)
+		if err != nil {
+			return "", err
 		}
+
+		found = true
 	case configTypeMAPFILE, configTypeMAPLOCAL:
-		if mappedPath, ok := state.MAPPEDFILES[key]; ok {
-			fullPath := cm.mainConfig.BaseDir + "/" + mappedPath
-			// For MAPFILE: Simulate fetching value from VAR first, then base64 decode and write to file
-			// For MAPLOCAL: just return the path if it exists
-			if _, err := os.Stat(fullPath); err == nil {
-				value = fullPath
-				found = true
-			} else if os.IsNotExist(err) {
-				value = "" // File does not exist
-				found = true
-			} else {
-				logger.ErrorContext(ctx, "Error stating file",
-					"file_path", fullPath,
-					"error", err)
-
-				return "", fmt.Errorf("error stating file %s: %w", fullPath, err)
-			}
-
-			logger.DebugContext(ctx, "Mapped file lookup result",
-				"config_type", cfgType,
-				"key", key,
-				"value", value,
-				"exists", found)
-		} else {
-			logger.WarnContext(ctx, "Key not in MAPPEDFILES",
-				"config_type", cfgType,
-				"key", key)
-
-			return "", fmt.Errorf("key '%s' not in MAPPEDFILES", key)
+		value, err = cm.lookupMappedFileKey(ctx, cfgType, key)
+		if err != nil {
+			return "", err
 		}
+
+		found = true
 	case configTypeSERVICE:
 		if _, ok := cm.State.ServerConfig.ServiceConfig[key]; ok {
 			value = constTRUE
-			found = true
 		} else {
 			value = constFALSE
-			found = true
 		}
+
+		found = true
 	default:
-		logger.WarnContext(ctx, "Unknown config type",
-			"config_type", cfgType,
-			"key", key)
+		logger.WarnContext(ctx, "Unknown config type", "config_type", cfgType, "key", key)
 
 		return "", fmt.Errorf("unknown config type %s", cfgType)
 	}
@@ -279,9 +279,7 @@ func (cm *ConfigManager) LookUpConfig(ctx context.Context, cfgType, key string) 
 	}
 
 	logger.DebugContext(ctx, "Config lookup completed",
-		"key", key,
-		"config_type", cfgType,
-		"value", value)
+		"key", key, "config_type", cfgType, "value", value)
 
 	return value, nil
 }

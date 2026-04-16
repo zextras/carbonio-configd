@@ -41,6 +41,61 @@ func NewRewriter(baseDir string, cl lookup.ConfigLookup, st *state.State) *Rewri
 	}
 }
 
+// scanAndWrite reads sourceFile line by line, transforms each line, and writes to tmpFile.
+func (r *Rewriter) scanAndWrite(ctx context.Context, sourceFile, tmpFile *os.File) error {
+	scanner := bufio.NewScanner(sourceFile)
+	writer := bufio.NewWriter(tmpFile)
+
+	for scanner.Scan() {
+		transformed := r.Transformer.Transform(ctx, scanner.Text())
+		if !strings.HasSuffix(transformed, "\n") {
+			transformed += "\n"
+		}
+
+		if _, err := writer.WriteString(transformed); err != nil {
+			return fmt.Errorf("failed to write to temporary file: %w", err)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("failed to read source file: %w", err)
+	}
+
+	if err := writer.Flush(); err != nil {
+		return fmt.Errorf("failed to flush writer: %w", err)
+	}
+
+	return nil
+}
+
+// atomicReplace chmod-s tmpPath then renames it to targetPath.
+// Falls back to copy+delete when rename crosses filesystems.
+func atomicReplace(ctx context.Context, tmpPath, targetPath string, fileMode os.FileMode) error {
+	if err := os.Chmod(tmpPath, fileMode); err != nil {
+		return fmt.Errorf("failed to set file mode %o: %w", fileMode, err)
+	}
+
+	if err := os.Rename(tmpPath, targetPath); err == nil {
+		return nil
+	}
+
+	logger.DebugContext(ctx, "Rename failed, falling back to copy")
+
+	if err := fileutil.CopyFile(ctx, tmpPath, targetPath); err != nil {
+		return fmt.Errorf("failed to copy temporary file to target: %w", err)
+	}
+
+	if err := os.Chmod(targetPath, fileMode); err != nil {
+		return fmt.Errorf("failed to set file mode %o on copied file: %w", fileMode, err)
+	}
+
+	if err := os.Remove(tmpPath); err != nil && !os.IsNotExist(err) {
+		logger.WarnContext(ctx, "Failed to remove temp file", "path", tmpPath, "error", err)
+	}
+
+	return nil
+}
+
 // RewriteConfig generates a target file from a source template (.in file).
 // It reads the source file line by line, applies transformations, and writes to the target.
 // The operation is atomic: writes to a temporary file first, then renames.
@@ -52,26 +107,19 @@ func NewRewriter(baseDir string, cl lookup.ConfigLookup, st *state.State) *Rewri
 //
 // Returns:
 //   - error: nil on success, error if rewrite fails
-//
-//nolint:gocyclo,cyclop // requires handling multiple template processing steps and error conditions
 func (r *Rewriter) RewriteConfig(ctx context.Context, source, target, mode string) error {
 	ctx = logger.ContextWithComponentOnce(ctx, "template")
-	logger.DebugContext(ctx, "Rewriting template",
-		"source", source,
-		"target", target)
+	logger.DebugContext(ctx, "Rewriting template", "source", source, "target", target)
 
-	// Default mode if not specified
 	if mode == "" {
 		mode = "0440"
 	}
 
-	// Parse mode as octal
 	fileMode, err := strconv.ParseUint(mode, 8, 32)
 	if err != nil {
 		return fmt.Errorf("invalid file mode %s: %w", mode, err)
 	}
 
-	// Build absolute paths
 	sourcePath := filepath.Join(r.BaseDir, source)
 	targetPath := filepath.Join(r.BaseDir, target)
 
@@ -80,7 +128,6 @@ func (r *Rewriter) RewriteConfig(ctx context.Context, source, target, mode strin
 		"target_path", targetPath,
 		"file_mode", fmt.Sprintf("%o", fileMode))
 
-	// Open source file
 	//nolint:gosec // G304: File path comes from trusted configuration
 	sourceFile, err := os.Open(sourcePath)
 	if err != nil {
@@ -89,15 +136,11 @@ func (r *Rewriter) RewriteConfig(ctx context.Context, source, target, mode strin
 
 	defer func() {
 		if cerr := sourceFile.Close(); cerr != nil {
-			logger.WarnContext(ctx, "Failed to close source file",
-				"path", sourcePath,
-				"error", cerr)
+			logger.WarnContext(ctx, "Failed to close source file", "path", sourcePath, "error", cerr)
 		}
 	}()
 
-	// Create temporary file in target directory for atomic write
 	targetDir := filepath.Dir(targetPath)
-	// Ensure target directory exists
 	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create target directory %s: %w", targetDir, err)
 	}
@@ -111,87 +154,21 @@ func (r *Rewriter) RewriteConfig(ctx context.Context, source, target, mode strin
 
 	defer func() {
 		if err := os.Remove(tmpPath); err != nil && !os.IsNotExist(err) {
-			logger.WarnContext(ctx, "Failed to remove temp file",
-				"path", tmpPath,
-				"error", err)
+			logger.WarnContext(ctx, "Failed to remove temp file", "path", tmpPath, "error", err)
 		}
 	}()
 
-	// Process source file line by line
-	scanner := bufio.NewScanner(sourceFile)
-	writer := bufio.NewWriter(tmpFile)
-
-	for scanner.Scan() {
-		line := scanner.Text()
-		// Transform the line (apply %%VAR:key%%, %%LOCAL:key%%, %%SERVICE:name%% substitutions)
-		transformed := r.Transformer.Transform(ctx, line)
-		// Ensure newline is always added (Transform may or may not add it depending on content)
-		if !strings.HasSuffix(transformed, "\n") {
-			transformed += "\n"
-		}
-
-		if _, err := writer.WriteString(transformed); err != nil {
-			if cerr := tmpFile.Close(); cerr != nil {
-				logger.WarnContext(ctx, warnCloseTempFile,
-					"path", tmpPath,
-					"error", cerr)
-			}
-
-			return fmt.Errorf("failed to write to temporary file: %w", err)
-		}
+	scanErr := r.scanAndWrite(ctx, sourceFile, tmpFile)
+	if cerr := tmpFile.Close(); cerr != nil {
+		logger.WarnContext(ctx, warnCloseTempFile, "path", tmpPath, "error", cerr)
 	}
 
-	if err := scanner.Err(); err != nil {
-		if cerr := tmpFile.Close(); cerr != nil {
-			logger.WarnContext(ctx, warnCloseTempFile,
-				"path", tmpPath,
-				"error", cerr)
-		}
-
-		return fmt.Errorf("failed to read source file: %w", err)
+	if scanErr != nil {
+		return scanErr
 	}
 
-	// Flush writer
-	if err := writer.Flush(); err != nil {
-		if cerr := tmpFile.Close(); cerr != nil {
-			logger.WarnContext(ctx, warnCloseTempFile,
-				"path", tmpPath,
-				"error", cerr)
-		}
-
-		return fmt.Errorf("failed to flush writer: %w", err)
-	}
-
-	// Close temporary file
-	if err := tmpFile.Close(); err != nil {
-		return fmt.Errorf("failed to close temporary file: %w", err)
-	}
-
-	// Set file permissions
-	if err := os.Chmod(tmpPath, os.FileMode(fileMode)); err != nil {
-		return fmt.Errorf("failed to set file mode %o: %w", fileMode, err)
-	}
-
-	// Atomic move: rename temporary file to target
-	// Try rename first (fast if same filesystem)
-	if err := os.Rename(tmpPath, targetPath); err != nil {
-		// If rename fails (cross-device link), fall back to copy+delete
-		logger.DebugContext(ctx, "Rename failed, falling back to copy",
-			"error", err)
-
-		if err := fileutil.CopyFile(ctx, tmpPath, targetPath); err != nil {
-			return fmt.Errorf("failed to copy temporary file to target: %w", err)
-		}
-		// Set permissions on the copied file
-		if err := os.Chmod(targetPath, os.FileMode(fileMode)); err != nil {
-			return fmt.Errorf("failed to set file mode %o on copied file: %w", fileMode, err)
-		}
-		// Clean up temp file (already deferred, but do it explicitly now)
-		if err := os.Remove(tmpPath); err != nil && !os.IsNotExist(err) {
-			logger.WarnContext(ctx, "Failed to remove temp file",
-				"path", tmpPath,
-				"error", err)
-		}
+	if err := atomicReplace(ctx, tmpPath, targetPath, os.FileMode(fileMode)); err != nil {
+		return err
 	}
 
 	logger.DebugContext(ctx, "Template rewrite completed",

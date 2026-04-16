@@ -86,75 +86,19 @@ func (cm *ConfigManager) CompileActions(ctx context.Context) {
 	logger.DebugContext(ctx, "Action compilation complete")
 }
 
-// compileSectionActions compiles actions for a changed section
-//
-//nolint:gocyclo,cyclop // Section action compilation requires multiple checks and accumulations
-func (cm *ConfigManager) compileSectionActions(
-	ctx context.Context, sn string, section *config.MtaConfigSection,
-	requestedConfigs, forcedConfig map[string]string, firstRun bool, serviceConfig map[string]string) {
-	logger.DebugContext(ctx, "Section changed, compiling rewrites",
-		"section", sn)
-
-	// Log the files that will be rewritten for this service
-	if len(section.Rewrites) > 0 {
-		logger.DebugContext(ctx, "Service queuing files for rewrite",
-			"service", sn,
-			"file_count", len(section.Rewrites))
-
-		for rewriteKey, rewriteEntry := range section.Rewrites {
-			logger.DebugContext(ctx, "Queuing file rewrite",
-				"source", rewriteKey,
-				"target", rewriteEntry.Value)
-			cm.State.CurRewrites(ctx, rewriteKey, &rewriteEntry)
-		}
-	}
-
-	logger.DebugContext(ctx, "Section changed, compiling postconf",
-		"section", sn)
-
-	for postconfKey, postconfVal := range section.Postconf {
-		cm.State.CurPostconf(ctx, postconfKey, postconfVal)
-	}
-
-	logger.DebugContext(ctx, "Section changed, compiling postconfd",
-		"section", sn)
-
-	for postconfdKey, postconfdVal := range section.Postconfd {
-		cm.State.CurPostconfd(ctx, postconfdKey, postconfdVal)
-	}
-
-	if section.Proxygen {
-		logger.DebugContext(ctx, "Section has PROXYGEN directive, compiling proxygen",
-			"section", sn)
-		cm.State.Proxygen(true)
-	}
-
-	logger.DebugContext(ctx, "Section changed, compiling ldap",
-		"section", sn)
-
-	for ldapKey, ldapVal := range section.Ldap {
-		cm.State.CurLdap(ctx, ldapKey, ldapVal)
-	}
-
-	// Process conditionals
-	logger.DebugContext(ctx, "Section changed, compiling conditionals",
-		"section", sn)
-	cm.processConditionals(ctx, section.Conditionals)
-
-	// Restarts are not triggered on forced or first run (mirroring Jython)
-	if firstRun || len(forcedConfig) > 0 || len(requestedConfigs) > 0 {
-		return
-	}
-
-	logger.DebugContext(ctx, "Section changed, compiling restarts",
-		"section", sn)
+// compileSectionRestarts queues restart or stop actions for each service in section.Restarts.
+func (cm *ConfigManager) compileSectionRestarts(
+	ctx context.Context,
+	section *config.MtaConfigSection,
+	serviceConfig map[string]string,
+) {
+	logger.DebugContext(ctx, "Section changed, compiling restarts")
 
 	for restartService := range section.Restarts {
 		isServiceEnabled, err := cm.LookUpConfig(ctx, "SERVICE", restartService)
 		if err == nil && state.IsTrueValue(isServiceEnabled) {
-			logger.DebugContext(ctx, "Adding restart",
-				"service", restartService)
-			cm.State.CurRestarts(restartService, -1) // -1 for restart
+			logger.DebugContext(ctx, "Adding restart", "service", restartService)
+			cm.State.CurRestarts(restartService, -1)
 
 			continue
 		}
@@ -162,17 +106,66 @@ func (cm *ConfigManager) compileSectionActions(
 		// Special handling for opendkim and archiving from Jython
 		switch {
 		case restartService == "archiving" && !state.IsTrueValue(serviceConfig[restartService]):
-			logger.DebugContext(ctx, "Service not enabled, skipping stop",
-				"service", restartService)
+			logger.DebugContext(ctx, "Service not enabled, skipping stop", "service", restartService)
 		case restartService == "opendkim" && state.IsTrueValue(serviceConfig["mta"]):
 			logger.DebugContext(ctx, "Adding restart opendkim")
 			cm.State.CurRestarts(restartService, -1)
 		default:
-			logger.DebugContext(ctx, "Adding stop",
-				"service", restartService)
-			cm.State.CurRestarts(restartService, 0) // 0 for stop
+			logger.DebugContext(ctx, "Adding stop", "service", restartService)
+			cm.State.CurRestarts(restartService, 0)
 		}
 	}
+}
+
+// compileSectionActions compiles actions for a changed section.
+func (cm *ConfigManager) compileSectionActions(
+	ctx context.Context, sn string, section *config.MtaConfigSection,
+	requestedConfigs, forcedConfig map[string]string, firstRun bool, serviceConfig map[string]string) {
+	logger.DebugContext(ctx, "Section changed, compiling rewrites", "section", sn)
+
+	if len(section.Rewrites) > 0 {
+		logger.DebugContext(ctx, "Service queuing files for rewrite",
+			"service", sn, "file_count", len(section.Rewrites))
+
+		for rewriteKey, rewriteEntry := range section.Rewrites {
+			logger.DebugContext(ctx, "Queuing file rewrite",
+				"source", rewriteKey, "target", rewriteEntry.Value)
+			cm.State.CurRewrites(ctx, rewriteKey, &rewriteEntry)
+		}
+	}
+
+	logger.DebugContext(ctx, "Section changed, compiling postconf", "section", sn)
+
+	for postconfKey, postconfVal := range section.Postconf {
+		cm.State.CurPostconf(ctx, postconfKey, postconfVal)
+	}
+
+	logger.DebugContext(ctx, "Section changed, compiling postconfd", "section", sn)
+
+	for postconfdKey, postconfdVal := range section.Postconfd {
+		cm.State.CurPostconfd(ctx, postconfdKey, postconfdVal)
+	}
+
+	if section.Proxygen {
+		logger.DebugContext(ctx, "Section has PROXYGEN directive, compiling proxygen", "section", sn)
+		cm.State.Proxygen(true)
+	}
+
+	logger.DebugContext(ctx, "Section changed, compiling ldap", "section", sn)
+
+	for ldapKey, ldapVal := range section.Ldap {
+		cm.State.CurLdap(ctx, ldapKey, ldapVal)
+	}
+
+	logger.DebugContext(ctx, "Section changed, compiling conditionals", "section", sn)
+	cm.processConditionals(ctx, section.Conditionals)
+
+	// Restarts are not triggered on forced or first run (mirroring Jython)
+	if firstRun || len(forcedConfig) > 0 || len(requestedConfigs) > 0 {
+		return
+	}
+
+	cm.compileSectionRestarts(ctx, section, serviceConfig)
 }
 
 // DoConfigRewrites executes configuration rewrites, postconf, postconfd, and LDAP changes.
@@ -357,129 +350,108 @@ func isAlreadyClosedError(err error) bool {
 	return err != nil && (err.Error() == "file already closed" || strings.Contains(err.Error(), "already closed"))
 }
 
-// processRewrite processes a single file rewrite
-//
-//nolint:gocyclo,cyclop // File rewrite requires multiple error checks and file operations
+// rewriteTransform opens srcPath, applies transformer to every line, and writes
+// the result to tmpFile. It owns the srcFile lifecycle.
+func (cm *ConfigManager) rewriteTransform(ctx context.Context, srcPath string, tmpFile *os.File) (int, error) {
+	//nolint:gosec // G304: File path comes from trusted configuration
+	srcFile, err := os.Open(srcPath)
+	if err != nil {
+		return 0, fmt.Errorf("open source file %s: %w", srcPath, err)
+	}
+
+	defer func() {
+		if cerr := srcFile.Close(); cerr != nil && !isAlreadyClosedError(cerr) {
+			logger.ErrorContext(ctx, "Error closing source file", "error", cerr)
+		}
+	}()
+
+	lineCount := 0
+	scanner := bufio.NewScanner(srcFile)
+
+	for scanner.Scan() {
+		lineCount++
+
+		if _, err := tmpFile.WriteString(cm.Transformer.Transform(ctx, scanner.Text()) + "\n"); err != nil {
+			return lineCount, fmt.Errorf("write to temp file: %w", err)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return lineCount, fmt.Errorf("read source file %s: %w", srcPath, err)
+	}
+
+	return lineCount, nil
+}
+
+// rewriteAtomicCommit sets permissions on tmpFileName and atomically replaces
+// destPath, falling back to copy+delete when rename crosses filesystems.
+func rewriteAtomicCommit(ctx context.Context, tmpFileName, destPath, modeStr string) error {
+	var fileMode os.FileMode = 0o644
+
+	if modeStr != "" {
+		modeInt, err := strconv.ParseInt(modeStr, 8, 32)
+		if err != nil {
+			return fmt.Errorf("invalid file mode %s: %w", modeStr, err)
+		}
+
+		//nolint:gosec // G115: modeInt is validated by ParseInt with base 8 and 32-bit size
+		fileMode = os.FileMode(modeInt)
+	}
+
+	if err := os.Chmod(tmpFileName, fileMode); err != nil {
+		return fmt.Errorf("chmod temp file: %w", err)
+	}
+
+	if err := os.Rename(tmpFileName, destPath); err == nil {
+		return nil
+	}
+
+	// Cross-device fallback: copy then delete.
+	if err := fileutil.CopyFile(ctx, tmpFileName, destPath); err != nil {
+		return fmt.Errorf("copy temp to dest %s: %w", destPath, err)
+	}
+
+	if err := os.Chmod(destPath, fileMode); err != nil {
+		return fmt.Errorf("chmod dest file: %w", err)
+	}
+
+	if err := os.Remove(tmpFileName); err != nil && !os.IsNotExist(err) {
+		logger.WarnContext(ctx, "Failed to remove temp file", "temp_file", tmpFileName, "error", err)
+	}
+
+	return nil
+}
+
+// processRewrite processes a single file rewrite.
 func (cm *ConfigManager) processRewrite(ctx context.Context, filePath string, rewriteEntry config.RewriteEntry) {
 	srcPath := cm.mainConfig.BaseDir + "/" + filePath
 	destPath := cm.mainConfig.BaseDir + "/" + rewriteEntry.Value
 
 	tmpFile, err := os.CreateTemp("", "zmconfigd-rewrite-")
 	if err != nil {
-		logger.ErrorContext(ctx, "Failed to create temporary file for rewrite",
-			"error", err)
+		logger.ErrorContext(ctx, "Failed to create temporary file for rewrite", "error", err)
 
 		return
 	}
 
 	tmpFileName := tmpFile.Name()
+	defer cleanupRewriteFiles(ctx, nil, tmpFile, tmpFileName)
 
-	var srcFile *os.File
-
-	defer cleanupRewriteFiles(ctx, srcFile, tmpFile, tmpFileName)
-
-	//nolint:gosec // G304: File path comes from trusted configuration
-	srcFile, err = os.Open(srcPath)
+	lineCount, err := cm.rewriteTransform(ctx, srcPath, tmpFile)
 	if err != nil {
-		logger.ErrorContext(ctx, "Failed to open source file for rewrite",
-			"source_path", srcPath,
-			"error", err)
+		logger.ErrorContext(ctx, "Failed to transform source file", "source_path", srcPath, "error", err)
 
 		return
-	}
-
-	lineCount := 0
-
-	scanner := bufio.NewScanner(srcFile)
-	for scanner.Scan() {
-		lineCount++
-		line := scanner.Text()
-		transformedLine := cm.Transformer.Transform(ctx, line)
-
-		if _, err := tmpFile.WriteString(transformedLine + "\n"); err != nil {
-			logger.ErrorContext(ctx, "Failed to write to temporary file during rewrite",
-				"error", err)
-
-			return
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		logger.ErrorContext(ctx, "Error reading source file during rewrite",
-			"source_path", srcPath,
-			"error", err)
-
-		return
-	}
-
-	// Close files explicitly to release handles before chmod/rename operations
-	if err := srcFile.Close(); err != nil {
-		logger.ErrorContext(ctx, "Error closing source file",
-			"error", err)
 	}
 
 	if err := tmpFile.Close(); err != nil {
-		logger.ErrorContext(ctx, "Error closing temporary file",
-			"error", err)
+		logger.ErrorContext(ctx, "Error closing temporary file", "error", err)
 	}
 
-	// Parse mode string to os.FileMode, default to 0644 if not specified
-	var fileMode os.FileMode
-	if rewriteEntry.Mode == "" {
-		fileMode = 0o644 // Default mode for config files
-	} else {
-		modeInt, err := strconv.ParseInt(rewriteEntry.Mode, 8, 32)
-		if err != nil {
-			logger.ErrorContext(ctx, "Invalid file mode for rewrite",
-				"mode", rewriteEntry.Mode,
-				"error", err)
-
-			return
-		}
-		//nolint:gosec // G115: modeInt is validated by ParseInt with base 8 and 32-bit size
-		fileMode = os.FileMode(modeInt)
-	}
-
-	// Set permissions on the temporary file
-	err = os.Chmod(tmpFileName, fileMode)
-	if err != nil {
-		logger.ErrorContext(ctx, "Failed to set permissions on temporary file",
-			"file", tmpFileName,
-			"error", err)
+	if err := rewriteAtomicCommit(ctx, tmpFileName, destPath, rewriteEntry.Mode); err != nil {
+		logger.ErrorContext(ctx, "Failed to commit rewrite", "dest_path", destPath, "error", err)
 
 		return
-	}
-
-	// Atomically replace the destination file
-	// Try rename first (fast if same filesystem)
-	if err := os.Rename(tmpFileName, destPath); err != nil {
-		// If rename fails (e.g., cross-device link), fall back to copy+delete
-		logger.DebugContext(ctx, "Rename failed, falling back to copy",
-			"dest_path", destPath,
-			"error", err)
-
-		if err := fileutil.CopyFile(ctx, tmpFileName, destPath); err != nil {
-			logger.ErrorContext(ctx, "Failed to copy temporary file to destination",
-				"temp_file", tmpFileName,
-				"dest_path", destPath,
-				"error", err)
-
-			return
-		}
-		// Set permissions on the copied file
-		if err := os.Chmod(destPath, fileMode); err != nil {
-			logger.ErrorContext(ctx, "Failed to set permissions on copied file",
-				"dest_path", destPath,
-				"error", err)
-
-			return
-		}
-		// Clean up temp file
-		if err := os.Remove(tmpFileName); err != nil {
-			logger.WarnContext(ctx, "Failed to remove temp file",
-				"temp_file", tmpFileName,
-				"error", err)
-		}
 	}
 
 	modeStr := rewriteEntry.Mode
@@ -488,9 +460,7 @@ func (cm *ConfigManager) processRewrite(ctx context.Context, filePath string, re
 	}
 
 	logger.DebugContext(ctx, "File rewrite completed",
-		"dest_path", destPath,
-		"mode", modeStr,
-		"lines_processed", lineCount)
+		"dest_path", destPath, "mode", modeStr, "lines_processed", lineCount)
 	cm.State.DelRewrite(filePath)
 }
 

@@ -18,14 +18,14 @@ import (
 
 // lexer implements the Lexer interface for tokenizing zmconfigd.cf files.
 type lexer struct {
-	ctx        context.Context
-	reader     *bufio.Reader
-	line       int
-	column     int
-	current    rune
-	eof        bool
-	peeked     Token // stored peeked token (valid only when hasPeeked is true)
-	hasPeeked  bool  // true when peeked holds a valid lookahead token
+	ctx       context.Context
+	reader    *bufio.Reader
+	line      int
+	column    int
+	current   rune
+	eof       bool
+	peeked    Token // stored peeked token (valid only when hasPeeked is true)
+	hasPeeked bool  // true when peeked holds a valid lookahead token
 }
 
 // NewLexer creates a new lexer from an io.Reader.
@@ -70,22 +70,6 @@ func (l *lexer) readChar() {
 		l.line++
 		l.column = 0
 	}
-}
-
-// peekChar looks at the next character without consuming it.
-func (l *lexer) peekChar() rune {
-	ch, _, err := l.reader.ReadRune()
-	if err != nil {
-		return 0
-	}
-
-	if err := l.reader.UnreadRune(); err != nil {
-		// This should rarely fail, but we'll log it
-		logger.WarnContext(l.ctx, "Failed to unread rune",
-			"error", err)
-	}
-
-	return ch
 }
 
 // skipWhitespace skips spaces and tabs but not newlines.
@@ -142,9 +126,38 @@ func (l *lexer) readString() string {
 	return sb.String()
 }
 
+// keywords maps upper-case identifiers to their token types.
+// Identifiers not in this map are TokenIdentifier.
+// LDAP is intentionally absent: it is treated as a plain identifier.
+var keywords = map[string]TokenType{
+	"SECTION":   TokenSection,
+	"REWRITE":   TokenRewrite,
+	"VAR":       TokenVar,
+	"LOCAL":     TokenLocal,
+	"SERVICE":   TokenService,
+	"POSTCONF":  TokenPostconf,
+	"POSTCONFD": TokenPostconfd,
+	"RESTART":   TokenRestart,
+	"DEPENDS":   TokenDepends,
+	"MAPFILE":   TokenMapfile,
+	"MAPLOCAL":  TokenMaplocal,
+	"MODE":      TokenMode,
+	"FILE":      TokenFile,
+	"IF":        TokenIf,
+	"FI":        TokenFi,
+	"PROXYGEN":  TokenProxygen,
+}
+
+// lookupKeyword returns the TokenType for ident (case-insensitive).
+func lookupKeyword(ident string) TokenType {
+	if tt, ok := keywords[strings.ToUpper(ident)]; ok {
+		return tt
+	}
+
+	return TokenIdentifier
+}
+
 // NextToken returns the next token from the input by value (no heap allocation).
-//
-//nolint:gocyclo,cyclop // Lexer token recognition requires checking many character patterns
 func (l *lexer) NextToken() (Token, error) {
 	// Return peeked token if available
 	if l.hasPeeked {
@@ -194,69 +207,14 @@ func (l *lexer) NextToken() (Token, error) {
 			ident = "!" + ident
 		}
 
-		// Check for keywords
-		tok := Token{Line: line, Column: col, Literal: ident}
-		switch strings.ToUpper(ident) {
-		case "SECTION":
-			tok.Type = TokenSection
-		case "REWRITE":
-			tok.Type = TokenRewrite
-		case "VAR":
-			tok.Type = TokenVar
-		case "LOCAL":
-			tok.Type = TokenLocal
-		case "SERVICE":
-			tok.Type = TokenService
-		case "POSTCONF":
-			tok.Type = TokenPostconf
-		case "POSTCONFD":
-			tok.Type = TokenPostconfd
-		case "RESTART":
-			tok.Type = TokenRestart
-		case "DEPENDS":
-			tok.Type = TokenDepends
-		case "MAPFILE":
-			tok.Type = TokenMapfile
-		case "MAPLOCAL":
-			tok.Type = TokenMaplocal
-		case "MODE":
-			tok.Type = TokenMode
-		case "FILE":
-			tok.Type = TokenFile
-		case "IF":
-			tok.Type = TokenIf
-		case "FI":
-			tok.Type = TokenFi
-		case "LDAP":
-			// LDAP is treated as an identifier for "LDAP key value" directives
-			tok.Type = TokenIdentifier
-		case "PROXYGEN":
-			tok.Type = TokenProxygen
-		default:
-			tok.Type = TokenIdentifier
-		}
+		tok := Token{Line: line, Column: col, Literal: ident, Type: lookupKeyword(ident)}
 
 		return tok, nil
 	}
 
-	// Path or string literal (/, ., or digit at start)
-	if l.current == '/' || l.current == '"' || unicode.IsDigit(l.current) {
-		str := l.readString()
-		return Token{Type: TokenString, Literal: str, Line: line, Column: col}, nil
-	}
-
-	// Dot - could be start of relative path like ./file or ../file or just a path component
-	if l.current == '.' {
-		// Check if it looks like a path (./  ../  or .something/)
-		next := l.peekChar()
-		if next == '/' || next == '.' {
-			str := l.readString()
-			return Token{Type: TokenString, Literal: str, Line: line, Column: col}, nil
-		}
-		// Otherwise treat as part of filename (will be read as string)
-		str := l.readString()
-
-		return Token{Type: TokenString, Literal: str, Line: line, Column: col}, nil
+	// Path, string literal, or dot-prefixed path component
+	if l.current == '/' || l.current == '"' || unicode.IsDigit(l.current) || l.current == '.' {
+		return Token{Type: TokenString, Literal: l.readString(), Line: line, Column: col}, nil
 	}
 
 	// Unknown character

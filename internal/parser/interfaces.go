@@ -96,60 +96,40 @@ type Token struct {
 	Column  int
 }
 
+// tokenNames maps each TokenType iota to its string representation.
+// Array lookup is O(1) with no branches.
+var tokenNames = [TokenComment + 1]string{
+	TokenEOF:        "EOF",
+	TokenError:      "ERROR",
+	TokenSection:    "SECTION",
+	TokenRewrite:    "REWRITE",
+	TokenVar:        "VAR",
+	TokenLocal:      "LOCAL",
+	TokenService:    "SERVICE",
+	TokenPostconf:   "POSTCONF",
+	TokenPostconfd:  "POSTCONFD",
+	TokenRestart:    "RESTART",
+	TokenDepends:    "DEPENDS",
+	TokenMapfile:    "MAPFILE",
+	TokenMaplocal:   "MAPLOCAL",
+	TokenMode:       "MODE",
+	TokenFile:       "FILE",
+	TokenIf:         "IF",
+	TokenFi:         "FI",
+	TokenLdap:       "LDAP",
+	TokenProxygen:   "PROXYGEN",
+	TokenNot:        "NOT",
+	TokenIdentifier: "IDENTIFIER",
+	TokenString:     "STRING",
+	TokenNewline:    "NEWLINE",
+	TokenComment:    "COMMENT",
+}
+
 // String returns a string representation of the token type.
-//
-//nolint:gocyclo,cyclop // Token type enumeration requires exhaustive switch cases
 func (t TokenType) String() string {
-	switch t {
-	case TokenEOF:
-		return "EOF"
-	case TokenError:
-		return "ERROR"
-	case TokenSection:
-		return "SECTION"
-	case TokenRewrite:
-		return "REWRITE"
-	case TokenVar:
-		return "VAR"
-	case TokenLocal:
-		return "LOCAL"
-	case TokenService:
-		return "SERVICE"
-	case TokenPostconf:
-		return "POSTCONF"
-	case TokenPostconfd:
-		return "POSTCONFD"
-	case TokenRestart:
-		return "RESTART"
-	case TokenDepends:
-		return "DEPENDS"
-	case TokenMapfile:
-		return "MAPFILE"
-	case TokenMaplocal:
-		return "MAPLOCAL"
-	case TokenMode:
-		return "MODE"
-	case TokenFile:
-		return "FILE"
-	case TokenIf:
-		return "IF"
-	case TokenFi:
-		return "FI"
-	case TokenLdap:
-		return "LDAP"
-	case TokenProxygen:
-		return "PROXYGEN"
-	case TokenNot:
-		return "NOT"
-	case TokenIdentifier:
-		return "IDENTIFIER"
-	case TokenString:
-		return "STRING"
-	case TokenNewline:
-		return "NEWLINE"
-	case TokenComment:
-		return "COMMENT"
-	default:
-		return "UNKNOWN"
+	if t >= 0 && int(t) < len(tokenNames) {
+		return tokenNames[t]
 	}
+
+	return "UNKNOWN"
 }
