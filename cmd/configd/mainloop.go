@@ -305,130 +305,216 @@ func runConfigPhases(
 	return timings, false
 }
 
+// daemonLoopDeps bundles dependencies of the daemon main loop.
+type daemonLoopDeps struct {
+	cfg            *config.Config
+	appState       *state.State
+	configManager  *configmgr.ConfigManager
+	serviceManager services.Manager
+	wd             *watchdog.Watchdog
+	args           *Args
+	notifier       *sdnotify.Notifier
+	trigger        *MainLoopActionTrigger
+	reloadChan     chan struct{}
+}
+
+// loopIterState carries mutable per-iteration counters between runs.
+type loopIterState struct {
+	lastEventCount int
+	loopCount      int
+	reloadSignaled bool
+	server         *network.ThreadedStreamServer
+}
+
+// iterOutcome signals how runLoopIteration wants the caller to proceed.
+type iterOutcome int
+
+const (
+	iterContinue iterOutcome = iota
+	iterExit
+)
+
 // runDaemonLoop is the main event loop for the configd daemon.
-func runDaemonLoop(
-	ctx context.Context,
-	mainCfg *config.Config,
-	appState *state.State,
-	configManager *configmgr.ConfigManager,
-	serviceManager services.Manager,
-	wd *watchdog.Watchdog,
-	args *Args,
-	notifier *sdnotify.Notifier,
-	mainLoopTrigger *MainLoopActionTrigger,
-	reloadChan chan struct{},
-) {
-	var server *network.ThreadedStreamServer
+func runDaemonLoop(ctx context.Context, deps *daemonLoopDeps) {
+	st := &loopIterState{}
 
 	defer func() {
-		if server != nil {
-			server.Shutdown(ctx)
+		if st.server != nil {
+			st.server.Shutdown(ctx)
 		}
 	}()
 
-	lastEventCount := 0
-	loopCount := 0
-	reloadSignaled := false
-
 	for {
-		select {
-		case <-ctx.Done():
-			logger.InfoContext(ctx, "Context cancelled, exiting main loop", "reason", "shutdown_signal")
+		if runLoopIteration(ctx, deps, st) == iterExit {
 			return
-		case <-reloadChan:
-			logger.InfoContext(ctx, "Received reload signal, re-evaluating configurations")
-
-			reloadSignaled = true
-		default:
-		}
-
-		if isIdlePoll(mainCfg, appState, mainLoopTrigger, lastEventCount, reloadSignaled) {
-			logger.DebugContext(ctx, "Skipping idle config poll", "reason", "no_events_since_last_check")
-			logger.DebugContext(ctx, "Sleeping", "interval_seconds", mainCfg.Interval)
-
-			if SleepWithContext(ctx, time.Duration(mainCfg.Interval)*time.Second, reloadChan) {
-				reloadSignaled = true
-				continue
-			}
-
-			continue
-		}
-
-		lastEventCount = mainLoopTrigger.EventCounter
-		t1 := time.Now()
-
-		loadDur, parseDur, err := runLoadAndParse(ctx, configManager, mainCfg)
-		if err != nil {
-			SleepWithContext(ctx, 60*time.Second, reloadChan)
-			continue
-		}
-
-		server = maybeStartListener(ctx, appState, args, mainLoopTrigger, server)
-
-		timings, skipIter := runConfigPhases(ctx, mainCfg, appState, configManager, serviceManager, wd, reloadChan)
-		if skipIter {
-			continue
-		}
-
-		select {
-		case <-ctx.Done():
-			logger.InfoContext(ctx, "Shutdown detected after config rewrites. Exiting main loop.",
-				"reason", "shutdown_signal")
-
-			return
-		default:
-		}
-
-		restartsDuration := time.Duration(0)
-
-		if mainCfg.RestartConfig {
-			phaseStart := time.Now()
-
-			configManager.DoRestarts(ctx)
-
-			restartsDuration = time.Since(phaseStart)
-
-			logger.DebugContext(ctx, "Timing: DoRestarts completed",
-				"duration_seconds", restartsDuration.Seconds(),
-				"operation", "do_restarts")
-		}
-
-		appState.SetFirstRun(false)
-
-		lt := time.Since(t1)
-
-		notifyReady(ctx, notifier, loopCount)
-
-		reloadSignaled = false
-		loopCount++
-
-		_ = notifier.Status("loop %d completed in %.1fs, next in %ds",
-			loopCount, lt.Seconds(), mainCfg.Interval)
-
-		logger.DebugContext(ctx, "Timing: Loop timing breakdown",
-			"load_configs_seconds", loadDur.Seconds(),
-			"parse_mta_seconds", parseDur.Seconds(),
-			"build_deps_seconds", timings.buildDeps.Seconds(),
-			"compare_keys_seconds", timings.compareKeys.Seconds(),
-			"compile_actions_seconds", timings.compileActions.Seconds(),
-			"rewrites_seconds", timings.rewrites.Seconds(),
-			"restarts_seconds", restartsDuration.Seconds())
-		logger.InfoContext(ctx, "Loop completed", "total_duration_seconds", lt.Seconds())
-
-		if args.Once {
-			logger.InfoContext(ctx, "Single-run mode: Exiting after one loop completion",
-				"total_duration_seconds", lt.Seconds())
-
-			return
-		}
-
-		logger.DebugContext(ctx, "Sleeping for interval", "interval_seconds", mainCfg.Interval)
-
-		if SleepWithContext(ctx, time.Duration(mainCfg.Interval)*time.Second, reloadChan) {
-			reloadSignaled = true
-			continue
 		}
 	}
+}
+
+// runLoopIteration performs one main-loop iteration. It returns iterExit
+// when the daemon should stop and iterContinue when the loop should run again.
+func runLoopIteration(ctx context.Context, deps *daemonLoopDeps, st *loopIterState) iterOutcome {
+	if outcome := consumeReloadSignal(ctx, deps.reloadChan, st); outcome == iterExit {
+		return iterExit
+	}
+
+	if isIdlePoll(deps.cfg, deps.appState, deps.trigger, st.lastEventCount, st.reloadSignaled) {
+		handleIdleSleep(ctx, deps, st)
+
+		return iterContinue
+	}
+
+	st.lastEventCount = deps.trigger.EventCounter
+	t1 := time.Now()
+
+	loadDur, parseDur, err := runLoadAndParse(ctx, deps.configManager, deps.cfg)
+	if err != nil {
+		SleepWithContext(ctx, 60*time.Second, deps.reloadChan)
+
+		return iterContinue
+	}
+
+	st.server = maybeStartListener(ctx, deps.appState, deps.args, deps.trigger, st.server)
+
+	timings, skipIter := runConfigPhases(
+		ctx, deps.cfg, deps.appState, deps.configManager,
+		deps.serviceManager, deps.wd, deps.reloadChan,
+	)
+	if skipIter {
+		return iterContinue
+	}
+
+	if ctxDone(ctx) {
+		logger.InfoContext(ctx, "Shutdown detected after config rewrites. Exiting main loop.",
+			"reason", "shutdown_signal")
+
+		return iterExit
+	}
+
+	restartsDur := runRestartsPhase(ctx, deps.cfg, deps.configManager)
+
+	return finalizeIteration(ctx, deps, st, &loopPhaseDurations{
+		t1:       t1,
+		load:     loadDur,
+		parse:    parseDur,
+		config:   timings,
+		restarts: restartsDur,
+	})
+}
+
+// consumeReloadSignal drains a ctx-cancellation or reloadChan signal without
+// blocking. It sets reloadSignaled on the caller's state and returns iterExit
+// when ctx is cancelled.
+func consumeReloadSignal(ctx context.Context, reloadChan chan struct{}, st *loopIterState) iterOutcome {
+	select {
+	case <-ctx.Done():
+		logger.InfoContext(ctx, "Context cancelled, exiting main loop", "reason", "shutdown_signal")
+
+		return iterExit
+	case <-reloadChan:
+		logger.InfoContext(ctx, "Received reload signal, re-evaluating configurations")
+
+		st.reloadSignaled = true
+	default:
+	}
+
+	return iterContinue
+}
+
+// handleIdleSleep logs the idle skip and sleeps for the configured interval,
+// updating reloadSignaled if the sleep was interrupted by a reload.
+func handleIdleSleep(ctx context.Context, deps *daemonLoopDeps, st *loopIterState) {
+	logger.DebugContext(ctx, "Skipping idle config poll", "reason", "no_events_since_last_check")
+	logger.DebugContext(ctx, "Sleeping", "interval_seconds", deps.cfg.Interval)
+
+	if SleepWithContext(ctx, time.Duration(deps.cfg.Interval)*time.Second, deps.reloadChan) {
+		st.reloadSignaled = true
+	}
+}
+
+// runRestartsPhase runs DoRestarts when restarts are enabled and returns the
+// elapsed time (zero when disabled).
+func runRestartsPhase(ctx context.Context, cfg *config.Config, cm *configmgr.ConfigManager) time.Duration {
+	if !cfg.RestartConfig {
+		return 0
+	}
+
+	phaseStart := time.Now()
+
+	cm.DoRestarts(ctx)
+
+	dur := time.Since(phaseStart)
+
+	logger.DebugContext(ctx, "Timing: DoRestarts completed",
+		"duration_seconds", dur.Seconds(),
+		"operation", "do_restarts")
+
+	return dur
+}
+
+// ctxDone reports whether ctx has been cancelled without blocking.
+func ctxDone(ctx context.Context) bool {
+	select {
+	case <-ctx.Done():
+		return true
+	default:
+		return false
+	}
+}
+
+// loopPhaseDurations groups timings produced during a single iteration.
+type loopPhaseDurations struct {
+	t1       time.Time
+	load     time.Duration
+	parse    time.Duration
+	config   phaseTimings
+	restarts time.Duration
+}
+
+// finalizeIteration commits post-rewrite bookkeeping: first-run flag,
+// sd_notify ready ping, timing logs, and the interval sleep or Once exit.
+func finalizeIteration(
+	ctx context.Context,
+	deps *daemonLoopDeps,
+	st *loopIterState,
+	dur *loopPhaseDurations,
+) iterOutcome {
+	deps.appState.SetFirstRun(false)
+
+	lt := time.Since(dur.t1)
+
+	notifyReady(ctx, deps.notifier, st.loopCount)
+
+	st.reloadSignaled = false
+	st.loopCount++
+
+	_ = deps.notifier.Status("loop %d completed in %.1fs, next in %ds",
+		st.loopCount, lt.Seconds(), deps.cfg.Interval)
+
+	logger.DebugContext(ctx, "Timing: Loop timing breakdown",
+		"load_configs_seconds", dur.load.Seconds(),
+		"parse_mta_seconds", dur.parse.Seconds(),
+		"build_deps_seconds", dur.config.buildDeps.Seconds(),
+		"compare_keys_seconds", dur.config.compareKeys.Seconds(),
+		"compile_actions_seconds", dur.config.compileActions.Seconds(),
+		"rewrites_seconds", dur.config.rewrites.Seconds(),
+		"restarts_seconds", dur.restarts.Seconds())
+	logger.InfoContext(ctx, "Loop completed", "total_duration_seconds", lt.Seconds())
+
+	if deps.args.Once {
+		logger.InfoContext(ctx, "Single-run mode: Exiting after one loop completion",
+			"total_duration_seconds", lt.Seconds())
+
+		return iterExit
+	}
+
+	logger.DebugContext(ctx, "Sleeping for interval", "interval_seconds", deps.cfg.Interval)
+
+	if SleepWithContext(ctx, time.Duration(deps.cfg.Interval)*time.Second, deps.reloadChan) {
+		st.reloadSignaled = true
+	}
+
+	return iterContinue
 }
 
 // RunMainLoop contains the core logic of the configd daemon.
@@ -515,7 +601,17 @@ func RunMainLoop(
 		os.Exit(0) //nolint:gocritic // exitAfterDefer false positive - wd.Stop() defer is in mutually exclusive if block
 	}
 
-	runDaemonLoop(ctx, mainCfg, appState, configManager, serviceManager, wd, args, notifier, mainLoopTrigger, reloadChan)
+	runDaemonLoop(ctx, &daemonLoopDeps{
+		cfg:            mainCfg,
+		appState:       appState,
+		configManager:  configManager,
+		serviceManager: serviceManager,
+		wd:             wd,
+		args:           args,
+		notifier:       notifier,
+		trigger:        mainLoopTrigger,
+		reloadChan:     reloadChan,
+	})
 }
 
 // buildServiceDependencies extracts dependencies from MTA config sections and sets them in the service manager.
