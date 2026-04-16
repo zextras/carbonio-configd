@@ -33,8 +33,8 @@ func TestNew(t *testing.T) {
 			t.Error("Expected skipCache to be false")
 		}
 
-		if cache.maxMemoryItems != 1000 {
-			t.Errorf("Expected maxMemoryItems=1000, got %d", cache.maxMemoryItems)
+		if cache.maxMemoryItems != 20 {
+			t.Errorf("Expected maxMemoryItems=20, got %d", cache.maxMemoryItems)
 		}
 	})
 
@@ -601,8 +601,8 @@ func TestGetMemoryCacheStats(t *testing.T) {
 		if stats["entries"] != 0 {
 			t.Errorf("Expected 0 entries, got %v", stats["entries"])
 		}
-		if stats["max_entries"] != 1000 {
-			t.Errorf("Expected max_entries=1000, got %v", stats["max_entries"])
+		if stats["max_entries"] != 20 {
+			t.Errorf("Expected max_entries=20, got %v", stats["max_entries"])
 		}
 	})
 
