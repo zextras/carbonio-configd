@@ -150,7 +150,7 @@ func (s *State) SnapshotCompileActions() CompileActionsSnapshot {
 
 	requestedConfig := make(map[string]string, len(s.RequestedConfig))
 	maps.Copy(requestedConfig, s.RequestedConfig)
-	s.RequestedConfig = make(map[string]string)
+	clear(s.RequestedConfig)
 
 	mtaSections := make(map[string]*config.MtaConfigSection, len(s.MtaConfig.Sections))
 	maps.Copy(mtaSections, s.MtaConfig.Sections)
@@ -330,7 +330,7 @@ func (s *State) ClearPostconf() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.CurrentActions.Postconf = make(map[string]string)
+	clear(s.CurrentActions.Postconf)
 }
 
 // CurPostconfd adds or retrieves a postconfd configuration change.
@@ -346,7 +346,7 @@ func (s *State) ClearPostconfd() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.CurrentActions.Postconfd = make(map[string]string)
+	clear(s.CurrentActions.Postconfd)
 }
 
 // CurServices sets or retrieves the current status for a service.
@@ -719,7 +719,7 @@ func (s *State) ClearFileCache(ctx context.Context) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.FileCache = make(map[string]string)
+	clear(s.FileCache)
 
 	logger.DebugContext(ctx, "Cleared FILE lookup cache")
 }
@@ -731,7 +731,7 @@ func (s *State) ResetForcedConfig(ctx context.Context) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.ForcedConfig = make(map[string]string)
+	clear(s.ForcedConfig)
 
 	logger.DebugContext(ctx, "Reset forced config")
 }
@@ -743,7 +743,7 @@ func (s *State) ResetRequestedConfig(ctx context.Context) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.RequestedConfig = make(map[string]string)
+	clear(s.RequestedConfig)
 
 	logger.DebugContext(ctx, "Reset requested config")
 }
@@ -850,23 +850,23 @@ func (s *State) SaveCurrentToPrevious(ctx context.Context) {
 	logger.DebugContext(ctx, "Saved current actions to previous")
 
 	// Copy rewrites
-	s.PreviousActions.Rewrites = make(map[string]config.RewriteEntry)
+	clear(s.PreviousActions.Rewrites)
 	maps.Copy(s.PreviousActions.Rewrites, s.CurrentActions.Rewrites)
 
 	// Copy postconf
-	s.PreviousActions.Postconf = make(map[string]string)
+	clear(s.PreviousActions.Postconf)
 	maps.Copy(s.PreviousActions.Postconf, s.CurrentActions.Postconf)
 
 	// Copy postconfd
-	s.PreviousActions.Postconfd = make(map[string]string)
+	clear(s.PreviousActions.Postconfd)
 	maps.Copy(s.PreviousActions.Postconfd, s.CurrentActions.Postconfd)
 
 	// Copy services
-	s.PreviousActions.Services = make(map[string]string)
+	clear(s.PreviousActions.Services)
 	maps.Copy(s.PreviousActions.Services, s.CurrentActions.Services)
 
 	// Copy LDAP
-	s.PreviousActions.Ldap = make(map[string]string)
+	clear(s.PreviousActions.Ldap)
 	maps.Copy(s.PreviousActions.Ldap, s.CurrentActions.Ldap)
 
 	// Copy proxygen

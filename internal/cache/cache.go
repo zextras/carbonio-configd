@@ -11,6 +11,7 @@ package cache
 import (
 	"context"
 	"crypto/md5" //nolint:gosec // MD5 used for non-cryptographic checksumming only
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -53,7 +54,7 @@ func New(parent context.Context, skipCache bool) *ConfigCache {
 	cache := &ConfigCache{
 		memoryCache:    make(map[string]*MemoryCacheEntry),
 		memoryCacheTTL: time.Duration(config.CacheTTL) * time.Second, // Use config TTL
-		maxMemoryItems: 1000,                                         // Higher limit since we're memory-only
+		maxMemoryItems: 20,                                           // Config daemon uses ~4-5 keys
 		skipCache:      skipCache,                                    // Set skipCache during initialization
 		stop:           make(chan struct{}),
 	}
@@ -168,7 +169,7 @@ func (cc *ConfigCache) generateHash(data any) string {
 
 	hash := md5.Sum(jsonData) //nolint:gosec // MD5 used for non-cryptographic checksumming only
 
-	return fmt.Sprintf("%x", hash)
+	return hex.EncodeToString(hash[:])
 }
 
 // getFromMemoryCache retrieves data from in-memory cache
@@ -389,7 +390,7 @@ func (cc *ConfigCache) ClearCache() error {
 
 	// Clear memory cache
 	memoryEntries := len(cc.memoryCache)
-	cc.memoryCache = make(map[string]*MemoryCacheEntry)
+	clear(cc.memoryCache)
 
 	logger.DebugContext(backgroundCtx(), "Memory cache cleared",
 		"removed_entries", memoryEntries)
