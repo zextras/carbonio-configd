@@ -1086,7 +1086,7 @@ func TestFetchAndCache_SkipCacheEnabled(t *testing.T) {
 	}
 
 	// With skipCache the entry is never stored; each call fetches fresh.
-	data, changed, err := cache.fetchAndCache(ctx, "skip_key", fetchFunc, true, "")
+	data, changed, _, err := cache.fetchAndCache(ctx, "skip_key", fetchFunc, true, "")
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}

@@ -297,7 +297,9 @@ func (cc *ConfigCache) GetCachedConfigWithChangeDetection(ctx context.Context, k
 	}
 
 	if cc.skipCache {
-		return cc.fetchAndCache(ctx, key, fetchFunc, true, "")
+		d, ch, _, e := cc.fetchAndCache(ctx, key, fetchFunc, true, "")
+
+		return d, ch, e
 	}
 
 	if memEntry, found := cc.getFromMemoryCache(key); found {
@@ -318,12 +320,11 @@ func (cc *ConfigCache) GetCachedConfigWithChangeDetection(ctx context.Context, k
 	logger.DebugContext(ctx, "Memory cache miss",
 		"key", key)
 
-	data, _, err = cc.fetchAndCache(ctx, key, fetchFunc, true, previousHash)
+	data, _, newHash, err := cc.fetchAndCache(ctx, key, fetchFunc, true, previousHash)
 	if err != nil {
 		return nil, false, err
 	}
 
-	newHash := cc.generateHash(data)
 	changed = previousHash == "" || previousHash != newHash
 
 	if !changed {
@@ -353,21 +354,23 @@ func (cc *ConfigCache) previousHash(key string) string {
 	return ""
 }
 
-// fetchAndCache is a helper function to fetch and optionally cache data
+// fetchAndCache is a helper function to fetch and optionally cache data.
+// Returns the freshly computed hash so callers can reuse it instead of
+// re-marshalling the same value.
 func (cc *ConfigCache) fetchAndCache(
 	ctx context.Context,
 	key string,
 	fetchFunc func() (any, error),
 	isChanged bool,
 	_ string,
-) (data any, changed bool, err error) {
+) (data any, changed bool, hash string, err error) {
 	// Fetch fresh data
 	logger.DebugContext(ctx, "Fetching fresh data",
 		"key", key)
 
 	freshData, err := fetchFunc()
 	if err != nil {
-		return nil, false, errs.WrapCache("fetch", key, err)
+		return nil, false, "", errs.WrapCache("fetch", key, err)
 	}
 
 	// Generate hash and store in cache
@@ -380,7 +383,7 @@ func (cc *ConfigCache) fetchAndCache(
 		cc.setMemoryCache(ctx, key, freshData, newHash)
 	}
 
-	return freshData, isChanged, nil // New data, so it's considered "changed"
+	return freshData, isChanged, newHash, nil // New data, so it's considered "changed"
 }
 
 // ClearCache removes all memory cache entries

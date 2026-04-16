@@ -596,14 +596,12 @@ func TestHandleConnectionReadError(t *testing.T) {
 func TestHandleConnectionWriteErrorOnEmptyCommand(t *testing.T) {
 	handler := &ConfigdRequestHandler{}
 	server := NewThreadedStreamServer("127.0.0.1", 0, false, handler)
-	server.wg.Add(1)
-
 	conn := &errorConn{
 		readData:  "\n", // empty line → parts will be empty
 		writeFail: true, // Write will fail after ReadString succeeds
 	}
 
-	// handleConnection runs synchronously (wg.Done called inside)
+	// handleConnection runs synchronously in the test (wg is managed by wg.Go in production).
 	server.handleConnection(context.Background(), conn)
 }
 
@@ -611,8 +609,6 @@ func TestHandleConnectionWriteErrorOnEmptyCommand(t *testing.T) {
 func TestHandleConnectionWriteErrorOnResponse(t *testing.T) {
 	handler := &ConfigdRequestHandler{}
 	server := NewThreadedStreamServer("127.0.0.1", 0, false, handler)
-	server.wg.Add(1)
-
 	conn := &errorConn{
 		readData:  "STATUS\n",
 		writeFail: true, // Write will fail when sending response
@@ -625,8 +621,6 @@ func TestHandleConnectionWriteErrorOnResponse(t *testing.T) {
 func TestHandleConnectionCloseError(t *testing.T) {
 	handler := &ConfigdRequestHandler{}
 	server := NewThreadedStreamServer("127.0.0.1", 0, false, handler)
-	server.wg.Add(1)
-
 	conn := &errorConn{
 		readData:  "STATUS\n",
 		writeFail: false,

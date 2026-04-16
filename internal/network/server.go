@@ -99,9 +99,9 @@ func (s *ThreadedStreamServer) ServeForever(ctx context.Context) error {
 				continue
 			}
 
-			s.wg.Add(1)
-
-			go s.handleConnection(ctx, conn)
+			s.wg.Go(func() {
+				s.handleConnection(ctx, conn)
+			})
 		}
 	}()
 
@@ -128,7 +128,6 @@ func (s *ThreadedStreamServer) Shutdown(ctx context.Context) {
 }
 
 func (s *ThreadedStreamServer) handleConnection(ctx context.Context, conn net.Conn) {
-	defer s.wg.Done()
 	defer func() {
 		if err := conn.Close(); err != nil {
 			logger.ErrorContext(ctx, "Error closing connection",

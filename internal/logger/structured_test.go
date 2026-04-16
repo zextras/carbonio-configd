@@ -43,7 +43,7 @@ func TestInitStructuredLogging(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			InitStructuredLogging(tt.config)
-			if defaultLogger == nil {
+			if defaultLogger.Load() == nil {
 				t.Error("defaultLogger should not be nil after initialization")
 			}
 		})
@@ -317,7 +317,7 @@ func TestDefaultConfig(t *testing.T) {
 // TestInitStructuredLogging_NilConfig verifies InitStructuredLogging with nil config.
 func TestInitStructuredLogging_NilConfig(t *testing.T) {
 	InitStructuredLogging(nil)
-	if defaultLogger == nil {
+	if defaultLogger.Load() == nil {
 		t.Error("defaultLogger should not be nil after InitStructuredLogging(nil)")
 	}
 }
@@ -331,7 +331,7 @@ func TestInitStructuredLogging_NilOutput(t *testing.T) {
 		AddSource: false,
 	}
 	InitStructuredLogging(cfg)
-	if defaultLogger == nil {
+	if defaultLogger.Load() == nil {
 		t.Error("defaultLogger should not be nil after init with nil Output")
 	}
 }

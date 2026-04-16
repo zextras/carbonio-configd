@@ -96,8 +96,10 @@ func (tp *TemplateProcessor) LoadTemplate(ctx context.Context, name string) (*Te
 		return nil, fmt.Errorf("failed to read template file %s from %s: %w", name, path, err)
 	}
 
-	// Split into lines for line-by-line processing
-	lines := strings.Split(string(content), "\n")
+	// Convert to string once — strings.Split and the Content field would
+	// otherwise each copy the full buffer, doubling peak allocations.
+	contentStr := string(content)
+	lines := strings.Split(contentStr, "\n")
 
 	logger.DebugContext(ctx, "Loaded template",
 		"name", name,
@@ -107,7 +109,7 @@ func (tp *TemplateProcessor) LoadTemplate(ctx context.Context, name string) (*Te
 	return &Template{
 		Name:    name,
 		Path:    path,
-		Content: string(content),
+		Content: contentStr,
 		Lines:   lines,
 	}, nil
 }

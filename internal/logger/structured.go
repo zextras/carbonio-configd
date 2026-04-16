@@ -14,6 +14,7 @@ import (
 	"os"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -42,9 +43,10 @@ const (
 )
 
 var (
-	// defaultLogger is the global logger instance
-	defaultLogger *slog.Logger
-	// logMutexSlog protects logger initialization
+	// defaultLogger is the global logger instance. Accessed atomically so that
+	// concurrent callers of Default() do not race with InitStructuredLogging().
+	defaultLogger atomic.Pointer[slog.Logger]
+	// logMutexSlog serialises calls to InitStructuredLogging.
 	logMutexSlog sync.Mutex
 )
 
@@ -135,23 +137,27 @@ func InitStructuredLogging(cfg *Config) {
 		handler = slog.NewTextHandler(cfg.Output, handlerOpts)
 	}
 
-	defaultLogger = slog.New(handler)
-	slog.SetDefault(defaultLogger)
+	newLogger := slog.New(handler)
+	defaultLogger.Store(newLogger)
+	slog.SetDefault(newLogger)
 
-	defaultLogger.Info("Structured logger initialized",
+	newLogger.Info("Structured logger initialized",
 		FieldComponent, "logger",
 		"format", cfg.Format,
 		"level", cfg.Level.String(),
 	)
 }
 
-// Default returns the default logger instance
+// Default returns the default logger instance, initialising it lazily on
+// first use. Safe for concurrent callers.
 func Default() *slog.Logger {
-	if defaultLogger == nil {
-		InitStructuredLogging(DefaultConfig())
+	if l := defaultLogger.Load(); l != nil {
+		return l
 	}
 
-	return defaultLogger
+	InitStructuredLogging(DefaultConfig())
+
+	return defaultLogger.Load()
 }
 
 // ContextWithLogger returns a new context with the given logger
