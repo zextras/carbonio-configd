@@ -31,7 +31,7 @@ const (
 
 // CompileActions compiles the MTA configuration actions.
 func (cm *ConfigManager) CompileActions(ctx context.Context) {
-	ctx = logger.ContextWithComponent(ctx, "configmgr")
+	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
 	logger.DebugContext(ctx, "Compiling actions")
 
 	// Snapshot and clear requested configs so we process exactly what was
@@ -177,7 +177,7 @@ func (cm *ConfigManager) compileSectionActions(
 
 // DoConfigRewrites executes configuration rewrites, postconf, postconfd, and LDAP changes.
 func (cm *ConfigManager) DoConfigRewrites(ctx context.Context) error {
-	ctx = logger.ContextWithComponent(ctx, "configmgr")
+	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
 	logger.DebugContext(ctx, "Executing config rewrites")
 
 	var wg sync.WaitGroup
@@ -296,6 +296,7 @@ func (cm *ConfigManager) doRewrites(ctx context.Context) {
 			var fileStartTime time.Time
 			if logger.IsDebug(ctx) {
 				fileStartTime = time.Now()
+
 				logger.DebugContext(ctx, "Rewriting file",
 					"file_number", fileNum,
 					"total_files", totalFiles,
@@ -737,7 +738,7 @@ func (cm *ConfigManager) doMapfile(ctx context.Context) {
 // DoRestarts executes service restarts based on the current state.
 // DoRestarts executes service restarts using the ServiceManager with dependency cascading.
 func (cm *ConfigManager) DoRestarts(ctx context.Context) {
-	ctx = logger.ContextWithComponent(ctx, "configmgr")
+	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
 	logger.DebugContext(ctx, "Executing service restarts")
 
 	// Transfer State.CurrentActions.Restarts to ServiceManager.RestartQueue
@@ -777,7 +778,7 @@ func (cm *ConfigManager) DoRestarts(ctx context.Context) {
 
 // ProcessIsRunning checks if a service is currently running.
 func (cm *ConfigManager) ProcessIsRunning(ctx context.Context, service string) bool {
-	ctx = logger.ContextWithComponent(ctx, "configmgr")
+	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
 	// Use the ServiceMgr to check process status
 	running, err := cm.ServiceMgr.IsRunning(ctx, service)
 	if err != nil {
@@ -791,7 +792,7 @@ func (cm *ConfigManager) ProcessIsRunning(ctx context.Context, service string) b
 
 // ProcessIsNotRunning checks if a service is currently not running.
 func (cm *ConfigManager) ProcessIsNotRunning(ctx context.Context, service string) bool {
-	ctx = logger.ContextWithComponent(ctx, "configmgr")
+	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
 	return !cm.ProcessIsRunning(ctx, service)
 }
 
@@ -799,7 +800,7 @@ func (cm *ConfigManager) ProcessIsNotRunning(ctx context.Context, service string
 // This method provides loaded LocalConfig, GlobalConfig, and ServerConfig to the proxy generator,
 // allowing it to resolve variables from actual LDAP data.
 func (cm *ConfigManager) RunProxygenWithConfigs(ctx context.Context) error {
-	ctx = logger.ContextWithComponent(ctx, "configmgr")
+	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
 	startTime := time.Now()
 
 	logger.DebugContext(ctx, "Running proxygen with loaded configurations")

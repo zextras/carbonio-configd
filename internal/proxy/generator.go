@@ -27,7 +27,7 @@ import (
 //
 // Custom templates take precedence over standard templates with the same name
 func (g *Generator) DiscoverTemplates(ctx context.Context) ([]string, error) {
-	ctx = logger.ContextWithComponent(ctx, "proxy")
+	ctx = logger.ContextWithComponentOnce(ctx, "proxy")
 	logger.DebugContext(ctx, "Discovering templates",
 		"template_dir", g.TemplateDir)
 
@@ -126,7 +126,7 @@ func discoverTemplatesInDir(dir string) ([]string, error) {
 // GenerateAll generates all nginx configuration files from templates
 // This is the main entry point for proxy configuration generation
 func (g *Generator) GenerateAll(ctx context.Context) error {
-	ctx = logger.ContextWithComponent(ctx, "proxy")
+	ctx = logger.ContextWithComponentOnce(ctx, "proxy")
 
 	span := tracing.StartSpan("GenerateAllProxyConfigs")
 	defer tracing.EndSpan(span)
@@ -253,7 +253,7 @@ func (g *Generator) prefetchOperation(
 // This is called before template processing to avoid sequential cache misses during template rendering.
 // Expected time savings: 3-4 seconds (parallel execution vs sequential cache misses)
 func (g *Generator) PrefetchUpstreamData(ctx context.Context) error {
-	ctx = logger.ContextWithComponent(ctx, "proxy")
+	ctx = logger.ContextWithComponentOnce(ctx, "proxy")
 	logger.DebugContext(ctx, "Prefetching upstream LDAP data in parallel")
 
 	t1 := time.Now()
@@ -307,7 +307,7 @@ func (g *Generator) PrefetchUpstreamData(ctx context.Context) error {
 // ProcessTemplate processes a single template file and writes the output
 // This method creates a new processor for each call (for backward compatibility)
 func (g *Generator) ProcessTemplate(ctx context.Context, templatePath, outputName string) error {
-	ctx = logger.ContextWithComponent(ctx, "proxy")
+	ctx = logger.ContextWithComponentOnce(ctx, "proxy")
 	logger.DebugContext(ctx, "ProcessTemplate called",
 		"template", templatePath,
 		"output", outputName)
@@ -323,7 +323,7 @@ func (g *Generator) ProcessTemplate(ctx context.Context, templatePath, outputNam
 func (g *Generator) ProcessTemplateWithProcessor(
 	ctx context.Context, processor *TemplateProcessor, templatePath, outputName string,
 ) error {
-	ctx = logger.ContextWithComponent(ctx, "proxy")
+	ctx = logger.ContextWithComponentOnce(ctx, "proxy")
 	logger.DebugContext(ctx, "Processing template with reused processor",
 		"template", templatePath,
 		"output", outputName)
@@ -462,7 +462,7 @@ func (g *Generator) writeFile(ctx context.Context, path string, content []byte) 
 // CleanIncludesDir removes all generated files from includes directory
 // Used when regenerating configuration from scratch
 func (g *Generator) CleanIncludesDir(ctx context.Context) error {
-	ctx = logger.ContextWithComponent(ctx, "proxy")
+	ctx = logger.ContextWithComponentOnce(ctx, "proxy")
 	if g.DryRun {
 		logger.DebugContext(ctx, "DRY-RUN: Would clean includes directory",
 			"path", g.IncludesDir)
@@ -516,7 +516,7 @@ func (g *Generator) CleanIncludesDir(ctx context.Context) error {
 
 // ValidateTemplate validates a template file syntax without generating output
 func (g *Generator) ValidateTemplate(ctx context.Context, templatePath string) error {
-	ctx = logger.ContextWithComponent(ctx, "proxy")
+	ctx = logger.ContextWithComponentOnce(ctx, "proxy")
 	// Create template processor
 	processor := NewTemplateProcessor(g, g.TemplateDir, g.IncludesDir)
 
@@ -540,7 +540,7 @@ func (g *Generator) ValidateTemplate(ctx context.Context, templatePath string) e
 
 // ValidateAllTemplates validates all discovered templates
 func (g *Generator) ValidateAllTemplates(ctx context.Context) error {
-	ctx = logger.ContextWithComponent(ctx, "proxy")
+	ctx = logger.ContextWithComponentOnce(ctx, "proxy")
 	logger.DebugContext(ctx, "Validating all templates")
 
 	templates, err := g.DiscoverTemplates(ctx)

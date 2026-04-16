@@ -24,7 +24,7 @@ func NewGenerator(ctx context.Context, cfg *config.Config,
 	serverCfg *config.ServerConfig,
 	ldapClient *ldap.Ldap,
 	cacheInstance *cache.ConfigCache) (*Generator, error) {
-	ctx = logger.ContextWithComponent(ctx, "proxy")
+	ctx = logger.ContextWithComponentOnce(ctx, "proxy")
 
 	if cfg == nil {
 		return nil, fmt.Errorf("config cannot be nil")
@@ -108,7 +108,7 @@ func LoadConfiguration(ctx context.Context, cfg *config.Config,
 	serverCfg *config.ServerConfig,
 	ldapClient *ldap.Ldap,
 	cacheInstance *cache.ConfigCache) (*Generator, error) {
-	ctx = logger.ContextWithComponent(ctx, "proxy")
+	ctx = logger.ContextWithComponentOnce(ctx, "proxy")
 
 	logger.DebugContext(ctx, "Loading proxy configuration from environment")
 
@@ -144,7 +144,7 @@ func LoadConfiguration(ctx context.Context, cfg *config.Config,
 
 // SetDryRun enables or disables dry-run mode
 func (g *Generator) SetDryRun(ctx context.Context, dryRun bool) {
-	ctx = logger.ContextWithComponent(ctx, "proxy")
+	ctx = logger.ContextWithComponentOnce(ctx, "proxy")
 
 	g.DryRun = dryRun
 	if dryRun {
@@ -154,7 +154,7 @@ func (g *Generator) SetDryRun(ctx context.Context, dryRun bool) {
 
 // SetVerbose enables or disables verbose logging mode
 func (g *Generator) SetVerbose(ctx context.Context, verbose bool) {
-	ctx = logger.ContextWithComponent(ctx, "proxy")
+	ctx = logger.ContextWithComponentOnce(ctx, "proxy")
 
 	g.Verbose = verbose
 	if verbose {
@@ -176,7 +176,7 @@ func (g *Generator) IsDryRun() bool {
 func (g *Generator) ReloadConfiguration(ctx context.Context, localCfg *config.LocalConfig,
 	globalCfg *config.GlobalConfig,
 	serverCfg *config.ServerConfig) error {
-	ctx = logger.ContextWithComponent(ctx, "proxy")
+	ctx = logger.ContextWithComponentOnce(ctx, "proxy")
 
 	logger.InfoContext(ctx, "Reloading proxy configuration")
 
@@ -200,7 +200,7 @@ func (g *Generator) ReloadConfiguration(ctx context.Context, localCfg *config.Lo
 // ClearUpstreamCache clears the cached upstream query results
 // This should be called when configuration changes or before each generation cycle
 func (g *Generator) ClearUpstreamCache(ctx context.Context) {
-	ctx = logger.ContextWithComponent(ctx, "proxy")
+	ctx = logger.ContextWithComponentOnce(ctx, "proxy")
 	if g.upstreamCache != nil {
 		logger.DebugContext(ctx, "Clearing upstream query cache")
 

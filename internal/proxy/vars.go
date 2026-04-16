@@ -94,7 +94,7 @@ func (g *Generator) RegisterVariables(_ context.Context) {
 //
 //nolint:gocyclo,cyclop // requires checking multiple configuration sources and fallbacks
 func (g *Generator) LookupValue(ctx context.Context, v *Variable) (any, error) {
-	ctx = logger.ContextWithComponent(ctx, "proxy")
+	ctx = logger.ContextWithComponentOnce(ctx, "proxy")
 	// If custom resolver is defined, use it
 	if v.CustomResolver != nil {
 		return v.CustomResolver(ctx)
@@ -226,7 +226,7 @@ func parseDurationToMillis(val string, secondsAsUnit bool) any {
 
 // ResolveAllVariables resolves all registered variables
 func (g *Generator) ResolveAllVariables(ctx context.Context) error {
-	ctx = logger.ContextWithComponent(ctx, "proxy")
+	ctx = logger.ContextWithComponentOnce(ctx, "proxy")
 	logger.DebugContext(ctx, "Starting variable resolution",
 		"variable_count", len(g.Variables))
 

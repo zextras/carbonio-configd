@@ -40,7 +40,7 @@ func NewPostfixManager(postconfCmd string) *PostfixManager {
 // AddPostconf adds a postconf directive (postconf -e key=value).
 // The change is queued and will be executed when FlushPostconf is called.
 func (pm *PostfixManager) AddPostconf(ctx context.Context, key, value string) error {
-	ctx = logger.ContextWithComponent(ctx, "postfix")
+	ctx = logger.ContextWithComponentOnce(ctx, "postfix")
 
 	if key == "" {
 		return fmt.Errorf("postconf key cannot be empty")
@@ -57,7 +57,7 @@ func (pm *PostfixManager) AddPostconf(ctx context.Context, key, value string) er
 // AddPostconfd adds a postconfd directive (postconf -X key for deletion).
 // The deletion is queued and will be executed when FlushPostconfd is called.
 func (pm *PostfixManager) AddPostconfd(ctx context.Context, key string) error {
-	ctx = logger.ContextWithComponent(ctx, "postfix")
+	ctx = logger.ContextWithComponentOnce(ctx, "postfix")
 
 	if key == "" {
 		return fmt.Errorf("postconfd key cannot be empty")
@@ -74,7 +74,7 @@ func (pm *PostfixManager) AddPostconfd(ctx context.Context, key string) error {
 // It runs postconf -e with all queued changes and clears the queue on success.
 // Returns error if the postconf command fails.
 func (pm *PostfixManager) FlushPostconf(ctx context.Context) error {
-	ctx = logger.ContextWithComponent(ctx, "postfix")
+	ctx = logger.ContextWithComponentOnce(ctx, "postfix")
 	if len(pm.postconfChanges) == 0 {
 		logger.DebugContext(ctx, "No postconf changes to flush")
 
@@ -129,7 +129,7 @@ func (pm *PostfixManager) FlushPostconf(ctx context.Context) error {
 // Deduplicates keys to avoid redundant deletions.
 // Returns error if the postconf command fails.
 func (pm *PostfixManager) FlushPostconfd(ctx context.Context) error {
-	ctx = logger.ContextWithComponent(ctx, "postfix")
+	ctx = logger.ContextWithComponentOnce(ctx, "postfix")
 	if len(pm.postconfdDeletions) == 0 {
 		logger.DebugContext(ctx, "No postconfd deletions to flush")
 
@@ -194,7 +194,7 @@ func (pm *PostfixManager) GetPendingChanges() (postconf map[string]string, postc
 
 // ClearPending clears all pending postconf and postconfd changes without executing them.
 func (pm *PostfixManager) ClearPending(ctx context.Context) {
-	ctx = logger.ContextWithComponent(ctx, "postfix")
+	ctx = logger.ContextWithComponentOnce(ctx, "postfix")
 	logger.DebugContext(ctx, "Clearing pending changes",
 		"postconf_change_count", len(pm.postconfChanges),
 		"postconfd_deletion_count", len(pm.postconfdDeletions))

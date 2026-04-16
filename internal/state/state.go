@@ -532,7 +532,7 @@ func IsTrueValue(val string) bool {
 func (s *State) CompileDependencyRestarts(ctx context.Context, serviceName string,
 	lookupConfig func(cfgType, key string) (string, error),
 	curRestarts func(service string, actionValue int)) {
-	ctx = logger.ContextWithComponent(ctx, "state")
+	ctx = logger.ContextWithComponentOnce(ctx, "state")
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -566,7 +566,7 @@ func (s *State) CompileDependencyRestarts(ctx context.Context, serviceName strin
 // ComputeFileMD5 computes the MD5 hash of a file's contents.
 // Returns the hex-encoded MD5 hash string or an error if file cannot be read.
 func ComputeFileMD5(ctx context.Context, filepath string) (string, error) {
-	ctx = logger.ContextWithComponent(ctx, "state")
+	ctx = logger.ContextWithComponentOnce(ctx, "state")
 	//nolint:gosec // G304: File path comes from trusted configuration
 	file, err := os.Open(filepath)
 	if err != nil {
@@ -619,7 +619,7 @@ func (s *State) SetFileMD5(filepath, md5hash string) {
 // If no cached MD5 exists, returns true (file is considered new/changed).
 // If file doesn't exist or can't be read, returns true (triggering rewrite).
 func (s *State) FileHasChanged(ctx context.Context, filepath string) bool {
-	ctx = logger.ContextWithComponent(ctx, "state")
+	ctx = logger.ContextWithComponentOnce(ctx, "state")
 	cachedMD5 := s.GetFileMD5(filepath)
 
 	currentMD5, err := ComputeFileMD5(ctx, filepath)
@@ -654,7 +654,7 @@ func (s *State) FileHasChanged(ctx context.Context, filepath string) bool {
 // UpdateFileMD5 recomputes and updates the cached MD5 for a file.
 // Returns error if file cannot be read.
 func (s *State) UpdateFileMD5(ctx context.Context, filepath string) error {
-	ctx = logger.ContextWithComponent(ctx, "state")
+	ctx = logger.ContextWithComponentOnce(ctx, "state")
 
 	md5hash, err := ComputeFileMD5(ctx, filepath)
 	if err != nil {
@@ -676,7 +676,7 @@ func (s *State) UpdateFileMD5(ctx context.Context, filepath string) error {
 // 3. ForcedConfig map (section explicitly forced via command-line or network)
 // 4. RequestedConfig map (section explicitly requested via network command)
 func (s *State) ShouldRewriteSection(ctx context.Context, sectionName string, section *config.MtaConfigSection) bool {
-	ctx = logger.ContextWithComponent(ctx, "state")
+	ctx = logger.ContextWithComponentOnce(ctx, "state")
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -718,7 +718,7 @@ func (s *State) ShouldRewriteSection(ctx context.Context, sectionName string, se
 // ClearFileCache clears the FILE type lookup cache.
 // This is called at the start of each configuration fetch cycle.
 func (s *State) ClearFileCache(ctx context.Context) {
-	ctx = logger.ContextWithComponent(ctx, "state")
+	ctx = logger.ContextWithComponentOnce(ctx, "state")
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -730,7 +730,7 @@ func (s *State) ClearFileCache(ctx context.Context) {
 
 // ResetForcedConfig clears the forced configuration map after processing.
 func (s *State) ResetForcedConfig(ctx context.Context) {
-	ctx = logger.ContextWithComponent(ctx, "state")
+	ctx = logger.ContextWithComponentOnce(ctx, "state")
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -742,7 +742,7 @@ func (s *State) ResetForcedConfig(ctx context.Context) {
 
 // ResetRequestedConfig clears the requested configuration map after processing.
 func (s *State) ResetRequestedConfig(ctx context.Context) {
-	ctx = logger.ContextWithComponent(ctx, "state")
+	ctx = logger.ContextWithComponentOnce(ctx, "state")
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -755,7 +755,7 @@ func (s *State) ResetRequestedConfig(ctx context.Context) {
 // SetForcedConfig adds a section to the forced configuration map.
 // Used for command-line --force-rewrite or similar operations.
 func (s *State) SetForcedConfig(ctx context.Context, section string) {
-	ctx = logger.ContextWithComponent(ctx, "state")
+	ctx = logger.ContextWithComponentOnce(ctx, "state")
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -846,7 +846,7 @@ func (s *State) CompareActions() bool {
 // SaveCurrentToPrevious copies current actions to previous actions.
 // This is called after successfully executing all actions in the main loop.
 func (s *State) SaveCurrentToPrevious(ctx context.Context) {
-	ctx = logger.ContextWithComponent(ctx, "state")
+	ctx = logger.ContextWithComponentOnce(ctx, "state")
 
 	s.mu.Lock()
 	defer s.mu.Unlock()

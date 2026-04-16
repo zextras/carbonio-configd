@@ -25,7 +25,7 @@ import (
 
 // LoadAllConfigs loads all configurations (local, global, server, misc).
 func (cm *ConfigManager) LoadAllConfigs(ctx context.Context) error {
-	ctx = logger.ContextWithComponent(ctx, "configmgr")
+	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
 	return cm.LoadAllConfigsWithRetry(ctx, 1) // Default: single attempt (no retry)
 }
 
@@ -33,7 +33,7 @@ func (cm *ConfigManager) LoadAllConfigs(ctx context.Context) error {
 //
 //nolint:gocyclo,cyclop // Configuration loading with retry logic and multiple config types
 func (cm *ConfigManager) LoadAllConfigsWithRetry(ctx context.Context, maxRetries int) error {
-	ctx = logger.ContextWithComponent(ctx, "configmgr")
+	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
 
 	span := tracing.StartSpan("LoadAllConfigs")
 	defer tracing.EndSpan(span)
@@ -252,7 +252,7 @@ func (cm *ConfigManager) LoadAllConfigsWithRetry(ctx context.Context, maxRetries
 
 // LoadLocalConfig loads local configuration using zmlocalconfig command.
 func (cm *ConfigManager) LoadLocalConfig(ctx context.Context) error {
-	ctx = logger.ContextWithComponent(ctx, "configmgr")
+	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
 
 	span := tracing.StartSpan("LoadLocalConfig")
 	defer tracing.EndSpan(span)
@@ -372,7 +372,7 @@ func (cm *ConfigManager) postProcessLocalConfig() {
 
 // LoadGlobalConfig loads global configuration from LDAP using zmprov gacf.
 func (cm *ConfigManager) LoadGlobalConfig(ctx context.Context) error {
-	ctx = logger.ContextWithComponent(ctx, "configmgr")
+	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
 
 	span := tracing.StartSpan("LoadGlobalConfig")
 	defer tracing.EndSpan(span)
@@ -515,7 +515,7 @@ func processSortedSSLConfigForTarget(configData map[string]string, key string) {
 // LoadMiscConfig loads miscellaneous configuration by executing misc commands.
 // Commands are executed in parallel to improve performance.
 func (cm *ConfigManager) LoadMiscConfig(ctx context.Context) error {
-	ctx = logger.ContextWithComponent(ctx, "configmgr")
+	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
 
 	span := tracing.StartSpan("LoadMiscConfig")
 	defer tracing.EndSpan(span)
@@ -673,7 +673,7 @@ func (cm *ConfigManager) fetchMiscCommand(ctx context.Context, cmdName string) (
 
 // LoadServerConfig loads server-specific configuration from LDAP using zmprov gs.
 func (cm *ConfigManager) LoadServerConfig(ctx context.Context) error {
-	ctx = logger.ContextWithComponent(ctx, "configmgr")
+	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
 
 	span := tracing.StartSpan("LoadServerConfig")
 	defer tracing.EndSpan(span)
@@ -1016,7 +1016,7 @@ func parseLDAPCommandOutput(output string) map[string]string {
 
 // LoadMtaConfig loads the zmconfigd.cf file.
 func (cm *ConfigManager) LoadMtaConfig(ctx context.Context, configFile string) error {
-	ctx = logger.ContextWithComponent(ctx, "configmgr")
+	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
 	// This will parse the zmconfigd.cf file.
 	// For now, it's a placeholder.
 	logger.DebugContext(ctx, "Loading MTA config from file",

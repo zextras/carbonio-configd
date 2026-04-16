@@ -64,6 +64,7 @@ const (
 	nginxReturn307Path = "return 307 /static/login/"
 	nginxOff           = "off"
 )
+
 // resolverQueryFailed is the log message emitted when a config resolver returns an error.
 const resolverQueryFailed = "Resolver query failed, returning empty"
 
@@ -234,6 +235,7 @@ func (g *Generator) resolveLookupHandlers(ctx context.Context) (any, error) {
 				"hostname", lookupHost,
 				"error", err)
 		}
+
 		g.cachedLookupIP = lookupHost
 	}
 

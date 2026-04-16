@@ -54,7 +54,7 @@ func NewThreadedStreamServer(addr string, port int, ipv6 bool, handler RequestHa
 
 // ServeForever starts the TCP server and listens for incoming connections.
 func (s *ThreadedStreamServer) ServeForever(ctx context.Context) error {
-	ctx = logger.ContextWithComponent(ctx, "network")
+	ctx = logger.ContextWithComponentOnce(ctx, "network")
 
 	var err error
 
@@ -110,7 +110,7 @@ func (s *ThreadedStreamServer) ServeForever(ctx context.Context) error {
 
 // Shutdown closes the listener and waits for all active connections to finish.
 func (s *ThreadedStreamServer) Shutdown(ctx context.Context) {
-	ctx = logger.ContextWithComponent(ctx, "network")
+	ctx = logger.ContextWithComponentOnce(ctx, "network")
 	logger.InfoContext(ctx, "Shutting down listener",
 		"address", s.addr,
 		"port", s.port)
@@ -181,7 +181,7 @@ type ConfigdRequestHandler struct {
 
 // HandleRequest processes incoming commands.
 func (h *ConfigdRequestHandler) HandleRequest(ctx context.Context, command string, args []string) string {
-	ctx = logger.ContextWithComponent(ctx, "network")
+	ctx = logger.ContextWithComponentOnce(ctx, "network")
 	logger.DebugContext(ctx, "ConfigdRequestHandler received command",
 		"command", command,
 		"args", args)

@@ -55,7 +55,7 @@ func NewRewriter(baseDir string, cl lookup.ConfigLookup, st *state.State) *Rewri
 //
 //nolint:gocyclo,cyclop // requires handling multiple template processing steps and error conditions
 func (r *Rewriter) RewriteConfig(ctx context.Context, source, target, mode string) error {
-	ctx = logger.ContextWithComponent(ctx, "template")
+	ctx = logger.ContextWithComponentOnce(ctx, "template")
 	logger.DebugContext(ctx, "Rewriting template",
 		"source", source,
 		"target", target)
@@ -211,7 +211,7 @@ func (r *Rewriter) RewriteConfig(ctx context.Context, source, target, mode strin
 // Returns:
 //   - error: nil on success, error if transformation fails
 func (r *Rewriter) RewriteReader(ctx context.Context, reader io.Reader, writer io.Writer) error {
-	ctx = logger.ContextWithComponent(ctx, "template")
+	ctx = logger.ContextWithComponentOnce(ctx, "template")
 	scanner := bufio.NewScanner(reader)
 	bufWriter := bufio.NewWriter(writer)
 

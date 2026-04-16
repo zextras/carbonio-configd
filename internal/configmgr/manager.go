@@ -62,7 +62,7 @@ type ConfigManager struct {
 // NewConfigManager creates a new ConfigManager instance.
 func NewConfigManager(ctx context.Context, mainCfg *config.Config,
 	appState *state.State, ldapClient *ldap.Ldap, cacheInstance *cache.ConfigCache) *ConfigManager {
-	ctx = logger.ContextWithComponent(ctx, "configmgr")
+	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
 	cm := &ConfigManager{
 		mainConfig: mainCfg,
 		State:      appState,
@@ -156,7 +156,7 @@ func (cm *ConfigManager) initNativeLdapClient(ctx context.Context) {
 //
 //nolint:gocyclo,cyclop // Config lookup requires checking multiple sources and fallbacks
 func (cm *ConfigManager) LookUpConfig(ctx context.Context, cfgType, key string) (string, error) {
-	ctx = logger.ContextWithComponent(ctx, "configmgr")
+	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
 	logger.DebugContext(ctx, "Looking up config key",
 		"key", key,
 		"config_type", cfgType)
@@ -292,7 +292,7 @@ func (cm *ConfigManager) LookUpConfig(ctx context.Context, cfgType, key string) 
 // - Manual proxy configuration generation is requested
 // - Config reload is triggered
 func (cm *ConfigManager) InvalidateLDAPCache(ctx context.Context) {
-	ctx = logger.ContextWithComponent(ctx, "configmgr")
+	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
 
 	if cm.Cache == nil {
 		return
@@ -314,7 +314,7 @@ func (cm *ConfigManager) InvalidateLDAPCache(ctx context.Context) {
 // - Config reload is requested
 // - System configuration may have changed
 func (cm *ConfigManager) ClearLocalConfigCache(ctx context.Context) {
-	ctx = logger.ContextWithComponent(ctx, "configmgr")
+	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
 	if cm.cachedLocalConfigOutput != "" {
 		logger.DebugContext(ctx, "Clearing localconfig cache")
 

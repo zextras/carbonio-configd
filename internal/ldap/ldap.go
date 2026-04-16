@@ -97,7 +97,7 @@ var keymap = map[string]LdapKeyMapEntry{
 
 // NewLdap initializes a new Ldap client with default retry configuration.
 func NewLdap(ctx context.Context, cfg *config.Config) *Ldap {
-	ctx = logger.ContextWithComponent(ctx, "ldap")
+	ctx = logger.ContextWithComponentOnce(ctx, "ldap")
 	l := &Ldap{
 		config:         cfg,
 		pendingChanges: make(map[string]string),
@@ -119,7 +119,7 @@ func NewLdap(ctx context.Context, cfg *config.Config) *Ldap {
 // SetNativeClient sets the native LDAP client for direct LDAP queries.
 // This should be called by ConfigManager after initializing the native client.
 func (l *Ldap) SetNativeClient(ctx context.Context, client *Client) {
-	ctx = logger.ContextWithComponent(ctx, "ldap")
+	ctx = logger.ContextWithComponentOnce(ctx, "ldap")
 	l.NativeClient = client
 
 	if client != nil {
@@ -131,7 +131,7 @@ func (l *Ldap) SetNativeClient(ctx context.Context, client *Client) {
 
 // AddChange adds an LDAP change to the pending queue.
 func (l *Ldap) AddChange(ctx context.Context, key, value string) {
-	ctx = logger.ContextWithComponent(ctx, "ldap")
+	ctx = logger.ContextWithComponentOnce(ctx, "ldap")
 	logger.DebugContext(ctx, "Adding LDAP change",
 		"key", key,
 		"value", value)
@@ -152,7 +152,7 @@ func (l *Ldap) ClearPending() {
 // This is a simplified implementation that directly manipulates cn=config.
 // In production, this would use proper LDAP client libraries.
 func (l *Ldap) ModifyAttribute(ctx context.Context, key, value string) error {
-	ctx = logger.ContextWithComponent(ctx, "ldap")
+	ctx = logger.ContextWithComponentOnce(ctx, "ldap")
 	logger.InfoContext(ctx, "Setting LDAP attribute",
 		"key", key,
 		"value", value)
@@ -232,7 +232,7 @@ func (l *Ldap) lookupKey(ctx context.Context, key string) (LdapKeyMapEntry, erro
 // This improves efficiency by combining multiple attribute modifications for the same DN
 // into a single LDAP modify operation.
 func (l *Ldap) ModifyAttributeBatch(ctx context.Context, changes map[string]string) error {
-	ctx = logger.ContextWithComponent(ctx, "ldap")
+	ctx = logger.ContextWithComponentOnce(ctx, "ldap")
 
 	if len(changes) == 0 {
 		return nil
@@ -426,7 +426,7 @@ type Server struct {
 // Returns a list of Domain structs containing the domain name, virtual hostname,
 // virtual IP address, and SSL certificate information.
 func (l *Ldap) QueryDomains(ctx context.Context) ([]Domain, error) {
-	ctx = logger.ContextWithComponent(ctx, "ldap")
+	ctx = logger.ContextWithComponentOnce(ctx, "ldap")
 	t0 := time.Now()
 
 	logger.DebugContext(ctx, "Starting QueryDomains")
@@ -503,7 +503,7 @@ func (l *Ldap) QueryDomains(ctx context.Context) ([]Domain, error) {
 //
 // serviceName examples: "mailbox", "proxy", "mta", "ldap", "memcached"
 func (l *Ldap) QueryServers(ctx context.Context, serviceName string) ([]Server, error) {
-	ctx = logger.ContextWithComponent(ctx, "ldap")
+	ctx = logger.ContextWithComponentOnce(ctx, "ldap")
 	logger.DebugContext(ctx, "Querying all servers with service",
 		"service", serviceName)
 

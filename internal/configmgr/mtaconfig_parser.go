@@ -15,7 +15,7 @@ import (
 
 // ParseMtaConfig parses the zmconfigd.cf file using the proper parser and populates the MtaConfig.
 func (cm *ConfigManager) ParseMtaConfig(ctx context.Context, configFile string) error {
-	ctx = logger.ContextWithComponent(ctx, "configmgr")
+	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
 	logger.DebugContext(ctx, "Parsing MTA config file",
 		"config_file", configFile)
 

@@ -204,23 +204,21 @@ func CorrelationIDFromContext(ctx context.Context) string {
 	return ""
 }
 
-// ContextWithComponent returns a new context with a component name
+// ContextWithComponent returns a new context with a component name.
+// The component is stored in the context and injected into each log record
+// by logWithCaller — no slog handler mutation occurs, avoiding WithAttrs allocations.
 func ContextWithComponent(ctx context.Context, component string) context.Context {
-	logger := LoggerFromContext(ctx).With(FieldComponent, component)
-	ctx = context.WithValue(ctx, componentContextKey, component)
-
-	return ContextWithLogger(ctx, logger)
+	return context.WithValue(ctx, componentContextKey, component)
 }
 
 // ContextWithComponentOnce is like ContextWithComponent but skips the allocation
 // when the context already carries exactly the same component string.
-// Use in methods that are called repeatedly in tight loops (e.g. state accessors).
 func ContextWithComponentOnce(ctx context.Context, component string) context.Context {
 	if existing, ok := ctx.Value(componentContextKey).(string); ok && existing == component {
 		return ctx
 	}
 
-	return ContextWithComponent(ctx, component)
+	return context.WithValue(ctx, componentContextKey, component)
 }
 
 // ContextWithOperation returns a new context with an operation name
@@ -284,6 +282,10 @@ func logWithCaller(ctx context.Context, level slog.Level, msg string, args ...an
 	runtime.Callers(3, pcs[:]) // skip: Callers, logWithCaller, public wrapper
 
 	r := slog.NewRecord(time.Now(), level, msg, pcs[0])
+	if component, ok := ctx.Value(componentContextKey).(string); ok && component != "" {
+		r.AddAttrs(slog.String(FieldComponent, component))
+	}
+
 	r.Add(args...)
 	_ = l.Handler().Handle(ctx, r)
 }

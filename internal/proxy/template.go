@@ -28,7 +28,6 @@ var bufPool = sync.Pool{
 	New: func() any { return bytes.NewBuffer(make([]byte, 0, 8192)) },
 }
 
-
 // SSL variable key constants used in template processing.
 const (
 	varKeySSLCrt     = "ssl.crt"
@@ -36,6 +35,7 @@ const (
 	varKeyOrigSSLCrt = "_orig_ssl.crt"
 	varKeyOrigSSLKey = "_orig_ssl.key"
 )
+
 // Template represents a parsed nginx configuration template
 type Template struct {
 	Name    string
@@ -81,7 +81,7 @@ func NewTemplateProcessor(gen *Generator, templateDir, outputDir string) *Templa
 
 // LoadTemplate reads a template file from disk
 func (tp *TemplateProcessor) LoadTemplate(ctx context.Context, name string) (*Template, error) {
-	ctx = logger.ContextWithComponent(ctx, "proxy")
+	ctx = logger.ContextWithComponentOnce(ctx, "proxy")
 	// If name is an absolute path, use it directly; otherwise join with templateDir
 	var path string
 	if filepath.IsAbs(name) {
@@ -114,9 +114,10 @@ func (tp *TemplateProcessor) LoadTemplate(ctx context.Context, name string) (*Te
 
 // ProcessTemplate processes a template with variable substitution
 func (tp *TemplateProcessor) ProcessTemplate(ctx context.Context, tmpl *Template) (string, error) {
-	ctx = logger.ContextWithComponent(ctx, "proxy")
+	ctx = logger.ContextWithComponentOnce(ctx, "proxy")
 
 	output := bufPool.Get().(*bytes.Buffer)
+
 	output.Reset()
 	defer bufPool.Put(output)
 
@@ -234,9 +235,11 @@ func (tp *TemplateProcessor) processEnablerLine(
 	varName := matches[2]
 	restOfLine := matches[3]
 
-	logger.DebugContext(ctx, "Matched enabler pattern",
-		"variable", varName,
-		"rest_of_line", restOfLine)
+	if logger.IsDebug(ctx) {
+		logger.DebugContext(ctx, "Matched enabler pattern",
+			"variable", varName,
+			"rest_of_line", restOfLine)
+	}
 
 	// Check if this is an enabler variable
 	v, exists := tp.generator.Variables[varName]
@@ -812,7 +815,7 @@ func (tp *TemplateProcessor) clearServerVariables() {
 
 // WriteOutput writes processed template to output file
 func (tp *TemplateProcessor) WriteOutput(ctx context.Context, name string, content string) error {
-	ctx = logger.ContextWithComponent(ctx, "proxy")
+	ctx = logger.ContextWithComponentOnce(ctx, "proxy")
 	// Determine output file path (remove .template extension)
 	outputName := strings.TrimSuffix(name, ".template")
 	outputPath := filepath.Join(tp.outputDir, outputName)
@@ -898,7 +901,7 @@ func truncateString(s string, maxLen int) string {
 
 // ProcessTemplateFile is a convenience method that loads, processes, and writes a template
 func (tp *TemplateProcessor) ProcessTemplateFile(ctx context.Context, name string) error {
-	ctx = logger.ContextWithComponent(ctx, "proxy")
+	ctx = logger.ContextWithComponentOnce(ctx, "proxy")
 
 	tmpl, err := tp.LoadTemplate(ctx, name)
 	if err != nil {
@@ -919,7 +922,7 @@ func (tp *TemplateProcessor) ProcessTemplateFile(ctx context.Context, name strin
 
 // ProcessAllTemplates processes all .template files in the template directory
 func (tp *TemplateProcessor) ProcessAllTemplates(ctx context.Context) error {
-	ctx = logger.ContextWithComponent(ctx, "proxy")
+	ctx = logger.ContextWithComponentOnce(ctx, "proxy")
 
 	entries, err := os.ReadDir(tp.templateDir)
 	if err != nil {
@@ -958,7 +961,7 @@ func (tp *TemplateProcessor) ProcessAllTemplates(ctx context.Context) error {
 // ExpandVariable expands a single variable by name
 // This is a helper method on Generator that looks up the variable and returns its expanded value
 func (g *Generator) ExpandVariable(ctx context.Context, name string) (string, error) {
-	ctx = logger.ContextWithComponent(ctx, "proxy")
+	ctx = logger.ContextWithComponentOnce(ctx, "proxy")
 
 	v, exists := g.Variables[name]
 	if !exists {
@@ -1183,7 +1186,7 @@ func (tp *TemplateProcessor) Rollback(configPath string) error {
 // ValidateNginxConfig runs nginx -t to validate the configuration
 // Returns nil if validation succeeds, error with nginx output if it fails
 func (tp *TemplateProcessor) ValidateNginxConfig(ctx context.Context, configPath string) error {
-	ctx = logger.ContextWithComponent(ctx, "proxy")
+	ctx = logger.ContextWithComponentOnce(ctx, "proxy")
 	// Look for nginx binary in common locations
 	nginxPaths := []string{
 		"/opt/zextras/common/sbin/nginx",

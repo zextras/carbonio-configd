@@ -30,7 +30,7 @@ func NewResolver(baseDir string) OperationResolver {
 // ResolveValue resolves a value based on type (VAR, LOCAL, FILE, MAPLOCAL, or literal).
 // This mirrors the lookUpConfig logic from carbonio-jython/jylibs/state.py.
 func (r *resolver) ResolveValue(ctx context.Context, valueType, key string, st *state.State) (string, error) {
-	ctx = logger.ContextWithComponent(ctx, "mtaops")
+	ctx = logger.ContextWithComponentOnce(ctx, "mtaops")
 	logger.DebugContext(ctx, "Resolving value",
 		"type", valueType,
 		"key", key)
@@ -148,7 +148,7 @@ func (r *resolver) ResolveValue(ctx context.Context, valueType, key string, st *
 //nolint:lll // Function signature naturally exceeds line limit
 func (r *resolver) ResolvePostconfDirective(
 	ctx context.Context, key, valueType, valueKey string, st *state.State) (PostconfOperation, error) {
-	ctx = logger.ContextWithComponent(ctx, "mtaops")
+	ctx = logger.ContextWithComponentOnce(ctx, "mtaops")
 	op := PostconfOperation{Key: key}
 
 	// If no valueType/valueKey, this means clear the parameter (empty value)
@@ -188,7 +188,7 @@ func (r *resolver) ResolvePostconfdDirective(key string) PostconfdOperation {
 func (r *resolver) ResolveLdapDirective(
 	ctx context.Context, key, valueType, valueKey string, st *state.State,
 ) (LdapOperation, error) {
-	ctx = logger.ContextWithComponent(ctx, "mtaops")
+	ctx = logger.ContextWithComponentOnce(ctx, "mtaops")
 	op := LdapOperation{Key: key}
 
 	// Resolve the value

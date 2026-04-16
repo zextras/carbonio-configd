@@ -81,7 +81,7 @@ func NewWatchdog(cfg Config) *Watchdog {
 
 // Start begins the watchdog monitoring loop.
 func (w *Watchdog) Start(ctx context.Context) {
-	ctx = logger.ContextWithComponent(ctx, "watchdog")
+	ctx = logger.ContextWithComponentOnce(ctx, "watchdog")
 
 	w.mu.Lock()
 
@@ -103,7 +103,7 @@ func (w *Watchdog) Start(ctx context.Context) {
 
 // Stop halts the watchdog monitoring loop.
 func (w *Watchdog) Stop(ctx context.Context) {
-	ctx = logger.ContextWithComponent(ctx, "watchdog")
+	ctx = logger.ContextWithComponentOnce(ctx, "watchdog")
 
 	w.mu.Lock()
 
@@ -132,7 +132,7 @@ func (w *Watchdog) IsEnabled() bool {
 
 // SetServiceEnabled sets whether a specific service should be monitored by watchdog.
 func (w *Watchdog) SetServiceEnabled(ctx context.Context, service string, enabled bool) {
-	ctx = logger.ContextWithComponent(ctx, "watchdog")
+	ctx = logger.ContextWithComponentOnce(ctx, "watchdog")
 
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -154,7 +154,7 @@ func (w *Watchdog) IsServiceEnabled(service string) bool {
 // AddService adds a service to watchdog tracking.
 // This is called after a service is successfully started.
 func (w *Watchdog) AddService(ctx context.Context, service string) {
-	ctx = logger.ContextWithComponent(ctx, "watchdog")
+	ctx = logger.ContextWithComponentOnce(ctx, "watchdog")
 
 	w.state.SetWatchdog(service, true)
 	logger.DebugContext(ctx, "Service now available for watchdog",
@@ -164,7 +164,7 @@ func (w *Watchdog) AddService(ctx context.Context, service string) {
 // RemoveService removes a service from watchdog tracking.
 // This is called when a service is explicitly stopped or restarted to prevent restart loops.
 func (w *Watchdog) RemoveService(ctx context.Context, service string) {
-	ctx = logger.ContextWithComponent(ctx, "watchdog")
+	ctx = logger.ContextWithComponentOnce(ctx, "watchdog")
 
 	w.state.DelWatchdog(service)
 	logger.DebugContext(ctx, "Removed service from watchdog tracking",
@@ -290,7 +290,7 @@ func (w *Watchdog) getTrackedServices() []string {
 // UpdateServiceList updates the list of services that should be monitored.
 // This should be called after configuration changes.
 func (w *Watchdog) UpdateServiceList(ctx context.Context, enabledServices []string) {
-	ctx = logger.ContextWithComponent(ctx, "watchdog")
+	ctx = logger.ContextWithComponentOnce(ctx, "watchdog")
 
 	w.mu.Lock()
 	defer w.mu.Unlock()

@@ -132,7 +132,7 @@ const (
 
 // ControlProcess performs an action on a service.
 func (sm *ServiceManager) ControlProcess(ctx context.Context, service string, action ServiceAction) error {
-	ctx = logger.ContextWithComponent(ctx, "services")
+	ctx = logger.ContextWithComponentOnce(ctx, "services")
 	service = strings.ToLower(service)
 
 	// Validate action
@@ -242,7 +242,7 @@ func (sm *ServiceManager) executeCommand(ctx context.Context, cmdPath, action st
 
 // IsRunning checks if a service is currently running.
 func (sm *ServiceManager) IsRunning(ctx context.Context, service string) (bool, error) {
-	ctx = logger.ContextWithComponent(ctx, "services")
+	ctx = logger.ContextWithComponentOnce(ctx, "services")
 	err := sm.ControlProcess(ctx, service, ActionStatus)
 
 	return err == nil, nil
@@ -250,7 +250,7 @@ func (sm *ServiceManager) IsRunning(ctx context.Context, service string) (bool, 
 
 // AddRestart queues a service for restart.
 func (sm *ServiceManager) AddRestart(ctx context.Context, service string) error {
-	ctx = logger.ContextWithComponent(ctx, "services")
+	ctx = logger.ContextWithComponentOnce(ctx, "services")
 	service = strings.ToLower(service)
 	sm.RestartQueue[service] = true
 	logger.DebugContext(ctx, "Queued restart for service",
@@ -263,7 +263,7 @@ func (sm *ServiceManager) AddRestart(ctx context.Context, service string) error 
 // Handles dependency ordering and retry logic.
 // The configLookup function is used to check if dependent services are enabled (SERVICE_* keys).
 func (sm *ServiceManager) ProcessRestarts(ctx context.Context, configLookup func(string) string) error {
-	ctx = logger.ContextWithComponent(ctx, "services")
+	ctx = logger.ContextWithComponentOnce(ctx, "services")
 
 	if sm.DisableRestarts {
 		sm.logDryRunRestarts(ctx)
@@ -396,7 +396,7 @@ func (sm *ServiceManager) getSortedServices() []string {
 
 // ClearRestarts clears all queued restarts.
 func (sm *ServiceManager) ClearRestarts(ctx context.Context) {
-	ctx = logger.ContextWithComponent(ctx, "services")
+	ctx = logger.ContextWithComponentOnce(ctx, "services")
 	sm.RestartQueue = make(map[string]bool)
 
 	logger.DebugContext(ctx, "Cleared all pending restarts")
@@ -428,7 +428,7 @@ func (sm *ServiceManager) SetUseSystemd(enabled bool) {
 // SetDependencies sets the dependency map for service restart cascading.
 // The map key is a section name, and the value is a slice of service names that depend on it.
 func (sm *ServiceManager) SetDependencies(ctx context.Context, deps map[string][]string) {
-	ctx = logger.ContextWithComponent(ctx, "services")
+	ctx = logger.ContextWithComponentOnce(ctx, "services")
 	sm.Dependencies = deps
 	logger.DebugContext(ctx, "Set dependencies",
 		"section_count", len(deps))
@@ -440,7 +440,7 @@ func (sm *ServiceManager) SetDependencies(ctx context.Context, deps map[string][
 func (sm *ServiceManager) AddDependencyRestarts(
 	ctx context.Context, sectionName string, configLookup func(string) string,
 ) {
-	ctx = logger.ContextWithComponent(ctx, "services")
+	ctx = logger.ContextWithComponentOnce(ctx, "services")
 
 	deps, exists := sm.Dependencies[sectionName]
 	if !exists || len(deps) == 0 {

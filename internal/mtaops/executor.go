@@ -41,7 +41,7 @@ func NewExecutor(baseDir string, ldapManager ldap.Manager) Executor {
 
 // ExecutePostconf executes a postconf -e operation.
 func (e *executor) ExecutePostconf(ctx context.Context, op PostconfOperation) error {
-	ctx = logger.ContextWithComponent(ctx, "mtaops")
+	ctx = logger.ContextWithComponentOnce(ctx, "mtaops")
 	return e.ExecutePostconfBatch(ctx, []PostconfOperation{op})
 }
 
@@ -50,7 +50,7 @@ func (e *executor) ExecutePostconf(ctx context.Context, op PostconfOperation) er
 // Values with newlines are executed separately as postconf doesn't support multi-line
 // values in batch mode.
 func (e *executor) ExecutePostconfBatch(ctx context.Context, ops []PostconfOperation) error {
-	ctx = logger.ContextWithComponent(ctx, "mtaops")
+	ctx = logger.ContextWithComponentOnce(ctx, "mtaops")
 
 	if len(ops) == 0 {
 		return nil
@@ -123,13 +123,13 @@ func (e *executor) ExecutePostconfBatch(ctx context.Context, ops []PostconfOpera
 
 // ExecutePostconfd executes a postconf -X operation (delete parameter).
 func (e *executor) ExecutePostconfd(ctx context.Context, op PostconfdOperation) error {
-	ctx = logger.ContextWithComponent(ctx, "mtaops")
+	ctx = logger.ContextWithComponentOnce(ctx, "mtaops")
 	return e.ExecutePostconfdBatch(ctx, []PostconfdOperation{op})
 }
 
 // ExecutePostconfdBatch executes multiple postconf -X operations in a single call.
 func (e *executor) ExecutePostconfdBatch(ctx context.Context, ops []PostconfdOperation) error {
-	ctx = logger.ContextWithComponent(ctx, "mtaops")
+	ctx = logger.ContextWithComponentOnce(ctx, "mtaops")
 
 	if len(ops) == 0 {
 		return nil
@@ -221,7 +221,7 @@ func (e *executor) handleEmptyMapfileData(ctx context.Context, op MapfileOperati
 
 // ExecuteMapfile executes a MAPFILE/MAPLOCAL operation.
 func (e *executor) ExecuteMapfile(ctx context.Context, op MapfileOperation) error {
-	ctx = logger.ContextWithComponent(ctx, "mtaops")
+	ctx = logger.ContextWithComponentOnce(ctx, "mtaops")
 
 	span := tracing.StartSpan("MTA.Mapfile")
 	if span != nil {
@@ -306,7 +306,7 @@ func (e *executor) executeMapFile(ctx context.Context, op MapfileOperation, file
 
 // ExecuteLdapWrite executes an LDAP cn=config write operation.
 func (e *executor) ExecuteLdapWrite(ctx context.Context, op LdapOperation) error {
-	ctx = logger.ContextWithComponent(ctx, "mtaops")
+	ctx = logger.ContextWithComponentOnce(ctx, "mtaops")
 
 	span := tracing.StartSpan("MTA.LdapWrite")
 	if span != nil {

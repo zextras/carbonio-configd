@@ -45,7 +45,7 @@ func NewSectionExecutor(cl lookup.ConfigLookup,
 // Returns true if the condition is met, false otherwise.
 // It delegates to ConfigLookup for value resolution, then applies truthy/negation logic.
 func (e *SectionExecutor) EvaluateConditional(ctx context.Context, cond *config.Conditional) bool {
-	ctx = logger.ContextWithComponent(ctx, "executor")
+	ctx = logger.ContextWithComponentOnce(ctx, "executor")
 	logger.DebugContext(ctx, "Evaluating conditional",
 		"type", cond.Type,
 		"key", cond.Key,
@@ -82,7 +82,7 @@ func (e *SectionExecutor) ExecuteSection(ctx context.Context, section *config.Mt
 	postconfd map[string]string,
 	ldap map[string]string,
 	restarts map[string]bool) {
-	ctx = logger.ContextWithComponent(ctx, "executor")
+	ctx = logger.ContextWithComponentOnce(ctx, "executor")
 	logger.DebugContext(ctx, "Executing section",
 		"section", section.Name)
 
@@ -162,7 +162,7 @@ func (e *SectionExecutor) GetSectionDependencies(section *config.MtaConfigSectio
 // CheckRequiredVars checks if all required variables for a section are present.
 // Returns true if all required vars are present, false otherwise.
 func (e *SectionExecutor) CheckRequiredVars(ctx context.Context, section *config.MtaConfigSection) bool {
-	ctx = logger.ContextWithComponent(ctx, "executor")
+	ctx = logger.ContextWithComponentOnce(ctx, "executor")
 	logger.DebugContext(ctx, "Checking required vars for section",
 		"section", section.Name)
 
@@ -194,7 +194,7 @@ func (e *SectionExecutor) CheckRequiredVars(ctx context.Context, section *config
 //   - "literal value" -> returns as-is
 //   - "prefix VAR:foo suffix" -> "prefix <value> suffix"
 func (e *SectionExecutor) ExpandValue(ctx context.Context, value string) (string, error) {
-	ctx = logger.ContextWithComponent(ctx, "executor")
+	ctx = logger.ContextWithComponentOnce(ctx, "executor")
 
 	if value == "" {
 		return "", nil
@@ -272,7 +272,7 @@ func (e *SectionExecutor) ExpandValue(ctx context.Context, value string) (string
 // Takes maps returned from ExecuteSection and queues them for execution.
 // Values are expanded to resolve FILE, VAR, LOCAL, and MAPLOCAL references.
 func (e *SectionExecutor) ApplyPostfixDirectives(ctx context.Context, postconf, postconfd map[string]string) error {
-	ctx = logger.ContextWithComponent(ctx, "executor")
+	ctx = logger.ContextWithComponentOnce(ctx, "executor")
 	logger.DebugContext(ctx, "Applying postfix directives",
 		"postconf_count", len(postconf),
 		"postconfd_count", len(postconfd))
@@ -315,7 +315,7 @@ func (e *SectionExecutor) ApplyPostfixDirectives(ctx context.Context, postconf, 
 
 // FlushPostfixChanges flushes all accumulated postfix changes.
 func (e *SectionExecutor) FlushPostfixChanges(ctx context.Context) error {
-	ctx = logger.ContextWithComponent(ctx, "executor")
+	ctx = logger.ContextWithComponentOnce(ctx, "executor")
 	logger.DebugContext(ctx, "Flushing postfix changes")
 
 	// Flush postconf changes
@@ -343,7 +343,7 @@ func (e *SectionExecutor) FlushPostfixChanges(ctx context.Context) error {
 // It evaluates conditionals for each section and queues all postconf/postconfd changes.
 // Call FlushPostfixChanges() after this method to execute all queued changes.
 func (e *SectionExecutor) ProcessAllSections(ctx context.Context, mtaConfig *config.MtaConfig) error {
-	ctx = logger.ContextWithComponent(ctx, "executor")
+	ctx = logger.ContextWithComponentOnce(ctx, "executor")
 	logger.DebugContext(ctx, "Processing all sections for postfix changes")
 
 	processedCount := 0

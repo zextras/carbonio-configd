@@ -16,7 +16,7 @@ import (
 
 // CheckConditional evaluates a conditional expression based on configuration type and key.
 func (cm *ConfigManager) CheckConditional(ctx context.Context, cfgType, key string) (bool, error) {
-	ctx = logger.ContextWithComponent(ctx, "configmgr")
+	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
 	negate := false
 	originalKey := key
 
@@ -67,7 +67,7 @@ func (cm *ConfigManager) CheckConditional(ctx context.Context, cfgType, key stri
 
 // CompareKeys compares current configuration values with previous ones and updates the state.
 func (cm *ConfigManager) CompareKeys(ctx context.Context) error {
-	ctx = logger.ContextWithComponent(ctx, "configmgr")
+	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
 	logger.DebugContext(ctx, "Comparing keys")
 
 	if err := cm.checkAllServicesEnabled(ctx); err != nil {

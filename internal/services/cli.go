@@ -58,7 +58,7 @@ func IsSystemdMode() bool {
 
 // ServiceStart starts a service by name, handling dependencies, config rewrite, and hooks.
 func ServiceStart(ctx context.Context, name string) error {
-	ctx = logger.ContextWithComponent(ctx, serviceCliComponent)
+	ctx = logger.ContextWithComponentOnce(ctx, serviceCliComponent)
 
 	def := LookupService(name)
 	if def == nil {
@@ -137,7 +137,7 @@ func runPostStartHooks(ctx context.Context, name string, sm *ServiceManager, def
 
 // ServiceStop stops a service by name, handling hooks and dependencies.
 func ServiceStop(ctx context.Context, name string) error {
-	ctx = logger.ContextWithComponent(ctx, serviceCliComponent)
+	ctx = logger.ContextWithComponentOnce(ctx, serviceCliComponent)
 
 	def := LookupService(name)
 	if def == nil {
@@ -178,7 +178,7 @@ func ServiceStop(ctx context.Context, name string) error {
 
 // ServiceRestart restarts a service.
 func ServiceRestart(ctx context.Context, name string) error {
-	ctx = logger.ContextWithComponent(ctx, serviceCliComponent)
+	ctx = logger.ContextWithComponentOnce(ctx, serviceCliComponent)
 
 	def := LookupService(name)
 	if def == nil {
