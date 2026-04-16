@@ -22,48 +22,37 @@ import (
 )
 
 // Transformer holds the necessary dependencies for transforming lines.
+// Regex patterns are compiled once at package init (see the var block below)
+// and shared across every Transformer instance, so constructing a new
+// Transformer is allocation-free.
 type Transformer struct {
 	ConfigLookup lookup.ConfigLookup
 	State        *state.State
-
-	// Compiled regex patterns (cached for performance)
-	localConfigRe   *regexp.Regexp
-	configVarRe     *regexp.Regexp
-	plainVarRe      *regexp.Regexp
-	commentRe       *regexp.Regexp
-	uncommentRe     *regexp.Regexp
-	binaryRe        *regexp.Regexp
-	truefalseRe     *regexp.Regexp
-	rangeRe         *regexp.Regexp
-	freqRe          *regexp.Regexp
-	freqDigitsRe    *regexp.Regexp
-	freqNonDigitsRe *regexp.Regexp
-	explodeRe       *regexp.Regexp
-	ldapURLRe       *regexp.Regexp
-	inlineDirectRe  *regexp.Regexp // compiled once, used in processInlineDirectives
 }
+
+// Compiled once at package init. `*regexp.Regexp` is safe for concurrent use.
+var (
+	localConfigRe   = regexp.MustCompile(`@@([^@]+)@@`)
+	configVarRe     = regexp.MustCompile(`%%(VAR|LOCAL|SERVICE):([^%]+)%%`)
+	plainVarRe      = regexp.MustCompile(`%%([^%:]+)%%`)
+	commentRe       = regexp.MustCompile(`comment ([^:]+):([^,\s]+)(?:,([^,]+))?(?:,([^,]+))?`)
+	uncommentRe     = regexp.MustCompile(`uncomment ([^:]+):([^,\s]+)(?:,([^,]+))?(?:,([^,]+))?`)
+	binaryRe        = regexp.MustCompile(`binary ([^:]+):(\S+)`)
+	truefalseRe     = regexp.MustCompile(`truefalse ([^:]+):(\S+)`)
+	rangeRe         = regexp.MustCompile(`range ([^:]+):(\S+)\s+(\S+)\s+(\S+)`)
+	freqRe          = regexp.MustCompile(`freq ([^:]+):(\S+)\s+(\S+)`)
+	freqDigitsRe    = regexp.MustCompile(`\D`)
+	freqNonDigitsRe = regexp.MustCompile(`\d`)
+	explodeRe       = regexp.MustCompile(`explode\s+(.*)\s+([^:]+):(\w+)`)
+	ldapURLRe       = regexp.MustCompile(`ldap.?://(\S+):\d+`)
+	inlineDirectRe  = regexp.MustCompile(`%%([^%]+)%%`)
+)
 
 // NewTransformer creates a new Transformer instance.
 func NewTransformer(cl lookup.ConfigLookup, st *state.State) *Transformer {
 	return &Transformer{
 		ConfigLookup: cl,
 		State:        st,
-
-		// Compile all regex patterns once at initialization
-		localConfigRe:   regexp.MustCompile(`@@([^@]+)@@`),
-		configVarRe:     regexp.MustCompile(`%%(VAR|LOCAL|SERVICE):([^%]+)%%`),
-		plainVarRe:      regexp.MustCompile(`%%([^%:]+)%%`),
-		commentRe:       regexp.MustCompile(`comment ([^:]+):([^,\s]+)(?:,([^,]+))?(?:,([^,]+))?`),
-		uncommentRe:     regexp.MustCompile(`uncomment ([^:]+):([^,\s]+)(?:,([^,]+))?(?:,([^,]+))?`),
-		binaryRe:        regexp.MustCompile(`binary ([^:]+):(\S+)`),
-		truefalseRe:     regexp.MustCompile(`truefalse ([^:]+):(\S+)`),
-		rangeRe:         regexp.MustCompile(`range ([^:]+):(\S+)\s+(\S+)\s+(\S+)`),
-		freqRe:          regexp.MustCompile(`freq ([^:]+):(\S+)\s+(\S+)`),
-		freqDigitsRe:    regexp.MustCompile(`\D`),
-		freqNonDigitsRe: regexp.MustCompile(`\d`),
-		explodeRe:       regexp.MustCompile(`explode\s+(.*)\s+([^:]+):(\w+)`),
-		ldapURLRe:       regexp.MustCompile(`ldap.?://(\S+):\d+`),
-		inlineDirectRe:  regexp.MustCompile(`%%([^%]+)%%`),
 	}
 }
 
@@ -76,7 +65,7 @@ func (t *Transformer) Transform(ctx context.Context, line string) string {
 	}
 
 	// Apply @@localconfig_key@@ substitutions
-	line = t.localConfigRe.ReplaceAllStringFunc(line, func(match string) string {
+	line = localConfigRe.ReplaceAllStringFunc(line, func(match string) string {
 		return t.xformLocalConfig(ctx, match)
 	})
 
@@ -102,12 +91,12 @@ func (t *Transformer) Transform(ctx context.Context, line string) string {
 
 	// Apply %%VAR:key%%, %%LOCAL:key%%, %%SERVICE:key%% substitutions
 	// Must happen before xformConfig to handle these patterns correctly
-	line = t.configVarRe.ReplaceAllStringFunc(line, func(match string) string {
+	line = configVarRe.ReplaceAllStringFunc(line, func(match string) string {
 		return t.xformConfigVariable(ctx, match)
 	})
 
 	// Apply %%config_variable%% substitutions (for complex directives)
-	line = t.plainVarRe.ReplaceAllStringFunc(line, func(match string) string {
+	line = plainVarRe.ReplaceAllStringFunc(line, func(match string) string {
 		return t.xformConfig(ctx, match)
 	})
 
@@ -132,9 +121,13 @@ func isWrappingDirective(directiveContent string) bool {
 		strings.HasPrefix(directiveContent, "explode ")
 }
 
+// knownDirectives lists every wrapping-directive keyword the transformer
+// understands. Declared at package scope so the backing array is allocated
+// once at init and every isKnownDirective call is a pure slice walk.
+var knownDirectives = []string{"binary", "truefalse", "range", "freq", "list", "contains", "exact"}
+
 // isKnownDirective checks if the directive name is a known directive type.
 func isKnownDirective(directiveName string) bool {
-	knownDirectives := []string{"binary", "truefalse", "range", "freq", "list", "contains", "exact"}
 	return slices.Contains(knownDirectives, directiveName)
 }
 
@@ -198,7 +191,7 @@ func (t *Transformer) processInlineDirectives(ctx context.Context, line string) 
 		return line
 	}
 
-	return t.inlineDirectRe.ReplaceAllStringFunc(line, func(match string) string {
+	return inlineDirectRe.ReplaceAllStringFunc(line, func(match string) string {
 		innerContent := strings.Trim(match, "%")
 		// Check if this looks like a directive (has a space and known directive name)
 		parts := strings.SplitN(innerContent, " ", 2)
@@ -244,7 +237,7 @@ func (t *Transformer) xformLocalConfig(ctx context.Context, match string) string
 		// It extracts hostnames from LDAP URLs
 		hostnames := []string{}
 
-		for _, match := range t.ldapURLRe.FindAllStringSubmatch(val, -1) {
+		for _, match := range ldapURLRe.FindAllStringSubmatch(val, -1) {
 			if len(match) > 1 {
 				hostnames = append(hostnames, match[1])
 			}
@@ -397,13 +390,13 @@ func (t *Transformer) resolveCommentState(
 // when the value is FALSE/empty (instead of when TRUE). This mirrors the
 // legacy Python configd behavior used in amavisd.conf.in templates.
 func (t *Transformer) handleCommentDirective(ctx context.Context, sr string) string {
-	return t.resolveCommentState(ctx, t.commentRe, "Invalid comment directive", sr, true)
+	return t.resolveCommentState(ctx, commentRe, "Invalid comment directive", sr, true)
 }
 
 // handleUncommentDirective processes uncomment directives.
 // Format: %%uncomment VAR:key%% or %%uncomment VAR:key,#%% or %%uncomment VAR:key,#,val1,val2%%
 func (t *Transformer) handleUncommentDirective(ctx context.Context, sr string) string {
-	return t.resolveCommentState(ctx, t.uncommentRe, "Invalid uncomment directive", sr, false)
+	return t.resolveCommentState(ctx, uncommentRe, "Invalid uncomment directive", sr, false)
 }
 
 // lookupBooleanValue is a helper to look up a boolean config value.
@@ -420,7 +413,7 @@ func (t *Transformer) lookupBooleanValue(ctx context.Context, cmd, key string) s
 // handleBinaryDirective processes binary directives.
 // Format: %%binary VAR:key%%
 func (t *Transformer) handleBinaryDirective(ctx context.Context, sr string) string {
-	matches := t.binaryRe.FindStringSubmatch(sr)
+	matches := binaryRe.FindStringSubmatch(sr)
 	if len(matches) < 3 {
 		logger.WarnContext(ctx, "Invalid binary directive", "directive", sr)
 		return "" // Invalid format
@@ -438,7 +431,7 @@ func (t *Transformer) handleBinaryDirective(ctx context.Context, sr string) stri
 // handleTrueFalseDirective processes truefalse directives.
 // Format: %%truefalse VAR:key%%
 func (t *Transformer) handleTrueFalseDirective(ctx context.Context, sr string) string {
-	matches := t.truefalseRe.FindStringSubmatch(sr)
+	matches := truefalseRe.FindStringSubmatch(sr)
 	if len(matches) < 3 {
 		logger.WarnContext(ctx, "Invalid truefalse directive", "directive", sr)
 		return "" // Invalid format
@@ -456,7 +449,7 @@ func (t *Transformer) handleTrueFalseDirective(ctx context.Context, sr string) s
 // handleRangeDirective processes range directives.
 // Format: %%range VAR:key lo hi%%
 func (t *Transformer) handleRangeDirective(ctx context.Context, sr string) string {
-	matches := t.rangeRe.FindStringSubmatch(sr)
+	matches := rangeRe.FindStringSubmatch(sr)
 	if len(matches) < 5 {
 		logger.WarnContext(ctx, "Invalid range directive", "directive", sr)
 		return "" // Invalid format
@@ -637,7 +630,7 @@ func (t *Transformer) handleExactDirective(ctx context.Context, sr string) strin
 // handleFreqDirective processes freq directives.
 // Format: %%freq VAR:key total%%
 func (t *Transformer) handleFreqDirective(ctx context.Context, sr string) string {
-	matches := t.freqRe.FindStringSubmatch(sr)
+	matches := freqRe.FindStringSubmatch(sr)
 	if len(matches) < 4 {
 		logger.WarnContext(ctx, "Invalid freq directive", "directive", sr)
 		return "" // Invalid format
@@ -657,8 +650,8 @@ func (t *Transformer) handleFreqDirective(ctx context.Context, sr string) string
 		return "" // Return empty string on error
 	}
 
-	valNumStr := t.freqDigitsRe.ReplaceAllString(lookupValStr, "")
-	per := t.freqNonDigitsRe.ReplaceAllString(lookupValStr, "")
+	valNumStr := freqDigitsRe.ReplaceAllString(lookupValStr, "")
+	per := freqNonDigitsRe.ReplaceAllString(lookupValStr, "")
 
 	valNum, _ := strconv.Atoi(valNumStr)
 	total, _ := strconv.Atoi(totalStr)
@@ -689,7 +682,7 @@ func (t *Transformer) handleFreqDirective(ctx context.Context, sr string) string
 // handleExplodeDirective processes explode directives.
 // Format: %%explode base_string VAR:key%%
 func (t *Transformer) handleExplodeDirective(ctx context.Context, sr string) string {
-	matches := t.explodeRe.FindStringSubmatch(sr)
+	matches := explodeRe.FindStringSubmatch(sr)
 	if len(matches) < 4 {
 		logger.WarnContext(ctx, "Invalid explode directive", "directive", sr)
 		return "" // Invalid format

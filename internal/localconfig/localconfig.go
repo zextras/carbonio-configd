@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/zextras/carbonio-configd/internal/intern"
 )
 
 // DefaultConfigPath is the standard location of localconfig.xml in Carbonio.
@@ -50,11 +52,11 @@ func LoadLocalConfigFromFile(path string) (map[string]string, error) {
 		return nil, fmt.Errorf("failed to parse localconfig XML: %w", err)
 	}
 
-	// Convert to map
+	// Convert to map. Local-config keys are interned so every downstream map
+	// keyed on them shares the same backing storage across the process.
 	result := make(map[string]string, len(config.Keys))
 	for _, key := range config.Keys {
-		// Trim whitespace from value (matches zmlocalconfig behavior)
-		result[key.Name] = strings.TrimSpace(key.Value)
+		result[intern.Key(key.Name)] = strings.TrimSpace(key.Value)
 	}
 
 	return result, nil

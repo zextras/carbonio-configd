@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/zextras/carbonio-configd/internal/intern"
 	"github.com/zextras/carbonio-configd/internal/logger"
 )
 
@@ -251,7 +252,7 @@ func (sm *ServiceManager) IsRunning(ctx context.Context, service string) (bool, 
 // AddRestart queues a service for restart.
 func (sm *ServiceManager) AddRestart(ctx context.Context, service string) error {
 	ctx = logger.ContextWithComponentOnce(ctx, "services")
-	service = strings.ToLower(service)
+	service = intern.Service(strings.ToLower(service))
 	sm.RestartQueue[service] = true
 	logger.DebugContext(ctx, "Queued restart for service",
 		"service", service)

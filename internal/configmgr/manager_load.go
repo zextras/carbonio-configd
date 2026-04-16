@@ -18,6 +18,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/cache"
 	"github.com/zextras/carbonio-configd/internal/commands"
 	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/intern"
 	"github.com/zextras/carbonio-configd/internal/localconfig"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/tracing"
@@ -49,35 +50,31 @@ func runLoadAttempt(
 	var timingMu sync.Mutex
 
 	for _, lf := range loadFuncs {
-		wg.Add(1)
-
-		go func(name string, fn func(context.Context) error) {
-			defer wg.Done()
-
-			logger.DebugContext(ctx, "Starting config load", "thread", name)
+		wg.Go(func() {
+			logger.DebugContext(ctx, "Starting config load", "thread", lf.name)
 
 			threadStart := time.Now()
-			loadErr := fn(ctx)
+			loadErr := lf.fn(ctx)
 			threadDuration := time.Since(threadStart)
 
 			timingMu.Lock()
-			threadTimings[name] = threadDuration
+			threadTimings[lf.name] = threadDuration
 			timingMu.Unlock()
 
 			logger.DebugContext(ctx, "Timing: Config load duration",
-				"thread", name,
+				"thread", lf.name,
 				"duration_seconds", threadDuration.Seconds())
 
 			statusMu.Lock()
-			threadStatus[name] = loadErr == nil
+			threadStatus[lf.name] = loadErr == nil
 			statusMu.Unlock()
 
 			if loadErr != nil {
-				errChan <- fmt.Errorf("thread %s failed: %w", name, loadErr)
+				errChan <- fmt.Errorf("thread %s failed: %w", lf.name, loadErr)
 			}
 
-			logger.DebugContext(ctx, "Finished config load", "thread", name)
-		}(lf.name, lf.fn)
+			logger.DebugContext(ctx, "Finished config load", "thread", lf.name)
+		})
 	}
 
 	done := make(chan struct{})
@@ -519,11 +516,7 @@ func (cm *ConfigManager) LoadMiscConfig(ctx context.Context) error {
 
 	// Execute all commands in parallel
 	for _, cmdName := range miscCommands {
-		wg.Add(1)
-
-		go func(cmd string) {
-			defer wg.Done()
-
+		wg.Go(func() {
 			var (
 				output string
 				err    error
@@ -531,19 +524,19 @@ func (cm *ConfigManager) LoadMiscConfig(ctx context.Context) error {
 
 			// If cache is available, use it
 			if cm.Cache != nil {
-				cacheKey := fmt.Sprintf("ldap:misc:%s", cmd)
+				cacheKey := fmt.Sprintf("ldap:misc:%s", cmdName)
 
 				cachedData, cacheErr := cm.Cache.GetCachedConfig(ctx, cacheKey, func() (any, error) {
 					// Fetch function - only runs on cache miss
-					return cm.fetchMiscCommand(ctx, cmd)
+					return cm.fetchMiscCommand(ctx, cmdName)
 				})
 				if cacheErr != nil {
 					// Non-fatal error - log and report
 					logger.WarnContext(ctx, "Failed to load misc command",
-						"command", cmd,
+						"command", cmdName,
 						"error", cacheErr)
 
-					resultsChan <- cmdResult{cmdName: cmd, output: "", err: cacheErr}
+					resultsChan <- cmdResult{cmdName: cmdName, output: "", err: cacheErr}
 
 					return
 				}
@@ -553,25 +546,25 @@ func (cm *ConfigManager) LoadMiscConfig(ctx context.Context) error {
 
 				output, ok = cachedData.(string)
 				if !ok || output == "" {
-					resultsChan <- cmdResult{cmdName: cmd, output: "", err: nil}
+					resultsChan <- cmdResult{cmdName: cmdName, output: "", err: nil}
 					return
 				}
 			} else {
 				// No cache - fetch directly (test environment)
-				output, err = cm.fetchMiscCommand(ctx, cmd)
+				output, err = cm.fetchMiscCommand(ctx, cmdName)
 				if err != nil || output == "" {
-					resultsChan <- cmdResult{cmdName: cmd, output: "", err: err}
+					resultsChan <- cmdResult{cmdName: cmdName, output: "", err: err}
 					return
 				}
 			}
 
 			// Store the output using the command name as key
-			cmdObj := commands.Commands[cmd]
+			cmdObj := commands.Commands[cmdName]
 			if cmdObj == nil {
 				logger.WarnContext(ctx, "Command object not available for storing result",
-					"command", cmd)
+					"command", cmdName)
 
-				resultsChan <- cmdResult{cmdName: cmd, output: "", err: fmt.Errorf("command not available")}
+				resultsChan <- cmdResult{cmdName: cmdName, output: "", err: fmt.Errorf("command not available")}
 
 				return
 			}
@@ -586,8 +579,8 @@ func (cm *ConfigManager) LoadMiscConfig(ctx context.Context) error {
 				"command_name", cmdObj.Name,
 				"output", output)
 
-			resultsChan <- cmdResult{cmdName: cmd, output: output, err: nil}
-		}(cmdName)
+			resultsChan <- cmdResult{cmdName: cmdName, output: output, err: nil}
+		})
 	}
 
 	// Wait for all goroutines to complete
@@ -960,7 +953,7 @@ func parseLDAPCommandOutput(output string) map[string]string {
 		if strings.Contains(line, "::") {
 			parts := strings.SplitN(line, "::", 2)
 			if len(parts) == 2 {
-				key := strings.TrimSpace(parts[0])
+				key := intern.Attr(strings.TrimSpace(parts[0]))
 				value := strings.TrimSpace(parts[1])
 				// Store base64-encoded value as-is (will be decoded by executor)
 				configData[key] = value
@@ -975,7 +968,7 @@ func parseLDAPCommandOutput(output string) map[string]string {
 		// SplitN with limit 2 preserves additional colons in the value
 		parts := strings.SplitN(line, ":", 2)
 		if len(parts) == 2 {
-			key := strings.TrimSpace(parts[0])
+			key := intern.Attr(strings.TrimSpace(parts[0]))
 			value := strings.TrimSpace(parts[1])
 			// Handle multi-value attributes by concatenating with newlines
 			if existingValue, exists := configData[key]; exists {

@@ -16,6 +16,7 @@ import (
 	"github.com/go-ldap/ldap/v3"
 
 	errs "github.com/zextras/carbonio-configd/internal/errors"
+	"github.com/zextras/carbonio-configd/internal/intern"
 )
 
 // Client represents a connection pool to the LDAP server.
@@ -585,15 +586,19 @@ func (c *Client) ModifyAttribute(dn, attribute, value string) error {
 
 // entryToMap converts an LDAP entry to a map of attribute name to value.
 // For multi-valued attributes, values are joined with newlines to match zmprov output.
+// Attribute names are interned so that every downstream map keyed by them
+// shares the same backing storage across the process.
 func entryToMap(entry *ldap.Entry) map[string]string {
-	result := make(map[string]string)
+	result := make(map[string]string, len(entry.Attributes))
 
 	for _, attr := range entry.Attributes {
+		name := intern.Attr(attr.Name)
+
 		if len(attr.Values) == 1 {
-			result[attr.Name] = attr.Values[0]
+			result[name] = attr.Values[0]
 		} else if len(attr.Values) > 1 {
 			// Multi-valued attributes: join with newlines
-			result[attr.Name] = strings.Join(attr.Values, "\n")
+			result[name] = strings.Join(attr.Values, "\n")
 		}
 	}
 
