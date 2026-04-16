@@ -187,6 +187,10 @@ type Generator struct {
 
 	// Hostname is the hostname to generate configuration for
 	Hostname string
+
+	// cachedLookupIP caches the resolved IP for resolveLookupHandlers.
+	// Avoids repeated /etc/hosts reads within a single proxygen cycle.
+	cachedLookupIP string
 }
 
 // UpstreamServer represents an upstream server in an nginx upstream block

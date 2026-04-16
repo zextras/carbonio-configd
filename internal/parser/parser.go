@@ -26,7 +26,7 @@ const (
 // parser implements the Parser interface for parsing zmconfigd.cf files.
 type parser struct {
 	lexer   Lexer
-	current *Token
+	current Token
 	errors  []error
 }
 
@@ -690,7 +690,7 @@ func (p *parser) advance() {
 	if err != nil {
 		p.errors = append(p.errors, err)
 		// Create an error token
-		p.current = &Token{Type: TokenError, Literal: err.Error()}
+		p.current = Token{Type: TokenError, Literal: err.Error()}
 
 		return
 	}

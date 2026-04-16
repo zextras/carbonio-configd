@@ -40,6 +40,7 @@ type Transformer struct {
 	freqNonDigitsRe *regexp.Regexp
 	explodeRe       *regexp.Regexp
 	ldapURLRe       *regexp.Regexp
+	inlineDirectRe  *regexp.Regexp // compiled once, used in processInlineDirectives
 }
 
 // NewTransformer creates a new Transformer instance.
@@ -62,12 +63,13 @@ func NewTransformer(cl lookup.ConfigLookup, st *state.State) *Transformer {
 		freqNonDigitsRe: regexp.MustCompile(`\d`),
 		explodeRe:       regexp.MustCompile(`explode\s+(.*)\s+([^:]+):(\w+)`),
 		ldapURLRe:       regexp.MustCompile(`ldap.?://(\S+):\d+`),
+		inlineDirectRe:  regexp.MustCompile(`%%([^%]+)%%`),
 	}
 }
 
 // Transform applies variable substitutions and conditional processing to a line.
 func (t *Transformer) Transform(ctx context.Context, line string) string {
-	ctx = logger.ContextWithComponent(ctx, "transformer")
+	ctx = logger.ContextWithComponentOnce(ctx, "transformer")
 	// Check for early exit if no special characters are present
 	if !strings.Contains(line, "@") && !strings.Contains(line, "%") {
 		return line // Return as-is without adding newline
@@ -196,10 +198,7 @@ func (t *Transformer) processInlineDirectives(ctx context.Context, line string) 
 		return line
 	}
 
-	// Use a regex to find all %%...%% patterns that might be directives
-	directiveRe := regexp.MustCompile(`%%([^%]+)%%`)
-
-	return directiveRe.ReplaceAllStringFunc(line, func(match string) string {
+	return t.inlineDirectRe.ReplaceAllStringFunc(line, func(match string) string {
 		innerContent := strings.Trim(match, "%")
 		// Check if this looks like a directive (has a space and known directive name)
 		parts := strings.SplitN(innerContent, " ", 2)

@@ -221,17 +221,20 @@ func (g *Generator) resolveLookupHandlers(ctx context.Context) (any, error) {
 		lookupHost = "127.0.0.1"
 	}
 
-	// Resolve hostname to IP
-	resolver := net.DefaultResolver
-
-	ips, err := resolver.LookupIPAddr(ctx, lookupHost)
-	if err == nil && len(ips) > 0 {
-		// Use the first IP address found
-		lookupHost = ips[0].String()
+	// Resolve hostname to IP, caching within a single proxygen cycle
+	// to avoid repeated /etc/hosts reads from the pure-Go resolver.
+	if g.cachedLookupIP != "" {
+		lookupHost = g.cachedLookupIP
 	} else {
-		logger.WarnContext(ctx, "Failed to resolve lookup host to IP, using hostname",
-			"hostname", lookupHost,
-			"error", err)
+		ips, err := net.DefaultResolver.LookupIPAddr(ctx, lookupHost)
+		if err == nil && len(ips) > 0 {
+			lookupHost = ips[0].String()
+		} else {
+			logger.WarnContext(ctx, "Failed to resolve lookup host to IP, using hostname",
+				"hostname", lookupHost,
+				"error", err)
+		}
+		g.cachedLookupIP = lookupHost
 	}
 
 	// Construct the lookup handler URL

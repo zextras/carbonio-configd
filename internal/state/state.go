@@ -173,7 +173,7 @@ func (s *State) SnapshotCompileActions() CompileActionsSnapshot {
 // AddRequestedConfigs marks the given sections as needing a rewrite on the
 // next compile cycle. Safe to call concurrently.
 func (s *State) AddRequestedConfigs(ctx context.Context, sections []string) {
-	ctx = logger.ContextWithComponent(ctx, "state")
+	ctx = logger.ContextWithComponentOnce(ctx, "state")
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -229,7 +229,7 @@ func (s *State) SetConfigs(lc *config.LocalConfig,
 // If entry is non-nil, it is added to the current rewrites map.
 // Returns the current rewrite entry for the service.
 func (s *State) CurRewrites(ctx context.Context, service string, entry *config.RewriteEntry) config.RewriteEntry {
-	ctx = logger.ContextWithComponent(ctx, "state")
+	ctx = logger.ContextWithComponentOnce(ctx, "state")
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -272,7 +272,7 @@ func (s *State) DelRestart(service string) {
 // If val is non-empty, it is added to the current LDAP changes map.
 // Returns the current value for the given key.
 func (s *State) CurLdap(ctx context.Context, key string, val string) string {
-	ctx = logger.ContextWithComponent(ctx, "state")
+	ctx = logger.ContextWithComponentOnce(ctx, "state")
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -321,7 +321,7 @@ func (s *State) addOrRetrieveConfig(
 // If val is non-empty, it is added to the current postconf map with newlines converted to spaces.
 // Returns the current value for the given key.
 func (s *State) CurPostconf(ctx context.Context, key string, val string) string {
-	ctx = logger.ContextWithComponent(ctx, "state")
+	ctx = logger.ContextWithComponentOnce(ctx, "state")
 	return s.addOrRetrieveConfig(ctx, s.CurrentActions.Postconf, key, val, "postconf")
 }
 
@@ -337,7 +337,7 @@ func (s *State) ClearPostconf() {
 // If val is non-empty, it is added to the current postconfd map with newlines converted to spaces.
 // Returns the current value for the given key.
 func (s *State) CurPostconfd(ctx context.Context, key string, val string) string {
-	ctx = logger.ContextWithComponent(ctx, "state")
+	ctx = logger.ContextWithComponentOnce(ctx, "state")
 	return s.addOrRetrieveConfig(ctx, s.CurrentActions.Postconfd, key, val, "postconfd")
 }
 
@@ -420,16 +420,18 @@ func (s *State) ChangedKeysForSection(section string, key string) []string {
 // If val is non-empty, it is stored as the last value for the given section/type/key.
 // Returns the last stored value or empty string if not found.
 func (s *State) LastVal(ctx context.Context, section, cfgType, key string, val string) string {
-	ctx = logger.ContextWithComponent(ctx, "state")
+	ctx = logger.ContextWithComponentOnce(ctx, "state")
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	logger.DebugContext(ctx, "Entering lastVal",
-		"section", section,
-		"config_type", cfgType,
-		"key", key,
-		"value", val)
+	if logger.IsDebug(ctx) {
+		logger.DebugContext(ctx, "Entering lastVal",
+			"section", section,
+			"config_type", cfgType,
+			"key", key,
+			"value", val)
+	}
 
 	if _, ok := s.LastVals[section]; !ok {
 		s.LastVals[section] = make(map[string]map[string]string)
@@ -444,11 +446,13 @@ func (s *State) LastVal(ctx context.Context, section, cfgType, key string, val s
 	}
 
 	if v, ok := s.LastVals[section][cfgType][key]; ok {
-		logger.DebugContext(ctx, "Returning lastVal",
-			"section", section,
-			"config_type", cfgType,
-			"key", key,
-			"value", v)
+		if logger.IsDebug(ctx) {
+			logger.DebugContext(ctx, "Returning lastVal",
+				"section", section,
+				"config_type", cfgType,
+				"key", key,
+				"value", v)
+		}
 
 		return v
 	}

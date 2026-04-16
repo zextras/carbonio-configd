@@ -24,11 +24,11 @@ type Parser interface {
 
 // Lexer interface defines methods for tokenizing input.
 type Lexer interface {
-	// NextToken returns the next token from the input
-	NextToken() (*Token, error)
+	// NextToken returns the next token from the input by value, avoiding a heap allocation.
+	NextToken() (Token, error)
 
-	// Peek returns the next token without consuming it
-	Peek() (*Token, error)
+	// Peek returns the next token without consuming it by value.
+	Peek() (Token, error)
 
 	// HasMore returns true if there are more tokens
 	HasMore() bool

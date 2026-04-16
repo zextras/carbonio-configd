@@ -17,10 +17,16 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/zextras/carbonio-configd/internal/ldap"
 	"github.com/zextras/carbonio-configd/internal/logger"
 )
+
+// bufPool reuses bytes.Buffer allocations across template processing calls.
+var bufPool = sync.Pool{
+	New: func() any { return bytes.NewBuffer(make([]byte, 0, 8192)) },
+}
 
 
 // SSL variable key constants used in template processing.
@@ -110,9 +116,11 @@ func (tp *TemplateProcessor) LoadTemplate(ctx context.Context, name string) (*Te
 func (tp *TemplateProcessor) ProcessTemplate(ctx context.Context, tmpl *Template) (string, error) {
 	ctx = logger.ContextWithComponent(ctx, "proxy")
 
-	var output bytes.Buffer
+	output := bufPool.Get().(*bytes.Buffer)
+	output.Reset()
+	defer bufPool.Put(output)
 
-	writer := bufio.NewWriter(&output)
+	writer := bufio.NewWriter(output)
 
 	// Check if first line contains explode directive
 	//nolint:nestif // Explode directive requires nested processing of template iterations

@@ -31,7 +31,6 @@ const (
 
 // Standard field names for structured logging
 const (
-	unknownComponent   = "unknown"
 	FieldComponent     = "component"
 	FieldOperation     = "operation"
 	FieldService       = "service"
@@ -213,6 +212,17 @@ func ContextWithComponent(ctx context.Context, component string) context.Context
 	return ContextWithLogger(ctx, logger)
 }
 
+// ContextWithComponentOnce is like ContextWithComponent but skips the allocation
+// when the context already carries exactly the same component string.
+// Use in methods that are called repeatedly in tight loops (e.g. state accessors).
+func ContextWithComponentOnce(ctx context.Context, component string) context.Context {
+	if existing, ok := ctx.Value(componentContextKey).(string); ok && existing == component {
+		return ctx
+	}
+
+	return ContextWithComponent(ctx, component)
+}
+
 // ContextWithOperation returns a new context with an operation name
 func ContextWithOperation(ctx context.Context, operation string) context.Context {
 	logger := LoggerFromContext(ctx).With(FieldOperation, operation)
@@ -302,4 +312,10 @@ func ErrorContext(ctx context.Context, msg string, args ...any) {
 func FatalContext(ctx context.Context, msg string, args ...any) {
 	logWithCaller(ctx, slog.LevelError, msg, args...)
 	os.Exit(1)
+}
+
+// IsDebug returns true when the logger in ctx has debug level enabled.
+// Use this to guard expensive debug log argument construction in hot paths.
+func IsDebug(ctx context.Context) bool {
+	return LoggerFromContext(ctx).Enabled(ctx, slog.LevelDebug)
 }

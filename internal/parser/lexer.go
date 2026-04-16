@@ -18,13 +18,14 @@ import (
 
 // lexer implements the Lexer interface for tokenizing zmconfigd.cf files.
 type lexer struct {
-	ctx     context.Context
-	reader  *bufio.Reader
-	line    int
-	column  int
-	current rune
-	eof     bool
-	peeked  *Token
+	ctx        context.Context
+	reader     *bufio.Reader
+	line       int
+	column     int
+	current    rune
+	eof        bool
+	peeked     Token // stored peeked token (valid only when hasPeeked is true)
+	hasPeeked  bool  // true when peeked holds a valid lookahead token
 }
 
 // NewLexer creates a new lexer from an io.Reader.
@@ -141,14 +142,14 @@ func (l *lexer) readString() string {
 	return sb.String()
 }
 
-// NextToken returns the next token from the input.
+// NextToken returns the next token from the input by value (no heap allocation).
 //
 //nolint:gocyclo,cyclop // Lexer token recognition requires checking many character patterns
-func (l *lexer) NextToken() (*Token, error) {
+func (l *lexer) NextToken() (Token, error) {
 	// Return peeked token if available
-	if l.peeked != nil {
+	if l.hasPeeked {
 		tok := l.peeked
-		l.peeked = nil
+		l.hasPeeked = false
 
 		return tok, nil
 	}
@@ -161,13 +162,13 @@ func (l *lexer) NextToken() (*Token, error) {
 
 	// EOF
 	if l.eof {
-		return &Token{Type: TokenEOF, Line: line, Column: col}, nil
+		return Token{Type: TokenEOF, Line: line, Column: col}, nil
 	}
 
 	// Newline
 	if l.current == '\n' {
 		l.readChar()
-		return &Token{Type: TokenNewline, Literal: "\n", Line: line, Column: col}, nil
+		return Token{Type: TokenNewline, Literal: "\n", Line: line, Column: col}, nil
 	}
 
 	// Comment
@@ -194,7 +195,7 @@ func (l *lexer) NextToken() (*Token, error) {
 		}
 
 		// Check for keywords
-		tok := &Token{Line: line, Column: col, Literal: ident}
+		tok := Token{Line: line, Column: col, Literal: ident}
 		switch strings.ToUpper(ident) {
 		case "SECTION":
 			tok.Type = TokenSection
@@ -241,7 +242,7 @@ func (l *lexer) NextToken() (*Token, error) {
 	// Path or string literal (/, ., or digit at start)
 	if l.current == '/' || l.current == '"' || unicode.IsDigit(l.current) {
 		str := l.readString()
-		return &Token{Type: TokenString, Literal: str, Line: line, Column: col}, nil
+		return Token{Type: TokenString, Literal: str, Line: line, Column: col}, nil
 	}
 
 	// Dot - could be start of relative path like ./file or ../file or just a path component
@@ -250,19 +251,19 @@ func (l *lexer) NextToken() (*Token, error) {
 		next := l.peekChar()
 		if next == '/' || next == '.' {
 			str := l.readString()
-			return &Token{Type: TokenString, Literal: str, Line: line, Column: col}, nil
+			return Token{Type: TokenString, Literal: str, Line: line, Column: col}, nil
 		}
 		// Otherwise treat as part of filename (will be read as string)
 		str := l.readString()
 
-		return &Token{Type: TokenString, Literal: str, Line: line, Column: col}, nil
+		return Token{Type: TokenString, Literal: str, Line: line, Column: col}, nil
 	}
 
 	// Unknown character
 	char := l.current
 	l.readChar()
 
-	return &Token{
+	return Token{
 		Type:    TokenError,
 		Literal: fmt.Sprintf("unexpected character: %q", char),
 		Line:    line,
@@ -270,15 +271,16 @@ func (l *lexer) NextToken() (*Token, error) {
 	}, fmt.Errorf("unexpected character: %q at line %d, column %d", char, line, col)
 }
 
-// Peek returns the next token without consuming it.
-func (l *lexer) Peek() (*Token, error) {
-	if l.peeked == nil {
+// Peek returns the next token without consuming it (by value).
+func (l *lexer) Peek() (Token, error) {
+	if !l.hasPeeked {
 		tok, err := l.NextToken()
 		if err != nil {
-			return nil, err
+			return Token{}, err
 		}
 
 		l.peeked = tok
+		l.hasPeeked = true
 	}
 
 	return l.peeked, nil
@@ -286,7 +288,7 @@ func (l *lexer) Peek() (*Token, error) {
 
 // HasMore returns true if there are more tokens.
 func (l *lexer) HasMore() bool {
-	if l.peeked != nil {
+	if l.hasPeeked {
 		return l.peeked.Type != TokenEOF
 	}
 

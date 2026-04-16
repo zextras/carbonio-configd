@@ -293,22 +293,26 @@ func (cm *ConfigManager) doRewrites(ctx context.Context) {
 			defer wg.Done()
 			defer func() { <-semaphore }() // Release semaphore slot
 
-			fileStartTime := time.Now()
-
-			logger.DebugContext(ctx, "Rewriting file",
-				"file_number", fileNum,
-				"total_files", totalFiles,
-				"source", fp,
-				"target", re.Value)
+			var fileStartTime time.Time
+			if logger.IsDebug(ctx) {
+				fileStartTime = time.Now()
+				logger.DebugContext(ctx, "Rewriting file",
+					"file_number", fileNum,
+					"total_files", totalFiles,
+					"source", fp,
+					"target", re.Value)
+			}
 
 			cm.processRewrite(ctx, fp, re)
 
-			elapsed := time.Since(fileStartTime)
-			logger.DebugContext(ctx, "Completed file rewrite",
-				"file_number", fileNum,
-				"total_files", totalFiles,
-				"target", re.Value,
-				"duration_seconds", elapsed.Seconds())
+			if logger.IsDebug(ctx) {
+				elapsed := time.Since(fileStartTime)
+				logger.DebugContext(ctx, "Completed file rewrite",
+					"file_number", fileNum,
+					"total_files", totalFiles,
+					"target", re.Value,
+					"duration_seconds", elapsed.Seconds())
+			}
 		}(filePath, rewriteEntry, currentFileNum)
 	}
 
