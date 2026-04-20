@@ -73,11 +73,11 @@ func advancedInstalled() bool {
 	return false
 }
 
-// advancedRunning calls `carbonio core getVersion` and returns true when the
+// advancedRunning calls `carbonio core getAllServicesStatus` and returns true when the
 // server responds without an "Unable to communicate" error.
 func advancedRunning(ctx context.Context) bool {
 	//nolint:gosec // fixed internal path
-	out, err := exec.CommandContext(ctx, carbonioCLI, "core", "getVersion").CombinedOutput()
+	out, err := exec.CommandContext(ctx, carbonioCLI, "core", "getAllServicesStatus").CombinedOutput()
 	if err != nil {
 		return false
 	}
