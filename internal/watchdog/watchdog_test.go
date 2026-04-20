@@ -609,12 +609,14 @@ func TestWatchdog_RestartFailure(t *testing.T) {
 	wd.Start(context.Background())
 	defer wd.Stop(context.Background())
 
-	// Wait for watchdog to attempt restart
-	time.Sleep(70 * time.Millisecond)
-
-	// Verify service is removed from tracking even on failed restart
-	if wd.IsServiceTracked("opendkim") {
-		t.Error("Service should be removed from tracking after failed restart attempt")
+	// Poll until watchdog removes service from tracking (or timeout)
+	deadline := time.After(2 * time.Second)
+	for wd.IsServiceTracked("opendkim") {
+		select {
+		case <-deadline:
+			t.Fatal("Timed out waiting for service to be removed from tracking after failed restart attempt")
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 
 	// Verify restart was attempted (AddRestart should have been called)
