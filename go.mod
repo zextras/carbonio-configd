@@ -4,10 +4,10 @@ go 1.26
 
 require (
 	github.com/alecthomas/kong v1.15.0
-	github.com/docker/docker v28.5.2+incompatible
 	github.com/docker/go-units v0.5.0
 	github.com/go-ldap/ldap/v3 v3.4.13
 	github.com/google/uuid v1.6.0
+	github.com/moby/moby/api v1.54.1
 	github.com/testcontainers/testcontainers-go v0.42.0
 	github.com/willabides/kongplete v0.4.0
 	golang.org/x/crypto v0.50.0
@@ -53,7 +53,6 @@ require (
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/moby/docker-image-spec v1.3.1 // indirect
 	github.com/moby/go-archive v0.2.0 // indirect
-	github.com/moby/moby/api v1.54.1 // indirect
 	github.com/moby/moby/client v0.4.0 // indirect
 	github.com/moby/patternmatcher v0.6.1 // indirect
 	github.com/moby/sys/sequential v0.6.0 // indirect
