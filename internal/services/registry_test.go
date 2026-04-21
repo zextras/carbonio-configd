@@ -104,15 +104,18 @@ func TestRegistryDependencies_Antivirus(t *testing.T) {
 		t.Fatal("antivirus not found")
 	}
 
-	hasClamd := false
+	hasFreshclam := false
 	for _, dep := range def.Dependencies {
+		if dep == "freshclam" {
+			hasFreshclam = true
+		}
 		if dep == "clamd" {
-			hasClamd = true
+			t.Error("antivirus must not depend on clamd; carbonio-antivirus.service IS clamd")
 		}
 	}
 
-	if !hasClamd {
-		t.Error("expected antivirus to depend on clamd")
+	if !hasFreshclam {
+		t.Error("expected antivirus to depend on freshclam")
 	}
 }
 
