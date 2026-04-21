@@ -14,20 +14,29 @@ import (
 	"github.com/zextras/carbonio-configd/internal/proxy"
 )
 
-// DoRestarts executes service restarts based on the current state.
 // DoRestarts executes service restarts using the ServiceManager with dependency cascading.
+//
+// Each successfully-queued restart is removed from State.CurrentActions.Restarts
+// as it is handed off to the ServiceManager. Without this, the map persists
+// across cycles, DoRestarts re-queues the same services every wake-up, and
+// every ExecStartPre REWRITE triggers another round of restarts — a 5-second
+// feedback loop visible as alternating mta/antivirus restarts in journalctl.
+// Entries for which AddRestart returned an error are intentionally retained
+// so the next cycle retries them.
 func (cm *ConfigManager) DoRestarts(ctx context.Context) {
 	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
 	logger.DebugContext(ctx, "Executing service restarts")
 
-	// Transfer State.CurrentActions.Restarts to ServiceManager.RestartQueue
-	// This bridges the gap between the state tracking and service control layers
 	for service := range cm.State.CurrentActions.Restarts {
 		if err := cm.ServiceMgr.AddRestart(ctx, service); err != nil {
 			logger.WarnContext(ctx, "Failed to queue restart",
 				"service", service,
 				"error", err)
+
+			continue
 		}
+
+		cm.State.DelRestart(service)
 	}
 
 	// Create a lookup function that wraps LookUpConfig for SERVICE_* keys

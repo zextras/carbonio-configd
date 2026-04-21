@@ -1332,7 +1332,6 @@ func TestCompileSectionActions(t *testing.T) {
 
 		cm.compileSectionActions(ctx, "mta", section, cm.State.RequestedConfig, cm.State.ForcedConfig, cm.State.FirstRun, cm.State.ServerConfig.ServiceConfig)
 
-		// Check that no restarts were added
 		if len(cm.State.CurrentActions.Restarts) != 0 {
 			t.Errorf("Expected 0 restarts with requested config, got %d", len(cm.State.CurrentActions.Restarts))
 		}

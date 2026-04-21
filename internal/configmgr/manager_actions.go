@@ -140,8 +140,22 @@ func (cm *ConfigManager) compileSectionActions(
 	logger.DebugContext(ctx, "Section changed, compiling conditionals", "section", sn)
 	cm.processConditionals(ctx, section.Conditionals)
 
-	// Restarts are not triggered on forced or first run (mirroring Jython)
-	if firstRun || len(forcedConfig) > 0 || len(requestedConfigs) > 0 {
+	// Restarts are not triggered on forced or first run (mirroring Jython).
+	// For REWRITE-driven cycles the skip is section-scoped, not cycle-wide:
+	// every Carbonio service unit runs `echo REWRITE <svc> | nc localhost
+	// 7171` as its ExecStartPre, so restarting the same service we were just
+	// asked to rewrite for would start an infinite 5-second feedback loop
+	// (REWRITE → restart → ExecStartPre → REWRITE …). But collateral
+	// sections whose variables changed — e.g. the antivirus section
+	// declaring `VAR zimbraMtaMaxMessageSize` when a `REWRITE mta` arrives
+	// after an LDAP update — must still get their restart compiled so the
+	// running service picks up the new config. A cycle-wide guard would
+	// silently drop those restarts forever.
+	if firstRun || len(forcedConfig) > 0 {
+		return
+	}
+
+	if _, requested := requestedConfigs[sn]; requested {
 		return
 	}
 
