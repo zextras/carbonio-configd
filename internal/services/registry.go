@@ -207,17 +207,6 @@ var Registry = map[string]*ServiceDef{
 		PidFile:     pidDir + "/freshclam.pid",
 		ProcessName: "freshclam",
 	},
-	"clamd": {
-		Name:         "clamd",
-		DisplayName:  "clamd",
-		SystemdUnits: []string{"carbonio-antivirus.service"},
-		BinaryPath:   commonPath + "/sbin/clamd",
-		BinaryArgs:   []string{"--config-file=" + confPath + "/clamd.conf"},
-		Detached:     true,
-		UseSDNotify:  true,
-		PidFile:      pidDir + "/clamd.pid",
-		ProcessName:  "clamd",
-	},
 	"saslauthd": {
 		Name:          "saslauthd",
 		DisplayName:   "saslauthd",
@@ -251,7 +240,7 @@ var Registry = map[string]*ServiceDef{
 		DisplayName:  "antivirus",
 		SystemdUnits: []string{"carbonio-antivirus.service"},
 		ProcessName:  "clamd",
-		Dependencies: []string{"clamd", "freshclam"},
+		Dependencies: []string{"freshclam"},
 	},
 	"antispam": {
 		Name:         "antispam",

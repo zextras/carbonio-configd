@@ -109,7 +109,6 @@ func getDefaultStartOrder() map[string]int {
 		"amavis":           75,
 		"antispam":         80,
 		"antivirus":        90,
-		"clamd":            91,
 		"freshclam":        92,
 		"opendkim":         100,
 		"cbpolicyd":        120,
