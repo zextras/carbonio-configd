@@ -236,6 +236,8 @@ func TestCliWarn(t *testing.T) {
 }
 
 func TestCliHeader(t *testing.T) {
+	cliHeaderPrinted = false
+
 	old := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
@@ -356,4 +358,11 @@ func TestSetupProfilingAndTracing_NoFlags(t *testing.T) {
 	if tc != nil {
 		t.Error("expected nil TracingConfig when no tracing flags set")
 	}
+}
+
+func TestInitCLILogging_WithEnvVar(t *testing.T) {
+	os.Setenv("CONFIGD_LOG_LEVEL", "debug")
+	defer os.Unsetenv("CONFIGD_LOG_LEVEL")
+
+	initCLILogging()
 }

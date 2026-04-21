@@ -46,7 +46,6 @@ func statsCustomStart(ctx context.Context, def *ServiceDef) error {
 		"zmstat-allprocs",
 	}
 
-	// Conditional collectors
 	if lc["zmstat_mysql_enabled"] == zmstatEnabledTrue {
 		collectors = append(collectors, "zmstat-mysql")
 	}
@@ -61,8 +60,6 @@ func statsCustomStart(ctx context.Context, def *ServiceDef) error {
 
 	var started int
 
-	logDir := logPath
-
 	for _, collectorCmd := range collectors {
 		parts := strings.Fields(collectorCmd)
 		binary := parts[0]
@@ -76,7 +73,7 @@ func statsCustomStart(ctx context.Context, def *ServiceDef) error {
 			continue
 		}
 
-		logFile := filepath.Join(logDir, binary+".out")
+		logFile := filepath.Join(logPath, binary+".out")
 
 		logFd, openErr := openLogFile(logFile)
 		if openErr != nil {
@@ -146,8 +143,11 @@ func statsCustomStop(ctx context.Context, _ *ServiceDef) error {
 	return nil
 }
 
-// killStatsPidFile reads the PID from pidPath, kills the process, and removes the file.
-// Returns true when the process was successfully killed.
+// killStatsPidFile reads the PID from pidPath, kills its process group (so
+// grandchildren like iostat/vmstat spawned by the zmstat-* perl workers die
+// with the parent), escalates to SIGKILL after a grace period, and escalates
+// via sudo when the PID is root-owned (sudo-spawned zmstat-fd). Removes the
+// pid file regardless. Returns true when the leader is confirmed gone.
 func killStatsPidFile(ctx context.Context, pidPath string) bool {
 	data, readErr := os.ReadFile(pidPath) //nolint:gosec // path is constructed from internal registry
 	if readErr != nil {
@@ -164,16 +164,7 @@ func killStatsPidFile(ctx context.Context, pidPath string) bool {
 		return false
 	}
 
-	killed := false
-
-	proc, findErr := os.FindProcess(pid)
-	if findErr == nil {
-		if killErr := proc.Kill(); killErr != nil {
-			logger.WarnContext(ctx, "Failed to kill stats collector", "pid", pid, "path", pidPath, "error", killErr)
-		} else {
-			killed = true
-		}
-	}
+	killed := killByPIDWithGroupAndSudo(ctx, pid)
 
 	_ = os.Remove(pidPath)
 

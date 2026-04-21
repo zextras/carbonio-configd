@@ -6,55 +6,44 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
-	"github.com/zextras/carbonio-configd/internal/systemd"
 )
+
+// killProcessTimeout is the grace period between SIGTERM and SIGKILL when
+// reaping a service's processes. Long enough for well-behaved daemons to
+// flush state (mailboxd's JVM shutdown hook needs ~30 s); short enough that
+// zmcontrol stop still completes in a reasonable time. Overridable for tests.
+var killProcessTimeout = 30 * time.Second
 
 // procFSRoot is the path prefix for Linux process entries in /proc.
 // Declared as var so tests can override it with a temporary directory.
 var procFSRoot = "/proc/"
 
-// startService starts a service. Behavior depends on host init system:
+// startService starts a service. Bifurcated on IsSystemdMode():
 //
-//   - systemd is PID 1: use systemctl exclusively. In strict systemd mode
-//     (IsSystemdMode), failures are returned as-is. In legacy mode, fall back
-//     to direct binary if systemctl fails and a BinaryPath is configured.
-//   - systemd is NOT PID 1: skip systemctl entirely (would surface noisy
-//     "System has not been booted" stderr); go straight to direct binary,
-//     or return a clean "no direct launcher" error if BinaryPath is empty.
+//   - strict systemd: every unit started via systemctl. Errors are returned.
+//     No fallback — a failed systemctl start is a real error in this mode.
+//   - legacy: direct binary spawn (CustomStart hook, then BinaryPath).
+//     systemctl is never invoked.
 func startService(ctx context.Context, name string, def *ServiceDef) error {
-	if !systemd.IsBooted() {
+	if !IsSystemdMode() {
 		return startWithoutSystemd(ctx, name, def)
 	}
 
-	if IsSystemdMode() {
-		for _, unit := range def.SystemdUnits {
-			logger.InfoContext(ctx, "Starting service via systemctl", "service", name, "unit", unit)
-
-			if err := Systemctl(ctx, "start", unit); err != nil {
-				return fmt.Errorf("failed to start %s (%s): %w", name, unit, err)
-			}
-		}
-
-		return nil
-	}
-
-	// Legacy mode: try systemctl first, fall back to direct launcher.
 	for _, unit := range def.SystemdUnits {
-		logger.InfoContext(ctx, "Starting service", "service", name, "unit", unit)
+		logger.InfoContext(ctx, "Starting service via systemctl", "service", name, "unit", unit)
 
 		if err := Systemctl(ctx, "start", unit); err != nil {
-			logger.WarnContext(ctx, "systemctl failed, trying direct launcher",
-				"service", name, "error", err)
-
-			return startWithoutSystemd(ctx, name, def)
+			return fmt.Errorf("failed to start %s (%s): %w", name, unit, err)
 		}
 	}
 
@@ -66,7 +55,7 @@ func startService(ctx context.Context, name string, def *ServiceDef) error {
 // Precedence: CustomStart hook (fully custom launch) > BinaryPath direct spawn.
 func startWithoutSystemd(ctx context.Context, name string, def *ServiceDef) error {
 	if def.CustomStart != nil {
-		logger.InfoContext(ctx, "Starting service via custom launcher (systemd not booted)",
+		logger.InfoContext(ctx, "Starting service via custom launcher (legacy mode)",
 			"service", name)
 
 		return def.CustomStart(ctx, def)
@@ -81,49 +70,34 @@ func startWithoutSystemd(ctx context.Context, name string, def *ServiceDef) erro
 		}
 
 		return fmt.Errorf(
-			"cannot start %s without systemd: no direct launcher registered "+
+			"cannot start %s in legacy mode: no direct launcher registered "+
 				"(set ServiceDef.BinaryPath or ServiceDef.CustomStart, "+
-				"or run on a systemd-booted host)", name)
+				"or enable a Carbonio systemd target)", name)
 	}
 
-	logger.InfoContext(ctx, "Starting service directly (systemd not booted)",
+	logger.InfoContext(ctx, "Starting service directly (legacy mode)",
 		"service", name, "binary", def.BinaryPath)
 
 	return startDirect(ctx, name, def)
 }
 
-// stopService stops a service. Mirrors startService's tri-mode dispatch:
-// non-systemd hosts skip systemctl entirely and pkill by ProcessName.
+// stopService stops a service. Mirrors startService's bifurcation on
+// IsSystemdMode(). Legacy mode calls CustomStop or pkill by ProcessName
+// and never invokes systemctl — critical for services like stats whose
+// workers run outside any systemd cgroup (e.g. spawned by statsCustomStart
+// directly into /init.scope in container installs).
 func stopService(ctx context.Context, name string, def *ServiceDef) error {
-	if !systemd.IsBooted() {
+	if !IsSystemdMode() {
 		return stopWithoutSystemd(ctx, name, def)
 	}
 
-	if IsSystemdMode() {
-		for i := len(def.SystemdUnits) - 1; i >= 0; i-- {
-			unit := def.SystemdUnits[i]
-
-			logger.InfoContext(ctx, "Stopping service via systemctl", "service", name, "unit", unit)
-
-			if err := Systemctl(ctx, "stop", unit); err != nil {
-				return fmt.Errorf("failed to stop %s (%s): %w", name, unit, err)
-			}
-		}
-
-		return nil
-	}
-
-	// Legacy mode: try systemctl first, fall back to direct shutdown.
 	for i := len(def.SystemdUnits) - 1; i >= 0; i-- {
 		unit := def.SystemdUnits[i]
 
-		logger.InfoContext(ctx, "Stopping service", "service", name, "unit", unit)
+		logger.InfoContext(ctx, "Stopping service via systemctl", "service", name, "unit", unit)
 
 		if err := Systemctl(ctx, "stop", unit); err != nil {
-			logger.WarnContext(ctx, "systemctl failed, trying direct shutdown",
-				"service", name, "error", err)
-
-			return stopWithoutSystemd(ctx, name, def)
+			return fmt.Errorf("failed to stop %s (%s): %w", name, unit, err)
 		}
 	}
 
@@ -132,9 +106,17 @@ func stopService(ctx context.Context, name string, def *ServiceDef) error {
 
 // stopWithoutSystemd is the fast-path stop for non-systemd hosts.
 // Precedence: CustomStop hook (fully custom shutdown) > ProcessName pkill.
+//
+// For services with UseSDNotify, an sd_notify shutdown observer is started
+// in parallel with killProcess: it listens on the persistent NOTIFY_SOCKET
+// and logs a "Graceful shutdown acknowledged" entry the moment the daemon
+// sends STOPPING=1. The observer never blocks or alters the shutdown
+// critical path; it exists purely to distinguish, in the operator-facing
+// log, a clean graceful shutdown from an SIGTERM-ignoring process that only
+// died via the SIGKILL escalation.
 func stopWithoutSystemd(ctx context.Context, name string, def *ServiceDef) error {
 	if def.CustomStop != nil {
-		logger.InfoContext(ctx, "Stopping service via custom shutdown (systemd not booted)",
+		logger.InfoContext(ctx, "Stopping service via custom shutdown (legacy mode)",
 			"service", name)
 
 		return def.CustomStop(ctx, def)
@@ -142,12 +124,19 @@ func stopWithoutSystemd(ctx context.Context, name string, def *ServiceDef) error
 
 	if def.ProcessName == "" {
 		return fmt.Errorf(
-			"cannot stop %s without systemd: no ProcessName registered "+
+			"cannot stop %s in legacy mode: no ProcessName registered "+
 				"(set ServiceDef.ProcessName or ServiceDef.CustomStop, "+
-				"or run on a systemd-booted host)", name)
+				"or enable a Carbonio systemd target)", name)
 	}
 
-	logger.InfoContext(ctx, "Stopping service via pkill (systemd not booted)",
+	if def.UseSDNotify {
+		observerCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+
+		go awaitSDNotifyStopping(observerCtx, name)
+	}
+
+	logger.InfoContext(ctx, "Stopping service via pkill (legacy mode)",
 		"service", name, "process", def.ProcessName)
 
 	return killProcess(ctx, def.ProcessName)
@@ -261,10 +250,16 @@ func startDetached(_ context.Context, name string, def *ServiceDef) error {
 	return nil
 }
 
-// killProcess sends SIGTERM to every process whose cmdline contains processName.
-// The current PID and its parent are excluded so we never SIGTERM ourselves.
-// Implemented directly against /proc to avoid forking pkill.
-func killProcess(_ context.Context, processName string) error {
+// killProcess terminates every process whose cmdline contains processName.
+// Two-phase shutdown: SIGTERM to all, wait up to killProcessTimeout for each
+// to exit, then SIGKILL survivors. Self and parent PIDs are excluded so we
+// never SIGTERM our own CLI invocation.
+//
+// Without the wait-then-SIGKILL phase, `zmcontrol stop` returns "Done (1ms)"
+// the instant SIGTERM is dispatched, even when the target ignores/slow-handles
+// the signal. mailboxd's JVM caught SIGTERM but took >80 s to exit via its
+// shutdown hook, leaving the CLI to falsely report success.
+func killProcess(ctx context.Context, processName string) error {
 	pids, err := scanProcessesByCmdline(processName)
 	if err != nil {
 		return fmt.Errorf("scan processes for %s: %w", processName, err)
@@ -273,20 +268,165 @@ func killProcess(_ context.Context, processName string) error {
 	self := os.Getpid()
 	parent := os.Getppid()
 
+	targets := make([]int, 0, len(pids))
+
 	for _, pid := range pids {
 		if pid == self || pid == parent {
 			continue
 		}
 
-		proc, ferr := os.FindProcess(pid)
-		if ferr != nil {
-			continue
-		}
-
-		_ = proc.Signal(syscall.SIGTERM)
+		targets = append(targets, pid)
 	}
 
+	if len(targets) == 0 {
+		return nil
+	}
+
+	for _, pid := range targets {
+		signalPID(pid, syscall.SIGTERM)
+	}
+
+	waitAndEscalate(ctx, targets, killProcessTimeout)
+
 	return nil
+}
+
+// signalPID best-effort sends sig to pid, ignoring ESRCH (already gone) and
+// EPERM (cross-UID; handled separately where needed).
+func signalPID(pid int, sig syscall.Signal) {
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return
+	}
+
+	_ = proc.Signal(sig)
+}
+
+// waitAndEscalate polls each pid in parallel until it exits or the deadline
+// expires, then SIGKILLs any survivors. Parallel so that N slow-exiting
+// processes do not sum to N*timeout.
+func waitAndEscalate(ctx context.Context, pids []int, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+
+	done := make(chan struct{}, len(pids))
+
+	for _, pid := range pids {
+		go func(p int) {
+			for time.Now().Before(deadline) {
+				if !processAlive(p) {
+					done <- struct{}{}
+
+					return
+				}
+
+				select {
+				case <-ctx.Done():
+					done <- struct{}{}
+
+					return
+				case <-time.After(200 * time.Millisecond):
+				}
+			}
+
+			if processAlive(p) {
+				logger.WarnContext(ctx, "SIGTERM grace expired, escalating to SIGKILL",
+					"pid", p, "timeout", timeout)
+				signalPID(p, syscall.SIGKILL)
+			}
+
+			done <- struct{}{}
+		}(pid)
+	}
+
+	for range pids {
+		<-done
+	}
+}
+
+// processAlive returns true when /proc/<pid> exists and the entry is not a
+// zombie. Zombies have already exited and are only waiting for a parent reap.
+func processAlive(pid int) bool {
+	if _, err := os.Stat(procFSRoot + strconv.Itoa(pid)); err != nil {
+		return false
+	}
+
+	return !isZombie(pid)
+}
+
+// killProcessGroup sends sig to the process group led by pgid (negative PID
+// semantics of syscall.Kill). Returns the raw syscall error so callers can
+// distinguish EPERM (cross-UID) from ESRCH (group already gone).
+func killProcessGroup(pgid int, sig syscall.Signal) error {
+	return syscall.Kill(-pgid, sig)
+}
+
+// sudoKill escalates a signal via sudo when the calling user cannot signal
+// the target directly (e.g. root-owned `sudo zmstat-fd` child). No-op error
+// on failure — the caller logs. Signal is passed as the literal name ("TERM",
+// "KILL") that `kill(1)` accepts.
+func sudoKill(ctx context.Context, pid int, signal string, groupKill bool) {
+	target := strconv.Itoa(pid)
+	if groupKill {
+		target = "-" + target
+	}
+
+	// #nosec G204 — arguments are a fixed literal signal name and a numeric PID
+	cmd := exec.CommandContext(ctx, "/usr/bin/sudo", "-n", "kill", "-"+signal, "--", target)
+
+	if out, err := cmd.CombinedOutput(); err != nil {
+		logger.WarnContext(ctx, "sudo kill failed",
+			"pid", pid, "signal", signal, "group", groupKill,
+			"error", err, "output", strings.TrimSpace(string(out)))
+	}
+}
+
+// killByPIDWithGroupAndSudo is the workhorse for pidfile-driven shutdowns of
+// services whose workers may spawn uncontrolled children (iostat, vmstat as
+// grandchildren of zmstat-*) and whose workers may have been launched with
+// elevated privileges (sudo-spawned zmstat-fd). Strategy, in order:
+//
+//  1. SIGTERM to the whole process group (-pid). Catches all children.
+//  2. On EPERM, retry the group SIGTERM via `sudo kill`.
+//  3. Wait up to killProcessTimeout for the group leader to exit.
+//  4. On timeout, escalate: SIGKILL the group; on EPERM, sudo SIGKILL.
+//
+// Returns true once the leader is gone. ESRCH (already dead) counts as success.
+func killByPIDWithGroupAndSudo(ctx context.Context, pid int) bool {
+	if err := killProcessGroup(pid, syscall.SIGTERM); err != nil {
+		switch {
+		case errors.Is(err, syscall.ESRCH):
+			return true
+		case errors.Is(err, syscall.EPERM):
+			sudoKill(ctx, pid, "TERM", true)
+		default:
+			logger.WarnContext(ctx, "Group SIGTERM failed",
+				"pid", pid, "error", err)
+		}
+	}
+
+	deadline := time.Now().Add(killProcessTimeout)
+	for time.Now().Before(deadline) {
+		if !processAlive(pid) {
+			return true
+		}
+
+		select {
+		case <-ctx.Done():
+			return !processAlive(pid)
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+
+	logger.WarnContext(ctx, "SIGTERM grace expired, escalating to SIGKILL on process group",
+		"pid", pid, "timeout", killProcessTimeout)
+
+	if err := killProcessGroup(pid, syscall.SIGKILL); err != nil {
+		if errors.Is(err, syscall.EPERM) {
+			sudoKill(ctx, pid, "KILL", true)
+		}
+	}
+
+	return !processAlive(pid)
 }
 
 // scanProcessesByCmdline walks /proc/<pid> looking for processes whose command
@@ -327,25 +467,39 @@ func matchProcEntry(e os.DirEntry, needle string) (int, bool) {
 
 	procDir := procFSRoot + e.Name()
 
-	if isZombie(pid) || !isOwnedByCurrentUser(procDir) {
+	// Zombies have already exited and cannot be signaled — never report
+	// them as matches. Ownership is intentionally NOT checked: services
+	// we register legitimately run as root (postfix master, sudo-spawned
+	// zmstat-fd) and must be visible to status. Cross-UID signaling is
+	// handled by the caller via sudo fallback in killByPIDWithGroupAndSudo.
+	if isZombie(pid) {
 		return 0, false
 	}
 
-	// Primary: check cmdline
+	// Primary: check cmdline. When cmdline is readable and non-empty the
+	// verdict is authoritative — a negative match here must NOT fall through
+	// to comm, because the 15-char comm truncation (TASK_COMM_LEN-1) collides
+	// unrelated processes. Example: service-discover-wrapper.sh has
+	// comm="service-discove" which is a prefix of the service-discover daemon
+	// binary name "service-discovered"; matching either direction against
+	// comm would falsely identify wrapper sidecars as the real daemon.
 	data, readErr := os.ReadFile(procDir + "/cmdline") //nolint:gosec // path is /proc/<pid>/cmdline, not user-controlled
 	if readErr == nil && len(data) > 0 {
 		cmdline := strings.ReplaceAll(string(data), "\x00", " ")
 		if strings.Contains(cmdline, needle) {
 			return pid, true
 		}
+
+		return 0, false
 	}
 
-	// Fallback: check comm (short process name, max 15 chars).
-	// Matches daemons that clear/replace their cmdline after fork.
+	// Fallback: cmdline unreadable or empty (some kernel threads, or daemons
+	// that zero their argv after fork). Only an *exact* comm match counts —
+	// substring semantics are unsafe because of the 15-char truncation.
 	comm, readErr := os.ReadFile(procDir + "/comm") //nolint:gosec // path is /proc/<pid>/comm, not user-controlled
 	if readErr == nil {
 		commStr := strings.TrimSpace(string(comm))
-		if commStr != "" && strings.Contains(needle, commStr) {
+		if commStr != "" && commStr == needle {
 			return pid, true
 		}
 	}
@@ -377,7 +531,6 @@ func isRunningByPidFile(pidFile string) (running bool, ok bool) {
 		return false, false // corrupt — fall through
 	}
 
-	// Check if /proc/<pid> exists and is not a zombie
 	_, err = os.Stat(procFSRoot + strconv.Itoa(pid))
 
 	return err == nil && !isZombie(pid), true

@@ -17,10 +17,6 @@ import (
 	"github.com/zextras/carbonio-configd/internal/systemd"
 )
 
-// ============================================================
-// interfaces.go — String() default branch
-// ============================================================
-
 // TestServiceActionString_Default exercises the default (unknown) branch of String().
 func TestServiceActionString_Default(t *testing.T) {
 	if testing.Short() {
@@ -31,10 +27,6 @@ func TestServiceActionString_Default(t *testing.T) {
 		t.Errorf("ServiceAction(42).String() = %q, want %q", got, "unknown")
 	}
 }
-
-// ============================================================
-// cli.go — rewriteConfigs (configrewrite absent → rewriteViaConfigd)
-// ============================================================
 
 // TestRewriteConfigs_NoConfigrewriteBinary exercises rewriteConfigs when the
 // configrewrite binary does not exist.
@@ -112,10 +104,6 @@ func TestRewriteConfigs_ConfigrewriteFailure(t *testing.T) {
 
 	rewriteConfigs(context.Background(), def)
 }
-
-// ============================================================
-// cli.go — rewriteViaConfigd
-// ============================================================
 
 // TestRewriteViaConfigd_ConnectionRefused verifies the connection-refused error path.
 func TestRewriteViaConfigd_ConnectionRefused(t *testing.T) {
@@ -261,8 +249,7 @@ func TestRewriteViaConfigd_WriteOrReadError(t *testing.T) {
 	_, _ = conn.Write([]byte(msg))
 
 	buf := make([]byte, 256)
-	_, readErr := conn.Read(buf)
-	_ = readErr
+	_, _ = conn.Read(buf)
 }
 
 // TestRewriteViaConfigd_ErrorResponsePath verifies the ERROR response branch.
@@ -454,17 +441,13 @@ func TestRewriteViaConfigdProtocol_SuccessResponse(t *testing.T) {
 	}
 }
 
-// ============================================================
-// cli.go — ServiceStatus
-// ============================================================
-
 // TestServiceStatus_NoPidFileNoProcessName verifies ServiceStatus returns (false, nil)
 // when no detection method is configured (non-systemd hosts only).
 func TestServiceStatus_NoPidFileNoProcessName(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	if systemd.IsBooted() {
+	if IsSystemdMode() {
 		t.Skip("skipping: on systemd host ServiceStatus uses systemctl, not PID/process detection")
 	}
 
@@ -490,7 +473,7 @@ func TestServiceStatus_WithPidFile_Running(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	if systemd.IsBooted() {
+	if IsSystemdMode() {
 		t.Skip("skipping PID-file detection test on systemd-booted host")
 	}
 
@@ -523,7 +506,7 @@ func TestServiceStatus_WithProcessName(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	if systemd.IsBooted() {
+	if IsSystemdMode() {
 		t.Skip("skipping: on systemd host ServiceStatus uses systemctl, not process name scan")
 	}
 
@@ -550,7 +533,7 @@ func TestServiceStatus_PidFileUnreadable_FallsBackToProcessName(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	if systemd.IsBooted() {
+	if IsSystemdMode() {
 		t.Skip("skipping: PID fallback test on systemd-booted host")
 	}
 	if os.Getuid() == 0 {
@@ -588,7 +571,7 @@ func TestServiceStatus_PidFileMissing_FallsToProcessName(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	if systemd.IsBooted() {
+	if IsSystemdMode() {
 		t.Skip("skipping: legacy PID fallback test on systemd-booted host")
 	}
 
@@ -607,6 +590,101 @@ func TestServiceStatus_PidFileMissing_FallsToProcessName(t *testing.T) {
 	}
 	if running {
 		t.Error("expected running=false for non-existent process")
+	}
+}
+
+// withMode forces IsSystemdMode() to return the given value for the duration
+// of a test, then restores the production detector. The two orchestration
+// modes are mutually exclusive; this helper lets each test pin the one it
+// means to exercise without depending on the host's target enablement.
+func withMode(t *testing.T, strict bool) {
+	t.Helper()
+
+	orig := isSystemdModeFn
+	isSystemdModeFn = func() bool { return strict }
+
+	t.Cleanup(func() { isSystemdModeFn = orig })
+}
+
+// TestServiceStatus_LegacyMode_UsesPidProbeRegardlessOfSystemdUnit asserts that
+// in legacy mode (no Carbonio target enabled) ServiceStatus ignores the
+// service's SystemdUnits entirely and reports running from the PID file.
+// This is the container regression test: stats in a podman install has an
+// inactive carbonio-stats.service but live zmstat-* workers; before the
+// IsSystemdMode()-gated refactor, a systemd-booted host would query
+// systemctl and report stopped even though workers were alive.
+func TestServiceStatus_LegacyMode_UsesPidProbeRegardlessOfSystemdUnit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: may invoke real system commands")
+	}
+
+	withMode(t, false)
+
+	tmp := t.TempDir()
+	pidFile := filepath.Join(tmp, "live.pid")
+
+	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	orig := Registry["memcached"]
+	defer func() { Registry["memcached"] = orig }()
+
+	def := *orig
+	def.SystemdUnits = []string{"carbonio-nonexistent-test-xyz.service"}
+	def.PidFile = pidFile
+	def.ProcessName = ""
+	Registry["memcached"] = &def
+
+	running, err := ServiceStatus(context.Background(), "memcached")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	if !running {
+		t.Error("expected running=true in legacy mode: PID file points to a live process, SystemdUnits must be ignored")
+	}
+}
+
+// TestServiceStatus_StrictMode_TrustsSystemctlOverPidProbe asserts that in
+// strict systemd mode a non-existent unit causes ServiceStatus to return
+// (false, nil) even when a live PID file exists. This guards against
+// reintroducing the hybrid fall-through (which would have returned true by
+// checking the PID file after systemctl failed).
+func TestServiceStatus_StrictMode_TrustsSystemctlOverPidProbe(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: may invoke real system commands")
+	}
+
+	if !systemd.IsBooted() {
+		t.Skip("skipping: strict-mode path requires a host that can actually run systemctl")
+	}
+
+	withMode(t, true)
+
+	tmp := t.TempDir()
+	pidFile := filepath.Join(tmp, "live.pid")
+
+	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	orig := Registry["memcached"]
+	defer func() { Registry["memcached"] = orig }()
+
+	def := *orig
+	def.SystemdUnits = []string{"carbonio-nonexistent-test-xyz.service"}
+	def.PidFile = pidFile
+	def.ProcessName = ""
+	Registry["memcached"] = &def
+
+	running, err := ServiceStatus(context.Background(), "memcached")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	if running {
+		t.Error("expected running=false in strict mode: systemd unit is not-active and must be authoritative")
 	}
 }
 
@@ -632,7 +710,7 @@ func TestServiceRestart_StopFailedStartAnyway(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	if systemd.IsBooted() {
+	if IsSystemdMode() {
 		t.Skip("skipping: restart test on systemd-booted host")
 	}
 
@@ -653,7 +731,7 @@ func TestServiceRestart_StopFailedStartAnyway(t *testing.T) {
 	def.ConfigRewrite = nil
 	Registry["memcached"] = &def
 
-	_ = ServiceRestart(context.Background(), "memcached")
+	ServiceRestart(context.Background(), "memcached")
 }
 
 // TestServiceRestart_NonMTA_StopAndStartBoth exercises the stop-failed-warn-then-start path.
@@ -661,7 +739,7 @@ func TestServiceRestart_NonMTA_StopAndStartBoth(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	if systemd.IsBooted() {
+	if IsSystemdMode() {
 		t.Skip("skipping restart branch test on systemd-booted host")
 	}
 
@@ -691,7 +769,7 @@ func TestServiceRestart_NonMTA_StopAndStartBoth(t *testing.T) {
 	}
 	Registry["memcached"] = &def
 
-	_ = ServiceRestart(context.Background(), "memcached")
+	ServiceRestart(context.Background(), "memcached")
 
 	if !stopCalled {
 		t.Error("expected stop to be called")
@@ -700,10 +778,6 @@ func TestServiceRestart_NonMTA_StopAndStartBoth(t *testing.T) {
 		t.Error("expected start to be called even after stop failure")
 	}
 }
-
-// ============================================================
-// cli.go — ServiceReload
-// ============================================================
 
 // TestServiceReload_NoSystemdUnits verifies ServiceReload returns nil when no units defined.
 func TestServiceReload_NoSystemdUnits(t *testing.T) {
@@ -723,16 +797,12 @@ func TestServiceReload_NoSystemdUnits(t *testing.T) {
 	}
 }
 
-// ============================================================
-// cli.go — ServiceStop
-// ============================================================
-
 // TestServiceStop_WithDisabledDependency exercises the "stop dependencies" path.
 func TestServiceStop_WithDisabledDependency(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	if systemd.IsBooted() {
+	if IsSystemdMode() {
 		t.Skip("skipping: stop dependency test on systemd-booted host")
 	}
 
@@ -758,7 +828,7 @@ func TestServiceStop_WithEnabledDependency(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	if systemd.IsBooted() {
+	if IsSystemdMode() {
 		t.Skip("skipping: stop dependency test on systemd-booted host")
 	}
 
@@ -790,7 +860,7 @@ func TestServiceStop_StopServiceError(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	if systemd.IsBooted() {
+	if IsSystemdMode() {
 		t.Skip("skipping: stopService error test on systemd-booted host")
 	}
 
@@ -817,7 +887,7 @@ func TestServiceStop_PreStopHookError(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	if systemd.IsBooted() {
+	if IsSystemdMode() {
 		t.Skip("skipping: pre-stop hook test on systemd-booted host")
 	}
 
@@ -870,19 +940,15 @@ func TestServiceStop_WithPreStopHookFails(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	_ = ServiceStop(ctx, "memcached")
+	ServiceStop(ctx, "memcached")
 }
-
-// ============================================================
-// cli.go — ServiceStart
-// ============================================================
 
 // TestServiceStart_WithConfigRewrite exercises the rewriteConfigs branch.
 func TestServiceStart_WithConfigRewrite(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	if systemd.IsBooted() {
+	if IsSystemdMode() {
 		t.Skip("skipping: start with config rewrite test on systemd-booted host")
 	}
 
@@ -904,7 +970,7 @@ func TestServiceStart_WithConfigRewrite(t *testing.T) {
 	NoRewrite = false
 	defer func() { NoRewrite = oldNoRewrite }()
 
-	_ = ServiceStart(context.Background(), "memcached")
+	ServiceStart(context.Background(), "memcached")
 }
 
 // TestServiceStart_AlreadyRunning exercises the "already running" early return.
@@ -912,7 +978,7 @@ func TestServiceStart_AlreadyRunning(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	if systemd.IsBooted() {
+	if IsSystemdMode() {
 		t.Skip("skipping: already-running test on systemd-booted host")
 	}
 
@@ -947,7 +1013,7 @@ func TestServiceStart_PreStartHookError(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	if systemd.IsBooted() {
+	if IsSystemdMode() {
 		t.Skip("skipping: pre-start hook test on systemd-booted host")
 	}
 
@@ -979,7 +1045,7 @@ func TestServiceStart_PostStartHookCalled(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	if systemd.IsBooted() {
+	if IsSystemdMode() {
 		t.Skip("skipping: post-start hook test on systemd-booted host")
 	}
 
@@ -1025,12 +1091,8 @@ func TestServiceStart_NoRewrite(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	_ = ServiceStart(ctx, "memcached")
+	ServiceStart(ctx, "memcached")
 }
-
-// ============================================================
-// cli.go — startEnabledDependencies
-// ============================================================
 
 // TestStartEnabledDependencies_EnabledDepFailsStart exercises the ServiceStart error return.
 func TestStartEnabledDependencies_EnabledDepFailsStart(t *testing.T) {
@@ -1053,7 +1115,7 @@ func TestStartEnabledDependencies_EnabledDepFailsStart(t *testing.T) {
 		Dependencies: []string{depName},
 	}
 
-	if systemd.IsBooted() {
+	if IsSystemdMode() {
 		t.Skip("systemd booted: ServiceStatus short-circuits before CustomStart")
 	}
 
@@ -1079,13 +1141,8 @@ func TestStartEnabledDependencies_EnabledDepFails(t *testing.T) {
 		Dependencies: []string{"testdep-xyz"},
 	}
 
-	err := startEnabledDependencies(context.Background(), "parent", def)
-	_ = err
+	startEnabledDependencies(context.Background(), "parent", def)
 }
-
-// ============================================================
-// cli.go — Systemctl
-// ============================================================
 
 // TestSystemctl_BootedHostReturnsError verifies Systemctl on a booted host.
 func TestSystemctl_BootedHostReturnsError(t *testing.T) {
@@ -1113,22 +1170,14 @@ func TestSystemctl_AnyHost_FakeUnit(t *testing.T) {
 	}
 }
 
-// ============================================================
-// cli.go — IsSystemdMode
-// ============================================================
-
 // TestIsSystemdMode_DoesNotPanic verifies IsSystemdMode() does not panic.
 func TestIsSystemdMode_DoesNotPanic(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	_ = IsSystemdMode()
-	_ = IsSystemdMode()
+	IsSystemdMode()
+	IsSystemdMode()
 }
-
-// ============================================================
-// cli_process.go — startWithoutSystemd branches
-// ============================================================
 
 // TestStartWithoutSystemd_CustomStart verifies that CustomStart is called.
 func TestStartWithoutSystemd_CustomStart(t *testing.T) {
@@ -1200,10 +1249,6 @@ func TestStartWithoutSystemd_BinaryNotFound(t *testing.T) {
 	}
 }
 
-// ============================================================
-// cli_process.go — stopWithoutSystemd branches
-// ============================================================
-
 // TestStopWithoutSystemd_CustomStop verifies CustomStop is called.
 func TestStopWithoutSystemd_CustomStop(t *testing.T) {
 	if testing.Short() {
@@ -1258,10 +1303,6 @@ func TestStopWithoutSystemd_ProcessName(t *testing.T) {
 		t.Errorf("stopWithoutSystemd with ProcessName returned unexpected error: %v", err)
 	}
 }
-
-// ============================================================
-// cli_process.go — killProcess
-// ============================================================
 
 // TestKillProcess_NoMatch verifies killProcess returns nil when no process matches.
 func TestKillProcess_NoMatch(t *testing.T) {
@@ -1406,10 +1447,6 @@ func TestKillProcess_SelfExcluded(t *testing.T) {
 	}
 }
 
-// ============================================================
-// cli_process.go — startDirect
-// ============================================================
-
 // TestStartDirect_EmptyBinaryPath verifies error returned immediately for empty binary.
 func TestStartDirect_EmptyBinaryPath(t *testing.T) {
 	if testing.Short() {
@@ -1464,7 +1501,7 @@ func TestStartDirect_NeedsRoot_NonRoot(t *testing.T) {
 		UseSDNotify: false,
 	}
 
-	_ = startDirect(context.Background(), "testservice", def)
+	startDirect(context.Background(), "testservice", def)
 }
 
 // TestStartDirect_NeedsRootAsNonRoot verifies that NeedsRoot=true prepends sudo.
@@ -1490,8 +1527,7 @@ func TestStartDirect_NeedsRootAsNonRoot(t *testing.T) {
 		UseSDNotify: false,
 	}
 
-	err := startDirect(context.Background(), "testservice", def)
-	_ = err
+	startDirect(context.Background(), "testservice", def)
 }
 
 // TestStartDirect_DirectExec_Success verifies startDirect with a real binary that exits 0.
@@ -1590,10 +1626,6 @@ func TestStartDirect_DetachedMissingBinary(t *testing.T) {
 		t.Error("expected error when detached binary is missing")
 	}
 }
-
-// ============================================================
-// cli_process.go — startDetached
-// ============================================================
 
 // TestStartDetached_LogFileOpenError exercises the os.OpenFile error path.
 func TestStartDetached_LogFileOpenError(t *testing.T) {
@@ -1717,7 +1749,7 @@ func TestStartDetached_UseSDNotify(t *testing.T) {
 		Detached:    false,
 	}
 
-	_ = startDetached(context.Background(), "testservice", def)
+	startDetached(context.Background(), "testservice", def)
 }
 
 // TestStartDetached_SDNotify_BinaryMissing verifies startDetached returns error
@@ -1743,17 +1775,13 @@ func TestStartDetached_SDNotify_BinaryMissing(t *testing.T) {
 	}
 }
 
-// ============================================================
-// cli_process.go — startService / stopService
-// ============================================================
-
 // TestStartService_NonSystemdCustomStart verifies startService uses CustomStart
 // when systemd is not booted.
 func TestStartService_NonSystemdCustomStart(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	if systemd.IsBooted() {
+	if IsSystemdMode() {
 		t.Skip("startService non-systemd path not reachable on systemd-booted host")
 	}
 
@@ -1782,7 +1810,7 @@ func TestStopService_NonSystemdCustomStop(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	if systemd.IsBooted() {
+	if IsSystemdMode() {
 		t.Skip("stopService non-systemd path not reachable on systemd-booted host")
 	}
 
@@ -1805,67 +1833,38 @@ func TestStopService_NonSystemdCustomStop(t *testing.T) {
 	}
 }
 
-// TestStopService_LegacyFallback_SystemctlFailsWithProcessName exercises the
-// "systemctl failed → pkill" branch on systemd-booted hosts in non-systemd-mode.
-func TestStopService_LegacyFallback_SystemctlFailsWithProcessName(t *testing.T) {
+// TestStopService_LegacyMode_BypassesSystemctl asserts that in legacy mode
+// stopService goes straight to stopWithoutSystemd (CustomStop / pkill) without
+// invoking systemctl. This guards the container fix: statsCustomStop must
+// actually run to terminate workers that live outside any systemd cgroup.
+func TestStopService_LegacyMode_BypassesSystemctl(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	if !systemd.IsBooted() {
-		t.Skip("skipping: legacy fallback test requires systemd-booted host")
-	}
-	if IsSystemdMode() {
-		t.Skip("skipping: legacy fallback not exercised in systemd mode")
-	}
+
+	withMode(t, false)
 
 	orig := Registry["memcached"]
 	defer func() { Registry["memcached"] = orig }()
 
+	called := false
 	def := *orig
 	def.SystemdUnits = []string{"carbonio-fake-stop-test-xyzzy.service"}
-	def.ProcessName = "carbonio-configd-unique-needle-xyzzy-no-match-stop"
-	def.CustomStop = nil
+	def.ProcessName = ""
+	def.CustomStop = func(_ context.Context, _ *ServiceDef) error {
+		called = true
+		return nil
+	}
 	Registry["memcached"] = &def
 
-	err := stopService(context.Background(), "memcached", &def)
-	if err != nil {
-		t.Logf("stopService returned error (acceptable in strict systemd mode): %v", err)
+	if err := stopService(context.Background(), "memcached", &def); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	if !called {
+		t.Error("expected CustomStop to run in legacy mode; systemctl must not be invoked, fall-through must not exist")
 	}
 }
-
-// TestStartService_LegacyFallback_SystemctlFailsWithBinaryPath exercises the
-// "systemctl failed → startDirect" path on systemd-booted hosts in non-systemd-mode.
-func TestStartService_LegacyFallback_SystemctlFailsWithBinaryPath(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	if !systemd.IsBooted() {
-		t.Skip("skipping: legacy fallback test requires systemd-booted host")
-	}
-	if IsSystemdMode() {
-		t.Skip("skipping: legacy fallback not exercised in systemd mode")
-	}
-
-	truePath := "/bin/true"
-	if _, err := os.Stat(truePath); err != nil {
-		t.Skip("skipping: /bin/true not available")
-	}
-
-	def := &ServiceDef{
-		Name:         "test-start-legacy-xyzzy",
-		SystemdUnits: []string{"carbonio-fake-start-test-xyzzy.service"},
-		BinaryPath:   truePath,
-		Detached:     false,
-		UseSDNotify:  false,
-	}
-
-	err := startService(context.Background(), "test-start-legacy-xyzzy", def)
-	_ = err
-}
-
-// ============================================================
-// helpers.go — signalViaPidfile
-// ============================================================
 
 // TestSignalViaPidfile_UnreadableFile verifies the "exists but unreadable" path.
 func TestSignalViaPidfile_UnreadableFile(t *testing.T) {

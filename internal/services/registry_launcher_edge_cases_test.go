@@ -464,8 +464,8 @@ func TestMailboxJavaBinary_BinaryNotFound(t *testing.T) {
 // registry.go — various custom start/stop
 // ============================================================
 
-// TestMtaCustomStop_NotRunning verifies that "is not running" in sudo output is treated as success.
-func TestMtaCustomStop_NotRunning(t *testing.T) {
+// TestMtaCustomStop_NotRunningOutput verifies that "is not running" in sudo output is treated as success.
+func TestMtaCustomStop_NotRunningOutput(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}

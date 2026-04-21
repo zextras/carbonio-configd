@@ -125,7 +125,7 @@ func serviceDiscoverCustomStart(ctx context.Context, def *ServiceDef) error {
 // Mirrors legacy cbpolicydctl.sh pre-start logic.
 func cbpolicydInitDB(_ context.Context, _ *ServiceManager) error {
 	if _, err := os.Stat(cbpolicydDBPath); err == nil {
-		return nil // DB already exists
+		return nil
 	}
 
 	if err := os.MkdirAll(filepath.Dir(cbpolicydDBPath), 0o755); err != nil {
@@ -210,7 +210,7 @@ var Registry = map[string]*ServiceDef{
 	"clamd": {
 		Name:         "clamd",
 		DisplayName:  "clamd",
-		SystemdUnits: []string{"carbonio-clamd.service"},
+		SystemdUnits: []string{"carbonio-antivirus.service"},
 		BinaryPath:   commonPath + "/sbin/clamd",
 		BinaryArgs:   []string{"--config-file=" + confPath + "/clamd.conf"},
 		Detached:     true,
@@ -258,6 +258,8 @@ var Registry = map[string]*ServiceDef{
 		DisplayName:  "antispam",
 		SystemdUnits: []string{"carbonio-antispam.service"},
 		ProcessName:  "amavisd",
+		CustomStart:  antispamCustomStart,
+		CustomStop:   antispamCustomStop,
 	},
 	"mta": {
 		Name:          "mta",
@@ -267,7 +269,8 @@ var Registry = map[string]*ServiceDef{
 		BinaryArgs:    []string{"start"},
 		NeedsRoot:     true,
 		PidFile:       dataPath + "/postfix/spool/pid/master.pid",
-		ProcessName:   "master",
+		ProcessName:   "common/libexec/master",
+		CustomStart:   mtaCustomStart,
 		CustomStop:    mtaCustomStop,
 		Dependencies:  []string{"saslauthd", "milter"},
 		ConfigRewrite: []string{"antispam", "antivirus", "opendkim", "mta", "sasl"},
@@ -290,6 +293,7 @@ var Registry = map[string]*ServiceDef{
 		ProcessName:   "com.zextras.mailbox.Mailbox",
 		ConfigRewrite: []string{"mailbox"},
 		CustomStart:   mailboxCustomStart,
+		CustomStop:    mailboxCustomStop,
 		PostStart:     []Hook{MailboxAdvancedStatusHook},
 	},
 	"ldap": {

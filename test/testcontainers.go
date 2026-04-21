@@ -14,8 +14,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/moby/moby/api/types/container"
 	"github.com/docker/go-units"
+	"github.com/moby/moby/api/types/container"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 )
@@ -150,7 +150,7 @@ func startLdapContainerDocker() (LdapContainer, error) {
 	lc := LdapContainer{
 		Stop: func() { _ = c.Terminate(ctx) },
 		IP:   func() string { return "localhost" },
-		Port: func() string { return port.Port() },
+		Port: port.Port,
 	}
 	lc.URL = func() string { return "ldap://localhost:" + lc.Port() }
 
@@ -178,8 +178,6 @@ func SpinUpCarbonioLdap(t *testing.T, address, version string) (LdapContainer, c
 
 	ctx := context.Background()
 
-	t.Log("Networks that are going to be attached to the container")
-
 	ulimits := []*units.Ulimit{{Name: "nofile", Soft: 32678, Hard: 32678}}
 	req := testcontainers.ContainerRequest{
 		Image:        fmt.Sprintf(address, version),
@@ -203,32 +201,14 @@ func SpinUpCarbonioLdap(t *testing.T, address, version string) (LdapContainer, c
 		t.Fatal(err)
 	}
 
-	cip, _ := ldapContainer.ContainerIP(ctx)
-	t.Log("Container ip: " + cip)
-
-	ports, _ := ldapContainer.Ports(ctx)
-
-	for port, bindings := range ports {
-		for _, binding := range bindings {
-			t.Log("Port: " + port.Port() + " host bind: " + binding.HostPort + " ip bind: " + binding.HostIP.String())
-		}
-	}
-
 	containerWithPort := LdapContainer{
 		Stop: func() {
-			err := ldapContainer.Terminate(ctx)
-			if err != nil {
+			if err := ldapContainer.Terminate(ctx); err != nil {
 				t.Log(err)
 			}
 		},
-		IP: func() string {
-			return "localhost"
-		},
-		Port: func() string {
-			port, _ := ldapContainer.MappedPort(ctx, "1389")
-
-			return port.Port()
-		},
+		IP:   func() string { return "localhost" },
+		Port: func() string { port, _ := ldapContainer.MappedPort(ctx, "1389"); return port.Port() },
 	}
 	containerWithPort.URL = func() string {
 		return "ldap://localhost:" + containerWithPort.Port()

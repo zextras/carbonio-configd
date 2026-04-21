@@ -31,10 +31,12 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// expectedSocketPath returns the socket path startWithSDNotify will create for
-// the given service name (same process, so same PID).
+// expectedSocketPath returns the socket path startWithSDNotify will create
+// for the given service name. The path is service-addressable (not
+// per-PID) so both the start-side READY=1 listener and the stop-side
+// STOPPING=1 observer can bind to it across independent CLI invocations.
 func expectedSocketPath(service string) string {
-	return fmt.Sprintf("%s/notify-%s-%d.sock", notifySocketDir, service, os.Getpid())
+	return sdNotifySocketPath(service)
 }
 
 // sendReady sends a READY=1 datagram to the given Unix socket path, retrying
@@ -230,5 +232,100 @@ func TestStartWithSDNotify_SocketCleanedUp(t *testing.T) {
 
 	if cmd.Process != nil {
 		_ = cmd.Process.Kill()
+	}
+}
+
+// TestAwaitSDNotifyStopping_ReturnsOnStoppingDatagram asserts the shutdown
+// observer exits as soon as a STOPPING=1 datagram is delivered. Regression
+// guard for the stop-side sd_notify enhancement: without it, operators can't
+// distinguish a daemon that engaged its graceful-shutdown hook from one that
+// silently ignored SIGTERM and was forcibly reaped.
+func TestAwaitSDNotifyStopping_ReturnsOnStoppingDatagram(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: uses a real Unix datagram socket")
+	}
+
+	socketPath := expectedSocketPath("test-stopping")
+	_ = os.Remove(socketPath)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan struct{})
+
+	go func() {
+		awaitSDNotifyStopping(ctx, "test-stopping")
+
+		close(done)
+	}()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(socketPath); err == nil {
+			break
+		}
+
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	conn, err := net.DialUnix("unixgram", nil, &net.UnixAddr{Name: socketPath, Net: "unixgram"})
+	if err != nil {
+		t.Fatalf("failed to dial observer socket %s: %v", socketPath, err)
+	}
+
+	defer func() { _ = conn.Close() }()
+
+	if _, err := conn.Write([]byte("STOPPING=1\n")); err != nil {
+		t.Fatalf("failed to send STOPPING=1: %v", err)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("observer did not return within 3s of receiving STOPPING=1")
+	}
+}
+
+// TestAwaitSDNotifyStopping_ReturnsOnContextCancel asserts the observer
+// exits when its parent context is cancelled, so a stop() call never leaks
+// the goroutine past its own lifetime.
+func TestAwaitSDNotifyStopping_ReturnsOnContextCancel(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: uses a real Unix datagram socket")
+	}
+
+	_ = os.Remove(expectedSocketPath("test-cancel-stopping"))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+
+	go func() {
+		awaitSDNotifyStopping(ctx, "test-cancel-stopping")
+
+		close(done)
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("observer did not return within 2s of ctx cancellation")
+	}
+}
+
+func TestStartWithSDNotify_CmdStartFails(t *testing.T) {
+	cmd := exec.Command("/nonexistent/binary/that/does/not/exist")
+	err := startWithSDNotify(context.Background(), cmd, "test-start-fail")
+	if err == nil {
+		t.Fatal("expected error when cmd.Start fails")
+	}
+}
+
+func TestSdNotifySocketPath_Format(t *testing.T) {
+	path := sdNotifySocketPath("myservice")
+	if !strings.Contains(path, "notify-myservice.sock") {
+		t.Errorf("expected socket path to contain 'notify-myservice.sock', got %s", path)
 	}
 }
