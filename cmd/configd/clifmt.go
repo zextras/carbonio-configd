@@ -8,10 +8,51 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
 )
+
+// Shared column widths for cliProgress + cliStatus. Picked so that
+// "Starting directory server" (25 chars) fits comfortably and "Running"/
+// "Stopped"/"Failed" all align identically across start/stop/status output.
+const (
+	colLabelWidth = 32
+	colStateWidth = 8
+)
+
+// visibleLen returns the display width of s, ignoring ANSI CSI sequences
+// (e.g. "\x1b[32m ... \x1b[0m"). Needed because Go's fmt '%-Ns' padding
+// counts bytes, so a colored string passes through padding unchanged.
+func visibleLen(s string) int {
+	n, inEsc := 0, false
+
+	for _, r := range s {
+		switch {
+		case r == '\x1b':
+			inEsc = true
+		case inEsc:
+			if r == 'm' {
+				inEsc = false
+			}
+		default:
+			n++
+		}
+	}
+
+	return n
+}
+
+// padRight appends spaces to s until its visible width reaches width.
+// No-op if s is already at or beyond width.
+func padRight(s string, width int) string {
+	if diff := width - visibleLen(s); diff > 0 {
+		return s + strings.Repeat(" ", diff)
+	}
+
+	return s
+}
 
 // isTTY returns true if the writer is an interactive terminal.
 func isTTY(w io.Writer) bool {
@@ -82,36 +123,93 @@ func initCLILogging() {
 	initCLIColors()
 }
 
-// cliProgress prints "Starting <name>..." and returns a function to print the result.
+// cliProgress prints the label column (action + name) and returns a
+// callback that fills the state + timing columns when the operation ends.
+// Output aligns with cliStatus on the state/detail columns so start/stop
+// rows line up with status rows.
 func cliProgress(action, name string) func(err error) {
-	fmt.Printf("\t%s %s...", action, name)
+	label := name
+	if action != "" {
+		label = action + " " + name
+	}
+
+	fmt.Printf("\t%s", padRight(label, colLabelWidth))
 
 	start := time.Now()
 
 	return func(err error) {
-		elapsed := time.Since(start)
-		timing := fmt.Sprintf(" %s(%s)%s", colorDim, formatDuration(elapsed), colorReset)
+		timing := fmt.Sprintf("(%s)", formatDuration(time.Since(start)))
 
 		if err != nil {
-			fmt.Printf("%sFailed.%s%s\n", colorRed, colorReset, timing)
-			fmt.Printf("\t\t%v\n", err)
-		} else {
-			fmt.Printf("%sDone.%s%s\n", colorGreen, colorReset, timing)
+			state := fmt.Sprintf("%sFailed%s", colorRed, colorReset)
+			fmt.Printf(" %s %s%s%s\n", padRight(state, colStateWidth), colorDim, timing, colorReset)
+			cliError(err)
+
+			return
 		}
+
+		state := fmt.Sprintf("%sDone%s", colorGreen, colorReset)
+		fmt.Printf(" %s %s%s%s\n", padRight(state, colStateWidth), colorDim, timing, colorReset)
 	}
 }
 
-// cliStatus prints a service status line with alignment and optional detail.
+// cliStatus prints a service status row with the same columns as cliProgress
+// (name in colLabelWidth, state in colStateWidth, optional dim detail).
 func cliStatus(name string, running bool, detail string) {
-	status := fmt.Sprintf("%sStopped%s", colorRed, colorReset)
+	state := fmt.Sprintf("%sStopped%s", colorRed, colorReset)
 	if running {
-		status = fmt.Sprintf("%sRunning%s", colorGreen, colorReset)
+		state = fmt.Sprintf("%sRunning%s", colorGreen, colorReset)
 	}
 
 	if detail != "" {
-		fmt.Printf("\t%-20s %-10s %s%s%s\n", name, status, colorDim, detail, colorReset)
-	} else {
-		fmt.Printf("\t%-20s %s\n", name, status)
+		fmt.Printf("\t%s %s %s%s%s\n",
+			padRight(name, colLabelWidth), padRight(state, colStateWidth),
+			colorDim, detail, colorReset)
+
+		return
+	}
+
+	fmt.Printf("\t%s %s\n", padRight(name, colLabelWidth), state)
+}
+
+// cliError prints a failure's details indented under the failing row.
+// Each line of the error message is emitted as a separate dim bullet so a
+// long multi-line systemctl error stays readable and visually scoped to
+// its row. The message is light-parsed to strip the Go wrapping prefixes
+// that are already redundant with the name column (e.g. "start service
+// stats: failed to start stats (carbonio-stats.service):") and the
+// trailing "exit status N" suffix that adds no operator-visible signal.
+func cliError(err error) {
+	if err == nil {
+		return
+	}
+
+	msg := err.Error()
+
+	for _, pfx := range []string{
+		"start service ",
+		"stop service ",
+		"failed to start ",
+		"failed to stop ",
+	} {
+		if strings.HasPrefix(msg, pfx) {
+			if idx := strings.Index(msg, ": "); idx != -1 {
+				msg = msg[idx+2:]
+			}
+		}
+	}
+
+	if idx := strings.LastIndex(msg, ": exit status "); idx != -1 {
+		msg = msg[:idx]
+	}
+
+	for raw := range strings.SplitSeq(msg, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+
+		fmt.Printf("\t   %s▸ %s%s\n", colorDim, line, colorReset)
 	}
 }
 

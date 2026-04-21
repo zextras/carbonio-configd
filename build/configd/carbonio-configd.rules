@@ -13,22 +13,22 @@
 //   denied (NO) on managed units so no other polkit rule can escalate them
 polkit.addRule(function(action, subject) {
     var allowedUnits = [
-        "carbonio-memcached.service",
-        "carbonio-policyd.service",
-        "carbonio-stats.service",
-        "carbonio-opendkim.service",
-        "carbonio-freshclam.service",
-        "carbonio-antivirus.service",
-        "carbonio-saslauthd.service",
-        "carbonio-milter.service",
-        "carbonio-mailthreat.service",
-        "carbonio-antivirus.service",
         "carbonio-antispam.service",
-        "carbonio-postfix.service",
-        "carbonio-nginx.service",
+        "carbonio-antivirus.service",
+        "carbonio-appserver-db.service",
         "carbonio-appserver.service",
-        "carbonio-openldap.service",
         "carbonio-configd.service",
+        "carbonio-freshclam.service",
+        "carbonio-mailthreat.service",
+        "carbonio-memcached.service",
+        "carbonio-milter.service",
+        "carbonio-nginx.service",
+        "carbonio-opendkim.service",
+        "carbonio-openldap.service",
+        "carbonio-policyd.service",
+        "carbonio-postfix.service",
+        "carbonio-saslauthd.service",
+        "carbonio-stats.service",
         "service-discover.service"
     ];
 
