@@ -276,9 +276,18 @@ var Registry = map[string]*ServiceDef{
 		ConfigRewrite: []string{"proxy"},
 	},
 	"mailbox": {
-		Name:          "mailbox",
-		DisplayName:   "mailbox",
-		SystemdUnits:  []string{"carbonio-appserver.service"},
+		Name:        "mailbox",
+		DisplayName: "mailbox",
+		// Units are listed in start order (DB first, JVM second). startService
+		// iterates forward; stopService iterates in reverse so the JVM is
+		// terminated before mariadb is shut down. Matches legacy zmstorectl's
+		// START_ORDER="mysql.server zmmailboxdctl" /
+		// STOP_ORDER="zmmailboxdctl mysql.server". carbonio-appserver.service
+		// already Wants=carbonio-appserver-db.service, so starting the JVM
+		// unit alone would pull in the DB — but Wants= is a start-time link
+		// only; without listing the DB here the stop path would leave
+		// mariadb running after `zmcontrol stop`.
+		SystemdUnits:  []string{"carbonio-appserver-db.service", "carbonio-appserver.service"},
 		ProcessName:   "com.zextras.mailbox.Mailbox",
 		ConfigRewrite: []string{"mailbox"},
 		CustomStart:   mailboxCustomStart,
