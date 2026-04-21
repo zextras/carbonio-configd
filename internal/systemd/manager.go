@@ -38,9 +38,7 @@ var (
 )
 
 // Manager provides an interface for interacting with systemd.
-type Manager struct {
-	// No fields needed for now, as we'll be calling external commands.
-}
+type Manager struct{}
 
 // Carbonio systemd targets used to determine if systemd is enabled
 var carbonioTargets = []string{
@@ -90,7 +88,10 @@ func (m *Manager) IsEnabled(ctx context.Context, unit string) bool {
 }
 
 // IsSystemdEnabled checks if Carbonio is running with systemd.
-// Returns true if at least one of the four Carbonio systemd targets is enabled.
+// Returns true if at least one of the five Carbonio systemd targets is enabled.
+// carbonio.target is deliberately excluded — it is a top-level umbrella target
+// that may be enabled on any install regardless of orchestration mode, so it
+// is not a reliable signal that services are managed via systemctl.
 // This matches the logic in carbonio-core-utils/src/bin/shutil.sh:is_systemd()
 func (m *Manager) IsSystemdEnabled(ctx context.Context) bool {
 	ctx = logger.ContextWithComponent(ctx, "systemd")

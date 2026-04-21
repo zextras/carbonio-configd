@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
@@ -17,7 +18,6 @@ import (
 
 const ldapServiceName = "ldap"
 
-// ControlCmd is the top-level control command.
 type ControlCmd struct {
 	Start    ControlStartCmd   `cmd:"" help:"Start all enabled services"`
 	Startup  ControlStartCmd   `cmd:"" help:"Start all enabled services"`
@@ -28,10 +28,8 @@ type ControlCmd struct {
 	Host     string            `name:"host" short:"H" help:"Execute command on remote host via SSH"`
 }
 
-// ControlStartCmd starts all enabled services.
 type ControlStartCmd struct{}
 
-// Run executes control start.
 func (c *ControlStartCmd) Run(parent *ControlCmd) error {
 	requireZextras()
 	initCLILogging()
@@ -49,10 +47,8 @@ func (c *ControlStartCmd) Run(parent *ControlCmd) error {
 	return nil
 }
 
-// ControlStopCmd stops all services.
 type ControlStopCmd struct{}
 
-// Run executes control stop.
 func (c *ControlStopCmd) Run(parent *ControlCmd) error {
 	requireZextras()
 	initCLILogging()
@@ -70,10 +66,8 @@ func (c *ControlStopCmd) Run(parent *ControlCmd) error {
 	return nil
 }
 
-// ControlRestartCmd restarts all services.
 type ControlRestartCmd struct{}
 
-// Run executes control restart.
 func (c *ControlRestartCmd) Run(parent *ControlCmd) error {
 	requireZextras()
 	initCLILogging()
@@ -97,10 +91,8 @@ func (c *ControlRestartCmd) Run(parent *ControlCmd) error {
 	return nil
 }
 
-// ControlStatusCmd shows status of all enabled services.
 type ControlStatusCmd struct{}
 
-// Run executes control status.
 func (c *ControlStatusCmd) Run(parent *ControlCmd) error {
 	requireZextras()
 	initCLILogging()
@@ -108,11 +100,7 @@ func (c *ControlStatusCmd) Run(parent *ControlCmd) error {
 	ctx := context.Background()
 
 	if parent.Host != "" {
-		requireZextras()
-		// For remote status, query each service and display results
-		// This is a simplified version - full implementation would enumerate services
 		_, err := services.RemoteHostStatus(ctx, parent.Host, "all")
-
 		return err
 	}
 
@@ -121,12 +109,10 @@ func (c *ControlStatusCmd) Run(parent *ControlCmd) error {
 	return nil
 }
 
-// VersionCmd shows Carbonio release and package versions.
 type VersionCmd struct {
 	Packages bool `name:"packages" short:"V" help:"Show installed package versions"`
 }
 
-// Run executes the version-info command.
 func (c *VersionCmd) Run() error {
 	initCLILogging()
 
@@ -199,7 +185,6 @@ func controlStart(ctx context.Context) int {
 	return startEnabledServices(ctx, enabledSet, threshold)
 }
 
-// startBootstrapServices starts LDAP (if local) and configd before all other services.
 func startBootstrapServices(ctx context.Context) error {
 	if services.IsLDAPLocal() {
 		running, _ := services.ServiceStatus(ctx, ldapServiceName)
@@ -231,7 +216,6 @@ func startBootstrapServices(ctx context.Context) error {
 	return nil
 }
 
-// startEnabledServices starts all LDAP-enabled (and custom-enabled) services in order.
 func startEnabledServices(ctx context.Context, enabledSet map[string]bool, threshold int) int {
 	rc := 0
 
@@ -350,33 +334,54 @@ func stopLDAPIfLocal(ctx context.Context, enabledSet map[string]bool) int {
 // a row is only counted against the exit code if the service is actually
 // LDAP-enabled — so an unconfigured host doesn't get rc=1 just because clamd
 // is not started.
-func controlStatus(ctx context.Context) int {
+func controlStatus(ctx context.Context) int { //nolint:unparam
 	cliHeader()
 
-	// Optional LDAP discovery — used only to decide which services SHOULD be
-	// running for the exit-code judgment, not to filter the displayed list.
-	enabledList, err := services.DiscoverEnabledServices(ctx)
+	_ = os.Stdout.Sync()
 
-	var enabledSet map[string]bool
-	if err == nil {
-		enabledSet = make(map[string]bool, len(enabledList))
-		for _, s := range enabledList {
-			mapped := services.MapLDAPServiceToRegistry(s)
-			enabledSet[mapped] = true
-		}
+	type discResult struct {
+		set map[string]bool
 	}
+
+	discCh := make(chan discResult, 1)
+
+	go func() {
+		list, err := services.DiscoverEnabledServices(ctx)
+		if err != nil {
+			discCh <- discResult{set: nil}
+			return
+		}
+
+		s := make(map[string]bool, len(list))
+		for _, n := range list {
+			s[services.MapLDAPServiceToRegistry(n)] = true
+		}
+
+		discCh <- discResult{set: s}
+	}()
+
+	type svcRow struct {
+		services.ServiceInfo
+		detail string
+	}
+
+	var rows []svcRow
+
+	for info := range services.ServiceListStatusStream(ctx) {
+		detail := getServiceDetail(ctx, info.Name, info.Running)
+		cliStatus(info.DisplayName, info.Running, detail)
+		rows = append(rows, svcRow{ServiceInfo: info, detail: detail})
+	}
+
+	_ = os.Stdout.Sync()
+
+	disc := <-discCh
 
 	allRunning := true
 
-	for _, info := range services.ServiceListStatus(ctx) {
-		detail := getServiceDetail(ctx, info.Name, info.Running)
-		cliStatus(info.DisplayName, info.Running, detail)
-
-		// Only fail the exit code if an enabled service is down. If LDAP
-		// discovery failed (enabledSet == nil), fall back to legacy "any
-		// stopped service is a failure" behavior.
-		if !info.Running {
-			if enabledSet == nil || enabledSet[info.Name] {
+	for _, r := range rows {
+		if !r.Running {
+			if disc.set == nil || disc.set[r.Name] {
 				allRunning = false
 			}
 		}
@@ -391,14 +396,35 @@ func controlStatus(ctx context.Context) int {
 	return 0
 }
 
-// getServiceDetail returns a short detail string for running services (pid, uptime).
+// getServiceDetail returns a short detail string for running services
+// (pid, uptime). Bifurcates on IsSystemdMode() to match the orchestration
+// layer: in strict systemd mode the authoritative source is systemctl show;
+// in legacy mode those values are stale/empty (systemd only sees the units
+// if the container bootstrap once touched them, and MainPID stays 0 because
+// it never tracked the real processes), so we read PID from the same probes
+// used by ServiceStatus and start time from /proc/<pid>'s mtime.
 func getServiceDetail(ctx context.Context, name string, running bool) string {
 	if !running {
 		return ""
 	}
 
 	def := services.LookupService(name)
-	if def == nil || len(def.SystemdUnits) == 0 {
+	if def == nil {
+		return ""
+	}
+
+	if services.IsSystemdMode() {
+		return serviceDetailFromSystemd(ctx, def)
+	}
+
+	return serviceDetailFromProc(def)
+}
+
+// serviceDetailFromSystemd reads MainPID and ActiveEnterTimestamp from
+// systemctl show. Correct only when strict systemd mode is active — that's
+// the mode in which every start/stop actually went through systemd.
+func serviceDetailFromSystemd(ctx context.Context, def *services.ServiceDef) string {
+	if len(def.SystemdUnits) == 0 {
 		return ""
 	}
 
@@ -434,7 +460,27 @@ func getServiceDetail(ctx context.Context, name string, running bool) string {
 	return "(" + strings.Join(parts, ", ") + ")"
 }
 
-// checkAdvancedStatus checks if Carbonio Advanced modules are installed and running.
+// serviceDetailFromProc reads PID and start time from /proc directly, so
+// legacy-mode status reflects the process configd actually spawned rather
+// than whatever systemd last remembered before we bypassed it. The PID
+// comes from services.RunningPID (same precedence as ServiceStatus) and
+// the "since" timestamp is /proc/<pid>'s mtime, which on Linux is set at
+// proc-entry creation (close enough to process start for display).
+func serviceDetailFromProc(def *services.ServiceDef) string {
+	pid := services.RunningPID(def)
+	if pid == 0 {
+		return ""
+	}
+
+	parts := []string{fmt.Sprintf("pid %d", pid)}
+
+	if info, err := os.Stat("/proc/" + strconv.Itoa(pid)); err == nil {
+		parts = append(parts, "since "+info.ModTime().UTC().Format("Mon 2006-01-02 15:04:05 MST"))
+	}
+
+	return "(" + strings.Join(parts, ", ") + ")"
+}
+
 func checkAdvancedStatus(ctx context.Context) {
 	matches, _ := os.ReadDir("/opt/zextras/lib/ext/carbonio")
 	hasAdvanced := false

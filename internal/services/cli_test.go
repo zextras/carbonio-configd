@@ -10,6 +10,9 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -409,5 +412,414 @@ func TestRewriteViaConfigd_ErrorFromListener(t *testing.T) {
 
 	if !strings.Contains(err.Error(), "configd returned error") {
 		t.Errorf("error = %q, want containing %q", err.Error(), "configd returned error")
+	}
+}
+
+func TestRunningPID_NilDef(t *testing.T) {
+	if RunningPID(nil) != 0 {
+		t.Error("expected 0 for nil def")
+	}
+}
+
+func TestRunningPID_EmptyPidFile(t *testing.T) {
+	def := &ServiceDef{Name: "test", PidFile: "", ProcessName: ""}
+	if RunningPID(def) != 0 {
+		t.Error("expected 0 for empty PidFile and ProcessName")
+	}
+}
+
+func TestRunningPID_ValidPidFile(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: may read real proc")
+	}
+	self := os.Getpid()
+	tmpDir := t.TempDir()
+	pidFile := filepath.Join(tmpDir, "test.pid")
+	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(self)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	def := &ServiceDef{
+		Name:        "test",
+		PidFile:     pidFile,
+		ProcessName: "nonexistent-process-xyz",
+	}
+	pid := RunningPID(def)
+	if pid != self {
+		t.Errorf("expected PID %d, got %d", self, pid)
+	}
+}
+
+func TestRunningPID_PidFileDeadFallsBackToProcessName(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: reads /proc")
+	}
+	tmpDir := t.TempDir()
+	pidFile := filepath.Join(tmpDir, "dead.pid")
+	if err := os.WriteFile(pidFile, []byte("99999999\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	def := &ServiceDef{
+		Name:        "test",
+		PidFile:     pidFile,
+		ProcessName: "nonexistent-process-xyz-test",
+	}
+	pid := RunningPID(def)
+	if pid != 0 {
+		t.Errorf("expected 0 for dead pidfile and nonexistent process, got %d", pid)
+	}
+}
+
+func TestPidFromPidFile_EmptyPath(t *testing.T) {
+	if pidFromPidFile("") != 0 {
+		t.Error("expected 0 for empty path")
+	}
+}
+
+func TestPidFromPidFile_NonexistentFile(t *testing.T) {
+	if pidFromPidFile("/nonexistent/path/test.pid") != 0 {
+		t.Error("expected 0 for nonexistent file")
+	}
+}
+
+func TestPidFromPidFile_ValidPid(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: reads /proc")
+	}
+	self := os.Getpid()
+	tmpDir := t.TempDir()
+	pidFile := filepath.Join(tmpDir, "test.pid")
+	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(self)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	pid := pidFromPidFile(pidFile)
+	if pid != self {
+		t.Errorf("expected %d, got %d", self, pid)
+	}
+}
+
+func TestPidFromProcessName_EmptyName(t *testing.T) {
+	if pidFromProcessName("") != 0 {
+		t.Error("expected 0 for empty process name")
+	}
+}
+
+func TestPidFromProcessName_Nonexistent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: reads /proc")
+	}
+	pid := pidFromProcessName("nonexistent-process-xyz-12345")
+	if pid != 0 {
+		t.Errorf("expected 0 for nonexistent process, got %d", pid)
+	}
+}
+
+func TestServiceListStatusStream_Cancelled(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: may invoke real system commands")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	ch := ServiceListStatusStream(ctx)
+	count := 0
+	for range ch {
+		count++
+	}
+	_ = count
+}
+
+func TestServiceListStatusStream_Default(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: may invoke real system commands")
+	}
+	ctx := context.Background()
+	ch := ServiceListStatusStream(ctx)
+
+	entries := 0
+	for info := range ch {
+		if info.Name == "" {
+			t.Error("expected non-empty Name in ServiceInfo")
+		}
+		entries++
+	}
+
+	if entries != len(Registry) {
+		t.Errorf("expected %d entries, got %d", len(Registry), entries)
+	}
+}
+
+func TestDefaultIsSystemdMode(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: may invoke real system commands")
+	}
+	_ = defaultIsSystemdMode()
+}
+
+func TestIsSystemdMode_Override(t *testing.T) {
+	orig := isSystemdModeFn
+	defer func() { isSystemdModeFn = orig }()
+
+	isSystemdModeFn = func() bool { return true }
+	if !IsSystemdMode() {
+		t.Error("expected IsSystemdMode to return true when override is true")
+	}
+
+	isSystemdModeFn = func() bool { return false }
+	if IsSystemdMode() {
+		t.Error("expected IsSystemdMode to return false when override is false")
+	}
+}
+
+func TestServiceStatus_SystemdModeOverride(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: may invoke real system commands")
+	}
+	orig := isSystemdModeFn
+	defer func() { isSystemdModeFn = orig }()
+
+	isSystemdModeFn = func() bool { return false }
+
+	def := &ServiceDef{
+		Name:        "test-legacy-status",
+		ProcessName: "nonexistent-process-xyz",
+	}
+	Registry["test-legacy-status"] = def
+	defer delete(Registry, "test-legacy-status")
+
+	running, err := ServiceStatus(context.Background(), "test-legacy-status")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if running {
+		t.Error("expected running=false for nonexistent process in legacy mode")
+	}
+}
+
+func TestNoRewrite_SkipConfigRewrite(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: may invoke real system commands")
+	}
+	origNoRewrite := NoRewrite
+	defer func() { NoRewrite = origNoRewrite }()
+
+	orig := isSystemdModeFn
+	defer func() { isSystemdModeFn = orig }()
+
+	isSystemdModeFn = func() bool { return false }
+	NoRewrite = true
+
+	def := &ServiceDef{
+		Name:          "test-norewrite",
+		ConfigRewrite: []string{"proxy", "mta"},
+	}
+	Registry["test-norewrite"] = def
+	defer delete(Registry, "test-norewrite")
+
+	err := ServiceStart(context.Background(), "test-norewrite")
+	if err == nil {
+		t.Error("expected error for service with no launcher")
+	}
+}
+
+func TestServiceReload_FallbackOnNonSystemd(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: may invoke real system commands")
+	}
+	orig := isSystemdModeFn
+	defer func() { isSystemdModeFn = orig }()
+
+	isSystemdModeFn = func() bool { return false }
+
+	err := ServiceReload(context.Background(), "proxy")
+	_ = err
+}
+
+func TestServiceStatus_LegacyMode_PidFile(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: may invoke real system commands")
+	}
+	orig := isSystemdModeFn
+	defer func() { isSystemdModeFn = orig }()
+
+	isSystemdModeFn = func() bool { return false }
+
+	self := os.Getpid()
+	tmpDir := t.TempDir()
+	pidFile := filepath.Join(tmpDir, "test.pid")
+	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(self)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	def := &ServiceDef{
+		Name:        "test-pid-status",
+		PidFile:     pidFile,
+		ProcessName: "nonexistent-pid-status-xyz",
+	}
+	Registry["test-pid-status"] = def
+	defer delete(Registry, "test-pid-status")
+
+	running, err := ServiceStatus(context.Background(), "test-pid-status")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if !running {
+		t.Error("expected running=true for service pointing to our own PID")
+	}
+}
+
+func TestServiceStatus_LegacyMode_ProcessName(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: may invoke real system commands")
+	}
+	orig := isSystemdModeFn
+	defer func() { isSystemdModeFn = orig }()
+
+	isSystemdModeFn = func() bool { return false }
+
+	def := &ServiceDef{
+		Name:        "test-proc-scan",
+		ProcessName: "nonexistent-proc-scan-xyz",
+	}
+	Registry["test-proc-scan"] = def
+	defer delete(Registry, "test-proc-scan")
+
+	running, err := ServiceStatus(context.Background(), "test-proc-scan")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if running {
+		t.Error("expected running=false for nonexistent process")
+	}
+}
+
+func TestServiceStatus_LegacyMode_NoPidFileNoProcessName(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: may invoke real system commands")
+	}
+	orig := isSystemdModeFn
+	defer func() { isSystemdModeFn = orig }()
+
+	isSystemdModeFn = func() bool { return false }
+
+	def := &ServiceDef{
+		Name: "test-no-pid-no-proc",
+	}
+	Registry["test-no-pid-no-proc"] = def
+	defer delete(Registry, "test-no-pid-no-proc")
+
+	running, err := ServiceStatus(context.Background(), "test-no-pid-no-proc")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if running {
+		t.Error("expected running=false for service with no PidFile and no ProcessName")
+	}
+}
+
+func TestStartEnabledDependencies_DisabledDep(t *testing.T) {
+	def := &ServiceDef{
+		Name:         "test-with-disabled-dep",
+		Dependencies: []string{"nonexistent-service-xyz"},
+	}
+
+	err := startEnabledDependencies(context.Background(), "test-with-disabled-dep", def)
+	if err != nil {
+		t.Errorf("startEnabledDependencies with disabled dep should not error, got %v", err)
+	}
+}
+
+func TestRunPreStartHooks_Nil(t *testing.T) {
+	sm := NewServiceManager()
+	def := &ServiceDef{Name: "test", PreStart: nil}
+	err := runPreStartHooks(context.Background(), "test", sm, def)
+	if err != nil {
+		t.Errorf("expected nil for no hooks, got %v", err)
+	}
+}
+
+func TestRunPostStartHooks_Nil(t *testing.T) {
+	def := &ServiceDef{Name: "test", PostStart: nil}
+	runPostStartHooks(context.Background(), "test", nil, def)
+}
+
+func TestRewriteConfigs_NoScript(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: may invoke real system commands")
+	}
+	oldBase := basePath
+	basePath = "/nonexistent/path/for/test"
+	defer func() { basePath = oldBase }()
+
+	def := &ServiceDef{
+		Name:          "test-rewrite-no-script",
+		ConfigRewrite: []string{"proxy"},
+	}
+	rewriteConfigs(context.Background(), def)
+}
+
+func TestServiceStart_AlreadyRunningPid(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: may invoke real system commands")
+	}
+	orig := isSystemdModeFn
+	defer func() { isSystemdModeFn = orig }()
+	isSystemdModeFn = func() bool { return false }
+
+	// Register a service that's "running" (our own PID in pidfile)
+	tmp := t.TempDir()
+	self := os.Getpid()
+	pidFile := filepath.Join(tmp, "test.pid")
+	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(self)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	def := &ServiceDef{
+		Name:        "test-already-running",
+		PidFile:     pidFile,
+		ProcessName: "nonexistent-already-running-xyz",
+	}
+	Registry["test-already-running"] = def
+	defer delete(Registry, "test-already-running")
+
+	err := ServiceStart(context.Background(), "test-already-running")
+	if err != nil {
+		t.Errorf("expected nil when service already running, got %v", err)
+	}
+}
+
+func TestServiceRestart_UnknownSvc(t *testing.T) {
+	err := ServiceRestart(context.Background(), "nonexistent-service-xyz")
+	if err == nil {
+		t.Error("expected error for unknown service")
+	}
+}
+
+func TestStartEnabledDependencies_FailsToStart(t *testing.T) {
+	orig := isSystemdModeFn
+	defer func() { isSystemdModeFn = orig }()
+	isSystemdModeFn = func() bool { return false }
+
+	depDef := &ServiceDef{
+		Name:        "test-dep-fail",
+		ProcessName: "nonexistent-dep-fail-xyz",
+		BinaryPath:  "/nonexistent/binary",
+	}
+	Registry["test-dep-fail"] = depDef
+	defer delete(Registry, "test-dep-fail")
+
+	parentDef := &ServiceDef{
+		Name:         "test-parent-dep",
+		Dependencies: []string{"test-dep-fail"},
+		BinaryPath:   "/nonexistent/binary",
+	}
+	Registry["test-parent-dep"] = parentDef
+	defer delete(Registry, "test-parent-dep")
+
+	err := startEnabledDependencies(context.Background(), "test-parent-dep", parentDef)
+	if err == nil {
+		t.Error("expected error when dependency fails to start")
 	}
 }

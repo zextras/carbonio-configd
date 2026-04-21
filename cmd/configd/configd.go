@@ -8,7 +8,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/alecthomas/kong"
@@ -20,7 +22,6 @@ import (
 	"github.com/zextras/carbonio-configd/internal/state"
 )
 
-// configureLogFormat configures the log format from environment variable.
 const ipModeIPv4 = "ipv4"
 
 func configureLogFormat(logConfig *logger.Config) {
@@ -37,7 +38,6 @@ func configureLogFormat(logConfig *logger.Config) {
 	}
 }
 
-// configureLogLevel configures the log level from environment variable.
 func configureLogLevel(logConfig *logger.Config) {
 	logLevel := os.Getenv("CONFIGD_LOG_LEVEL")
 	switch logLevel {
@@ -63,7 +63,6 @@ func requireZextras() {
 	}
 }
 
-// initializeLogging initializes structured logging.
 func initializeLogging() context.Context {
 	logConfig := logger.DefaultConfig()
 	configureLogFormat(logConfig)
@@ -73,7 +72,6 @@ func initializeLogging() context.Context {
 	return logger.NewCorrelationID(context.Background())
 }
 
-// initializeConfig initializes configuration objects, state, and LDAP client.
 func initializeConfig() (*config.Config, *state.State, *ldap.Ldap) {
 	mainCfg, err := config.NewConfig()
 	if err != nil {
@@ -88,7 +86,7 @@ func initializeConfig() (*config.Config, *state.State, *ldap.Ldap) {
 
 	// Load initial local config to get listen port and IP mode for contact_service
 	appState.LocalConfig.Data["zmconfigd_listen_port"] = "7171"
-	appState.LocalConfig.Data["zimbraIPMode"] = ipModeIPv4 // Default
+	appState.LocalConfig.Data["zimbraIPMode"] = ipModeIPv4
 
 	return mainCfg, appState, ldapClient
 }
@@ -132,7 +130,6 @@ func setupProfilingAndTracing(ctx context.Context, args *Args) (*ProfilingConfig
 
 	var tracingConfig *TracingConfig
 
-	// Setup profiling if requested
 	if args.CPUProfile != "" || args.MemProfile != "" || args.Trace != "" {
 		profilingConfig = &ProfilingConfig{
 			CPUProfilePath:  args.CPUProfile,
@@ -152,7 +149,6 @@ func setupProfilingAndTracing(ctx context.Context, args *Args) (*ProfilingConfig
 		}
 	}
 
-	// Setup tracing if requested
 	if args.EnableTracing {
 		tracingConfig = &TracingConfig{
 			OutputPath: args.TracingOutput,
@@ -174,7 +170,58 @@ func setupProfilingAndTracing(ctx context.Context, args *Args) (*ProfilingConfig
 	return profilingConfig, tracingConfig
 }
 
+// ensureZextrasPerlEnv injects PERLLIB / PERL5LIB into the process env when
+// unset so that child processes we spawn (amavisd, zmstat-* perl workers,
+// antispam-mysql.server, and any other perl-based tool) can locate Carbonio's
+// bundled CPAN modules under /opt/zextras/common/lib/perl5. The zextras
+// user's .bashrc sets these vars for interactive shells; daemons invoked by
+// systemd (or by configd itself) do not source .bashrc, so without this
+// amavisd fails with "Can't locate Amavis/Boot.pm in @INC".
+//
+// Existing values are preserved so operators can override for debugging.
+func ensureZextrasPerlEnv() {
+	if _, ok := os.LookupEnv("PERL5LIB"); ok {
+		return
+	}
+
+	archname := perlArchname()
+	if archname == "" {
+		return
+	}
+
+	base := "/opt/zextras/common/lib/perl5"
+	lib := base + "/" + archname + ":" + base
+
+	_ = os.Setenv("PERLLIB", lib)
+	_ = os.Setenv("PERL5LIB", lib)
+}
+
+// perlArchname asks the system perl for its architecture tag
+// (e.g. "x86_64-linux-thread-multi" or "aarch64-linux-thread-multi"). Returns
+// empty string when perl is missing or the output cannot be parsed; callers
+// treat that as "skip env setup".
+func perlArchname() string {
+	//nolint:noctx,gosec // fixed binary path, runs once at startup
+	out, err := exec.Command("/usr/bin/perl", "-V:archname").Output()
+	if err != nil {
+		return ""
+	}
+
+	s := strings.TrimSpace(string(out))
+
+	start := strings.IndexByte(s, '\'')
+
+	end := strings.LastIndexByte(s, '\'')
+	if start < 0 || end <= start {
+		return ""
+	}
+
+	return s[start+1 : end]
+}
+
 func main() {
+	ensureZextrasPerlEnv()
+
 	cli := &CLI{}
 
 	parser, err := kong.New(cli,

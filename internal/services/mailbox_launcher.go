@@ -15,9 +15,21 @@ import (
 	"github.com/zextras/carbonio-configd/internal/logger"
 )
 
-// mailboxCustomStart builds and executes the Java command for zmmailboxd.
-// Mirrors the logic in carbonio-appserver.service + legacy zmmailboxdctl.
+// mailboxCustomStart starts the appserver mariadb and then the mailboxd JVM,
+// in that order. Matches legacy zmstorectl START_ORDER="mysql.server
+// zmmailboxdctl". The DB is not a separate registered service — keeping
+// `zmcontrol status` aligned with the legacy %allservices list — so its
+// lifecycle is stitched in here.
 func mailboxCustomStart(ctx context.Context, def *ServiceDef) error {
+	if err := startAppserverDB(ctx); err != nil {
+		// Match legacy zmstorectl: log the DB failure but proceed with
+		// mailboxd start. The daemon reconnects on its own once the DB
+		// recovers, and blocking the JVM on an intermittent DB failure
+		// would be a bigger outage than degraded operation.
+		logger.WarnContext(ctx, "Appserver DB failed to start; continuing with mailbox",
+			"error", err)
+	}
+
 	lc, err := loadConfig()
 	if err != nil {
 		return fmt.Errorf("failed to load localconfig: %w", err)
@@ -33,11 +45,6 @@ func mailboxCustomStart(ctx context.Context, def *ServiceDef) error {
 	if err := os.MkdirAll(mailboxdPath+"/work/service/jsp", 0o755); err != nil {
 		logger.WarnContext(ctx, "Failed to create mailbox work directory",
 			"path", mailboxdPath+"/work/service/jsp", "error", err)
-	}
-
-	if err := os.MkdirAll(mailboxdPath+"/work", 0o755); err != nil {
-		logger.WarnContext(ctx, "Failed to create mailbox work directory",
-			"path", mailboxdPath+"/work", "error", err)
 	}
 
 	logFile := logPath + "/zmmailboxd.out"
@@ -67,6 +74,31 @@ func mailboxCustomStart(ctx context.Context, def *ServiceDef) error {
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start mailbox: %w", err)
+	}
+
+	return nil
+}
+
+// mailboxCustomStop terminates mailboxd and then the appserver mariadb in
+// that order. Matches legacy zmstorectl STOP_ORDER="zmmailboxdctl
+// mysql.server": the JVM exits first so in-flight writes are flushed by the
+// application, then stopAppserverDB runs the InnoDB dirty-page flush and
+// shuts mariadb down cleanly. DB errors are logged but do not fail the stop
+// so `zmcontrol stop` still makes forward progress on the rest of the
+// shutdown sequence.
+func mailboxCustomStop(ctx context.Context, def *ServiceDef) error {
+	if def.ProcessName != "" {
+		if err := killProcess(ctx, def.ProcessName); err != nil {
+			logger.WarnContext(ctx, "Failed to signal mailbox JVM; proceeding to DB stop",
+				"error", err)
+		}
+	}
+
+	if err := stopAppserverDB(ctx); err != nil {
+		logger.WarnContext(ctx, "Failed to stop appserver DB",
+			"error", err)
+
+		return err
 	}
 
 	return nil

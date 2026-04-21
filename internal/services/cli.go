@@ -32,6 +32,19 @@ var (
 	systemdModeOnce sync.Once
 )
 
+// isSystemdModeFn is the mode detector. Exposed as a variable so tests can
+// force strict-systemd or pure-legacy behavior without manipulating the host.
+var isSystemdModeFn = defaultIsSystemdMode
+
+func defaultIsSystemdMode() bool {
+	systemdModeOnce.Do(func() {
+		mgr := systemd.NewManager()
+		systemdMode = mgr.IsSystemdEnabled(context.Background())
+	})
+
+	return systemdMode
+}
+
 // ErrSystemdNotBooted is returned by Systemctl when /run/systemd/system is
 // missing — i.e. the host did not boot with systemd as PID 1.
 var ErrSystemdNotBooted = fmt.Errorf("systemd is not the init system on this host")
@@ -43,16 +56,19 @@ type ServiceInfo struct {
 	Running     bool
 }
 
-// IsSystemdMode returns true if any Carbonio systemd target is enabled.
-// When true, services are managed exclusively via systemctl (with polkit).
-// When false, services are managed via direct binary execution (legacy mode).
+// IsSystemdMode returns true if any Carbonio systemd role target is enabled.
+// This is the single orchestration-mode gate — the two modes are mutually
+// exclusive:
+//
+//   - true  → strict systemd: every start/stop/status goes through systemctl;
+//     no direct binary spawn, no pkill fallback.
+//   - false → pure legacy: direct binary execution, PID/ProcessName probes;
+//     systemctl is not invoked at all.
+//
+// Callers must NOT gate on systemd.IsBooted() — the init system being systemd
+// does not imply Carbonio is managed by it. Only target enablement does.
 func IsSystemdMode() bool {
-	systemdModeOnce.Do(func() {
-		mgr := systemd.NewManager()
-		systemdMode = mgr.IsSystemdEnabled(context.Background())
-	})
-
-	return systemdMode
+	return isSystemdModeFn()
 }
 
 // ServiceStart starts a service by name, handling dependencies, config rewrite, and hooks.
@@ -81,7 +97,6 @@ func ServiceStart(ctx context.Context, name string) error {
 		return err
 	}
 
-	// Rewrite configs before start (unless --no-rewrite)
 	if !NoRewrite && len(def.ConfigRewrite) > 0 {
 		rewriteConfigs(ctx, def)
 	}
@@ -101,7 +116,6 @@ func ServiceStart(ctx context.Context, name string) error {
 	return nil
 }
 
-// startEnabledDependencies starts all enabled dependencies of the service in order.
 func startEnabledDependencies(ctx context.Context, name string, def *ServiceDef) error {
 	for _, dep := range def.Dependencies {
 		if !isDepEnabled(ctx, dep) {
@@ -120,7 +134,6 @@ func startEnabledDependencies(ctx context.Context, name string, def *ServiceDef)
 	return nil
 }
 
-// runPreStartHooks executes each pre-start hook and returns the first error encountered.
 func runPreStartHooks(ctx context.Context, name string, sm *ServiceManager, def *ServiceDef) error {
 	for _, hook := range def.PreStart {
 		if err := hook(ctx, sm); err != nil {
@@ -131,7 +144,6 @@ func runPreStartHooks(ctx context.Context, name string, sm *ServiceManager, def 
 	return nil
 }
 
-// runPostStartHooks executes each post-start hook, logging but not returning errors.
 func runPostStartHooks(ctx context.Context, name string, sm *ServiceManager, def *ServiceDef) {
 	for _, hook := range def.PostStart {
 		if err := hook(ctx, sm); err != nil {
@@ -149,7 +161,6 @@ func ServiceStop(ctx context.Context, name string) error {
 		return fmt.Errorf(errUnknownService, name)
 	}
 
-	// Run pre-stop hooks
 	sm := newCLIServiceManager()
 
 	for _, hook := range def.PreStop {
@@ -163,7 +174,6 @@ func ServiceStop(ctx context.Context, name string) error {
 		return fmt.Errorf("stop service %s: %w", name, err)
 	}
 
-	// Stop dependencies in reverse order
 	for i := len(def.Dependencies) - 1; i >= 0; i-- {
 		dep := def.Dependencies[i]
 
@@ -232,18 +242,27 @@ func ServiceReload(ctx context.Context, name string) error {
 	return nil
 }
 
-// ServiceStatus returns whether a service is running.
+// ServiceStatus returns whether a service is running. Bifurcated on
+// IsSystemdMode(); the two paths never mix:
+//
+//   - strict systemd: trust systemctl is-active for each unit. No PID scan.
+//   - legacy: PID file first, then ProcessName /proc scan. Never systemctl.
+//
+// The legacy path covers the container case that motivated this design
+// (podman without carbonio targets enabled): services like stats are spawned
+// directly by statsCustomStart into /init.scope, so their systemd unit is
+// inactive even while the workers are live. In legacy mode we never ask
+// systemctl, so ServiceStatus reports the true state and controlStop can
+// invoke statsCustomStop to actually terminate the workers.
 func ServiceStatus(ctx context.Context, name string) (bool, error) {
 	def := LookupService(name)
 	if def == nil {
 		return false, fmt.Errorf(errUnknownService, name)
 	}
 
-	// Systemd mode: use systemctl exclusively — PID files are managed by
-	// systemd and we should not second-guess its state tracking.
-	if systemd.IsBooted() {
+	if IsSystemdMode() {
 		for _, unit := range def.SystemdUnits {
-			if checkErr := Systemctl(ctx, "is-active", unit); checkErr != nil {
+			if err := Systemctl(ctx, "is-active", unit); err != nil {
 				return false, nil //nolint:nilerr // not-active is not an error
 			}
 		}
@@ -251,7 +270,6 @@ func ServiceStatus(ctx context.Context, name string) (bool, error) {
 		return true, nil
 	}
 
-	// Legacy mode (non-systemd): prefer PID file, then /proc scan fallback.
 	// PidFile may be unreadable (e.g. postfix master.pid is root:root 0600)
 	// so we fall through to ProcessName scan on read failure.
 	if def.PidFile != "" {
@@ -267,26 +285,115 @@ func ServiceStatus(ctx context.Context, name string) (bool, error) {
 	return false, nil
 }
 
+// RunningPID returns the primary PID of a running service, or 0 when the
+// service is not running or its PID cannot be determined. Resolution order
+// mirrors the legacy-mode branch of ServiceStatus (PidFile → ProcessName),
+// so callers that format status detail (pid/since) from /proc see the same
+// process that ServiceStatus reports as running.
+func RunningPID(def *ServiceDef) int {
+	if def == nil {
+		return 0
+	}
+
+	if pid := pidFromPidFile(def.PidFile); pid > 0 {
+		return pid
+	}
+
+	return pidFromProcessName(def.ProcessName)
+}
+
+// pidFromPidFile reads a pidfile and returns the PID when that PID points to
+// a live (non-zombie) process. Returns 0 for any failure (unreadable,
+// corrupt, or process gone).
+func pidFromPidFile(pidFile string) int {
+	if pidFile == "" {
+		return 0
+	}
+
+	data, err := os.ReadFile(pidFile) //nolint:gosec // path is from internal registry
+	if err != nil {
+		return 0
+	}
+
+	pidStr, _, _ := strings.Cut(strings.TrimSpace(string(data)), "\n")
+
+	pid, err := strconv.Atoi(strings.TrimSpace(pidStr))
+	if err != nil || pid <= 0 {
+		return 0
+	}
+
+	if !processAlive(pid) {
+		return 0
+	}
+
+	return pid
+}
+
+// pidFromProcessName scans /proc for the first cmdline match that isn't the
+// current process or its parent. Empty processName short-circuits to 0.
+func pidFromProcessName(processName string) int {
+	if processName == "" {
+		return 0
+	}
+
+	pids, err := scanProcessesByCmdline(processName)
+	if err != nil {
+		return 0
+	}
+
+	self := os.Getpid()
+	parent := os.Getppid()
+
+	for _, p := range pids {
+		if p != self && p != parent {
+			return p
+		}
+	}
+
+	return 0
+}
+
+// ServiceListStatusStream emits ServiceInfo entries on the returned channel
+// as each service's probe completes, allowing callers to render rows
+// incrementally without waiting for the full scan to finish. The channel is
+// closed when all services have been probed.
+func ServiceListStatusStream(ctx context.Context) <-chan ServiceInfo {
+	names := AllServiceNames()
+	ch := make(chan ServiceInfo, len(names))
+
+	go func() {
+		defer close(ch)
+
+		for _, name := range names {
+			def := LookupService(name)
+			running, _ := ServiceStatus(ctx, name)
+
+			select {
+			case ch <- ServiceInfo{
+				Name:        name,
+				DisplayName: def.DisplayName,
+				Running:     running,
+			}:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	return ch
+}
+
 // ServiceListStatus returns all services with their running status.
 func ServiceListStatus(ctx context.Context) []ServiceInfo {
-	names := AllServiceNames()
-	result := make([]ServiceInfo, 0, len(names))
+	result := make([]ServiceInfo, 0, len(Registry))
 
-	for _, name := range names {
-		def := LookupService(name)
-		running, _ := ServiceStatus(ctx, name)
-
-		result = append(result, ServiceInfo{
-			Name:        name,
-			DisplayName: def.DisplayName,
-			Running:     running,
-		})
+	for info := range ServiceListStatusStream(ctx) {
+		result = append(result, info)
 	}
 
 	return result
 }
 
-// rewriteConfigs triggers config rewrite for the service's config names.
 func rewriteConfigs(ctx context.Context, def *ServiceDef) {
 	logger.InfoContext(ctx, "Rewriting configuration files", "service", def.Name, "configs", def.ConfigRewrite)
 

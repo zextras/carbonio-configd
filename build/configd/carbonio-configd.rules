@@ -18,7 +18,7 @@ polkit.addRule(function(action, subject) {
         "carbonio-stats.service",
         "carbonio-opendkim.service",
         "carbonio-freshclam.service",
-        "carbonio-clamd.service",
+        "carbonio-antivirus.service",
         "carbonio-saslauthd.service",
         "carbonio-milter.service",
         "carbonio-mailthreat.service",
