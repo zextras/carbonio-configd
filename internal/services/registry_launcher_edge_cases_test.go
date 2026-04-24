@@ -809,3 +809,88 @@ oIZwAAAEBVE7YQBA0pDIhPZ1+5FJJRLcZPvuFLHSiZlmCOGKqumFjj7wkwYyEmxIsdEN
 		t.Error("expected error when known_hosts is missing")
 	}
 }
+
+// ============================================================
+// registry.go — clamdDirInit
+// ============================================================
+
+// TestClamdDirInit_CreatesDir verifies that clamdDirInit creates
+// the clamav database directory if it doesn't exist.
+func TestClamdDirInit_CreatesDir(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: may invoke real system commands")
+	}
+
+	tmp := t.TempDir()
+	testPath := filepath.Join(tmp, "clamav", "db")
+
+	old := clamdDirPath
+	clamdDirPath = testPath
+	defer func() { clamdDirPath = old }()
+
+	err := clamdDirInit(context.Background(), nil)
+	if err != nil {
+		t.Errorf("clamdDirInit returned error: %v", err)
+	}
+
+	// Verify the directory was created
+	stat, err := os.Stat(testPath)
+	if err != nil {
+		t.Errorf("directory not created: %v", err)
+	}
+	if !stat.IsDir() {
+		t.Error("path exists but is not a directory")
+	}
+}
+
+// TestClamdDirInit_Idempotent verifies that clamdDirInit can be
+// called multiple times without error (idempotent).
+func TestClamdDirInit_Idempotent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: may invoke real system commands")
+	}
+
+	tmp := t.TempDir()
+	testPath := filepath.Join(tmp, "clamav", "db")
+
+	old := clamdDirPath
+	clamdDirPath = testPath
+	defer func() { clamdDirPath = old }()
+
+	// First call
+	err := clamdDirInit(context.Background(), nil)
+	if err != nil {
+		t.Errorf("first clamdDirInit returned error: %v", err)
+	}
+
+	// Second call (directory already exists)
+	err = clamdDirInit(context.Background(), nil)
+	if err != nil {
+		t.Errorf("second clamdDirInit returned error: %v", err)
+	}
+}
+
+// TestClamdDirInit_Error verifies that clamdDirInit returns an error
+// when the directory cannot be created (e.g., permission denied).
+func TestClamdDirInit_Error(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: may invoke real system commands")
+	}
+
+	// Skip if running as root (MkdirAll succeeds as root even on /proc)
+	if os.Geteuid() == 0 {
+		t.Skip("MkdirAll succeeds as root")
+	}
+
+	// Try to create a directory under /proc which is not writable
+	testPath := "/proc/1/clamav-db-test-" + t.Name()
+
+	old := clamdDirPath
+	clamdDirPath = testPath
+	defer func() { clamdDirPath = old }()
+
+	err := clamdDirInit(context.Background(), nil)
+	if err == nil {
+		t.Error("expected error when creating directory in non-writable location")
+	}
+}

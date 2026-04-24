@@ -838,3 +838,39 @@ func TestHasCommand(t *testing.T) {
 		})
 	}
 }
+
+// TestCommandMapClamd verifies that the clamd alias is mapped
+// to the correct command in the CommandMap.
+func TestCommandMapClamd(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: may invoke real system commands")
+	}
+	sm := NewServiceManager()
+
+	expected := binPath + "/zmclamdctl"
+	got, exists := sm.CommandMap["clamd"]
+	if !exists {
+		t.Error("clamd not found in CommandMap")
+	}
+	if got != expected {
+		t.Errorf("CommandMap[clamd] = %q, want %q", got, expected)
+	}
+}
+
+// TestSystemdMapClamd verifies that the clamd alias is mapped
+// to the correct systemd unit in the SystemdMap.
+func TestSystemdMapClamd(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: may invoke real system commands")
+	}
+	sm := NewServiceManager()
+
+	expected := "carbonio-antivirus.service"
+	got, exists := sm.SystemdMap["clamd"]
+	if !exists {
+		t.Error("clamd not found in SystemdMap")
+	}
+	if got != expected {
+		t.Errorf("SystemdMap[clamd] = %q, want %q", got, expected)
+	}
+}

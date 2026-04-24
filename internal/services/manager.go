@@ -59,6 +59,7 @@ func getDefaultCommandMap() map[string]string {
 		"antispam":  binPath + "/zmantispamctl",
 		"antivirus": binPath + "/zmclamdctl",
 		"cbpolicyd": binPath + "/zmcbpolicydctl",
+		"clamd":     binPath + "/zmclamdctl",
 		"ldap":      binPath + "/ldap",
 		"mailbox":   binPath + "/zmstorectl",
 		"mailboxd":  binPath + "/zmmailboxdctl",
@@ -79,6 +80,7 @@ func getDefaultSystemdMap() map[string]string {
 		"antispam":  "carbonio-antispam.service",
 		"antivirus": "carbonio-antivirus.service",
 		"cbpolicyd": "carbonio-policyd.service",
+		"clamd":     "carbonio-antivirus.service",
 		"ldap":      "carbonio-openldap.service",
 		"mailbox":   "carbonio-appserver.service", // Carbonio Appserver = mailbox service
 		"memcached": "carbonio-memcached.service",
