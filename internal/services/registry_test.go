@@ -280,16 +280,37 @@ func TestServiceAliasesNotInRegistry(t *testing.T) {
 		t.Skip("slow: may invoke real system commands")
 	}
 
-	// "clamd" should not be a direct Registry key
-	if _, ok := Registry["clamd"]; ok {
-		t.Error("clamd should not be a direct Registry entry (it's an alias)")
+	names := AllServiceNames()
+	nameSet := make(map[string]struct{}, len(names))
+	for _, n := range names {
+		nameSet[n] = struct{}{}
 	}
 
-	// "clamd" should not appear in AllServiceNames
-	names := AllServiceNames()
-	for _, name := range names {
-		if name == "clamd" {
-			t.Error("clamd should not appear in AllServiceNames (it's an alias)")
+	for alias := range ServiceAliases {
+		if _, ok := Registry[alias]; ok {
+			t.Errorf("%q should not be a direct Registry entry (it's an alias)", alias)
+		}
+		if _, ok := nameSet[alias]; ok {
+			t.Errorf("%q should not appear in AllServiceNames (it's an alias)", alias)
+		}
+	}
+}
+
+// TestServiceAliasesResolve verifies every alias resolves to its canonical
+// definition.
+func TestServiceAliasesResolve(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: may invoke real system commands")
+	}
+	for alias, canonical := range ServiceAliases {
+		aliasDef := LookupService(alias)
+		canonicalDef := LookupService(canonical)
+		if canonicalDef == nil {
+			t.Errorf("canonical service %q (target of alias %q) not in Registry", canonical, alias)
+			continue
+		}
+		if aliasDef != canonicalDef {
+			t.Errorf("alias %q does not resolve to canonical %q", alias, canonical)
 		}
 	}
 }
