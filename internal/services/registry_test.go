@@ -117,6 +117,18 @@ func TestRegistryDependencies_Antivirus(t *testing.T) {
 	if !hasFreshclam {
 		t.Error("expected antivirus to depend on freshclam")
 	}
+
+	// Verify ConfigRewrite contains "antivirus"
+	hasAntivirusConfig := false
+	for _, cfg := range def.ConfigRewrite {
+		if cfg == "antivirus" {
+			hasAntivirusConfig = true
+			break
+		}
+	}
+	if !hasAntivirusConfig {
+		t.Error("expected antivirus ConfigRewrite to contain 'antivirus'")
+	}
 }
 
 func TestRegistryConfigRewrite_Proxy(t *testing.T) {
@@ -176,5 +188,141 @@ func TestRegistryCoversAllSystemdMap(t *testing.T) {
 				t.Logf("Note: systemdMap entry %q not in registry (may be alias)", name)
 			}
 		}
+	}
+}
+
+// TestRegistryAntivirusLegacyFields verifies the antivirus service definition
+// has all the expected fields for clamd integration.
+func TestRegistryAntivirusLegacyFields(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: may invoke real system commands")
+	}
+	def := LookupService("antivirus")
+	if def == nil {
+		t.Fatal("antivirus not found")
+	}
+
+	// BinaryPath should be commonPath + "/sbin/clamd"
+	expectedBinaryPath := commonPath + "/sbin/clamd"
+	if def.BinaryPath != expectedBinaryPath {
+		t.Errorf("BinaryPath = %q, want %q", def.BinaryPath, expectedBinaryPath)
+	}
+
+	// BinaryArgs should have exactly one entry: "--config-file=<confPath>/clamd.conf"
+	if len(def.BinaryArgs) != 1 {
+		t.Errorf("len(BinaryArgs) = %d, want 1", len(def.BinaryArgs))
+	}
+	expectedArg := "--config-file=" + confPath + "/clamd.conf"
+	if len(def.BinaryArgs) > 0 && def.BinaryArgs[0] != expectedArg {
+		t.Errorf("BinaryArgs[0] = %q, want %q", def.BinaryArgs[0], expectedArg)
+	}
+
+	// Detached should be true
+	if !def.Detached {
+		t.Error("Detached = false, want true")
+	}
+
+	// PidFile should be pidDir + "/clamd.pid"
+	expectedPidFile := pidDir + "/clamd.pid"
+	if def.PidFile != expectedPidFile {
+		t.Errorf("PidFile = %q, want %q", def.PidFile, expectedPidFile)
+	}
+
+	// UseSDNotify should be true
+	if !def.UseSDNotify {
+		t.Error("UseSDNotify = false, want true")
+	}
+
+	// ConfigRewrite should contain "antivirus"
+	hasAntivirusConfig := false
+	for _, cfg := range def.ConfigRewrite {
+		if cfg == "antivirus" {
+			hasAntivirusConfig = true
+			break
+		}
+	}
+	if !hasAntivirusConfig {
+		t.Error("ConfigRewrite does not contain 'antivirus'")
+	}
+
+	// PreStart should have exactly one hook (clamdDirInit)
+	if len(def.PreStart) != 1 {
+		t.Errorf("len(PreStart) = %d, want 1", len(def.PreStart))
+	}
+}
+
+// TestLookupService_ClamdAlias verifies that the "clamd" alias
+// resolves to the antivirus service definition.
+func TestLookupService_ClamdAlias(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: may invoke real system commands")
+	}
+	clamdDef := LookupService("clamd")
+	if clamdDef == nil {
+		t.Fatal("expected clamd alias to resolve to a service definition")
+	}
+
+	antivirusDef := LookupService("antivirus")
+	if antivirusDef == nil {
+		t.Fatal("antivirus not found")
+	}
+
+	// The alias should return the same pointer as the canonical service
+	if clamdDef != antivirusDef {
+		t.Error("clamd alias does not resolve to the same antivirus definition")
+	}
+}
+
+// TestServiceAliasesNotInRegistry verifies that alias names
+// do not appear in the Registry or AllServiceNames.
+func TestServiceAliasesNotInRegistry(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: may invoke real system commands")
+	}
+
+	// "clamd" should not be a direct Registry key
+	if _, ok := Registry["clamd"]; ok {
+		t.Error("clamd should not be a direct Registry entry (it's an alias)")
+	}
+
+	// "clamd" should not appear in AllServiceNames
+	names := AllServiceNames()
+	for _, name := range names {
+		if name == "clamd" {
+			t.Error("clamd should not appear in AllServiceNames (it's an alias)")
+		}
+	}
+}
+
+// TestServiceStartClamdAlias verifies that the clamd alias
+// resolves to the antivirus definition with the correct fields.
+// Note: We do NOT call ServiceStart directly as that would attempt to
+// launch the actual clamd process. Instead, we verify the alias resolution
+// and that the definition has the necessary fields for start code to use.
+func TestServiceStartClamdAlias(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: may invoke real system commands")
+	}
+
+	// Verify the alias resolves to antivirus
+	def := LookupService("clamd")
+	if def == nil {
+		t.Fatal("clamd alias should resolve to a service definition")
+	}
+
+	// Verify it's the antivirus definition
+	if def.Name != "antivirus" {
+		t.Errorf("clamd alias resolved to Name=%q, want 'antivirus'", def.Name)
+	}
+
+	// Verify BinaryPath is set (required for start code)
+	if def.BinaryPath == "" {
+		t.Error("BinaryPath is empty; start code would fail")
+	}
+
+	// Verify it's the same as the antivirus definition
+	antivirusDef := LookupService("antivirus")
+	if def != antivirusDef {
+		t.Error("clamd alias does not resolve to the antivirus definition")
 	}
 }

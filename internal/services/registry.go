@@ -83,7 +83,17 @@ var (
 	milterOptionsPath = confPath + "/mta_milter_options"
 	cbpolicydDBPath   = dataPath + "/cbpolicyd/db/cbpolicyd.sqlitedb"
 	cbpolicydInitBin  = basePath + "/libexec/zmcbpolicydinit"
+	clamdDirPath      = dataPath + "/clamav/db"
 )
+
+// ServiceAliases maps alternative service names to their canonical Registry key.
+// These names are accepted by LookupService but do NOT appear in Registry or
+// AllServiceNames — they are resolution aliases only.
+var ServiceAliases = map[string]string{
+	"clamd":    "antivirus",
+	"mailboxd": "mailbox",
+	"service":  "mailbox",
+}
 
 // serviceDiscoverCustomStart starts service-discovered in the correct role:
 // "server" on LDAP nodes, "agent" on non-LDAP nodes. Mirrors the two separate
@@ -139,6 +149,17 @@ func cbpolicydInitDB(_ context.Context, _ *ServiceManager) error {
 	cmd := exec.CommandContext(context.Background(), cbpolicydInitBin) //nolint:gosec // fixed internal path
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("cbpolicyd DB init failed: %s: %w", strings.TrimSpace(string(output)), err)
+	}
+
+	return nil
+}
+
+// clamdDirInit creates the clamav database directory if missing. Mirrors the
+// `mkdir -p /opt/zextras/data/clamav/db` from legacy clamdctl.sh; clamd refuses
+// to start if the directory does not exist.
+func clamdDirInit(_ context.Context, _ *ServiceManager) error {
+	if err := os.MkdirAll(clamdDirPath, 0o755); err != nil {
+		return fmt.Errorf("failed to create clamav DB directory: %w", err)
 	}
 
 	return nil
@@ -236,11 +257,18 @@ var Registry = map[string]*ServiceDef{
 		ConfigRewrite: []string{"amavis", "antispam"},
 	},
 	"antivirus": {
-		Name:         "antivirus",
-		DisplayName:  "antivirus",
-		SystemdUnits: []string{"carbonio-antivirus.service"},
-		ProcessName:  "clamd",
-		Dependencies: []string{"freshclam"},
+		Name:          "antivirus",
+		DisplayName:   "antivirus",
+		SystemdUnits:  []string{"carbonio-antivirus.service"},
+		BinaryPath:    commonPath + "/sbin/clamd",
+		BinaryArgs:    []string{"--config-file=" + confPath + "/clamd.conf"},
+		Detached:      true,
+		PidFile:       pidDir + "/clamd.pid",
+		ProcessName:   "clamd",
+		UseSDNotify:   true,
+		ConfigRewrite: []string{"antivirus"},
+		PreStart:      []Hook{clamdDirInit},
+		Dependencies:  []string{"freshclam"},
 	},
 	"antispam": {
 		Name:         "antispam",
@@ -325,8 +353,19 @@ var Registry = map[string]*ServiceDef{
 }
 
 // LookupService returns the ServiceDef for a service name, or nil if not found.
+// Resolves ServiceAliases (e.g. "clamd" → "antivirus") before the registry lookup,
+// so every lifecycle call site (start/stop/restart/status/reload, network protocol,
+// watchdog) transparently accepts alias names.
 func LookupService(name string) *ServiceDef {
-	return Registry[name]
+	if def, ok := Registry[name]; ok {
+		return def
+	}
+
+	if canonical, ok := ServiceAliases[name]; ok {
+		return Registry[canonical]
+	}
+
+	return nil
 }
 
 // AllServiceNames returns all registered service names sorted by start order.
