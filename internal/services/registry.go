@@ -90,9 +90,12 @@ var (
 // These names are accepted by LookupService but do NOT appear in Registry or
 // AllServiceNames — they are resolution aliases only.
 var ServiceAliases = map[string]string{
-	"clamd":    "antivirus",
-	"mailboxd": "mailbox",
-	"service":  "mailbox",
+	"clamd":            "antivirus",
+	"mailboxd":         "mailbox",
+	"service":          "mailbox",
+	"directory-server": "ldap",
+	"directory":        "ldap",
+	"config-service":   "configd",
 }
 
 // serviceDiscoverCustomStart starts service-discovered in the correct role:
