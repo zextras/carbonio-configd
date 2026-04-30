@@ -27,7 +27,6 @@ import (
 	"github.com/zextras/carbonio-configd/internal/transformer"
 )
 
-// Configuration constants
 const (
 	constTRUE            = "TRUE"
 	constFALSE           = "FALSE"
@@ -70,24 +69,24 @@ func NewConfigManager(ctx context.Context, mainCfg *config.Config,
 		Cache:      cacheInstance,
 		ServiceMgr: services.NewServiceManager(), // Initialize service manager
 	}
-	// Initialize transformer here, passing cm (which implements ConfigLookup) and appState
 	cm.Transformer = transformer.NewTransformer(cm, appState)
-
-	// Initialize MTA operations
 	cm.mtaExecutor = mtaops.NewExecutor(mainCfg.BaseDir, ldapClient)
 	cm.mtaResolver = mtaops.NewResolver(mainCfg.BaseDir)
-
-	// Initialize native LDAP client
 	cm.initNativeLdapClient(ctx)
 
 	return cm
 }
 
+// loadLocalConfigForLDAP is the localconfig loader used by initNativeLdapClient.
+// Production points it at localconfig.LoadLocalConfig; tests override it to
+// inject deterministic localconfig maps so the URL-validation branches can be
+// exercised without touching disk.
+var loadLocalConfigForLDAP = localconfig.LoadLocalConfig
+
 // initNativeLdapClient initializes the native LDAP client from localconfig.
 // If initialization fails, it logs a warning and the manager will fall back to zmprov subprocess calls.
 func (cm *ConfigManager) initNativeLdapClient(ctx context.Context) {
-	// Load LDAP connection info from localconfig
-	localCfg, err := localconfig.LoadLocalConfig()
+	localCfg, err := loadLocalConfigForLDAP()
 	if err != nil {
 		logger.WarnContext(ctx, "Failed to load localconfig for native LDAP client - LDAP queries will fail",
 			"error", err)
@@ -95,10 +94,20 @@ func (cm *ConfigManager) initNativeLdapClient(ctx context.Context) {
 		return
 	}
 
-	// Extract LDAP connection parameters
+	// Extract LDAP connection parameters. ldap_url may be a single URL or a
+	// space-separated list of URLs (Carbonio HA convention) — ParseURLs
+	// normalises both forms (CO-3565).
 	ldapURL, ok := localCfg["ldap_url"]
 	if !ok || ldapURL == "" {
 		logger.WarnContext(ctx, "LDAP URL not found in localconfig - LDAP queries will fail")
+
+		return
+	}
+
+	ldapURLs := ldap.ParseURLs(ldapURL)
+	if len(ldapURLs) == 0 {
+		logger.WarnContext(ctx, "LDAP URL is empty after parsing - LDAP queries will fail",
+			"ldap_url", ldapURL)
 
 		return
 	}
@@ -117,9 +126,8 @@ func (cm *ConfigManager) initNativeLdapClient(ctx context.Context) {
 		return
 	}
 
-	// Create native LDAP client
 	nativeClient, err := ldap.NewClient(&ldap.ClientConfig{
-		URL:      ldapURL,
+		URLs:     ldapURLs,
 		BindDN:   bindDN,
 		Password: password,
 		BaseDN:   "cn=zimbra",
@@ -136,16 +144,12 @@ func (cm *ConfigManager) initNativeLdapClient(ctx context.Context) {
 	cm.NativeLdapClient = nativeClient
 
 	logger.InfoContext(ctx, "Native LDAP client initialized successfully",
-		"ldap_url", ldapURL,
+		"ldap_urls", ldapURLs,
 		"bind_dn", bindDN)
 
-	// Set the native LDAP client for the commands package
-	// This allows commands like getserver, getglobal, etc. to use the native client
 	executor := commands.NewCommandExecutor(nativeClient)
 	commands.RegisterLDAPCommands(executor)
 
-	// Set the native LDAP client on the existing Ldap manager
-	// This allows QueryDomains, QueryServers, etc. to use the native client
 	if cm.LdapClient != nil {
 		cm.LdapClient.SetNativeClient(ctx, nativeClient)
 	}
@@ -298,7 +302,6 @@ func (cm *ConfigManager) InvalidateLDAPCache(ctx context.Context) {
 
 	logger.DebugContext(ctx, "Invalidating LDAP cache")
 
-	// Invalidate all cache entries with "ldap:" prefix
 	invalidatedCount := cm.Cache.InvalidateCacheByPrefix("ldap:")
 
 	if invalidatedCount == 0 {

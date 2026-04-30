@@ -195,8 +195,8 @@ func TestNewClient_CustomConfig(t *testing.T) {
 		t.Fatalf("expected no error, got %v", err)
 	}
 
-	if client.url != "ldaps://localhost:636" {
-		t.Errorf("expected url ldaps://localhost:636, got %s", client.url)
+	if len(client.urls) != 1 || client.urls[0] != "ldaps://localhost:636" {
+		t.Errorf("expected urls [ldaps://localhost:636], got %v", client.urls)
 	}
 	if client.baseDN != "dc=example,dc=com" {
 		t.Errorf("expected baseDN dc=example,dc=com, got %s", client.baseDN)

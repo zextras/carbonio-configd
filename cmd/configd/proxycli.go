@@ -54,8 +54,6 @@ type ProxyConfCmd struct {
 	ConfigFile string `arg:"" optional:"" default:"/opt/zextras/conf/nginx.conf" help:"Path to nginx.conf"`
 }
 
-// Run executes the proxy conf command.
-//
 //nolint:unparam // Kong interface requires error return
 func (c *ProxyConfCmd) Run() error {
 	initCLILogging()
@@ -66,9 +64,6 @@ func (c *ProxyConfCmd) Run() error {
 	}
 
 	conf := c.ConfigFile
-	if conf == "" {
-		conf = "/opt/zextras/conf/nginx.conf"
-	}
 
 	opts := &nginxConfOpts{
 		markers:    c.Markers,
@@ -189,8 +184,6 @@ type ProxyGenCmd struct {
 	ExtraConfigs []string `arg:"" optional:"" help:"Additional config names to regenerate"`
 }
 
-// Run executes the proxy gen command.
-//
 //nolint:unparam // Kong interface requires error return
 func (c *ProxyGenCmd) Run() error {
 	requireZextras()
@@ -204,8 +197,6 @@ type ProxyEnableCmd struct {
 	Protocol string `arg:"" help:"Protocol (http, https, mail, imap, imaps, pop3, pop3s)"`
 }
 
-// Run executes the proxy enable command.
-//
 //nolint:unparam // Kong interface requires error return
 func (c *ProxyEnableCmd) Run() error {
 	requireZextras()
@@ -219,8 +210,6 @@ type ProxyDisableCmd struct {
 	Protocol string `arg:"" help:"Protocol (http, https, mail, imap, imaps, pop3, pop3s)"`
 }
 
-// Run executes the proxy disable command.
-//
 //nolint:unparam // Kong interface requires error return
 func (c *ProxyDisableCmd) Run() error {
 	requireZextras()
@@ -232,8 +221,6 @@ func (c *ProxyDisableCmd) Run() error {
 // ProxyStatusCmd shows proxy protocol statuses.
 type ProxyStatusCmd struct{}
 
-// Run executes the proxy status command.
-//
 //nolint:unparam // Kong interface requires error return
 func (c *ProxyStatusCmd) Run() error {
 	showProxyStatus()
@@ -247,8 +234,6 @@ type ProxyRewriteCmd struct {
 	ExtraConfigs []string `arg:"" optional:"" help:"Additional config names"`
 }
 
-// Run executes the proxy rewrite fallthrough.
-//
 //nolint:unparam // Kong interface requires error return
 func (c *ProxyRewriteCmd) Run() error {
 	requireZextras()
@@ -345,6 +330,30 @@ func showProxyStatus() {
 	}
 }
 
+// buildProxyLDAPClient builds a write-capable LDAP client from a resolved
+// localconfig map. Splits ldap_master_url via ParseURLs so connect-time
+// failover works on multi-URL HA setups (CO-3565).
+func buildProxyLDAPClient(lc map[string]string) (*carboldap.Client, string, error) {
+	ldapURLs := carboldap.ParseURLs(lc["ldap_master_url"])
+	if len(ldapURLs) == 0 {
+		return nil, "", fmt.Errorf(
+			"LDAP not configured (ldap_master_url is empty); " +
+				"directory server may not be running or localconfig is incomplete")
+	}
+
+	client, err := carboldap.NewClient(&carboldap.ClientConfig{
+		URLs:     ldapURLs,
+		BindDN:   lc["zimbra_ldap_userdn"],
+		Password: lc["zimbra_ldap_password"],
+		StartTLS: true,
+	})
+	if err != nil {
+		return nil, "", fmt.Errorf("connecting to LDAP: %w", err)
+	}
+
+	return client, lc["zimbra_server_hostname"], nil
+}
+
 func connectLDAP() (client *carboldap.Client, hostname string) {
 	lc, err := localconfig.LoadResolvedConfig()
 	if err != nil {
@@ -352,23 +361,11 @@ func connectLDAP() (client *carboldap.Client, hostname string) {
 		os.Exit(1)
 	}
 
-	ldapURL := lc["ldap_master_url"]
-	if ldapURL == "" {
-		fmt.Fprintln(os.Stderr, "Error: LDAP not configured (ldap_master_url is empty)")
-		fmt.Fprintln(os.Stderr, "Directory server may not be running or localconfig is incomplete")
-		os.Exit(1)
-	}
-
-	client, err = carboldap.NewClient(&carboldap.ClientConfig{
-		URL:      ldapURL,
-		BindDN:   lc["zimbra_ldap_userdn"],
-		Password: lc["zimbra_ldap_password"],
-		StartTLS: true,
-	})
+	client, hostname, err = buildProxyLDAPClient(lc)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error connecting to LDAP: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	return client, lc["zimbra_server_hostname"]
+	return client, hostname
 }

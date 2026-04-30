@@ -12,7 +12,6 @@ import (
 	"github.com/go-ldap/ldap/v3"
 )
 
-// TestNewClient tests creating a new LDAP client with various configurations
 func TestNewClient(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -27,7 +26,7 @@ func TestNewClient(t *testing.T) {
 				Password: "test",
 			},
 			want: &Client{
-				url:           "ldap://localhost:389",
+				urls:          []string{"ldap://localhost:389"},
 				bindDN:        "uid=zimbra,cn=admins,cn=zimbra",
 				password:      "test",
 				baseDN:        "cn=zimbra",
@@ -50,7 +49,7 @@ func TestNewClient(t *testing.T) {
 				MaxRetryDelay: 10 * time.Second,
 			},
 			want: &Client{
-				url:           "ldaps://ldap.example.com:636",
+				urls:          []string{"ldaps://ldap.example.com:636"},
 				bindDN:        "cn=admin,dc=example,dc=com",
 				password:      "secret",
 				baseDN:        "dc=example,dc=com",
@@ -69,8 +68,8 @@ func TestNewClient(t *testing.T) {
 				t.Fatalf("NewClient() error = %v", err)
 			}
 
-			if got.url != tt.want.url {
-				t.Errorf("url = %v, want %v", got.url, tt.want.url)
+			if !slicesEqual(got.urls, tt.want.urls) {
+				t.Errorf("urls = %v, want %v", got.urls, tt.want.urls)
 			}
 			if got.bindDN != tt.want.bindDN {
 				t.Errorf("bindDN = %v, want %v", got.bindDN, tt.want.bindDN)
@@ -97,7 +96,6 @@ func TestNewClient(t *testing.T) {
 	}
 }
 
-// TestEntryToMap tests converting LDAP entries to maps
 func TestEntryToMap(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -168,7 +166,6 @@ func TestEntryToMap(t *testing.T) {
 	}
 }
 
-// TestFormatAsZmprovOutput tests formatting config maps as zmprov output
 func TestFormatAsZmprovOutput(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -218,7 +215,6 @@ func TestFormatAsZmprovOutput(t *testing.T) {
 	}
 }
 
-// TestFormatAsZmprovOutput_EmptyValue tests handling of empty values
 func TestFormatAsZmprovOutput_EmptyValue(t *testing.T) {
 	config := map[string]string{
 		"key1": "",
@@ -236,7 +232,6 @@ func TestFormatAsZmprovOutput_EmptyValue(t *testing.T) {
 	}
 }
 
-// TestClient_Close tests closing client connections
 func TestClient_Close(t *testing.T) {
 	client, err := NewClient(&ClientConfig{
 		URL:      "ldap://localhost:389",
@@ -260,7 +255,6 @@ func TestClient_Close(t *testing.T) {
 	}
 }
 
-// Helper function to check if output contains a line
 func containsLine(output, line string) bool {
 	lines := splitLines(output)
 	for _, l := range lines {
@@ -271,7 +265,6 @@ func containsLine(output, line string) bool {
 	return false
 }
 
-// Helper function to split output into lines
 func splitLines(s string) []string {
 	if s == "" {
 		return []string{}
@@ -427,7 +420,6 @@ func TestDomainDNEscaping(t *testing.T) {
 	}
 }
 
-// BenchmarkEntryToMap benchmarks converting LDAP entries to maps
 func BenchmarkEntryToMap(b *testing.B) {
 	entry := &ldap.Entry{
 		DN: "cn=test,cn=servers,cn=zimbra",
@@ -445,7 +437,6 @@ func BenchmarkEntryToMap(b *testing.B) {
 	}
 }
 
-// BenchmarkFormatAsZmprovOutput benchmarks formatting config as zmprov output
 func BenchmarkFormatAsZmprovOutput(b *testing.B) {
 	config := map[string]string{
 		"cn":                    "test",

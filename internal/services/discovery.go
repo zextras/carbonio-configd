@@ -47,8 +47,17 @@ func DiscoverEnabledServices(ctx context.Context) ([]string, error) {
 		tlsConfig = carbonioCATLSConfig()
 	}
 
+	// ldap_master_url may be space-separated multi-URL (Carbonio HA) — let
+	// ParseURLs split it so we get connect-time failover (CO-3565).
+	masterURLs := carboldap.ParseURLs(lc["ldap_master_url"])
+	if len(masterURLs) == 0 {
+		logger.WarnContext(ctx, "ldap_master_url is empty in localconfig, trying cache")
+
+		return readCache(ctx)
+	}
+
 	client, err := carboldap.NewClient(&carboldap.ClientConfig{
-		URL:       lc["ldap_master_url"],
+		URLs:      masterURLs,
 		BindDN:    lc["zimbra_ldap_userdn"],
 		Password:  lc["zimbra_ldap_password"],
 		StartTLS:  startTLS,
