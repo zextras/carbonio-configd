@@ -43,57 +43,64 @@ const compressionMIMETypes = `        application/atom+xml
         text/xml;
 `
 
-// resolveLookupHandlers constructs the lookup handler URLs
-// Format: https://hostname:port/service/extension/nginx-lookup
+// resolveLookupHandlers constructs the nginx zm_lookup_handlers value as a
+// space-separated list of "https://<host>:<port>/service/extension/nginx-lookup"
+// URLs, one per entry in zimbraReverseProxyAvailableLookupTargets.
+//
+// LDAP multi-valued attributes arrive joined with newlines (entryToMap in
+// internal/ldap), so the raw value can carry several hostnames. The earlier
+// implementation treated the whole blob as a single hostname, which produced
+// `https://<host1>\n<host2>:7072/...` in nginx.conf.zmlookup and made nginx
+// fail to start with "invalid URL prefix" — same multi-token-not-split family
+// as CO-3565.
 func (g *Generator) resolveLookupHandlers(ctx context.Context) (any, error) {
-	// Get the extension port from global config (zimbraExtensionBindPort)
-	extensionPort := "7072" // default
-
+	extensionPort := "7072"
 	if val, ok := g.getConfigValue("zimbraExtensionBindPort", sourceGlobal); ok {
 		extensionPort = val
 	}
 
-	// Get the lookup target hostname from global config
-	// zimbraReverseProxyAvailableLookupTargets contains the hostname
-	lookupHost := ""
-
+	rawHosts := ""
 	if val, ok := g.getConfigValue("zimbraReverseProxyAvailableLookupTargets", sourceGlobal); ok {
-		lookupHost = val
+		rawHosts = val
 	}
 
-	// If no specific lookup host, try to get our own hostname
-	if lookupHost == "" {
-		if val, ok := g.getConfigValue("zimbra_server_hostname", sourceLocal); ok {
-			lookupHost = val
+	hosts := strings.Fields(normalizeMultiValue(rawHosts))
+
+	if len(hosts) == 0 {
+		if val, ok := g.getConfigValue("zimbra_server_hostname", sourceLocal); ok && val != "" {
+			hosts = []string{val}
 		}
 	}
 
-	// Fallback to localhost
-	if lookupHost == "" {
-		lookupHost = "127.0.0.1"
+	if len(hosts) == 0 {
+		hosts = []string{"127.0.0.1"}
 	}
 
-	// Resolve hostname to IP, caching within a single proxygen cycle
-	// to avoid repeated /etc/hosts reads from the pure-Go resolver.
-	if g.cachedLookupIP != "" {
-		lookupHost = g.cachedLookupIP
-	} else {
-		ips, err := net.DefaultResolver.LookupIPAddr(ctx, lookupHost)
-		if err == nil && len(ips) > 0 {
-			lookupHost = ips[0].String()
-		} else {
-			logger.WarnContext(ctx, "Failed to resolve lookup host to IP, using hostname",
-				"hostname", lookupHost,
-				"error", err)
-		}
-
-		g.cachedLookupIP = lookupHost
+	urls := make([]string, 0, len(hosts))
+	for _, host := range hosts {
+		urls = append(urls, fmt.Sprintf(
+			"https://%s:%s/service/extension/nginx-lookup",
+			resolveHostToIP(ctx, host),
+			extensionPort,
+		))
 	}
 
-	// Construct the lookup handler URL
-	url := fmt.Sprintf("https://%s:%s/service/extension/nginx-lookup", lookupHost, extensionPort)
+	return strings.Join(urls, " "), nil
+}
 
-	return url, nil
+// resolveHostToIP returns the first IP for host, or host itself when DNS
+// fails. Logs a WARN on lookup failure so an operator can spot a bad entry.
+func resolveHostToIP(ctx context.Context, host string) string {
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err == nil && len(ips) > 0 {
+		return ips[0].String()
+	}
+
+	logger.WarnContext(ctx, "Failed to resolve lookup host to IP, using hostname",
+		"hostname", host,
+		"error", err)
+
+	return host
 }
 
 // ============================================================================
