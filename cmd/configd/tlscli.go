@@ -96,7 +96,11 @@ func (c *TLSCmd) Run(cli *CLI) error {
 //     unless --force was passed.
 //  3. Write zimbraMailMode on the local server entry.
 func applyMailMode(lc map[string]string, hostname string, mode configtls.Mode, force bool) error {
-	client := openLDAPForWrites(lc)
+	client, err := openLDAPForWrites(lc)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
 
 	defer func() { _ = client.Close() }()
 
@@ -187,29 +191,30 @@ func validateAgainstProxies(client *carboldap.Client, hostname string, mode conf
 }
 
 // openLDAPForWrites dials ldap_master_url (writes require the master).
-func openLDAPForWrites(lc map[string]string) *carboldap.Client {
-	url := lc["ldap_master_url"]
-	if url == "" {
-		url = lc["ldap_url"]
+// Both ldap_master_url and ldap_url may carry space-separated multi-URL
+// values; ParseURLs is used at both layers so connect-time failover works
+// regardless of which key holds the list (CO-3565).
+func openLDAPForWrites(lc map[string]string) (*carboldap.Client, error) {
+	urls := carboldap.ParseURLs(lc["ldap_master_url"])
+	if len(urls) == 0 {
+		urls = carboldap.ParseURLs(lc["ldap_url"])
 	}
 
-	if url == "" {
-		fmt.Fprintln(os.Stderr, "Error: LDAP not configured (ldap_master_url and ldap_url are both empty)")
-		os.Exit(1)
+	if len(urls) == 0 {
+		return nil, fmt.Errorf("LDAP not configured (ldap_master_url and ldap_url are both empty)")
 	}
 
 	client, err := carboldap.NewClient(&carboldap.ClientConfig{
-		URL:      url,
+		URLs:     urls,
 		BindDN:   lc["zimbra_ldap_userdn"],
 		Password: lc["zimbra_ldap_password"],
 		StartTLS: true,
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error connecting to LDAP: %v\n", err)
-		os.Exit(1)
+		return nil, fmt.Errorf("connecting to LDAP: %w", err)
 	}
 
-	return client
+	return client, nil
 }
 
 // joinWithCommas is a small helper used in user-facing messages.

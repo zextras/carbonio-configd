@@ -6,6 +6,7 @@
 package ldap
 
 import (
+	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -17,15 +18,16 @@ import (
 
 	errs "github.com/zextras/carbonio-configd/internal/errors"
 	"github.com/zextras/carbonio-configd/internal/intern"
+	"github.com/zextras/carbonio-configd/internal/logger"
 )
 
 // Client represents a connection pool to the LDAP server.
 type Client struct {
-	url      string // LDAP URL (e.g., ldap://host:389 or ldaps://host:636)
-	bindDN   string // Bind DN (e.g., uid=zimbra,cn=admins,cn=zimbra)
-	password string // Bind password
-	baseDN   string // Base DN (e.g., cn=zimbra)
-	startTLS bool   // Whether to upgrade ldap:// connections with StartTLS
+	urls     []string // Ordered list of LDAP URLs (failover at connect-time)
+	bindDN   string   // Bind DN (e.g., uid=zimbra,cn=admins,cn=zimbra)
+	password string   // Bind password
+	baseDN   string   // Base DN (e.g., cn=zimbra)
+	startTLS bool     // Whether to upgrade ldap:// connections with StartTLS
 
 	// Connection pool
 	pool     []*ldap.Conn
@@ -49,8 +51,16 @@ const defaultBaseDN = "cn=zimbra"
 const ldapFilterAllObjects = "(objectClass=*)"
 
 // ClientConfig holds configuration for creating an LDAP client.
+//
+// URL and URLs are alternative inputs for the LDAP endpoint:
+//   - If URLs is non-empty it takes precedence and the client uses
+//     connect-time failover across the listed URLs in order.
+//   - Otherwise URL is parsed via ParseURLs, so callers passing the raw
+//     localconfig string (which may contain space-separated multi-URLs)
+//     keep working without code changes.
 type ClientConfig struct {
-	URL           string        // LDAP URL
+	URL           string        // LDAP URL (single URL, or space-separated list — see ParseURLs)
+	URLs          []string      // Pre-parsed ordered URL list (preferred over URL when set)
 	BindDN        string        // Bind DN
 	Password      string        // Password
 	BaseDN        string        // Base DN (defaults to "cn=zimbra" if empty)
@@ -64,7 +74,6 @@ type ClientConfig struct {
 
 // NewClient creates a new LDAP client with connection pooling.
 func NewClient(config *ClientConfig) (*Client, error) {
-	// Set defaults
 	if config.BaseDN == "" {
 		config.BaseDN = defaultBaseDN
 	}
@@ -85,14 +94,22 @@ func NewClient(config *ClientConfig) (*Client, error) {
 		config.MaxRetryDelay = 5 * time.Second
 	}
 
-	// Configure TLS if provided
 	var tlsConfig *tls.Config
 	if config.TLSConfig != nil {
 		tlsConfig = config.TLSConfig
 	}
 
+	urls := config.URLs
+	if len(urls) == 0 {
+		urls = ParseURLs(config.URL)
+	}
+
+	if len(urls) == 0 {
+		return nil, fmt.Errorf("ldap client: no URL configured (URL=%q, URLs=%v)", config.URL, config.URLs)
+	}
+
 	client := &Client{
-		url:           config.URL,
+		urls:          urls,
 		bindDN:        config.BindDN,
 		password:      config.Password,
 		baseDN:        config.BaseDN,
@@ -113,18 +130,15 @@ func (c *Client) getConnection() (*ldap.Conn, error) {
 	c.poolMu.Lock()
 	defer c.poolMu.Unlock()
 
-	// Try to reuse existing connection from pool
 	if len(c.pool) > 0 {
 		conn := c.pool[len(c.pool)-1]
 		c.pool = c.pool[:len(c.pool)-1]
 
-		// Test if connection is still alive
 		if conn != nil && !conn.IsClosing() {
 			return conn, nil
 		}
 	}
 
-	// Create new connection
 	conn, err := c.connect()
 	if err != nil {
 		return nil, err
@@ -142,7 +156,6 @@ func (c *Client) returnConnection(conn *ldap.Conn) {
 	c.poolMu.Lock()
 	defer c.poolMu.Unlock()
 
-	// Only add to pool if not full
 	if len(c.pool) < c.poolSize {
 		c.pool = append(c.pool, conn)
 	} else {
@@ -150,43 +163,70 @@ func (c *Client) returnConnection(conn *ldap.Conn) {
 	}
 }
 
-// connect establishes a connection to the LDAP server.
+// connect establishes a connection to the LDAP server, walking the
+// configured URL list and using the first URL that completes both dial
+// and bind successfully. Per-URL failures are emitted at WARN so an
+// operator can pinpoint a misconfigured entry even when the overall
+// connection succeeds (CO-3565).
 func (c *Client) connect() (*ldap.Conn, error) {
-	// Dial LDAP server
+	ctx := logger.ContextWithComponentOnce(context.Background(), "ldap")
+
+	agg := &AggregateDialError{Errors: make([]error, 0, len(c.urls))}
+
+	for _, url := range c.urls {
+		conn, err := c.dialAndBind(url)
+		if err == nil {
+			return conn, nil
+		}
+
+		logger.WarnContext(ctx, "LDAP URL failed, trying next", "url", url, "error", err)
+
+		agg.Errors = append(agg.Errors, &urlDialError{URL: url, Err: err})
+	}
+
+	return nil, fmt.Errorf("failed to connect to LDAP server: %w", agg)
+}
+
+// clientDial is the dialer used by dialAndBind. Production points it at
+// ldap.DialURL; tests override it with a stub that returns deterministic
+// errors so the failover loop in connect() can be exercised without a
+// running LDAP server.
+var clientDial = ldap.DialURL
+
+// dialAndBind performs the full dial+StartTLS+bind sequence for a single URL.
+// Returns a bound connection on success; on any failure it closes any partial
+// connection and returns the wrapped error.
+func (c *Client) dialAndBind(url string) (*ldap.Conn, error) {
 	var (
 		conn *ldap.Conn
 		err  error
 	)
 
 	switch {
-	case strings.HasPrefix(c.url, "ldaps://"):
-		// LDAPS connection
-		conn, err = ldap.DialURL(c.url, ldap.DialWithTLSConfig(c.tlsConfig))
-	case strings.HasPrefix(c.url, "ldap://"):
-		// LDAP connection — upgrade to TLS via StartTLS if configured
-		conn, err = ldap.DialURL(c.url)
+	case strings.HasPrefix(url, "ldaps://"):
+		conn, err = clientDial(url, ldap.DialWithTLSConfig(c.tlsConfig))
+	case strings.HasPrefix(url, "ldap://"):
+		conn, err = clientDial(url)
 	default:
-		return nil, fmt.Errorf("unsupported LDAP URL scheme: %s", c.url)
+		return nil, fmt.Errorf("unsupported LDAP URL scheme: %s", url)
 	}
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to LDAP server: %w", err)
+		return nil, fmt.Errorf("dial: %w", err)
 	}
 
-	// Upgrade plaintext ldap:// connections to TLS if StartTLS is required
-	if strings.HasPrefix(c.url, "ldap://") && c.startTLS {
+	if strings.HasPrefix(url, "ldap://") && c.startTLS {
 		if err := conn.StartTLS(c.tlsConfig); err != nil {
 			_ = conn.Close()
 
-			return nil, fmt.Errorf("failed to StartTLS on LDAP connection: %w", err)
+			return nil, fmt.Errorf("StartTLS: %w", err)
 		}
 	}
 
-	// Bind with credentials
-	err = conn.Bind(c.bindDN, c.password)
-	if err != nil {
-		_ = conn.Close() // Best effort close on bind failure
-		return nil, fmt.Errorf("failed to bind to LDAP server: %w", err)
+	if err := conn.Bind(c.bindDN, c.password); err != nil {
+		_ = conn.Close()
+
+		return nil, fmt.Errorf("bind: %w", err)
 	}
 
 	return conn, nil
@@ -266,7 +306,6 @@ func (c *Client) handleOperationError(conn *ldap.Conn, err error) error {
 		return fmt.Errorf("%w: %w", errs.ErrLDAPUnhealthyConnection, err)
 	}
 
-	// Return healthy connection to pool
 	c.returnConnection(conn)
 
 	return err
@@ -279,7 +318,6 @@ func isConnectionError(err error) bool {
 		return false
 	}
 
-	// Check if it's an LDAP error
 	ldapErr := &ldap.Error{}
 	if errors.As(err, &ldapErr) {
 		switch ldapErr.ResultCode {
@@ -296,7 +334,6 @@ func isConnectionError(err error) bool {
 		}
 	}
 
-	// Check for network/transport errors
 	errStr := err.Error()
 	if strings.Contains(errStr, "connection") ||
 		strings.Contains(errStr, "broken pipe") ||
@@ -315,7 +352,6 @@ func isLDAPErrorRetryable(err error) bool {
 		return false
 	}
 
-	// Check if it's an LDAP error
 	ldapErr := &ldap.Error{}
 	if errors.As(err, &ldapErr) {
 		switch ldapErr.ResultCode {
@@ -463,7 +499,6 @@ func (c *Client) getEntitiesWithAttributes(
 func (c *Client) GetGlobalConfig() (map[string]string, error) {
 	dn := fmt.Sprintf("cn=config,%s", c.baseDN)
 
-	// Get all attributes
 	result, err := c.Search(dn, ldapFilterAllObjects, []string{"*"}, ldap.ScopeBaseObject)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get global config: %w", err)
