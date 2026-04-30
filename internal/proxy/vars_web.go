@@ -142,6 +142,13 @@ func (g *Generator) registerWebVariables() {
 		withDescription("Upstream name for login"),
 	)
 
+	g.registerVar("web.login.upstream.url", "/",
+		withAttribute("zimbraMailURL"),
+		withValueType(ValueTypeString),
+		withOverrideType(OverrideServer),
+		withDescription("Zimbra Login URL"),
+	)
+
 	// web.ssl.login.upstream.name - Upstream name for SSL login
 	g.registerVar("web.ssl.login.upstream.name", "zimbra_login_ssl",
 		withValueType(ValueTypeString),
@@ -298,6 +305,27 @@ func (g *Generator) registerWebVariables() {
 		withOverrideType(OverrideCustom),
 		withDescription("Generated add_header directives block for default virtual host"),
 		withCustomResolver(g.resolveAddHeadersDefault),
+	)
+
+	g.registerVar("web.add.headers.vhost", "",
+		withValueType(ValueTypeCustom),
+		withOverrideType(OverrideCustom),
+		withDescription("Generated add_header directives block for per-domain virtual hosts"),
+		withCustomResolver(g.resolveAddHeadersDefault),
+	)
+
+	g.registerVar("web.available", false,
+		withValueType(ValueTypeEnabler),
+		withOverrideType(OverrideCustom),
+		withDescription("Whether at least one web upstream server is configured (legacy ZMWebAvailableVar)"),
+		withCustomResolver(g.resolveWebAvailable),
+	)
+
+	g.registerVar("web.ssl.dhparam.enabled", false,
+		withValueType(ValueTypeEnabler),
+		withOverrideType(OverrideCustom),
+		withDescription("Whether the web SSL DH parameter file exists (legacy WebSSLDhparamEnablerVar)"),
+		withCustomResolver(g.resolveWebSSLDhparamEnabled),
 	)
 
 	// web.errpages - Error page directives for 502 and 504 (custom resolver)

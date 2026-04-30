@@ -50,11 +50,11 @@ func TestAllVariableKeysRegistered(t *testing.T) {
 		{"core", "core.ipv6only.enabled"},
 		{"core", "core.ipboth.enabled"},
 		{"core", "main.workers"},
-		{"core", "main.workerConnections"},
+		{"core", "main.connections"},
 		{"core", "main.accept_mutex"},
 		{"core", "main.logfile"},
 		{"core", "main.krb5keytab"},
-		{"core", "main.logLevel"},
+		{"core", "main.loglevel"},
 
 		// vars_ssl.go
 		{"ssl", "ssl.crt.default"},
@@ -204,12 +204,12 @@ func TestAllVariableKeysRegistered(t *testing.T) {
 		// vars_imap_pop.go
 		{"imap_pop", "mail.imap.greeting"},
 		{"imap_pop", "mail.imap.enabled_capability"},
-		{"imap_pop", "mail.imap.starttls"},
+		{"imap_pop", "mail.imap.tls"},
 		{"imap_pop", "mail.imap.sasl.plain.enabled"},
 		{"imap_pop", "mail.imap.sasl.gssapi.enabled"},
 		{"imap_pop", "mail.pop3.greeting"},
 		{"imap_pop", "mail.pop3.enabled_capability"},
-		{"imap_pop", "mail.pop3.starttls"},
+		{"imap_pop", "mail.pop3.tls"},
 		{"imap_pop", "mail.pop3.sasl.plain.enabled"},
 		{"imap_pop", "mail.pop3.sasl.gssapi.enabled"},
 		{"imap_pop", "mail.upstream.pop3xoip"},

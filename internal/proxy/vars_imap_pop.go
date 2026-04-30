@@ -18,11 +18,11 @@ func (g *Generator) registerIMAPPOPVariables() {
 		withOverrideType(OverrideConfig),
 		withDescription("Enabled IMAP capabilities to advertise"),
 	)
-	g.registerVar("mail.imap.starttls", "only",
+	g.registerVar("mail.imap.tls", "only",
 		withAttribute("zimbraReverseProxyImapStartTlsMode"),
-		withOverrideType(OverrideConfig),
+		withOverrideType(OverrideServer),
 		withValueType(ValueTypeString),
-		withDescription("IMAP STARTTLS mode (on, off, only)"),
+		withDescription("TLS support for IMAP (on, off, only)"),
 	)
 	g.registerSASLConfigVar("mail.imap.sasl.plain.enabled", "zimbraReverseProxyImapSaslPlainEnabled",
 		true, "Enable IMAP SASL PLAIN authentication")
@@ -40,11 +40,11 @@ func (g *Generator) registerIMAPPOPVariables() {
 		withOverrideType(OverrideConfig),
 		withDescription("Enabled POP3 capabilities to advertise"),
 	)
-	g.registerVar("mail.pop3.starttls", "only",
+	g.registerVar("mail.pop3.tls", "only",
 		withAttribute("zimbraReverseProxyPop3StartTlsMode"),
-		withOverrideType(OverrideConfig),
+		withOverrideType(OverrideServer),
 		withValueType(ValueTypeString),
-		withDescription("POP3 STARTTLS mode (on, off, only)"),
+		withDescription("TLS support for POP3 (on, off, only)"),
 	)
 	g.registerSASLConfigVar("mail.pop3.sasl.plain.enabled", "zimbraReverseProxyPop3SaslPlainEnabled",
 		true, "Enable POP3 SASL PLAIN authentication")

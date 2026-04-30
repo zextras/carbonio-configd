@@ -55,8 +55,8 @@ func TestVariableResolutionFromGlobalConfig(t *testing.T) {
 		expected any
 	}{
 		{"main.workers", 8},
-		{"main.workerConnections", 20480},
-		{"main.logLevel", "warn"},
+		{"main.connections", 20480},
+		{"main.loglevel", "warn"},
 		{"web.http.port", 8080},
 		{"web.https.port", 8443},
 		{"ssl.ciphers", "HIGH:!aNULL:!MD5"},
@@ -103,11 +103,11 @@ func TestVariableResolutionDefaults(t *testing.T) {
 		varName  string
 		expected any
 	}{
-		{"main.workers", 4},               // Default
-		{"main.workerConnections", 10240}, // Default
-		{"main.logLevel", "info"},         // Default
-		{"web.http.port", 0},              // Changed to 0 to match Java
-		{"web.https.port", 0},             // Changed to 0 to match Java
+		{"main.workers", 4},         // Default
+		{"main.connections", 10240}, // Default
+		{"main.loglevel", "info"},   // Default
+		{"web.http.port", 0},        // Changed to 0 to match Java
+		{"web.https.port", 0},       // Changed to 0 to match Java
 	}
 
 	for _, tt := range tests {

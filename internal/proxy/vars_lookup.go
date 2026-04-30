@@ -19,6 +19,12 @@ func (g *Generator) registerLookupVariables() {
 		withDescription("Whether lookup target is configured and available"),
 		withCustomResolver(g.resolveLookupTargetAvailable),
 	)
+	g.registerVar("lookup.available", false,
+		withValueType(ValueTypeEnabler),
+		withOverrideType(OverrideCustom),
+		withDescription("Whether at least one lookup handler is configured (legacy ZMLookupAvailableVar)"),
+		withCustomResolver(g.resolveLookupAvailable),
+	)
 	g.registerVar("lookup.caching.enabled", true,
 		withAttribute("zimbraReverseProxyZmlookupCachingEnabled"),
 		withValueType(ValueTypeBoolean),
