@@ -512,13 +512,13 @@ func checkAdvancedStatus(ctx context.Context) {
 		return
 	}
 
-	fmt.Printf("\n\t%sCarbonio Advanced installed.%s\n", colorCyan, colorReset)
+	fmt.Printf("\n\t%sCarbonio Advanced%s\n", colorCyan, colorReset)
 
 	// #nosec G204 - fixed binary path
 	out, err := exec.CommandContext(ctx, carbonioCLI, "--json", "core", "getAllServicesStatus").Output()
 	if err != nil {
 		logger.DebugContext(ctx, "Advanced status check failed", "error", err)
-		fmt.Printf("\t  %sAdvanced modules status unavailable.%s\n", colorDim, colorReset)
+		fmt.Printf("\t%smodule status unavailable%s\n", colorDim, colorReset)
 
 		return
 	}
@@ -542,14 +542,9 @@ func parseAdvancedStatus(jsonOutput string) {
 			continue
 		}
 
-		name := line[nameStart : nameStart+nameEnd]
+		name := strings.ToLower(line[nameStart : nameStart+nameEnd])
 		running := strings.Contains(line, `"running":true`)
-
-		if running {
-			fmt.Printf("\t  %-20s %s%s%s\n", name, colorGreen, "running", colorReset)
-		} else {
-			fmt.Printf("\t  %-20s %s%s%s\n", name, colorRed, "NOT running", colorReset)
-		}
+		cliStatus(name, running, "")
 	}
 }
 

@@ -46,10 +46,10 @@ func (g *Generator) registerCoreVariables() {
 		withOverrideType(OverrideConfig),
 		withDescription("Number of NGINX worker processes"),
 	)
-	g.registerVar("main.workerConnections", 10240,
+	g.registerVar("main.connections", 10240,
 		withAttribute("zimbraReverseProxyWorkerConnections"),
 		withValueType(ValueTypeInteger),
-		withOverrideType(OverrideConfig),
+		withOverrideType(OverrideServer),
 		withDescription("Maximum number of simultaneous connections per worker process"),
 	)
 	g.registerVar("main.accept_mutex", "on",
@@ -68,9 +68,9 @@ func (g *Generator) registerCoreVariables() {
 		withValueType(ValueTypeString),
 		withDescription("Kerberos 5 keytab file location"),
 	)
-	g.registerVar("main.logLevel", "info",
+	g.registerVar("main.loglevel", "info",
 		withAttribute("zimbraReverseProxyLogLevel"),
-		withOverrideType(OverrideConfig),
+		withOverrideType(OverrideServer),
 		withValueType(ValueTypeString),
 		withDescription("Log level for NGINX error log (debug, info, notice, warn, error, crit)"),
 	)

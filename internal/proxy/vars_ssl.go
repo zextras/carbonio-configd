@@ -108,4 +108,10 @@ func (g *Generator) registerSSLVariables() {
 		withOverrideType(OverrideConfig),
 		withDescription("Maximum depth for SSL certificate verification chain for default vhost"),
 	)
+	g.registerVar("ssl.clientcertca.enabled", false,
+		withValueType(ValueTypeEnabler),
+		withOverrideType(OverrideCustom),
+		withDescription("Whether a non-empty client CA certificate file exists (legacy ssl.clientcertca.enabled)"),
+		withCustomResolver(g.resolveSSLClientCertCAEnabled),
+	)
 }

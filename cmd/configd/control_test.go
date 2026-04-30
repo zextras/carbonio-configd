@@ -264,11 +264,11 @@ func TestParseAdvancedStatus_WithRunningModules(t *testing.T) {
 	buf.ReadFrom(r)
 	output := buf.String()
 
-	if !strings.Contains(output, "TeamChatting") {
-		t.Errorf("expected TeamChatting in output, got %q", output)
+	if !strings.Contains(output, "teamchatting") {
+		t.Errorf("expected teamchatting in output, got %q", output)
 	}
-	if !strings.Contains(output, "running") {
-		t.Errorf("expected 'running' in output, got %q", output)
+	if !strings.Contains(output, "Running") {
+		t.Errorf("expected 'Running' in output, got %q", output)
 	}
 }
 
@@ -288,8 +288,8 @@ func TestParseAdvancedStatus_AllStoppedModules(t *testing.T) {
 	buf.ReadFrom(r)
 	output := buf.String()
 
-	if !strings.Contains(output, "NOT running") {
-		t.Errorf("expected 'NOT running' in output, got %q", output)
+	if !strings.Contains(output, "Stopped") {
+		t.Errorf("expected 'Stopped' in output, got %q", output)
 	}
 }
 

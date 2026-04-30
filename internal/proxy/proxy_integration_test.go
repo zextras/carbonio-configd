@@ -32,8 +32,8 @@ func TestProxyGeneratorIntegration(t *testing.T) {
 	// Create a simple test template
 	templateContent := `# NGINX Main Configuration
 worker_processes ${main.workers};
-worker_connections ${main.workerConnections};
-error_log ${main.logfile} ${main.logLevel};
+worker_connections ${main.connections};
+error_log ${main.logfile} ${main.loglevel};
 
 # SSL Configuration
 ssl_certificate ${ssl.crt.default};
@@ -88,8 +88,8 @@ ssl_certificate_key ${ssl.key.default};
 	// Verify expected content
 	expectedSubstrings := []string{
 		"worker_processes 4",                        // From main.workers default
-		"worker_connections 10240",                  // From main.workerConnections default
-		"error_log /opt/zextras/log/nginx.log info", // From main.logfile and main.logLevel
+		"worker_connections 10240",                  // From main.connections default
+		"error_log /opt/zextras/log/nginx.log info", // From main.logfile and main.loglevel
 		"ssl_certificate",                           // SSL certificate path
 		"ssl_certificate_key",                       // SSL key path
 	}
@@ -757,8 +757,8 @@ func TestJavaProxyConfGenCompatibility(t *testing.T) {
 
 # Main settings
 worker_processes ${main.workers};
-worker_connections ${main.workerConnections};
-error_log ${main.logfile} ${main.logLevel};
+worker_connections ${main.connections};
+error_log ${main.logfile} ${main.loglevel};
 
 # Proxy settings
 proxy_pass_header ${web.ssl.passheader};

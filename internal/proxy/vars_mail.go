@@ -90,6 +90,31 @@ func (g *Generator) registerMailVariables() {
 		withDescription("IMAP network timeout after authentication (base + 300s offset)"),
 		withCustomResolver(g.makeTimeoutResolver("imap_authenticated_max_idle_time", 1800, 300)),
 	)
+	g.registerVar("mail.imap.timeout", 60,
+		withAttribute("imap_max_idle_time"),
+		withValueType(ValueTypeInteger),
+		withOverrideType(OverrideLocalConfig),
+		withDescription("IMAP network timeout before authentication (seconds)"),
+	)
+	g.registerVar("mail.pop3.timeout", 60,
+		withAttribute("pop3_max_idle_time"),
+		withValueType(ValueTypeInteger),
+		withOverrideType(OverrideLocalConfig),
+		withDescription("POP3 network timeout before authentication (seconds)"),
+	)
+	g.registerVar("mail.pop3.proxytimeout", 60,
+		withAttribute("pop3_max_idle_time"),
+		withValueType(ValueTypeInteger),
+		withOverrideType(OverrideLocalConfig),
+		withDescription("POP3 network timeout after authentication (seconds)"),
+	)
+	g.registerVar("mail.whitelistip.:servers", "",
+		withAttribute("zimbraReverseProxyIPThrottleWhitelist"),
+		withValueType(ValueTypeCustom),
+		withOverrideType(OverrideCustom),
+		withDescription("List of client IP addresses immune to IP throttling"),
+		withCustomResolver(g.resolveMailWhitelistIPs),
+	)
 	g.registerVar("mail.ctimeout", 120000,
 		withAttribute("zimbraReverseProxyConnectTimeout"),
 		withValueType(ValueTypeTime),

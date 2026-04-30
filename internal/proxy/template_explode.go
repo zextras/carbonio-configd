@@ -436,26 +436,35 @@ func (tp *TemplateProcessor) setDomainVariables(domain *DomainInfo) {
 		Value:     domain.VirtualIPAddress,
 	}
 
-	// Store original SSL values before overriding (for restoration)
 	tp.generator.Variables[varKeyOrigSSLCrt] = tp.generator.Variables[varKeySSLCrt]
 	tp.generator.Variables[varKeyOrigSSLKey] = tp.generator.Variables[varKeySSLKey]
 
-	// Set SSL certificate variables if available
-	if domain.SSLCertificate != "" {
-		tp.generator.Variables[varKeySSLCrt] = &Variable{
-			Keyword:   varKeySSLCrt,
-			ValueType: ValueTypeString,
-			Value:     domain.SSLCertificate,
+	tp.generator.Variables[varKeySSLCrt] = &Variable{
+		Keyword:   varKeySSLCrt,
+		ValueType: ValueTypeString,
+		Value:     domainSSLValueOrDefault(domain.SSLCertificate, tp.generator.Variables["ssl.crt.default"]),
+	}
+	tp.generator.Variables[varKeySSLKey] = &Variable{
+		Keyword:   varKeySSLKey,
+		ValueType: ValueTypeString,
+		Value:     domainSSLValueOrDefault(domain.SSLPrivateKey, tp.generator.Variables["ssl.key.default"]),
+	}
+}
+
+// domainSSLValueOrDefault returns the per-domain SSL path when set, otherwise falls
+// back to the global default variable's value (legacy ProxyConfGen.java:777-786).
+func domainSSLValueOrDefault(domainValue string, defaultVar *Variable) string {
+	if domainValue != "" {
+		return domainValue
+	}
+
+	if defaultVar != nil {
+		if s, ok := defaultVar.Value.(string); ok {
+			return s
 		}
 	}
 
-	if domain.SSLPrivateKey != "" {
-		tp.generator.Variables[varKeySSLKey] = &Variable{
-			Keyword:   varKeySSLKey,
-			ValueType: ValueTypeString,
-			Value:     domain.SSLPrivateKey,
-		}
-	}
+	return ""
 }
 
 // clearDomainVariables removes domain-specific variables after processing.

@@ -223,14 +223,13 @@ server {
 		Variables: make(map[string]*Variable),
 	}
 
-	// Set global default SSL paths
-	gen.Variables["ssl.crt"] = &Variable{
-		Keyword:   "ssl.crt",
+	gen.Variables["ssl.crt.default"] = &Variable{
+		Keyword:   "ssl.crt.default",
 		ValueType: ValueTypeString,
 		Value:     "/opt/zextras/ssl/default.crt",
 	}
-	gen.Variables["ssl.key"] = &Variable{
-		Keyword:   "ssl.key",
+	gen.Variables["ssl.key.default"] = &Variable{
+		Keyword:   "ssl.key.default",
 		ValueType: ValueTypeString,
 		Value:     "/opt/zextras/ssl/default.key",
 	}

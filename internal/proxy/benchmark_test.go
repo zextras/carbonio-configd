@@ -66,8 +66,8 @@ func BenchmarkTemplateProcessing(b *testing.B) {
 	// Create a test template with multiple variables
 	templateContent := `# NGINX Configuration
 worker_processes ${main.workers};
-worker_connections ${main.workerConnections};
-error_log ${main.logfile} ${main.logLevel};
+worker_connections ${main.connections};
+error_log ${main.logfile} ${main.loglevel};
 
 # SSL Configuration
 ssl_certificate ${ssl.crt.default};
@@ -131,7 +131,7 @@ func BenchmarkFullGeneration(b *testing.B) {
 	// Create multiple test templates to simulate real workload
 	templates := map[string]string{
 		"nginx.conf.main.template": `worker_processes ${main.workers};
-events { worker_connections ${main.workerConnections}; }
+events { worker_connections ${main.connections}; }
 http { include ${core.includes}/http.conf; }`,
 		"http.conf.template": `upstream backend { server ${web.upstream.target}:${web.http.port}; }
 server { listen ${web.http.port}; ssl_certificate ${ssl.crt.default}; }`,
