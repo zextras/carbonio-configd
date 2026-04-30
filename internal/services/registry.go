@@ -296,13 +296,16 @@ var Registry = map[string]*ServiceDef{
 		ConfigRewrite: []string{"antispam", "antivirus", "opendkim", "mta", "sasl"},
 	},
 	"proxy": {
-		Name:          "proxy",
-		DisplayName:   "proxy",
-		SystemdUnits:  []string{"carbonio-nginx.service"},
-		BinaryPath:    commonPath + "/sbin/nginx",
-		BinaryArgs:    []string{"-c", confPath + "/nginx.conf"},
-		PidFile:       pidDir + "/nginx.pid",
-		ProcessName:   "nginx",
+		Name:         "proxy",
+		DisplayName:  "proxy",
+		SystemdUnits: []string{"carbonio-nginx.service"},
+		BinaryPath:   commonPath + "/sbin/nginx",
+		BinaryArgs:   []string{"-c", confPath + "/nginx.conf"},
+		PidFile:      pidDir + "/nginx.pid",
+		// Path fragment, not the bare token "nginx": avoids matching
+		// /usr/bin/carbonio-prometheus-nginx-exporter, whose argv
+		// contains "nginx" multiple times.
+		ProcessName:   "/sbin/nginx",
 		UseSDNotify:   true,
 		ConfigRewrite: []string{"proxy"},
 	},
