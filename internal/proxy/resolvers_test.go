@@ -516,6 +516,15 @@ func TestResolveLookupHandlers(t *testing.T) {
 			containsPort: "7072",
 			containsURL:  "nginx-lookup",
 		},
+		{
+			name: "multi-host (newline-joined LDAP multi-value) renders one URL per host",
+			globalData: map[string]string{
+				"zimbraReverseProxyAvailableLookupTargets": "127.0.0.1\n127.0.0.2",
+			},
+			localData:    map[string]string{},
+			containsPort: "7072",
+			containsURL:  "nginx-lookup",
+		},
 	}
 
 	for _, tt := range tests {
@@ -540,6 +549,14 @@ func TestResolveLookupHandlers(t *testing.T) {
 			}
 			if !strings.HasPrefix(str, "https://") {
 				t.Errorf("expected URL to start with https://, got %q", str)
+			}
+			if strings.ContainsAny(str, "\n,") {
+				t.Errorf("output must not contain raw newline/comma separators (CO-3565 family): %q", str)
+			}
+			if strings.Contains(tt.name, "multi-host") {
+				if c := strings.Count(str, "https://"); c != 2 {
+					t.Errorf("expected 2 https:// URLs for multi-host input, got %d in %q", c, str)
+				}
 			}
 		})
 	}
