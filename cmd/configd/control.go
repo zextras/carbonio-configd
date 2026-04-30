@@ -328,19 +328,26 @@ func stopLDAPIfLocal(ctx context.Context, enabledSet map[string]bool) int {
 	return 0
 }
 
-// controlStatus prints the status of every registered service, matching the
-// behavior of legacy `zmcontrol status` which always displayed the full list
-// (rather than filtering to LDAP-enabled services). The "running" judgment for
-// a row is only counted against the exit code if the service is actually
-// LDAP-enabled — so an unconfigured host doesn't get rc=1 just because clamd
-// is not started.
+// controlStatus prints the status of services that are enabled on this host
+// (mirroring legacy `control.pl:doStatus`, which iterated keys of
+// getEnabledServices() — i.e. services whose name is in zimbraServiceEnabled
+// for the local host, plus zmconfigd which legacy always added). This is the
+// CO-3566 fix: the previous implementation iterated the entire registry and
+// thus showed phantom rows like `directory server`, `mailbox`, `cbpolicyd`,
+// `freshclam`, `saslauthd`, `milter`, `stats` on proxy/MTA-only nodes.
+//
+// When LDAP is unreachable, services.DiscoverEnabledServices already falls
+// back to the on-disk cache; we propagate that opportunistically. As a last
+// resort (LDAP and cache both unavailable) we degrade to the full registry
+// view rather than printing nothing — operators must still see something.
+//
+// Exit code: rc=1 if any displayed service is Stopped/Failed, else rc=0.
 func controlStatus(ctx context.Context) int { //nolint:unparam
 	cliHeader()
 
-	_ = os.Stdout.Sync()
-
 	type discResult struct {
-		set map[string]bool
+		set    map[string]bool
+		failed bool
 	}
 
 	discCh := make(chan discResult, 1)
@@ -348,16 +355,20 @@ func controlStatus(ctx context.Context) int { //nolint:unparam
 	go func() {
 		list, err := services.DiscoverEnabledServices(ctx)
 		if err != nil {
-			discCh <- discResult{set: nil}
+			discCh <- discResult{set: nil, failed: true}
 			return
 		}
 
-		s := make(map[string]bool, len(list))
+		s := make(map[string]bool, len(list)+1)
 		for _, n := range list {
 			s[services.MapLDAPServiceToRegistry(n)] = true
 		}
 
-		discCh <- discResult{set: s}
+		// Legacy parity: zmcontrol/control.pl always inserted "zmconfigd"
+		// regardless of LDAP state, so configd is always shown.
+		s["configd"] = true
+
+		discCh <- discResult{set: s, failed: false}
 	}()
 
 	type svcRow struct {
@@ -367,30 +378,29 @@ func controlStatus(ctx context.Context) int { //nolint:unparam
 
 	var rows []svcRow
 
-	for info := range services.ServiceListStatusStream(ctx) {
+	stream := services.ServiceListStatusStream(ctx)
+	disc := <-discCh
+
+	for info := range stream {
+		if disc.set != nil && !disc.set[info.Name] {
+			continue
+		}
+
 		detail := getServiceDetail(ctx, info.Name, info.Running)
 		cliStatus(info.DisplayName, info.Running, detail)
 		rows = append(rows, svcRow{ServiceInfo: info, detail: detail})
 	}
 
-	_ = os.Stdout.Sync()
-
-	disc := <-discCh
-
-	allRunning := true
-
-	for _, r := range rows {
-		if !r.Running {
-			if disc.set == nil || disc.set[r.Name] {
-				allRunning = false
-			}
-		}
+	if disc.failed {
+		logger.WarnContext(ctx, "Service discovery unavailable, displayed full registry as fallback")
 	}
 
 	checkAdvancedStatus(ctx)
 
-	if !allRunning {
-		return 1
+	for _, r := range rows {
+		if !r.Running {
+			return 1
+		}
 	}
 
 	return 0
