@@ -375,3 +375,51 @@ func TestMailboxCustomStop_WithProcessName(t *testing.T) {
 		t.Logf("mailboxCustomStop with ProcessName: %v (stopAppserverDB error is expected)", err)
 	}
 }
+
+// TestMailboxCustomStop_StopDBError verifies that when stopAppserverDB returns
+// an error, mailboxCustomStop propagates it (covers the return err branch).
+func TestMailboxCustomStop_StopDBError(t *testing.T) {
+	tmp := t.TempDir()
+
+	// Create a pidfile with an invalid PID so stopMysqldByPidFile returns an error
+	pidFile := filepath.Join(tmp, "mysql.pid")
+	if err := os.WriteFile(pidFile, []byte("not-a-pid\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	oldPidFile := appserverDBPidFile
+	appserverDBPidFile = pidFile
+	defer func() { appserverDBPidFile = oldPidFile }()
+
+	def := &ServiceDef{Name: "mailbox"}
+	err := mailboxCustomStop(context.Background(), def)
+	if err == nil {
+		t.Error("expected error when stopAppserverDB fails with invalid pidfile")
+	}
+}
+
+// TestMailboxJavaBinary_ZimbraJavaHome verifies the zimbra_java_home fallback
+// (when mailboxd_java_home is empty but zimbra_java_home is set).
+func TestMailboxJavaBinary_ZimbraJavaHome(t *testing.T) {
+	tmp := t.TempDir()
+	javaDir := filepath.Join(tmp, "zimbra-jdk", "bin")
+	if err := os.MkdirAll(javaDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	javaBin := filepath.Join(javaDir, "java")
+	if err := os.WriteFile(javaBin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	lc := map[string]string{
+		"mailboxd_java_home": "",
+		"zimbra_java_home":   filepath.Join(tmp, "zimbra-jdk"),
+	}
+	bin, err := mailboxJavaBinary(context.Background(), lc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(bin, "zimbra-jdk") {
+		t.Errorf("expected zimbra_java_home fallback path, got %s", bin)
+	}
+}
