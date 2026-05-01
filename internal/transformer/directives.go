@@ -217,38 +217,38 @@ func (t *Transformer) handleListDirective(ctx context.Context, sr string) string
 	return ""
 }
 
-// handleContainsDirective processes contains directives.
-// Format: %%contains VAR:key string^replacement^altreplacement%%
-func (t *Transformer) handleContainsDirective(ctx context.Context, sr string) string {
+// resolveSearchReplaceDirective implements the shared logic for contains/exact directives.
+// Format: %%<directive> VAR:key searchString^replacement^altReplacement%%
+// The match func receives (lookupVal, searchString) and returns whether the value matches.
+func (t *Transformer) resolveSearchReplaceDirective(
+	ctx context.Context,
+	directiveName string,
+	sr string,
+	match func(lookupVal, searchString string) bool,
+) string {
 	parts := strings.SplitN(sr, " ", 3)
 	if len(parts) < 3 {
-		logger.WarnContext(ctx, "Invalid contains directive", "directive", sr)
-		return "" // Invalid format
+		logger.WarnContext(ctx, "Invalid "+directiveName+" directive", "directive", sr)
+		return ""
 	}
 
-	cfgTypeKey := parts[1]
-	searchAndReplace := parts[2]
-
-	cfgTypeParts := strings.SplitN(cfgTypeKey, ":", 2)
+	cfgTypeParts := strings.SplitN(parts[1], ":", 2)
 	if len(cfgTypeParts) != 2 {
-		logger.WarnContext(ctx, "Invalid contains config type:key format", "config", cfgTypeKey)
-		return "" // Invalid format
+		logger.WarnContext(ctx, "Invalid "+directiveName+" config type:key format", "config", parts[1])
+		return ""
 	}
 
-	cfgType := cfgTypeParts[0]
-	key := cfgTypeParts[1]
-
-	lookupVal, err := t.ConfigLookup.LookUpConfig(ctx, cfgType, key)
+	lookupVal, err := t.ConfigLookup.LookUpConfig(ctx, cfgTypeParts[0], cfgTypeParts[1])
 	if err != nil {
-		logger.WarnContext(ctx, "Error looking up config for contains",
-			"config_type", cfgType,
-			"key", key,
+		logger.WarnContext(ctx, "Error looking up config for "+directiveName,
+			"config_type", cfgTypeParts[0],
+			"key", cfgTypeParts[1],
 			"error", err)
 
-		return "" // Return empty string on error
+		return ""
 	}
 
-	splitReplace := strings.SplitN(searchAndReplace, "^", 3)
+	splitReplace := strings.SplitN(parts[2], "^", 3)
 	searchString := splitReplace[0]
 	replacement := searchString
 	altReplacement := ""
@@ -261,65 +261,26 @@ func (t *Transformer) handleContainsDirective(ctx context.Context, sr string) st
 		altReplacement = splitReplace[2]
 	}
 
-	if strings.Contains(lookupVal, searchString) {
+	if match(lookupVal, searchString) {
 		return replacement
 	}
 
 	return altReplacement
 }
 
+// handleContainsDirective processes contains directives.
+// Format: %%contains VAR:key string^replacement^altreplacement%%
+func (t *Transformer) handleContainsDirective(ctx context.Context, sr string) string {
+	return t.resolveSearchReplaceDirective(ctx, "contains", sr, strings.Contains)
+}
+
 // handleExactDirective processes exact directives.
 // Format: %%exact VAR:key string^replacement^altreplacement%%
 func (t *Transformer) handleExactDirective(ctx context.Context, sr string) string {
-	parts := strings.SplitN(sr, " ", 3)
-	if len(parts) < 3 {
-		logger.WarnContext(ctx, "Invalid exact directive", "directive", sr)
-		return "" // Invalid format
-	}
-
-	cfgTypeKey := parts[1]
-	searchAndReplace := parts[2]
-
-	cfgTypeParts := strings.SplitN(cfgTypeKey, ":", 2)
-	if len(cfgTypeParts) != 2 {
-		logger.WarnContext(ctx, "Invalid exact config type:key format", "config", cfgTypeKey)
-		return "" // Invalid format
-	}
-
-	cfgType := cfgTypeParts[0]
-	key := cfgTypeParts[1]
-
-	lookupVal, err := t.ConfigLookup.LookUpConfig(ctx, cfgType, key)
-	if err != nil {
-		logger.WarnContext(ctx, "Error looking up config for exact",
-			"config_type", cfgType,
-			"key", key,
-			"error", err)
-
-		return "" // Return empty string on error
-	}
-
-	splitReplace := strings.SplitN(searchAndReplace, "^", 3)
-	searchString := splitReplace[0]
-	replacement := searchString
-	altReplacement := ""
-
-	if len(splitReplace) > 1 {
-		replacement = splitReplace[1]
-	}
-
-	if len(splitReplace) > 2 {
-		altReplacement = splitReplace[2]
-	}
-
-	// For exact, we need to split the lookupVal into fields and check for exact match
-	foundExact := slices.Contains(strings.Fields(lookupVal), searchString)
-
-	if foundExact {
-		return replacement
-	}
-
-	return altReplacement
+	return t.resolveSearchReplaceDirective(ctx, "exact", sr,
+		func(lookupVal, searchString string) bool {
+			return slices.Contains(strings.Fields(lookupVal), searchString)
+		})
 }
 
 // handleFreqDirective processes freq directives.
