@@ -7,6 +7,7 @@ package zxadmin
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -293,5 +294,212 @@ func TestNew_DefaultsToLocalAdminPort(t *testing.T) {
 
 	if c.baseURL != "https://localhost:7071" {
 		t.Errorf("baseURL=%q, want https://localhost:7071", c.baseURL)
+	}
+}
+
+// --- Transport error tests ---
+
+func TestAuthenticate_TransportError(t *testing.T) {
+	// Create a client with a custom transport that always fails.
+	c := NewWithBaseURL("https://localhost:7071", map[string]string{
+		"zimbra_ldap_user":     "zimbra",
+		"zimbra_ldap_password": "secret",
+	})
+
+	// Replace transport with one that returns an error.
+	c.httpClient.Transport = &errorRoundTripper{err: "boom"}
+
+	_, err := c.GetAllServicesStatus(context.Background())
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "boom") && !strings.Contains(err.Error(), "auth request failed") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestGetAllServicesStatus_TransportErrorAfterAuth(t *testing.T) {
+	// First, set up a server that returns a good auth response.
+	mux := http.NewServeMux()
+	mux.HandleFunc(soapPath, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(goodAuthResponse))
+	})
+
+	srv := httptest.NewTLSServer(mux)
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+
+	// Ensure token is cached by calling ensureToken.
+	if err := c.ensureToken(context.Background()); err != nil {
+		t.Fatalf("ensureToken failed: %v", err)
+	}
+
+	// Now replace the transport with one that fails.
+	c.httpClient.Transport = &errorRoundTripper{err: "transport boom"}
+
+	_, err := c.GetAllServicesStatus(context.Background())
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "transport boom") && !strings.Contains(err.Error(), "status request failed") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// errorRoundTripper is a custom http.RoundTripper that always returns an error.
+type errorRoundTripper struct {
+	err string
+}
+
+func (e *errorRoundTripper) RoundTrip(_ *http.Request) (*http.Response, error) {
+	return nil, fmt.Errorf("%s", e.err)
+}
+
+// --- parseAuthResponse tests ---
+
+func TestParseAuthResponse_MalformedXML(t *testing.T) {
+	_, _, err := parseAuthResponse([]byte("<?xml not well-formed"))
+	if err == nil {
+		t.Fatalf("expected error for malformed XML")
+	}
+
+	if !strings.Contains(err.Error(), "parse auth response") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestParseAuthResponse_SOAPFaultWithReasonText(t *testing.T) {
+	faultWithReason := `<?xml version="1.0"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Body>
+    <soap:Fault>
+      <faultcode>soap:Client</faultcode>
+      <Reason><Text>auth denied</Text></Reason>
+    </soap:Fault>
+  </soap:Body>
+</soap:Envelope>`
+
+	_, _, err := parseAuthResponse([]byte(faultWithReason))
+	if err == nil {
+		t.Fatalf("expected error for SOAP fault")
+	}
+
+	if !strings.Contains(err.Error(), "auth denied") {
+		t.Errorf("expected 'auth denied' in error, got: %v", err)
+	}
+}
+
+func TestParseAuthResponse_SOAPFaultWithFaultString(t *testing.T) {
+	faultWithString := `<?xml version="1.0"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Body>
+    <soap:Fault>
+      <faultcode>soap:Client</faultcode>
+      <faultstring>bad creds</faultstring>
+      <Reason><Text></Text></Reason>
+    </soap:Fault>
+  </soap:Body>
+</soap:Envelope>`
+
+	_, _, err := parseAuthResponse([]byte(faultWithString))
+	if err == nil {
+		t.Fatalf("expected error for SOAP fault")
+	}
+
+	if !strings.Contains(err.Error(), "bad creds") {
+		t.Errorf("expected 'bad creds' in error, got: %v", err)
+	}
+}
+
+func TestAuthenticate_LifetimeZeroFallback(t *testing.T) {
+	// Server returns auth response with no lifetime.
+	noLifetimeResponse := `<?xml version="1.0"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Body>
+    <AuthResponse xmlns="urn:zimbraAdmin">
+      <authToken>test-token</authToken>
+    </AuthResponse>
+  </soap:Body>
+</soap:Envelope>`
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(soapPath, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(noLifetimeResponse))
+	})
+	mux.HandleFunc(statusPath, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(objectStatusResponse))
+	})
+
+	srv := httptest.NewTLSServer(mux)
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+
+	_, err := c.GetAllServicesStatus(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Check that expiresAt is roughly now + 1h - renewSkew.
+	now := time.Now()
+	expectedMin := now.Add(1*time.Hour - renewSkew - 5*time.Minute)
+	expectedMax := now.Add(1*time.Hour - renewSkew + 5*time.Minute)
+
+	if c.expiresAt.Before(expectedMin) || c.expiresAt.After(expectedMax) {
+		t.Errorf("expiresAt=%v, expected roughly %v (±5min)", c.expiresAt, now.Add(1*time.Hour-renewSkew))
+	}
+}
+
+func TestGetAllServicesStatus_HTTP500(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc(soapPath, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(goodAuthResponse))
+	})
+	mux.HandleFunc(statusPath, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("kaboom"))
+	})
+
+	srv := httptest.NewTLSServer(mux)
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+
+	_, err := c.GetAllServicesStatus(context.Background())
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "HTTP 500") && !strings.Contains(err.Error(), "kaboom") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestMapToModules_Defaults(t *testing.T) {
+	// Test with minimal JSON: no commandName or commercialName fields.
+	minimalJSON := `{"ZxFoo":{"running":true}}`
+
+	mods, err := parseStatusResponse([]byte(minimalJSON))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(mods) != 1 {
+		t.Fatalf("expected 1 module, got %d", len(mods))
+	}
+
+	if mods[0].Name != "ZxFoo" {
+		t.Errorf("Name=%q, want ZxFoo", mods[0].Name)
+	}
+
+	if mods[0].CommercialName != "ZxFoo" {
+		t.Errorf("CommercialName=%q, want ZxFoo", mods[0].CommercialName)
+	}
+
+	if !mods[0].Running {
+		t.Errorf("Running=%v, want true", mods[0].Running)
 	}
 }

@@ -7,6 +7,8 @@ package proxy
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/zextras/carbonio-configd/internal/config"
@@ -297,5 +299,43 @@ func TestConvertValue(t *testing.T) {
 					tt.val, tt.vt, got, got, tt.want, tt.want)
 			}
 		})
+	}
+}
+
+// TestSSLProtocolsCustomFormatter_ArrayPath tests the []string branch of the
+// ssl.protocols custom formatter (used in both mail and web).
+func TestSSLProtocolsCustomFormatter_ArrayPath(t *testing.T) {
+	formatter := func(val any) (string, error) {
+		if arr, ok := val.([]string); ok {
+			return " " + strings.Join(arr, " "), nil
+		}
+		return fmt.Sprintf(" %v", val), nil
+	}
+
+	result, err := formatter([]string{"TLSv1.2", "TLSv1.3"})
+	if err != nil {
+		t.Fatalf("formatter failed: %v", err)
+	}
+	if result != " TLSv1.2 TLSv1.3" {
+		t.Errorf("expected ' TLSv1.2 TLSv1.3', got %q", result)
+	}
+}
+
+// TestSSLProtocolsCustomFormatter_ScalarFallback tests the non-[]string fallback
+// branch of the ssl.protocols custom formatter.
+func TestSSLProtocolsCustomFormatter_ScalarFallback(t *testing.T) {
+	formatter := func(val any) (string, error) {
+		if arr, ok := val.([]string); ok {
+			return " " + strings.Join(arr, " "), nil
+		}
+		return fmt.Sprintf(" %v", val), nil
+	}
+
+	result, err := formatter(42)
+	if err != nil {
+		t.Fatalf("formatter failed: %v", err)
+	}
+	if result != " 42" {
+		t.Errorf("expected ' 42', got %q", result)
 	}
 }

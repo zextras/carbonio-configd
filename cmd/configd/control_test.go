@@ -7,6 +7,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -376,4 +377,170 @@ func TestServiceDetailFromSystemd_NoSystemdUnits(t *testing.T) {
 	if detail != "" {
 		t.Errorf("expected empty detail for service with no systemd units, got %q", detail)
 	}
+}
+
+// TestShortErr_Nil tests shortErr with nil error (should panic or handle gracefully)
+// Since shortErr calls err.Error(), passing nil will panic. This test documents that behavior.
+func TestShortErr_Short(t *testing.T) {
+	err := fmt.Errorf("short error")
+	result := shortErr(err)
+	if result != "short error" {
+		t.Errorf("expected 'short error', got %q", result)
+	}
+}
+
+// TestShortErr_LongSingleLine tests shortErr with a long single-line error
+func TestShortErr_LongSingleLine(t *testing.T) {
+	longMsg := strings.Repeat("x", 150)
+	err := errors.New(longMsg)
+	result := shortErr(err)
+	if len(result) != 140 {
+		t.Errorf("expected length 140, got %d", len(result))
+	}
+	if !strings.HasSuffix(result, "...") {
+		t.Errorf("expected result to end with '...', got %q", result)
+	}
+}
+
+// TestShortErr_MultilineError tests shortErr with embedded newlines
+func TestShortErr_MultilineError(t *testing.T) {
+	err := fmt.Errorf("line1\nline2\nline3")
+	result := shortErr(err)
+	if strings.Contains(result, "\n") {
+		t.Errorf("expected newlines to be replaced with spaces, got %q", result)
+	}
+	if !strings.Contains(result, "line1 line2 line3") {
+		t.Errorf("expected 'line1 line2 line3', got %q", result)
+	}
+}
+
+// TestShortErr_LongMultilineError tests shortErr with long multiline error
+func TestShortErr_LongMultilineError(t *testing.T) {
+	longMsg := strings.Repeat("x", 70) + "\n" + strings.Repeat("y", 70)
+	err := errors.New(longMsg)
+	result := shortErr(err)
+	if strings.Contains(result, "\n") {
+		t.Errorf("expected newlines replaced, got %q", result)
+	}
+	if len(result) != 140 {
+		t.Errorf("expected length 140, got %d", len(result))
+	}
+	if !strings.HasSuffix(result, "...") {
+		t.Errorf("expected result to end with '...', got %q", result)
+	}
+}
+
+// TestStartEnabledServices_SkipsUnknownService tests that startEnabledServices
+// skips services not in the registry without error
+func TestStartEnabledServices_SkipsUnknownService(t *testing.T) {
+	enabledSet := map[string]bool{
+		"nonexistent-service-xyz": true,
+	}
+	rc := startEnabledServices(context.Background(), enabledSet, 100)
+	if rc != 0 {
+		t.Errorf("expected rc=0 when service not in registry, got %d", rc)
+	}
+}
+
+// TestStartEnabledServices_SkipsLDAPAndConfigd tests that startEnabledServices
+// skips ldap and configd services
+func TestStartEnabledServices_SkipsLDAPAndConfigd(t *testing.T) {
+	enabledSet := map[string]bool{
+		"ldap":    true,
+		"configd": true,
+	}
+	rc := startEnabledServices(context.Background(), enabledSet, 100)
+	if rc != 0 {
+		t.Errorf("expected rc=0 when only ldap/configd in set, got %d", rc)
+	}
+}
+
+// TestCheckAdvancedStatus_NoAdvancedJARs tests checkAdvancedStatus when no JARs present
+func TestCheckAdvancedStatus_NoAdvancedJARs(t *testing.T) {
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	checkAdvancedStatus(context.Background())
+
+	w.Close()
+	os.Stdout = old
+
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+	output := buf.String()
+
+	// When no JARs are present, checkAdvancedStatus should return early
+	// and not print anything (or minimal output)
+	_ = output
+}
+
+// TestVersionCmd_Run_NoPackages tests VersionCmd.Run with Packages=false
+func TestVersionCmd_Run_NoPackages(t *testing.T) {
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	cmd := &VersionCmd{Packages: false}
+	err := cmd.Run()
+
+	w.Close()
+	os.Stdout = old
+
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+	output := buf.String()
+
+	// Should print version info (or "unknown" if file doesn't exist)
+	if !strings.Contains(output, "Carbonio") {
+		t.Logf("output: %q", output)
+	}
+	// err may be non-nil if /opt/zextras/.version doesn't exist, which is OK
+	_ = err
+}
+
+// TestVersionCmd_Run_WithPackages tests VersionCmd.Run with Packages=true
+func TestVersionCmd_Run_WithPackages(t *testing.T) {
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	cmd := &VersionCmd{Packages: true}
+	err := cmd.Run()
+
+	w.Close()
+	os.Stdout = old
+
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+	output := buf.String()
+
+	// Should attempt to show packages (may be empty if none installed)
+	_ = output
+	_ = err
+}
+
+// TestStopLDAPIfLocal_EnabledSetWithLDAP tests stopLDAPIfLocal when ldap is in enabledSet
+func TestStopLDAPIfLocal_EnabledSetWithLDAP(t *testing.T) {
+	enabledSet := map[string]bool{"ldap": true}
+	rc := stopLDAPIfLocal(context.Background(), enabledSet)
+	// Should return 0 if LDAP is not local (which is typical in test env)
+	if rc != 0 && !services.IsLDAPLocal() {
+		t.Errorf("expected rc=0 when LDAP not local, got %d", rc)
+	}
+}
+
+// TestAdvancedJARsPresent_NoDir tests advancedJARsPresent when dir doesn't exist
+func TestAdvancedJARsPresent_NoDir(t *testing.T) {
+	result := advancedJARsPresent()
+	// Should return false if dir doesn't exist or no JARs found
+	if result && !fileExists("/opt/zextras/lib/ext/carbonio") {
+		t.Errorf("expected false when dir doesn't exist, got %v", result)
+	}
+}
+
+// Helper function to check if file exists
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }

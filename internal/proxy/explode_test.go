@@ -6,6 +6,7 @@ package proxy
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -762,4 +763,141 @@ func TestExplodeInvalidDirective(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCachedLDAPQuery_NilCache(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("calls queryFunc directly when cache is nil", func(t *testing.T) {
+		result, err := cachedLDAPQuery[string](ctx, nil, "test-key", "test-entity", func() (string, error) {
+			return "query-result", nil
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result != "query-result" {
+			t.Errorf("expected 'query-result', got %q", result)
+		}
+	})
+
+	t.Run("returns error when queryFunc fails and cache is nil", func(t *testing.T) {
+		_, err := cachedLDAPQuery[string](ctx, nil, "test-key", "test-entity", func() (string, error) {
+			return "", fmt.Errorf("query failed")
+		})
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "failed to query test-entity from LDAP") {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+}
+
+func TestCachedLDAPQuery_WithCache(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("uses cache when available", func(t *testing.T) {
+		mockCache := &mockCache{
+			data: map[string]any{
+				"ldap:domains": []string{"example.com"},
+			},
+		}
+
+		queryCalled := false
+		result, err := cachedLDAPQuery[[]string](ctx, mockCache, "ldap:domains", "domains", func() ([]string, error) {
+			queryCalled = true
+			return []string{"fresh.com"}, nil
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(result) != 1 || result[0] != "example.com" {
+			t.Errorf("expected cached [example.com], got %v", result)
+		}
+		if queryCalled {
+			t.Error("queryFunc should not be called when cache has data")
+		}
+	})
+
+	t.Run("calls queryFunc when cache misses", func(t *testing.T) {
+		callCount := 0
+		mockCache := &mockCacheWithQuery{
+			getCachedConfig: func(ctx context.Context, key string, fn func() (any, error)) (any, error) {
+				callCount++
+				return fn()
+			},
+		}
+
+		result, err := cachedLDAPQuery[[]string](ctx, mockCache, "ldap:domains", "domains", func() ([]string, error) {
+			return []string{"fresh.com"}, nil
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(result) != 1 || result[0] != "fresh.com" {
+			t.Errorf("expected [fresh.com], got %v", result)
+		}
+		if callCount != 1 {
+			t.Errorf("expected 1 cache call, got %d", callCount)
+		}
+	})
+
+	t.Run("returns error when cache query fails", func(t *testing.T) {
+		mockCache := &mockCache{
+			err: fmt.Errorf("cache error"),
+		}
+
+		_, err := cachedLDAPQuery[[]string](ctx, mockCache, "ldap:domains", "domains", func() ([]string, error) {
+			return []string{"fresh.com"}, nil
+		})
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "failed to query domains from LDAP (cached)") {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("returns type mismatch error", func(t *testing.T) {
+		mockCache := &mockCache{
+			data: map[string]any{
+				"ldap:domains": "wrong-type", // string instead of []string
+			},
+		}
+
+		_, err := cachedLDAPQuery[[]string](ctx, mockCache, "ldap:domains", "domains", func() ([]string, error) {
+			return []string{"fresh.com"}, nil
+		})
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "cache returned unexpected type for domains") {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+}
+
+type mockCache struct {
+	data map[string]any
+	err  error
+}
+
+func (m *mockCache) GetCachedConfig(_ context.Context, key string, _ func() (any, error)) (any, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	if m.data != nil {
+		if val, ok := m.data[key]; ok {
+			return val, nil
+		}
+	}
+	return nil, fmt.Errorf("cache miss for key %q", key)
+}
+
+type mockCacheWithQuery struct {
+	getCachedConfig func(ctx context.Context, key string, fn func() (any, error)) (any, error)
+}
+
+func (m *mockCacheWithQuery) GetCachedConfig(ctx context.Context, key string, fn func() (any, error)) (any, error) {
+	return m.getCachedConfig(ctx, key, fn)
 }
