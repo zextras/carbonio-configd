@@ -6,30 +6,22 @@
 
 package main
 
-import (
-	"time"
-)
+import "github.com/zextras/carbonio-configd/internal/tracing"
 
-// ProfilingConfig holds profiling configuration.
-// This is a no-op version when profiling is disabled at build time.
-type ProfilingConfig struct {
-	CPUProfilePath  string
-	MemProfilePath  string
-	TracePath       string
-	ProfileDuration time.Duration
-}
+// ProfilingConfig is re-exported from internal/tracing for CLI use.
+type ProfilingConfig = tracing.ProfilingConfig
 
-// StartProfiling is a no-op when profiling is disabled.
+// StartProfiling delegates to internal/tracing (no-op).
 func StartProfiling(config *ProfilingConfig) error {
-	return nil
+	return tracing.StartProfiling(config)
 }
 
-// StopProfiling is a no-op when profiling is disabled.
+// StopProfiling delegates to internal/tracing (no-op).
 func StopProfiling(config *ProfilingConfig) {
-	// No-op
+	tracing.StopProfiling(config)
 }
 
-// ValidateProfilingConfig is a no-op when profiling is disabled.
+// ValidateProfilingConfig delegates to internal/tracing (no-op).
 func ValidateProfilingConfig(config *ProfilingConfig) error {
-	return nil
+	return tracing.ValidateProfilingConfig(config)
 }

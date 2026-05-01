@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/zextras/carbonio-configd/internal/config"
-	errs "github.com/zextras/carbonio-configd/internal/errors"
 	"github.com/zextras/carbonio-configd/internal/ldap"
 	"github.com/zextras/carbonio-configd/internal/localconfig"
 	"github.com/zextras/carbonio-configd/internal/logger"
@@ -59,20 +58,17 @@ type Command struct {
 	Output      string
 	Error       string
 	LastChecked time.Time
-	// Deprecated: Cmd field for format-string command execution (use Binary+CmdArgs instead)
-	Cmd string
 }
 
 // NewCommand creates a new Command instance.
 func NewCommand(
-	desc, name, cmd string,
+	desc, name string,
 	fn func(ctx context.Context, args ...string) (string, error),
 	cmdArgs ...string,
 ) *Command {
 	c := &Command{
 		Desc:    desc,
 		Name:    name,
-		Cmd:     cmd,
 		Func:    fn,
 		Args:    cmdArgs,
 		Status:  0,
@@ -89,77 +85,6 @@ func (c *Command) resetState() {
 	c.Status = 0
 	c.Output = ""
 	c.Error = ""
-}
-
-// applyQuoteChar processes a quote rune for splitCommandArgs.
-// Returns the updated inQuote/quoteChar state; appends an empty arg when an
-// empty quoted segment is closed.
-func applyQuoteChar(
-	r, quoteChar rune,
-	inQuote bool,
-	current *strings.Builder,
-	args *[]string,
-) (newInQuote bool, newQuoteChar rune) {
-	switch {
-	case !inQuote:
-		return true, r
-	case r == quoteChar:
-		if current.Len() == 0 {
-			*args = append(*args, "")
-		}
-
-		return false, 0
-	default:
-		current.WriteRune(r)
-
-		return inQuote, quoteChar
-	}
-}
-
-// splitCommandArgs splits a command string into argv preserving quoted and
-// escaped segments.
-func splitCommandArgs(cmdStr string) ([]string, error) {
-	var (
-		args      []string
-		current   strings.Builder
-		inQuote   bool
-		quoteChar rune
-		escaped   bool
-	)
-
-	for _, r := range cmdStr {
-		switch {
-		case escaped:
-			current.WriteRune(r)
-
-			escaped = false
-		case r == '\\':
-			escaped = true
-		case r == '"' || r == '\'':
-			inQuote, quoteChar = applyQuoteChar(r, quoteChar, inQuote, &current, &args)
-		case !inQuote && (r == ' ' || r == '\t'):
-			if current.Len() > 0 {
-				args = append(args, current.String())
-				current.Reset()
-			}
-		default:
-			current.WriteRune(r)
-		}
-	}
-
-	if inQuote {
-		return nil, fmt.Errorf("unterminated quote in command: %s", cmdStr)
-	}
-
-	if escaped {
-		return nil, fmt.Errorf("trailing escape character in command: %s", cmdStr)
-	}
-
-	if current.Len() > 0 {
-		args = append(args, current.String())
-	}
-
-	return args, nil
 }
 
 // DefaultCommandTimeout is the default timeout for command execution (60 seconds)
@@ -196,8 +121,6 @@ func (c *Command) ExecuteWithContext(ctx context.Context, args ...string) (exitC
 	switch {
 	case c.Binary != "":
 		rc, output, err = c.runBinaryWithContext(ctx, args)
-	case c.Cmd != "":
-		rc, output, err = c.runCmdWithContext(ctx, c.formatCmd(args))
 	case c.Func != nil:
 		// Go function execution
 		output, err = c.Func(ctx, args...)
@@ -255,24 +178,7 @@ func (c *Command) ExecuteWithContext(ctx context.Context, args ...string) (exitC
 }
 
 // formatCmd returns the command string with the first argument substituted
-// when c.Cmd contains a "%s" placeholder. Without a placeholder the command
-// is returned unchanged, regardless of how many args are provided.
-//
-// Deprecated: Use Binary+CmdArgs instead to avoid format-string construction.
-func (c *Command) formatCmd(args []string) string {
-	if len(args) == 0 {
-		return c.Cmd
-	}
-
-	if !strings.Contains(c.Cmd, "%s") {
-		return c.Cmd
-	}
-
-	return fmt.Sprintf(c.Cmd, args[0])
-}
-
 // runBinaryWithContext executes a command using the structured Binary+CmdArgs pattern.
-// This avoids format-string interpolation entirely.
 func (c *Command) runBinaryWithContext(ctx context.Context, args []string) (exitCode int, output string, err error) {
 	cmdArgs := make([]string, 0, len(c.CmdArgs)+len(args))
 	cmdArgs = append(cmdArgs, c.CmdArgs...)
@@ -299,47 +205,7 @@ func (c *Command) runBinaryWithContext(ctx context.Context, args []string) (exit
 	return 0, output, nil
 }
 
-func (c *Command) runCmdWithContext(ctx context.Context, cmdStr string) (exitCode int, output string, err error) {
-	logger.DebugContext(ctx, "Executing shell command",
-		"command", cmdStr)
-
-	parts, parseErr := splitCommandArgs(cmdStr)
-	if parseErr != nil {
-		return 1, "", errs.WrapCommand("execute", cmdStr, 1, parseErr)
-	}
-
-	if len(parts) == 0 {
-		return 1, "", errs.WrapCommand("execute", cmdStr, 1, fmt.Errorf(errs.ErrEmptyCommand))
-	}
-
-	cmd := exec.CommandContext(ctx, parts[0], parts[1:]...)
-	outputBytes, cmdErr := cmd.CombinedOutput()
-	output = string(outputBytes)
-	err = cmdErr
-
-	logger.DebugContext(ctx, "Shell command completed",
-		"command", cmdStr,
-		"return_code", cmd.ProcessState.ExitCode(),
-		"output", output,
-		"error", err)
-
-	if err != nil {
-		exitError := &exec.ExitError{}
-		if stderrors.As(err, &exitError) {
-			return exitError.ExitCode(), output, errs.WrapCommand("execute", cmdStr, exitError.ExitCode(), err)
-		}
-
-		return 1, output, errs.WrapCommand("execute", cmdStr, 1, err)
-	}
-
-	return 0, output, nil
-}
-
 func (c *Command) String() string {
-	if c.Cmd != "" {
-		return fmt.Sprintf("%s %s", c.Name, c.Cmd)
-	}
-
 	return fmt.Sprintf("%s %s(%v)", c.Name, c.Name, c.Args)
 }
 
@@ -744,12 +610,12 @@ func RegisterLDAPCommands(e *CommandExecutor) {
 		Commands = make(map[string]*Command)
 	}
 
-	Commands["gacf"] = NewCommand("Global system configuration", "gacf", "", e.getglobal)
-	Commands["gamau"] = NewCommand("All MTA Authentication Target URLs", "getAllMtaAuthURLs", "", e.gamau)
-	Commands["garpb"] = NewCommand("All Reverse Proxy Backends", "getAllReverseProxyBackends", "", e.garpb)
-	Commands["garpu"] = NewCommand("All Reverse Proxy URLs", "getAllReverseProxyURLs", "", e.garpu)
-	Commands["gs"] = NewCommand("Configuration for server", "gs", "", e.getserver)
-	Commands["gs:enabled"] = NewCommand("Enabled Services for host", "gs:enabled", "", e.getserverenabled)
+	Commands["gacf"] = NewCommand("Global system configuration", "gacf", e.getglobal)
+	Commands["gamau"] = NewCommand("All MTA Authentication Target URLs", "getAllMtaAuthURLs", e.gamau)
+	Commands["garpb"] = NewCommand("All Reverse Proxy Backends", "getAllReverseProxyBackends", e.garpb)
+	Commands["garpu"] = NewCommand("All Reverse Proxy URLs", "getAllReverseProxyURLs", e.garpu)
+	Commands["gs"] = NewCommand("Configuration for server", "gs", e.getserver)
+	Commands["gs:enabled"] = NewCommand("Enabled Services for host", "gs:enabled", e.getserverenabled)
 }
 
 // ResetProvisioning clears cached provisioning data for the specified type.

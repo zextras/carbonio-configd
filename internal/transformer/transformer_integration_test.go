@@ -6,13 +6,14 @@
 
 package transformer
 
-import "context"
 import (
 	"bufio"
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/zextras/carbonio-configd/internal/state"
+	"github.com/zextras/carbonio-configd/internal/testutil"
 )
 
 // transformMultiLine is a helper function that transforms multi-line input

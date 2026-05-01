@@ -11,15 +11,8 @@ import (
 	"testing"
 
 	"github.com/zextras/carbonio-configd/internal/fileutil"
+	"github.com/zextras/carbonio-configd/internal/testutil"
 )
-
-// skipIfRoot skips the test when running as root.
-func skipIfRoot(t *testing.T) {
-	t.Helper()
-	if os.Getuid() == 0 {
-		t.Skip("skipping permission-based test: running as root")
-	}
-}
 
 func TestCopyFile(t *testing.T) {
 	ctx := context.Background()
@@ -150,7 +143,7 @@ func TestCopyFile(t *testing.T) {
 // destination" error path. We create a destination file inside a directory that
 // has been made read-only so os.Remove fails.
 func TestCopyFile_RemoveExistingDestFails(t *testing.T) {
-	skipIfRoot(t)
+	testutil.SkipIfRoot(t)
 
 	ctx := context.Background()
 	tmpDir := t.TempDir()
@@ -224,7 +217,7 @@ func TestCopyFile_LargeFileCopy(t *testing.T) {
 // TestCopyFile_DestCreateFails exercises the os.Create failure path by making
 // the target directory read-only.
 func TestCopyFile_DestCreateFails(t *testing.T) {
-	skipIfRoot(t)
+	testutil.SkipIfRoot(t)
 
 	ctx := context.Background()
 	tmpDir := t.TempDir()

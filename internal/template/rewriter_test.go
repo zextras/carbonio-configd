@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/state"
+	"github.com/zextras/carbonio-configd/internal/testutil"
 	"io"
 	"os"
 	"path/filepath"
@@ -17,55 +18,30 @@ import (
 	"testing"
 )
 
-// skipIfRoot skips the test when running as root because chmod(0o000) has no
-// effect for root and the permission-denied error paths cannot be triggered.
-func skipIfRoot(t *testing.T) {
-	t.Helper()
-	if os.Getuid() == 0 {
-		t.Skip("skipping permission-based test: running as root")
-	}
-}
-
-// mockConfigLookup implements the ConfigLookup interface for testing
-type mockConfigLookup struct {
-	data map[string]map[string]string
-}
-
-func (m *mockConfigLookup) LookUpConfig(ctx context.Context, cfgType, key string) (string, error) {
-	if typeData, ok := m.data[cfgType]; ok {
-		if val, ok := typeData[key]; ok {
-			return val, nil
-		}
-	}
-	return "", fmt.Errorf("key not found: %s:%s", cfgType, key)
-}
-
-func newMockLookup() *mockConfigLookup {
-	return &mockConfigLookup{
-		data: map[string]map[string]string{
-			"VAR": {
-				"zimbraServerHostname": "mail.example.com",
-				"zimbraMtaMyNetworks":  "127.0.0.0/8 192.168.1.0/24",
-				"zimbraMtaMyOrigin":    "example.com",
-				"zimbraMtaRelayHost":   "relay.example.com",
-				"zimbraSmtpPort":       "25",
-				"zimbraHttpPort":       "8080",
-				"zimbraHttpSSLPort":    "8443",
-				"emptyVar":             "",
-			},
-			"LOCAL": {
-				"hostname":             "server1.example.com",
-				"postfix_mail_owner":   "postfix",
-				"postfix_setgid_group": "postdrop",
-			},
-			"SERVICE": {
-				"antivirus": "TRUE",
-				"antispam":  "TRUE",
-				"webmail":   "FALSE",
-				"ldap":      "TRUE",
-			},
+func newMockLookup() *testutil.MockConfigLookup {
+	return testutil.NewMockConfigLookupWithData(map[string]map[string]string{
+		"VAR": {
+			"zimbraServerHostname": "mail.example.com",
+			"zimbraMtaMyNetworks":  "127.0.0.0/8 192.168.1.0/24",
+			"zimbraMtaMyOrigin":    "example.com",
+			"zimbraMtaRelayHost":   "relay.example.com",
+			"zimbraSmtpPort":       "25",
+			"zimbraHttpPort":       "8080",
+			"zimbraHttpSSLPort":    "8443",
+			"emptyVar":             "",
 		},
-	}
+		"LOCAL": {
+			"hostname":             "server1.example.com",
+			"postfix_mail_owner":   "postfix",
+			"postfix_setgid_group": "postdrop",
+		},
+		"SERVICE": {
+			"antivirus": "TRUE",
+			"antispam":  "TRUE",
+			"webmail":   "FALSE",
+			"ldap":      "TRUE",
+		},
+	})
 }
 
 func TestRewriteReader(t *testing.T) {
@@ -671,7 +647,7 @@ func TestRewriteReader_PlainTextLines(t *testing.T) {
 // TestRewriteConfig_MkdirAllFailure exercises the os.MkdirAll error path by
 // pointing the target directory at a path whose parent is chmod 0o000.
 func TestRewriteConfig_MkdirAllFailure(t *testing.T) {
-	skipIfRoot(t)
+	testutil.SkipIfRoot(t)
 
 	mockLookup := newMockLookup()
 	st := &state.State{}
@@ -708,7 +684,7 @@ func TestRewriteConfig_MkdirAllFailure(t *testing.T) {
 // TestRewriteConfig_CreateTempFailure exercises the os.CreateTemp error path by
 // making the target directory unwritable after it has been created.
 func TestRewriteConfig_CreateTempFailure(t *testing.T) {
-	skipIfRoot(t)
+	testutil.SkipIfRoot(t)
 
 	mockLookup := newMockLookup()
 	st := &state.State{}
@@ -743,7 +719,7 @@ func TestRewriteConfig_CreateTempFailure(t *testing.T) {
 
 // TestRewriteConfig_ChmodFailure exercises the Chmod success branch with mode 0755.
 func TestRewriteConfig_ChmodFailure(t *testing.T) {
-	skipIfRoot(t)
+	testutil.SkipIfRoot(t)
 
 	mockLookup := newMockLookup()
 	st := &state.State{}

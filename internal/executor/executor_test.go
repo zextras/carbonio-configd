@@ -10,23 +10,9 @@ import (
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/services"
 	"github.com/zextras/carbonio-configd/internal/state"
+	"github.com/zextras/carbonio-configd/internal/testutil"
 	"testing"
 )
-
-// mockConfigLookup implements the ConfigLookup interface for testing
-type mockConfigLookup struct {
-	data map[string]map[string]string
-}
-
-func (m *mockConfigLookup) LookUpConfig(ctx context.Context, cfgType, key string) (string, error) {
-	if typeData, ok := m.data[cfgType]; ok {
-		if val, ok := typeData[key]; ok {
-			return val, nil
-		}
-	}
-	// Return error when key is not found
-	return "", errors.New("key not found")
-}
 
 // mockPostfixManager implements the postfix.Manager interface for testing
 type mockPostfixManager struct {
@@ -129,22 +115,20 @@ func (m *mockServiceManager) SetUseSystemd(enabled bool) {
 	// No-op for mock
 }
 
-func newMockLookup() *mockConfigLookup {
-	return &mockConfigLookup{
-		data: map[string]map[string]string{
-			"VAR": {
-				"zimbraMtaEnableSmtpdPolicyd": "TRUE",
-				"zimbraMtaMyNetworks":         "127.0.0.0/8 192.168.1.0/24",
-				"zimbraMtaMyOrigin":           "example.com",
-				"emptyVar":                    "",
-			},
-			"SERVICE": {
-				"antivirus": "TRUE",
-				"antispam":  "TRUE",
-				"webmail":   "FALSE",
-			},
+func newMockLookup() *testutil.MockConfigLookup {
+	return testutil.NewMockConfigLookupWithData(map[string]map[string]string{
+		"VAR": {
+			"zimbraMtaEnableSmtpdPolicyd": "TRUE",
+			"zimbraMtaMyNetworks":         "127.0.0.0/8 192.168.1.0/24",
+			"zimbraMtaMyOrigin":           "example.com",
+			"emptyVar":                    "",
 		},
-	}
+		"SERVICE": {
+			"antivirus": "TRUE",
+			"antispam":  "TRUE",
+			"webmail":   "FALSE",
+		},
+	})
 }
 
 func TestEvaluateConditional_Service(t *testing.T) {
@@ -729,22 +713,20 @@ func TestProcessAllSectionsWithMissingRequiredVars(t *testing.T) {
 
 // TestExpandValue tests the ExpandValue method for FILE, VAR, LOCAL, and MAPLOCAL directives.
 func TestExpandValue(t *testing.T) {
-	mockLookup := &mockConfigLookup{
-		data: map[string]map[string]string{
-			"FILE": {
-				"zmconfigd/test.cf": "permit_sasl_authenticated, reject",
-			},
-			"VAR": {
-				"zimbraMtaMyNetworks": "127.0.0.0/8 192.168.1.0/24",
-			},
-			"LOCAL": {
-				"zimbra_server_hostname": "mail.example.com",
-			},
-			"MAPLOCAL": {
-				"zimbraSSLDHParam": "/opt/zextras/conf/dhparam.pem",
-			},
+	mockLookup := testutil.NewMockConfigLookupWithData(map[string]map[string]string{
+		"FILE": {
+			"zmconfigd/test.cf": "permit_sasl_authenticated, reject",
 		},
-	}
+		"VAR": {
+			"zimbraMtaMyNetworks": "127.0.0.0/8 192.168.1.0/24",
+		},
+		"LOCAL": {
+			"zimbra_server_hostname": "mail.example.com",
+		},
+		"MAPLOCAL": {
+			"zimbraSSLDHParam": "/opt/zextras/conf/dhparam.pem",
+		},
+	})
 	st := state.NewState()
 	mockPfx := newMockPostfixManager()
 	executor := NewSectionExecutor(mockLookup, st, mockPfx, newMockServiceManager())
@@ -826,16 +808,14 @@ func TestExpandValue(t *testing.T) {
 
 // TestApplyPostfixDirectivesWithExpansion tests that ApplyPostfixDirectives expands values.
 func TestApplyPostfixDirectivesWithExpansion(t *testing.T) {
-	mockLookup := &mockConfigLookup{
-		data: map[string]map[string]string{
-			"FILE": {
-				"zmconfigd/smtpd_recipient_restrictions.cf": "permit_sasl_authenticated, permit_mynetworks, reject_unauth_destination",
-			},
-			"VAR": {
-				"zimbraMtaMyNetworks": "127.0.0.0/8",
-			},
+	mockLookup := testutil.NewMockConfigLookupWithData(map[string]map[string]string{
+		"FILE": {
+			"zmconfigd/smtpd_recipient_restrictions.cf": "permit_sasl_authenticated, permit_mynetworks, reject_unauth_destination",
 		},
-	}
+		"VAR": {
+			"zimbraMtaMyNetworks": "127.0.0.0/8",
+		},
+	})
 	st := state.NewState()
 	mockPfx := newMockPostfixManager()
 	executor := NewSectionExecutor(mockLookup, st, mockPfx, newMockServiceManager())
@@ -936,10 +916,8 @@ func (m *mockFailingServiceManager) AddRestart(_ context.Context, service string
 
 // TestExpandValue_LocalError tests that ExpandValue propagates errors from LOCAL lookup.
 func TestExpandValue_LocalError(t *testing.T) {
-	// mockConfigLookup returns error when key is not found; LOCAL:badkey is not in data.
-	mockLookup := &mockConfigLookup{
-		data: map[string]map[string]string{},
-	}
+	// MockConfigLookup returns error when key is not found; LOCAL:badkey is not in data.
+	mockLookup := testutil.NewMockConfigLookupWithData(map[string]map[string]string{})
 	st := state.NewState()
 	mockPfx := newMockPostfixManager()
 	exec := NewSectionExecutor(mockLookup, st, mockPfx, newMockServiceManager())
@@ -952,9 +930,7 @@ func TestExpandValue_LocalError(t *testing.T) {
 
 // TestExpandValue_MapLocalError tests that ExpandValue propagates errors from MAPLOCAL lookup.
 func TestExpandValue_MapLocalError(t *testing.T) {
-	mockLookup := &mockConfigLookup{
-		data: map[string]map[string]string{},
-	}
+	mockLookup := testutil.NewMockConfigLookupWithData(map[string]map[string]string{})
 	st := state.NewState()
 	mockPfx := newMockPostfixManager()
 	exec := NewSectionExecutor(mockLookup, st, mockPfx, newMockServiceManager())

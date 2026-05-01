@@ -119,8 +119,20 @@ package__ubuntu_noble() {
 postinst__apt() {
   if [ -d /run/systemd/system ]; then
     systemctl daemon-reload &>/dev/null || :
+
+    # Kill legacy Jython zmconfigd if still running (first-time migration from Jython to Go)
+    _legacy_pid=$(pgrep -f '/opt/zextras/.*/java.*configd' 2>/dev/null || true)
+    if [ -n "${_legacy_pid}" ]; then
+      kill "${_legacy_pid}" 2>/dev/null || :
+      sleep 2
+    fi
+
     if [ "$1" = "configure" ] && [ -z "$2" ]; then
-      systemctl enable carbonio-configd.service &>/dev/null || :
+      # Fresh install: enable and start
+      systemctl enable --now carbonio-configd.service &>/dev/null || :
+    else
+      # Upgrade (Go→Go or Jython→Go): already enabled, just start
+      systemctl start carbonio-configd.service &>/dev/null || :
     fi
   fi
 }
@@ -128,8 +140,20 @@ postinst__apt() {
 postinst__yum() {
   if [ -d /run/systemd/system ]; then
     systemctl daemon-reload &>/dev/null || :
+
+    # Kill legacy Jython zmconfigd if still running (first-time migration from Jython to Go)
+    _legacy_pid=$(pgrep -f '/opt/zextras/.*/java.*configd' 2>/dev/null || true)
+    if [ -n "${_legacy_pid}" ]; then
+      kill "${_legacy_pid}" 2>/dev/null || :
+      sleep 2
+    fi
+
     if [ $1 -eq 1 ]; then
-      systemctl enable carbonio-configd.service &>/dev/null || :
+      # Fresh install: enable and start
+      systemctl enable --now carbonio-configd.service &>/dev/null || :
+    else
+      # Upgrade (Go→Go or Jython→Go): already enabled, just start
+      systemctl start carbonio-configd.service &>/dev/null || :
     fi
   fi
 }

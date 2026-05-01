@@ -24,48 +24,39 @@ func TestNewCommand(t *testing.T) {
 		name        string
 		desc        string
 		cmdName     string
-		cmd         string
 		fn          func(context.Context, ...string) (string, error)
 		args        []string
 		wantDesc    string
 		wantCmdName string
-		wantCmd     string
 	}{
 		{
-			name:        "external command",
-			desc:        "Test external command",
+			name:        "binary command",
+			desc:        "Test binary command",
 			cmdName:     "test",
-			cmd:         "echo %s",
 			fn:          nil,
 			args:        []string{"arg1"},
-			wantDesc:    "Test external command",
+			wantDesc:    "Test binary command",
 			wantCmdName: "test",
-			wantCmd:     "echo %s",
 		},
 		{
 			name:        "function command",
 			desc:        "Test function command",
 			cmdName:     "testfn",
-			cmd:         "",
 			fn:          func(ctx context.Context, args ...string) (string, error) { return "result", nil },
 			args:        []string{"arg1"},
 			wantDesc:    "Test function command",
 			wantCmdName: "testfn",
-			wantCmd:     "",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cmd := NewCommand(tt.desc, tt.cmdName, tt.cmd, tt.fn, tt.args...)
+			cmd := NewCommand(tt.desc, tt.cmdName, tt.fn, tt.args...)
 			if cmd.Desc != tt.wantDesc {
 				t.Errorf("NewCommand().Desc = %v, want %v", cmd.Desc, tt.wantDesc)
 			}
 			if cmd.Name != tt.wantCmdName {
 				t.Errorf("NewCommand().Name = %v, want %v", cmd.Name, tt.wantCmdName)
-			}
-			if cmd.Cmd != tt.wantCmd {
-				t.Errorf("NewCommand().Cmd = %v, want %v", cmd.Cmd, tt.wantCmd)
 			}
 			if cmd.Status != 0 {
 				t.Errorf("NewCommand().Status = %v, want %v", cmd.Status, 0)
@@ -81,7 +72,7 @@ func TestNewCommand(t *testing.T) {
 }
 
 func TestCommand_resetState(t *testing.T) {
-	cmd := NewCommand("test", "test", "echo test", nil)
+	cmd := NewCommand("test", "test", nil)
 	cmd.Status = 1
 	cmd.Output = "some output"
 	cmd.Error = "some error"
@@ -106,13 +97,13 @@ func TestCommand_String(t *testing.T) {
 		want string
 	}{
 		{
-			name: "external command",
-			cmd:  NewCommand("test", "echo", "echo %s", nil),
-			want: "echo echo %s",
+			name: "binary command",
+			cmd:  NewCommand("test", "echo", nil),
+			want: "echo echo([])",
 		},
 		{
 			name: "function command",
-			cmd:  NewCommand("test", "testfn", "", func(ctx context.Context, args ...string) (string, error) { return "", nil }, "arg1"),
+			cmd:  NewCommand("test", "testfn", func(ctx context.Context, args ...string) (string, error) { return "", nil }, "arg1"),
 			want: "testfn testfn([arg1])",
 		},
 	}
@@ -129,23 +120,26 @@ func TestCommand_String(t *testing.T) {
 func TestCommand_Execute_ExternalCommand(t *testing.T) {
 	tests := []struct {
 		name       string
-		cmd        string
+		binary     string
+		cmdArgs    []string
 		args       []string
 		wantStatus int
 		wantOutput string
 		wantError  string
 	}{
 		{
-			name:       "successful echo command",
-			cmd:        "echo %s",
+			name:       "successful echo command with runtime arg",
+			binary:     "echo",
+			cmdArgs:    []string{},
 			args:       []string{"hello"},
 			wantStatus: 0,
 			wantOutput: "hello\n",
 			wantError:  "OK",
 		},
 		{
-			name:       "command with no args",
-			cmd:        "echo hello",
+			name:       "command with static arg",
+			binary:     "echo",
+			cmdArgs:    []string{"hello"},
 			args:       []string{},
 			wantStatus: 0,
 			wantOutput: "hello\n",
@@ -155,7 +149,11 @@ func TestCommand_Execute_ExternalCommand(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cmd := NewCommand("test", "test", tt.cmd, nil)
+			cmd := &Command{
+				Name:    "test",
+				Binary:  tt.binary,
+				CmdArgs: tt.cmdArgs,
+			}
 			status, output, err := cmd.Execute(context.Background(), tt.args...)
 
 			if status != tt.wantStatus {
@@ -204,7 +202,7 @@ func TestCommand_Execute_FunctionCommand(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cmd := NewCommand("test", "test", "", tt.fn)
+			cmd := NewCommand("test", "test", tt.fn)
 			status, output, err := cmd.Execute(context.Background(), tt.args...)
 
 			if status != tt.wantStatus {
@@ -221,7 +219,7 @@ func TestCommand_Execute_FunctionCommand(t *testing.T) {
 }
 
 func TestCommand_Execute_UnknownOutput(t *testing.T) {
-	cmd := NewCommand("test", "test", "", func(ctx context.Context, args ...string) (string, error) {
+	cmd := NewCommand("test", "test", func(ctx context.Context, args ...string) (string, error) {
 		return "", nil // Empty output
 	})
 
@@ -239,7 +237,7 @@ func TestCommand_Execute_UnknownOutput(t *testing.T) {
 }
 
 func TestCommand_Execute_Timing(t *testing.T) {
-	cmd := NewCommand("test", "test", "", func(ctx context.Context, args ...string) (string, error) {
+	cmd := NewCommand("test", "test", func(ctx context.Context, args ...string) (string, error) {
 		time.Sleep(10 * time.Millisecond) // Small delay
 		return "result", nil
 	})
@@ -433,54 +431,47 @@ func TestCommandsMap(t *testing.T) {
 	}
 }
 
-// TestCommand_runCmd_ErrorCases tests error paths in runCmdWithContext
-func TestCommand_runCmd_ErrorCases(t *testing.T) {
+// TestCommand_runBinary_ErrorCases tests error paths in runBinaryWithContext
+func TestCommand_runBinary_ErrorCases(t *testing.T) {
 	tests := []struct {
 		name       string
-		cmdStr     string
+		binary     string
 		wantStatus int
 		wantErr    bool
 		errMsg     string
 	}{
 		{
-			name:       "empty command string",
-			cmdStr:     "",
+			name:       "binary not found",
+			binary:     "nonexistent_command_xyz",
 			wantStatus: 1,
 			wantErr:    true,
-			errMsg:     "empty command",
-		},
-		{
-			name:       "command not found",
-			cmdStr:     "nonexistent_command_xyz",
-			wantStatus: 1,
-			wantErr:    true,
-			errMsg:     "execute",
+			errMsg:     "executable file not found",
 		},
 		{
 			name:       "command with non-zero exit",
-			cmdStr:     "false", // false command always returns exit code 1
+			binary:     "false", // false command always returns exit code 1
 			wantStatus: 1,
 			wantErr:    true,
-			errMsg:     "execute",
+			errMsg:     "exit status",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cmd := NewCommand("test", "test", "", nil)
+			cmd := &Command{Name: "test", Binary: tt.binary}
 			ctx := context.Background()
-			exitCode, _, err := cmd.runCmdWithContext(ctx, tt.cmdStr)
+			exitCode, _, err := cmd.runBinaryWithContext(ctx, nil)
 
 			if exitCode != tt.wantStatus {
-				t.Errorf("runCmdWithContext() exitCode = %v, want %v", exitCode, tt.wantStatus)
+				t.Errorf("runBinaryWithContext() exitCode = %v, want %v", exitCode, tt.wantStatus)
 			}
 
 			if (err != nil) != tt.wantErr {
-				t.Errorf("runCmdWithContext() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("runBinaryWithContext() error = %v, wantErr %v", err, tt.wantErr)
 			}
 
 			if tt.wantErr && err != nil && !strings.Contains(err.Error(), tt.errMsg) {
-				t.Errorf("runCmdWithContext() error = %v, want error containing %v", err, tt.errMsg)
+				t.Errorf("runBinaryWithContext() error = %v, want error containing %v", err, tt.errMsg)
 			}
 		})
 	}
@@ -1027,38 +1018,43 @@ func TestRegisterLDAPCommands_NilCommandsMap(t *testing.T) {
 	}
 }
 
-func TestCommand_Execute_SafeFormatting(t *testing.T) {
+func TestCommand_Execute_BinaryArgs(t *testing.T) {
 	tests := []struct {
 		name       string
-		cmd        string
+		binary     string
+		cmdArgs    []string
 		args       []string
 		wantStatus int
 		wantErr    bool
 	}{
 		{
-			name:       "command with format specifier and arg",
-			cmd:        "echo %s",
+			name:       "binary with static and runtime args",
+			binary:     "echo",
+			cmdArgs:    []string{"hello"},
+			args:       []string{"world"},
+			wantStatus: 0,
+			wantErr:    false,
+		},
+		{
+			name:       "binary with only runtime args",
+			binary:     "echo",
+			cmdArgs:    []string{},
 			args:       []string{"hello"},
 			wantStatus: 0,
 			wantErr:    false,
 		},
 		{
-			name:       "command with format specifier but no args",
-			cmd:        "echo %s",
+			name:       "binary with only static args",
+			binary:     "echo",
+			cmdArgs:    []string{"hello"},
 			args:       []string{},
 			wantStatus: 0,
 			wantErr:    false,
 		},
 		{
-			name:       "command without format specifier with args",
-			cmd:        "echo hello",
-			args:       []string{"ignored"},
-			wantStatus: 0,
-			wantErr:    false,
-		},
-		{
-			name:       "command without format specifier without args",
-			cmd:        "echo hello",
+			name:       "binary with no args",
+			binary:     "echo",
+			cmdArgs:    []string{},
 			args:       []string{},
 			wantStatus: 0,
 			wantErr:    false,
@@ -1067,7 +1063,11 @@ func TestCommand_Execute_SafeFormatting(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cmd := NewCommand("test", "test", tt.cmd, nil)
+			cmd := &Command{
+				Name:    "test",
+				Binary:  tt.binary,
+				CmdArgs: tt.cmdArgs,
+			}
 			status, _, errStr := cmd.Execute(context.Background(), tt.args...)
 
 			if status != tt.wantStatus {
@@ -1092,10 +1092,10 @@ func TestBuildBackendURL(t *testing.T) {
 		{
 			name: "valid backend",
 			attrs: map[string]string{
-				zimbraServiceHostname:              "mail.example.com",
-				"zimbraReverseProxyLookupTarget":   "TRUE",
-				"zimbraMailMode":                   "https",
-				"zimbraMailSSLPort":                "8443",
+				zimbraServiceHostname:            "mail.example.com",
+				"zimbraReverseProxyLookupTarget": "TRUE",
+				"zimbraMailMode":                 "https",
+				"zimbraMailSSLPort":              "8443",
 			},
 			wantURL: "https://mail.example.com:8443",
 			wantOK:  true,
@@ -1103,9 +1103,9 @@ func TestBuildBackendURL(t *testing.T) {
 		{
 			name: "default port when missing",
 			attrs: map[string]string{
-				zimbraServiceHostname:              "mail.example.com",
-				"zimbraReverseProxyLookupTarget":   "TRUE",
-				"zimbraMailMode":                   "https",
+				zimbraServiceHostname:            "mail.example.com",
+				"zimbraReverseProxyLookupTarget": "TRUE",
+				"zimbraMailMode":                 "https",
 			},
 			wantURL: "https://mail.example.com:443",
 			wantOK:  true,
@@ -1113,10 +1113,10 @@ func TestBuildBackendURL(t *testing.T) {
 		{
 			name: "case insensitive lookup target",
 			attrs: map[string]string{
-				zimbraServiceHostname:              "mail.example.com",
-				"zimbraReverseProxyLookupTarget":   "true",
-				"zimbraMailMode":                   "both",
-				"zimbraMailSSLPort":                "7443",
+				zimbraServiceHostname:            "mail.example.com",
+				"zimbraReverseProxyLookupTarget": "true",
+				"zimbraMailMode":                 "both",
+				"zimbraMailSSLPort":              "7443",
 			},
 			wantURL: "https://mail.example.com:7443",
 			wantOK:  true,
@@ -1139,9 +1139,9 @@ func TestBuildBackendURL(t *testing.T) {
 		{
 			name: "not a lookup target",
 			attrs: map[string]string{
-				zimbraServiceHostname:              "mail.example.com",
-				"zimbraReverseProxyLookupTarget":   "FALSE",
-				"zimbraMailMode":                   "https",
+				zimbraServiceHostname:            "mail.example.com",
+				"zimbraReverseProxyLookupTarget": "FALSE",
+				"zimbraMailMode":                 "https",
 			},
 			wantURL: "",
 			wantOK:  false,
@@ -1158,8 +1158,8 @@ func TestBuildBackendURL(t *testing.T) {
 		{
 			name: "missing mail mode",
 			attrs: map[string]string{
-				zimbraServiceHostname:              "mail.example.com",
-				"zimbraReverseProxyLookupTarget":   "TRUE",
+				zimbraServiceHostname:            "mail.example.com",
+				"zimbraReverseProxyLookupTarget": "TRUE",
 			},
 			wantURL: "",
 			wantOK:  false,
@@ -1167,9 +1167,9 @@ func TestBuildBackendURL(t *testing.T) {
 		{
 			name: "empty mail mode",
 			attrs: map[string]string{
-				zimbraServiceHostname:              "mail.example.com",
-				"zimbraReverseProxyLookupTarget":   "TRUE",
-				"zimbraMailMode":                   "",
+				zimbraServiceHostname:            "mail.example.com",
+				"zimbraReverseProxyLookupTarget": "TRUE",
+				"zimbraMailMode":                 "",
 			},
 			wantURL: "",
 			wantOK:  false,

@@ -6,62 +6,22 @@
 
 package main
 
-import (
-	"context"
-	"fmt"
-	"github.com/zextras/carbonio-configd/internal/logger"
-	"github.com/zextras/carbonio-configd/internal/tracing"
-)
+import "github.com/zextras/carbonio-configd/internal/tracing"
 
-// TracingConfig holds configuration for span-based tracing.
-type TracingConfig struct {
-	OutputPath string // Path to write trace spans
-	Format     string // Output format: "json" or "timeline"
-}
+// TracingConfig is re-exported from internal/tracing for CLI use.
+type TracingConfig = tracing.Config
 
-// ValidateTracingConfig validates the tracing configuration.
+// ValidateTracingConfig delegates to internal/tracing.
 func ValidateTracingConfig(cfg *TracingConfig) error {
-	if cfg.OutputPath == "" {
-		return fmt.Errorf("tracing output path cannot be empty")
-	}
-	if cfg.Format != "json" && cfg.Format != "timeline" {
-		return fmt.Errorf("invalid tracing format: %s (must be 'json' or 'timeline')", cfg.Format)
-	}
-	return nil
+	return tracing.ValidateTracingConfig(cfg)
 }
 
-// StartTracing enables the tracing system.
+// StartTracing delegates to internal/tracing.
 func StartTracing(cfg *TracingConfig) error {
-	ctx := context.Background()
-	ctx = logger.ContextWithComponent(ctx, "tracing")
-	logger.InfoContext(ctx, "Enabling span-based tracing",
-		"output_path", cfg.OutputPath,
-		"format", cfg.Format)
-	tracing.Enable()
-	return nil
+	return tracing.StartTracing(cfg)
 }
 
-// StopTracing exports collected spans and disables tracing.
+// StopTracing delegates to internal/tracing.
 func StopTracing(cfg *TracingConfig) {
-	ctx := context.Background()
-	ctx = logger.ContextWithComponent(ctx, "tracing")
-	if !tracing.IsEnabled() {
-		return
-	}
-
-	logger.InfoContext(ctx, "Exporting tracing spans",
-		"output_path", cfg.OutputPath)
-
-	if err := tracing.ExportToFile(cfg.OutputPath, cfg.Format); err != nil {
-		logger.ErrorContext(ctx, "Failed to export tracing spans",
-			"error", err)
-		return
-	}
-
-	spans := tracing.GetSpans()
-	logger.InfoContext(ctx, "Exported spans",
-		"span_count", len(spans),
-		"output_path", cfg.OutputPath)
-
-	tracing.Disable()
+	tracing.StopTracing(cfg)
 }

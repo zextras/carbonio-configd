@@ -9,6 +9,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/zextras/carbonio-configd/internal/commands"
 	"github.com/zextras/carbonio-configd/internal/config"
 )
 
@@ -106,6 +107,16 @@ func TestInitNativeLdapClient_MultiURLSucceedsBuilding(t *testing.T) {
 			"zimbra_ldap_userdn":   "uid=zimbra,cn=admins,cn=zimbra",
 			"zimbra_ldap_password": "secret",
 		}, nil
+	})
+
+	// RegisterLDAPCommands writes to the global commands.Commands map.
+	// Remove the LDAP entries after the test to prevent later tests from
+	// executing real (network) LDAP queries against the fake server addresses.
+	ldapCommandKeys := []string{"gacf", "gamau", "garpb", "garpu", "gs", "gs:enabled"}
+	t.Cleanup(func() {
+		for _, k := range ldapCommandKeys {
+			delete(commands.Commands, k)
+		}
 	})
 
 	cm := &ConfigManager{mainConfig: &config.Config{}}

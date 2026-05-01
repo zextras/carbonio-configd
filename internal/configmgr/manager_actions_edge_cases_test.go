@@ -7,6 +7,7 @@ package configmgr
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/zextras/carbonio-configd/internal/cache"
@@ -15,6 +16,25 @@ import (
 	"github.com/zextras/carbonio-configd/internal/state"
 	"github.com/zextras/carbonio-configd/internal/transformer"
 )
+
+func newTestConfigManager(t *testing.T) *ConfigManager {
+	t.Helper()
+
+	baseDir := t.TempDir()
+	st := state.NewState()
+	st.FirstRun = true
+
+	cfg := &config.Config{
+		BaseDir:    baseDir,
+		ConfigFile: filepath.Join(baseDir, "zmconfigd.cf"),
+		Hostname:   "testhost",
+	}
+
+	ctx := context.Background()
+	cacheInstance := cache.New(ctx, false)
+
+	return NewConfigManager(ctx, cfg, st, nil, cacheInstance)
+}
 
 // mockMtaExecutor is a controllable mock for mtaops.Executor used in these tests.
 type mockMtaExecutor struct {
