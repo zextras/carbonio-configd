@@ -18,7 +18,11 @@ import (
 	"github.com/zextras/carbonio-configd/internal/logger"
 )
 
-const errUnknownCommand = "ERROR UNKNOWN COMMAND"
+const (
+	errUnknownCommand    = "ERROR UNKNOWN COMMAND"
+	respSuccessActive    = "SUCCESS ACTIVE"
+	respRewritesComplete = "SUCCESS REWRITES COMPLETE"
+)
 
 // ActionTrigger defines the interface for triggering actions in the main application logic.
 type ActionTrigger interface {
@@ -187,14 +191,14 @@ func (h *ConfigdRequestHandler) HandleRequest(ctx context.Context, command strin
 
 	switch command {
 	case "STATUS":
-		return "SUCCESS ACTIVE"
+		return respSuccessActive
 	case "REWRITE":
 		if h.ActionTrigger != nil {
 			h.ActionTrigger.TriggerRewrite(args)
 			logger.DebugContext(ctx, "Triggered REWRITE command",
 				"args", args)
 
-			return "SUCCESS REWRITES COMPLETE"
+			return respRewritesComplete
 		}
 
 		logger.ErrorContext(ctx, "ActionTrigger not set for REWRITE command")

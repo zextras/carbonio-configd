@@ -36,14 +36,14 @@ func statsCustomStart(ctx context.Context, def *ServiceDef) error {
 
 	// Base collectors (always run)
 	collectors := []string{
-		"zmstat-proc",
-		"zmstat-cpu",
-		"zmstat-vm",
-		"zmstat-io -x",
-		"zmstat-df",
-		"zmstat-io",
-		"zmstat-fd",
-		"zmstat-allprocs",
+		zmstatProc,
+		zmstatCPU,
+		zmstatVM,
+		zmstatIO + " -x",
+		zmstatDF,
+		zmstatIO,
+		zmstatFD,
+		zmstatAllprocs,
 	}
 
 	if lc["zmstat_mysql_enabled"] == zmstatEnabledTrue {

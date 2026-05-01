@@ -20,13 +20,13 @@ import (
 
 // proxyProtocols maps protocol names to their LDAP attributes.
 var proxyProtocols = map[string]string{
-	"http":  "zimbraReverseProxyHttpEnabled",
-	"https": "zimbraReverseProxySSLToUpstreamEnabled",
-	"mail":  "zimbraReverseProxyMailEnabled",
-	"imap":  "zimbraReverseProxyMailImapEnabled",
-	"imaps": "zimbraReverseProxyMailImapsEnabled",
-	"pop3":  "zimbraReverseProxyMailPop3Enabled",
-	"pop3s": "zimbraReverseProxyMailPop3sEnabled",
+	"http":      "zimbraReverseProxyHttpEnabled",
+	schemeHTTPS: "zimbraReverseProxySSLToUpstreamEnabled",
+	"mail":      "zimbraReverseProxyMailEnabled",
+	"imap":      "zimbraReverseProxyMailImapEnabled",
+	"imaps":     "zimbraReverseProxyMailImapsEnabled",
+	"pop3":      "zimbraReverseProxyMailPop3Enabled",
+	"pop3s":     "zimbraReverseProxyMailPop3sEnabled",
 }
 
 var (
@@ -187,7 +187,7 @@ type ProxyGenCmd struct {
 //nolint:unparam // Kong interface requires error return
 func (c *ProxyGenCmd) Run() error {
 	requireZextras()
-	proxyContactDaemon(append([]string{"proxy"}, c.ExtraConfigs...))
+	proxyContactDaemon(append([]string{componentProxy}, c.ExtraConfigs...))
 
 	return nil
 }
@@ -237,7 +237,7 @@ type ProxyRewriteCmd struct {
 //nolint:unparam // Kong interface requires error return
 func (c *ProxyRewriteCmd) Run() error {
 	requireZextras()
-	proxyContactDaemon(append([]string{"proxy"}, c.ExtraConfigs...))
+	proxyContactDaemon(append([]string{componentProxy}, c.ExtraConfigs...))
 
 	return nil
 }

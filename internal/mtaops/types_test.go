@@ -92,7 +92,7 @@ func TestMapfileOperation(t *testing.T) {
 		{
 			name: "MAPFILE operation with base64",
 			op: MapfileOperation{
-				Key:        "zimbraSSLDHParam",
+				Key:        attrZimbraSSLDHParam,
 				IsLocal:    false,
 				FilePath:   "/opt/zextras/conf/dhparam.pem",
 				Base64Data: "LS0tLS1CRUdJTiBESCBQQVJBTUVURVJTLS0tLS0K",
@@ -310,7 +310,7 @@ func TestBatchOperations(t *testing.T) {
 func TestMapfileTypes(t *testing.T) {
 	t.Run("MAPFILE vs MAPLOCAL", func(t *testing.T) {
 		mapfile := MapfileOperation{
-			Key:        "zimbraSSLDHParam",
+			Key:        attrZimbraSSLDHParam,
 			IsLocal:    false, // MAPFILE
 			FilePath:   "/opt/zextras/conf/dhparam.pem",
 			Base64Data: "encoded_data",

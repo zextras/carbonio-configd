@@ -215,7 +215,7 @@ func TestResolveValue_MAPLOCAL(t *testing.T) {
 	}{
 		{
 			name:      "MAPLOCAL file exists",
-			key:       "zimbraSSLDHParam",
+			key:       attrZimbraSSLDHParam,
 			wantValue: dhparamFile,
 			wantErr:   false,
 		},
@@ -248,7 +248,7 @@ func TestResolveValue_MAPLOCAL_FileNotExists(t *testing.T) {
 	st := &state.State{}
 
 	// dhparam.pem doesn't exist in tmpDir
-	got, err := r.ResolveValue(context.Background(), "MAPLOCAL", "zimbraSSLDHParam", st)
+	got, err := r.ResolveValue(context.Background(), "MAPLOCAL", attrZimbraSSLDHParam, st)
 	if err != nil {
 		t.Errorf("ResolveValue() returned error for non-existent file: %v", err)
 	}
@@ -476,7 +476,7 @@ func TestResolveMapfileDirective(t *testing.T) {
 	st := &state.State{
 		GlobalConfig: &config.GlobalConfig{
 			Data: map[string]string{
-				"zimbraSSLDHParam": "base64encodeddata==",
+				attrZimbraSSLDHParam: "base64encodeddata==",
 			},
 		},
 	}
@@ -493,9 +493,9 @@ func TestResolveMapfileDirective(t *testing.T) {
 	}{
 		{
 			name:         "MAPFILE (remote) with base64 data",
-			key:          "zimbraSSLDHParam",
+			key:          attrZimbraSSLDHParam,
 			isLocal:      false,
-			wantKey:      "zimbraSSLDHParam",
+			wantKey:      attrZimbraSSLDHParam,
 			wantFilePath: expectedPath,
 			wantBase64:   "base64encodeddata==",
 			wantIsLocal:  false,
@@ -503,9 +503,9 @@ func TestResolveMapfileDirective(t *testing.T) {
 		},
 		{
 			name:         "MAPLOCAL (local check only)",
-			key:          "zimbraSSLDHParam",
+			key:          attrZimbraSSLDHParam,
 			isLocal:      true,
-			wantKey:      "zimbraSSLDHParam",
+			wantKey:      attrZimbraSSLDHParam,
 			wantFilePath: expectedPath,
 			wantBase64:   "",
 			wantIsLocal:  true,

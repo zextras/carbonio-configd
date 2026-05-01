@@ -18,7 +18,7 @@ import (
 // rewriteConfigs is the set of Carbonio configs rewritten after a successful
 // mail-mode change (matches the legacy zmtlsctl script).
 var rewriteConfigs = []string{
-	"sasl", "webxml", "mailbox", "service", "zextras", "zextrasAdmin", "zimlet",
+	"sasl", "webxml", componentMailbox, "service", "zextras", "zextrasAdmin", "zimlet",
 }
 
 // TLSCmd handles "configd tls" — the Go port of legacy zmtlsctl.
@@ -195,9 +195,9 @@ func validateAgainstProxies(client *carboldap.Client, hostname string, mode conf
 // values; ParseURLs is used at both layers so connect-time failover works
 // regardless of which key holds the list (CO-3565).
 func openLDAPForWrites(lc map[string]string) (*carboldap.Client, error) {
-	urls := carboldap.ParseURLs(lc["ldap_master_url"])
+	urls := carboldap.ParseURLs(lc[lcKeyLDAPMasterURL])
 	if len(urls) == 0 {
-		urls = carboldap.ParseURLs(lc["ldap_url"])
+		urls = carboldap.ParseURLs(lc[lcKeyLDAPURL])
 	}
 
 	if len(urls) == 0 {
@@ -206,8 +206,8 @@ func openLDAPForWrites(lc map[string]string) (*carboldap.Client, error) {
 
 	client, err := carboldap.NewClient(&carboldap.ClientConfig{
 		URLs:     urls,
-		BindDN:   lc["zimbra_ldap_userdn"],
-		Password: lc["zimbra_ldap_password"],
+		BindDN:   lc[lcKeyZimbraLDAPUserDN],
+		Password: lc[lcKeyZimbraLDAPPassword],
 		StartTLS: true,
 	})
 	if err != nil {

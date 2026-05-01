@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -91,7 +92,7 @@ func stopService(ctx context.Context, name string, def *ServiceDef) error {
 		return stopWithoutSystemd(ctx, name, def)
 	}
 
-	for i := len(def.SystemdUnits) - 1; i >= 0; i-- {
+	for i := range slices.Backward(def.SystemdUnits) {
 		unit := def.SystemdUnits[i]
 
 		logger.InfoContext(ctx, "Stopping service via systemctl", "service", name, "unit", unit)

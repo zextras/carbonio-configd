@@ -17,6 +17,11 @@ import (
 	"github.com/zextras/carbonio-configd/internal/logger"
 )
 
+const (
+	// boolFalseStr is the string representation of false used in parsing.
+	boolFalseStr = "false"
+)
+
 // State manages the current and previous configurations and actions.
 type State struct {
 	mu sync.Mutex // Protects access to state variables
@@ -266,7 +271,7 @@ func IsFalseValue(val string) bool {
 	}
 
 	lowerVal := strings.ToLower(val)
-	if lowerVal == "no" || lowerVal == "false" {
+	if lowerVal == "no" || lowerVal == boolFalseStr {
 		return true
 	}
 	// Check if the value consists only of zeros (matching 0+ regex)

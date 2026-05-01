@@ -58,6 +58,8 @@ const (
 	nginxReturn200     = "return 200"
 	nginxReturn307Path = "return 307 /static/login/"
 	nginxOff           = "off"
+	sslDHParamKey      = "ssl_dhparam"
+	sslDHParamPath     = "/opt/zextras/conf/dhparam.pem"
 )
 
 // resolverQueryFailed is the log message emitted when a config resolver returns an error.
@@ -104,7 +106,7 @@ func (g *Generator) resolveClientCertCADefault(ctx context.Context) (any, error)
 func (g *Generator) resolveDHParamEnabled(ctx context.Context) (any, error) {
 	dhPath := g.ConfDir + "/dhparam.pem"
 	if _, err := os.Stat(dhPath); err == nil {
-		return "ssl_dhparam", nil // Return the keyword to enable
+		return sslDHParamKey, nil // Return the keyword to enable
 	}
 
 	return "", nil
@@ -165,7 +167,7 @@ func (g *Generator) resolveLookupAvailable(_ context.Context) (any, error) {
 // resolveWebSSLDhparamEnabled returns true when the web SSL DH parameter file exists on disk.
 // Mirrors legacy WebSSLDhparamEnablerVar (ProxyConfGen.java:1913).
 func (g *Generator) resolveWebSSLDhparamEnabled(_ context.Context) (any, error) {
-	dhPath := "/opt/zextras/conf/dhparam.pem"
+	dhPath := sslDHParamPath
 
 	if g.LocalConfig != nil {
 		if v, ok := g.LocalConfig.Data["web.ssl.dhparam.file"]; ok && v != "" {

@@ -22,7 +22,7 @@ var cacheFile = logPath + "/.zmcontrol.cache"
 var legacyServiceNames = map[string]bool{
 	"zimlet":      true,
 	"zimbraAdmin": true,
-	"zimbra":      true,
+	userZimbra:    true,
 }
 
 // DiscoverEnabledServices queries LDAP for services enabled on this host.
@@ -90,7 +90,7 @@ func DiscoverEnabledServices(ctx context.Context) ([]string, error) {
 	hasConfigd := false
 
 	for _, s := range services {
-		if s == "zmconfigd" || s == "configd" {
+		if s == svcZmconfigd || s == svcConfigd {
 			hasConfigd = true
 
 			break
@@ -98,7 +98,7 @@ func DiscoverEnabledServices(ctx context.Context) ([]string, error) {
 	}
 
 	if !hasConfigd {
-		services = append(services, "zmconfigd")
+		services = append(services, svcZmconfigd)
 	}
 
 	writeCache(ctx, services)
@@ -125,9 +125,9 @@ func IsLDAPLocal() bool {
 // LDAP uses names like "directory-server", "service"; registry uses "ldap", "mailbox".
 func MapLDAPServiceToRegistry(ldapName string) string {
 	mapping := map[string]string{
-		"directory-server": "ldap",
-		"service":          "mailbox",
-		"zmconfigd":        "configd",
+		groupDirectoryServer: svcLdap,
+		svcService:           svcMailbox,
+		svcZmconfigd:         svcConfigd,
 	}
 
 	if mapped, ok := mapping[ldapName]; ok {

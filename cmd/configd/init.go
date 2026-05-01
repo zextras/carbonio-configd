@@ -16,8 +16,19 @@ import (
 )
 
 const (
-	componentMTA   = "mta"
-	componentProxy = "proxy"
+	componentMTA              = "mta"
+	componentProxy            = "proxy"
+	componentConfigd          = "configd"
+	componentMailbox          = "mailbox"
+	componentAntivirus        = "antivirus"
+	outputFormatJSON          = "json"
+	outputFormatXML           = "xml"
+	schemeHTTPS               = "https"
+	lcKeyZimbraLDAPPassword   = "zimbra_ldap_password"
+	lcKeyZimbraLDAPUserDN     = "zimbra_ldap_userdn"
+	lcKeyLDAPURL              = "ldap_url"
+	lcKeyLDAPMasterURL        = "ldap_master_url"
+	lcKeyZimbraServerHostname = "zimbra_server_hostname"
 )
 
 var initComponents = map[string]string{

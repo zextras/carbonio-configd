@@ -262,12 +262,12 @@ func (e *CommandExecutor) getserverenabled(ctx context.Context, args ...string) 
 	}
 
 	// Extract only zimbraServiceEnabled attribute
-	if services, ok := serverAttrs["zimbraServiceEnabled"]; ok {
+	if services, ok := serverAttrs[attrZimbraServiceEnabled]; ok {
 		logger.DebugContext(ctx, "Native LDAP query successful - found enabled services",
 			"hostname", hostname,
 			"services", services)
 
-		return "zimbraServiceEnabled: " + services + "\n", nil
+		return attrZimbraServiceEnabled + ": " + services + "\n", nil
 	}
 
 	logger.DebugContext(ctx, "No enabled services found for server",
@@ -382,16 +382,16 @@ func buildBackendURL(attrs map[string]string) (string, bool) {
 		return "", false
 	}
 
-	if !strings.EqualFold(attrs["zimbraReverseProxyLookupTarget"], "TRUE") {
+	if !strings.EqualFold(attrs[attrZimbraReverseProxyLookupTarget], "TRUE") {
 		return "", false
 	}
 
-	mailMode, hasMail := attrs["zimbraMailMode"]
+	mailMode, hasMail := attrs[attrZimbraMailMode]
 	if !hasMail || mailMode == "" {
 		return "", false
 	}
 
-	httpsPort := attrs["zimbraMailSSLPort"]
+	httpsPort := attrs[attrZimbraMailSSLPort]
 	if httpsPort == "" {
 		httpsPort = "443"
 	}
@@ -434,9 +434,9 @@ func parseProxygenArgs(args []string) (hostname string, dryRun, verbose bool) {
 				hostname = args[i+1]
 				i++
 			}
-		case "-d", "--dry-run":
+		case "-d", flagDryRun:
 			dryRun = true
-		case "-v", "--verbose":
+		case "-v", flagVerbose:
 			verbose = true
 		default:
 			if hostname == "" && !strings.HasPrefix(args[i], "-") {
@@ -580,24 +580,24 @@ func Initialize() {
 		}
 
 		Commands = map[string]*Command{
-			"amavis":      {Desc: "amavis", Name: "amavis", Binary: Exe["AMAVIS"]},
-			"antispam":    {Desc: "antispam", Name: "antispam", Binary: Exe["ANTISPAM"]},
-			"antivirus":   {Desc: "antivirus", Name: "antivirus", Binary: Exe["ANTIVIRUS"]},
-			"cbpolicyd":   {Desc: "cbpolicyd", Name: "cbpolicyd", Binary: Exe["CBPOLICYD"]},
-			"ldap":        {Desc: "ldap", Name: "ldap", Binary: Exe["LDAP"]},
-			"localconfig": {Desc: "Local server configuration", Name: "localconfig", Func: getlocal},
-			"mailbox":     {Desc: "mailbox", Name: "mailbox", Binary: Exe["MAILBOX"]},
-			"mailboxd":    {Desc: "mailboxd", Name: "mailboxd", Binary: Exe["MAILBOXD"]},
-			"memcached":   {Desc: "memcached", Name: "memcached", Binary: Exe["MEMCACHED"]},
-			"mta":         {Desc: "mta", Name: "mta", Binary: Exe["MTA"]},
-			"opendkim":    {Desc: "opendkim", Name: "opendkim", Binary: Exe["OPENDKIM"]},
-			"postconf":    {Desc: "postconf", Name: "postconf", Func: postconfExec},
-			"postconfd":   {Desc: "postconfd", Name: "postconfd", Binary: Exe["POSTCONFD"]},
-			"proxy":       {Desc: "proxy", Name: "proxy", Binary: Exe["PROXY"]},
-			"proxygen":    {Desc: "proxygen", Name: "proxygen", Func: proxygen},
-			"sasl":        {Desc: "sasl", Name: "sasl", Binary: Exe["SASL"]},
-			"service":     {Desc: "service", Name: "service", Binary: Exe["SERVICE"]},
-			"stats":       {Desc: "stats", Name: "stats", Binary: Exe["STATS"]},
+			cmdAmavis:      {Desc: cmdAmavis, Name: cmdAmavis, Binary: Exe["AMAVIS"]},
+			cmdAntispam:    {Desc: cmdAntispam, Name: cmdAntispam, Binary: Exe["ANTISPAM"]},
+			cmdAntivirus:   {Desc: cmdAntivirus, Name: cmdAntivirus, Binary: Exe["ANTIVIRUS"]},
+			cmdCBPolicyd:   {Desc: cmdCBPolicyd, Name: cmdCBPolicyd, Binary: Exe["CBPOLICYD"]},
+			cmdLDAP:        {Desc: cmdLDAP, Name: cmdLDAP, Binary: Exe["LDAP"]},
+			cmdLocalconfig: {Desc: "Local server configuration", Name: cmdLocalconfig, Func: getlocal},
+			cmdMailbox:     {Desc: cmdMailbox, Name: cmdMailbox, Binary: Exe["MAILBOX"]},
+			cmdMailboxd:    {Desc: cmdMailboxd, Name: cmdMailboxd, Binary: Exe["MAILBOXD"]},
+			cmdMemcached:   {Desc: cmdMemcached, Name: cmdMemcached, Binary: Exe["MEMCACHED"]},
+			cmdMTA:         {Desc: cmdMTA, Name: cmdMTA, Binary: Exe["MTA"]},
+			cmdOpenDKIM:    {Desc: cmdOpenDKIM, Name: cmdOpenDKIM, Binary: Exe["OPENDKIM"]},
+			cmdPostconf:    {Desc: cmdPostconf, Name: cmdPostconf, Func: postconfExec},
+			cmdPostconfd:   {Desc: cmdPostconfd, Name: cmdPostconfd, Binary: Exe["POSTCONFD"]},
+			cmdProxy:       {Desc: cmdProxy, Name: cmdProxy, Binary: Exe["PROXY"]},
+			cmdProxygen:    {Desc: cmdProxygen, Name: cmdProxygen, Func: proxygen},
+			cmdSASL:        {Desc: cmdSASL, Name: cmdSASL, Binary: Exe["SASL"]},
+			cmdService:     {Desc: cmdService, Name: cmdService, Binary: Exe["SERVICE"]},
+			cmdStats:       {Desc: cmdStats, Name: cmdStats, Binary: Exe["STATS"]},
 		}
 	})
 }
@@ -610,12 +610,12 @@ func RegisterLDAPCommands(e *CommandExecutor) {
 		Commands = make(map[string]*Command)
 	}
 
-	Commands["gacf"] = NewCommand("Global system configuration", "gacf", e.getglobal)
-	Commands["gamau"] = NewCommand("All MTA Authentication Target URLs", "getAllMtaAuthURLs", e.gamau)
-	Commands["garpb"] = NewCommand("All Reverse Proxy Backends", "getAllReverseProxyBackends", e.garpb)
-	Commands["garpu"] = NewCommand("All Reverse Proxy URLs", "getAllReverseProxyURLs", e.garpu)
-	Commands["gs"] = NewCommand("Configuration for server", "gs", e.getserver)
-	Commands["gs:enabled"] = NewCommand("Enabled Services for host", "gs:enabled", e.getserverenabled)
+	Commands[cmdGACF] = NewCommand("Global system configuration", cmdGACF, e.getglobal)
+	Commands[cmdGAMAU] = NewCommand("All MTA Authentication Target URLs", "getAllMtaAuthURLs", e.gamau)
+	Commands[cmdGARPB] = NewCommand("All Reverse Proxy Backends", "getAllReverseProxyBackends", e.garpb)
+	Commands[cmdGARPU] = NewCommand("All Reverse Proxy URLs", "getAllReverseProxyURLs", e.garpu)
+	Commands[cmdGS] = NewCommand("Configuration for server", cmdGS, e.getserver)
+	Commands[cmdGSEnabled] = NewCommand("Enabled Services for host", cmdGSEnabled, e.getserverenabled)
 }
 
 // ResetProvisioning clears cached provisioning data for the specified type.

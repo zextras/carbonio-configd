@@ -33,7 +33,7 @@ func (a ServiceAction) String() string {
 	case ActionStop:
 		return "stop"
 	case ActionStart:
-		return "start"
+		return actionStart
 	case ActionStatus:
 		return "status"
 	default:

@@ -9,16 +9,14 @@ import (
 	"os"
 	"strconv"
 	"syscall"
-
-
 )
 
 const defaultDiskThresholdMB = 100
 
 // ServiceDiskDirs maps service names to directories that should be checked before start.
 var ServiceDiskDirs = map[string][]string{
-	"mailbox": {storePath, basePath + "/db", basePath + "/index", basePath + "/redolog"},
-	"mta":     {dataPath + "/postfix/spool"},
+	svcMailbox: {storePath, basePath + "/db", basePath + "/index", basePath + "/redolog"},
+	serviceMTA: {dataPath + "/postfix/spool"},
 }
 
 // CheckDiskSpace checks available space on a path. Returns available MB and whether it's above threshold.

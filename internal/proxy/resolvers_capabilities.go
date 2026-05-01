@@ -17,8 +17,22 @@ import (
 // pop3ExpireCapability is the POP3 capability string for message expiry.
 const pop3ExpireCapability = "EXPIRE 31 USER"
 
+// IMAP/POP3 capability constants
+const (
+	imapCapIMAPRev1  = "IMAP4rev1"
+	imapCapID        = "ID"
+	imapCapLiteral   = "LITERAL+"
+	imapCapTOP       = "TOP"
+	imapCapIDLE      = "IDLE"
+	imapCapUIDL      = "UIDL"
+	imapCapUSER      = "USER"
+	imapCapSASLIR    = "SASL-IR"
+	imapCapNAMESPACE = "NAMESPACE"
+	loopbackIPv4     = "127.0.0.1"
+)
+
 // defaultPOP3Capabilities is the default set of POP3 capabilities (matching Java ProxyConfGen).
-var defaultPOP3Capabilities = []string{pop3ExpireCapability, "TOP", "UIDL", "USER", "XOIP"}
+var defaultPOP3Capabilities = []string{pop3ExpireCapability, imapCapTOP, imapCapUIDL, imapCapUSER, "XOIP"}
 
 // compressionMIMETypes is the shared list of MIME types for gzip and brotli compression.
 const compressionMIMETypes = `        application/atom+xml
@@ -73,7 +87,7 @@ func (g *Generator) resolveLookupHandlers(ctx context.Context) (any, error) {
 	}
 
 	if len(hosts) == 0 {
-		hosts = []string{"127.0.0.1"}
+		hosts = []string{loopbackIPv4}
 	}
 
 	urls := make([]string, 0, len(hosts))
@@ -114,7 +128,7 @@ func (g *Generator) resolveIMAPCapabilities(ctx context.Context) (any, error) {
 	// Default capabilities matching Java ImapCapaVar.getDefaultImapCapabilities()
 	// Plus commonly enabled extensions
 	defaultCaps := []string{
-		"IMAP4rev1", "ID", "LITERAL+", "SASL-IR", "IDLE", "NAMESPACE",
+		imapCapIMAPRev1, imapCapID, imapCapLiteral, imapCapSASLIR, imapCapIDLE, imapCapNAMESPACE,
 		"ACL", "BINARY", "CATENATE", "CHILDREN", "CONDSTORE", "ENABLE",
 		"ESEARCH", "ESORT", "I18NLEVEL=1", "LIST-EXTENDED", "LIST-STATUS",
 		"MULTIAPPEND", "QRESYNC", "QUOTA", "RIGHTS=ektx", "SEARCHRES",

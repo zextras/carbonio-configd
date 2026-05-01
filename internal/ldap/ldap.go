@@ -74,23 +74,23 @@ const (
 //
 //nolint:lll
 var keymap = map[string]LdapKeyMapEntry{
-	"ldap_common_loglevel":       {"olcLogLevel", ldapCnConfig, false, "%s"},
-	"ldap_common_threads":        {"olcThreads", ldapCnConfig, false, "%s"},
-	"ldap_common_toolthreads":    {"olcToolThreads", ldapCnConfig, false, "%s"},
-	"ldap_common_require_tls":    {"olcSecurity", ldapCnConfig, false, "ssf=%s"},
+	keyLDAPCommonLoglevel:        {"olcLogLevel", ldapCnConfig, false, "%s"},
+	keyLDAPCommonThreads:         {"olcThreads", ldapCnConfig, false, "%s"},
+	keyLDAPCommonToolthreads:     {"olcToolThreads", ldapCnConfig, false, "%s"},
+	keyLDAPCommonRequireTLS:      {"olcSecurity", ldapCnConfig, false, "ssf=%s"},
 	"ldap_common_writetimeout":   {"olcWriteTimeout", ldapCnConfig, false, "%s"},
 	"ldap_common_tlsdhparamfile": {"olcTLSDHParamFile", ldapCnConfig, false, "%s"},
 	"ldap_common_tlsprotocolmin": {"olcTLSProtocolMin", ldapCnConfig, false, "%s"},
 	"ldap_common_tlsciphersuite": {"olcTLSCipherSuite", ldapCnConfig, false, "%s"},
 
-	"ldap_db_maxsize":  {"olcDbMaxsize", ldapDB3MdbCnConfig, false, "%s"},
-	"ldap_db_envflags": {"olcDbEnvFlags", ldapDB3MdbCnConfig, false, "%s"},
+	keyLDAPDBMaxsize:   {olcDBMaxsizeAttr, ldapDB3MdbCnConfig, false, "%s"},
+	keyLDAPDBEnvflags:  {"olcDbEnvFlags", ldapDB3MdbCnConfig, false, "%s"},
 	"ldap_db_rtxnsize": {"olcDbRtxnSize", ldapDB3MdbCnConfig, false, "%s"},
 
-	"ldap_accesslog_maxsize":           {"olcDbMaxsize", ldapDB2MdbCnConfig, true, "%s"},
+	keyLDAPAccesslogMaxsize:            {olcDBMaxsizeAttr, ldapDB2MdbCnConfig, true, "%s"},
 	"ldap_accesslog_envflags":          {"olcDbEnvFlags", ldapDB2MdbCnConfig, true, "%s"},
-	"ldap_overlay_syncprov_checkpoint": {"olcSpCheckpoint", "olcOverlay={0}syncprov,olcDatabase={3}mdb,cn=config", true, "%s"},
-	"ldap_overlay_syncprov_sessionlog": {"olcSpSessionlog", "olcOverlay={0}syncprov,olcDatabase={3}mdb,cn=config", true, "%s"},
+	keyLDAPOverlaySyncprovCheckpoint:   {"olcSpCheckpoint", ldapOverlaySyncprovDB3DN, true, "%s"},
+	"ldap_overlay_syncprov_sessionlog": {"olcSpSessionlog", ldapOverlaySyncprovDB3DN, true, "%s"},
 
 	"ldap_overlay_accesslog_logpurge": {"olcAccessLogPurge", "olcOverlay={1}accesslog,olcDatabase={3}mdb,cn=config", true, "%s"},
 }
@@ -529,7 +529,7 @@ func (l *Ldap) QueryServers(ctx context.Context, serviceName string) ([]Server, 
 		serviceHostname := serverAttrs["zimbraServiceHostname"]
 
 		// Check if the service is enabled
-		servicesEnabled := serverAttrs["zimbraServiceEnabled"]
+		servicesEnabled := serverAttrs[attrZimbraServiceEnabled]
 		hasService := false
 
 		// zimbraServiceEnabled is multi-valued and joined with \n

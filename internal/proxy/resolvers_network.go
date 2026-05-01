@@ -170,7 +170,7 @@ func (g *Generator) resolveWebUpstreamTargetAvailable(ctx context.Context) (any,
 // resolveSaslHostFromIP returns hostname for SASL authentication from IP
 // Reads zimbraReverseProxySaslHostFromIP attribute
 func (g *Generator) resolveSaslHostFromIP(ctx context.Context) (any, error) {
-	saslHost := "off"
+	saslHost := nginxOff
 
 	if val, ok := g.getConfigValue("zimbraReverseProxySaslHostFromIP", sourceGlobal); ok {
 		saslHost = val

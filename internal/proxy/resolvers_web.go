@@ -12,6 +12,12 @@ import (
 	"github.com/zextras/carbonio-configd/internal/logger"
 )
 
+// TLS protocol version constants
+const (
+	tlsV12 = "TLSv1.2"
+	tlsV13 = "TLSv1.3"
+)
+
 // resolveLoginUpstreamDisable returns "#" to comment out login upstream block if no servers configured
 // Returns "" (empty string) if servers are configured to enable the upstream block
 func (g *Generator) resolveLoginUpstreamDisable(ctx context.Context) (any, error) {
@@ -86,7 +92,7 @@ func (g *Generator) resolveProxyHTTPCompression(ctx context.Context) (any, error
 // Returns default "TLSv1.2 TLSv1.3" if not configured
 func (g *Generator) resolveWebSSLProtocols(ctx context.Context) (any, error) {
 	// Default protocols
-	defaultProtocols := []string{"TLSv1.2", "TLSv1.3"}
+	defaultProtocols := []string{tlsV12, tlsV13}
 
 	// Check ServerConfig for zimbraReverseProxySSLProtocols
 	if val, ok := g.getConfigValue("zimbraReverseProxySSLProtocols", sourceServer); ok {

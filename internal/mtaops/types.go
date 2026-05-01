@@ -25,7 +25,7 @@ type PostconfdOperation struct {
 
 // LdapOperation represents an LDAP cn=config modification operation.
 type LdapOperation struct {
-	Key   string // Internal key name (e.g., "ldap_db_maxsize")
+	Key   string // Internal key name (e.g., keyLDAPDBMaxsize)
 	Value string // Value to set in LDAP
 }
 

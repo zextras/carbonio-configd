@@ -15,12 +15,21 @@ import (
 
 // Config type constants
 const (
-	ConfigTypeVAR      = "VAR"
-	ConfigTypeLOCAL    = "LOCAL"
-	ConfigTypeMAPFILE  = "MAPFILE"
-	ConfigTypeMAPLOCAL = "MAPLOCAL"
-	ConfigTypeREWRITE  = "REWRITE"
-	errExpectedVarName = "expected variable name at line %d"
+	ConfigTypeSECTION   = "SECTION"
+	ConfigTypeREWRITE   = "REWRITE"
+	ConfigTypeVAR       = "VAR"
+	ConfigTypeLOCAL     = "LOCAL"
+	ConfigTypeSERVICE   = "SERVICE"
+	ConfigTypePOSTCONF  = "POSTCONF"
+	ConfigTypePOSTCONFD = "POSTCONFD"
+	ConfigTypeRESTART   = "RESTART"
+	ConfigTypeDEPENDS   = "DEPENDS"
+	ConfigTypeMAPFILE   = "MAPFILE"
+	ConfigTypeMAPLOCAL  = "MAPLOCAL"
+	ConfigTypeMODE      = "MODE"
+	ConfigTypeFILE      = "FILE"
+	ConfigTypePROXYGEN  = "PROXYGEN"
+	errExpectedVarName  = "expected variable name at line %d"
 )
 
 // parser implements the Parser interface for parsing zmconfigd.cf files.

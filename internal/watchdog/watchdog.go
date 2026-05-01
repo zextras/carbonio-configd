@@ -46,6 +46,47 @@ type Watchdog struct {
 	configLookup func(string) string
 }
 
+const (
+	// serviceLDAP is the LDAP service name.
+	serviceLDAP = "ldap"
+
+	// serviceMailbox is the mailbox service name.
+	serviceMailbox = "mailbox"
+
+	// serviceMailboxd is the mailboxd service name.
+	serviceMailboxd = "mailboxd"
+
+	// serviceMemcached is the memcached service name.
+	serviceMemcached = "memcached"
+
+	// serviceProxy is the proxy service name.
+	serviceProxy = "proxy"
+
+	// serviceAntispam is the antispam service name.
+	serviceAntispam = "antispam"
+
+	// serviceAntivirus is the antivirus service name.
+	serviceAntivirus = "antivirus"
+
+	// serviceCbpolicyd is the cbpolicyd service name.
+	serviceCbpolicyd = "cbpolicyd"
+
+	// serviceAmavis is the amavis service name.
+	serviceAmavis = "amavis"
+
+	// serviceOpendkim is the opendkim service name.
+	serviceOpendkim = "opendkim"
+
+	// serviceMTA is the MTA service name.
+	serviceMTA = "mta"
+
+	// serviceSasl is the sasl service name.
+	serviceSasl = "sasl"
+
+	// serviceStats is the stats service name.
+	serviceStats = "stats"
+)
+
 // Config holds configuration for the Watchdog.
 type Config struct {
 	// CheckInterval is how often to check service health
@@ -270,9 +311,9 @@ func (w *Watchdog) getTrackedServices() []string {
 	// Collect all services that are tracked
 	// Note: State methods handle their own locking
 	commonServices := []string{
-		"ldap", "mailbox", "mailboxd", "memcached", "proxy",
-		"antispam", "antivirus", "cbpolicyd", "amavis", "opendkim",
-		"mta", "sasl", "stats",
+		serviceLDAP, serviceMailbox, serviceMailboxd, serviceMemcached, serviceProxy,
+		serviceAntispam, serviceAntivirus, serviceCbpolicyd, serviceAmavis, serviceOpendkim,
+		serviceMTA, serviceSasl, serviceStats,
 	}
 
 	serviceList := make([]string, 0, len(commonServices))

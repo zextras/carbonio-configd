@@ -115,7 +115,7 @@ func (cm *ConfigManager) postProcessServerConfig(configData *ServerConfigData) {
 			switch s {
 			case "mailbox":
 				svc["mailboxd"] = zimbraServiceEnabled
-			case "mta":
+			case serviceMTA:
 				svc["sasl"] = zimbraServiceEnabled
 			}
 		}
@@ -175,10 +175,10 @@ func processMtaRestrictionRBLsForData(data map[string]string) {
 	}
 
 	rblTypes := []rblType{
-		{pattern: "reject_rbl_client", dataKey: "zimbraMtaRestrictionRBLs"},
-		{pattern: "reject_rhsbl_client", dataKey: "zimbraMtaRestrictionRHSBLCs"},
-		{pattern: "reject_rhsbl_sender", dataKey: "zimbraMtaRestrictionRHSBLSs"},
-		{pattern: "reject_rhsbl_reverse_client", dataKey: "zimbraMtaRestrictionRHSBLRCs"},
+		{pattern: restrictionRejectRBLClient, dataKey: dataKeyMtaRestrictionRBLs},
+		{pattern: restrictionRejectRHSBLClient, dataKey: dataKeyMtaRestrictionRHSBLCs},
+		{pattern: "reject_rhsbl_sender", dataKey: dataKeyMtaRestrictionRHSBLSs},
+		{pattern: "reject_rhsbl_reverse_client", dataKey: dataKeyMtaRestrictionRHSBLRCs},
 	}
 
 	extracted, cleaned := processRBLPatterns(restriction, rblTypes)
@@ -248,7 +248,7 @@ func processIPModeConfigForData(data map[string]string) {
 		data["zimbraPostconfProtocol"] = constIPv4
 		data["zimbraAmavisListenSockets"] = "'10024','10026','10032'"
 
-		data["zimbraInetMode"] = "inet"
+		data["zimbraInetMode"] = inetFamily
 		if _, ok := data["zimbraMilterBindAddress"]; !ok {
 			data["zimbraMilterBindAddress"] = localhostIPv4
 		}
@@ -256,22 +256,24 @@ func processIPModeConfigForData(data map[string]string) {
 		data["zimbraUnboundBindAddress"] = localhostIPv6
 		data["zimbraLocalBindAddress"] = localhostIPv6
 		data["zimbraPostconfProtocol"] = constIPv6
-		data["zimbraAmavisListenSockets"] = "'[::1]:10024','[::1]:10026','[::1]:10032'"
+		data["zimbraAmavisListenSockets"] = "'" + loopbackIPv6 + ":10024'," +
+			"'" + loopbackIPv6 + ":10026'," +
+			"'" + loopbackIPv6 + ":10032'"
 
-		data["zimbraInetMode"] = "inet6"
+		data["zimbraInetMode"] = inet6Family
 		if _, ok := data["zimbraMilterBindAddress"]; !ok {
-			data["zimbraMilterBindAddress"] = "[::1]"
+			data["zimbraMilterBindAddress"] = loopbackIPv6
 		}
 	case "both":
 		data["zimbraUnboundBindAddress"] = localhostIPv4 + " " + localhostIPv6
 		data["zimbraLocalBindAddress"] = localhostIPv6
 		data["zimbraPostconfProtocol"] = "all"
 		data["zimbraAmavisListenSockets"] =
-			"'10024','10026','10032','[::1]:10024','[::1]:10026','[::1]:10032'"
+			"'10024','10026','10032','" + loopbackIPv6 + ":10024','" + loopbackIPv6 + ":10026','" + loopbackIPv6 + ":10032'"
 
-		data["zimbraInetMode"] = "inet6"
+		data["zimbraInetMode"] = inet6Family
 		if _, ok := data["zimbraMilterBindAddress"]; !ok {
-			data["zimbraMilterBindAddress"] = "[::1]"
+			data["zimbraMilterBindAddress"] = loopbackIPv6
 		}
 	}
 }

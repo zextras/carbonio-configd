@@ -28,6 +28,17 @@ type Transformer struct {
 	State        *state.State
 }
 
+const (
+	// configTypeVAR is the VAR config type for variable substitution.
+	configTypeVAR = "VAR"
+
+	// configTypeLOCAL is the LOCAL config type for variable substitution.
+	configTypeLOCAL = "LOCAL"
+
+	// configTypeSERVICE is the SERVICE config type for variable substitution.
+	configTypeSERVICE = "SERVICE"
+)
+
 // Compiled once at package init. `*regexp.Regexp` is safe for concurrent use.
 var (
 	localConfigRe   = regexp.MustCompile(`@@([^@]+)@@`)
@@ -267,7 +278,7 @@ func (t *Transformer) xformConfigVariable(ctx context.Context, match string) str
 	key := parts[1]
 
 	// Validate config type
-	if cfgType != "VAR" && cfgType != "LOCAL" && cfgType != "SERVICE" {
+	if cfgType != configTypeVAR && cfgType != configTypeLOCAL && cfgType != configTypeSERVICE {
 		logger.WarnContext(ctx, "Invalid config type in variable",
 			"config_type", cfgType)
 

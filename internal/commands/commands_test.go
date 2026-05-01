@@ -561,7 +561,7 @@ func TestProxygen_ArgumentParsing(t *testing.T) {
 		},
 		{
 			name:    "hostname with --dry-run",
-			args:    []string{"--dry-run", "mail.example.com"},
+			args:    []string{flagDryRun, "mail.example.com"},
 			wantErr: true,
 			errMsg:  "",
 		},
@@ -579,7 +579,7 @@ func TestProxygen_ArgumentParsing(t *testing.T) {
 		},
 		{
 			name:    "hostname with --verbose",
-			args:    []string{"--verbose", "mail.example.com"},
+			args:    []string{flagVerbose, "mail.example.com"},
 			wantErr: true,
 			errMsg:  "",
 		},
@@ -942,7 +942,7 @@ func TestParseProxygenArgs(t *testing.T) {
 		},
 		{
 			name:        "--dry-run flag",
-			args:        []string{"--dry-run", "mail.example.com"},
+			args:        []string{flagDryRun, "mail.example.com"},
 			wantHost:    "mail.example.com",
 			wantDryRun:  true,
 			wantVerbose: false,
@@ -956,7 +956,7 @@ func TestParseProxygenArgs(t *testing.T) {
 		},
 		{
 			name:        "--verbose flag",
-			args:        []string{"--verbose", "mail.example.com"},
+			args:        []string{flagVerbose, "mail.example.com"},
 			wantHost:    "mail.example.com",
 			wantDryRun:  false,
 			wantVerbose: true,
@@ -1092,10 +1092,10 @@ func TestBuildBackendURL(t *testing.T) {
 		{
 			name: "valid backend",
 			attrs: map[string]string{
-				zimbraServiceHostname:            "mail.example.com",
-				"zimbraReverseProxyLookupTarget": "TRUE",
-				"zimbraMailMode":                 "https",
-				"zimbraMailSSLPort":              "8443",
+				zimbraServiceHostname:              "mail.example.com",
+				attrZimbraReverseProxyLookupTarget: "TRUE",
+				attrZimbraMailMode:                 "https",
+				attrZimbraMailSSLPort:              "8443",
 			},
 			wantURL: "https://mail.example.com:8443",
 			wantOK:  true,
@@ -1103,9 +1103,9 @@ func TestBuildBackendURL(t *testing.T) {
 		{
 			name: "default port when missing",
 			attrs: map[string]string{
-				zimbraServiceHostname:            "mail.example.com",
-				"zimbraReverseProxyLookupTarget": "TRUE",
-				"zimbraMailMode":                 "https",
+				zimbraServiceHostname:              "mail.example.com",
+				attrZimbraReverseProxyLookupTarget: "TRUE",
+				attrZimbraMailMode:                 "https",
 			},
 			wantURL: "https://mail.example.com:443",
 			wantOK:  true,
@@ -1113,10 +1113,10 @@ func TestBuildBackendURL(t *testing.T) {
 		{
 			name: "case insensitive lookup target",
 			attrs: map[string]string{
-				zimbraServiceHostname:            "mail.example.com",
-				"zimbraReverseProxyLookupTarget": "true",
-				"zimbraMailMode":                 "both",
-				"zimbraMailSSLPort":              "7443",
+				zimbraServiceHostname:              "mail.example.com",
+				attrZimbraReverseProxyLookupTarget: "true",
+				attrZimbraMailMode:                 "both",
+				attrZimbraMailSSLPort:              "7443",
 			},
 			wantURL: "https://mail.example.com:7443",
 			wantOK:  true,
@@ -1130,8 +1130,8 @@ func TestBuildBackendURL(t *testing.T) {
 		{
 			name: "missing hostname",
 			attrs: map[string]string{
-				"zimbraReverseProxyLookupTarget": "TRUE",
-				"zimbraMailMode":                 "https",
+				attrZimbraReverseProxyLookupTarget: "TRUE",
+				attrZimbraMailMode:                 "https",
 			},
 			wantURL: "",
 			wantOK:  false,
@@ -1139,9 +1139,9 @@ func TestBuildBackendURL(t *testing.T) {
 		{
 			name: "not a lookup target",
 			attrs: map[string]string{
-				zimbraServiceHostname:            "mail.example.com",
-				"zimbraReverseProxyLookupTarget": "FALSE",
-				"zimbraMailMode":                 "https",
+				zimbraServiceHostname:              "mail.example.com",
+				attrZimbraReverseProxyLookupTarget: "FALSE",
+				attrZimbraMailMode:                 "https",
 			},
 			wantURL: "",
 			wantOK:  false,
@@ -1150,7 +1150,7 @@ func TestBuildBackendURL(t *testing.T) {
 			name: "missing lookup target attr",
 			attrs: map[string]string{
 				zimbraServiceHostname: "mail.example.com",
-				"zimbraMailMode":      "https",
+				attrZimbraMailMode:    "https",
 			},
 			wantURL: "",
 			wantOK:  false,
@@ -1158,8 +1158,8 @@ func TestBuildBackendURL(t *testing.T) {
 		{
 			name: "missing mail mode",
 			attrs: map[string]string{
-				zimbraServiceHostname:            "mail.example.com",
-				"zimbraReverseProxyLookupTarget": "TRUE",
+				zimbraServiceHostname:              "mail.example.com",
+				attrZimbraReverseProxyLookupTarget: "TRUE",
 			},
 			wantURL: "",
 			wantOK:  false,
@@ -1167,9 +1167,9 @@ func TestBuildBackendURL(t *testing.T) {
 		{
 			name: "empty mail mode",
 			attrs: map[string]string{
-				zimbraServiceHostname:            "mail.example.com",
-				"zimbraReverseProxyLookupTarget": "TRUE",
-				"zimbraMailMode":                 "",
+				zimbraServiceHostname:              "mail.example.com",
+				attrZimbraReverseProxyLookupTarget: "TRUE",
+				attrZimbraMailMode:                 "",
 			},
 			wantURL: "",
 			wantOK:  false,

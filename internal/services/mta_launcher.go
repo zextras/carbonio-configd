@@ -175,14 +175,14 @@ func writePostfixLDAPConfig(ctx context.Context, lc map[string]string) error {
 		body     string
 		extraTLS string
 	}{
-		{"ldap-vmm.cf", ldapQueryVMM, ""},
-		{"ldap-vmd.cf", ldapQueryVMD, ""},
-		{"ldap-vam.cf", ldapQueryVAM, "special_result_attribute = member\n"},
-		{"ldap-vad.cf", ldapQueryVAD, ""},
-		{"ldap-canonical.cf", ldapQueryCanonical, ""},
-		{"ldap-transport.cf", ldapQueryTransport, ""},
-		{"ldap-slm.cf", ldapQuerySLM, ""},
-		{"ldap-splitdomain.cf", ldapQuerySplitdomain, ""},
+		{ldapVmm, ldapQueryVMM, ""},
+		{ldapVmd, ldapQueryVMD, ""},
+		{ldapVam, ldapQueryVAM, "special_result_attribute = member\n"},
+		{ldapVad, ldapQueryVAD, ""},
+		{ldapCanonical, ldapQueryCanonical, ""},
+		{ldapTransport, ldapQueryTransport, ""},
+		{ldapSlm, ldapQuerySLM, ""},
+		{ldapSplitdomain, ldapQuerySplitdomain, ""},
 	}
 
 	for _, t := range tables {
@@ -236,8 +236,8 @@ func chgrpPostfixLDAPFiles(ctx context.Context) {
 	}
 
 	for _, name := range []string{
-		"ldap-vmm.cf", "ldap-vmd.cf", "ldap-vam.cf", "ldap-vad.cf",
-		"ldap-canonical.cf", "ldap-transport.cf", "ldap-slm.cf", "ldap-splitdomain.cf",
+		ldapVmm, ldapVmd, ldapVam, ldapVad,
+		ldapCanonical, ldapTransport, ldapSlm, ldapSplitdomain,
 	} {
 		path := confPath + "/" + name
 		if err := os.Chown(path, -1, gid); err != nil {

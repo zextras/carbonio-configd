@@ -130,22 +130,22 @@ func (l *lexer) readString() string {
 // Identifiers not in this map are TokenIdentifier.
 // LDAP is intentionally absent: it is treated as a plain identifier.
 var keywords = map[string]TokenType{
-	"SECTION":   TokenSection,
-	"REWRITE":   TokenRewrite,
-	"VAR":       TokenVar,
-	"LOCAL":     TokenLocal,
-	"SERVICE":   TokenService,
-	"POSTCONF":  TokenPostconf,
-	"POSTCONFD": TokenPostconfd,
-	"RESTART":   TokenRestart,
-	"DEPENDS":   TokenDepends,
-	"MAPFILE":   TokenMapfile,
-	"MAPLOCAL":  TokenMaplocal,
-	"MODE":      TokenMode,
-	"FILE":      TokenFile,
-	"IF":        TokenIf,
-	"FI":        TokenFi,
-	"PROXYGEN":  TokenProxygen,
+	ConfigTypeSECTION:   TokenSection,
+	ConfigTypeREWRITE:   TokenRewrite,
+	ConfigTypeVAR:       TokenVar,
+	ConfigTypeLOCAL:     TokenLocal,
+	ConfigTypeSERVICE:   TokenService,
+	ConfigTypePOSTCONF:  TokenPostconf,
+	ConfigTypePOSTCONFD: TokenPostconfd,
+	ConfigTypeRESTART:   TokenRestart,
+	ConfigTypeDEPENDS:   TokenDepends,
+	ConfigTypeMAPFILE:   TokenMapfile,
+	ConfigTypeMAPLOCAL:  TokenMaplocal,
+	ConfigTypeMODE:      TokenMode,
+	ConfigTypeFILE:      TokenFile,
+	"IF":                TokenIf,
+	"FI":                TokenFi,
+	ConfigTypePROXYGEN:  TokenProxygen,
 }
 
 // lookupKeyword returns the TokenType for ident (case-insensitive).

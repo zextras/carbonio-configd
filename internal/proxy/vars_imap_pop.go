@@ -62,7 +62,9 @@ func (g *Generator) registerIMAPPOPVariables() {
 		withDescription("SASL hostname from IP address configuration"),
 		withCustomResolver(g.resolveSaslHostFromIP),
 	)
-	g.registerVar("mail.imapcapa", []string{"IMAP4rev1", "ID", "LITERAL+", "SASL-IR", "IDLE", "NAMESPACE"},
+	g.registerVar(
+		"mail.imapcapa",
+		[]string{imapCapIMAPRev1, imapCapID, imapCapLiteral, imapCapSASLIR, imapCapIDLE, imapCapNAMESPACE},
 		withAttribute("zimbraReverseProxyImapEnabledCapability"),
 		withValueType(ValueTypeCustom),
 		withOverrideType(OverrideCustom),
@@ -70,7 +72,7 @@ func (g *Generator) registerIMAPPOPVariables() {
 		withCustomResolver(g.resolveIMAPCapabilities),
 		withCustomFormatter(formatIMAPCapabilities),
 	)
-	g.registerVar("mail.pop3capa", []string{"TOP", "USER", "UIDL", "EXPIRE 31 USER"},
+	g.registerVar("mail.pop3capa", []string{imapCapTOP, imapCapUSER, imapCapUIDL, pop3ExpireCapability},
 		withAttribute("zimbraReverseProxyPop3EnabledCapability"),
 		withValueType(ValueTypeCustom),
 		withOverrideType(OverrideCustom),

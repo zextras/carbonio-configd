@@ -27,7 +27,7 @@ const ipModeIPv4 = "ipv4"
 func configureLogFormat(logConfig *logger.Config) {
 	logFormat := os.Getenv("CONFIGD_LOG_FORMAT")
 	switch logFormat {
-	case "json":
+	case outputFormatJSON:
 		logConfig.Format = logger.FormatJSON
 	case "text", "":
 		logConfig.Format = logger.FormatText
@@ -151,7 +151,7 @@ func setupProfilingAndTracing(
 	if args.EnableTracing {
 		tracingConfig = &TracingConfig{
 			OutputPath: args.TracingOutput,
-			Format:     "json",
+			Format:     outputFormatJSON,
 		}
 
 		if err := ValidateTracingConfig(tracingConfig); err != nil {

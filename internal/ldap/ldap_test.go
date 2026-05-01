@@ -33,16 +33,16 @@ func TestLdap_AddChange(t *testing.T) {
 	cfg := &config.Config{}
 	l := NewLdap(context.Background(), cfg)
 
-	l.AddChange(context.Background(), "ldap_common_loglevel", "256")
+	l.AddChange(context.Background(), keyLDAPCommonLoglevel, "256")
 	if len(l.pendingChanges) != 1 {
 		t.Errorf("Expected 1 pending change, got %d", len(l.pendingChanges))
 	}
-	if val, ok := l.pendingChanges["ldap_common_loglevel"]; !ok || val != "256" {
+	if val, ok := l.pendingChanges[keyLDAPCommonLoglevel]; !ok || val != "256" {
 		t.Errorf("Expected ldap_common_loglevel=256, got %s", val)
 	}
 
 	// Add another change
-	l.AddChange(context.Background(), "ldap_common_threads", "8")
+	l.AddChange(context.Background(), keyLDAPCommonThreads, "8")
 	if len(l.pendingChanges) != 2 {
 		t.Errorf("Expected 2 pending changes, got %d", len(l.pendingChanges))
 	}
@@ -100,24 +100,24 @@ func TestLdap_LookupKey(t *testing.T) {
 		requiresMaster bool
 	}{
 		{
-			name:          "ldap_common_loglevel",
-			key:           "ldap_common_loglevel",
+			name:          keyLDAPCommonLoglevel,
+			key:           keyLDAPCommonLoglevel,
 			wantAttr:      "olcLogLevel",
 			wantDN:        "cn=config",
 			wantTransform: "%s",
 			wantErr:       false,
 		},
 		{
-			name:          "ldap_common_require_tls",
-			key:           "ldap_common_require_tls",
+			name:          keyLDAPCommonRequireTLS,
+			key:           keyLDAPCommonRequireTLS,
 			wantAttr:      "olcSecurity",
 			wantDN:        "cn=config",
 			wantTransform: "ssf=%s",
 			wantErr:       false,
 		},
 		{
-			name:          "ldap_db_maxsize",
-			key:           "ldap_db_maxsize",
+			name:          keyLDAPDBMaxsize,
+			key:           keyLDAPDBMaxsize,
 			wantAttr:      "olcDbMaxsize",
 			wantDN:        "olcDatabase={3}mdb,cn=config",
 			wantTransform: "%s",
@@ -125,7 +125,7 @@ func TestLdap_LookupKey(t *testing.T) {
 		},
 		{
 			name:           "ldap_overlay_syncprov_checkpoint (requires master)",
-			key:            "ldap_overlay_syncprov_checkpoint",
+			key:            keyLDAPOverlaySyncprovCheckpoint,
 			wantAttr:       "olcSpCheckpoint",
 			wantDN:         "olcOverlay={0}syncprov,olcDatabase={3}mdb,cn=config",
 			wantTransform:  "%s",
@@ -184,7 +184,7 @@ func TestLdap_LookupKey_NonMaster_DbKeys(t *testing.T) {
 	l.IsMaster = false
 
 	// Test that ldap_db_ keys adjust DN when not master
-	entry, err := l.lookupKey(context.Background(), "ldap_db_maxsize")
+	entry, err := l.lookupKey(context.Background(), keyLDAPDBMaxsize)
 	if err != nil {
 		t.Fatalf("lookupKey() unexpected error: %v", err)
 	}
@@ -204,21 +204,21 @@ func TestLdap_ModifyAttribute(t *testing.T) {
 	}{
 		{
 			name:     "valid_common_key",
-			key:      "ldap_common_loglevel",
+			key:      keyLDAPCommonLoglevel,
 			value:    "256",
 			isMaster: true,
 			wantErr:  false,
 		},
 		{
 			name:     "valid_require_tls",
-			key:      "ldap_common_require_tls",
+			key:      keyLDAPCommonRequireTLS,
 			value:    "128",
 			isMaster: true,
 			wantErr:  false,
 		},
 		{
 			name:     "master_required_key_as_non_master",
-			key:      "ldap_overlay_syncprov_checkpoint",
+			key:      keyLDAPOverlaySyncprovCheckpoint,
 			value:    "100 10",
 			isMaster: false,
 			wantErr:  true,
@@ -264,7 +264,7 @@ func TestLdap_ModifyAttributeBatch(t *testing.T) {
 		{
 			name: "single_change",
 			changes: map[string]string{
-				"ldap_common_loglevel": "256",
+				keyLDAPCommonLoglevel: "256",
 			},
 			isMaster: true,
 			wantErr:  false,
@@ -272,9 +272,9 @@ func TestLdap_ModifyAttributeBatch(t *testing.T) {
 		{
 			name: "multiple_changes_same_dn",
 			changes: map[string]string{
-				"ldap_common_loglevel":    "256",
-				"ldap_common_threads":     "8",
-				"ldap_common_toolthreads": "4",
+				keyLDAPCommonLoglevel:    "256",
+				keyLDAPCommonThreads:     "8",
+				keyLDAPCommonToolthreads: "4",
 			},
 			isMaster: true,
 			wantErr:  false,
@@ -282,9 +282,9 @@ func TestLdap_ModifyAttributeBatch(t *testing.T) {
 		{
 			name: "multiple_changes_different_dns",
 			changes: map[string]string{
-				"ldap_common_loglevel": "256",
-				"ldap_db_maxsize":      "85899345920",
-				"ldap_db_envflags":     "writemap",
+				keyLDAPCommonLoglevel: "256",
+				keyLDAPDBMaxsize:      "85899345920",
+				keyLDAPDBEnvflags:     "writemap",
 			},
 			isMaster: true,
 			wantErr:  false,
@@ -292,9 +292,9 @@ func TestLdap_ModifyAttributeBatch(t *testing.T) {
 		{
 			name: "batch_with_master_only_keys_as_master",
 			changes: map[string]string{
-				"ldap_common_loglevel":             "256",
-				"ldap_overlay_syncprov_checkpoint": "100 10",
-				"ldap_accesslog_maxsize":           "85899345920",
+				keyLDAPCommonLoglevel:            "256",
+				keyLDAPOverlaySyncprovCheckpoint: "100 10",
+				keyLDAPAccesslogMaxsize:          "85899345920",
 			},
 			isMaster: true,
 			wantErr:  false,
@@ -302,8 +302,8 @@ func TestLdap_ModifyAttributeBatch(t *testing.T) {
 		{
 			name: "batch_with_master_only_keys_as_non_master",
 			changes: map[string]string{
-				"ldap_common_loglevel":             "256",
-				"ldap_overlay_syncprov_checkpoint": "100 10",
+				keyLDAPCommonLoglevel:            "256",
+				keyLDAPOverlaySyncprovCheckpoint: "100 10",
 			},
 			isMaster: false,
 			wantErr:  true,
@@ -311,8 +311,8 @@ func TestLdap_ModifyAttributeBatch(t *testing.T) {
 		{
 			name: "batch_with_unknown_key",
 			changes: map[string]string{
-				"ldap_common_loglevel": "256",
-				"unknown_ldap_key":     "value",
+				keyLDAPCommonLoglevel: "256",
+				"unknown_ldap_key":    "value",
 			},
 			isMaster: true,
 			wantErr:  true,
@@ -320,8 +320,8 @@ func TestLdap_ModifyAttributeBatch(t *testing.T) {
 		{
 			name: "batch_with_transformed_values",
 			changes: map[string]string{
-				"ldap_common_require_tls": "128",
-				"ldap_common_loglevel":    "256",
+				keyLDAPCommonRequireTLS: "128",
+				keyLDAPCommonLoglevel:   "256",
 			},
 			isMaster: true,
 			wantErr:  false,
@@ -353,11 +353,11 @@ func TestLdap_ModifyAttributeBatch_DNGrouping(t *testing.T) {
 	l.IsMaster = true
 
 	changes := map[string]string{
-		"ldap_common_loglevel":   "256",         // cn=config
-		"ldap_common_threads":    "8",           // cn=config
-		"ldap_db_maxsize":        "85899345920", // olcDatabase={3}mdb,cn=config
-		"ldap_db_envflags":       "writemap",    // olcDatabase={3}mdb,cn=config
-		"ldap_accesslog_maxsize": "85899345920", // olcDatabase={2}mdb,cn=config
+		keyLDAPCommonLoglevel:   "256",         // cn=config
+		keyLDAPCommonThreads:    "8",           // cn=config
+		keyLDAPDBMaxsize:        "85899345920", // olcDatabase={3}mdb,cn=config
+		keyLDAPDBEnvflags:       "writemap",    // olcDatabase={3}mdb,cn=config
+		keyLDAPAccesslogMaxsize: "85899345920", // olcDatabase={2}mdb,cn=config
 	}
 
 	err := l.ModifyAttributeBatch(context.Background(), changes)
@@ -378,8 +378,8 @@ func TestLdap_ModifyAttributeBatch_NonMaster_DNAdjustment(t *testing.T) {
 	l.IsMaster = false
 
 	changes := map[string]string{
-		"ldap_db_maxsize":  "85899345920",
-		"ldap_db_envflags": "writemap",
+		keyLDAPDBMaxsize:  "85899345920",
+		keyLDAPDBEnvflags: "writemap",
 	}
 
 	err := l.ModifyAttributeBatch(context.Background(), changes)

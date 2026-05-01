@@ -34,7 +34,7 @@ func NewExecutor(baseDir string, ldapManager ldap.Manager) Executor {
 		postconfPath: filepath.Join(baseDir, "common", "sbin", "postconf"),
 		ldapManager:  ldapManager,
 		mappedFiles: map[string]string{
-			"zimbraSSLDHParam": filepath.Join(baseDir, "conf", "dhparam.pem"),
+			attrZimbraSSLDHParam: filepath.Join(baseDir, "conf", "dhparam.pem"),
 		},
 	}
 }

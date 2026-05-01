@@ -28,20 +28,31 @@ import (
 )
 
 const (
-	constTRUE            = "TRUE"
-	constFALSE           = "FALSE"
-	constIPv4            = "ipv4"
-	constIPv6            = "ipv6"
-	zimbraServiceEnabled = "zimbraServiceEnabled"
-	localhostIPv4        = "127.0.0.1"
-	localhostIPv6        = "::1"
-	configTypeVAR        = "VAR"      // Config lookup type for variable configs
-	configTypeLOCAL      = "LOCAL"    // Config lookup type for local configs
-	configTypeFILE       = "FILE"     // Config lookup type for file configs
-	configTypeMAPFILE    = "MAPFILE"  // Config lookup type for mapped files
-	configTypeMAPLOCAL   = "MAPLOCAL" // Config lookup type for mapped local files
-	configTypeLITERAL    = "LITERAL"  // Literal value (no lookup)
-	configTypeSERVICE    = "SERVICE"  // Config lookup type for service status
+	constTRUE                     = "TRUE"
+	constFALSE                    = "FALSE"
+	constIPv4                     = "ipv4"
+	constIPv6                     = "ipv6"
+	zimbraServiceEnabled          = "zimbraServiceEnabled"
+	localhostIPv4                 = "127.0.0.1"
+	localhostIPv6                 = "::1"
+	configTypeVAR                 = "VAR"      // Config lookup type for variable configs
+	configTypeLOCAL               = "LOCAL"    // Config lookup type for local configs
+	configTypeFILE                = "FILE"     // Config lookup type for file configs
+	configTypeMAPFILE             = "MAPFILE"  // Config lookup type for mapped files
+	configTypeMAPLOCAL            = "MAPLOCAL" // Config lookup type for mapped local files
+	configTypeLITERAL             = "LITERAL"  // Literal value (no lookup)
+	configTypeSERVICE             = "SERVICE"  // Config lookup type for service status
+	componentProxy                = "proxy"
+	serviceMTA                    = "mta"
+	restrictionRejectRBLClient    = "reject_rbl_client"
+	restrictionRejectRHSBLClient  = "reject_rhsbl_client"
+	inetFamily                    = "inet"
+	inet6Family                   = "inet6"
+	loopbackIPv6                  = "[::1]"
+	dataKeyMtaRestrictionRBLs     = "zimbraMtaRestrictionRBLs"
+	dataKeyMtaRestrictionRHSBLCs  = "zimbraMtaRestrictionRHSBLCs"
+	dataKeyMtaRestrictionRHSBLSs  = "zimbraMtaRestrictionRHSBLSs"
+	dataKeyMtaRestrictionRHSBLRCs = "zimbraMtaRestrictionRHSBLRCs"
 )
 
 // ConfigManager manages all types of configurations.

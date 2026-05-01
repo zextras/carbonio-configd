@@ -101,7 +101,7 @@ func antispamDBEnabled(ctx context.Context) bool {
 		return false
 	}
 
-	if host == "127.0.0.1" || host == "localhost" {
+	if host == loopbackIPv4 || host == localhostName {
 		return true
 	}
 

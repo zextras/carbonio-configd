@@ -36,9 +36,9 @@ func (r *resolver) ResolveValue(ctx context.Context, valueType, key string, st *
 		"key", key)
 
 	switch valueType {
-	case "VAR":
+	case configTypeVAR:
 		return r.resolveVAR(ctx, key, st)
-	case "LOCAL":
+	case configTypeLOCAL:
 		return r.resolveLOCAL(ctx, key, st)
 	case "FILE":
 		return r.resolveFILE(ctx, key)
@@ -107,7 +107,7 @@ func (r *resolver) resolveFILE(ctx context.Context, key string) (string, error) 
 
 func (r *resolver) resolveMAPLOCAL(ctx context.Context, key string) (string, error) {
 	mappedFiles := map[string]string{
-		"zimbraSSLDHParam": filepath.Join(r.baseDir, "conf", "dhparam.pem"),
+		attrZimbraSSLDHParam: filepath.Join(r.baseDir, "conf", "dhparam.pem"),
 	}
 
 	filePath, exists := mappedFiles[key]
@@ -177,7 +177,7 @@ func (r *resolver) ResolvePostconfdDirective(key string) PostconfdOperation {
 
 // ResolveLdapDirective resolves an LDAP directive value.
 // Format: "LDAP key TYPE value"
-// Example: "LDAP ldap_db_maxsize LOCAL ldap_db_maxsize"
+// Example: "LDAP keyLDAPDBMaxsize LOCAL keyLDAPDBMaxsize"
 func (r *resolver) ResolveLdapDirective(
 	ctx context.Context, key, valueType, valueKey string, st *state.State,
 ) (LdapOperation, error) {

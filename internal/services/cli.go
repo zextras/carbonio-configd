@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -174,7 +175,7 @@ func ServiceStop(ctx context.Context, name string) error {
 		return fmt.Errorf("stop service %s: %w", name, err)
 	}
 
-	for i := len(def.Dependencies) - 1; i >= 0; i-- {
+	for i := range slices.Backward(def.Dependencies) {
 		dep := def.Dependencies[i]
 
 		if !isDepEnabled(ctx, dep) {

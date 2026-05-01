@@ -42,17 +42,17 @@ const defaultZmjavaOptions = "" +
 // Interpolate after merging with XML overrides.
 var Defaults = map[string]string{
 	// Core paths
-	"zimbra_home":          "/opt/zextras",
-	"zimbra_log_directory": "${zimbra_home}/log",
-	"mailboxd_directory":   "${zimbra_home}/mailboxd",
+	lcKeyZimbraHome:         defaultBaseDir,
+	lcKeyZimbraLogDirectory: defaultLogDir,
+	"mailboxd_directory":    "${zimbra_home}/mailboxd",
 
 	// Logging
 	"zimbra_log4j_properties": "${zimbra_home}/conf/log4j.properties",
 
 	// Antispam
-	"antispam_enable_restarts":         "true",
+	"antispam_enable_restarts":         boolTrueStr,
 	"antispam_enable_rule_compilation": "false",
-	"antispam_enable_rule_updates":     "true",
+	"antispam_enable_rule_updates":     boolTrueStr,
 
 	// JVM / Mailbox
 	"networkaddress_cache_ttl":            "60",
@@ -68,17 +68,17 @@ var Defaults = map[string]string{
 	"zimbra_configrewrite_timeout": "120",
 
 	// MySQL
-	"mysql_errlogfile": "/opt/zextras/log/mysql_error.log",
-	"mysql_mycnf":      "/opt/zextras/conf/my.cnf",
+	"mysql_errlogfile": defaultBaseDir + "/log/mysql_error.log",
+	"mysql_mycnf":      defaultBaseDir + "/conf/my.cnf",
 
 	// LDAP (empty defaults — set in localconfig.xml per-installation)
-	"ldap_port":     "",
+	lcKeyLDAPPort:   "",
 	"ldap_url":      "",
 	"ldap_bind_url": "",
 
 	// Server identity
-	"zimbra_server_hostname": "localhost",
-	"ldap_host":              "",
+	"zimbra_server_hostname": localhostName,
+	lcKeyLDAPHost:            "",
 
 	// Mail service
 	"mail_service_port": "",

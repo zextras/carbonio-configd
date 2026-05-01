@@ -21,6 +21,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -40,6 +41,9 @@ const (
 	// renewSkew is subtracted from the server-reported lifetime so we
 	// re-authenticate before the token actually expires.
 	renewSkew = 30 * time.Second
+
+	// defaultUsername is the default LDAP master account username.
+	defaultUsername = "zimbra"
 )
 
 // ModuleStatus is one row in the `core getAllServicesStatus` response.
@@ -76,7 +80,7 @@ func NewWithBaseURL(baseURL string, localCfg map[string]string) *Client {
 		// localconfig.xml typically does not define zimbra_ldap_user; the
 		// LDAP master account is "zimbra" (matches LC.zimbra_ldap_user
 		// default in carbonio-mailbox).
-		user = "zimbra"
+		user = defaultUsername
 	}
 
 	return &Client{
@@ -175,7 +179,16 @@ func (c *Client) GetAllServicesStatus(ctx context.Context) ([]ModuleStatus, erro
 		return nil, fmt.Errorf("zxadmin: build status request: %w", err)
 	}
 
-	req.AddCookie(&http.Cookie{Name: authCookieName, Value: c.token})
+	// Defensive flags: the request goes over HTTPS to localhost:7071 and is
+	// never seen by a browser, so HttpOnly/SameSite are no-ops here, but
+	// setting them costs nothing and keeps gosec happy.
+	req.AddCookie(&http.Cookie{
+		Name:     authCookieName,
+		Value:    c.token,
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -346,6 +359,15 @@ func mapToModules(m map[string]statusEntry) []ModuleStatus {
 			Running:        e.Running,
 		})
 	}
+
+	// Sort by Name for deterministic output — Go map iteration is randomized,
+	// so without this the advanced-services list reorders on every status call.
+	// Compare case-insensitively because the server returns mixed-case command
+	// names (e.g. "sProxyd") and the display layer lowercases them, so a plain
+	// byte-wise sort would put "sProxyd" before "admin".
+	sort.Slice(out, func(i, j int) bool {
+		return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)
+	})
 
 	return out
 }

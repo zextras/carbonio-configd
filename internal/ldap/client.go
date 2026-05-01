@@ -597,7 +597,7 @@ func (c *Client) GetAllDomainsWithAttributes() (map[string]map[string]string, er
 func (c *Client) GetEnabledServices(hostname string) ([]string, error) {
 	dn := fmt.Sprintf("cn=%s,cn=servers,%s", ldap.EscapeDN(hostname), c.baseDN)
 
-	result, err := c.Search(dn, ldapFilterAllObjects, []string{"zimbraServiceEnabled"}, ldap.ScopeBaseObject)
+	result, err := c.Search(dn, ldapFilterAllObjects, []string{attrZimbraServiceEnabled}, ldap.ScopeBaseObject)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get enabled services for %s: %w", hostname, err)
 	}
@@ -606,7 +606,7 @@ func (c *Client) GetEnabledServices(hostname string) ([]string, error) {
 		return nil, fmt.Errorf("server not found: %s", hostname)
 	}
 
-	return result.Entries[0].GetAttributeValues("zimbraServiceEnabled"), nil
+	return result.Entries[0].GetAttributeValues(attrZimbraServiceEnabled), nil
 }
 
 // ModifyAttribute replaces an attribute value on an LDAP entry.

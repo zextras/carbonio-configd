@@ -104,14 +104,14 @@ type localconfigOpts struct {
 
 // dangerousKeys lists keys that require -force to edit.
 var dangerousKeys = map[string]bool{
-	"zimbra_ldap_password":                 true,
+	lcKeyZimbraLDAPPassword:                true,
 	"ldap_root_password":                   true,
 	"zimbra_mysql_password":                true,
 	"mysql_root_password":                  true,
-	"zimbra_ldap_userdn":                   true,
-	"ldap_url":                             true,
-	"ldap_master_url":                      true,
-	"zimbra_server_hostname":               true,
+	lcKeyZimbraLDAPUserDN:                  true,
+	lcKeyLDAPURL:                           true,
+	lcKeyLDAPMasterURL:                     true,
+	lcKeyZimbraServerHostname:              true,
 	"zimbra_require_interprocess_security": true,
 }
 
@@ -239,7 +239,7 @@ func writeOutput(config map[string]string, opts *localconfigOpts) {
 		localconfig.FormatExport(os.Stdout, config)
 	case "nokey":
 		localconfig.FormatNokey(os.Stdout, config, opts.keys)
-	case "xml":
+	case outputFormatXML:
 		if err := localconfig.FormatXML(os.Stdout, config); err != nil {
 			fmt.Fprintf(os.Stderr, errFmt, err)
 			os.Exit(1)

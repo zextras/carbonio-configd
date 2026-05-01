@@ -242,7 +242,7 @@ func (cm *ConfigManager) LoadMtaConfig(ctx context.Context, configFile string) e
 
 	// Simulate parsing a simple config file
 	section := &config.MtaConfigSection{
-		Name:         "proxy",
+		Name:         componentProxy,
 		Depends:      make(map[string]bool),
 		Rewrites:     make(map[string]config.RewriteEntry),
 		Restarts:     make(map[string]bool),
@@ -252,9 +252,9 @@ func (cm *ConfigManager) LoadMtaConfig(ctx context.Context, configFile string) e
 		Ldap:         make(map[string]string),
 	}
 	section.Rewrites["conf/nginx/nginx.conf.zmconfigd"] = config.RewriteEntry{Value: "conf/nginx/nginx.conf", Mode: "0644"}
-	section.Restarts["proxy"] = true
-	section.RequiredVars["zimbraReverseProxyLookupTarget"] = "VAR"
-	cm.State.MtaConfig.Sections["proxy"] = section
+	section.Restarts[componentProxy] = true
+	section.RequiredVars["zimbraReverseProxyLookupTarget"] = configTypeVAR
+	cm.State.MtaConfig.Sections[componentProxy] = section
 
 	logger.DebugContext(ctx, "MTA config loaded")
 

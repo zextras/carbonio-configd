@@ -17,8 +17,16 @@ import (
 )
 
 const (
-	errGetAllServers = "failed to get all servers: %w"
-	serverNamePrefix = "# name "
+	errGetAllServers                   = "failed to get all servers: %w"
+	serverNamePrefix                   = "# name "
+	zimbraServiceHostnameAttr          = "zimbraServiceHostname"
+	zimbraReverseProxyLookupTargetAttr = "zimbraReverseProxyLookupTarget"
+	zimbraMailModeAttr                 = "zimbraMailMode"
+	zimbraMailPortAttr                 = "zimbraMailPort"
+	zimbraMailSSLPortAttr              = "zimbraMailSSLPort"
+	localhostName                      = "localhost"
+	mailModeHTTP                       = "http"
+	mailModeMixed                      = "mixed"
 )
 
 // MemcacheServer represents a memcached server
@@ -46,17 +54,17 @@ type mcServerData struct {
 // applyServerAttr updates cur with a parsed key/value attribute pair.
 func applyServerAttr(key, value string, cur *serverData) {
 	switch key {
-	case "zimbraServiceHostname":
+	case zimbraServiceHostnameAttr:
 		cur.hostname = value
-	case "zimbraReverseProxyLookupTarget":
+	case zimbraReverseProxyLookupTargetAttr:
 		cur.lookupTarget = strings.EqualFold(value, "TRUE")
-	case "zimbraMailMode":
+	case zimbraMailModeAttr:
 		cur.mailMode = strings.ToLower(value)
-	case "zimbraMailPort":
+	case zimbraMailPortAttr:
 		if port, err := strconv.Atoi(value); err == nil {
 			cur.mailPort = port
 		}
-	case "zimbraMailSSLPort":
+	case zimbraMailSSLPortAttr:
 		if port, err := strconv.Atoi(value); err == nil {
 			cur.mailSSLPort = port
 		}
@@ -78,7 +86,7 @@ func appendValidUpstream(servers *[]UpstreamServer, cur serverData, portSelector
 // applyMcAttr updates cur with a parsed key/value attribute pair.
 func applyMcAttr(key, value string, cur *mcServerData) {
 	switch key {
-	case "zimbraServiceHostname":
+	case zimbraServiceHostnameAttr:
 		cur.hostname = value
 	case "zimbraServiceEnabled":
 		if value == "memcached" {
@@ -175,7 +183,7 @@ func (g *Generator) buildUpstreamServer(data serverData) UpstreamServer {
 
 	// Determine port based on mail mode
 	switch data.mailMode {
-	case "http", "mixed", "both":
+	case mailModeHTTP, mailModeMixed, ipModeBoth:
 		server.Port = data.mailPort
 	default:
 		// For "https", "redirect", or any other mode, use SSL port
@@ -237,7 +245,7 @@ func (g *Generator) getAllReverseProxyBackendsBy(ctx context.Context, ssl bool) 
 		logger.WarnContext(ctx, "No "+label+"reverse proxy backends found, using fallback",
 			"fallback_port", fallbackPort)
 
-		return []UpstreamServer{{Host: "localhost", Port: fallbackPort}}, nil
+		return []UpstreamServer{{Host: localhostName, Port: fallbackPort}}, nil
 	}
 
 	return servers, nil

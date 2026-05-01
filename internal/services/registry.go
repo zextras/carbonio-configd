@@ -90,12 +90,12 @@ var (
 // These names are accepted by LookupService but do NOT appear in Registry or
 // AllServiceNames — they are resolution aliases only.
 var ServiceAliases = map[string]string{
-	"clamd":            "antivirus",
-	"mailboxd":         "mailbox",
-	"service":          "mailbox",
-	"directory-server": "ldap",
-	"directory":        "ldap",
-	"config-service":   "configd",
+	svcClamd:             svcAntivirus,
+	svcMailboxd:          svcMailbox,
+	svcService:           svcMailbox,
+	groupDirectoryServer: svcLdap,
+	"directory":          svcLdap,
+	"config-service":     svcConfigd,
 }
 
 // serviceDiscoverCustomStart starts service-discovered in the correct role:
@@ -180,46 +180,46 @@ func milterEnabled(_ context.Context) bool {
 
 // Registry maps service names to their definitions.
 var Registry = map[string]*ServiceDef{
-	"memcached": {
-		Name:         "memcached",
-		DisplayName:  "memcached",
+	svcMemcached: {
+		Name:         svcMemcached,
+		DisplayName:  svcMemcached,
 		SystemdUnits: []string{"carbonio-memcached.service"},
 		BinaryPath:   commonPath + "/bin/memcached",
 		BinaryArgs:   []string{"-d", "-U", "0", "-l", "127.0.1.1,127.0.0.1", "-p", "11211"},
-		ProcessName:  "memcached",
+		ProcessName:  svcMemcached,
 	},
-	"cbpolicyd": {
-		Name:          "cbpolicyd",
-		DisplayName:   "cbpolicyd",
-		SystemdUnits:  []string{"carbonio-policyd.service"},
+	svcCbpolicyd: {
+		Name:          svcCbpolicyd,
+		DisplayName:   svcCbpolicyd,
+		SystemdUnits:  []string{unitPolicyd},
 		BinaryPath:    commonPath + "/bin/cbpolicyd",
 		BinaryArgs:    []string{"--config", confPath + "/cbpolicyd.conf"},
 		PidFile:       pidDir + "/cbpolicyd.pid",
-		ProcessName:   "cbpolicyd",
-		ConfigRewrite: []string{"cbpolicyd"},
+		ProcessName:   svcCbpolicyd,
+		ConfigRewrite: []string{svcCbpolicyd},
 		PreStart:      []Hook{cbpolicydInitDB},
 	},
-	"stats": {
-		Name:         "stats",
-		DisplayName:  "stats",
+	svcStats: {
+		Name:         svcStats,
+		DisplayName:  svcStats,
 		SystemdUnits: []string{"carbonio-stats.service"},
 		ProcessName:  "zmstat-",
 		CustomStart:  statsCustomStart,
 		CustomStop:   statsCustomStop,
 	},
-	"opendkim": {
-		Name:         "opendkim",
-		DisplayName:  "opendkim",
-		SystemdUnits: []string{"carbonio-opendkim.service"},
+	svcOpendkim: {
+		Name:         svcOpendkim,
+		DisplayName:  svcOpendkim,
+		SystemdUnits: []string{unitOpendkim},
 		BinaryPath:   commonPath + "/sbin/opendkim",
-		BinaryArgs:   []string{"-f", "-x", confPath + "/opendkim.conf", "-u", "zextras"},
+		BinaryArgs:   []string{"-f", "-x", confPath + "/opendkim.conf", "-u", userZimbra},
 		PidFile:      pidDir + "/opendkim.pid",
-		ProcessName:  "opendkim",
+		ProcessName:  svcOpendkim,
 		UseSDNotify:  true,
 	},
-	"freshclam": {
-		Name:         "freshclam",
-		DisplayName:  "freshclam",
+	svcFreshclam: {
+		Name:         svcFreshclam,
+		DisplayName:  svcFreshclam,
 		SystemdUnits: []string{"carbonio-freshclam.service"},
 		BinaryPath:   commonPath + "/bin/freshclam",
 		BinaryArgs: []string{
@@ -229,76 +229,76 @@ var Registry = map[string]*ServiceDef{
 		Detached:    true,
 		UseSDNotify: true,
 		PidFile:     pidDir + "/freshclam.pid",
-		ProcessName: "freshclam",
+		ProcessName: svcFreshclam,
 	},
-	"saslauthd": {
-		Name:          "saslauthd",
-		DisplayName:   "saslauthd",
+	svcSaslauthd: {
+		Name:          svcSaslauthd,
+		DisplayName:   svcSaslauthd,
 		SystemdUnits:  []string{"carbonio-saslauthd.service"},
 		BinaryPath:    commonPath + "/sbin/saslauthd",
-		BinaryArgs:    []string{"-r", "-a", "zimbra"},
+		BinaryArgs:    []string{"-r", "-a", userZimbra},
 		PidFile:       pidDir + "/saslauthd.pid",
-		ProcessName:   "saslauthd",
-		ConfigRewrite: []string{"sasl"},
+		ProcessName:   svcSaslauthd,
+		ConfigRewrite: []string{svcSasl},
 	},
-	"milter": {
-		Name:         "milter",
-		DisplayName:  "milter",
+	svcMilter: {
+		Name:         svcMilter,
+		DisplayName:  svcMilter,
 		SystemdUnits: []string{"carbonio-milter.service"},
 		ProcessName:  "milter.MilterServer",
 		EnableCheck:  milterEnabled,
 		CustomStart:  milterCustomStart,
 	},
-	"amavis": {
-		Name:          "amavis",
-		DisplayName:   "amavis",
-		SystemdUnits:  []string{"carbonio-mailthreat.service"},
+	svcAmavis: {
+		Name:          svcAmavis,
+		DisplayName:   svcAmavis,
+		SystemdUnits:  []string{unitMailthreat},
 		BinaryPath:    commonPath + "/sbin/amavisd",
 		BinaryArgs:    []string{"-X", "no_conf_file_writable_check", "-c", confPath + "/amavisd.conf"},
 		PidFile:       pidDir + "/amavisd.pid",
 		ProcessName:   "amavisd",
-		ConfigRewrite: []string{"amavis", "antispam"},
+		ConfigRewrite: []string{svcAmavis, svcAntispam},
 	},
-	"antivirus": {
-		Name:          "antivirus",
-		DisplayName:   "antivirus",
-		SystemdUnits:  []string{"carbonio-antivirus.service"},
+	svcAntivirus: {
+		Name:          svcAntivirus,
+		DisplayName:   svcAntivirus,
+		SystemdUnits:  []string{unitAntivirus},
 		BinaryPath:    commonPath + "/sbin/clamd",
 		BinaryArgs:    []string{"--config-file=" + confPath + "/clamd.conf"},
 		Detached:      true,
 		PidFile:       pidDir + "/clamd.pid",
 		ProcessName:   "clamd",
 		UseSDNotify:   true,
-		ConfigRewrite: []string{"antivirus"},
+		ConfigRewrite: []string{svcAntivirus},
 		PreStart:      []Hook{clamdDirInit},
-		Dependencies:  []string{"freshclam"},
+		Dependencies:  []string{svcFreshclam},
 	},
-	"antispam": {
-		Name:         "antispam",
-		DisplayName:  "antispam",
+	svcAntispam: {
+		Name:         svcAntispam,
+		DisplayName:  svcAntispam,
 		SystemdUnits: []string{"carbonio-antispam.service"},
 		ProcessName:  "amavisd",
 		CustomStart:  antispamCustomStart,
 		CustomStop:   antispamCustomStop,
 	},
-	"mta": {
-		Name:          "mta",
-		DisplayName:   "mta",
-		SystemdUnits:  []string{"carbonio-postfix.service"},
+	serviceMTA: {
+		Name:          serviceMTA,
+		DisplayName:   serviceMTA,
+		SystemdUnits:  []string{unitPostfix},
 		BinaryPath:    postfixBin,
-		BinaryArgs:    []string{"start"},
+		BinaryArgs:    []string{actionStart},
 		NeedsRoot:     true,
 		PidFile:       dataPath + "/postfix/spool/pid/master.pid",
 		ProcessName:   "common/libexec/master",
 		CustomStart:   mtaCustomStart,
 		CustomStop:    mtaCustomStop,
-		Dependencies:  []string{"saslauthd", "milter"},
-		ConfigRewrite: []string{"antispam", "antivirus", "opendkim", "mta", "sasl"},
+		Dependencies:  []string{svcSaslauthd, svcMilter},
+		ConfigRewrite: []string{svcAntispam, svcAntivirus, svcOpendkim, serviceMTA, svcSasl},
 	},
-	"proxy": {
-		Name:         "proxy",
-		DisplayName:  "proxy",
-		SystemdUnits: []string{"carbonio-nginx.service"},
+	svcProxy: {
+		Name:         svcProxy,
+		DisplayName:  svcProxy,
+		SystemdUnits: []string{unitNginx},
 		BinaryPath:   commonPath + "/sbin/nginx",
 		BinaryArgs:   []string{"-c", confPath + "/nginx.conf"},
 		PidFile:      pidDir + "/nginx.pid",
@@ -307,11 +307,11 @@ var Registry = map[string]*ServiceDef{
 		// contains "nginx" multiple times.
 		ProcessName:   "/sbin/nginx",
 		UseSDNotify:   true,
-		ConfigRewrite: []string{"proxy"},
+		ConfigRewrite: []string{svcProxy},
 	},
-	"mailbox": {
-		Name:        "mailbox",
-		DisplayName: "mailbox",
+	svcMailbox: {
+		Name:        svcMailbox,
+		DisplayName: svcMailbox,
 		// Units are listed in start order (DB first, JVM second). startService
 		// iterates forward; stopService iterates in reverse so the JVM is
 		// terminated before mariadb is shut down. Matches legacy zmstorectl's
@@ -321,25 +321,25 @@ var Registry = map[string]*ServiceDef{
 		// unit alone would pull in the DB — but Wants= is a start-time link
 		// only; without listing the DB here the stop path would leave
 		// mariadb running after `zmcontrol stop`.
-		SystemdUnits:  []string{"carbonio-appserver-db.service", "carbonio-appserver.service"},
+		SystemdUnits:  []string{"carbonio-appserver-db.service", unitAppserver},
 		ProcessName:   "com.zextras.mailbox.Mailbox",
-		ConfigRewrite: []string{"mailbox"},
+		ConfigRewrite: []string{svcMailbox},
 		CustomStart:   mailboxCustomStart,
 		CustomStop:    mailboxCustomStop,
 		PostStart:     []Hook{MailboxAdvancedStatusHook},
 	},
-	"ldap": {
-		Name:         "ldap",
+	svcLdap: {
+		Name:         svcLdap,
 		DisplayName:  "directory server",
-		SystemdUnits: []string{"carbonio-openldap.service"},
+		SystemdUnits: []string{unitOpenldap},
 		PidFile:      pidDir + "/slapd.pid",
 		ProcessName:  "slapd",
 		UseSDNotify:  true,
 		CustomStart:  ldapCustomStart,
 		CustomStop:   ldapCustomStop,
 	},
-	"configd": {
-		Name:         "configd",
+	svcConfigd: {
+		Name:         svcConfigd,
 		DisplayName:  "config service",
 		SystemdUnits: []string{"carbonio-configd.service"},
 		BinaryPath:   binPath + "/configd",
@@ -347,8 +347,8 @@ var Registry = map[string]*ServiceDef{
 		LogFile:      logPath + "/configd.out",
 		ProcessName:  binPath + "/configd",
 	},
-	"service-discover": {
-		Name:         "service-discover",
+	svcServiceDiscover: {
+		Name:         svcServiceDiscover,
 		DisplayName:  "service discover",
 		SystemdUnits: []string{"service-discover.service"},
 		BinaryPath:   "/usr/bin/service-discovered",

@@ -31,6 +31,15 @@ const (
 
 	// yesValue is the systemd boolean string used in directives.
 	yesValue = "yes"
+
+	// systemdProtectFull is the "full" value for ProtectSystem= and ProtectHome= directives.
+	systemdProtectFull = "full"
+
+	// errnoEPERM is the errno returned for blocked system calls.
+	errnoEPERM = "EPERM"
+
+	// capNetBindService is the capability to bind to privileged ports.
+	capNetBindService = "CAP_NET_BIND_SERVICE"
 )
 
 // SecurityProfile defines systemd security directives for service hardening.
@@ -133,7 +142,7 @@ var ServiceSecurityMapping = map[string]SecurityLevel{
 func GetStrictProfile() *SecurityProfile {
 	return &SecurityProfile{
 		Level:                  SecurityLevelStrict,
-		ProtectSystem:          "strict",
+		ProtectSystem:          string(SecurityLevelStrict),
 		ProtectHome:            yesValue,
 		PrivateTmp:             true,
 		PrivateDevices:         true,
@@ -154,7 +163,7 @@ func GetStrictProfile() *SecurityProfile {
 		SystemCallFilter: []string{
 			"@system-service",
 		},
-		SystemCallErrorNumber: "EPERM",
+		SystemCallErrorNumber: errnoEPERM,
 		ProtectHostname:       true,
 		ProtectClock:          true,
 		LockPersonality:       true,
@@ -167,7 +176,7 @@ func GetStrictProfile() *SecurityProfile {
 func GetStandardProfile() *SecurityProfile {
 	return &SecurityProfile{
 		Level:                  SecurityLevelStandard,
-		ProtectSystem:          "full",
+		ProtectSystem:          systemdProtectFull,
 		ProtectHome:            yesValue,
 		PrivateTmp:             true,
 		PrivateDevices:         true,
@@ -186,12 +195,12 @@ func GetStandardProfile() *SecurityProfile {
 			"AF_NETLINK", // Needed for some network operations
 		},
 		CapabilityBoundingSet: []string{
-			"CAP_NET_BIND_SERVICE", // Allow binding to privileged ports
+			capNetBindService, // Allow binding to privileged ports
 		},
 		SystemCallFilter: []string{
 			"@system-service",
 		},
-		SystemCallErrorNumber: "EPERM",
+		SystemCallErrorNumber: errnoEPERM,
 		ProtectHostname:       true,
 		ProtectClock:          true,
 		LockPersonality:       true,
@@ -204,7 +213,7 @@ func GetStandardProfile() *SecurityProfile {
 func GetMinimalProfile() *SecurityProfile {
 	return &SecurityProfile{
 		Level:                   SecurityLevelMinimal,
-		ProtectSystem:           "full",
+		ProtectSystem:           systemdProtectFull,
 		ProtectHome:             "read-only",
 		PrivateTmp:              false, // Some services need shared tmp
 		PrivateDevices:          false, // Some services need device access
@@ -218,7 +227,7 @@ func GetMinimalProfile() *SecurityProfile {
 		RestrictRealtime:        true,
 		RestrictAddressFamilies: []string{}, // No restriction
 		CapabilityBoundingSet: []string{
-			"CAP_NET_BIND_SERVICE",
+			capNetBindService,
 			"CAP_SETGID",
 			"CAP_SETUID",
 			"CAP_CHOWN",

@@ -203,11 +203,11 @@ func startBootstrapServices(ctx context.Context) error {
 		}
 	}
 
-	if running, _ := services.ServiceStatus(ctx, "configd"); !running {
-		def := services.LookupService("configd")
+	if running, _ := services.ServiceStatus(ctx, componentConfigd); !running {
+		def := services.LookupService(componentConfigd)
 		done := cliProgress("Starting", def.DisplayName)
 
-		err := services.ServiceStart(ctx, "configd")
+		err := services.ServiceStart(ctx, componentConfigd)
 		done(err)
 
 		if err != nil {
@@ -222,7 +222,7 @@ func startEnabledServices(ctx context.Context, enabledSet map[string]bool, thres
 	rc := 0
 
 	for _, name := range services.AllServiceNames() {
-		if name == ldapServiceName || name == "configd" {
+		if name == ldapServiceName || name == componentConfigd {
 			continue
 		}
 
@@ -261,7 +261,7 @@ func controlStop(ctx context.Context) int {
 	}
 
 	for _, name := range ordered {
-		if name == "configd" || name == ldapServiceName {
+		if name == componentConfigd || name == ldapServiceName {
 			continue
 		}
 
@@ -289,10 +289,10 @@ func controlStop(ctx context.Context) int {
 
 	// Stop the configd daemon itself — it must be last so it can handle
 	// rewriteConfigs calls from other services during their own shutdown.
-	if running, _ := services.ServiceStatus(ctx, "configd"); running {
-		def := services.LookupService("configd")
+	if running, _ := services.ServiceStatus(ctx, componentConfigd); running {
+		def := services.LookupService(componentConfigd)
 		done := cliProgress("Stopping", def.DisplayName)
-		stopErr := services.ServiceStop(ctx, "configd")
+		stopErr := services.ServiceStop(ctx, componentConfigd)
 		done(stopErr)
 
 		if stopErr != nil {
@@ -368,7 +368,7 @@ func controlStatus(ctx context.Context) int { //nolint:unparam
 
 		// Legacy parity: zmcontrol/control.pl always inserted "zmconfigd"
 		// regardless of LDAP state, so configd is always shown.
-		s["configd"] = true
+		s[componentConfigd] = true
 
 		discCh <- discResult{set: s, failed: false}
 	}()

@@ -30,6 +30,7 @@ const (
 	varKeySSLKey     = "ssl.key"
 	varKeyOrigSSLCrt = "_orig_ssl.crt"
 	varKeyOrigSSLKey = "_orig_ssl.key"
+	mailImapEnabled  = "mail.imap.enabled"
 )
 
 // Template represents a parsed nginx configuration template
@@ -67,7 +68,7 @@ func NewTemplateProcessor(gen *Generator, templateDir, outputDir string) *Templa
 		enablerPattern:        regexp.MustCompile(`^(\s*)\$\{([^}]+)\}(.+)$`),
 		emptyDirectivePattern: regexp.MustCompile(`^\s+[a-z0-9_]+\s+;`),
 		debugVars: map[string]struct{}{
-			"mail.imap.enabled":  {},
+			mailImapEnabled:      {},
 			"mail.pop3.enabled":  {},
 			"mail.imaps.enabled": {},
 			"mail.pop3s.enabled": {},

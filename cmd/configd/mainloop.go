@@ -647,7 +647,7 @@ func updateWatchdogServices(ctx context.Context, wd *watchdog.Watchdog, appState
 	// Get watchdog service list from config (defaults to ["antivirus"])
 	watchdogServices := mainCfg.WdList
 	if len(watchdogServices) == 0 {
-		watchdogServices = []string{"antivirus"}
+		watchdogServices = []string{componentAntivirus}
 	}
 
 	// Enable monitoring for configured watchdog services

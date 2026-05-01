@@ -80,7 +80,7 @@ func buildLDAPBindURL(lc map[string]string) string {
 
 	host := lc["zimbra_server_hostname"]
 	if host == "" {
-		host = "localhost"
+		host = localhostName
 	}
 
 	return fmt.Sprintf("ldap://%s:%s", host, port)

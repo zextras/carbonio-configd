@@ -53,9 +53,9 @@ func TestExecutor_Initialization(t *testing.T) {
 
 	// Check zimbraSSLDHParam mapping
 	expectedDHParamPath := filepath.Join(baseDir, "conf", "dhparam.pem")
-	if executor.mappedFiles["zimbraSSLDHParam"] != expectedDHParamPath {
+	if executor.mappedFiles[attrZimbraSSLDHParam] != expectedDHParamPath {
 		t.Errorf("zimbraSSLDHParam mapping = %v, want %v",
-			executor.mappedFiles["zimbraSSLDHParam"], expectedDHParamPath)
+			executor.mappedFiles[attrZimbraSSLDHParam], expectedDHParamPath)
 	}
 }
 

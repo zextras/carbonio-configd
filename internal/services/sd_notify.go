@@ -49,7 +49,7 @@ func startWithSDNotify(ctx context.Context, cmd *exec.Cmd, service string) error
 	// clearing it here is safe.
 	_ = os.Remove(socketPath)
 
-	conn, err := net.ListenUnixgram("unixgram", &net.UnixAddr{Name: socketPath, Net: "unixgram"})
+	conn, err := net.ListenUnixgram(socketFamilyUnixgram, &net.UnixAddr{Name: socketPath, Net: socketFamilyUnixgram})
 	if err != nil {
 		return fmt.Errorf("create notify socket for %s: %w", service, err)
 	}
@@ -95,7 +95,7 @@ func awaitSDNotifyStopping(ctx context.Context, service string) {
 	// transparent to it.
 	_ = os.Remove(socketPath)
 
-	conn, err := net.ListenUnixgram("unixgram", &net.UnixAddr{Name: socketPath, Net: "unixgram"})
+	conn, err := net.ListenUnixgram(socketFamilyUnixgram, &net.UnixAddr{Name: socketPath, Net: socketFamilyUnixgram})
 	if err != nil {
 		logger.DebugContext(ctx, "sd_notify shutdown observer not started",
 			"service", service, "error", err)

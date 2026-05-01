@@ -15,8 +15,14 @@ import (
 	"time"
 )
 
-// CacheTTL defines the default time-to-live for cache entries in seconds.
-const CacheTTL = 300
+const (
+	// CacheTTL defines the default time-to-live for cache entries in seconds.
+	CacheTTL = 300
+	// defaultBaseDir is the default base directory for Zextras installation.
+	defaultBaseDir = "/opt/zextras"
+	// programName is the name of the configd program.
+	programName = "zmconfigd"
+)
 
 // Config holds the application-wide configuration parameters.
 type Config struct {
@@ -114,11 +120,11 @@ func NewConfig() (*Config, error) {
 	// Determine base directory from environment or default
 	baseDir := os.Getenv("ZEXTRAS_HOME")
 	if baseDir == "" {
-		baseDir = "/opt/zextras"
+		baseDir = defaultBaseDir
 	}
 
 	c := &Config{
-		Progname:         "zmconfigd",
+		Progname:         programName,
 		WdAll:            false,
 		Debug:            false,
 		BaseDir:          baseDir,

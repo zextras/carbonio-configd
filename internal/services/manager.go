@@ -55,41 +55,41 @@ func NewServiceManager() *ServiceManager {
 // All paths use basePath as prefix so they can be overridden in tests.
 func getDefaultCommandMap() map[string]string {
 	return map[string]string{
-		"amavis":    binPath + "/zmamavisdctl",
-		"antispam":  binPath + "/zmantispamctl",
-		"antivirus": binPath + "/zmclamdctl",
-		"cbpolicyd": binPath + "/zmcbpolicydctl",
-		"clamd":     binPath + "/zmclamdctl",
-		"ldap":      binPath + "/ldap",
-		"mailbox":   binPath + "/zmstorectl",
-		"mailboxd":  binPath + "/zmmailboxdctl",
-		"memcached": binPath + "/zmmemcachedctl",
-		"mta":       binPath + "/zmmtactl",
-		"opendkim":  binPath + "/zmopendkimctl",
-		"proxy":     binPath + "/zmproxyctl",
-		"sasl":      binPath + "/zmsaslauthdctl",
-		"service":   binPath + "/zmmailboxdctl",
-		"stats":     binPath + "/zmstatctl",
+		svcAmavis:    binPath + "/zmamavisdctl",
+		svcAntispam:  binPath + "/zmantispamctl",
+		svcAntivirus: binPath + "/zmclamdctl",
+		svcCbpolicyd: binPath + "/zmcbpolicydctl",
+		svcClamd:     binPath + "/zmclamdctl",
+		svcLdap:      binPath + "/ldap",
+		svcMailbox:   binPath + "/zmstorectl",
+		svcMailboxd:  binPath + "/zmmailboxdctl",
+		svcMemcached: binPath + "/zmmemcachedctl",
+		serviceMTA:   binPath + "/zmmtactl",
+		svcOpendkim:  binPath + "/zmopendkimctl",
+		svcProxy:     binPath + "/zmproxyctl",
+		svcSasl:      binPath + "/zmsaslauthdctl",
+		svcService:   binPath + "/zmmailboxdctl",
+		svcStats:     binPath + "/zmstatctl",
 	}
 }
 
 // getDefaultSystemdMap returns the default systemd unit name mappings.
 func getDefaultSystemdMap() map[string]string {
 	return map[string]string{
-		"amavis":    "carbonio-mailthreat.service", // Mail Threat = amavis equivalent
-		"antispam":  "carbonio-antispam.service",
-		"antivirus": "carbonio-antivirus.service",
-		"cbpolicyd": "carbonio-policyd.service",
-		"clamd":     "carbonio-antivirus.service",
-		"ldap":      "carbonio-openldap.service",
-		"mailbox":   "carbonio-appserver.service", // Carbonio Appserver = mailbox service
-		"memcached": "carbonio-memcached.service",
-		"milter":    "carbonio-milter.service",
-		"mta":       "carbonio-postfix.service",
-		"opendkim":  "carbonio-opendkim.service",
-		"proxy":     "carbonio-nginx.service",
-		"sasl":      "carbonio-saslauthd.service",
-		"stats":     "carbonio-stats.service",
+		svcAmavis:    unitMailthreat, // Mail Threat = amavis equivalent
+		svcAntispam:  "carbonio-antispam.service",
+		svcAntivirus: unitAntivirus,
+		svcCbpolicyd: unitPolicyd,
+		svcClamd:     unitAntivirus,
+		svcLdap:      unitOpenldap,
+		svcMailbox:   unitAppserver, // Carbonio Appserver = mailbox service
+		svcMemcached: "carbonio-memcached.service",
+		svcMilter:    "carbonio-milter.service",
+		serviceMTA:   unitPostfix,
+		svcOpendkim:  unitOpendkim,
+		svcProxy:     unitNginx,
+		svcSasl:      "carbonio-saslauthd.service",
+		svcStats:     "carbonio-stats.service",
 	}
 }
 
@@ -102,22 +102,22 @@ func getDefaultSystemdMap() map[string]string {
 // so other services can register themselves.
 func getDefaultStartOrder() map[string]int {
 	return map[string]int{
-		"ldap":             0,
-		"configd":          10,
-		"service-discover": 20,
-		"mailbox":          50,
-		"memcached":        60,
-		"proxy":            70,
-		"amavis":           75,
-		"antispam":         80,
-		"antivirus":        90,
-		"freshclam":        92,
-		"opendkim":         100,
-		"cbpolicyd":        120,
-		"saslauthd":        130,
-		"milter":           140,
-		"mta":              150,
-		"stats":            160,
+		svcLdap:            0,
+		svcConfigd:         10,
+		svcServiceDiscover: 20,
+		svcMailbox:         50,
+		svcMemcached:       60,
+		svcProxy:           70,
+		svcAmavis:          75,
+		svcAntispam:        80,
+		svcAntivirus:       90,
+		svcFreshclam:       92,
+		svcOpendkim:        100,
+		svcCbpolicyd:       120,
+		svcSaslauthd:       130,
+		svcMilter:          140,
+		serviceMTA:         150,
+		svcStats:           160,
 	}
 }
 
@@ -460,8 +460,8 @@ func (sm *ServiceManager) AddDependencyRestarts(
 func (sm *ServiceManager) queueDependencyRestart(
 	ctx context.Context, depService string, configLookup func(string) string,
 ) {
-	if depService == "amavis" {
-		sm.addRestartLogged(ctx, depService, "amavis (special case)")
+	if depService == svcAmavis {
+		sm.addRestartLogged(ctx, depService, svcAmavis+" (special case)")
 		return
 	}
 
