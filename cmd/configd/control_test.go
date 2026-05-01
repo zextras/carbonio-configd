@@ -17,34 +17,6 @@ import (
 	"github.com/zextras/carbonio-configd/internal/services"
 )
 
-func TestParseAdvancedStatus_Running(t *testing.T) {
-	// JSON-like input with a running module
-	input := `[{"commercialName":"TeamChatting","running":true,"other":"data"},{"commercialName":"VideoMeeting","running":false}]`
-	// Just verify it doesn't panic and processes multiple entries
-	parseAdvancedStatus(input)
-}
-
-func TestParseAdvancedStatus_Empty(t *testing.T) {
-	parseAdvancedStatus("")
-}
-
-func TestParseAdvancedStatus_NoCommercialName(t *testing.T) {
-	// Line with no commercialName field — should be skipped
-	parseAdvancedStatus(`[{"running":true}]`)
-}
-
-func TestParseAdvancedStatus_UnterminatedName(t *testing.T) {
-	// commercialName present but no closing quote — should be skipped
-	parseAdvancedStatus(`[{"commercialName":"NoClosure}]`)
-}
-
-func TestParseAdvancedStatus_MultipleModules(t *testing.T) {
-	// Multiple modules split by "}," as the parser uses
-	input := `[{"commercialName":"ModA","running":true},{"commercialName":"ModB","running":false},{"commercialName":"ModC","running":true}]`
-	// Must not panic
-	parseAdvancedStatus(input)
-}
-
 func TestGetDistroID_NonExistentFile(t *testing.T) {
 	// When /etc/os-release doesn't exist on the test host (unlikely) or reading fails,
 	// getDistroID reads the real file. We just verify the function returns a string
@@ -248,51 +220,6 @@ func TestCliHeaderPrintedOnce(t *testing.T) {
 	}
 }
 
-func TestParseAdvancedStatus_WithRunningModules(t *testing.T) {
-	input := `[{"commercialName":"TeamChatting","running":true},{"commercialName":"VideoMeeting","running":false}]`
-
-	old := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	parseAdvancedStatus(input)
-
-	w.Close()
-	os.Stdout = old
-
-	var buf bytes.Buffer
-	buf.ReadFrom(r)
-	output := buf.String()
-
-	if !strings.Contains(output, "teamchatting") {
-		t.Errorf("expected teamchatting in output, got %q", output)
-	}
-	if !strings.Contains(output, "Running") {
-		t.Errorf("expected 'Running' in output, got %q", output)
-	}
-}
-
-func TestParseAdvancedStatus_AllStoppedModules(t *testing.T) {
-	input := `[{"commercialName":"Modules","running":false}]`
-
-	old := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	parseAdvancedStatus(input)
-
-	w.Close()
-	os.Stdout = old
-
-	var buf bytes.Buffer
-	buf.ReadFrom(r)
-	output := buf.String()
-
-	if !strings.Contains(output, "Stopped") {
-		t.Errorf("expected 'Stopped' in output, got %q", output)
-	}
-}
-
 func TestServiceDetailFromSystemd_WithUnits(t *testing.T) {
 	def := &services.ServiceDef{
 		Name:         "mta",
@@ -389,25 +316,6 @@ func TestGetServiceDetail_NotRunning2(t *testing.T) {
 	detail := getServiceDetail(context.Background(), "test-svc", false)
 	if detail != "" {
 		t.Errorf("expected empty detail for not-running service, got %q", detail)
-	}
-}
-
-func TestParseAdvancedStatus_EmptyInput(t *testing.T) {
-	old := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	parseAdvancedStatus("")
-
-	w.Close()
-	os.Stdout = old
-
-	var buf bytes.Buffer
-	buf.ReadFrom(r)
-	output := buf.String()
-
-	if output != "" {
-		t.Errorf("expected empty output for empty input, got %q", output)
 	}
 }
 

@@ -7,11 +7,12 @@ package services
 import (
 	"context"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
+	"github.com/zextras/carbonio-configd/internal/localconfig"
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/zxadmin"
 )
 
 const (
@@ -19,10 +20,7 @@ const (
 	advancedPollAttempts = 10
 )
 
-var (
-	carbonioCLI    = basePath + "/bin/carbonio"
-	advancedJARDir = basePath + "/lib/ext/carbonio"
-)
+var advancedJARDir = basePath + "/lib/ext/carbonio"
 
 // MailboxAdvancedStatusHook is a PostStart hook for mailbox that polls
 // Carbonio Advanced modules until they are ready, mirroring the legacy
@@ -32,14 +30,19 @@ func MailboxAdvancedStatusHook(ctx context.Context, _ *ServiceManager) error {
 		return nil
 	}
 
-	if _, statErr := os.Stat(carbonioCLI); statErr != nil {
-		return nil //nolint:nilerr // carbonio CLI is optional; absence is not an error
+	cfg, err := localconfig.LoadLocalConfig()
+	if err != nil {
+		logger.DebugContext(ctx, "Advanced status hook: localconfig load failed", "error", err)
+
+		return nil //nolint:nilerr // hook is best-effort
 	}
+
+	client := zxadmin.New(cfg)
 
 	logger.InfoContext(ctx, "Waiting for Carbonio Advanced modules to become ready")
 
 	for range advancedPollAttempts {
-		if advancedRunning(ctx) {
+		if advancedRunning(ctx, client) {
 			logger.InfoContext(ctx, "Carbonio Advanced modules are ready")
 
 			return nil
@@ -73,14 +76,13 @@ func advancedInstalled() bool {
 	return false
 }
 
-// advancedRunning calls `carbonio core getAllServicesStatus` and returns true when the
-// server responds without an "Unable to communicate" error.
-func advancedRunning(ctx context.Context) bool {
-	//nolint:gosec // fixed internal path
-	out, err := exec.CommandContext(ctx, carbonioCLI, "core", "getAllServicesStatus").CombinedOutput()
+// advancedRunning queries the admin endpoint and returns true when
+// the call succeeds and at least one module is reported.
+func advancedRunning(ctx context.Context, client *zxadmin.Client) bool {
+	modules, err := client.GetAllServicesStatus(ctx)
 	if err != nil {
 		return false
 	}
 
-	return !strings.Contains(string(out), "Unable to communicate with server")
+	return len(modules) > 0
 }
