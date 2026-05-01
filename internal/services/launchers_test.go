@@ -119,27 +119,6 @@ func TestMailboxAdvancedStatusHook_NotInstalled(t *testing.T) {
 	}
 }
 
-func TestMailboxAdvancedStatusHook_NoCarbonioCLI(t *testing.T) {
-	// When jars exist but CLI binary is missing, hook should return nil.
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "carbonio-advanced-1.0.jar"), []byte("fake"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	oldJAR := advancedJARDir
-	advancedJARDir = dir
-	defer func() { advancedJARDir = oldJAR }()
-
-	oldCLI := carbonioCLI
-	carbonioCLI = filepath.Join(t.TempDir(), "nonexistent-cli")
-	defer func() { carbonioCLI = oldCLI }()
-
-	err := MailboxAdvancedStatusHook(context.Background(), nil)
-	if err != nil {
-		t.Errorf("expected nil when carbonio CLI absent, got: %v", err)
-	}
-}
-
 func TestMailboxAdvancedStatusHook_ContextCancelled(t *testing.T) {
 	// When context is cancelled, hook should return nil without hanging.
 	dir := t.TempDir()
@@ -151,49 +130,12 @@ func TestMailboxAdvancedStatusHook_ContextCancelled(t *testing.T) {
 	advancedJARDir = dir
 	defer func() { advancedJARDir = oldJAR }()
 
-	// Create a fake CLI binary that always fails (simulates module not ready).
-	fakeCLI := filepath.Join(t.TempDir(), "carbonio")
-	if err := os.WriteFile(fakeCLI, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	oldCLI := carbonioCLI
-	carbonioCLI = fakeCLI
-	defer func() { carbonioCLI = oldCLI }()
-
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately
 
 	err := MailboxAdvancedStatusHook(ctx, nil)
 	if err != nil {
 		t.Errorf("expected nil on cancelled context, got: %v", err)
-	}
-}
-
-func TestMailboxAdvancedStatusHook_AdvancedReady(t *testing.T) {
-	// When CLI reports success without the "Unable to communicate" message,
-	// the hook should return nil quickly.
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "carbonio-advanced-1.0.jar"), []byte("fake"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	oldJAR := advancedJARDir
-	advancedJARDir = dir
-	defer func() { advancedJARDir = oldJAR }()
-
-	fakeCLI := filepath.Join(t.TempDir(), "carbonio")
-	if err := os.WriteFile(fakeCLI, []byte("#!/bin/sh\necho '8.8.15'\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	oldCLI := carbonioCLI
-	carbonioCLI = fakeCLI
-	defer func() { carbonioCLI = oldCLI }()
-
-	err := MailboxAdvancedStatusHook(context.Background(), nil)
-	if err != nil {
-		t.Errorf("expected nil when advanced is ready, got: %v", err)
 	}
 }
 

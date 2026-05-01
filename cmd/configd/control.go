@@ -12,8 +12,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/zextras/carbonio-configd/internal/localconfig"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/services"
+	"github.com/zextras/carbonio-configd/internal/zxadmin"
 )
 
 const ldapServiceName = "ldap"
@@ -492,60 +494,52 @@ func serviceDetailFromProc(def *services.ServiceDef) string {
 }
 
 func checkAdvancedStatus(ctx context.Context) {
-	matches, _ := os.ReadDir("/opt/zextras/lib/ext/carbonio")
-	hasAdvanced := false
-
-	for _, m := range matches {
-		if strings.HasPrefix(m.Name(), "carbonio-advanced-") && strings.HasSuffix(m.Name(), ".jar") {
-			hasAdvanced = true
-
-			break
-		}
-	}
-
-	if !hasAdvanced {
-		return
-	}
-
-	carbonioCLI := "/opt/zextras/bin/carbonio"
-	if _, err := os.Stat(carbonioCLI); err != nil {
+	if !advancedJARsPresent() {
 		return
 	}
 
 	fmt.Printf("\n\t%sCarbonio Advanced%s\n", colorCyan, colorReset)
 
-	// #nosec G204 - fixed binary path
-	out, err := exec.CommandContext(ctx, carbonioCLI, "--json", "core", "getAllServicesStatus").Output()
+	cfg, err := localconfig.LoadLocalConfig()
 	if err != nil {
-		logger.DebugContext(ctx, "Advanced status check failed", "error", err)
-		fmt.Printf("\t%smodule status unavailable%s\n", colorDim, colorReset)
+		logger.WarnContext(ctx, "Advanced status check: localconfig load failed", "error", err)
+		fmt.Printf("\t%smodule status unavailable: %s%s\n", colorDim, shortErr(err), colorReset)
 
 		return
 	}
 
-	parseAdvancedStatus(string(out))
+	modules, err := zxadmin.New(cfg).GetAllServicesStatus(ctx)
+	if err != nil {
+		logger.WarnContext(ctx, "Advanced status check failed", "error", err)
+		fmt.Printf("\t%smodule status unavailable: %s%s\n", colorDim, shortErr(err), colorReset)
+
+		return
+	}
+
+	for _, m := range modules {
+		cliStatus(strings.ToLower(m.Name), m.Running, "")
+	}
 }
 
-func parseAdvancedStatus(jsonOutput string) {
-	for line := range strings.SplitSeq(jsonOutput, "},") {
-		line = strings.TrimLeft(line, "[{ \n\r\t")
-
-		nameIdx := strings.Index(line, `"commercialName":"`)
-		if nameIdx < 0 {
-			continue
-		}
-
-		nameStart := nameIdx + len(`"commercialName":"`)
-		nameEnd := strings.Index(line[nameStart:], `"`)
-
-		if nameEnd < 0 {
-			continue
-		}
-
-		name := strings.ToLower(line[nameStart : nameStart+nameEnd])
-		running := strings.Contains(line, `"running":true`)
-		cliStatus(name, running, "")
+// shortErr returns a single-line, length-capped form of err for inline display.
+func shortErr(err error) string {
+	s := strings.ReplaceAll(err.Error(), "\n", " ")
+	if len(s) > 140 {
+		s = s[:137] + "..."
 	}
+
+	return s
+}
+
+func advancedJARsPresent() bool {
+	matches, _ := os.ReadDir("/opt/zextras/lib/ext/carbonio")
+	for _, m := range matches {
+		if strings.HasPrefix(m.Name(), "carbonio-advanced-") && strings.HasSuffix(m.Name(), ".jar") {
+			return true
+		}
+	}
+
+	return false
 }
 
 func getDistroID() string {
