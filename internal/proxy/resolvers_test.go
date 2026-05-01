@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zextras/carbonio-configd/internal/config"
 )
@@ -1660,4 +1661,437 @@ func TestResolvePOP3Greeting(t *testing.T) {
 			t.Errorf("expected POP3 in greeting, got %q", str)
 		}
 	})
+}
+
+func TestResolveMailWhitelistIPs(t *testing.T) {
+	t.Run("returns empty when not configured", func(t *testing.T) {
+		g := &Generator{
+			ServerConfig: &config.ServerConfig{Data: map[string]string{}},
+			GlobalConfig: &config.GlobalConfig{Data: map[string]string{}},
+		}
+		result, err := g.resolveMailWhitelistIPs(context.Background())
+		if err != nil {
+			t.Fatalf("resolveMailWhitelistIPs failed: %v", err)
+		}
+		if result != "" {
+			t.Errorf("expected empty string, got %q", result)
+		}
+	})
+
+	t.Run("returns single IP", func(t *testing.T) {
+		g := &Generator{
+			ServerConfig: &config.ServerConfig{Data: map[string]string{
+				"zimbraReverseProxyIPThrottleWhitelist": "1.2.3.4",
+			}},
+		}
+		result, err := g.resolveMailWhitelistIPs(context.Background())
+		if err != nil {
+			t.Fatalf("resolveMailWhitelistIPs failed: %v", err)
+		}
+		str, ok := result.(string)
+		if !ok {
+			t.Fatalf("expected string, got %T", result)
+		}
+		expected := "mail_whitelist_ip    1.2.3.4;\n"
+		if str != expected {
+			t.Errorf("expected %q, got %q", expected, str)
+		}
+	})
+
+	t.Run("returns multiple IPs with proper formatting", func(t *testing.T) {
+		g := &Generator{
+			ServerConfig: &config.ServerConfig{Data: map[string]string{
+				"zimbraReverseProxyIPThrottleWhitelist": "1.2.3.4\n5.6.7.8",
+			}},
+		}
+		result, err := g.resolveMailWhitelistIPs(context.Background())
+		if err != nil {
+			t.Fatalf("resolveMailWhitelistIPs failed: %v", err)
+		}
+		str, ok := result.(string)
+		if !ok {
+			t.Fatalf("expected string, got %T", result)
+		}
+		if !strings.Contains(str, "mail_whitelist_ip    1.2.3.4;") {
+			t.Errorf("expected first IP directive in %q", str)
+		}
+		if !strings.Contains(str, "    mail_whitelist_ip    5.6.7.8;") {
+			t.Errorf("expected second IP indented directive in %q", str)
+		}
+	})
+
+	t.Run("falls back to global config", func(t *testing.T) {
+		g := &Generator{
+			ServerConfig: &config.ServerConfig{Data: map[string]string{}},
+			GlobalConfig: &config.GlobalConfig{Data: map[string]string{
+				"zimbraReverseProxyIPThrottleWhitelist": "10.0.0.1",
+			}},
+		}
+		result, err := g.resolveMailWhitelistIPs(context.Background())
+		if err != nil {
+			t.Fatalf("resolveMailWhitelistIPs failed: %v", err)
+		}
+		str, ok := result.(string)
+		if !ok {
+			t.Fatalf("expected string, got %T", result)
+		}
+		if !strings.Contains(str, "10.0.0.1") {
+			t.Errorf("expected IP 10.0.0.1 in %q", str)
+		}
+	})
+}
+
+func TestGetIPMode_LocalConfig(t *testing.T) {
+	t.Run("falls back to LocalConfig when GlobalConfig missing", func(t *testing.T) {
+		g := &Generator{
+			LocalConfig: &config.LocalConfig{Data: map[string]string{
+				"zimbraIPMode": "IPv6",
+			}},
+		}
+		mode := g.getIPMode()
+		if mode != "ipv6" {
+			t.Errorf("expected ipv6, got %q", mode)
+		}
+	})
+
+	t.Run("returns both when neither config has the key", func(t *testing.T) {
+		g := &Generator{
+			LocalConfig:  &config.LocalConfig{Data: map[string]string{}},
+			GlobalConfig: &config.GlobalConfig{Data: map[string]string{}},
+		}
+		mode := g.getIPMode()
+		if mode != ipModeBoth {
+			t.Errorf("expected %q, got %q", ipModeBoth, mode)
+		}
+	})
+}
+
+func TestResolveWebAvailable(t *testing.T) {
+	t.Run("returns true when backends exist in cache", func(t *testing.T) {
+		g := &Generator{
+			upstreamCache: &upstreamQueryCache{
+				populated:            true,
+				reverseProxyBackends: []UpstreamServer{{Host: "server1.example.com", Port: 443}},
+			},
+		}
+		result, err := g.resolveWebAvailable(context.Background())
+		if err != nil {
+			t.Fatalf("resolveWebAvailable failed: %v", err)
+		}
+		if result != true {
+			t.Errorf("expected true, got %v", result)
+		}
+	})
+
+	t.Run("returns false when no backends", func(t *testing.T) {
+		g := &Generator{
+			upstreamCache: &upstreamQueryCache{
+				populated:            true,
+				reverseProxyBackends: []UpstreamServer{},
+			},
+		}
+		result, err := g.resolveWebAvailable(context.Background())
+		if err != nil {
+			t.Fatalf("resolveWebAvailable failed: %v", err)
+		}
+		if result != false {
+			t.Errorf("expected false, got %v", result)
+		}
+	})
+}
+
+func TestResolveLookupAvailable(t *testing.T) {
+	t.Run("returns true when lookup targets configured", func(t *testing.T) {
+		g := &Generator{
+			GlobalConfig: &config.GlobalConfig{Data: map[string]string{
+				"zimbraReverseProxyAvailableLookupTargets": "host1 host2",
+			}},
+		}
+		result, err := g.resolveLookupAvailable(context.Background())
+		if err != nil {
+			t.Fatalf("resolveLookupAvailable failed: %v", err)
+		}
+		if result != true {
+			t.Errorf("expected true, got %v", result)
+		}
+	})
+
+	t.Run("returns false when attribute not set", func(t *testing.T) {
+		g := &Generator{
+			GlobalConfig: &config.GlobalConfig{Data: map[string]string{}},
+		}
+		result, err := g.resolveLookupAvailable(context.Background())
+		if err != nil {
+			t.Fatalf("resolveLookupAvailable failed: %v", err)
+		}
+		if result != false {
+			t.Errorf("expected false, got %v", result)
+		}
+	})
+}
+
+func TestResolveWebSSLDhparamEnabled(t *testing.T) {
+	t.Run("returns true when default dhparam file exists", func(t *testing.T) {
+		dir := t.TempDir()
+		dhPath := filepath.Join(dir, "dhparam.pem")
+		if err := os.WriteFile(dhPath, []byte("fake-dhparam"), 0o644); err != nil {
+			t.Fatalf("failed to create test file: %v", err)
+		}
+		g := &Generator{
+			LocalConfig: &config.LocalConfig{Data: map[string]string{
+				"web.ssl.dhparam.file": dhPath,
+			}},
+		}
+		result, err := g.resolveWebSSLDhparamEnabled(context.Background())
+		if err != nil {
+			t.Fatalf("resolveWebSSLDhparamEnabled failed: %v", err)
+		}
+		if result != true {
+			t.Errorf("expected true when file exists, got %v", result)
+		}
+	})
+
+	t.Run("returns false when file does not exist", func(t *testing.T) {
+		g := &Generator{
+			LocalConfig: &config.LocalConfig{Data: map[string]string{
+				"web.ssl.dhparam.file": "/tmp/nonexistent-dhparam-xyz.pem",
+			}},
+		}
+		result, err := g.resolveWebSSLDhparamEnabled(context.Background())
+		if err != nil {
+			t.Fatalf("resolveWebSSLDhparamEnabled failed: %v", err)
+		}
+		if result != false {
+			t.Errorf("expected false when file missing, got %v", result)
+		}
+	})
+
+	t.Run("uses default path when LocalConfig not set", func(t *testing.T) {
+		g := &Generator{
+			LocalConfig: &config.LocalConfig{Data: map[string]string{}},
+		}
+		result, err := g.resolveWebSSLDhparamEnabled(context.Background())
+		if err != nil {
+			t.Fatalf("resolveWebSSLDhparamEnabled failed: %v", err)
+		}
+		_ = result // Just verifying no panic; /opt/zextras/conf/dhparam.pem likely doesn't exist
+	})
+}
+
+func TestResolveSSLClientCertCAEnabled(t *testing.T) {
+	t.Run("returns true when file exists and has content", func(t *testing.T) {
+		dir := t.TempDir()
+		caPath := filepath.Join(dir, "nginx.client.ca.crt")
+		if err := os.WriteFile(caPath, []byte("certificate-content"), 0o644); err != nil {
+			t.Fatalf("failed to create test file: %v", err)
+		}
+		g := &Generator{ConfDir: dir}
+		result, err := g.resolveSSLClientCertCAEnabled(context.Background())
+		if err != nil {
+			t.Fatalf("resolveSSLClientCertCAEnabled failed: %v", err)
+		}
+		if result != true {
+			t.Errorf("expected true when file has content, got %v", result)
+		}
+	})
+
+	t.Run("returns false when file exists but is empty", func(t *testing.T) {
+		dir := t.TempDir()
+		caPath := filepath.Join(dir, "nginx.client.ca.crt")
+		if err := os.WriteFile(caPath, []byte(""), 0o644); err != nil {
+			t.Fatalf("failed to create test file: %v", err)
+		}
+		g := &Generator{ConfDir: dir}
+		result, err := g.resolveSSLClientCertCAEnabled(context.Background())
+		if err != nil {
+			t.Fatalf("resolveSSLClientCertCAEnabled failed: %v", err)
+		}
+		if result != false {
+			t.Errorf("expected false when file is empty, got %v", result)
+		}
+	})
+
+	t.Run("returns false when file does not exist", func(t *testing.T) {
+		g := &Generator{ConfDir: "/tmp/nonexistent-dir-xyz"}
+		result, err := g.resolveSSLClientCertCAEnabled(context.Background())
+		if err != nil {
+			t.Fatalf("resolveSSLClientCertCAEnabled failed: %v", err)
+		}
+		if result != false {
+			t.Errorf("expected false when file missing, got %v", result)
+		}
+	})
+}
+
+func TestMakeBackendResolver(t *testing.T) {
+	t.Run("returns empty string when no backends (nil LDAP)", func(t *testing.T) {
+		g := &Generator{
+			LdapClient: nil,
+		}
+		resolver := g.makeBackendResolver(false)
+		result, err := resolver(context.Background())
+		if err != nil {
+			t.Fatalf("backend resolver failed: %v", err)
+		}
+		str, ok := result.(string)
+		if !ok {
+			t.Fatalf("expected string, got %T", result)
+		}
+		if str != "" {
+			t.Errorf("expected empty string with no backends, got %q", str)
+		}
+	})
+
+	t.Run("returns formatted servers with cached backends", func(t *testing.T) {
+		g := &Generator{
+			upstreamCache: &upstreamQueryCache{
+				populated:            true,
+				reverseProxyBackends: []UpstreamServer{{Host: "server1.example.com", Port: 8080}},
+			},
+		}
+		resolver := g.makeBackendResolver(false)
+		result, err := resolver(context.Background())
+		if err != nil {
+			t.Fatalf("backend resolver failed: %v", err)
+		}
+		str, ok := result.(string)
+		if !ok {
+			t.Fatalf("expected string, got %T", result)
+		}
+		if !strings.Contains(str, "server1.example.com") {
+			t.Errorf("expected server1.example.com in result, got %q", str)
+		}
+	})
+
+	t.Run("returns formatted SSL backends", func(t *testing.T) {
+		g := &Generator{
+			upstreamCache: &upstreamQueryCache{
+				populated:               true,
+				reverseProxyBackendsSSL: []UpstreamServer{{Host: "ssl-server.example.com", Port: 8443}},
+			},
+		}
+		resolver := g.makeBackendResolver(true)
+		result, err := resolver(context.Background())
+		if err != nil {
+			t.Fatalf("backend resolver failed: %v", err)
+		}
+		str, ok := result.(string)
+		if !ok {
+			t.Fatalf("expected string, got %T", result)
+		}
+		if !strings.Contains(str, "ssl-server.example.com") {
+			t.Errorf("expected ssl-server.example.com in result, got %q", str)
+		}
+	})
+}
+
+func TestMakeAttributeResolver(t *testing.T) {
+	t.Run("returns empty string when no servers (nil LDAP)", func(t *testing.T) {
+		g := &Generator{
+			LdapClient: nil,
+		}
+		resolver := g.makeAttributeResolver("zimbraReverseProxyUpstreamEwsServers", false)
+		result, err := resolver(context.Background())
+		if err != nil {
+			t.Fatalf("attribute resolver failed: %v", err)
+		}
+		str, ok := result.(string)
+		if !ok {
+			t.Fatalf("expected string, got %T", result)
+		}
+		if str != "" {
+			t.Errorf("expected empty string with no servers, got %q", str)
+		}
+	})
+
+	t.Run("returns formatted servers with cached attribute backends", func(t *testing.T) {
+		g := &Generator{
+			upstreamCache: &upstreamQueryCache{
+				populated: true,
+				attributeServers: map[string][]UpstreamServer{
+					"zimbraReverseProxyUpstreamEwsServers": {{Host: "ews-server.example.com", Port: 8443}},
+				},
+				attributeServersSSL: map[string][]UpstreamServer{},
+			},
+		}
+		resolver := g.makeAttributeResolver("zimbraReverseProxyUpstreamEwsServers", false)
+		result, err := resolver(context.Background())
+		if err != nil {
+			t.Fatalf("attribute resolver failed: %v", err)
+		}
+		str, ok := result.(string)
+		if !ok {
+			t.Fatalf("expected string, got %T", result)
+		}
+		if !strings.Contains(str, "ews-server.example.com") {
+			t.Errorf("expected ews-server.example.com in result, got %q", str)
+		}
+	})
+
+	t.Run("returns formatted SSL attribute servers", func(t *testing.T) {
+		g := &Generator{
+			upstreamCache: &upstreamQueryCache{
+				populated: true,
+				attributeServersSSL: map[string][]UpstreamServer{
+					"zimbraReverseProxyUpstreamEwsServers": {{Host: "ssl-ews.example.com", Port: 9443}},
+				},
+				attributeServers: map[string][]UpstreamServer{},
+			},
+		}
+		resolver := g.makeAttributeResolver("zimbraReverseProxyUpstreamEwsServers", true)
+		result, err := resolver(context.Background())
+		if err != nil {
+			t.Fatalf("attribute resolver failed: %v", err)
+		}
+		str, ok := result.(string)
+		if !ok {
+			t.Fatalf("expected string, got %T", result)
+		}
+		if !strings.Contains(str, "ssl-ews.example.com") {
+			t.Errorf("expected ssl-ews.example.com in result, got %q", str)
+		}
+	})
+}
+
+func TestResolveHostToIP_DNSFailure(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	result := resolveHostToIP(ctx, "nonexistent.invalid.example.xyz")
+	if result != "nonexistent.invalid.example.xyz" {
+		t.Errorf("expected hostname returned as-is on DNS failure, got %q", result)
+	}
+}
+
+func TestResolveHostToIP_Localhost(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	result := resolveHostToIP(ctx, "127.0.0.1")
+	if result == "" {
+		t.Errorf("expected non-empty result for 127.0.0.1, got empty string")
+	}
+}
+
+func TestResolvePOP3Capabilities_WhitespaceOnly(t *testing.T) {
+	g := &Generator{
+		GlobalConfig: &config.GlobalConfig{Data: map[string]string{
+			"zimbraReverseProxyPop3EnabledCapability": "\n\n\n",
+		}},
+	}
+
+	result, err := g.resolvePOP3Capabilities(context.Background())
+	if err != nil {
+		t.Fatalf("resolvePOP3Capabilities failed: %v", err)
+	}
+
+	caps, ok := result.([]string)
+	if !ok {
+		t.Fatalf("expected []string, got %T", result)
+	}
+
+	if len(caps) != len(defaultPOP3Capabilities) {
+		t.Errorf("expected %d default capabilities for whitespace-only input, got %d: %v",
+			len(defaultPOP3Capabilities), len(caps), caps)
+	}
 }
