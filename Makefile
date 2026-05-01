@@ -83,10 +83,23 @@ test-integration:
 	@echo "Running integration tests..."
 	$(GOTEST) -v -tags integration ./...
 
-# Run tests with coverage
+# Run tests with coverage (all build tag combinations merged)
 test-coverage:
-	@echo "Running tests with coverage..."
-	$(GOTEST) -v -coverprofile=coverage.out ./...
+	@echo "Running tests with coverage (default tags)..."
+	$(GOTEST) -v -coverprofile=coverage.default.out ./...
+	@echo "Running tests with coverage (tracing tag)..."
+	$(GOTEST) -v -tags tracing -coverprofile=coverage.tracing.out ./...
+	@echo "Running tests with coverage (profiling tag)..."
+	$(GOTEST) -v -tags profiling -coverprofile=coverage.profiling.out ./...
+	@echo "Running tests with coverage (tracing+profiling tags)..."
+	$(GOTEST) -v -tags "tracing profiling" -coverprofile=coverage.full.out ./...
+	@echo "Merging coverage profiles..."
+	@head -1 coverage.default.out > coverage.out
+	@tail -n +2 coverage.default.out >> coverage.out
+	@tail -n +2 coverage.tracing.out >> coverage.out
+	@tail -n +2 coverage.profiling.out >> coverage.out
+	@tail -n +2 coverage.full.out >> coverage.out
+	@rm -f coverage.default.out coverage.tracing.out coverage.profiling.out coverage.full.out
 	$(GOCMD) tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report generated: coverage.html"
 
