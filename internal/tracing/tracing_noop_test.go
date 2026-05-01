@@ -2,8 +2,9 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//go:build !tracing
+
 // Package tracing provides noop tests compiled without the 'tracing' build tag.
-// No build tag here — this file compiles with the noop implementation by default.
 package tracing
 
 import (

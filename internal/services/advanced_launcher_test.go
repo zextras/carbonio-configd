@@ -124,3 +124,128 @@ func TestMailboxAdvancedStatusHook_LocalConfigMissing(t *testing.T) {
 		t.Errorf("MailboxAdvancedStatusHook returned error: %v", err)
 	}
 }
+
+// --- advancedInstalled ---
+
+func TestAdvancedInstalled(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(t *testing.T) string // returns dir path
+		want  bool
+	}{
+		{
+			name: "no directory exists",
+			setup: func(t *testing.T) string {
+				t.Helper()
+				return filepath.Join(t.TempDir(), "nonexistent")
+			},
+			want: false,
+		},
+		{
+			name: "empty directory",
+			setup: func(t *testing.T) string {
+				t.Helper()
+				return t.TempDir()
+			},
+			want: false,
+		},
+		{
+			name: "directory with unrelated jar",
+			setup: func(t *testing.T) string {
+				t.Helper()
+				dir := t.TempDir()
+				if err := os.WriteFile(filepath.Join(dir, "other-lib.jar"), []byte("fake"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				return dir
+			},
+			want: false,
+		},
+		{
+			name: "directory with matching jar",
+			setup: func(t *testing.T) string {
+				t.Helper()
+				dir := t.TempDir()
+				if err := os.WriteFile(filepath.Join(dir, "carbonio-advanced-1.0.jar"), []byte("fake"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				return dir
+			},
+			want: true,
+		},
+		{
+			name: "file with matching prefix but wrong extension",
+			setup: func(t *testing.T) string {
+				t.Helper()
+				dir := t.TempDir()
+				if err := os.WriteFile(filepath.Join(dir, "carbonio-advanced-config.xml"), []byte("fake"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				return dir
+			},
+			want: false,
+		},
+		{
+			name: "multiple jars with one matching",
+			setup: func(t *testing.T) string {
+				t.Helper()
+				dir := t.TempDir()
+				for _, name := range []string{"util.jar", "carbonio-advanced-2.5.jar", "readme.txt"} {
+					if err := os.WriteFile(filepath.Join(dir, name), []byte("fake"), 0o644); err != nil {
+						t.Fatal(err)
+					}
+				}
+				return dir
+			},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := tt.setup(t)
+
+			old := advancedJARDir
+			advancedJARDir = dir
+			defer func() { advancedJARDir = old }()
+
+			if got := advancedInstalled(); got != tt.want {
+				t.Errorf("advancedInstalled() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// --- MailboxAdvancedStatusHook ---
+
+func TestMailboxAdvancedStatusHook_NotInstalled(t *testing.T) {
+	// When no advanced jars exist, the hook should return nil immediately.
+	old := advancedJARDir
+	advancedJARDir = filepath.Join(t.TempDir(), "nonexistent")
+	defer func() { advancedJARDir = old }()
+
+	err := MailboxAdvancedStatusHook(context.Background(), nil)
+	if err != nil {
+		t.Errorf("expected nil when advanced not installed, got: %v", err)
+	}
+}
+
+func TestMailboxAdvancedStatusHook_ContextCancelled(t *testing.T) {
+	// When context is cancelled, hook should return nil without hanging.
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "carbonio-advanced-1.0.jar"), []byte("fake"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	oldJAR := advancedJARDir
+	advancedJARDir = dir
+	defer func() { advancedJARDir = oldJAR }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+
+	err := MailboxAdvancedStatusHook(ctx, nil)
+	if err != nil {
+		t.Errorf("expected nil on cancelled context, got: %v", err)
+	}
+}

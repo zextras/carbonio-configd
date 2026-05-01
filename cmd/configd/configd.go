@@ -123,12 +123,11 @@ func handleForcedConfigs(ctx context.Context, args *Args, appState *state.State)
 }
 
 // setupProfilingAndTracing sets up profiling and tracing if requested in args.
-func setupProfilingAndTracing(ctx context.Context, args *Args) (*ProfilingConfig, *TracingConfig) {
+func setupProfilingAndTracing(
+	ctx context.Context,
+	args *Args,
+) (profilingConfig *ProfilingConfig, tracingConfig *TracingConfig) {
 	ctx = logger.ContextWithComponent(ctx, "main")
-
-	var profilingConfig *ProfilingConfig
-
-	var tracingConfig *TracingConfig
 
 	if args.CPUProfile != "" || args.MemProfile != "" || args.Trace != "" {
 		profilingConfig = &ProfilingConfig{

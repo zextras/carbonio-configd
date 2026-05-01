@@ -116,11 +116,29 @@ package__ubuntu_noble() {
   _package_systemd
 }
 
+_kill_legacy_zmconfigd() {
+  # Kill legacy Jython zmconfigd (Java process) if still running.
+  # Uses zmconfigd-specific pattern to avoid matching unrelated Java processes.
+  if pgrep -f '/opt/zextras/.*/java.*zmconfigd' &>/dev/null; then
+    pkill -f '/opt/zextras/.*/java.*zmconfigd' 2>/dev/null || :
+    # Wait up to 10s for the JVM to exit before starting the Go daemon
+    for _i in 1 2 3 4 5 6 7 8 9 10; do
+      pgrep -f '/opt/zextras/.*/java.*zmconfigd' &>/dev/null || break
+      sleep 1
+    done
+  fi
+}
+
 postinst__apt() {
   if [ -d /run/systemd/system ]; then
     systemctl daemon-reload &>/dev/null || :
+    _kill_legacy_zmconfigd
     if [ "$1" = "configure" ] && [ -z "$2" ]; then
-      systemctl enable carbonio-configd.service &>/dev/null || :
+      # Fresh install: enable and start
+      systemctl enable --now carbonio-configd.service &>/dev/null || :
+    else
+      # Upgrade (Go→Go or Jython→Go): already enabled, restart to pick up new binary
+      systemctl restart carbonio-configd.service &>/dev/null || :
     fi
   fi
 }
@@ -128,8 +146,13 @@ postinst__apt() {
 postinst__yum() {
   if [ -d /run/systemd/system ]; then
     systemctl daemon-reload &>/dev/null || :
+    _kill_legacy_zmconfigd
     if [ $1 -eq 1 ]; then
-      systemctl enable carbonio-configd.service &>/dev/null || :
+      # Fresh install: enable and start
+      systemctl enable --now carbonio-configd.service &>/dev/null || :
+    else
+      # Upgrade (Go→Go or Jython→Go): already enabled, restart to pick up new binary
+      systemctl restart carbonio-configd.service &>/dev/null || :
     fi
   fi
 }

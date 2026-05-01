@@ -47,6 +47,11 @@ func mailboxCustomStart(ctx context.Context, def *ServiceDef) error {
 			"path", mailboxdPath+"/work/service/jsp", "error", err)
 	}
 
+	if err := os.MkdirAll(mailboxdPath+"/work", 0o755); err != nil {
+		logger.WarnContext(ctx, "Failed to create mailbox work directory",
+			"path", mailboxdPath+"/work", "error", err)
+	}
+
 	logFile := logPath + "/zmmailboxd.out"
 
 	logFd, err := openLogFile(logFile)
