@@ -77,6 +77,11 @@ type ServiceDef struct {
 	// CustomStop mirrors CustomStart for the stop side. Used by stats to
 	// kill every collector recorded in its aggregate pidfile.
 	CustomStop func(ctx context.Context, def *ServiceDef) error
+	// UseSystemdForStatus, when true, forces status detection via systemctl
+	// is-active even in non-systemd (legacy) mode. Use for services like
+	// service-discover that are always managed by their systemd unit regardless
+	// of the Carbonio orchestration mode.
+	UseSystemdForStatus bool
 }
 
 var (
@@ -348,13 +353,14 @@ var Registry = map[string]*ServiceDef{
 		ProcessName:  binPath + "/configd",
 	},
 	svcServiceDiscover: {
-		Name:         svcServiceDiscover,
-		DisplayName:  "service discover",
-		SystemdUnits: []string{"service-discover.service"},
-		BinaryPath:   "/usr/bin/service-discovered",
-		Detached:     true,
-		ProcessName:  "service-discovered",
-		CustomStart:  serviceDiscoverCustomStart,
+		Name:                svcServiceDiscover,
+		DisplayName:         "service discover",
+		SystemdUnits:        []string{"service-discover.service"},
+		BinaryPath:          "/usr/bin/service-discover",
+		Detached:            true,
+		ProcessName:         svcServiceDiscover,
+		CustomStart:         serviceDiscoverCustomStart,
+		UseSystemdForStatus: true,
 	},
 }
 

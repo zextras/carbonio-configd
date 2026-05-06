@@ -244,10 +244,13 @@ func ServiceReload(ctx context.Context, name string) error {
 }
 
 // ServiceStatus returns whether a service is running. Bifurcated on
-// IsSystemdMode(); the two paths never mix:
+// IsSystemdMode(); the two paths never mix, with one exception:
 //
 //   - strict systemd: trust systemctl is-active for each unit. No PID scan.
 //   - legacy: PID file first, then ProcessName /proc scan. Never systemctl.
+//     Exception: services with UseSystemdForStatus=true always use systemctl
+//     is-active even in legacy mode (e.g. service-discover, which is always
+//     managed by its systemd unit regardless of Carbonio orchestration mode).
 //
 // The legacy path covers the container case that motivated this design
 // (podman without carbonio targets enabled): services like stats are spawned
@@ -261,7 +264,7 @@ func ServiceStatus(ctx context.Context, name string) (bool, error) {
 		return false, fmt.Errorf(errUnknownService, name)
 	}
 
-	if IsSystemdMode() {
+	if IsSystemdMode() || def.UseSystemdForStatus {
 		for _, unit := range def.SystemdUnits {
 			if err := Systemctl(ctx, "is-active", unit); err != nil {
 				return false, nil //nolint:nilerr // not-active is not an error
