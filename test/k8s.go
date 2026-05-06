@@ -144,6 +144,9 @@ func newLdapPod(name, namespace, image string) *corev1.Pod {
 			Labels:    map[string]string{"app": "ldap-test", "managed-by": "testcontainers"},
 		},
 		Spec: corev1.PodSpec{
+			NodeSelector: map[string]string{
+				"node-role.kubernetes.io/worker": "true",
+			},
 			Containers: []corev1.Container{{
 				Name:  "ldap",
 				Image: image,
