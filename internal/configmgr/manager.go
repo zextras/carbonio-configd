@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/zextras/carbonio-configd/internal/cache"
 	"github.com/zextras/carbonio-configd/internal/commands"
@@ -63,10 +64,13 @@ type ConfigManager struct {
 	NativeLdapClient        *ldap.Client       // Native LDAP client for direct queries
 	Cache                   *cache.ConfigCache // Configuration cache for LDAP and other data
 	Transformer             *transformer.Transformer
-	ServiceMgr              services.Manager // Service manager interface
-	cachedLocalConfigOutput string           // Cached output from zmlocalconfig -s command
+	ServiceMgr              services.Manager   // Service manager interface
+	CommandRegistry         *commands.Registry // Command registry for this instance
+	cachedLocalConfigOutput string             // Cached output from zmlocalconfig -s command
+	cachedLocalConfigMu     sync.RWMutex       // Protects cachedLocalConfigOutput
 	mtaExecutor             mtaops.Executor
 	mtaResolver             mtaops.OperationResolver
+	comparator              *Comparator
 }
 
 // NewConfigManager creates a new ConfigManager instance.
@@ -74,16 +78,18 @@ func NewConfigManager(ctx context.Context, mainCfg *config.Config,
 	appState *state.State, ldapClient *ldap.Ldap, cacheInstance *cache.ConfigCache) *ConfigManager {
 	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
 	cm := &ConfigManager{
-		mainConfig: mainCfg,
-		State:      appState,
-		LdapClient: ldapClient,
-		Cache:      cacheInstance,
-		ServiceMgr: services.NewServiceManager(), // Initialize service manager
+		mainConfig:      mainCfg,
+		State:           appState,
+		LdapClient:      ldapClient,
+		Cache:           cacheInstance,
+		ServiceMgr:      services.NewServiceManager(), // Initialize service manager
+		CommandRegistry: commands.NewRegistry(mainCfg.BaseDir),
 	}
 	cm.Transformer = transformer.NewTransformer(cm, appState)
 	cm.mtaExecutor = mtaops.NewExecutor(mainCfg.BaseDir, ldapClient)
 	cm.mtaResolver = mtaops.NewResolver(mainCfg.BaseDir)
 	cm.initNativeLdapClient(ctx)
+	cm.comparator = NewComparator(cm, appState, cm.ServiceMgr)
 
 	return cm
 }
@@ -159,7 +165,7 @@ func (cm *ConfigManager) initNativeLdapClient(ctx context.Context) {
 		"bind_dn", bindDN)
 
 	executor := commands.NewCommandExecutor(nativeClient)
-	commands.RegisterLDAPCommands(executor)
+	cm.CommandRegistry.RegisterLDAPCommands(executor)
 
 	if cm.LdapClient != nil {
 		cm.LdapClient.SetNativeClient(ctx, nativeClient)
@@ -168,15 +174,15 @@ func (cm *ConfigManager) initNativeLdapClient(ctx context.Context) {
 
 // lookupVarKey checks GlobalConfig → MiscConfig → ServerConfig for key.
 func (cm *ConfigManager) lookupVarKey(key string) (string, bool) {
-	if val, ok := cm.State.GlobalConfig.Data[key]; ok {
+	if val, ok := cm.State.GlobalConfig.Data.Get(key); ok {
 		return val, true
 	}
 
-	if val, ok := cm.State.MiscConfig.Data[key]; ok {
+	if val, ok := cm.State.MiscConfig.Data.Get(key); ok {
 		return val, true
 	}
 
-	if val, ok := cm.State.ServerConfig.Data[key]; ok {
+	if val, ok := cm.State.ServerConfig.Data.Get(key); ok {
 		return val, true
 	}
 
@@ -260,7 +266,7 @@ func (cm *ConfigManager) LookUpConfig(ctx context.Context, cfgType, key string) 
 	case configTypeVAR:
 		value, found = cm.lookupVarKey(key)
 	case configTypeLOCAL:
-		value, found = cm.State.LocalConfig.Data[key]
+		value, found = cm.State.LocalConfig.Data.Get(key)
 	case configTypeFILE:
 		value, err = cm.lookupFileKey(ctx, key)
 		if err != nil {
@@ -276,7 +282,7 @@ func (cm *ConfigManager) LookUpConfig(ctx context.Context, cfgType, key string) 
 
 		found = true
 	case configTypeSERVICE:
-		if _, ok := cm.State.ServerConfig.ServiceConfig[key]; ok {
+		if _, ok := cm.State.ServerConfig.ServiceConfig.Get(key); ok {
 			value = constTRUE
 		} else {
 			value = constFALSE
@@ -327,9 +333,18 @@ func (cm *ConfigManager) InvalidateLDAPCache(ctx context.Context) {
 // - System configuration may have changed
 func (cm *ConfigManager) ClearLocalConfigCache(ctx context.Context) {
 	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
+
+	cm.cachedLocalConfigMu.Lock()
+	defer cm.cachedLocalConfigMu.Unlock()
+
 	if cm.cachedLocalConfigOutput != "" {
 		logger.DebugContext(ctx, "Clearing localconfig cache")
 
 		cm.cachedLocalConfigOutput = ""
 	}
+}
+
+// Comparator returns the embedded Comparator instance.
+func (cm *ConfigManager) Comparator() *Comparator {
+	return cm.comparator
 }

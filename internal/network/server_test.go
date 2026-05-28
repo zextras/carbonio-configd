@@ -22,7 +22,7 @@ type MockActionTrigger struct {
 	lastConfigs      []string
 }
 
-func (m *MockActionTrigger) TriggerRewrite(configs []string) {
+func (m *MockActionTrigger) TriggerRewrite(ctx context.Context, configs []string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.rewriteCallCount++

@@ -1,8 +1,9 @@
+//go:build integration
+// +build integration
+
 // SPDX-FileCopyrightText: 2026 Zextras <https://www.zextras.com>
 //
 // SPDX-License-Identifier: AGPL-3.0-only
-
-//go:build integration
 
 // Integration tests for native LDAP client against real Carbonio LDAP server.
 // Run with: go test -tags=integration ./internal/ldap/
@@ -290,7 +291,7 @@ func TestLdap_QueryDomains_Integration(t *testing.T) {
 	ldapMgr.SetNativeClient(context.Background(), nativeClient)
 
 	// Test QueryDomains
-	domains, err := ldapMgr.QueryDomains(context.Background())
+	domains, err := ldapMgr.NativeClient.QueryDomains(context.Background())
 	if err != nil {
 		t.Fatalf("QueryDomains failed: %v", err)
 	}
@@ -338,7 +339,7 @@ func TestLdap_QueryServers_Integration(t *testing.T) {
 
 	for _, service := range services {
 		t.Run("Service_"+service, func(t *testing.T) {
-			servers, err := ldapMgr.QueryServers(context.Background(), service)
+			servers, err := ldapMgr.NativeClient.QueryServers(context.Background(), service)
 			if err != nil {
 				t.Fatalf("QueryServers(%s) failed: %v", service, err)
 			}

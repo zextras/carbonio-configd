@@ -697,7 +697,7 @@ func TestState_SnapshotCompileActions(t *testing.T) {
 	s.RequestedConfig["proxy"] = "proxy"
 	s.ForcedConfig["mta"] = "1"
 	s.FirstRun = true
-	s.ServerConfig.ServiceConfig["mta"] = "TRUE"
+	s.ServerConfig.ServiceConfig.Set("mta", "TRUE")
 	section := &config.MtaConfigSection{Name: "proxy"}
 	s.MtaConfig.Sections["proxy"] = section
 
@@ -829,10 +829,10 @@ func TestState_GetCurrentRewriteKeys(t *testing.T) {
 func TestState_SetConfigs(t *testing.T) {
 	s := NewState()
 
-	lc := &config.LocalConfig{Data: map[string]string{"key": "val"}}
-	gc := &config.GlobalConfig{Data: map[string]string{"gkey": "gval"}}
-	mc := &config.MiscConfig{Data: map[string]string{"mkey": "mval"}}
-	sc := &config.ServerConfig{Data: map[string]string{}, ServiceConfig: map[string]string{"svc": "TRUE"}}
+	lc := &config.LocalConfig{Data: config.NewConfigMapFrom(map[string]string{"key": "val"})}
+	gc := &config.GlobalConfig{Data: config.NewConfigMapFrom(map[string]string{"gkey": "gval"})}
+	mc := &config.MiscConfig{Data: config.NewConfigMapFrom(map[string]string{"mkey": "mval"})}
+	sc := &config.ServerConfig{Data: config.NewConfigMapFrom(map[string]string{}), ServiceConfig: config.NewConfigMapFrom(map[string]string{})}
 	mtac := &config.MtaConfig{Sections: map[string]*config.MtaConfigSection{}}
 
 	s.SetConfigs(lc, gc, mc, sc, mtac)

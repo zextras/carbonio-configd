@@ -54,7 +54,7 @@ func TestReferenceValidation(t *testing.T) {
 	}
 
 	localConfig := &config.LocalConfig{
-		Data: map[string]string{
+		Data: config.NewConfigMapFrom(map[string]string{
 			"zimbraIPMode":               "both",
 			"zimbraMailProxyPort":        "80",
 			"zimbraMailSSLProxyPort":     "443",
@@ -69,11 +69,11 @@ func TestReferenceValidation(t *testing.T) {
 			"zimbraAdminPort":            "7071",
 			"zimbraAdminProxyPort":       "9071",
 			"zimbraMemcachedBindPort":    "11211",
-		},
+		}),
 	}
 
 	globalConfig := &config.GlobalConfig{
-		Data: map[string]string{
+		Data: config.NewConfigMapFrom(map[string]string{
 			"zimbraReverseProxyHttpEnabled":            "TRUE",
 			"zimbraReverseProxyMailMode":               "both",
 			"zimbraReverseProxySSLToUpstreamEnabled":   "TRUE",
@@ -83,17 +83,17 @@ func TestReferenceValidation(t *testing.T) {
 			"zimbraReverseProxyUpstreamPollingTimeout": "60",
 			"zimbraMailProxyReconnect":                 "5000",
 			"zimbraReverseProxyDefaultRealm":           "example.com",
-		},
+		}),
 	}
 
 	serverConfig := &config.ServerConfig{
-		Data: map[string]string{
+		Data: config.NewConfigMapFrom(map[string]string{
 			"zimbraServerHostname": "mail.example.com",
 			"zimbraMailMode":       "https",
 			"zimbraMailPort":       "8080",
 			"zimbraMailSSLPort":    "8443",
 			"zimbraAdminURL":       "https://admin.example.com:7071",
-		},
+		}),
 	}
 
 	// Create generator
@@ -297,9 +297,9 @@ func TestReferenceOutputStructure(t *testing.T) {
 
 	gen := &Generator{
 		Config:       baseConfig,
-		LocalConfig:  &config.LocalConfig{Data: map[string]string{}},
-		GlobalConfig: &config.GlobalConfig{Data: map[string]string{}},
-		ServerConfig: &config.ServerConfig{Data: map[string]string{}},
+		LocalConfig:  &config.LocalConfig{Data: config.NewConfigMapFrom(map[string]string{})},
+		GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMap()},
+		ServerConfig: &config.ServerConfig{Data: config.NewConfigMap()},
 		LdapClient:   nil,
 		TemplateDir:  templateDir,
 		ConfDir:      confDir,

@@ -18,21 +18,21 @@ func TestMakeLoginURLResolver(t *testing.T) {
 	tests := []struct {
 		name       string
 		configKey  string
-		globalData map[string]string
+		globalData *config.ConfigMap
 		expected   string
 	}{
 		{
 			name:       "returns staticLoginPath when key not in config",
 			configKey:  "zimbraWebClientLoginURL",
-			globalData: map[string]string{},
+			globalData: config.NewConfigMapFrom(map[string]string{}),
 			expected:   staticLoginPath,
 		},
 		{
 			name:      "returns custom URL from config",
 			configKey: "zimbraWebClientLoginURL",
-			globalData: map[string]string{
+			globalData: config.NewConfigMapFrom(map[string]string{
 				"zimbraWebClientLoginURL": "https://custom.example.com/login",
-			},
+			}),
 			expected: "https://custom.example.com/login",
 		},
 	}
@@ -59,21 +59,21 @@ func TestMakeLogoutRedirectResolver(t *testing.T) {
 	tests := []struct {
 		name       string
 		configKey  string
-		globalData map[string]string
+		globalData *config.ConfigMap
 		expected   string
 	}{
 		{
 			name:       "returns return 307 path when key not in config",
 			configKey:  "zimbraWebClientLogoutURL",
-			globalData: map[string]string{},
+			globalData: config.NewConfigMapFrom(map[string]string{}),
 			expected:   nginxReturn307Path,
 		},
 		{
 			name:      "returns return 200 when key is set in config",
 			configKey: "zimbraWebClientLogoutURL",
-			globalData: map[string]string{
+			globalData: config.NewConfigMapFrom(map[string]string{
 				"zimbraWebClientLogoutURL": "https://custom.example.com/logout",
-			},
+			}),
 			expected: nginxReturn200,
 		},
 	}
@@ -99,7 +99,7 @@ func TestMakeLogoutRedirectResolver(t *testing.T) {
 func TestResolveErrorPages(t *testing.T) {
 	t.Run("uses default static error pages when no URL configured", func(t *testing.T) {
 		g := &Generator{
-			GlobalConfig: &config.GlobalConfig{Data: map[string]string{}},
+			GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMap()},
 		}
 		result, err := g.resolveErrorPages(context.Background())
 		if err != nil {
@@ -116,9 +116,9 @@ func TestResolveErrorPages(t *testing.T) {
 
 	t.Run("uses custom error handler URL when configured", func(t *testing.T) {
 		g := &Generator{
-			GlobalConfig: &config.GlobalConfig{Data: map[string]string{
+			GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMapFrom(map[string]string{
 				"zimbraReverseProxyErrorHandlerURL": "/error-handler",
-			}},
+			})},
 		}
 		result, err := g.resolveErrorPages(context.Background())
 		if err != nil {

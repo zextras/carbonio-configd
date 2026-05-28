@@ -847,14 +847,14 @@ func TestParseLocalConfigOutput_ValidInput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cm.State.LocalConfig.Data["key1"] != "value1" {
-		t.Errorf("expected key1=value1, got %q", cm.State.LocalConfig.Data["key1"])
+	if cm.State.LocalConfig.Data.GetOr("key1", "") != "value1" {
+		t.Errorf("expected key1=value1, got %q", cm.State.LocalConfig.Data.GetOr("key1", ""))
 	}
-	if cm.State.LocalConfig.Data["key2"] != "value2" {
-		t.Errorf("expected key2=value2, got %q", cm.State.LocalConfig.Data["key2"])
+	if cm.State.LocalConfig.Data.GetOr("key2", "") != "value2" {
+		t.Errorf("expected key2=value2, got %q", cm.State.LocalConfig.Data.GetOr("key2", ""))
 	}
-	if cm.State.LocalConfig.Data["key3"] != "value with spaces" {
-		t.Errorf("expected 'value with spaces', got %q", cm.State.LocalConfig.Data["key3"])
+	if cm.State.LocalConfig.Data.GetOr("key3", "") != "value with spaces" {
+		t.Errorf("expected 'value with spaces', got %q", cm.State.LocalConfig.Data.GetOr("key3", ""))
 	}
 }
 
@@ -886,13 +886,13 @@ func TestParseLocalConfigOutput_MalformedLines(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cm.State.LocalConfig.Data["valid"] != "value" {
-		t.Errorf("expected valid=value, got %q", cm.State.LocalConfig.Data["valid"])
+	if cm.State.LocalConfig.Data.GetOr("valid", "") != "value" {
+		t.Errorf("expected valid=value, got %q", cm.State.LocalConfig.Data.GetOr("valid", ""))
 	}
-	if cm.State.LocalConfig.Data["another"] != "good" {
-		t.Errorf("expected another=good, got %q", cm.State.LocalConfig.Data["another"])
+	if cm.State.LocalConfig.Data.GetOr("another", "") != "good" {
+		t.Errorf("expected another=good, got %q", cm.State.LocalConfig.Data.GetOr("another", ""))
 	}
-	if _, ok := cm.State.LocalConfig.Data["malformed_no_equals"]; ok {
+	if _, ok := cm.State.LocalConfig.Data.Get("malformed_no_equals"); ok {
 		t.Error("malformed line should not be in data map")
 	}
 }
@@ -1129,7 +1129,7 @@ func TestDoRestarts_ConfigLookup_ServiceEnabled(t *testing.T) {
 	}
 
 	// Put "mta" into ServiceConfig — LookUpConfig("SERVICE","mta") will return "TRUE"
-	cm.State.ServerConfig.ServiceConfig["mta"] = "zimbraServiceEnabled"
+	cm.State.ServerConfig.ServiceConfig.Set("mta", "zimbraServiceEnabled")
 
 	cm.DoRestarts(ctx)
 
@@ -1192,7 +1192,7 @@ func TestDoRestarts_ConfigLookup_ServiceEnabledPath(t *testing.T) {
 	}
 
 	// "nginx" in ServiceConfig — LookUpConfig returns "TRUE" not "enabled"
-	cm.State.ServerConfig.ServiceConfig["nginx"] = "zimbraServiceEnabled"
+	cm.State.ServerConfig.ServiceConfig.Set("nginx", "zimbraServiceEnabled")
 
 	cm.DoRestarts(ctx)
 
@@ -1432,8 +1432,7 @@ func TestLoadAllConfigsWithRetry_LdapReadTimeoutParsing(t *testing.T) {
 	}
 	cm := newTestConfigManager(t)
 	// Set a valid ldap_read_timeout so the Atoi branch is taken
-	cm.State.LocalConfig.Data["ldap_read_timeout"] = "30000"
-	// Pre-cache local config so it doesn't fail on XML load
+	cm.State.LocalConfig.Data.Set("ldap_read_timeout", "30000") // Pre-cache local config so it doesn't fail on XML load
 	cm.cachedLocalConfigOutput = "ldap_read_timeout = 30000\nkey = val"
 
 	err := cm.LoadAllConfigsWithRetry(context.Background(), 1)
@@ -1685,10 +1684,9 @@ func TestRunProxygenWithConfigs_WithPopulatedState(t *testing.T) {
 	cm, _ := newTestCMWithExecutor(t)
 
 	// Populate some state to exercise the parameter-passing code paths
-	cm.State.LocalConfig.Data["key"] = "val"
-	cm.State.GlobalConfig.Data["globalKey"] = "globalVal"
-	cm.State.ServerConfig.Data["serverKey"] = "serverVal"
-
+	cm.State.LocalConfig.Data.Set("key", "val")
+	cm.State.GlobalConfig.Data.Set("globalKey", "globalVal")
+	cm.State.ServerConfig.Data.Set("serverKey", "serverVal")
 	err := cm.RunProxygenWithConfigs(context.Background())
 	// Expect error (no real proxy config), but no panic
 	if err == nil {
@@ -1721,8 +1719,7 @@ func TestDoRestarts_ConfigLookup_EnabledMatchPath(t *testing.T) {
 	}
 
 	// Set "enabled" (the exact value the closure checks) for service "proxy"
-	cm.State.ServerConfig.ServiceConfig["proxy"] = "enabled"
-
+	cm.State.ServerConfig.ServiceConfig.Set("proxy", "enabled")
 	cm.DoRestarts(ctx)
 
 	if captureMgr.lastLookup == nil {

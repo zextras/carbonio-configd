@@ -17,12 +17,11 @@ func TestFetchMiscCommand_Success(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: has retry delays")
 	}
-	commands.Initialize()
 
 	cm := newTestConfigManager(t)
 
 	mockOutput := "test output data"
-	commands.Commands["testcmd"] = commands.NewCommand(
+	cm.CommandRegistry.Commands["testcmd"] = commands.NewCommand(
 		"Test command",
 		"testcmd",
 		func(_ context.Context, args ...string) (string, error) {
@@ -45,11 +44,10 @@ func TestFetchMiscCommand_CommandNotAvailable(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: has retry delays")
 	}
-	commands.Initialize()
 
 	cm := newTestConfigManager(t)
 
-	commands.Commands = make(map[string]*commands.Command)
+	cm.CommandRegistry.Commands = make(map[string]*commands.Command)
 
 	output, err := cm.fetchMiscCommand(context.Background(), "nonexistent")
 	if err != nil {
@@ -66,11 +64,10 @@ func TestFetchMiscCommand_CommandFails(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: has retry delays")
 	}
-	commands.Initialize()
 
 	cm := newTestConfigManager(t)
 
-	commands.Commands["failcmd"] = commands.NewCommand(
+	cm.CommandRegistry.Commands["failcmd"] = commands.NewCommand(
 		"Failing command",
 		"failcmd",
 		func(_ context.Context, args ...string) (string, error) {
@@ -93,11 +90,10 @@ func TestFetchMiscCommand_EmptyOutput(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: has retry delays")
 	}
-	commands.Initialize()
 
 	cm := newTestConfigManager(t)
 
-	commands.Commands["emptycmd"] = commands.NewCommand(
+	cm.CommandRegistry.Commands["emptycmd"] = commands.NewCommand(
 		"Empty command",
 		"emptycmd",
 		func(_ context.Context, args ...string) (string, error) {
@@ -121,12 +117,11 @@ func TestLoadMiscConfig_Success(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: has retry delays")
 	}
-	commands.Initialize()
 
 	cm := newTestConfigManager(t)
 
 	// Mock all 4 misc commands
-	commands.Commands["garpu"] = commands.NewCommand(
+	cm.CommandRegistry.Commands["garpu"] = commands.NewCommand(
 		"Get all reverse proxy URLs",
 		"garpu",
 		func(_ context.Context, args ...string) (string, error) {
@@ -134,7 +129,7 @@ func TestLoadMiscConfig_Success(t *testing.T) {
 		},
 	)
 
-	commands.Commands["garpb"] = commands.NewCommand(
+	cm.CommandRegistry.Commands["garpb"] = commands.NewCommand(
 		"Get all reverse proxy backends",
 		"garpb",
 		func(_ context.Context, args ...string) (string, error) {
@@ -142,7 +137,7 @@ func TestLoadMiscConfig_Success(t *testing.T) {
 		},
 	)
 
-	commands.Commands["gamau"] = commands.NewCommand(
+	cm.CommandRegistry.Commands["gamau"] = commands.NewCommand(
 		"Get all MTA auth URLs",
 		"gamau",
 		func(_ context.Context, args ...string) (string, error) {
@@ -156,16 +151,16 @@ func TestLoadMiscConfig_Success(t *testing.T) {
 	}
 
 	// Verify all commands were executed and stored
-	if cm.State.MiscConfig.Data["garpu"] != "https://proxy1.example.com" {
-		t.Errorf("Expected garpu output to be stored, got: %s", cm.State.MiscConfig.Data["garpu"])
+	if val, ok := cm.State.MiscConfig.Data.Get("garpu"); !ok || val != "https://proxy1.example.com" {
+		t.Errorf("Expected garpu output to be stored, got: %s", val)
 	}
 
-	if cm.State.MiscConfig.Data["garpb"] != "backend1.example.com" {
-		t.Errorf("Expected garpb output to be stored, got: %s", cm.State.MiscConfig.Data["garpb"])
+	if val, ok := cm.State.MiscConfig.Data.Get("garpb"); !ok || val != "backend1.example.com" {
+		t.Errorf("Expected garpb output to be stored, got: %s", val)
 	}
 
-	if cm.State.MiscConfig.Data["gamau"] != "ldap://mta-auth.example.com" {
-		t.Errorf("Expected gamau output to be stored, got: %s", cm.State.MiscConfig.Data["gamau"])
+	if val, ok := cm.State.MiscConfig.Data.Get("gamau"); !ok || val != "ldap://mta-auth.example.com" {
+		t.Errorf("Expected gamau output to be stored, got: %s", val)
 	}
 }
 
@@ -174,12 +169,11 @@ func TestLoadMiscConfig_NoCache(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: has retry delays")
 	}
-	commands.Initialize()
 
 	cm := newTestConfigManager(t)
 	cm.Cache = nil // Disable cache
 
-	commands.Commands["garpu"] = commands.NewCommand(
+	cm.CommandRegistry.Commands["garpu"] = commands.NewCommand(
 		"Get all reverse proxy URLs",
 		"garpu",
 		func(_ context.Context, args ...string) (string, error) {
@@ -187,8 +181,8 @@ func TestLoadMiscConfig_NoCache(t *testing.T) {
 		},
 	)
 
-	commands.Commands["garpb"] = commands.NewCommand("desc", "garpb", func(_ context.Context, args ...string) (string, error) { return "", nil })
-	commands.Commands["gamau"] = commands.NewCommand("desc", "gamau", func(_ context.Context, args ...string) (string, error) { return "", nil })
+	cm.CommandRegistry.Commands["garpb"] = commands.NewCommand("desc", "garpb", func(_ context.Context, args ...string) (string, error) { return "", nil })
+	cm.CommandRegistry.Commands["gamau"] = commands.NewCommand("desc", "gamau", func(_ context.Context, args ...string) (string, error) { return "", nil })
 
 	err := cm.LoadMiscConfig(context.Background())
 	if err != nil {
@@ -196,8 +190,8 @@ func TestLoadMiscConfig_NoCache(t *testing.T) {
 	}
 
 	// Verify at least one command output was stored
-	if cm.State.MiscConfig.Data["garpu"] != "https://proxy.example.com" {
-		t.Errorf("Expected garpu output to be stored without cache, got: %s", cm.State.MiscConfig.Data["garpu"])
+	if val, ok := cm.State.MiscConfig.Data.Get("garpu"); !ok || val != "https://proxy.example.com" {
+		t.Errorf("Expected garpu output to be stored without cache, got: %s", val)
 	}
 }
 
@@ -206,12 +200,11 @@ func TestLoadMiscConfig_PartialFailure(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: has retry delays")
 	}
-	commands.Initialize()
 
 	cm := newTestConfigManager(t)
 
 	successCount := 0
-	commands.Commands["garpu"] = commands.NewCommand(
+	cm.CommandRegistry.Commands["garpu"] = commands.NewCommand(
 		"Get all reverse proxy URLs",
 		"garpu",
 		func(_ context.Context, args ...string) (string, error) {
@@ -221,7 +214,7 @@ func TestLoadMiscConfig_PartialFailure(t *testing.T) {
 	)
 
 	// These commands will fail or return empty
-	commands.Commands["garpb"] = commands.NewCommand(
+	cm.CommandRegistry.Commands["garpb"] = commands.NewCommand(
 		"desc",
 		"garpb",
 		func(_ context.Context, args ...string) (string, error) {
@@ -229,7 +222,7 @@ func TestLoadMiscConfig_PartialFailure(t *testing.T) {
 		},
 	)
 
-	commands.Commands["gamau"] = commands.NewCommand("desc", "gamau", func(_ context.Context, args ...string) (string, error) { return "", nil })
+	cm.CommandRegistry.Commands["gamau"] = commands.NewCommand("desc", "gamau", func(_ context.Context, args ...string) (string, error) { return "", nil })
 
 	err := cm.LoadMiscConfig(context.Background())
 	if err != nil {
@@ -237,12 +230,12 @@ func TestLoadMiscConfig_PartialFailure(t *testing.T) {
 	}
 
 	// Verify successful command output was stored
-	if cm.State.MiscConfig.Data["garpu"] != "https://proxy.example.com" {
-		t.Errorf("Expected garpu output to be stored, got: %s", cm.State.MiscConfig.Data["garpu"])
+	if val, ok := cm.State.MiscConfig.Data.Get("garpu"); !ok || val != "https://proxy.example.com" {
+		t.Errorf("Expected garpu output to be stored, got: %s", val)
 	}
 
 	// Verify failed commands are not in the data map or are empty
-	if val, ok := cm.State.MiscConfig.Data["garpb"]; ok && val != "" {
+	if val, ok := cm.State.MiscConfig.Data.Get("garpb"); ok && val != "" {
 		t.Errorf("Expected garpb to not be stored or be empty, got: %s", val)
 	}
 }

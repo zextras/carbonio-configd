@@ -207,14 +207,14 @@ func TestLdap_ModifyAttribute(t *testing.T) {
 			key:      keyLDAPCommonLoglevel,
 			value:    "256",
 			isMaster: true,
-			wantErr:  false,
+			wantErr:  true, // nil NativeClient → write guard error
 		},
 		{
 			name:     "valid_require_tls",
 			key:      keyLDAPCommonRequireTLS,
 			value:    "128",
 			isMaster: true,
-			wantErr:  false,
+			wantErr:  true, // nil NativeClient → write guard error
 		},
 		{
 			name:     "master_required_key_as_non_master",
@@ -267,7 +267,7 @@ func TestLdap_ModifyAttributeBatch(t *testing.T) {
 				keyLDAPCommonLoglevel: "256",
 			},
 			isMaster: true,
-			wantErr:  false,
+			wantErr:  true, // nil NativeClient → write guard error
 		},
 		{
 			name: "multiple_changes_same_dn",
@@ -277,7 +277,7 @@ func TestLdap_ModifyAttributeBatch(t *testing.T) {
 				keyLDAPCommonToolthreads: "4",
 			},
 			isMaster: true,
-			wantErr:  false,
+			wantErr:  true, // nil NativeClient → write guard error
 		},
 		{
 			name: "multiple_changes_different_dns",
@@ -287,7 +287,7 @@ func TestLdap_ModifyAttributeBatch(t *testing.T) {
 				keyLDAPDBEnvflags:     "writemap",
 			},
 			isMaster: true,
-			wantErr:  false,
+			wantErr:  true, // nil NativeClient → write guard error
 		},
 		{
 			name: "batch_with_master_only_keys_as_master",
@@ -297,7 +297,7 @@ func TestLdap_ModifyAttributeBatch(t *testing.T) {
 				keyLDAPAccesslogMaxsize:          "85899345920",
 			},
 			isMaster: true,
-			wantErr:  false,
+			wantErr:  true, // nil NativeClient → write guard error
 		},
 		{
 			name: "batch_with_master_only_keys_as_non_master",
@@ -324,7 +324,7 @@ func TestLdap_ModifyAttributeBatch(t *testing.T) {
 				keyLDAPCommonLoglevel:   "256",
 			},
 			isMaster: true,
-			wantErr:  false,
+			wantErr:  true, // nil NativeClient → write guard error
 		},
 	}
 
@@ -345,7 +345,8 @@ func TestLdap_ModifyAttributeBatch(t *testing.T) {
 }
 
 func TestLdap_ModifyAttributeBatch_DNGrouping(t *testing.T) {
-	// This test verifies that changes are properly grouped by DN
+	// This test verifies that DN grouping reaches the write stage and errors
+	// when the native client is not initialized (nil NativeClient guard).
 	cfg := &config.Config{
 		LdapIsMaster: true,
 	}
@@ -361,16 +362,17 @@ func TestLdap_ModifyAttributeBatch_DNGrouping(t *testing.T) {
 	}
 
 	err := l.ModifyAttributeBatch(context.Background(), changes)
-	if err != nil {
-		t.Fatalf("ModifyAttributeBatch() unexpected error: %v", err)
+	if err == nil {
+		t.Fatalf("ModifyAttributeBatch() expected error due to nil NativeClient, got nil")
 	}
 
-	// The test passes if no error is returned, indicating that DN grouping
-	// and batch execution completed successfully
+	// The test verifies that DN grouping completes successfully and the error
+	// occurs at the write stage (nil NativeClient guard in executeBatchModifyInternal)
 }
 
 func TestLdap_ModifyAttributeBatch_NonMaster_DNAdjustment(t *testing.T) {
-	// Test that ldap_db_ keys adjust DN when not master in batch operations
+	// Test that ldap_db_ keys adjust DN when not master in batch operations,
+	// and that the nil NativeClient guard errors after successful DN adjustment.
 	cfg := &config.Config{
 		LdapIsMaster: false,
 	}
@@ -383,12 +385,13 @@ func TestLdap_ModifyAttributeBatch_NonMaster_DNAdjustment(t *testing.T) {
 	}
 
 	err := l.ModifyAttributeBatch(context.Background(), changes)
-	if err != nil {
-		t.Fatalf("ModifyAttributeBatch() unexpected error: %v", err)
+	if err == nil {
+		t.Fatalf("ModifyAttributeBatch() expected error due to nil NativeClient, got nil")
 	}
 
-	// The test verifies that non-master DN adjustment works in batch mode
-	// (ldap_db_ keys should use olcDatabase={2}mdb,cn=config instead of {3})
+	// The test verifies that DN adjustment (ldap_db_ keys use olcDatabase={2}mdb,cn=config
+	// instead of {3} when not master) completes successfully, but the error occurs at the
+	// write stage (nil NativeClient guard in executeBatchModifyInternal)
 }
 
 func TestLdap_RetryConfiguration(t *testing.T) {
@@ -591,4 +594,128 @@ func indexString(s, substr string) int {
 		}
 	}
 	return -1
+}
+
+// TestLdap_SetNativeClient tests SetNativeClient method
+func TestLdap_SetNativeClient(t *testing.T) {
+	cfg := &config.Config{}
+	l := NewLdap(context.Background(), cfg)
+
+	// Test setting a non-nil client (we'll use a zero-value Client)
+	client := &Client{}
+	l.SetNativeClient(context.Background(), client)
+	if l.NativeClient != client {
+		t.Errorf("SetNativeClient() failed to set client")
+	}
+
+	// Test clearing the client (setting to nil)
+	l.SetNativeClient(context.Background(), nil)
+	if l.NativeClient != nil {
+		t.Errorf("SetNativeClient() failed to clear client")
+	}
+}
+
+// TestLdap_ModifyAttribute_WithNativeClient covers the path where the nil-client
+// guard passes (NativeClient set) and execution reaches the withRetry/native
+// modify stage. An empty *Client has no configured URLs, so connect() fails fast
+// without any network I/O. MaxRetries is set to 0 to keep the test -short safe.
+func TestLdap_ModifyAttribute_WithNativeClient(t *testing.T) {
+	cfg := &config.Config{LdapIsMaster: true}
+	l := NewLdap(context.Background(), cfg)
+	l.IsMaster = true
+	l.MaxRetries = 0 // avoid retry sleeps
+	l.NativeClient = &Client{}
+
+	// Valid key resolves; native modify fails fast (no URLs to dial).
+	err := l.ModifyAttribute(context.Background(), keyLDAPCommonLoglevel, "256")
+	if err == nil {
+		t.Fatal("ModifyAttribute() expected error from native client with no URLs, got nil")
+	}
+}
+
+// TestLdap_ModifyAttribute_LookupErrorBeforeClient verifies an unknown key errors
+// during lookup before the native client guard is reached.
+func TestLdap_ModifyAttribute_LookupErrorBeforeClient(t *testing.T) {
+	cfg := &config.Config{LdapIsMaster: true}
+	l := NewLdap(context.Background(), cfg)
+	l.IsMaster = true
+	l.NativeClient = &Client{} // present, but lookup should fail first
+
+	err := l.ModifyAttribute(context.Background(), "totally_unknown_key", "x")
+	if err == nil {
+		t.Fatal("ModifyAttribute() expected lookup error for unknown key, got nil")
+	}
+	if !errs.IsConfigError(err) {
+		t.Errorf("ModifyAttribute() error = %v, want a config (lookup) error", err)
+	}
+}
+
+// TestLdap_ModifyAttributeBatch_Empty verifies the empty-changes early return.
+func TestLdap_ModifyAttributeBatch_Empty(t *testing.T) {
+	cfg := &config.Config{LdapIsMaster: true}
+	l := NewLdap(context.Background(), cfg)
+
+	if err := l.ModifyAttributeBatch(context.Background(), map[string]string{}); err != nil {
+		t.Errorf("ModifyAttributeBatch() with empty map error = %v, want nil", err)
+	}
+	if err := l.ModifyAttributeBatch(context.Background(), nil); err != nil {
+		t.Errorf("ModifyAttributeBatch() with nil map error = %v, want nil", err)
+	}
+}
+
+// TestLdap_ModifyAttributeBatch_NilClient verifies the fail-fast nil-client guard.
+func TestLdap_ModifyAttributeBatch_NilClient(t *testing.T) {
+	cfg := &config.Config{LdapIsMaster: true}
+	l := NewLdap(context.Background(), cfg)
+	l.IsMaster = true
+
+	err := l.ModifyAttributeBatch(context.Background(), map[string]string{
+		keyLDAPCommonLoglevel: "256",
+	})
+	if err == nil {
+		t.Fatal("ModifyAttributeBatch() expected nil-client guard error, got nil")
+	}
+	if !contains(err.Error(), "native client not initialized") {
+		t.Errorf("ModifyAttributeBatch() error = %v, want 'native client not initialized'", err)
+	}
+}
+
+// TestLdap_ModifyAttributeBatch_LookupError verifies an unknown key in the batch
+// surfaces an error during DN grouping (after the nil-client guard passes).
+func TestLdap_ModifyAttributeBatch_LookupError(t *testing.T) {
+	cfg := &config.Config{LdapIsMaster: true}
+	l := NewLdap(context.Background(), cfg)
+	l.IsMaster = true
+	l.MaxRetries = 0
+	l.NativeClient = &Client{}
+
+	err := l.ModifyAttributeBatch(context.Background(), map[string]string{
+		"unknown_ldap_key": "value",
+	})
+	if err == nil {
+		t.Fatal("ModifyAttributeBatch() expected lookup error for unknown key, got nil")
+	}
+	if !errs.IsConfigError(err) {
+		t.Errorf("ModifyAttributeBatch() error = %v, want a config (lookup) error", err)
+	}
+}
+
+// TestLdap_ModifyAttributeBatch_WithNativeClient covers DN grouping and the
+// per-DN retry wrapper reaching executeBatchModifyInternal. The empty *Client
+// fails fast (no URLs), and MaxRetries=0 keeps it -short safe.
+func TestLdap_ModifyAttributeBatch_WithNativeClient(t *testing.T) {
+	cfg := &config.Config{LdapIsMaster: true}
+	l := NewLdap(context.Background(), cfg)
+	l.IsMaster = true
+	l.MaxRetries = 0
+	l.NativeClient = &Client{}
+
+	// Two DNs (cn=config and olcDatabase={3}mdb,cn=config) exercise grouping.
+	err := l.ModifyAttributeBatch(context.Background(), map[string]string{
+		keyLDAPCommonLoglevel: "256",
+		keyLDAPDBMaxsize:      "85899345920",
+	})
+	if err == nil {
+		t.Fatal("ModifyAttributeBatch() expected native modify error with no URLs, got nil")
+	}
 }

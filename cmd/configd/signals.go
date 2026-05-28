@@ -43,6 +43,8 @@ func SetupSignalHandler(
 	logger.InfoContext(ctx, "Signal handler registered for: SIGINT, SIGTERM, SIGHUP, SIGUSR2, SIGALRM, SIGCHLD")
 
 	go func() {
+		defer recoverGoroutine(ctx, "signal-handler")
+
 		logger.DebugContext(ctx, "Signal handler goroutine started")
 
 		for sig := range signals {

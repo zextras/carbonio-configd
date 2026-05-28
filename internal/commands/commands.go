@@ -25,6 +25,10 @@ import (
 	"github.com/zextras/carbonio-configd/internal/proxy"
 )
 
+// defaultZextrasHome is the fallback installation root when neither
+// ZEXTRAS_HOME nor CARBONIO_BASE_DIR is set.
+const defaultZextrasHome = "/opt/zextras"
+
 // Configuration key constants
 const (
 	zimbraServiceHostname = "zimbraServiceHostname"
@@ -206,7 +210,7 @@ func (c *Command) runBinaryWithContext(ctx context.Context, args []string) (exit
 }
 
 func (c *Command) String() string {
-	return fmt.Sprintf("%s %s(%v)", c.Name, c.Name, c.Args)
+	return fmt.Sprintf("%s(%v)", c.Name, c.Args)
 }
 
 // --- Dummy functions for provisioning commands (to be replaced with actual LDAP/API calls) ---
@@ -461,10 +465,9 @@ func proxygen(ctx context.Context, args ...string) (string, error) {
 	logger.DebugContext(ctx, "Running Go proxy configuration generator",
 		"hostname", hostname)
 
-	// Determine base directory
 	baseDir := os.Getenv("ZEXTRAS_HOME")
 	if baseDir == "" {
-		baseDir = "/opt/zextras"
+		baseDir = defaultZextrasHome
 	}
 
 	// Create base configuration
@@ -519,48 +522,58 @@ func proxygen(ctx context.Context, args ...string) (string, error) {
 
 // postconfExec executes postconf with proper argument handling.
 // Args format: "key=value" (the caller should format as key=value without extra quotes)
-func postconfExec(ctx context.Context, args ...string) (string, error) {
-	if len(args) == 0 {
-		return "", fmt.Errorf("postconf requires arguments")
+func makePostconfExec(postconfSpec string) func(ctx context.Context, args ...string) (string, error) {
+	return func(ctx context.Context, args ...string) (string, error) {
+		if len(args) == 0 {
+			return "", fmt.Errorf("postconf requires arguments")
+		}
+
+		arg := args[0]
+
+		fields := strings.Fields(postconfSpec)
+		if len(fields) == 0 {
+			return "", fmt.Errorf("postconf executable path not configured")
+		}
+
+		cmd := exec.CommandContext(ctx, fields[0], "-e", arg)
+
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return string(output), fmt.Errorf("postconf command failed: %w (output: %s)", err, string(output))
+		}
+
+		return string(output), nil
 	}
-
-	arg := args[0]
-
-	postconfPath := strings.Fields(Exe["POSTCONF"])[0]
-	cmd := exec.CommandContext(ctx, postconfPath, "-e", arg)
-
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return string(output), fmt.Errorf("postconf command failed: %w (output: %s)", err, string(output))
-	}
-
-	return string(output), nil
 }
 
-// Exe map mirrors the exe dictionary in jylibs/commands.py
-var Exe map[string]string
-
-// Commands map mirrors the commands dictionary in jylibs/commands.py
-var Commands map[string]*Command
-
-var (
+// Registry holds command executables and command definitions for a specific ZEXTRAS_HOME.
+// It replaces the former package-level globals (Exe, Commands, initOnce) to enable
+// per-instance initialization and path overrides.
+type Registry struct {
+	Exe      map[string]string
+	Commands map[string]*Command
 	initOnce sync.Once
-)
+}
 
-// Initialize sets up executable paths and commands based on ZEXTRAS_HOME environment variable.
-// This function is safe to call multiple times (initialization happens only once).
-// LDAP-dependent commands (gacf, gamau, garpb, garpu, gs, gs:enabled) are not
-// registered here — call RegisterLDAPCommands with a CommandExecutor to register them.
-func Initialize() {
-	initOnce.Do(func() {
-		baseDir := os.Getenv("ZEXTRAS_HOME")
+// NewRegistry creates a new Registry with executable paths and commands initialized
+// based on the provided zextrasHome directory. If zextrasHome is empty, defaults to
+// "/opt/zextras". The registry is safe for concurrent use after construction.
+func NewRegistry(zextrasHome string) *Registry {
+	r := &Registry{
+		Exe:      make(map[string]string),
+		Commands: make(map[string]*Command),
+	}
+
+	// Initialize once per instance
+	r.initOnce.Do(func() {
+		baseDir := zextrasHome
 		if baseDir == "" {
-			baseDir = "/opt/zextras"
+			baseDir = defaultZextrasHome
 		}
 
 		binDir := baseDir + "/bin"
 
-		Exe = map[string]string{
+		r.Exe = map[string]string{
 			"AMAVIS":    binDir + "/zmamavisdctl",
 			"ANTISPAM":  binDir + "/zmantispamctl",
 			"ANTIVIRUS": binDir + "/zmclamdctl",
@@ -579,43 +592,45 @@ func Initialize() {
 			"STATS":     binDir + "/zmstatctl",
 		}
 
-		Commands = map[string]*Command{
-			cmdAmavis:      {Desc: cmdAmavis, Name: cmdAmavis, Binary: Exe["AMAVIS"]},
-			cmdAntispam:    {Desc: cmdAntispam, Name: cmdAntispam, Binary: Exe["ANTISPAM"]},
-			cmdAntivirus:   {Desc: cmdAntivirus, Name: cmdAntivirus, Binary: Exe["ANTIVIRUS"]},
-			cmdCBPolicyd:   {Desc: cmdCBPolicyd, Name: cmdCBPolicyd, Binary: Exe["CBPOLICYD"]},
-			cmdLDAP:        {Desc: cmdLDAP, Name: cmdLDAP, Binary: Exe["LDAP"]},
+		r.Commands = map[string]*Command{
+			cmdAmavis:      {Desc: cmdAmavis, Name: cmdAmavis, Binary: r.Exe["AMAVIS"]},
+			cmdAntispam:    {Desc: cmdAntispam, Name: cmdAntispam, Binary: r.Exe["ANTISPAM"]},
+			cmdAntivirus:   {Desc: cmdAntivirus, Name: cmdAntivirus, Binary: r.Exe["ANTIVIRUS"]},
+			cmdCBPolicyd:   {Desc: cmdCBPolicyd, Name: cmdCBPolicyd, Binary: r.Exe["CBPOLICYD"]},
+			cmdLDAP:        {Desc: cmdLDAP, Name: cmdLDAP, Binary: r.Exe["LDAP"]},
 			cmdLocalconfig: {Desc: "Local server configuration", Name: cmdLocalconfig, Func: getlocal},
-			cmdMailbox:     {Desc: cmdMailbox, Name: cmdMailbox, Binary: Exe["MAILBOX"]},
-			cmdMailboxd:    {Desc: cmdMailboxd, Name: cmdMailboxd, Binary: Exe["MAILBOXD"]},
-			cmdMemcached:   {Desc: cmdMemcached, Name: cmdMemcached, Binary: Exe["MEMCACHED"]},
-			cmdMTA:         {Desc: cmdMTA, Name: cmdMTA, Binary: Exe["MTA"]},
-			cmdOpenDKIM:    {Desc: cmdOpenDKIM, Name: cmdOpenDKIM, Binary: Exe["OPENDKIM"]},
-			cmdPostconf:    {Desc: cmdPostconf, Name: cmdPostconf, Func: postconfExec},
-			cmdPostconfd:   {Desc: cmdPostconfd, Name: cmdPostconfd, Binary: Exe["POSTCONFD"]},
-			cmdProxy:       {Desc: cmdProxy, Name: cmdProxy, Binary: Exe["PROXY"]},
+			cmdMailbox:     {Desc: cmdMailbox, Name: cmdMailbox, Binary: r.Exe["MAILBOX"]},
+			cmdMailboxd:    {Desc: cmdMailboxd, Name: cmdMailboxd, Binary: r.Exe["MAILBOXD"]},
+			cmdMemcached:   {Desc: cmdMemcached, Name: cmdMemcached, Binary: r.Exe["MEMCACHED"]},
+			cmdMTA:         {Desc: cmdMTA, Name: cmdMTA, Binary: r.Exe["MTA"]},
+			cmdOpenDKIM:    {Desc: cmdOpenDKIM, Name: cmdOpenDKIM, Binary: r.Exe["OPENDKIM"]},
+			cmdPostconf:    {Desc: cmdPostconf, Name: cmdPostconf, Func: makePostconfExec(r.Exe["POSTCONF"])},
+			cmdPostconfd:   {Desc: cmdPostconfd, Name: cmdPostconfd, Binary: r.Exe["POSTCONFD"]},
+			cmdProxy:       {Desc: cmdProxy, Name: cmdProxy, Binary: r.Exe["PROXY"]},
 			cmdProxygen:    {Desc: cmdProxygen, Name: cmdProxygen, Func: proxygen},
-			cmdSASL:        {Desc: cmdSASL, Name: cmdSASL, Binary: Exe["SASL"]},
-			cmdService:     {Desc: cmdService, Name: cmdService, Binary: Exe["SERVICE"]},
-			cmdStats:       {Desc: cmdStats, Name: cmdStats, Binary: Exe["STATS"]},
+			cmdSASL:        {Desc: cmdSASL, Name: cmdSASL, Binary: r.Exe["SASL"]},
+			cmdService:     {Desc: cmdService, Name: cmdService, Binary: r.Exe["SERVICE"]},
+			cmdStats:       {Desc: cmdStats, Name: cmdStats, Binary: r.Exe["STATS"]},
 		}
 	})
+
+	return r
 }
 
 // RegisterLDAPCommands registers LDAP-dependent commands using the given CommandExecutor.
-// This must be called after Initialize() and should be called by ConfigManager once it
-// has created an LDAP client. It can be called multiple times to update the executor.
-func RegisterLDAPCommands(e *CommandExecutor) {
-	if Commands == nil {
-		Commands = make(map[string]*Command)
+// This must be called after the Registry is created and should be called by ConfigManager
+// once it has created an LDAP client. It can be called multiple times to update the executor.
+func (r *Registry) RegisterLDAPCommands(e *CommandExecutor) {
+	if r.Commands == nil {
+		r.Commands = make(map[string]*Command)
 	}
 
-	Commands[cmdGACF] = NewCommand("Global system configuration", cmdGACF, e.getglobal)
-	Commands[cmdGAMAU] = NewCommand("All MTA Authentication Target URLs", "getAllMtaAuthURLs", e.gamau)
-	Commands[cmdGARPB] = NewCommand("All Reverse Proxy Backends", "getAllReverseProxyBackends", e.garpb)
-	Commands[cmdGARPU] = NewCommand("All Reverse Proxy URLs", "getAllReverseProxyURLs", e.garpu)
-	Commands[cmdGS] = NewCommand("Configuration for server", cmdGS, e.getserver)
-	Commands[cmdGSEnabled] = NewCommand("Enabled Services for host", cmdGSEnabled, e.getserverenabled)
+	r.Commands[cmdGACF] = NewCommand("Global system configuration", cmdGACF, e.getglobal)
+	r.Commands[cmdGAMAU] = NewCommand("All MTA Authentication Target URLs", "getAllMtaAuthURLs", e.gamau)
+	r.Commands[cmdGARPB] = NewCommand("All Reverse Proxy Backends", "getAllReverseProxyBackends", e.garpb)
+	r.Commands[cmdGARPU] = NewCommand("All Reverse Proxy URLs", "getAllReverseProxyURLs", e.garpu)
+	r.Commands[cmdGS] = NewCommand("Configuration for server", cmdGS, e.getserver)
+	r.Commands[cmdGSEnabled] = NewCommand("Enabled Services for host", cmdGSEnabled, e.getserverenabled)
 }
 
 // ResetProvisioning clears cached provisioning data for the specified type.

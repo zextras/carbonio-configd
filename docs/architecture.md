@@ -100,15 +100,17 @@ Four goroutines run concurrently, one per config source:
 | Goroutine name | Function | What it loads |
 |---|---|---|
 | `lc` | `LoadLocalConfig` | `localconfig.xml` via the Go native reader |
-| `gc` | `LoadGlobalConfig` | Global config attributes via LDAP `zmprov gacf` |
+| `gc` | `LoadGlobalConfig` | Global config attributes via native LDAP client |
 | `mc` | `LoadMiscConfig` | Miscellaneous service states (SERVICE_* keys) |
-| `sc` | `LoadServerConfig` | Per-server attributes via LDAP `zmprov gs` |
+| `sc` | `LoadServerConfig` | Per-server attributes via native LDAP client |
 
 **Timeout**: derived from `ldap_read_timeout` in localconfig (default `60000` ms → 60 s).
 The implementation uses a two-stage timeout matching the original Python behaviour: if the
 first timeout fires, the loop waits another full interval before giving up. If all four
 goroutines finish before the timeout, the loop continues immediately.
 
-Results are merged into `state.State` under per-field mutexes. The MTA config
-(`ParseMtaConfig`) is loaded after all four complete, because it reads from
-`conf/zmconfigd.cf` which may depend on the outputs of the loaders above.
+Results are merged into `state.State`, which uses a single `sync.Mutex` protecting
+only bookkeeping fields (ChangedKeys, LastVals, action maps); the config Data maps
+are currently unsynchronized and exposed raw (to be addressed in future work).
+The MTA config (`ParseMtaConfig`) is loaded after all four complete, because it reads
+from `conf/zmconfigd.cf` which may depend on the outputs of the loaders above.

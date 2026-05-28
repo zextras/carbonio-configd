@@ -7,6 +7,8 @@ package configmgr
 import (
 	"strings"
 	"testing"
+
+	"github.com/zextras/carbonio-configd/internal/config"
 )
 
 // TestProcessIPModeConfig tests IP mode configuration processing
@@ -76,16 +78,18 @@ func TestProcessIPModeConfig(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cm := newTestConfigManager(t)
 
-			cm.State.ServerConfig.Data = map[string]string{
+			data := map[string]string{
 				"zimbraIPMode": tt.ipMode,
 			}
+			cm.State.ServerConfig.Data = config.NewConfigMapFrom(data)
 
-			processIPModeConfigForData(cm.State.ServerConfig.Data)
+			processIPModeConfigForData(data)
+			cm.State.ServerConfig.Data.Replace(data)
 
 			for _, key := range tt.checkKeys {
-				if cm.State.ServerConfig.Data[key] != tt.expected[key] {
+				if v, _ := cm.State.ServerConfig.Data.Get(key); v != tt.expected[key] {
 					t.Errorf("Key %s: expected '%s', got '%s'",
-						key, tt.expected[key], cm.State.ServerConfig.Data[key])
+						key, tt.expected[key], v)
 				}
 			}
 		})
@@ -99,14 +103,14 @@ func TestProcessIPModeConfig_NoIPMode(t *testing.T) {
 	}
 	cm := newTestConfigManager(t)
 
-	cm.State.ServerConfig.Data = map[string]string{
-		"someKey": "someValue",
-	}
+	data := map[string]string{"someKey": "someValue"}
+	cm.State.ServerConfig.Data = config.NewConfigMapFrom(data)
 
-	processIPModeConfigForData(cm.State.ServerConfig.Data)
+	processIPModeConfigForData(data)
+	cm.State.ServerConfig.Data.Replace(data)
 
 	// Should not add any IP mode related keys
-	if _, ok := cm.State.ServerConfig.Data["zimbraPostconfProtocol"]; ok {
+	if _, ok := cm.State.ServerConfig.Data.Get("zimbraPostconfProtocol"); ok {
 		t.Error("Expected no zimbraPostconfProtocol when IP mode not set")
 	}
 }
@@ -454,14 +458,16 @@ func TestProcessMilterConfig(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cm := newTestConfigManager(t)
 
-			cm.State.ServerConfig.Data = make(map[string]string)
+			data := make(map[string]string, len(tt.input))
 			for k, v := range tt.input {
-				cm.State.ServerConfig.Data[k] = v
+				data[k] = v
 			}
+			cm.State.ServerConfig.Data = config.NewConfigMapFrom(data)
 
-			processMilterConfigForData(cm.State.ServerConfig.Data)
+			processMilterConfigForData(data)
+			cm.State.ServerConfig.Data.Replace(data)
 
-			result := cm.State.ServerConfig.Data["zimbraMtaSmtpdMilters"]
+			result := cm.State.ServerConfig.Data.GetOr("zimbraMtaSmtpdMilters", "")
 			if result != tt.expected {
 				t.Errorf("Expected zimbraMtaSmtpdMilters '%s', got '%s'", tt.expected, result)
 			}

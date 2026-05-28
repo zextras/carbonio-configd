@@ -93,9 +93,13 @@ func (g *Generator) collectVirtualIPAddresses(ctx context.Context, fallback stri
 // queryDomains fetches domains from LDAP, using the cache when available.
 // Returns (domains, true) on success or (nil, false) when the caller should fall back.
 func (g *Generator) queryDomains(ctx context.Context, _ string) ([]ldap.Domain, bool) {
+	if g.LdapClient == nil || g.LdapClient.NativeClient == nil {
+		return nil, false
+	}
+
 	if g.Cache != nil {
 		cachedData, err := g.Cache.GetCachedConfig(ctx, "ldap:domains", func() (any, error) {
-			return g.LdapClient.QueryDomains(ctx)
+			return g.LdapClient.NativeClient.QueryDomains(ctx)
 		})
 		if err != nil {
 			return nil, false //nolint:nilerr // Intentional: fallback to placeholder on LDAP failure
@@ -106,7 +110,7 @@ func (g *Generator) queryDomains(ctx context.Context, _ string) ([]ldap.Domain, 
 		return domains, ok
 	}
 
-	domains, err := g.LdapClient.QueryDomains(ctx)
+	domains, err := g.LdapClient.NativeClient.QueryDomains(ctx)
 	if err != nil {
 		return nil, false //nolint:nilerr // Intentional: fallback to placeholder on LDAP failure
 	}

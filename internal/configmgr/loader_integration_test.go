@@ -85,8 +85,8 @@ func TestConfigLoader_TimeoutHandling(t *testing.T) {
 	appState := state.NewState()
 
 	// Set a very short timeout for testing
-	appState.LocalConfig.Data = make(map[string]string)
-	appState.LocalConfig.Data["ldap_read_timeout"] = "100" // 100ms
+	appState.LocalConfig.Data = config.NewConfigMap()
+	appState.LocalConfig.Data.Set("ldap_read_timeout", "100") // 100ms
 
 	ldapClient := ldap.NewLdap(context.Background(), mainCfg)
 	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil)
@@ -161,7 +161,7 @@ func TestConfigLoader_CompareWithReference(t *testing.T) {
 	})
 
 	t.Run("Compare MiscConfig", func(t *testing.T) {
-		compareConfigs(t, "MiscConfig", reference.MiscConfig, cm.State.MiscConfig.Data)
+		compareConfigs(t, "MiscConfig", reference.MiscConfig, cm.State.MiscConfig.Data.Snapshot())
 	})
 }
 
@@ -223,7 +223,7 @@ func TestConfigLoader_PostProcessing(t *testing.T) {
 
 	t.Run("SSL protocol sorting", func(t *testing.T) {
 		// Simulate unsorted SSL protocols
-		cm.State.GlobalConfig.Data = make(map[string]string)
+		cm.State.GlobalConfig.Data = config.NewConfigMap()
 		cm.State.GlobalConfig.Data["zimbraMailboxdSSLProtocols"] = "TLSv1.3 TLSv1 TLSv1.2"
 
 		processSortedSSLConfigForTarget(cm.State.GlobalConfig.Data, "zimbraMailboxdSSLProtocols")
@@ -244,18 +244,18 @@ func TestConfigLoader_PostProcessing(t *testing.T) {
 
 	t.Run("RBL extraction", func(t *testing.T) {
 		// Simulate MTA restriction with RBL entries
-		cm.State.ServerConfig.Data = make(map[string]string)
-		cm.State.ServerConfig.Data["zimbraMtaRestriction"] = "reject_rbl_client zen.spamhaus.org reject_rbl_client bl.spamcop.net permit"
+		cm.State.ServerConfig.Data = config.NewConfigMap()
+		cm.State.ServerConfig.Data.Set("zimbraMtaRestriction", "reject_rbl_client zen.spamhaus.org reject_rbl_client bl.spamcop.net permit")
 
 		processMtaRestrictionRBLsForData(cm.State.ServerConfig.Data)
 
-		rbls := cm.State.ServerConfig.Data["zimbraMtaRestrictionRBLs"]
+		rbls := cm.State.ServerConfig.Data.GetOr("zimbraMtaRestrictionRBLs", "")
 		if rbls != "zen.spamhaus.org, bl.spamcop.net" {
 			t.Errorf("RBL extraction failed: got '%s'", rbls)
 		}
 
 		// Check that RBL entries were removed from restriction
-		restriction := cm.State.ServerConfig.Data["zimbraMtaRestriction"]
+		restriction := cm.State.ServerConfig.Data.GetOr("zimbraMtaRestriction", "")
 		if restriction != "permit" {
 			t.Errorf("RBL removal failed: got '%s'", restriction)
 		}
@@ -288,13 +288,13 @@ func TestConfigLoader_PostProcessing(t *testing.T) {
 
 		for _, tc := range testCases {
 			t.Run(tc.mode, func(t *testing.T) {
-				cm.State.ServerConfig.Data = make(map[string]string)
-				cm.State.ServerConfig.Data["zimbraIPMode"] = tc.mode
+				cm.State.ServerConfig.Data = config.NewConfigMap()
+				cm.State.ServerConfig.Data.Set("zimbraIPMode", tc.mode)
 
 				cm.processIPModeConfig()
 
 				for key, expectedVal := range tc.expected {
-					actualVal := cm.State.ServerConfig.Data[key]
+					actualVal := cm.State.ServerConfig.Data.Get(key)
 					if actualVal != expectedVal {
 						t.Errorf("IP mode config for %s: expected '%s', got '%s'", key, expectedVal, actualVal)
 					}
@@ -304,11 +304,11 @@ func TestConfigLoader_PostProcessing(t *testing.T) {
 	})
 
 	t.Run("OpenDKIM URI derivation", func(t *testing.T) {
-		cm.State.LocalConfig.Data = make(map[string]string)
-		cm.State.LocalConfig.Data["ldap_url"] = "ldap://ldap1.example.com:389 ldap://ldap2.example.com:389"
+		cm.State.LocalConfig.Data = config.NewConfigMap()
+		cm.State.LocalConfig.Data.Set("ldap_url", "ldap://ldap1.example.com:389 ldap://ldap2.example.com:389")
 
 		// Re-run the LocalConfig post-processing logic (simplified)
-		ldapURL := cm.State.LocalConfig.Data["ldap_url"]
+		ldapURL := cm.State.LocalConfig.Data.GetOr("ldap_url", "")
 		urls := []string{"ldap://ldap1.example.com:389", "ldap://ldap2.example.com:389"}
 
 		var signingTableURIs []string

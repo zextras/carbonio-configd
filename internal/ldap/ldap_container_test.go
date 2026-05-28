@@ -1,3 +1,6 @@
+//go:build integration
+// +build integration
+
 // SPDX-FileCopyrightText: 2026 Zextras <https://www.zextras.com>
 //
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -7,6 +10,8 @@ package ldap
 import (
 	"context"
 	"testing"
+
+	"github.com/zextras/carbonio-configd/internal/config"
 )
 
 func newTestLdapMgr(t *testing.T) (*Ldap, *Client) {
@@ -38,7 +43,7 @@ func TestContainer_SetNativeClient(t *testing.T) {
 func TestContainer_QueryDomains(t *testing.T) {
 	mgr, _ := newTestLdapMgr(t)
 
-	domains, err := mgr.QueryDomains(context.Background())
+	domains, err := mgr.NativeClient.QueryDomains(context.Background())
 	if err != nil {
 		t.Fatalf("QueryDomains: %v", err)
 	}
@@ -52,7 +57,7 @@ func TestContainer_QueryDomains(t *testing.T) {
 func TestContainer_QueryServers_Known(t *testing.T) {
 	mgr, _ := newTestLdapMgr(t)
 
-	servers, err := mgr.QueryServers(context.Background(), "ldap")
+	servers, err := mgr.NativeClient.QueryServers(context.Background(), "ldap")
 	if err != nil {
 		t.Fatalf("QueryServers(ldap): %v", err)
 	}
@@ -70,11 +75,56 @@ func TestContainer_QueryServers_Known(t *testing.T) {
 func TestContainer_QueryServers_Unknown(t *testing.T) {
 	mgr, _ := newTestLdapMgr(t)
 
-	servers, err := mgr.QueryServers(context.Background(), "nonexistent-service-12345")
+	servers, err := mgr.NativeClient.QueryServers(context.Background(), "nonexistent-service-12345")
 	if err != nil {
 		t.Fatalf("QueryServers(nonexistent): %v", err)
 	}
 	if len(servers) != 0 {
 		t.Fatalf("QueryServers(nonexistent) returned %d servers, want 0", len(servers))
+	}
+}
+
+// TestContainer_Ldap_ModifyAttribute exercises the Ldap wrapper write path
+// end-to-end against a real LDAP container: keymap resolution -> transform ->
+// NativeClient.ModifyAttribute -> read-back -> restore. This covers the wiring
+// that unit tests can only check with a nil NativeClient.
+func TestContainer_Ldap_ModifyAttribute(t *testing.T) {
+	client := newTestClient(t)
+
+	// A non-nil config is required: ModifyAttribute reads config.LdapIsMaster.
+	mgr := NewLdap(context.Background(), &config.Config{LdapIsMaster: true})
+	mgr.IsMaster = true
+	mgr.SetNativeClient(context.Background(), client)
+
+	// keyLDAPCommonLoglevel maps to olcLogLevel on cn=config with a "%s"
+	// transform, so the wrapper resolves DN/attr from the keymap and writes
+	// through the native client.
+	const key = keyLDAPCommonLoglevel
+	const dn = ldapCnConfig
+	const attr = "olcLogLevel"
+
+	before, err := client.getEntityConfig(dn, "config", dn)
+	if err != nil {
+		t.Fatalf("read before: %v", err)
+	}
+	original := before[attr]
+
+	if err := mgr.ModifyAttribute(context.Background(), key, "256"); err != nil {
+		t.Fatalf("Ldap.ModifyAttribute: %v", err)
+	}
+
+	after, err := client.getEntityConfig(dn, "config", dn)
+	if err != nil {
+		t.Fatalf("read after: %v", err)
+	}
+	if got := after[attr]; got != "256" {
+		t.Fatalf("%s = %q, want %q", attr, got, "256")
+	}
+
+	// Restore the original value when one existed.
+	if original != "" && original != "256" {
+		if err := mgr.ModifyAttribute(context.Background(), key, original); err != nil {
+			t.Fatalf("Ldap.ModifyAttribute restore: %v", err)
+		}
 	}
 }

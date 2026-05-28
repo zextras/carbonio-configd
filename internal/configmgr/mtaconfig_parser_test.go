@@ -264,8 +264,8 @@ func TestParseMtaConfig_LDAPLookup(t *testing.T) {
 
 	cm := setupTestConfigManagerForParser(tempDir)
 	// Set up config values for lookup
-	cm.State.LocalConfig.Data["ldap_url"] = "ldap://localhost:389"
-	cm.State.LocalConfig.Data["zimbra_server_hostname"] = "mail.example.com"
+	cm.State.LocalConfig.Data.Set("ldap_url", "ldap://localhost:389")
+	cm.State.LocalConfig.Data.Set("zimbra_server_hostname", "mail.example.com")
 
 	err = cm.ParseMtaConfig(context.Background(), configFile)
 	if err != nil {
@@ -541,7 +541,7 @@ func TestParseMtaConfig_AllDirectiveTypes(t *testing.T) {
 	}
 
 	cm := setupTestConfigManagerForParser(tempDir)
-	cm.State.LocalConfig.Data["ldap_url"] = "ldap://localhost"
+	cm.State.LocalConfig.Data.Set("ldap_url", "ldap://localhost")
 
 	err = cm.ParseMtaConfig(context.Background(), configFile)
 	if err != nil {

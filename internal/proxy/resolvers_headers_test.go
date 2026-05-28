@@ -17,41 +17,41 @@ import (
 func TestResolveAddHeadersDefault(t *testing.T) {
 	tests := []struct {
 		name       string
-		globalData map[string]string
+		globalData *config.ConfigMap
 		contains   []string
 		empty      bool
 	}{
 		{
 			name:       "no headers configured returns empty string",
-			globalData: map[string]string{},
+			globalData: config.NewConfigMapFrom(map[string]string{}),
 			empty:      true,
 		},
 		{
 			name: "single response header generates add_header directive",
-			globalData: map[string]string{
+			globalData: config.NewConfigMapFrom(map[string]string{
 				"zimbraReverseProxyResponseHeaders": "X-Frame-Options: SAMEORIGIN",
-			},
+			}),
 			contains: []string{"add_header X-Frame-Options SAMEORIGIN;"},
 		},
 		{
 			name: "CSP header generates add_header directive",
-			globalData: map[string]string{
+			globalData: config.NewConfigMapFrom(map[string]string{
 				"carbonioReverseProxyResponseCSPHeader": "Content-Security-Policy: default-src 'self'",
-			},
+			}),
 			contains: []string{"add_header Content-Security-Policy default-src 'self';"},
 		},
 		{
 			name: "multiple headers with newlines",
-			globalData: map[string]string{
+			globalData: config.NewConfigMapFrom(map[string]string{
 				"zimbraReverseProxyResponseHeaders": "X-Frame-Options: SAMEORIGIN\nX-XSS-Protection: 1; mode=block",
-			},
+			}),
 			contains: []string{"add_header X-Frame-Options SAMEORIGIN;", "add_header X-XSS-Protection 1; mode=block;"},
 		},
 		{
 			name: "malformed header without colon is skipped",
-			globalData: map[string]string{
+			globalData: config.NewConfigMapFrom(map[string]string{
 				"zimbraReverseProxyResponseHeaders": "malformed-no-colon",
-			},
+			}),
 			empty: true,
 		},
 	}
@@ -88,30 +88,30 @@ func TestResolveAddHeadersDefault(t *testing.T) {
 func TestResolveProxyHTTPCompression(t *testing.T) {
 	tests := []struct {
 		name        string
-		serverData  map[string]string
+		serverData  *config.ConfigMap
 		expectEmpty bool
 		expectGzip  bool
 	}{
 		{
 			name:        "no config defaults to enabled",
-			serverData:  map[string]string{},
+			serverData:  config.NewConfigMapFrom(map[string]string{}),
 			expectEmpty: false,
 			expectGzip:  true,
 		},
 		{
 			name:        "explicitly enabled returns directives",
-			serverData:  map[string]string{"zimbraHttpCompressionEnabled": "TRUE"},
+			serverData:  config.NewConfigMapFrom(map[string]string{"zimbraHttpCompressionEnabled": "TRUE"}),
 			expectEmpty: false,
 			expectGzip:  true,
 		},
 		{
 			name:        "disabled returns empty string",
-			serverData:  map[string]string{"zimbraHttpCompressionEnabled": "FALSE"},
+			serverData:  config.NewConfigMapFrom(map[string]string{"zimbraHttpCompressionEnabled": "FALSE"}),
 			expectEmpty: true,
 		},
 		{
 			name:        "value 1 enables compression",
-			serverData:  map[string]string{"zimbraHttpCompressionEnabled": "1"},
+			serverData:  config.NewConfigMapFrom(map[string]string{"zimbraHttpCompressionEnabled": "1"}),
 			expectEmpty: false,
 			expectGzip:  true,
 		},
@@ -147,32 +147,32 @@ func TestResolveProxyHTTPCompression(t *testing.T) {
 func TestResolveHTTPEnabled(t *testing.T) {
 	tests := []struct {
 		name       string
-		globalData map[string]string
+		globalData *config.ConfigMap
 		expected   bool
 	}{
 		{
 			name:       "returns true when not configured",
-			globalData: map[string]string{},
+			globalData: config.NewConfigMapFrom(map[string]string{}),
 			expected:   true,
 		},
 		{
 			name:       "returns false when mail mode is https",
-			globalData: map[string]string{"zimbraReverseProxyMailMode": "https"},
+			globalData: config.NewConfigMapFrom(map[string]string{"zimbraReverseProxyMailMode": "https"}),
 			expected:   false,
 		},
 		{
 			name:       "returns false when mail mode is HTTPS (case insensitive)",
-			globalData: map[string]string{"zimbraReverseProxyMailMode": "HTTPS"},
+			globalData: config.NewConfigMapFrom(map[string]string{"zimbraReverseProxyMailMode": "HTTPS"}),
 			expected:   false,
 		},
 		{
 			name:       "returns true when mail mode is http",
-			globalData: map[string]string{"zimbraReverseProxyMailMode": "http"},
+			globalData: config.NewConfigMapFrom(map[string]string{"zimbraReverseProxyMailMode": "http"}),
 			expected:   true,
 		},
 		{
 			name:       "returns true when mail mode is mixed",
-			globalData: map[string]string{"zimbraReverseProxyMailMode": "mixed"},
+			globalData: config.NewConfigMapFrom(map[string]string{"zimbraReverseProxyMailMode": "mixed"}),
 			expected:   true,
 		},
 	}
@@ -197,32 +197,32 @@ func TestResolveHTTPEnabled(t *testing.T) {
 func TestResolveHTTPSEnabled(t *testing.T) {
 	tests := []struct {
 		name       string
-		globalData map[string]string
+		globalData *config.ConfigMap
 		expected   bool
 	}{
 		{
 			name:       "returns true when not configured",
-			globalData: map[string]string{},
+			globalData: config.NewConfigMapFrom(map[string]string{}),
 			expected:   true,
 		},
 		{
 			name:       "returns false when mail mode is http",
-			globalData: map[string]string{"zimbraReverseProxyMailMode": "http"},
+			globalData: config.NewConfigMapFrom(map[string]string{"zimbraReverseProxyMailMode": "http"}),
 			expected:   false,
 		},
 		{
 			name:       "returns false when mail mode is HTTP (case insensitive)",
-			globalData: map[string]string{"zimbraReverseProxyMailMode": "HTTP"},
+			globalData: config.NewConfigMapFrom(map[string]string{"zimbraReverseProxyMailMode": "HTTP"}),
 			expected:   false,
 		},
 		{
 			name:       "returns true when mail mode is https",
-			globalData: map[string]string{"zimbraReverseProxyMailMode": "https"},
+			globalData: config.NewConfigMapFrom(map[string]string{"zimbraReverseProxyMailMode": "https"}),
 			expected:   true,
 		},
 		{
 			name:       "returns true when mail mode is mixed",
-			globalData: map[string]string{"zimbraReverseProxyMailMode": "mixed"},
+			globalData: config.NewConfigMapFrom(map[string]string{"zimbraReverseProxyMailMode": "mixed"}),
 			expected:   true,
 		},
 	}

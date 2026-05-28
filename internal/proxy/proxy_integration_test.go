@@ -485,7 +485,7 @@ func TestFullStackIntegration(t *testing.T) {
 	}
 
 	localConfig := &config.LocalConfig{
-		Data: map[string]string{
+		Data: config.NewConfigMapFrom(map[string]string{
 			"zimbraIPMode":               "both",
 			"zimbraMailProxyPort":        "80",
 			"zimbraMailSSLProxyPort":     "443",
@@ -500,11 +500,11 @@ func TestFullStackIntegration(t *testing.T) {
 			"zimbraAdminPort":            "7071",
 			"zimbraAdminProxyPort":       "9071",
 			"zimbraMemcachedBindPort":    "11211",
-		},
+		}),
 	}
 
 	globalConfig := &config.GlobalConfig{
-		Data: map[string]string{
+		Data: config.NewConfigMapFrom(map[string]string{
 			"zimbraReverseProxyHttpEnabled":            "TRUE",
 			"zimbraReverseProxyMailMode":               "both",
 			"zimbraReverseProxySSLToUpstreamEnabled":   "TRUE",
@@ -515,17 +515,17 @@ func TestFullStackIntegration(t *testing.T) {
 			"zimbraMailProxyReconnect":                 "5000",
 			"zimbraReverseProxyDefaultRealm":           "carbonio.example.com",
 			"zimbraPublicServiceHostname":              "mail.carbonio.example.com",
-		},
+		}),
 	}
 
 	serverConfig := &config.ServerConfig{
-		Data: map[string]string{
+		Data: config.NewConfigMapFrom(map[string]string{
 			"zimbraServerHostname": "mail.carbonio.example.com",
 			"zimbraMailMode":       "https",
 			"zimbraMailPort":       "8080",
 			"zimbraMailSSLPort":    "8443",
 			"zimbraAdminURL":       "https://admin.carbonio.example.com:7071",
-		},
+		}),
 	}
 
 	// Create generator with full configuration using NewGenerator

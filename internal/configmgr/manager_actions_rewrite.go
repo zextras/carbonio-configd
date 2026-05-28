@@ -30,44 +30,57 @@ func (cm *ConfigManager) DoConfigRewrites(ctx context.Context) error {
 
 	errChan := make(chan error, 6) // Buffer matches goroutine count to prevent blocking
 
-	// Proxygen takes longest, do it first
-	wg.Go(func() {
-		if cm.State.CurrentActions.Proxygen {
-			logger.DebugContext(ctx, "Running proxygen")
-			// Use the new method that passes loaded configs
-			if err := cm.RunProxygenWithConfigs(ctx); err != nil {
-				errChan <- fmt.Errorf("proxygen failed: %w", err)
-			} else {
-				logger.DebugContext(ctx, "Proxygen executed successfully")
-				cm.State.Proxygen(false)
-			}
-		}
+	// Proxygen takes longest, so launch it first.
+	cm.runStep(ctx, &wg, errChan, func(ctx context.Context) error {
+		return cm.runProxygen(ctx)
 	})
-
-	wg.Go(func() {
-		cm.doRewrites(ctx)
-	})
-
-	wg.Go(func() {
-		cm.doPostconf(ctx)
-	})
-
-	wg.Go(func() {
-		cm.doPostconfd(ctx)
-	})
-
-	wg.Go(func() {
-		cm.doLdap(ctx)
-	})
-
-	wg.Go(func() {
-		cm.doMapfile(ctx)
-	})
+	cm.runStep(ctx, &wg, errChan, cm.doRewrites)
+	cm.runStep(ctx, &wg, errChan, cm.doPostconf)
+	cm.runStep(ctx, &wg, errChan, cm.doPostconfd)
+	cm.runStep(ctx, &wg, errChan, cm.doLdap)
+	cm.runStep(ctx, &wg, errChan, cm.doMapfile)
 
 	wg.Wait()
 	close(errChan)
 
-	// Collect all errors from concurrent goroutines
+	return cm.joinRewriteErrors(ctx, errChan)
+}
+
+// runStep launches step in a goroutine and forwards any error to errChan.
+func (cm *ConfigManager) runStep(
+	ctx context.Context,
+	wg *sync.WaitGroup,
+	errChan chan<- error,
+	step func(context.Context) error,
+) {
+	wg.Go(func() {
+		if err := step(ctx); err != nil {
+			errChan <- err
+		}
+	})
+}
+
+// runProxygen runs proxygen when requested, clearing the pending flag on success.
+func (cm *ConfigManager) runProxygen(ctx context.Context) error {
+	if !cm.State.CurrentActions.Proxygen {
+		return nil
+	}
+
+	logger.DebugContext(ctx, "Running proxygen")
+
+	// Use the new method that passes loaded configs.
+	if err := cm.RunProxygenWithConfigs(ctx); err != nil {
+		return fmt.Errorf("proxygen failed: %w", err)
+	}
+
+	logger.DebugContext(ctx, "Proxygen executed successfully")
+	cm.State.Proxygen(false)
+
+	return nil
+}
+
+// joinRewriteErrors drains errChan, logs each error, and joins them into one.
+func (cm *ConfigManager) joinRewriteErrors(ctx context.Context, errChan <-chan error) error {
 	var errs []error
 
 	for err := range errChan {
@@ -85,9 +98,42 @@ func (cm *ConfigManager) DoConfigRewrites(ctx context.Context) error {
 	return nil
 }
 
-func (cm *ConfigManager) doRewrites(ctx context.Context) {
+// rewriteWorker performs a single file rewrite while reporting timing under
+// debug. It exists to keep doRewrites' cognitive complexity below the lint
+// threshold by extracting the per-file goroutine body.
+func (cm *ConfigManager) rewriteWorker(
+	ctx context.Context,
+	filePath string,
+	entry config.RewriteEntry,
+	fileNum, totalFiles int,
+) error {
+	var fileStartTime time.Time
+	if logger.IsDebug(ctx) {
+		fileStartTime = time.Now()
+
+		logger.DebugContext(ctx, "Rewriting file",
+			"file_number", fileNum,
+			"total_files", totalFiles,
+			"source", filePath,
+			"target", entry.Value)
+	}
+
+	err := cm.processRewrite(ctx, filePath, entry)
+
+	if logger.IsDebug(ctx) {
+		logger.DebugContext(ctx, "Completed file rewrite",
+			"file_number", fileNum,
+			"total_files", totalFiles,
+			"target", entry.Value,
+			"duration_seconds", time.Since(fileStartTime).Seconds())
+	}
+
+	return err
+}
+
+func (cm *ConfigManager) doRewrites(ctx context.Context) error {
 	if len(cm.State.CurrentActions.Rewrites) == 0 {
-		return
+		return nil
 	}
 
 	// Snapshot rewrites to avoid concurrent map read/write with DelRewrite
@@ -100,75 +146,67 @@ func (cm *ConfigManager) doRewrites(ctx context.Context) {
 	logger.DebugContext(ctx, "Starting configuration file rewrites",
 		"total_files", totalFiles)
 
-	// Use a semaphore to limit concurrent file operations
-	// This prevents overwhelming the disk I/O system
-	maxConcurrent := 4 // Tuned for balance between parallelism and I/O contention
+	const maxConcurrent = 4 // Tuned for balance between parallelism and I/O contention
+
 	semaphore := make(chan struct{}, maxConcurrent)
 
-	var wg sync.WaitGroup
+	var (
+		wg        sync.WaitGroup
+		errMu     sync.Mutex
+		errs      []error
+		fileCount int
+	)
 
-	fileCount := 0
+	collectErr := func(err error) {
+		if err == nil {
+			return
+		}
 
-	var mu sync.Mutex // Protect fileCount for logging
+		errMu.Lock()
+
+		errs = append(errs, err)
+		errMu.Unlock()
+	}
 
 	for filePath, rewriteEntry := range rewrites {
-		// Check for cancellation before starting new goroutine
 		select {
 		case <-ctx.Done():
 			logger.InfoContext(ctx, "File rewrites cancelled by shutdown signal")
-			wg.Wait() // Wait for ongoing rewrites to complete
+			wg.Wait()
 
-			return
+			if len(errs) > 0 {
+				return errors.Join(errs...)
+			}
+
+			return nil
 		default:
 		}
 
+		fileCount++
+		fp, re, num := filePath, rewriteEntry, fileCount
+
 		wg.Add(1)
 
-		semaphore <- struct{}{} // Acquire semaphore slot
+		semaphore <- struct{}{}
 
-		// Increment file count under mutex
-		mu.Lock()
-
-		fileCount++
-		currentFileNum := fileCount
-
-		mu.Unlock()
-
-		// Process file in parallel goroutine
-		go func(fp string, re config.RewriteEntry, fileNum int) {
+		go func() {
 			defer wg.Done()
-			defer func() { <-semaphore }() // Release semaphore slot
+			defer func() { <-semaphore }()
 
-			var fileStartTime time.Time
-			if logger.IsDebug(ctx) {
-				fileStartTime = time.Now()
-
-				logger.DebugContext(ctx, "Rewriting file",
-					"file_number", fileNum,
-					"total_files", totalFiles,
-					"source", fp,
-					"target", re.Value)
-			}
-
-			cm.processRewrite(ctx, fp, re)
-
-			if logger.IsDebug(ctx) {
-				elapsed := time.Since(fileStartTime)
-				logger.DebugContext(ctx, "Completed file rewrite",
-					"file_number", fileNum,
-					"total_files", totalFiles,
-					"target", re.Value,
-					"duration_seconds", elapsed.Seconds())
-			}
-		}(filePath, rewriteEntry, currentFileNum)
+			collectErr(cm.rewriteWorker(ctx, fp, re, num, totalFiles))
+		}()
 	}
 
-	// Wait for all rewrites to complete
 	wg.Wait()
 
-	totalElapsed := time.Since(startTime)
 	logger.DebugContext(ctx, "All configuration file rewrites completed",
-		"duration_seconds", totalElapsed.Seconds())
+		"duration_seconds", time.Since(startTime).Seconds())
+
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+
+	return nil
 }
 
 // cleanupRewriteFiles cleans up temporary and source files
@@ -276,7 +314,7 @@ func rewriteAtomicCommit(ctx context.Context, tmpFileName, destPath, modeStr str
 }
 
 // processRewrite processes a single file rewrite.
-func (cm *ConfigManager) processRewrite(ctx context.Context, filePath string, rewriteEntry config.RewriteEntry) {
+func (cm *ConfigManager) processRewrite(ctx context.Context, filePath string, rewriteEntry config.RewriteEntry) error {
 	srcPath := cm.mainConfig.BaseDir + "/" + filePath
 	destPath := cm.mainConfig.BaseDir + "/" + rewriteEntry.Value
 
@@ -284,7 +322,7 @@ func (cm *ConfigManager) processRewrite(ctx context.Context, filePath string, re
 	if err != nil {
 		logger.ErrorContext(ctx, "Failed to create temporary file for rewrite", "error", err)
 
-		return
+		return fmt.Errorf("create temp file: %w", err)
 	}
 
 	tmpFileName := tmpFile.Name()
@@ -294,7 +332,7 @@ func (cm *ConfigManager) processRewrite(ctx context.Context, filePath string, re
 	if err != nil {
 		logger.ErrorContext(ctx, "Failed to transform source file", "source_path", srcPath, "error", err)
 
-		return
+		return fmt.Errorf("transform source file %s: %w", srcPath, err)
 	}
 
 	if err := tmpFile.Close(); err != nil {
@@ -304,7 +342,7 @@ func (cm *ConfigManager) processRewrite(ctx context.Context, filePath string, re
 	if err := rewriteAtomicCommit(ctx, tmpFileName, destPath, rewriteEntry.Mode); err != nil {
 		logger.ErrorContext(ctx, "Failed to commit rewrite", "dest_path", destPath, "error", err)
 
-		return
+		return fmt.Errorf("commit rewrite to %s: %w", destPath, err)
 	}
 
 	modeStr := rewriteEntry.Mode
@@ -315,6 +353,8 @@ func (cm *ConfigManager) processRewrite(ctx context.Context, filePath string, re
 	logger.DebugContext(ctx, "File rewrite completed",
 		"dest_path", destPath, "mode", modeStr, "lines_processed", lineCount)
 	cm.State.DelRewrite(filePath)
+
+	return nil
 }
 
 // resolveValueSpec parses a value specification and resolves it to a concrete value.

@@ -64,7 +64,7 @@ func TestE2E_ConfigdCycleWithProxy(t *testing.T) {
 		ServiceManager: serviceManager,
 		State:          appState,
 		ConfigLookup: func(key string) string {
-			if val, exists := appState.LocalConfig.Data[key]; exists {
+			if val, exists := appState.LocalConfig.Data.Get(key); exists {
 				return val
 			}
 			return ""
@@ -88,20 +88,20 @@ func TestE2E_ConfigdCycleWithProxy(t *testing.T) {
 		}
 
 		// Verify basic configs loaded
-		if len(appState.LocalConfig.Data) == 0 {
+		if appState.LocalConfig.Data.Len() == 0 {
 			t.Error("LocalConfig not loaded")
 		}
-		if len(appState.GlobalConfig.Data) == 0 {
+		if appState.GlobalConfig.Data.Len() == 0 {
 			t.Error("GlobalConfig not loaded")
 		}
-		if len(appState.ServerConfig.Data) == 0 {
+		if appState.ServerConfig.Data.Len() == 0 {
 			t.Error("ServerConfig not loaded")
 		}
 
 		t.Logf("✓ Loaded configs: Local=%d keys, Global=%d keys, Server=%d keys",
-			len(appState.LocalConfig.Data),
-			len(appState.GlobalConfig.Data),
-			len(appState.ServerConfig.Data))
+			appState.LocalConfig.Data.Len(),
+			appState.GlobalConfig.Data.Len(),
+			appState.ServerConfig.Data.Len())
 	})
 
 	t.Run("Parse_MTA_Config", func(t *testing.T) {
@@ -180,7 +180,7 @@ func TestE2E_ConfigdCycleWithProxy(t *testing.T) {
 		defer os.RemoveAll(tmpDir)
 
 		// Override output directory in configs
-		appState.LocalConfig.Data["zimbraProxyConfDir"] = tmpDir
+		appState.LocalConfig.Data.Set("zimbraProxyConfDir", tmpDir)
 
 		// Ensure proxygen is enabled
 		appState.CurrentActions.Proxygen = true
@@ -453,7 +453,7 @@ func TestE2E_ProxyConfigValidation(t *testing.T) {
 		defer os.RemoveAll(tmpDir)
 
 		// Override output directory in local config
-		appState.LocalConfig.Data["zimbraProxyConfDir"] = tmpDir
+		appState.LocalConfig.Data.Set("zimbraProxyConfDir", tmpDir)
 
 		// Create proxy generator with full configs
 		gen, err := proxy.LoadConfiguration(
@@ -656,9 +656,9 @@ type MockActionTrigger struct {
 	State      *state.State
 }
 
-func (t *MockActionTrigger) TriggerRewrite(configs []string) {
+func (t *MockActionTrigger) TriggerRewrite(ctx context.Context, configs []string) {
 	// Mock implementation: update state and signal reload
-	t.State.AddRequestedConfigs(context.Background(), configs)
+	t.State.AddRequestedConfigs(ctx, configs)
 	select {
 	case t.ReloadChan <- struct{}{}:
 		// Reload signal sent

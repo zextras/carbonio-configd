@@ -110,8 +110,8 @@ func TestLookupValueBranches(t *testing.T) {
 
 	t.Run("OverrideServer hits server config", func(t *testing.T) {
 		g := &Generator{
-			ServerConfig: &config.ServerConfig{Data: map[string]string{"myAttr": "42"}},
-			GlobalConfig: &config.GlobalConfig{Data: map[string]string{}},
+			ServerConfig: &config.ServerConfig{Data: config.NewConfigMapFrom(map[string]string{"myAttr": "42"})},
+			GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMap()},
 		}
 		v := &Variable{
 			Keyword:      "test",
@@ -131,8 +131,8 @@ func TestLookupValueBranches(t *testing.T) {
 
 	t.Run("OverrideServer falls back to global config", func(t *testing.T) {
 		g := &Generator{
-			ServerConfig: &config.ServerConfig{Data: map[string]string{}},
-			GlobalConfig: &config.GlobalConfig{Data: map[string]string{"myAttr": "99"}},
+			ServerConfig: &config.ServerConfig{Data: config.NewConfigMapFrom(map[string]string{})},
+			GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMapFrom(map[string]string{"myAttr": "99"})},
 		}
 		v := &Variable{
 			Keyword:      "test",
@@ -152,7 +152,7 @@ func TestLookupValueBranches(t *testing.T) {
 
 	t.Run("OverrideLocalConfig hits local config", func(t *testing.T) {
 		g := &Generator{
-			LocalConfig: &config.LocalConfig{Data: map[string]string{"localAttr": "77"}},
+			LocalConfig: &config.LocalConfig{Data: config.NewConfigMapFrom(map[string]string{"localAttr": "77"})},
 		}
 		v := &Variable{
 			Keyword:      "test",
@@ -172,7 +172,7 @@ func TestLookupValueBranches(t *testing.T) {
 
 	t.Run("OverrideLocalConfig falls through to default when attr missing", func(t *testing.T) {
 		g := &Generator{
-			LocalConfig: &config.LocalConfig{Data: map[string]string{}},
+			LocalConfig: &config.LocalConfig{Data: config.NewConfigMapFrom(map[string]string{})},
 		}
 		v := &Variable{
 			Keyword:      "test",
@@ -245,7 +245,7 @@ func TestResolveAllVariablesError(t *testing.T) {
 			},
 		},
 		GlobalConfig: &config.GlobalConfig{
-			Data: map[string]string{"badAttr": "notanumber"},
+			Data: config.NewConfigMapFrom(map[string]string{"badAttr": "notanumber"}),
 		},
 	}
 

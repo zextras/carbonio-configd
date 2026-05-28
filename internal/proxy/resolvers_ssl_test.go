@@ -18,32 +18,32 @@ import (
 func TestResolveWebSSLProtocols(t *testing.T) {
 	tests := []struct {
 		name       string
-		serverData map[string]string
+		serverData *config.ConfigMap
 		expected   []string
 	}{
 		{
 			name:       "returns defaults when attribute not set",
-			serverData: map[string]string{},
+			serverData: config.NewConfigMapFrom(map[string]string{}),
 			expected:   []string{"TLSv1.2", "TLSv1.3"},
 		},
 		{
 			name:       "returns configured space-separated protocols",
-			serverData: map[string]string{"zimbraReverseProxySSLProtocols": "TLSv1.2 TLSv1.3"},
+			serverData: config.NewConfigMapFrom(map[string]string{"zimbraReverseProxySSLProtocols": "TLSv1.2 TLSv1.3"}),
 			expected:   []string{"TLSv1.2", "TLSv1.3"},
 		},
 		{
 			name:       "returns configured comma-separated protocols",
-			serverData: map[string]string{"zimbraReverseProxySSLProtocols": "TLSv1.2,TLSv1.3"},
+			serverData: config.NewConfigMapFrom(map[string]string{"zimbraReverseProxySSLProtocols": "TLSv1.2,TLSv1.3"}),
 			expected:   []string{"TLSv1.2", "TLSv1.3"},
 		},
 		{
 			name:       "returns single protocol",
-			serverData: map[string]string{"zimbraReverseProxySSLProtocols": "TLSv1.3"},
+			serverData: config.NewConfigMapFrom(map[string]string{"zimbraReverseProxySSLProtocols": "TLSv1.3"}),
 			expected:   []string{"TLSv1.3"},
 		},
 		{
 			name:       "returns default when value is empty after filtering",
-			serverData: map[string]string{"zimbraReverseProxySSLProtocols": "   "},
+			serverData: config.NewConfigMapFrom(map[string]string{"zimbraReverseProxySSLProtocols": "   "}),
 			expected:   []string{"TLSv1.2", "TLSv1.3"},
 		},
 	}
@@ -137,7 +137,7 @@ func TestResolveDHParamEnabled(t *testing.T) {
 func TestResolveSSLSessionCacheSize(t *testing.T) {
 	t.Run("returns default 10m when not configured", func(t *testing.T) {
 		g := &Generator{
-			GlobalConfig: &config.GlobalConfig{Data: map[string]string{}},
+			GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMap()},
 		}
 		result, err := g.resolveSSLSessionCacheSize(context.Background())
 		if err != nil {
@@ -150,9 +150,9 @@ func TestResolveSSLSessionCacheSize(t *testing.T) {
 
 	t.Run("returns configured size", func(t *testing.T) {
 		g := &Generator{
-			GlobalConfig: &config.GlobalConfig{Data: map[string]string{
+			GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMapFrom(map[string]string{
 				"zimbraReverseProxySSLSessionCacheSize": "20m",
-			}},
+			})},
 		}
 		result, err := g.resolveSSLSessionCacheSize(context.Background())
 		if err != nil {
@@ -173,9 +173,9 @@ func TestResolveWebSSLDhparamEnabled(t *testing.T) {
 			t.Fatalf("failed to create test file: %v", err)
 		}
 		g := &Generator{
-			LocalConfig: &config.LocalConfig{Data: map[string]string{
+			LocalConfig: &config.LocalConfig{Data: config.NewConfigMapFrom(map[string]string{
 				"web.ssl.dhparam.file": dhPath,
-			}},
+			})},
 		}
 		result, err := g.resolveWebSSLDhparamEnabled(context.Background())
 		if err != nil {
@@ -188,9 +188,9 @@ func TestResolveWebSSLDhparamEnabled(t *testing.T) {
 
 	t.Run("returns false when file does not exist", func(t *testing.T) {
 		g := &Generator{
-			LocalConfig: &config.LocalConfig{Data: map[string]string{
+			LocalConfig: &config.LocalConfig{Data: config.NewConfigMapFrom(map[string]string{
 				"web.ssl.dhparam.file": "/tmp/nonexistent-dhparam-xyz.pem",
-			}},
+			})},
 		}
 		result, err := g.resolveWebSSLDhparamEnabled(context.Background())
 		if err != nil {
@@ -203,7 +203,7 @@ func TestResolveWebSSLDhparamEnabled(t *testing.T) {
 
 	t.Run("uses default path when LocalConfig not set", func(t *testing.T) {
 		g := &Generator{
-			LocalConfig: &config.LocalConfig{Data: map[string]string{}},
+			LocalConfig: &config.LocalConfig{Data: config.NewConfigMapFrom(map[string]string{})},
 		}
 		result, err := g.resolveWebSSLDhparamEnabled(context.Background())
 		if err != nil {

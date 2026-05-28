@@ -6,7 +6,7 @@ pkgname="carbonio-configd"
 pkgver="1.0.0"
 pkgrel="1"
 pkgdesc="High-performance configuration daemon for Carbonio with service management and legacy wrappers"
-arch=('x86_64')
+arch=('aarch64' 'x86_64')
 maintainer="Zextras <packages@zextras.com>"
 copyright=('2026, Zextras <https://www.zextras.com>')
 license=("AGPL-3.0-only")
@@ -14,10 +14,11 @@ url="https://github.com/zextras"
 section="mail"
 priority="optional"
 options=('!strip')
-makedepends=(
+# UPX is x86_64-only: host-side tool; aarch64 cross-builds get upx:arm64.
+makedepends_x86_64=(
   'upx'
 )
-makedepends__apt=(
+makedepends_x86_64__apt=(
   'upx-ucl'
 )
 depends__apt=(
@@ -83,12 +84,14 @@ _package_systemd() {
 }
 
 build() {
-  cd "$(dirname "$(find /project -name "yap.json" -print -quit)")/.."
+  cd "${repodir}"
   CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
     -o "${srcdir}/configd" ./cmd/configd/
 
-  # Compress with UPX to reduce binary size by ~70%
-  upx "${srcdir}/configd"
+  # UPX (~70% smaller) only on x86_64; skip on aarch64 cross-build.
+  if [ "${CARCH}" = "x86_64" ]; then
+    upx "${srcdir}/configd"
+  fi
 }
 
 package() {

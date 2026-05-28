@@ -50,23 +50,23 @@ type Config struct {
 
 // LocalConfig represents the local configuration settings.
 type LocalConfig struct {
-	Data map[string]string
+	Data *ConfigMap
 }
 
 // GlobalConfig represents the global configuration settings from LDAP.
 type GlobalConfig struct {
-	Data map[string]string
+	Data *ConfigMap
 }
 
 // MiscConfig represents miscellaneous configuration settings.
 type MiscConfig struct {
-	Data map[string]string
+	Data *ConfigMap
 }
 
 // ServerConfig represents server-specific configuration settings from LDAP.
 type ServerConfig struct {
-	Data          map[string]string
-	ServiceConfig map[string]string
+	Data          *ConfigMap
+	ServiceConfig *ConfigMap
 }
 
 // MtaConfig represents the parsed zmconfigd.cf configuration.
@@ -157,15 +157,15 @@ func NewConfig() (*Config, error) {
 }
 
 // localStr sets *dst to data[key] when the key is present.
-func localStr(data map[string]string, key string, dst *string) {
-	if v, ok := data[key]; ok {
+func localStr(data *ConfigMap, key string, dst *string) {
+	if v, ok := data.Get(key); ok {
 		*dst = v
 	}
 }
 
 // localInt sets *dst to the integer value of data[key] when present and parseable.
-func localInt(data map[string]string, key string, dst *int) {
-	if v, ok := data[key]; ok && v != "" {
+func localInt(data *ConfigMap, key string, dst *int) {
+	if v, ok := data.Get(key); ok && v != "" {
 		if i, err := strconv.Atoi(v); err == nil {
 			*dst = i
 		}
@@ -173,15 +173,15 @@ func localInt(data map[string]string, key string, dst *int) {
 }
 
 // localBoolTrue sets *dst to true when data[key] equals "TRUE" (case-insensitive).
-func localBoolTrue(data map[string]string, key string, dst *bool) {
-	if v, ok := data[key]; ok {
+func localBoolTrue(data *ConfigMap, key string, dst *bool) {
+	if v, ok := data.Get(key); ok {
 		*dst = strings.EqualFold(v, "TRUE")
 	}
 }
 
 // localBoolNotFalse sets *dst to false only when data[key] equals "FALSE" (case-insensitive).
-func localBoolNotFalse(data map[string]string, key string, dst *bool) {
-	if v, ok := data[key]; ok {
+func localBoolNotFalse(data *ConfigMap, key string, dst *bool) {
+	if v, ok := data.Get(key); ok {
 		*dst = !strings.EqualFold(v, "FALSE")
 	}
 }
@@ -208,7 +208,7 @@ func (c *Config) SetVals(localConfig *LocalConfig) {
 	localBoolNotFalse(data, "zmconfigd_watchdog", &c.Watchdog)
 	localBoolNotFalse(data, "zmconfigd_enable_config_restarts", &c.RestartConfig)
 
-	if v, ok := data["zmconfigd_watchdog_services"]; ok {
+	if v, ok := data.Get("zmconfigd_watchdog_services"); ok {
 		c.WdList = strings.Fields(v)
 	}
 

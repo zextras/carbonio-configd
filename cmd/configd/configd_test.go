@@ -144,11 +144,11 @@ func TestInitializeConfig(t *testing.T) {
 		t.Error("expected non-nil ldap client")
 	}
 
-	if appState.LocalConfig.Data["zmconfigd_listen_port"] != "7171" {
-		t.Errorf("expected listen port 7171, got %s", appState.LocalConfig.Data["zmconfigd_listen_port"])
+	if appState.LocalConfig.Data.GetOr("zmconfigd_listen_port", "") != "7171" {
+		t.Errorf("expected listen port 7171, got %s", appState.LocalConfig.Data.GetOr("zmconfigd_listen_port", ""))
 	}
-	if appState.LocalConfig.Data["zimbraIPMode"] != ipModeIPv4 {
-		t.Errorf("expected IP mode %s, got %s", ipModeIPv4, appState.LocalConfig.Data["zimbraIPMode"])
+	if appState.LocalConfig.Data.GetOr("zimbraIPMode", "") != ipModeIPv4 {
+		t.Errorf("expected IP mode %s, got %s", ipModeIPv4, appState.LocalConfig.Data.GetOr("zimbraIPMode", ""))
 	}
 }
 

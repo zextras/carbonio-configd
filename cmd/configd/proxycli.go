@@ -51,14 +51,18 @@ type ProxyConfCmd struct {
 	Indent     bool   `short:"i" help:"Indent included files"`
 	NoComments bool   `short:"n" help:"Do not print comment lines (beginning with #)"`
 	NoEmpty    bool   `short:"e" help:"Do not print empty lines"`
-	ConfigFile string `arg:"" optional:"" default:"/opt/zextras/conf/nginx.conf" help:"Path to nginx.conf"`
+	ConfigFile string `arg:"" optional:"" help:"Path to nginx.conf"`
 }
 
 //nolint:unparam // Kong interface requires error return
 func (c *ProxyConfCmd) Run() error {
 	initCLILogging()
 
-	if _, err := os.Stat("/opt/zextras/common/sbin/nginx"); err != nil {
+	if c.ConfigFile == "" {
+		c.ConfigFile = basePath("conf", "nginx.conf")
+	}
+
+	if _, err := os.Stat(basePath("common", "sbin", "nginx")); err != nil {
 		fmt.Println("Nginx not installed, exiting")
 		return nil //nolint:nilerr // intentional: nginx absence is not an error condition
 	}

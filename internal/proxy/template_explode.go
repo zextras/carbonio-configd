@@ -297,13 +297,13 @@ func (tp *TemplateProcessor) getDomains(ctx context.Context) []DomainInfo {
 	switch {
 	case tp.domainProvider != nil:
 		domainInfos = tp.domainProvider()
-	case tp.generator.LdapClient == nil:
+	case tp.generator.LdapClient == nil || tp.generator.LdapClient.NativeClient == nil:
 		logger.DebugContext(ctx, "No LDAP client available, returning empty list")
 		return []DomainInfo{}
 	default:
 		domains, err := cachedLDAPQuery(ctx, tp.generator.Cache, "ldap:domains", "domains",
 			func() ([]ldap.Domain, error) {
-				return tp.generator.LdapClient.QueryDomains(ctx)
+				return tp.generator.LdapClient.NativeClient.QueryDomains(ctx)
 			})
 		if err != nil {
 			logger.ErrorContext(ctx, "Domain query failed", "error", err)
@@ -350,7 +350,7 @@ func (tp *TemplateProcessor) getServersWithService(ctx context.Context, serviceN
 	switch {
 	case tp.serverProvider != nil:
 		serverInfos = tp.serverProvider(serviceName)
-	case tp.generator.LdapClient == nil:
+	case tp.generator.LdapClient == nil || tp.generator.LdapClient.NativeClient == nil:
 		logger.DebugContext(ctx, "No LDAP client available, returning empty list",
 			"service", serviceName)
 
@@ -360,7 +360,7 @@ func (tp *TemplateProcessor) getServersWithService(ctx context.Context, serviceN
 
 		servers, err := cachedLDAPQuery(ctx, tp.generator.Cache, cacheKey, "servers",
 			func() ([]ldap.Server, error) {
-				return tp.generator.LdapClient.QueryServers(ctx, serviceName)
+				return tp.generator.LdapClient.NativeClient.QueryServers(ctx, serviceName)
 			})
 		if err != nil {
 			logger.ErrorContext(ctx, "Server query failed", "error", err, "service", serviceName)

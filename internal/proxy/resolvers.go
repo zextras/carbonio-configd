@@ -26,24 +26,27 @@ const (
 // returning the first non-empty value found.
 func (g *Generator) getConfigValue(key string, sources ...configSource) (string, bool) {
 	for _, src := range sources {
-		var data map[string]string
+		var (
+			v  string
+			ok bool
+		)
 
 		switch src {
 		case sourceGlobal:
 			if g.GlobalConfig != nil {
-				data = g.GlobalConfig.Data
+				v, ok = g.GlobalConfig.Data.Get(key)
 			}
 		case sourceServer:
 			if g.ServerConfig != nil {
-				data = g.ServerConfig.Data
+				v, ok = g.ServerConfig.Data.Get(key)
 			}
 		case sourceLocal:
 			if g.LocalConfig != nil {
-				data = g.LocalConfig.Data
+				v, ok = g.LocalConfig.Data.Get(key)
 			}
 		}
 
-		if v, ok := data[key]; ok && v != "" {
+		if ok && v != "" {
 			return v, true
 		}
 	}
@@ -77,14 +80,14 @@ func (g *Generator) makeIPModeResolver(mode string) func(context.Context) (any, 
 func (g *Generator) getIPMode() string {
 	// Check GlobalConfig first (zimbraIPMode is a global attribute)
 	if g.GlobalConfig != nil {
-		if mode, ok := g.GlobalConfig.Data["zimbraIPMode"]; ok {
+		if mode, ok := g.GlobalConfig.Data.Get("zimbraIPMode"); ok {
 			return strings.ToLower(mode)
 		}
 	}
 
 	// Fall back to LocalConfig for compatibility
 	if g.LocalConfig != nil {
-		if mode, ok := g.LocalConfig.Data["zimbraIPMode"]; ok {
+		if mode, ok := g.LocalConfig.Data.Get("zimbraIPMode"); ok {
 			return strings.ToLower(mode)
 		}
 	}
@@ -170,7 +173,7 @@ func (g *Generator) resolveWebSSLDhparamEnabled(_ context.Context) (any, error) 
 	dhPath := sslDHParamPath
 
 	if g.LocalConfig != nil {
-		if v, ok := g.LocalConfig.Data["web.ssl.dhparam.file"]; ok && v != "" {
+		if v, ok := g.LocalConfig.Data.Get("web.ssl.dhparam.file"); ok && v != "" {
 			dhPath = v
 		}
 	}

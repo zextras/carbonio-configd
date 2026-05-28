@@ -18,22 +18,13 @@ import (
 	"github.com/zextras/carbonio-configd/internal/logger"
 )
 
-// Manager interface defines methods for LDAP attribute management.
-type Manager interface {
-	// ModifyAttribute modifies an LDAP attribute using zmprov
+// AttributeModifier is the narrow LDAP write surface that mtaops needs.
+// It is satisfied by *Ldap, which applies keymap resolution, attribute
+// transforms, and retry semantics. Kept as an interface so callers (notably
+// mtaops) can inject test doubles without a live LDAP connection.
+type AttributeModifier interface {
+	// ModifyAttribute modifies an LDAP attribute identified by an internal keymap key.
 	ModifyAttribute(ctx context.Context, key, value string) error
-
-	// ModifyAttributeBatch modifies multiple LDAP attributes in batches by DN
-	ModifyAttributeBatch(ctx context.Context, changes map[string]string) error
-
-	// GetPendingChanges returns the current pending LDAP changes
-	GetPendingChanges() map[string]string
-
-	// AddChange adds an LDAP change to the pending queue
-	AddChange(ctx context.Context, key, value string)
-
-	// ClearPending clears all pending changes
-	ClearPending()
 }
 
 // Ldap represents the LDAP client.
@@ -148,16 +139,15 @@ func (l *Ldap) ClearPending() {
 	l.pendingChanges = make(map[string]string)
 }
 
-// ModifyAttribute modifies an LDAP attribute using direct LDAP operations with retry logic.
-// This is a simplified implementation that directly manipulates cn=config.
-// In production, this would use proper LDAP client libraries.
+// ModifyAttribute modifies an LDAP attribute using the native LDAP client with retry logic.
+// It resolves the internal key to its DN/attribute via the keymap, applies the
+// configured transform format, and issues a real LDAP modify through NativeClient.
 func (l *Ldap) ModifyAttribute(ctx context.Context, key, value string) error {
 	ctx = logger.ContextWithComponentOnce(ctx, "ldap")
 	logger.InfoContext(ctx, "Setting LDAP attribute",
 		"key", key,
 		"value", value)
 
-	// Simulate master check if needed
 	if l.config.LdapIsMaster {
 		l.IsMaster = true
 
@@ -176,27 +166,18 @@ func (l *Ldap) ModifyAttribute(ctx context.Context, key, value string) error {
 
 	val := fmt.Sprintf(entry.TransformFmt, value)
 
-	// Execute LDAP modification with retry logic
+	if l.NativeClient == nil {
+		return fmt.Errorf("cannot modify LDAP attribute %q: native client not initialized", key)
+	}
+
+	// Execute LDAP modification with retry logic.
 	return l.withRetry(ctx, fmt.Sprintf("modify %s=%s", key, value), func() error {
-		// In a real implementation, this would:
-		// 1. Connect to LDAP via ldapi:/// or ldap_master_url
-		// 2. Search for the DN and fetch the current attribute value
-		// 3. Compare with the new value
-		// 4. If different, perform an LDAP modify operation
-		//
-		// For now, we'll use ldapmodify command directly as a placeholder.
-		// This requires proper LDIF generation and error handling.
-		logger.InfoContext(ctx, "Would modify LDAP",
+		logger.DebugContext(ctx, "Modifying LDAP attribute",
 			"dn", entry.DN,
 			"attr", entry.Attr,
 			"value", val)
 
-		// Placeholder: In production, replace this with actual LDAP client code
-		// For now, we'll just log the operation
-		// Example command that would be used:
-		// echo -e "dn: ${DN}\nchangetype: modify\nreplace: ${ATTR}\n${ATTR}: ${VAL}" | ldapmodify -Y EXTERNAL -H ldapi:///
-
-		return nil
+		return l.NativeClient.ModifyAttribute(entry.DN, entry.Attr, val)
 	})
 }
 
@@ -246,6 +227,13 @@ func (l *Ldap) ModifyAttributeBatch(ctx context.Context, changes map[string]stri
 		l.IsMaster = true
 	}
 
+	// A missing native client is a configuration error, not a transient
+	// failure: fail fast before entering the retry loop (which would
+	// otherwise sleep/backoff per DN for an unrecoverable condition).
+	if l.NativeClient == nil {
+		return fmt.Errorf("cannot batch modify LDAP attributes: native client not initialized")
+	}
+
 	// Group changes by DN
 	dnGroups := make(map[string]map[string]string) // DN -> map[Attr]Value
 
@@ -288,36 +276,28 @@ func (l *Ldap) ModifyAttributeBatch(ctx context.Context, changes map[string]stri
 }
 
 // executeBatchModifyInternal performs the actual LDAP batch modification without retry logic.
-// This is called by executeBatchModify through the retry wrapper.
+// This is called by ModifyAttributeBatch through the withRetry wrapper. Each attribute on
+// the DN is applied via the native client; the go-ldap library does not expose a
+// transactional multi-attribute modify here, so attributes are replaced sequentially and
+// the first failure aborts the remaining attributes for that DN.
 func (l *Ldap) executeBatchModifyInternal(ctx context.Context, dn string, attrs map[string]string) error {
 	logger.DebugContext(ctx, "Batch modifying DN",
 		"dn", dn,
 		"attribute_count", len(attrs))
 
-	// In a real implementation, this would:
-	// 1. Build an LDAP modify request with multiple attribute replacements
-	// 2. Execute the modify operation in a single LDAP transaction
-	// 3. Handle errors and rollback if needed
-	//
-	// Example LDIF that would be generated:
-	// dn: cn=config
-	// changetype: modify
-	// replace: olcLogLevel
-	// olcLogLevel: 256
-	// -
-	// replace: olcThreads
-	// olcThreads: 8
-	// -
+	if l.NativeClient == nil {
+		return fmt.Errorf("cannot batch modify DN %q: native client not initialized", dn)
+	}
 
 	for attr, val := range attrs {
 		logger.DebugContext(ctx, "Batch attribute",
 			"attr", attr,
 			"value", val)
-	}
 
-	// Placeholder: In production, replace this with actual LDAP client code
-	// This would use ldapmodify with a properly formatted LDIF containing
-	// all attribute modifications for this DN
+		if err := l.NativeClient.ModifyAttribute(dn, attr, val); err != nil {
+			return fmt.Errorf("modify %s on %s: %w", attr, dn, err)
+		}
+	}
 
 	return nil
 }
@@ -419,138 +399,6 @@ type Domain struct {
 type Server struct {
 	ServerID        string // zimbraId
 	ServiceHostname string // zimbraServiceHostname
-}
-
-// QueryDomains queries all domains that have a zimbraVirtualHostname configured.
-// This is used by the nginx proxy generator to create virtual host configurations.
-// Returns a list of Domain structs containing the domain name, virtual hostname,
-// virtual IP address, and SSL certificate information.
-func (l *Ldap) QueryDomains(ctx context.Context) ([]Domain, error) {
-	ctx = logger.ContextWithComponentOnce(ctx, "ldap")
-	t0 := time.Now()
-
-	logger.DebugContext(ctx, "Starting QueryDomains")
-
-	// Use native LDAP client if available
-	if l.NativeClient == nil {
-		return nil, fmt.Errorf("native LDAP client not initialized")
-	}
-
-	// OPTIMIZED: Use batch query to get all domains with attributes in one LDAP query
-	// This replaces the previous approach of:
-	//   1. GetAllDomains() - get domain names list
-	//   2. For each domain: GetDomain(name) - sequential queries
-	t1 := time.Now()
-	allDomainsAttrs, err := l.NativeClient.GetAllDomainsWithAttributes()
-	queryDuration := time.Since(t1)
-
-	logger.DebugContext(ctx, "GetAllDomainsWithAttributes completed",
-		"duration_ms", queryDuration.Milliseconds(),
-		"domain_count", len(allDomainsAttrs))
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to get domains with attributes: %w", err)
-	}
-
-	if len(allDomainsAttrs) == 0 {
-		logger.DebugContext(ctx, "No domains found")
-
-		return []Domain{}, nil
-	}
-
-	var domains []Domain
-
-	// Process domain attributes and filter by zimbraVirtualHostname
-	t2 := time.Now()
-
-	for domainName, domainAttrs := range allDomainsAttrs {
-		// Build Domain struct from attributes
-		domain := Domain{
-			DomainName:       domainName,
-			VirtualHostname:  domainAttrs["zimbraVirtualHostname"],
-			VirtualIPAddress: domainAttrs["zimbraVirtualIPAddress"],
-			ClientCertMode:   domainAttrs["zimbraClientCertMode"],
-			SSLCertificate:   domainAttrs["zimbraSSLCertificate"],
-			SSLPrivateKey:    domainAttrs["zimbraSSLPrivateKey"],
-		}
-
-		// Only include domains with zimbraVirtualHostname set
-		if domain.VirtualHostname != "" {
-			domains = append(domains, domain)
-			logger.DebugContext(ctx, "Found domain",
-				"domain_name", domain.DomainName,
-				"virtual_hostname", domain.VirtualHostname,
-				"virtual_ip", domain.VirtualIPAddress)
-		}
-	}
-
-	processingDuration := time.Since(t2)
-
-	totalDuration := time.Since(t0)
-	logger.DebugContext(ctx, "QueryDomains completed",
-		"total_duration_ms", totalDuration.Milliseconds(),
-		"ldap_query_ms", queryDuration.Milliseconds(),
-		"processing_ms", processingDuration.Milliseconds(),
-		"total_domains", len(allDomainsAttrs),
-		"filtered_domains", len(domains))
-
-	return domains, nil
-}
-
-// QueryServers queries all servers that have the specified service enabled.
-// This is used by the nginx proxy generator to create upstream server configurations.
-// Returns a list of Server structs containing the server ID and service hostname.
-//
-// serviceName examples: "mailbox", "proxy", "mta", "ldap", "memcached"
-func (l *Ldap) QueryServers(ctx context.Context, serviceName string) ([]Server, error) {
-	ctx = logger.ContextWithComponentOnce(ctx, "ldap")
-	logger.DebugContext(ctx, "Querying all servers with service",
-		"service", serviceName)
-
-	// Use native LDAP client if available
-	if l.NativeClient == nil {
-		return nil, fmt.Errorf("native LDAP client not initialized")
-	}
-
-	// Get all servers with full attributes
-	allServers, err := l.NativeClient.GetAllServersWithAttributes()
-	if err != nil {
-		return nil, fmt.Errorf("failed to query servers: %w", err)
-	}
-
-	var servers []Server
-
-	// Filter servers that have the specified service enabled
-	for _, serverAttrs := range allServers {
-		// Get server ID
-		serverID := serverAttrs["zimbraId"]
-
-		// Get service hostname
-		serviceHostname := serverAttrs["zimbraServiceHostname"]
-
-		// Check if the service is enabled
-		servicesEnabled := serverAttrs[attrZimbraServiceEnabled]
-		hasService := false
-
-		// zimbraServiceEnabled is multi-valued and joined with \n
-		if strings.Contains(servicesEnabled, serviceName) {
-			hasService = true
-		}
-
-		// Add server if it has the requested service and required fields
-		if hasService && serverID != "" && serviceHostname != "" {
-			servers = append(servers, Server{
-				ServerID:        serverID,
-				ServiceHostname: serviceHostname,
-			})
-		}
-	}
-
-	logger.DebugContext(ctx, "Found servers with service",
-		"count", len(servers),
-		"service", serviceName)
-
-	return servers, nil
 }
 
 // Helper function to simulate LDAP search for master check

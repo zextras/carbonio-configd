@@ -114,30 +114,30 @@ func LoadConfiguration(ctx context.Context, cfg *config.Config,
 
 	// Use provided configs, or create empty ones if nil (for testing)
 	if localCfg == nil {
-		localCfg = &config.LocalConfig{Data: make(map[string]string)}
+		localCfg = &config.LocalConfig{Data: config.NewConfigMap()}
 
 		logger.DebugContext(ctx, "Using empty LocalConfig (testing mode)")
 	}
 
 	if globalCfg == nil {
-		globalCfg = &config.GlobalConfig{Data: make(map[string]string)}
+		globalCfg = &config.GlobalConfig{Data: config.NewConfigMap()}
 
 		logger.DebugContext(ctx, "Using empty GlobalConfig (testing mode)")
 	}
 
 	if serverCfg == nil {
 		serverCfg = &config.ServerConfig{
-			Data:          make(map[string]string),
-			ServiceConfig: make(map[string]string),
+			Data:          config.NewConfigMap(),
+			ServiceConfig: config.NewConfigMap(),
 		}
 
 		logger.DebugContext(ctx, "Using empty ServerConfig (testing mode)")
 	}
 
 	logger.DebugContext(ctx, "Proxy configuration loaded",
-		"local_count", len(localCfg.Data),
-		"global_count", len(globalCfg.Data),
-		"server_count", len(serverCfg.Data))
+		"local_count", localCfg.Data.Len(),
+		"global_count", globalCfg.Data.Len(),
+		"server_count", serverCfg.Data.Len())
 
 	return NewGenerator(ctx, cfg, localCfg, globalCfg, serverCfg, ldapClient, cacheInstance)
 }

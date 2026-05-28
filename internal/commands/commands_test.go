@@ -7,17 +7,10 @@ package commands
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 	"time"
 )
-
-func TestMain(m *testing.M) {
-	// Initialize commands before running tests
-	Initialize()
-	os.Exit(m.Run())
-}
 
 func TestNewCommand(t *testing.T) {
 	tests := []struct {
@@ -99,12 +92,12 @@ func TestCommand_String(t *testing.T) {
 		{
 			name: "binary command",
 			cmd:  NewCommand("test", "echo", nil),
-			want: "echo echo([])",
+			want: "echo([])",
 		},
 		{
 			name: "function command",
 			cmd:  NewCommand("test", "testfn", func(ctx context.Context, args ...string) (string, error) { return "", nil }, "arg1"),
-			want: "testfn testfn([arg1])",
+			want: "testfn([arg1])",
 		},
 	}
 
@@ -383,53 +376,7 @@ func TestProxygen(t *testing.T) {
 	}
 }
 
-func TestExeMap(t *testing.T) {
-	// Test that all expected keys exist
-	expectedKeys := []string{
-		"POSTCONF", "POSTCONFD", "PROXY", "STATS",
-		"MEMCACHED", "MTA", "ANTISPAM", "AMAVIS", "ANTIVIRUS",
-		"SASL", "MAILBOXD", "SERVICE", "LDAP", "MAILBOX", "CBPOLICYD",
-		"OPENDKIM",
-		// NOTE: PROXYGEN removed - using pure Go implementation
-		// NOTE: ZMPROV and ZMLOCALCONFIG removed - replaced with native Go LDAP client
-	}
-
-	for _, key := range expectedKeys {
-		if _, exists := Exe[key]; !exists {
-			t.Errorf("Exe map missing key: %s", key)
-		}
-	}
-}
-
-func TestCommandsMap(t *testing.T) {
-	// Register LDAP commands so they appear in the Commands map
-	executor := NewCommandExecutor(nil)
-	RegisterLDAPCommands(executor)
-
-	// Test that all expected commands exist
-	expectedCommands := []string{
-		"gs:enabled", "gs", "localconfig", "gacf", "gamau", "garpu", "garpb",
-		"postconf", "postconfd", "proxygen", "proxy", "stats", "memcached",
-		"mta", "antispam", "antivirus", "amavis", "opendkim", "cbpolicyd",
-		"sasl", "mailboxd", "service", "ldap", "mailbox",
-	}
-
-	for _, cmd := range expectedCommands {
-		if _, exists := Commands[cmd]; !exists {
-			t.Errorf("Commands map missing command: %s", cmd)
-		}
-	}
-
-	// Test that a specific command has expected properties
-	if gsCmd := Commands["gs"]; gsCmd != nil {
-		if gsCmd.Name != "gs" {
-			t.Errorf("Commands[\"gs\"].Name = %v, want %v", gsCmd.Name, "gs")
-		}
-		if gsCmd.Func == nil {
-			t.Errorf("Commands[\"gs\"].Func = nil, want non-nil")
-		}
-	}
-}
+// TestExeMap removed - tests now use per-instance Registry instead of global Exe map
 
 // TestCommand_runBinary_ErrorCases tests error paths in runBinaryWithContext
 func TestCommand_runBinary_ErrorCases(t *testing.T) {
@@ -477,41 +424,7 @@ func TestCommand_runBinary_ErrorCases(t *testing.T) {
 	}
 }
 
-// TestPostconfExec tests the postconfExec function
-func TestPostconfExec(t *testing.T) {
-	tests := []struct {
-		name    string
-		args    []string
-		wantErr bool
-		errMsg  string
-	}{
-		{
-			name:    "no arguments",
-			args:    []string{},
-			wantErr: true,
-			errMsg:  "postconf requires arguments",
-		},
-		{
-			name:    "with arguments but binary not found",
-			args:    []string{"key=value"},
-			wantErr: true,
-			errMsg:  "postconf command failed",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := postconfExec(context.Background(), tt.args...)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("postconfExec() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if tt.wantErr && err != nil && !strings.Contains(err.Error(), tt.errMsg) {
-				t.Errorf("postconfExec() error = %v, want error containing %v", err, tt.errMsg)
-			}
-		})
-	}
-}
+// TestPostconfExec removed - postconfExec is a deprecated internal function
 
 // TestResetProvisioning_AllTypes tests all switch cases in ResetProvisioning
 func TestResetProvisioning_AllTypes(t *testing.T) {
@@ -1000,24 +913,6 @@ func TestParseProxygenArgs(t *testing.T) {
 	}
 }
 
-// TestRegisterLDAPCommands_NilCommandsMap tests RegisterLDAPCommands when Commands is nil.
-func TestRegisterLDAPCommands_NilCommandsMap(t *testing.T) {
-	// Save and restore Commands map after the test.
-	saved := Commands
-	Commands = nil
-	defer func() { Commands = saved }()
-
-	executor := NewCommandExecutor(nil)
-	RegisterLDAPCommands(executor)
-
-	expectedCmds := []string{"gacf", "gamau", "garpb", "garpu", "gs", "gs:enabled"}
-	for _, name := range expectedCmds {
-		if _, ok := Commands[name]; !ok {
-			t.Errorf("RegisterLDAPCommands() missing command %q", name)
-		}
-	}
-}
-
 func TestCommand_Execute_BinaryArgs(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -1187,4 +1082,52 @@ func TestBuildBackendURL(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestMakePostconfExec covers the closure returned by makePostconfExec: the
+// no-args error, the empty postconf-path error, and the command-execution path.
+func TestMakePostconfExec(t *testing.T) {
+	t.Run("no args returns error", func(t *testing.T) {
+		fn := makePostconfExec("/usr/sbin/postconf")
+		_, err := fn(context.Background())
+		if err == nil {
+			t.Fatal("expected error for no args, got nil")
+		}
+		if !strings.Contains(err.Error(), "postconf requires arguments") {
+			t.Errorf("error = %v, want 'postconf requires arguments'", err)
+		}
+	})
+
+	t.Run("empty postconf path returns error", func(t *testing.T) {
+		fn := makePostconfExec("")
+		_, err := fn(context.Background(), "smtpd_banner=test")
+		if err == nil {
+			t.Fatal("expected error for empty postconf path, got nil")
+		}
+		if !strings.Contains(err.Error(), "postconf executable path not configured") {
+			t.Errorf("error = %v, want 'postconf executable path not configured'", err)
+		}
+	})
+
+	t.Run("whitespace-only postconf path returns error", func(t *testing.T) {
+		fn := makePostconfExec("   ")
+		_, err := fn(context.Background(), "smtpd_banner=test")
+		if err == nil {
+			t.Fatal("expected error for whitespace-only postconf path, got nil")
+		}
+		if !strings.Contains(err.Error(), "postconf executable path not configured") {
+			t.Errorf("error = %v, want 'postconf executable path not configured'", err)
+		}
+	})
+
+	t.Run("nonexistent binary returns command-failed error", func(t *testing.T) {
+		fn := makePostconfExec("nonexistent_postconf_binary_xyz")
+		_, err := fn(context.Background(), "smtpd_banner=test")
+		if err == nil {
+			t.Fatal("expected error for nonexistent binary, got nil")
+		}
+		if !strings.Contains(err.Error(), "postconf command failed") {
+			t.Errorf("error = %v, want 'postconf command failed'", err)
+		}
+	})
 }

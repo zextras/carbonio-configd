@@ -10,6 +10,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -38,6 +39,15 @@ type Client struct {
 	maxRetries    int
 	retryDelay    time.Duration
 	maxRetryDelay time.Duration
+
+	// dialTimeout bounds a single dial+TLS attempt so an unreachable or
+	// hung LDAP server cannot block a config cycle indefinitely.
+	dialTimeout time.Duration
+
+	// opTimeout bounds each individual LDAP request (search/modify) once a
+	// connection is established, so a server that accepts the connection but
+	// then stalls mid-operation cannot block a config cycle indefinitely.
+	opTimeout time.Duration
 
 	// TLS configuration
 	tlsConfig *tls.Config
@@ -68,9 +78,19 @@ type ClientConfig struct {
 	MaxRetries    int           // Max retry attempts (default: 3)
 	RetryDelay    time.Duration // Initial retry delay (default: 100ms)
 	MaxRetryDelay time.Duration // Max retry delay (default: 5s)
+	DialTimeout   time.Duration // Per-attempt dial timeout (default: 10s)
+	OpTimeout     time.Duration // Per-request timeout for search/modify (default: 30s)
 	TLSConfig     *tls.Config   // TLS configuration (optional)
 	StartTLS      bool          // Upgrade ldap:// connections with StartTLS (default: true)
 }
+
+// defaultDialTimeout bounds a single LDAP dial attempt when
+// ClientConfig.DialTimeout is left unset.
+const defaultDialTimeout = 10 * time.Second
+
+// defaultOpTimeout bounds a single LDAP request (search/modify) when
+// ClientConfig.OpTimeout is left unset.
+const defaultOpTimeout = 30 * time.Second
 
 // NewClient creates a new LDAP client with connection pooling.
 func NewClient(config *ClientConfig) (*Client, error) {
@@ -92,6 +112,14 @@ func NewClient(config *ClientConfig) (*Client, error) {
 
 	if config.MaxRetryDelay == 0 {
 		config.MaxRetryDelay = 5 * time.Second
+	}
+
+	if config.DialTimeout == 0 {
+		config.DialTimeout = defaultDialTimeout
+	}
+
+	if config.OpTimeout == 0 {
+		config.OpTimeout = defaultOpTimeout
 	}
 
 	var tlsConfig *tls.Config
@@ -118,6 +146,8 @@ func NewClient(config *ClientConfig) (*Client, error) {
 		maxRetries:    config.MaxRetries,
 		retryDelay:    config.RetryDelay,
 		maxRetryDelay: config.MaxRetryDelay,
+		dialTimeout:   config.DialTimeout,
+		opTimeout:     config.OpTimeout,
 		tlsConfig:     tlsConfig,
 		pool:          make([]*ldap.Conn, 0, config.PoolSize),
 	}
@@ -202,11 +232,13 @@ func (c *Client) dialAndBind(url string) (*ldap.Conn, error) {
 		err  error
 	)
 
+	dialer := ldap.DialWithDialer(&net.Dialer{Timeout: c.dialTimeout})
+
 	switch {
 	case strings.HasPrefix(url, "ldaps://"):
-		conn, err = clientDial(url, ldap.DialWithTLSConfig(c.tlsConfig))
+		conn, err = clientDial(url, dialer, ldap.DialWithTLSConfig(c.tlsConfig))
 	case strings.HasPrefix(url, "ldap://"):
-		conn, err = clientDial(url)
+		conn, err = clientDial(url, dialer)
 	default:
 		return nil, fmt.Errorf("unsupported LDAP URL scheme: %s", url)
 	}
@@ -265,6 +297,11 @@ func (c *Client) executeWithRetry(operation func(*ldap.Conn) error) error {
 			continue
 		}
 
+		// Bound this request so a server that stalls mid-operation cannot
+		// block the caller indefinitely. SetTimeout applies to subsequent
+		// requests on this connection.
+		conn.SetTimeout(c.opTimeout)
+
 		err = operation(conn)
 		if err == nil {
 			c.returnConnection(conn)
@@ -273,7 +310,7 @@ func (c *Client) executeWithRetry(operation func(*ldap.Conn) error) error {
 
 		lastErr = c.handleOperationError(conn, err)
 
-		if !isLDAPErrorRetryable(err) {
+		if !isLDAPErrorRetryable(lastErr) {
 			return lastErr
 		}
 	}

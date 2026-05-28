@@ -113,15 +113,15 @@ func (g *Generator) LookupValue(ctx context.Context, v *Variable) (any, error) {
 	// Extract nil-safe data maps once. Indexing a nil map is safe in Go.
 	var globalData, serverData, localData map[string]string
 	if g.GlobalConfig != nil {
-		globalData = g.GlobalConfig.Data
+		globalData = g.GlobalConfig.Data.Snapshot()
 	}
 
 	if g.ServerConfig != nil {
-		serverData = g.ServerConfig.Data
+		serverData = g.ServerConfig.Data.Snapshot()
 	}
 
 	if g.LocalConfig != nil {
-		localData = g.LocalConfig.Data
+		localData = g.LocalConfig.Data.Snapshot()
 	}
 
 	switch v.OverrideType {

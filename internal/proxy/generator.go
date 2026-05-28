@@ -573,11 +573,11 @@ func (g *Generator) ValidateAllTemplates(ctx context.Context) error {
 // Reads from local config or returns default value
 func (g *Generator) GetCarboVersion() string {
 	if g.LocalConfig != nil {
-		if version, ok := g.LocalConfig.Data["carbonio_version"]; ok && version != "" {
+		if version, ok := g.LocalConfig.Data.Get("carbonio_version"); ok && version != "" {
 			return version
 		}
 		// Fallback to zimbraversion
-		if version, ok := g.LocalConfig.Data["zimbra_version"]; ok && version != "" {
+		if version, ok := g.LocalConfig.Data.Get("zimbra_version"); ok && version != "" {
 			return version
 		}
 	}
