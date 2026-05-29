@@ -24,6 +24,8 @@ const (
 	zimbraMailModeAttr                 = "zimbraMailMode"
 	zimbraMailPortAttr                 = "zimbraMailPort"
 	zimbraMailSSLPortAttr              = "zimbraMailSSLPort"
+	zimbraServiceEnabledAttr           = "zimbraServiceEnabled"
+	zimbraMemcachedBindPortAttr        = "zimbraMemcachedBindPort"
 	localhostName                      = "localhost"
 	mailModeHTTP                       = "http"
 	mailModeMixed                      = "mixed"
@@ -88,11 +90,11 @@ func applyMcAttr(key, value string, cur *mcServerData) {
 	switch key {
 	case zimbraServiceHostnameAttr:
 		cur.hostname = value
-	case "zimbraServiceEnabled":
+	case zimbraServiceEnabledAttr:
 		if value == "memcached" {
 			cur.hasMemcached = true
 		}
-	case "zimbraMemcachedBindPort":
+	case zimbraMemcachedBindPortAttr:
 		if port, err := strconv.Atoi(value); err == nil {
 			cur.memcachedPort = port
 		}
@@ -165,6 +167,11 @@ func (g *Generator) parseReverseProxyBackendsGeneric(
 		if len(parts) == 2 {
 			applyServerAttr(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), &current)
 		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		logger.ErrorContext(context.Background(), "Error scanning reverse proxy backends",
+			"error", err)
 	}
 
 	appendValidUpstream(&servers, current, portSelector)
@@ -355,6 +362,11 @@ func (g *Generator) parseMemcachedServers(output string) []MemcacheServer {
 		}
 	}
 
+	if err := scanner.Err(); err != nil {
+		logger.ErrorContext(context.Background(), "Error scanning memcached servers",
+			"error", err)
+	}
+
 	appendValidMcServer(&servers, current)
 
 	return servers
@@ -513,6 +525,11 @@ func collectAttributeServerNames(gasOutput, attributeName string) map[string]boo
 		}
 	}
 
+	if err := scanner.Err(); err != nil {
+		logger.ErrorContext(context.Background(), "Error scanning attribute server names",
+			"error", err)
+	}
+
 	return names
 }
 
@@ -554,6 +571,11 @@ func extractUpstreamServers(
 		if cur.hasAttributeValue {
 			parseGasServerAttr(line, portAttribute, &cur)
 		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		logger.ErrorContext(ctx, "Error scanning upstream servers",
+			"error", err)
 	}
 
 	// Flush the last server block.

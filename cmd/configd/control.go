@@ -118,7 +118,7 @@ type VersionCmd struct {
 func (c *VersionCmd) Run() error {
 	initCLILogging()
 
-	version, err := os.ReadFile("/opt/zextras/.version")
+	version, err := os.ReadFile(basePath(".version"))
 	if err != nil {
 		fmt.Println("Carbonio Release unknown")
 	} else {
@@ -173,10 +173,11 @@ func controlStart(ctx context.Context) int {
 	}
 
 	threshold := services.GetDiskThreshold()
+	bd := baseDir()
 
-	avail, ok, _ := services.CheckDiskSpace("/opt/zextras", threshold)
+	avail, ok, _ := services.CheckDiskSpace(bd, threshold)
 	if !ok {
-		cliWarn("Disk space below threshold for /opt/zextras (%dMB available, %dMB required)", avail, threshold)
+		cliWarn("Disk space below threshold for %s (%dMB available, %dMB required)", bd, avail, threshold)
 	}
 
 	enabledSet := make(map[string]bool, len(enabledList))
@@ -532,7 +533,7 @@ func shortErr(err error) string {
 }
 
 func advancedJARsPresent() bool {
-	matches, _ := os.ReadDir("/opt/zextras/lib/ext/carbonio")
+	matches, _ := os.ReadDir(basePath("lib", "ext", "carbonio"))
 	for _, m := range matches {
 		if strings.HasPrefix(m.Name(), "carbonio-advanced-") && strings.HasSuffix(m.Name(), ".jar") {
 			return true

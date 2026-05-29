@@ -10,8 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zextras/carbonio-configd/internal/commands"
-	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/tracing"
 )
@@ -35,7 +33,7 @@ func (cm *ConfigManager) LoadMiscConfig(ctx context.Context) error {
 
 	miscCommands := []string{"garpu", "garpb", "gamau"}
 
-	cm.State.MiscConfig.Data = make(map[string]string)
+	cm.State.MiscConfig.Data.Clear()
 
 	var (
 		wg sync.WaitGroup
@@ -86,7 +84,7 @@ func (cm *ConfigManager) executeMiscCommand(ctx context.Context, cmdName string,
 		return miscCmdResult{cmdName: cmdName}
 	}
 
-	cmdObj := commands.Commands[cmdName]
+	cmdObj := cm.CommandRegistry.Commands[cmdName]
 	if cmdObj == nil {
 		logger.WarnContext(ctx, "Command object not available for storing result",
 			"command", cmdName)
@@ -95,7 +93,7 @@ func (cm *ConfigManager) executeMiscCommand(ctx context.Context, cmdName string,
 	}
 
 	mu.Lock()
-	cm.State.MiscConfig.Data[cmdObj.Name] = output
+	cm.State.MiscConfig.Data.Set(cmdObj.Name, output)
 	mu.Unlock()
 
 	logger.DebugContext(ctx, "Stored misc command output",
@@ -128,10 +126,10 @@ func (cm *ConfigManager) resolveMiscOutput(ctx context.Context, cmdName string) 
 //
 //nolint:unparam // error return required for cache interface compatibility
 func (cm *ConfigManager) fetchMiscCommand(ctx context.Context, cmdName string) (string, error) {
-	cmd := commands.Commands[cmdName]
+	cmd := cm.CommandRegistry.Commands[cmdName]
 
 	// If command is not found (nil), skip execution
-	// This happens in test environments where commands.Initialize() isn't called
+	// This happens in test environments where the LDAP commands aren't registered
 	if cmd == nil {
 		logger.WarnContext(ctx, "Command not available, skipping",
 			"command", cmdName)
@@ -185,7 +183,7 @@ func (cm *ConfigManager) loadGlobalConfigWithRetry(ctx context.Context, maxRetri
 		return err
 	}
 
-	cm.State.GlobalConfig.Data = configData
+	cm.State.GlobalConfig.Data.Replace(configData)
 
 	dt := time.Since(t1)
 	logger.DebugContext(ctx, "GlobalConfig loaded",
@@ -197,9 +195,9 @@ func (cm *ConfigManager) loadGlobalConfigWithRetry(ctx context.Context, maxRetri
 // fetchGlobalConfig fetches fresh global config from LDAP (cache miss path)
 func (cm *ConfigManager) fetchGlobalConfig(ctx context.Context, maxRetries int) (map[string]string, error) {
 	return retryWithBackoff(ctx, "GlobalConfig", maxRetries, func() (map[string]string, error) {
-		cmd := commands.Commands["gacf"]
+		cmd := cm.CommandRegistry.Commands["gacf"]
 		if cmd == nil {
-			return nil, fmt.Errorf("gacf command not available (commands.Initialize() not called)")
+			return nil, fmt.Errorf("gacf command not available (LDAP commands not registered)")
 		}
 
 		rc, output, errMsg := cmd.Execute(ctx)
@@ -230,33 +228,4 @@ func (cm *ConfigManager) fetchGlobalConfig(ctx context.Context, maxRetries int) 
 
 		return configData, nil
 	})
-}
-
-// LoadMtaConfig loads the zmconfigd.cf file.
-func (cm *ConfigManager) LoadMtaConfig(ctx context.Context, configFile string) error {
-	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
-	// This will parse the zmconfigd.cf file.
-	// For now, it's a placeholder.
-	logger.DebugContext(ctx, "Loading MTA config from file",
-		"config_file", configFile)
-
-	// Simulate parsing a simple config file
-	section := &config.MtaConfigSection{
-		Name:         componentProxy,
-		Depends:      make(map[string]bool),
-		Rewrites:     make(map[string]config.RewriteEntry),
-		Restarts:     make(map[string]bool),
-		RequiredVars: make(map[string]string),
-		Postconf:     make(map[string]string),
-		Postconfd:    make(map[string]string),
-		Ldap:         make(map[string]string),
-	}
-	section.Rewrites["conf/nginx/nginx.conf.zmconfigd"] = config.RewriteEntry{Value: "conf/nginx/nginx.conf", Mode: "0644"}
-	section.Restarts[componentProxy] = true
-	section.RequiredVars["zimbraReverseProxyLookupTarget"] = configTypeVAR
-	cm.State.MtaConfig.Sections[componentProxy] = section
-
-	logger.DebugContext(ctx, "MTA config loaded")
-
-	return nil
 }

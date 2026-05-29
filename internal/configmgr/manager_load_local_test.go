@@ -6,9 +6,10 @@ package configmgr
 
 import (
 	"context"
-	"github.com/zextras/carbonio-configd/internal/commands"
 	"strings"
 	"testing"
+
+	"github.com/zextras/carbonio-configd/internal/config"
 )
 
 // TestLoadLocalConfigWithRetry_Success tests successful local config loading
@@ -16,8 +17,6 @@ func TestLoadLocalConfigWithRetry_Success(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: has retry delays")
 	}
-	// Initialize commands for testing
-	commands.Initialize()
 
 	cm := newTestConfigManager(t)
 
@@ -32,19 +31,19 @@ func TestLoadLocalConfigWithRetry_Success(t *testing.T) {
 	}
 
 	// Verify data was parsed
-	if cm.State.LocalConfig.Data["ldap_url"] != "ldap://localhost:389" {
+	if cm.State.LocalConfig.Data.GetOr("ldap_url", "") != "ldap://localhost:389" {
 		t.Errorf("Expected ldap_url to be 'ldap://localhost:389', got: %s",
-			cm.State.LocalConfig.Data["ldap_url"])
+			cm.State.LocalConfig.Data.GetOr("ldap_url", ""))
 	}
 
 	// Verify default port was set
-	if cm.State.LocalConfig.Data["zmconfigd_listen_port"] != "7171" {
+	if cm.State.LocalConfig.Data.GetOr("zmconfigd_listen_port", "") != "7171" {
 		t.Errorf("Expected default zmconfigd_listen_port '7171', got: %s",
-			cm.State.LocalConfig.Data["zmconfigd_listen_port"])
+			cm.State.LocalConfig.Data.GetOr("zmconfigd_listen_port", ""))
 	}
 
 	// Verify OpenDKIM URIs were generated
-	if _, ok := cm.State.LocalConfig.Data["opendkim_signingtable_uri"]; !ok {
+	if _, ok := cm.State.LocalConfig.Data.Get("opendkim_signingtable_uri"); !ok {
 		t.Error("Expected opendkim_signingtable_uri to be generated")
 	}
 }
@@ -54,7 +53,6 @@ func TestLoadLocalConfigWithRetry_XMLNotAvailable(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: has retry delays")
 	}
-	commands.Initialize()
 
 	cm := newTestConfigManager(t)
 
@@ -76,7 +74,6 @@ func TestLoadLocalConfigWithRetry_CommandFails(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: has retry delays")
 	}
-	commands.Initialize()
 
 	cm := newTestConfigManager(t)
 
@@ -97,7 +94,6 @@ func TestLoadLocalConfigWithRetry_EmptyOutput(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: has retry delays")
 	}
-	commands.Initialize()
 
 	cm := newTestConfigManager(t)
 
@@ -110,14 +106,14 @@ func TestLoadLocalConfigWithRetry_EmptyOutput(t *testing.T) {
 	}
 
 	// Verify default port was still set
-	if cm.State.LocalConfig.Data["zmconfigd_listen_port"] != "7171" {
+	if cm.State.LocalConfig.Data.GetOr("zmconfigd_listen_port", "") != "7171" {
 		t.Errorf("Expected default zmconfigd_listen_port '7171', got: %s",
-			cm.State.LocalConfig.Data["zmconfigd_listen_port"])
+			cm.State.LocalConfig.Data.GetOr("zmconfigd_listen_port", ""))
 	}
 
 	// Verify the data map exists but is mostly empty (except defaults)
-	if len(cm.State.LocalConfig.Data) > 1 {
-		t.Errorf("Expected only default values, got %d entries", len(cm.State.LocalConfig.Data))
+	if cm.State.LocalConfig.Data.Len() > 1 {
+		t.Errorf("Expected only default values, got %d entries", cm.State.LocalConfig.Data.Len())
 	}
 }
 
@@ -126,7 +122,6 @@ func TestLoadLocalConfigWithRetry_CachedOutput(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: has retry delays")
 	}
-	commands.Initialize()
 
 	cm := newTestConfigManager(t)
 
@@ -140,8 +135,8 @@ func TestLoadLocalConfigWithRetry_CachedOutput(t *testing.T) {
 	}
 
 	// Verify data was parsed from cached output
-	if cm.State.LocalConfig.Data["key1"] != "value1" {
-		t.Errorf("Expected key1=value1, got: %s", cm.State.LocalConfig.Data["key1"])
+	if cm.State.LocalConfig.Data.GetOr("key1", "") != "value1" {
+		t.Errorf("Expected key1=value1, got: %s", cm.State.LocalConfig.Data.GetOr("key1", ""))
 	}
 
 	// Second call - should still use cached output
@@ -151,8 +146,8 @@ func TestLoadLocalConfigWithRetry_CachedOutput(t *testing.T) {
 	}
 
 	// Verify data is still correct
-	if cm.State.LocalConfig.Data["key2"] != "value2" {
-		t.Errorf("Expected key2=value2, got: %s", cm.State.LocalConfig.Data["key2"])
+	if cm.State.LocalConfig.Data.GetOr("key2", "") != "value2" {
+		t.Errorf("Expected key2=value2, got: %s", cm.State.LocalConfig.Data.GetOr("key2", ""))
 	}
 }
 
@@ -161,19 +156,18 @@ func TestPostProcessLocalConfig(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
-	commands.Initialize()
 
 	cm := newTestConfigManager(t)
 
 	// Set up test data with ldap_url
-	cm.State.LocalConfig.Data = map[string]string{
+	cm.State.LocalConfig.Data = config.NewConfigMapFrom(map[string]string{
 		"ldap_url": "ldap://server1:389 ldap://server2:389",
-	}
+	})
 
 	cm.postProcessLocalConfig()
 
 	// Verify OpenDKIM URIs were generated
-	signingURI, ok := cm.State.LocalConfig.Data["opendkim_signingtable_uri"]
+	signingURI, ok := cm.State.LocalConfig.Data.Get("opendkim_signingtable_uri")
 	if !ok {
 		t.Fatal("Expected opendkim_signingtable_uri to be generated")
 	}
@@ -187,7 +181,7 @@ func TestPostProcessLocalConfig(t *testing.T) {
 		t.Errorf("Expected both servers in URI, got: %s", signingURI)
 	}
 
-	keyURI, ok := cm.State.LocalConfig.Data["opendkim_keytable_uri"]
+	keyURI, ok := cm.State.LocalConfig.Data.Get("opendkim_keytable_uri")
 	if !ok {
 		t.Fatal("Expected opendkim_keytable_uri to be generated")
 	}
@@ -202,20 +196,19 @@ func TestPostProcessLocalConfig_DefaultPort(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
-	commands.Initialize()
 
 	cm := newTestConfigManager(t)
 
-	cm.State.LocalConfig.Data = map[string]string{
+	cm.State.LocalConfig.Data = config.NewConfigMapFrom(map[string]string{
 		"some_key": "some_value",
-	}
+	})
 
 	cm.postProcessLocalConfig()
 
 	// Verify default port was set
-	if cm.State.LocalConfig.Data["zmconfigd_listen_port"] != "7171" {
+	if cm.State.LocalConfig.Data.GetOr("zmconfigd_listen_port", "") != "7171" {
 		t.Errorf("Expected default port '7171', got: %s",
-			cm.State.LocalConfig.Data["zmconfigd_listen_port"])
+			cm.State.LocalConfig.Data.GetOr("zmconfigd_listen_port", ""))
 	}
 }
 
@@ -224,18 +217,17 @@ func TestPostProcessLocalConfig_NoLDAPUrl(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
-	commands.Initialize()
 
 	cm := newTestConfigManager(t)
 
-	cm.State.LocalConfig.Data = map[string]string{
+	cm.State.LocalConfig.Data = config.NewConfigMapFrom(map[string]string{
 		"key1": "value1",
-	}
+	})
 
 	cm.postProcessLocalConfig()
 
 	// Verify OpenDKIM URIs were NOT generated
-	if _, ok := cm.State.LocalConfig.Data["opendkim_signingtable_uri"]; ok {
+	if _, ok := cm.State.LocalConfig.Data.Get("opendkim_signingtable_uri"); ok {
 		t.Error("Expected opendkim_signingtable_uri to NOT be generated without ldap_url")
 	}
 }

@@ -52,9 +52,9 @@ func (r *resolver) ResolveValue(ctx context.Context, valueType, key string, st *
 }
 
 func (r *resolver) resolveVAR(ctx context.Context, key string, st *state.State) (string, error) {
-	value := st.GlobalConfig.Data[key]
+	value, _ := st.GlobalConfig.Data.Get(key)
 	if value == "" {
-		value = st.ServerConfig.Data[key]
+		value, _ = st.ServerConfig.Data.Get(key)
 	}
 
 	if value == "" {
@@ -67,7 +67,7 @@ func (r *resolver) resolveVAR(ctx context.Context, key string, st *state.State) 
 }
 
 func (r *resolver) resolveLOCAL(ctx context.Context, key string, st *state.State) (string, error) {
-	value := st.LocalConfig.Data[key]
+	value, _ := st.LocalConfig.Data.Get(key)
 	if value == "" {
 		logger.DebugContext(ctx, "LOCAL not found in local config", "key", key)
 
@@ -217,7 +217,7 @@ func (r *resolver) ResolveMapfileDirective(key string, isLocal bool, st *state.S
 
 	if !isLocal {
 		// MAPFILE: Read base64-encoded data from LDAP
-		base64Data := st.GlobalConfig.Data[key]
+		base64Data, _ := st.GlobalConfig.Data.Get(key)
 		op.Base64Data = base64Data
 	}
 

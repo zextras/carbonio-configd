@@ -23,12 +23,12 @@ import (
 type executor struct {
 	baseDir      string
 	postconfPath string
-	ldapManager  ldap.Manager
+	ldapManager  ldap.AttributeModifier
 	mappedFiles  map[string]string // key -> file path mapping
 }
 
 // NewExecutor creates a new MTA operations executor.
-func NewExecutor(baseDir string, ldapManager ldap.Manager) Executor {
+func NewExecutor(baseDir string, ldapManager ldap.AttributeModifier) Executor {
 	return &executor{
 		baseDir:      baseDir,
 		postconfPath: filepath.Join(baseDir, "common", "sbin", "postconf"),
@@ -103,8 +103,8 @@ func (e *executor) ExecutePostconfBatch(ctx context.Context, ops []PostconfOpera
 			"value", op.Value)
 	}
 
-	//nolint:gosec,noctx // G204: Command from trusted data; noctx: Postconf is fast and doesn't need cancellation
-	cmd := exec.Command(e.postconfPath, args...)
+	//nolint:gosec // G204: Command from trusted data
+	cmd := exec.CommandContext(ctx, e.postconfPath, args...)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -154,8 +154,8 @@ func (e *executor) ExecutePostconfdBatch(ctx context.Context, ops []PostconfdOpe
 			"key", op.Key)
 	}
 
-	//nolint:gosec,noctx // G204: Command from trusted data; noctx: Postconf is fast and doesn't need cancellation
-	cmd := exec.Command(e.postconfPath, args...)
+	//nolint:gosec // G204: Command from trusted data
+	cmd := exec.CommandContext(ctx, e.postconfPath, args...)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {

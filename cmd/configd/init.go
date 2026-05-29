@@ -111,10 +111,10 @@ func (c *InitCmd) Run() error {
 func configsExist(component string) bool {
 	switch component {
 	case componentMTA:
-		_, err := os.Stat("/opt/zextras/common/conf/postfix/main.cf")
+		_, err := os.Stat(basePath("common", "conf", "postfix", "main.cf"))
 		return err == nil
 	case componentProxy:
-		_, err := os.Stat("/opt/zextras/conf/nginx/nginx.conf")
+		_, err := os.Stat(basePath("conf", "nginx", "nginx.conf"))
 		return err == nil
 	}
 

@@ -21,13 +21,13 @@ func TestVariableResolutionFromGlobalConfig(t *testing.T) {
 	}
 
 	localCfg := &config.LocalConfig{
-		Data: map[string]string{
+		Data: config.NewConfigMapFrom(map[string]string{
 			"zimbraIPMode": "both",
-		},
+		}),
 	}
 
 	globalCfg := &config.GlobalConfig{
-		Data: map[string]string{
+		Data: config.NewConfigMapFrom(map[string]string{
 			"zimbraReverseProxyWorkerProcesses":   "8",
 			"zimbraReverseProxyWorkerConnections": "20480",
 			"zimbraReverseProxyLogLevel":          "warn",
@@ -35,12 +35,12 @@ func TestVariableResolutionFromGlobalConfig(t *testing.T) {
 			"zimbraMailSSLProxyPort":              "8443",
 			"zimbraReverseProxySSLCiphers":        "HIGH:!aNULL:!MD5",
 			"zimbraReverseProxySSLProtocols":      "TLSv1.2 TLSv1.3",
-		},
+		}),
 	}
 
 	serverCfg := &config.ServerConfig{
-		Data:          make(map[string]string),
-		ServiceConfig: make(map[string]string),
+		Data:          config.NewConfigMap(),
+		ServiceConfig: config.NewConfigMap(),
 	}
 
 	// Create generator
@@ -85,11 +85,11 @@ func TestVariableResolutionDefaults(t *testing.T) {
 		Hostname: "proxy.example.com",
 	}
 
-	localCfg := &config.LocalConfig{Data: make(map[string]string)}
-	globalCfg := &config.GlobalConfig{Data: make(map[string]string)}
+	localCfg := &config.LocalConfig{Data: config.NewConfigMap()}
+	globalCfg := &config.GlobalConfig{Data: config.NewConfigMap()}
 	serverCfg := &config.ServerConfig{
-		Data:          make(map[string]string),
-		ServiceConfig: make(map[string]string),
+		Data:          config.NewConfigMap(),
+		ServiceConfig: config.NewConfigMap(),
 	}
 
 	// Create generator

@@ -921,3 +921,606 @@ func TestGetUpstreamServersByAttributeSSLCached(t *testing.T) {
 		t.Errorf("expected SSL cached server, got %q", result[0].Host)
 	}
 }
+
+// TestApplyServerAttr tests applyServerAttr helper function
+func TestApplyServerAttr(t *testing.T) {
+	tests := []struct {
+		name     string
+		key      string
+		value    string
+		initial  serverData
+		expected serverData
+	}{
+		{
+			name:    "sets hostname",
+			key:     "zimbraServiceHostname",
+			value:   "server1.example.com",
+			initial: serverData{},
+			expected: serverData{
+				hostname: "server1.example.com",
+			},
+		},
+		{
+			name:    "sets lookupTarget TRUE",
+			key:     "zimbraReverseProxyLookupTarget",
+			value:   "TRUE",
+			initial: serverData{},
+			expected: serverData{
+				lookupTarget: true,
+			},
+		},
+		{
+			name:    "sets lookupTarget FALSE",
+			key:     "zimbraReverseProxyLookupTarget",
+			value:   "FALSE",
+			initial: serverData{},
+			expected: serverData{
+				lookupTarget: false,
+			},
+		},
+		{
+			name:    "sets lookupTarget case-insensitive",
+			key:     "zimbraReverseProxyLookupTarget",
+			value:   "true",
+			initial: serverData{},
+			expected: serverData{
+				lookupTarget: true,
+			},
+		},
+		{
+			name:    "sets mailMode lowercase",
+			key:     "zimbraMailMode",
+			value:   "HTTPS",
+			initial: serverData{},
+			expected: serverData{
+				mailMode: "https",
+			},
+		},
+		{
+			name:    "sets mailPort",
+			key:     "zimbraMailPort",
+			value:   "8080",
+			initial: serverData{},
+			expected: serverData{
+				mailPort: 8080,
+			},
+		},
+		{
+			name:    "ignores invalid mailPort",
+			key:     "zimbraMailPort",
+			value:   "invalid",
+			initial: serverData{},
+			expected: serverData{
+				mailPort: 0,
+			},
+		},
+		{
+			name:    "sets mailSSLPort",
+			key:     "zimbraMailSSLPort",
+			value:   "8443",
+			initial: serverData{},
+			expected: serverData{
+				mailSSLPort: 8443,
+			},
+		},
+		{
+			name:  "ignores unknown key",
+			key:   "unknownKey",
+			value: "somevalue",
+			initial: serverData{
+				hostname: "existing.com",
+			},
+			expected: serverData{
+				hostname: "existing.com",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cur := tt.initial
+			applyServerAttr(tt.key, tt.value, &cur)
+			if cur != tt.expected {
+				t.Errorf("applyServerAttr() = %+v, expected %+v", cur, tt.expected)
+			}
+		})
+	}
+}
+
+// TestAppendValidUpstream tests appendValidUpstream helper function
+func TestAppendValidUpstream(t *testing.T) {
+	tests := []struct {
+		name         string
+		cur          serverData
+		portSelector func(serverData) UpstreamServer
+		shouldAppend bool
+		expectedPort int
+	}{
+		{
+			name: "appends when hostname and lookupTarget set",
+			cur: serverData{
+				hostname:     "server1.example.com",
+				lookupTarget: true,
+			},
+			portSelector: func(s serverData) UpstreamServer {
+				return UpstreamServer{Host: s.hostname, Port: 8080}
+			},
+			shouldAppend: true,
+			expectedPort: 8080,
+		},
+		{
+			name: "skips when hostname empty",
+			cur: serverData{
+				hostname:     "",
+				lookupTarget: true,
+			},
+			portSelector: func(s serverData) UpstreamServer {
+				return UpstreamServer{Host: s.hostname, Port: 8080}
+			},
+			shouldAppend: false,
+		},
+		{
+			name: "skips when lookupTarget false",
+			cur: serverData{
+				hostname:     "server1.example.com",
+				lookupTarget: false,
+			},
+			portSelector: func(s serverData) UpstreamServer {
+				return UpstreamServer{Host: s.hostname, Port: 8080}
+			},
+			shouldAppend: false,
+		},
+		{
+			name: "skips when port selector returns 0 port",
+			cur: serverData{
+				hostname:     "server1.example.com",
+				lookupTarget: true,
+			},
+			portSelector: func(s serverData) UpstreamServer {
+				return UpstreamServer{Host: s.hostname, Port: 0}
+			},
+			shouldAppend: false,
+		},
+		{
+			name: "skips when port selector returns negative port",
+			cur: serverData{
+				hostname:     "server1.example.com",
+				lookupTarget: true,
+			},
+			portSelector: func(s serverData) UpstreamServer {
+				return UpstreamServer{Host: s.hostname, Port: -1}
+			},
+			shouldAppend: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var servers []UpstreamServer
+			appendValidUpstream(&servers, tt.cur, tt.portSelector)
+
+			if tt.shouldAppend {
+				if len(servers) != 1 {
+					t.Errorf("expected 1 server appended, got %d", len(servers))
+				} else if servers[0].Port != tt.expectedPort {
+					t.Errorf("expected port %d, got %d", tt.expectedPort, servers[0].Port)
+				}
+			} else {
+				if len(servers) != 0 {
+					t.Errorf("expected no servers appended, got %d", len(servers))
+				}
+			}
+		})
+	}
+}
+
+// TestApplyMcAttr tests applyMcAttr helper function
+func TestApplyMcAttr(t *testing.T) {
+	tests := []struct {
+		name     string
+		key      string
+		value    string
+		initial  mcServerData
+		expected mcServerData
+	}{
+		{
+			name:    "sets hostname",
+			key:     "zimbraServiceHostname",
+			value:   "mc.example.com",
+			initial: mcServerData{},
+			expected: mcServerData{
+				hostname: "mc.example.com",
+			},
+		},
+		{
+			name:    "sets hasMemcached when value is memcached",
+			key:     "zimbraServiceEnabled",
+			value:   "memcached",
+			initial: mcServerData{},
+			expected: mcServerData{
+				hasMemcached: true,
+			},
+		},
+		{
+			name:    "does not set hasMemcached for other service",
+			key:     "zimbraServiceEnabled",
+			value:   "mailbox",
+			initial: mcServerData{},
+			expected: mcServerData{
+				hasMemcached: false,
+			},
+		},
+		{
+			name:    "sets memcachedPort",
+			key:     "zimbraMemcachedBindPort",
+			value:   "11211",
+			initial: mcServerData{},
+			expected: mcServerData{
+				memcachedPort: 11211,
+			},
+		},
+		{
+			name:    "ignores invalid memcachedPort",
+			key:     "zimbraMemcachedBindPort",
+			value:   "invalid",
+			initial: mcServerData{},
+			expected: mcServerData{
+				memcachedPort: 0,
+			},
+		},
+		{
+			name:  "ignores unknown key",
+			key:   "unknownKey",
+			value: "somevalue",
+			initial: mcServerData{
+				hostname: "existing.com",
+			},
+			expected: mcServerData{
+				hostname: "existing.com",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cur := tt.initial
+			applyMcAttr(tt.key, tt.value, &cur)
+			if cur != tt.expected {
+				t.Errorf("applyMcAttr() = %+v, expected %+v", cur, tt.expected)
+			}
+		})
+	}
+}
+
+// TestAppendValidMcServer tests appendValidMcServer helper function
+func TestAppendValidMcServer(t *testing.T) {
+	tests := []struct {
+		name         string
+		cur          mcServerData
+		shouldAppend bool
+	}{
+		{
+			name: "appends when all conditions met",
+			cur: mcServerData{
+				hostname:      "mc.example.com",
+				hasMemcached:  true,
+				memcachedPort: 11211,
+			},
+			shouldAppend: true,
+		},
+		{
+			name: "skips when hostname empty",
+			cur: mcServerData{
+				hostname:      "",
+				hasMemcached:  true,
+				memcachedPort: 11211,
+			},
+			shouldAppend: false,
+		},
+		{
+			name: "skips when hasMemcached false",
+			cur: mcServerData{
+				hostname:      "mc.example.com",
+				hasMemcached:  false,
+				memcachedPort: 11211,
+			},
+			shouldAppend: false,
+		},
+		{
+			name: "skips when memcachedPort is 0",
+			cur: mcServerData{
+				hostname:      "mc.example.com",
+				hasMemcached:  true,
+				memcachedPort: 0,
+			},
+			shouldAppend: false,
+		},
+		{
+			name: "skips when memcachedPort is negative",
+			cur: mcServerData{
+				hostname:      "mc.example.com",
+				hasMemcached:  true,
+				memcachedPort: -1,
+			},
+			shouldAppend: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var servers []MemcacheServer
+			appendValidMcServer(&servers, tt.cur)
+
+			if tt.shouldAppend {
+				if len(servers) != 1 {
+					t.Errorf("expected 1 server appended, got %d", len(servers))
+				} else if servers[0].Hostname != tt.cur.hostname || servers[0].Port != tt.cur.memcachedPort {
+					t.Errorf("appended server mismatch: %+v", servers[0])
+				}
+			} else {
+				if len(servers) != 0 {
+					t.Errorf("expected no servers appended, got %d", len(servers))
+				}
+			}
+		})
+	}
+}
+
+// TestParseGasServerAttr tests parseGasServerAttr helper function
+func TestParseGasServerAttr(t *testing.T) {
+	tests := []struct {
+		name          string
+		line          string
+		portAttribute string
+		initial       gasServerState
+		expected      gasServerState
+	}{
+		{
+			name:          "parses hostname",
+			line:          "zimbraServiceHostname: server1.example.com",
+			portAttribute: "zimbraMailPort",
+			initial:       gasServerState{},
+			expected: gasServerState{
+				hostname: "server1.example.com",
+			},
+		},
+		{
+			name:          "parses hostname with spaces",
+			line:          "zimbraServiceHostname:   server1.example.com  ",
+			portAttribute: "zimbraMailPort",
+			initial:       gasServerState{},
+			expected: gasServerState{
+				hostname: "server1.example.com",
+			},
+		},
+		{
+			name:          "parses port attribute",
+			line:          "zimbraMailPort: 8080",
+			portAttribute: "zimbraMailPort",
+			initial:       gasServerState{},
+			expected: gasServerState{
+				port: 8080,
+			},
+		},
+		{
+			name:          "parses custom port attribute",
+			line:          "zimbraMailSSLPort: 8443",
+			portAttribute: "zimbraMailSSLPort",
+			initial:       gasServerState{},
+			expected: gasServerState{
+				port: 8443,
+			},
+		},
+		{
+			name:          "ignores invalid port",
+			line:          "zimbraMailPort: invalid",
+			portAttribute: "zimbraMailPort",
+			initial:       gasServerState{},
+			expected: gasServerState{
+				port: 0,
+			},
+		},
+		{
+			name:          "ignores non-matching port attribute",
+			line:          "zimbraMailPort: 8080",
+			portAttribute: "zimbraMailSSLPort",
+			initial:       gasServerState{},
+			expected: gasServerState{
+				port: 0,
+			},
+		},
+		{
+			name:          "ignores unknown attribute",
+			line:          "unknownAttr: value",
+			portAttribute: "zimbraMailPort",
+			initial: gasServerState{
+				hostname: "existing.com",
+			},
+			expected: gasServerState{
+				hostname: "existing.com",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cur := tt.initial
+			parseGasServerAttr(tt.line, tt.portAttribute, &cur)
+			if cur != tt.expected {
+				t.Errorf("parseGasServerAttr() = %+v, expected %+v", cur, tt.expected)
+			}
+		})
+	}
+}
+
+// TestExtractUpstreamServers tests extractUpstreamServers helper function
+func TestExtractUpstreamServers(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name                 string
+		gasOutput            string
+		attributeServerNames map[string]bool
+		portAttribute        string
+		expectedCount        int
+		expectedFirstHost    string
+		expectedFirstPort    int
+	}{
+		{
+			name: "extracts single server",
+			gasOutput: `# name server1.example.com
+zimbraServiceHostname: server1.example.com
+zimbraMailPort: 8080
+`,
+			attributeServerNames: map[string]bool{"server1.example.com": true},
+			portAttribute:        "zimbraMailPort",
+			expectedCount:        1,
+			expectedFirstHost:    "server1.example.com",
+			expectedFirstPort:    8080,
+		},
+		{
+			name: "extracts multiple servers",
+			gasOutput: `# name server1.example.com
+zimbraServiceHostname: server1.example.com
+zimbraMailPort: 8080
+
+# name server2.example.com
+zimbraServiceHostname: server2.example.com
+zimbraMailPort: 8081
+`,
+			attributeServerNames: map[string]bool{"server1.example.com": true, "server2.example.com": true},
+			portAttribute:        "zimbraMailPort",
+			expectedCount:        2,
+			expectedFirstHost:    "server1.example.com",
+			expectedFirstPort:    8080,
+		},
+		{
+			name: "skips servers not in attributeServerNames",
+			gasOutput: `# name server1.example.com
+zimbraServiceHostname: server1.example.com
+zimbraMailPort: 8080
+
+# name server2.example.com
+zimbraServiceHostname: server2.example.com
+zimbraMailPort: 8081
+`,
+			attributeServerNames: map[string]bool{"server1.example.com": true},
+			portAttribute:        "zimbraMailPort",
+			expectedCount:        1,
+			expectedFirstHost:    "server1.example.com",
+			expectedFirstPort:    8080,
+		},
+		{
+			name:                 "returns empty when no servers match",
+			gasOutput:            `# name server1.example.com\nzimbraServiceHostname: server1.example.com\n`,
+			attributeServerNames: map[string]bool{"server2.example.com": true},
+			portAttribute:        "zimbraMailPort",
+			expectedCount:        0,
+			expectedFirstHost:    "",
+			expectedFirstPort:    0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractUpstreamServers(ctx, tt.gasOutput, tt.attributeServerNames, tt.portAttribute)
+			if len(result) != tt.expectedCount {
+				t.Errorf("expected %d servers, got %d", tt.expectedCount, len(result))
+			}
+			if tt.expectedCount > 0 {
+				if result[0].Host != tt.expectedFirstHost {
+					t.Errorf("expected first host %q, got %q", tt.expectedFirstHost, result[0].Host)
+				}
+				if result[0].Port != tt.expectedFirstPort {
+					t.Errorf("expected first port %d, got %d", tt.expectedFirstPort, result[0].Port)
+				}
+			}
+		})
+	}
+}
+
+// TestFinaliseGasServer tests finaliseGasServer helper function
+func TestFinaliseGasServer(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name     string
+		cur      gasServerState
+		shouldOk bool
+		expected UpstreamServer
+	}{
+		{
+			name: "finalises valid server",
+			cur: gasServerState{
+				name:              "server1.example.com",
+				hostname:          "server1.example.com",
+				port:              8080,
+				hasAttributeValue: true,
+			},
+			shouldOk: true,
+			expected: UpstreamServer{Host: "server1.example.com", Port: 8080},
+		},
+		{
+			name: "rejects when name empty",
+			cur: gasServerState{
+				name:              "",
+				hostname:          "server1.example.com",
+				port:              8080,
+				hasAttributeValue: true,
+			},
+			shouldOk: false,
+		},
+		{
+			name: "rejects when hasAttributeValue false",
+			cur: gasServerState{
+				name:              "server1.example.com",
+				hostname:          "server1.example.com",
+				port:              8080,
+				hasAttributeValue: false,
+			},
+			shouldOk: false,
+		},
+		{
+			name: "rejects when hostname empty",
+			cur: gasServerState{
+				name:              "server1.example.com",
+				hostname:          "",
+				port:              8080,
+				hasAttributeValue: true,
+			},
+			shouldOk: false,
+		},
+		{
+			name: "rejects when port is 0",
+			cur: gasServerState{
+				name:              "server1.example.com",
+				hostname:          "server1.example.com",
+				port:              0,
+				hasAttributeValue: true,
+			},
+			shouldOk: false,
+		},
+		{
+			name: "rejects when port is negative",
+			cur: gasServerState{
+				name:              "server1.example.com",
+				hostname:          "server1.example.com",
+				port:              -1,
+				hasAttributeValue: true,
+			},
+			shouldOk: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, ok := finaliseGasServer(ctx, tt.cur)
+			if ok != tt.shouldOk {
+				t.Errorf("expected ok=%v, got %v", tt.shouldOk, ok)
+			}
+			if tt.shouldOk && result != tt.expected {
+				t.Errorf("expected %+v, got %+v", tt.expected, result)
+			}
+		})
+	}
+}

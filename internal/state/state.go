@@ -100,10 +100,10 @@ func NewState() *State {
 		WatchdogProcess:   make(map[string]bool),
 		FirstRun:          true,
 		MaxFailedRestarts: 3, // Default value from Jython
-		LocalConfig:       &config.LocalConfig{Data: make(map[string]string)},
-		GlobalConfig:      &config.GlobalConfig{Data: make(map[string]string)},
-		MiscConfig:        &config.MiscConfig{Data: make(map[string]string)},
-		ServerConfig:      &config.ServerConfig{Data: make(map[string]string), ServiceConfig: make(map[string]string)},
+		LocalConfig:       &config.LocalConfig{Data: config.NewConfigMap()},
+		GlobalConfig:      &config.GlobalConfig{Data: config.NewConfigMap()},
+		MiscConfig:        &config.MiscConfig{Data: config.NewConfigMap()},
+		ServerConfig:      &config.ServerConfig{Data: config.NewConfigMap(), ServiceConfig: config.NewConfigMap()},
 		MtaConfig:         &config.MtaConfig{Sections: make(map[string]*config.MtaConfigSection)},
 	}
 

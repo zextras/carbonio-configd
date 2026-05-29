@@ -18,32 +18,32 @@ import (
 func TestResolveGreeting(t *testing.T) {
 	tests := []struct {
 		name        string
-		globalData  map[string]string
+		globalData  *config.ConfigMap
 		attribute   string
 		format      string
 		expectEmpty bool
 	}{
 		{
 			name:        "returns empty when attribute not set",
-			globalData:  map[string]string{},
+			globalData:  config.NewConfigMapFrom(map[string]string{}),
 			attribute:   "zimbraReverseProxyImapExposeVersionOnBanner",
 			format:      "* OK Carbonio %s IMAP4 ready",
 			expectEmpty: true,
 		},
 		{
 			name: "returns empty when attribute is FALSE",
-			globalData: map[string]string{
+			globalData: config.NewConfigMapFrom(map[string]string{
 				"zimbraReverseProxyImapExposeVersionOnBanner": "FALSE",
-			},
+			}),
 			attribute:   "zimbraReverseProxyImapExposeVersionOnBanner",
 			format:      "* OK Carbonio %s IMAP4 ready",
 			expectEmpty: true,
 		},
 		{
 			name: "returns greeting when attribute is TRUE",
-			globalData: map[string]string{
+			globalData: config.NewConfigMapFrom(map[string]string{
 				"zimbraReverseProxyImapExposeVersionOnBanner": "TRUE",
-			},
+			}),
 			attribute:   "zimbraReverseProxyImapExposeVersionOnBanner",
 			format:      "* OK Carbonio %s IMAP4 ready",
 			expectEmpty: false,
@@ -54,7 +54,7 @@ func TestResolveGreeting(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			g := &Generator{
 				GlobalConfig: &config.GlobalConfig{Data: tt.globalData},
-				LocalConfig:  &config.LocalConfig{Data: map[string]string{}},
+				LocalConfig:  &config.LocalConfig{Data: config.NewConfigMapFrom(map[string]string{})},
 			}
 			result, err := g.resolveGreeting(tt.attribute, tt.format)
 			if err != nil {
@@ -78,7 +78,7 @@ func TestResolveGreeting(t *testing.T) {
 func TestResolveIMAPId(t *testing.T) {
 	t.Run("returns UNKNOWN version when no local config", func(t *testing.T) {
 		g := &Generator{
-			LocalConfig: &config.LocalConfig{Data: map[string]string{}},
+			LocalConfig: &config.LocalConfig{Data: config.NewConfigMapFrom(map[string]string{})},
 		}
 		result, err := g.resolveIMAPId(context.Background())
 		if err != nil {
@@ -95,9 +95,9 @@ func TestResolveIMAPId(t *testing.T) {
 
 	t.Run("appends build number when configured and version has no underscore", func(t *testing.T) {
 		g := &Generator{
-			LocalConfig: &config.LocalConfig{Data: map[string]string{
+			LocalConfig: &config.LocalConfig{Data: config.NewConfigMapFrom(map[string]string{
 				"zimbra_buildnum": "12345",
-			}},
+			})},
 		}
 		result, err := g.resolveIMAPId(context.Background())
 		if err != nil {
@@ -121,7 +121,7 @@ func TestResolveIMAPIdWithVersion(t *testing.T) {
 	t.Run("version file read and used", func(t *testing.T) {
 		g := &Generator{
 			LocalConfig: &config.LocalConfig{
-				Data: map[string]string{"zimbra_home": dir},
+				Data: config.NewConfigMapFrom(map[string]string{"zimbra_home": dir}),
 			},
 		}
 		result, err := g.resolveIMAPId(context.Background())
@@ -140,10 +140,10 @@ func TestResolveIMAPIdWithVersion(t *testing.T) {
 		}
 		g := &Generator{
 			LocalConfig: &config.LocalConfig{
-				Data: map[string]string{
+				Data: config.NewConfigMapFrom(map[string]string{
 					"zimbra_home":     dir,
 					"zimbra_buildnum": "11111",
-				},
+				}),
 			},
 		}
 		result, err := g.resolveIMAPId(context.Background())
@@ -162,8 +162,8 @@ func TestResolveIMAPIdWithVersion(t *testing.T) {
 func TestResolveIMAPGreeting(t *testing.T) {
 	t.Run("returns empty when disabled", func(t *testing.T) {
 		g := &Generator{
-			GlobalConfig: &config.GlobalConfig{Data: map[string]string{}},
-			LocalConfig:  &config.LocalConfig{Data: map[string]string{}},
+			GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMap()},
+			LocalConfig:  &config.LocalConfig{Data: config.NewConfigMapFrom(map[string]string{})},
 		}
 		result, err := g.resolveIMAPGreeting(context.Background())
 		if err != nil {
@@ -176,10 +176,10 @@ func TestResolveIMAPGreeting(t *testing.T) {
 
 	t.Run("returns IMAP greeting when enabled", func(t *testing.T) {
 		g := &Generator{
-			GlobalConfig: &config.GlobalConfig{Data: map[string]string{
+			GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMapFrom(map[string]string{
 				"zimbraReverseProxyImapExposeVersionOnBanner": "TRUE",
-			}},
-			LocalConfig: &config.LocalConfig{Data: map[string]string{}},
+			})},
+			LocalConfig: &config.LocalConfig{Data: config.NewConfigMapFrom(map[string]string{})},
 		}
 		result, err := g.resolveIMAPGreeting(context.Background())
 		if err != nil {
@@ -196,8 +196,8 @@ func TestResolveIMAPGreeting(t *testing.T) {
 func TestResolvePOP3Greeting(t *testing.T) {
 	t.Run("returns empty when disabled", func(t *testing.T) {
 		g := &Generator{
-			GlobalConfig: &config.GlobalConfig{Data: map[string]string{}},
-			LocalConfig:  &config.LocalConfig{Data: map[string]string{}},
+			GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMap()},
+			LocalConfig:  &config.LocalConfig{Data: config.NewConfigMapFrom(map[string]string{})},
 		}
 		result, err := g.resolvePOP3Greeting(context.Background())
 		if err != nil {
@@ -210,10 +210,10 @@ func TestResolvePOP3Greeting(t *testing.T) {
 
 	t.Run("returns POP3 greeting when enabled", func(t *testing.T) {
 		g := &Generator{
-			GlobalConfig: &config.GlobalConfig{Data: map[string]string{
+			GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMapFrom(map[string]string{
 				"zimbraReverseProxyPop3ExposeVersionOnBanner": "TRUE",
-			}},
-			LocalConfig: &config.LocalConfig{Data: map[string]string{}},
+			})},
+			LocalConfig: &config.LocalConfig{Data: config.NewConfigMapFrom(map[string]string{})},
 		}
 		result, err := g.resolvePOP3Greeting(context.Background())
 		if err != nil {
@@ -230,8 +230,8 @@ func TestResolvePOP3Greeting(t *testing.T) {
 func TestResolveMailWhitelistIPs(t *testing.T) {
 	t.Run("returns empty when not configured", func(t *testing.T) {
 		g := &Generator{
-			ServerConfig: &config.ServerConfig{Data: map[string]string{}},
-			GlobalConfig: &config.GlobalConfig{Data: map[string]string{}},
+			ServerConfig: &config.ServerConfig{Data: config.NewConfigMapFrom(map[string]string{})},
+			GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMap()},
 		}
 		result, err := g.resolveMailWhitelistIPs(context.Background())
 		if err != nil {
@@ -244,9 +244,9 @@ func TestResolveMailWhitelistIPs(t *testing.T) {
 
 	t.Run("returns single IP", func(t *testing.T) {
 		g := &Generator{
-			ServerConfig: &config.ServerConfig{Data: map[string]string{
+			ServerConfig: &config.ServerConfig{Data: config.NewConfigMapFrom(map[string]string{
 				"zimbraReverseProxyIPThrottleWhitelist": "1.2.3.4",
-			}},
+			})},
 		}
 		result, err := g.resolveMailWhitelistIPs(context.Background())
 		if err != nil {
@@ -264,9 +264,9 @@ func TestResolveMailWhitelistIPs(t *testing.T) {
 
 	t.Run("returns multiple IPs with proper formatting", func(t *testing.T) {
 		g := &Generator{
-			ServerConfig: &config.ServerConfig{Data: map[string]string{
+			ServerConfig: &config.ServerConfig{Data: config.NewConfigMapFrom(map[string]string{
 				"zimbraReverseProxyIPThrottleWhitelist": "1.2.3.4\n5.6.7.8",
-			}},
+			})},
 		}
 		result, err := g.resolveMailWhitelistIPs(context.Background())
 		if err != nil {
@@ -286,10 +286,10 @@ func TestResolveMailWhitelistIPs(t *testing.T) {
 
 	t.Run("falls back to global config", func(t *testing.T) {
 		g := &Generator{
-			ServerConfig: &config.ServerConfig{Data: map[string]string{}},
-			GlobalConfig: &config.GlobalConfig{Data: map[string]string{
+			ServerConfig: &config.ServerConfig{Data: config.NewConfigMapFrom(map[string]string{})},
+			GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMapFrom(map[string]string{
 				"zimbraReverseProxyIPThrottleWhitelist": "10.0.0.1",
-			}},
+			})},
 		}
 		result, err := g.resolveMailWhitelistIPs(context.Background())
 		if err != nil {

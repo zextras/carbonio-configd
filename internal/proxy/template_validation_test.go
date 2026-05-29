@@ -32,7 +32,7 @@ func TestValidateAllRealTemplates(t *testing.T) {
 
 	// Create comprehensive test configuration
 	localCfg := &config.LocalConfig{
-		Data: map[string]string{
+		Data: config.NewConfigMapFrom(map[string]string{
 			"zimbraIPMode":                             "both",
 			"zimbraReverseProxyAdminIPAddress":         "127.0.0.1",
 			"zimbraReverseProxyHttpEnabled":            "TRUE",
@@ -54,11 +54,11 @@ func TestValidateAllRealTemplates(t *testing.T) {
 			"zimbraReverseProxyUserLoginLimitTime":     "3600",
 			"zimbra_server_hostname":                   "mail.example.com",
 			"ssl_dhparam":                              "/opt/zextras/conf/dhparam.pem",
-		},
+		}),
 	}
 
 	globalCfg := &config.GlobalConfig{
-		Data: map[string]string{
+		Data: config.NewConfigMapFrom(map[string]string{
 			"zimbraReverseProxyHttpEnabled":            "TRUE",
 			"zimbraReverseProxyMailEnabled":            "TRUE",
 			"zimbraReverseProxyDefaultRealm":           "example.com",
@@ -69,11 +69,11 @@ func TestValidateAllRealTemplates(t *testing.T) {
 			"zimbraReverseProxySSLCiphers":             "ECDHE+AESGCM",
 			"zimbraReverseProxySSLProtocols":           "TLSv1.2 TLSv1.3",
 			"zimbraReverseProxyUpstreamPollingTimeout": "60",
-		},
+		}),
 	}
 
 	serverCfg := &config.ServerConfig{
-		Data: map[string]string{
+		Data: config.NewConfigMapFrom(map[string]string{
 			"zimbraServiceEnabled":           "imapd pop3d",
 			"zimbraServiceHostname":          "mail.example.com",
 			"zimbraMailPort":                 "8080",
@@ -82,11 +82,11 @@ func TestValidateAllRealTemplates(t *testing.T) {
 			"zimbraReverseProxyLookupTarget": "TRUE",
 			"zimbraSSLCertificate":           "/opt/zextras/conf/nginx.crt",
 			"zimbraSSLPrivateKey":            "/opt/zextras/conf/nginx.key",
-		},
-		ServiceConfig: map[string]string{
+		}),
+		ServiceConfig: config.NewConfigMapFrom(map[string]string{
 			"imapd": "enabled",
 			"pop3d": "enabled",
-		},
+		}),
 	}
 
 	cfg, err := config.NewConfig()

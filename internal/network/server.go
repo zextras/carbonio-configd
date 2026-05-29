@@ -14,6 +14,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
 )
@@ -22,11 +23,12 @@ const (
 	errUnknownCommand    = "ERROR UNKNOWN COMMAND"
 	respSuccessActive    = "SUCCESS ACTIVE"
 	respRewritesComplete = "SUCCESS REWRITES COMPLETE"
+	acceptErrorBackoff   = 100 * time.Millisecond
 )
 
 // ActionTrigger defines the interface for triggering actions in the main application logic.
 type ActionTrigger interface {
-	TriggerRewrite(configs []string)
+	TriggerRewrite(ctx context.Context, configs []string)
 }
 
 // RequestHandler defines the interface for handling incoming requests.
@@ -98,6 +100,7 @@ func (s *ThreadedStreamServer) ServeForever(ctx context.Context) error {
 				default:
 					logger.ErrorContext(ctx, "Error accepting connection",
 						"error", err)
+					time.Sleep(acceptErrorBackoff)
 				}
 
 				continue
@@ -194,7 +197,7 @@ func (h *ConfigdRequestHandler) HandleRequest(ctx context.Context, command strin
 		return respSuccessActive
 	case "REWRITE":
 		if h.ActionTrigger != nil {
-			h.ActionTrigger.TriggerRewrite(args)
+			h.ActionTrigger.TriggerRewrite(ctx, args)
 			logger.DebugContext(ctx, "Triggered REWRITE command",
 				"args", args)
 

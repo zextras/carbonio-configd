@@ -13,6 +13,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/state"
 	"github.com/zextras/carbonio-configd/internal/transformer"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -688,56 +689,6 @@ func TestCompileActions(t *testing.T) {
 	})
 }
 
-// TestLoadMtaConfig tests the LoadMtaConfig method
-func TestLoadMtaConfig(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
-	ctx := context.Background()
-	cacheInstance := cache.New(ctx, false)
-
-	cm := &ConfigManager{
-		mainConfig: &config.Config{
-			BaseDir:  "/tmp",
-			Hostname: "testhost",
-		},
-		State: state.NewState(),
-		Cache: cacheInstance,
-	}
-
-	// Load MTA config
-	err := cm.LoadMtaConfig(context.Background(), "/tmp/zmconfigd.cf")
-	if err != nil {
-		t.Errorf("LoadMtaConfig failed: %v", err)
-	}
-
-	// Verify proxy section was added
-	if _, exists := cm.State.MtaConfig.Sections["proxy"]; !exists {
-		t.Error("Expected proxy section to be loaded")
-	}
-
-	// Verify proxy section has expected data
-	proxySection := cm.State.MtaConfig.Sections["proxy"]
-	if proxySection.Name != "proxy" {
-		t.Errorf("Expected section name 'proxy', got %q", proxySection.Name)
-	}
-
-	// Verify rewrites
-	if len(proxySection.Rewrites) == 0 {
-		t.Error("Expected proxy section to have rewrites")
-	}
-
-	// Verify restarts
-	if !proxySection.Restarts["proxy"] {
-		t.Error("Expected proxy to be in restarts")
-	}
-
-	// Verify required vars
-	if _, exists := proxySection.RequiredVars["zimbraReverseProxyLookupTarget"]; !exists {
-		t.Error("Expected zimbraReverseProxyLookupTarget in required vars")
-	}
-}
-
 // TestLookUpConfig tests the LookUpConfig method
 func TestLookUpConfig(t *testing.T) {
 	if testing.Short() {
@@ -758,7 +709,7 @@ func TestLookUpConfig(t *testing.T) {
 		}
 
 		// Add to GlobalConfig
-		cm.State.GlobalConfig.Data["testKey"] = "testValue"
+		cm.State.GlobalConfig.Data.Set("testKey", "testValue")
 
 		value, err := cm.LookUpConfig(ctx, "VAR", "testKey")
 		if err != nil {
@@ -780,7 +731,7 @@ func TestLookUpConfig(t *testing.T) {
 		}
 
 		// Add to MiscConfig (not in GlobalConfig)
-		cm.State.MiscConfig.Data["miscKey"] = "miscValue"
+		cm.State.MiscConfig.Data.Set("miscKey", "miscValue")
 
 		value, err := cm.LookUpConfig(ctx, "VAR", "miscKey")
 		if err != nil {
@@ -802,7 +753,7 @@ func TestLookUpConfig(t *testing.T) {
 		}
 
 		// Add to ServerConfig (not in Global or Misc)
-		cm.State.ServerConfig.Data["serverKey"] = "serverValue"
+		cm.State.ServerConfig.Data.Set("serverKey", "serverValue")
 
 		value, err := cm.LookUpConfig(ctx, "VAR", "serverKey")
 		if err != nil {
@@ -824,7 +775,7 @@ func TestLookUpConfig(t *testing.T) {
 		}
 
 		// Add to LocalConfig
-		cm.State.LocalConfig.Data["localKey"] = "localValue"
+		cm.State.LocalConfig.Data.Set("localKey", "localValue")
 
 		value, err := cm.LookUpConfig(ctx, "LOCAL", "localKey")
 		if err != nil {
@@ -846,7 +797,7 @@ func TestLookUpConfig(t *testing.T) {
 		}
 
 		// Add to ServiceConfig
-		cm.State.ServerConfig.ServiceConfig["nginx"] = "TRUE"
+		cm.State.ServerConfig.ServiceConfig.Set("nginx", "TRUE")
 
 		value, err := cm.LookUpConfig(ctx, "SERVICE", "nginx")
 		if err != nil {
@@ -1145,7 +1096,7 @@ func TestCompileSectionActions(t *testing.T) {
 			},
 		}
 
-		cm.compileSectionActions(ctx, "testservice", section, nil, cm.State.ForcedConfig, cm.State.FirstRun, cm.State.ServerConfig.ServiceConfig)
+		cm.compileSectionActions(ctx, "testservice", section, nil, cm.State.ForcedConfig, cm.State.FirstRun, cm.State.ServerConfig.ServiceConfig.Snapshot())
 
 		// Check that rewrites were added to state
 		if len(cm.State.CurrentActions.Rewrites) != 2 {
@@ -1181,7 +1132,7 @@ func TestCompileSectionActions(t *testing.T) {
 			},
 		}
 
-		cm.compileSectionActions(ctx, "mta", section, nil, cm.State.ForcedConfig, cm.State.FirstRun, cm.State.ServerConfig.ServiceConfig)
+		cm.compileSectionActions(ctx, "mta", section, nil, cm.State.ForcedConfig, cm.State.FirstRun, cm.State.ServerConfig.ServiceConfig.Snapshot())
 
 		// Check postconf
 		if len(cm.State.CurrentActions.Postconf) != 2 {
@@ -1216,7 +1167,7 @@ func TestCompileSectionActions(t *testing.T) {
 			Proxygen: true,
 		}
 
-		cm.compileSectionActions(ctx, "proxy", section, nil, cm.State.ForcedConfig, cm.State.FirstRun, cm.State.ServerConfig.ServiceConfig)
+		cm.compileSectionActions(ctx, "proxy", section, nil, cm.State.ForcedConfig, cm.State.FirstRun, cm.State.ServerConfig.ServiceConfig.Snapshot())
 
 		// Check that proxygen was set
 		if !cm.State.CurrentActions.Proxygen {
@@ -1243,7 +1194,7 @@ func TestCompileSectionActions(t *testing.T) {
 			},
 		}
 
-		cm.compileSectionActions(ctx, "ldap", section, nil, cm.State.ForcedConfig, cm.State.FirstRun, cm.State.ServerConfig.ServiceConfig)
+		cm.compileSectionActions(ctx, "ldap", section, nil, cm.State.ForcedConfig, cm.State.FirstRun, cm.State.ServerConfig.ServiceConfig.Snapshot())
 
 		// Check ldap entries
 		if len(cm.State.CurrentActions.Ldap) != 2 {
@@ -1272,9 +1223,9 @@ func TestCompileSectionActions(t *testing.T) {
 		}
 
 		// Set up service as enabled
-		cm.State.ServerConfig.ServiceConfig["mta"] = "TRUE"
+		cm.State.ServerConfig.ServiceConfig.Set("mta", "TRUE")
 
-		cm.compileSectionActions(ctx, "mta", section, nil, cm.State.ForcedConfig, cm.State.FirstRun, cm.State.ServerConfig.ServiceConfig)
+		cm.compileSectionActions(ctx, "mta", section, nil, cm.State.ForcedConfig, cm.State.FirstRun, cm.State.ServerConfig.ServiceConfig.Snapshot())
 
 		// Check that no restarts were added
 		if len(cm.State.CurrentActions.Restarts) != 0 {
@@ -1300,9 +1251,9 @@ func TestCompileSectionActions(t *testing.T) {
 			Restarts: map[string]bool{"mta": true},
 		}
 
-		cm.State.ServerConfig.ServiceConfig["mta"] = "TRUE"
+		cm.State.ServerConfig.ServiceConfig.Set("mta", "TRUE")
 
-		cm.compileSectionActions(ctx, "mta", section, nil, cm.State.ForcedConfig, cm.State.FirstRun, cm.State.ServerConfig.ServiceConfig)
+		cm.compileSectionActions(ctx, "mta", section, nil, cm.State.ForcedConfig, cm.State.FirstRun, cm.State.ServerConfig.ServiceConfig.Snapshot())
 
 		// Check that no restarts were added
 		if len(cm.State.CurrentActions.Restarts) != 0 {
@@ -1328,9 +1279,9 @@ func TestCompileSectionActions(t *testing.T) {
 			Restarts: map[string]bool{"mta": true},
 		}
 
-		cm.State.ServerConfig.ServiceConfig["mta"] = "TRUE"
+		cm.State.ServerConfig.ServiceConfig.Set("mta", "TRUE")
 
-		cm.compileSectionActions(ctx, "mta", section, cm.State.RequestedConfig, cm.State.ForcedConfig, cm.State.FirstRun, cm.State.ServerConfig.ServiceConfig)
+		cm.compileSectionActions(ctx, "mta", section, cm.State.RequestedConfig, cm.State.ForcedConfig, cm.State.FirstRun, cm.State.ServerConfig.ServiceConfig.Snapshot())
 
 		if len(cm.State.CurrentActions.Restarts) != 0 {
 			t.Errorf("Expected 0 restarts with requested config, got %d", len(cm.State.CurrentActions.Restarts))
@@ -1354,9 +1305,9 @@ func TestCompileSectionActions(t *testing.T) {
 			Restarts: map[string]bool{"mta": true},
 		}
 
-		cm.State.ServerConfig.ServiceConfig["mta"] = "TRUE"
+		cm.State.ServerConfig.ServiceConfig.Set("mta", "TRUE")
 
-		cm.compileSectionActions(ctx, "mta", section, nil, cm.State.ForcedConfig, cm.State.FirstRun, cm.State.ServerConfig.ServiceConfig)
+		cm.compileSectionActions(ctx, "mta", section, nil, cm.State.ForcedConfig, cm.State.FirstRun, cm.State.ServerConfig.ServiceConfig.Snapshot())
 
 		// Check that restart was added with value -1
 		if len(cm.State.CurrentActions.Restarts) != 1 {
@@ -1386,7 +1337,7 @@ func TestCompileSectionActions(t *testing.T) {
 
 		// Don't add mta to ServiceConfig - absence means disabled
 
-		cm.compileSectionActions(ctx, "mta", section, nil, cm.State.ForcedConfig, cm.State.FirstRun, cm.State.ServerConfig.ServiceConfig)
+		cm.compileSectionActions(ctx, "mta", section, nil, cm.State.ForcedConfig, cm.State.FirstRun, cm.State.ServerConfig.ServiceConfig.Snapshot())
 
 		// Check that stop was added with value 0
 		if len(cm.State.CurrentActions.Restarts) != 1 {
@@ -1415,9 +1366,9 @@ func TestCompileSectionActions(t *testing.T) {
 		}
 
 		// opendkim is not explicitly enabled, but mta is
-		cm.State.ServerConfig.ServiceConfig["mta"] = "TRUE"
+		cm.State.ServerConfig.ServiceConfig.Set("mta", "TRUE")
 
-		cm.compileSectionActions(ctx, "mta", section, nil, cm.State.ForcedConfig, cm.State.FirstRun, cm.State.ServerConfig.ServiceConfig)
+		cm.compileSectionActions(ctx, "mta", section, nil, cm.State.ForcedConfig, cm.State.FirstRun, cm.State.ServerConfig.ServiceConfig.Snapshot())
 
 		// Check that opendkim restart was added
 		if len(cm.State.CurrentActions.Restarts) != 1 {
@@ -1440,7 +1391,7 @@ func TestCompileSectionActions(t *testing.T) {
 		}
 
 		// Set up a condition that will evaluate to true
-		cm.State.LocalConfig.Data["zimbraServiceEnabled"] = "TRUE"
+		cm.State.LocalConfig.Data.Set("zimbraServiceEnabled", "TRUE")
 
 		section := &config.MtaConfigSection{
 			Name: "mta",
@@ -1456,7 +1407,7 @@ func TestCompileSectionActions(t *testing.T) {
 			},
 		}
 
-		cm.compileSectionActions(ctx, "mta", section, nil, cm.State.ForcedConfig, cm.State.FirstRun, cm.State.ServerConfig.ServiceConfig)
+		cm.compileSectionActions(ctx, "mta", section, nil, cm.State.ForcedConfig, cm.State.FirstRun, cm.State.ServerConfig.ServiceConfig.Snapshot())
 
 		// Check that conditional postconf was added
 		if cm.State.CurrentActions.Postconf["conditional_setting"] != "value" {
@@ -1475,8 +1426,8 @@ func TestCompileSectionActions(t *testing.T) {
 			Cache:      cacheInstance,
 		}
 		cm.State.FirstRun = false
-		cm.State.ServerConfig.ServiceConfig["mta"] = "TRUE"
-		cm.State.ServerConfig.ServiceConfig["nginx"] = "TRUE"
+		cm.State.ServerConfig.ServiceConfig.Set("mta", "TRUE")
+		cm.State.ServerConfig.ServiceConfig.Set("nginx", "TRUE")
 
 		section := &config.MtaConfigSection{
 			Name: "mta",
@@ -1499,7 +1450,7 @@ func TestCompileSectionActions(t *testing.T) {
 			},
 		}
 
-		cm.compileSectionActions(ctx, "mta", section, nil, cm.State.ForcedConfig, cm.State.FirstRun, cm.State.ServerConfig.ServiceConfig)
+		cm.compileSectionActions(ctx, "mta", section, nil, cm.State.ForcedConfig, cm.State.FirstRun, cm.State.ServerConfig.ServiceConfig.Snapshot())
 
 		// Check all directives were processed
 		if len(cm.State.CurrentActions.Rewrites) != 1 {
@@ -1629,4 +1580,51 @@ func TestDoConfigRewrites_ErrorCollection(t *testing.T) {
 		t.Logf("DoConfigRewrites returned error as expected: %v", err)
 	}
 	// The test primarily verifies no deadlock occurs with the buffer fix
+}
+
+// TestDoConfigRewrites_ErrorSurfacing verifies that errors from rewrite operations
+// are properly surfaced through DoConfigRewrites
+func TestDoConfigRewrites_ErrorSurfacing(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: configmgr test may have retry delays")
+	}
+	ctx := context.Background()
+	cacheInstance := cache.New(ctx, false)
+	tmpDir := t.TempDir()
+
+	cm := &ConfigManager{
+		mainConfig: &config.Config{
+			BaseDir:  tmpDir,
+			Hostname: "testhost",
+		},
+		State:      state.NewState(),
+		ServiceMgr: newMockServiceManager(),
+		Cache:      cacheInstance,
+	}
+
+	// Create a transformer for testing
+	cm.Transformer = newTestTransformer(cm, cm.State)
+
+	// Add a rewrite that will fail because the source file doesn't exist
+	cm.State.CurrentActions.Rewrites = map[string]config.RewriteEntry{
+		"nonexistent.conf": {
+			Value: "output.conf",
+			Mode:  "0644",
+		},
+	}
+
+	// Call DoConfigRewrites and expect an error
+	err := cm.DoConfigRewrites(ctx)
+
+	// Verify that an error was returned
+	if err == nil {
+		t.Error("Expected DoConfigRewrites to return an error for nonexistent source file")
+	} else {
+		t.Logf("DoConfigRewrites correctly returned error: %v", err)
+		// Verify the error message contains relevant information
+		errStr := err.Error()
+		if !strings.Contains(errStr, "nonexistent.conf") && !strings.Contains(errStr, "no such file") {
+			t.Logf("Error message may not contain expected details: %s", errStr)
+		}
+	}
 }

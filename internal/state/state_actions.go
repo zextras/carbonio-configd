@@ -41,8 +41,7 @@ func (s *State) SnapshotCompileActions() CompileActionsSnapshot {
 	forcedConfig := make(map[string]string, len(s.ForcedConfig))
 	maps.Copy(forcedConfig, s.ForcedConfig)
 
-	serviceConfig := make(map[string]string, len(s.ServerConfig.ServiceConfig))
-	maps.Copy(serviceConfig, s.ServerConfig.ServiceConfig)
+	serviceConfig := s.ServerConfig.ServiceConfig.Snapshot()
 
 	return CompileActionsSnapshot{
 		RequestedConfig: requestedConfig,

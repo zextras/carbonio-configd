@@ -28,7 +28,7 @@ func TestCheckConditional_BasicTrue(t *testing.T) {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
 	cm := newTestConfigManager(t)
-	cm.State.ServerConfig.ServiceConfig["imapd"] = "TRUE"
+	cm.State.ServerConfig.ServiceConfig.Set("imapd", "TRUE")
 
 	result, err := cm.CheckConditional(context.Background(), "SERVICE", "imapd")
 	if err != nil {
@@ -62,7 +62,7 @@ func TestCheckConditional_Negated(t *testing.T) {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
 	cm := newTestConfigManager(t)
-	cm.State.ServerConfig.ServiceConfig["imapd"] = "TRUE"
+	cm.State.ServerConfig.ServiceConfig.Set("imapd", "TRUE")
 
 	// Negated conditional - should return false when service is enabled
 	result, err := cm.CheckConditional(context.Background(), "SERVICE", "!imapd")
@@ -133,7 +133,7 @@ func TestCheckConditional_VarType(t *testing.T) {
 	}
 	cm := newTestConfigManager(t)
 	// VAR type looks in GlobalConfig, MiscConfig, or ServerConfig
-	cm.State.GlobalConfig.Data["zimbraIPMode"] = "ipv4"
+	cm.State.GlobalConfig.Data.Set("zimbraIPMode", "ipv4")
 
 	result, err := cm.CheckConditional(context.Background(), "VAR", "zimbraIPMode")
 	if err != nil {
@@ -151,7 +151,7 @@ func TestCheckConditional_ZeroValue(t *testing.T) {
 	}
 	cm := newTestConfigManager(t)
 	// VAR type looks in GlobalConfig first
-	cm.State.GlobalConfig.Data["some_counter"] = "0"
+	cm.State.GlobalConfig.Data.Set("some_counter", "0")
 
 	result, err := cm.CheckConditional(context.Background(), "VAR", "some_counter")
 	if err != nil {
@@ -171,7 +171,7 @@ func TestCompareKeys_FirstRun(t *testing.T) {
 	cm.State.FirstRun = true
 
 	// Add a service to ServerConfig
-	cm.State.ServerConfig.ServiceConfig["imapd"] = "TRUE"
+	cm.State.ServerConfig.ServiceConfig.Set("imapd", "TRUE")
 
 	// Create a section with required vars
 	cm.State.MtaConfig.Sections["imap"] = &config.MtaConfigSection{
@@ -179,7 +179,7 @@ func TestCompareKeys_FirstRun(t *testing.T) {
 		RequiredVars: map[string]string{"zimbraImapBindPort": "VAR"},
 		Changed:      false,
 	}
-	cm.State.LocalConfig.Data["zimbraImapBindPort"] = "143"
+	cm.State.LocalConfig.Data.Set("zimbraImapBindPort", "143")
 
 	err := cm.CompareKeys(context.Background())
 	if err != nil {
@@ -212,7 +212,7 @@ func TestCompareKeys_ConfigChange(t *testing.T) {
 	// Set initial value
 	cm.State.LastVal(context.Background(), "imap", "VAR", "zimbraImapBindPort", "143")
 	// Set new value in GlobalConfig (VAR type checks GlobalConfig first)
-	cm.State.GlobalConfig.Data["zimbraImapBindPort"] = "7143"
+	cm.State.GlobalConfig.Data.Set("zimbraImapBindPort", "7143")
 
 	err := cm.CompareKeys(context.Background())
 	if err != nil {
@@ -272,7 +272,7 @@ func TestCompareKeys_ServiceEnabled(t *testing.T) {
 	cm.State.FirstRun = false
 
 	// Service not in current services but enabled in ServerConfig
-	cm.State.ServerConfig.ServiceConfig["imapd"] = "TRUE"
+	cm.State.ServerConfig.ServiceConfig.Set("imapd", "TRUE")
 
 	// Ensure service manager has command for this service
 	mockServiceMgr := &mockServiceManager{
@@ -340,8 +340,8 @@ func TestCompareKeys_ForcedConfig(t *testing.T) {
 	cm.State.ForcedConfig["imap"] = "true"
 
 	// Set different values in GlobalConfig (VAR type)
-	cm.State.GlobalConfig.Data["zimbraImapBindPort"] = "143"
-	cm.State.GlobalConfig.Data["zimbraSmtpPort"] = "25"
+	cm.State.GlobalConfig.Data.Set("zimbraImapBindPort", "143")
+	cm.State.GlobalConfig.Data.Set("zimbraSmtpPort", "25")
 	cm.State.LastVal(context.Background(), "imap", "VAR", "zimbraImapBindPort", "7143")
 	cm.State.LastVal(context.Background(), "smtp", "VAR", "zimbraSmtpPort", "587")
 
@@ -395,7 +395,7 @@ func TestProcessConditionals_Simple(t *testing.T) {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
 	cm := newTestConfigManager(t)
-	cm.State.ServerConfig.ServiceConfig["imapd"] = "TRUE"
+	cm.State.ServerConfig.ServiceConfig.Set("imapd", "TRUE")
 
 	conditionals := []config.Conditional{
 		{
@@ -478,9 +478,9 @@ func TestProcessConditionals_Nested(t *testing.T) {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
 	cm := newTestConfigManager(t)
-	cm.State.ServerConfig.ServiceConfig["imapd"] = "TRUE"
+	cm.State.ServerConfig.ServiceConfig.Set("imapd", "TRUE")
 	// VAR type looks in GlobalConfig
-	cm.State.GlobalConfig.Data["zimbraIPMode"] = "ipv6"
+	cm.State.GlobalConfig.Data.Set("zimbraIPMode", "ipv6")
 
 	conditionals := []config.Conditional{
 		{
@@ -514,7 +514,7 @@ func TestProcessConditionals_MultipleDirectives(t *testing.T) {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
 	cm := newTestConfigManager(t)
-	cm.State.ServerConfig.ServiceConfig["cbpolicyd"] = "TRUE"
+	cm.State.ServerConfig.ServiceConfig.Set("cbpolicyd", "TRUE")
 
 	conditionals := []config.Conditional{
 		{
@@ -543,5 +543,85 @@ func TestProcessConditionals_MultipleDirectives(t *testing.T) {
 	}
 	if _, exists := cm.State.CurrentActions.Ldap["ldap-alias.cf"]; !exists {
 		t.Error("Expected ldap to be set")
+	}
+}
+
+// TestCheckConditional_ComparatorAvailable verifies CheckConditional works
+// through the constructor-initialised comparator.
+func TestCheckConditional_ComparatorAvailable(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: configmgr test may have retry delays")
+	}
+	cm := newTestConfigManager(t)
+	cm.State.ServerConfig.ServiceConfig.Set("imapd", "TRUE")
+
+	// NewConfigManager initialises the comparator eagerly.
+	if cm.comparator == nil {
+		t.Fatal("Expected comparator to be initialized by the constructor")
+	}
+
+	result, err := cm.CheckConditional(context.Background(), "SERVICE", "imapd")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+	if !result {
+		t.Error("Expected true for enabled service")
+	}
+
+	if cm.comparator == nil {
+		t.Error("Expected comparator to remain initialized after CheckConditional")
+	}
+}
+
+// TestCompareKeys_ComparatorAvailable verifies the comparator is wired up by
+// the constructor and remains usable across CompareKeys calls.
+func TestCompareKeys_ComparatorAvailable(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: configmgr test may have retry delays")
+	}
+	cm := newTestConfigManager(t)
+	cm.State.FirstRun = true
+	cm.State.ServerConfig.ServiceConfig.Set("imapd", "TRUE")
+
+	// NewConfigManager initialises the comparator eagerly.
+	if cm.comparator == nil {
+		t.Fatal("Expected comparator to be initialized by the constructor")
+	}
+
+	// CompareKeys uses the existing comparator without error.
+	if err := cm.CompareKeys(context.Background()); err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+
+	if cm.comparator == nil {
+		t.Error("Expected comparator to remain initialized after CompareKeys")
+	}
+}
+
+// TestCompareKeys_ReuseComparator tests that CompareKeys reuses the comparator on subsequent calls
+func TestCompareKeys_ReuseComparator(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: configmgr test may have retry delays")
+	}
+	cm := newTestConfigManager(t)
+	cm.State.FirstRun = true
+	cm.State.ServerConfig.ServiceConfig.Set("imapd", "TRUE")
+
+	// First call initializes the comparator
+	err := cm.CompareKeys(context.Background())
+	if err != nil {
+		t.Fatalf("Expected no error on first call, got: %v", err)
+	}
+	firstComparator := cm.comparator
+
+	// Second call should reuse the same comparator
+	err = cm.CompareKeys(context.Background())
+	if err != nil {
+		t.Fatalf("Expected no error on second call, got: %v", err)
+	}
+	secondComparator := cm.comparator
+
+	if firstComparator != secondComparator {
+		t.Error("Expected comparator to be reused on subsequent calls")
 	}
 }

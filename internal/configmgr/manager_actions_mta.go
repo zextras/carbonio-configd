@@ -6,14 +6,16 @@ package configmgr
 
 import (
 	"context"
+	"errors"
 
+	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/mtaops"
 )
 
-func (cm *ConfigManager) doPostconf(ctx context.Context) {
+func (cm *ConfigManager) doPostconf(ctx context.Context) error {
 	if len(cm.State.CurrentActions.Postconf) == 0 {
-		return
+		return nil
 	}
 
 	logger.DebugContext(ctx, "Executing postconf commands")
@@ -21,13 +23,19 @@ func (cm *ConfigManager) doPostconf(ctx context.Context) {
 	// Collect all operations first for batch execution
 	ops := make([]mtaops.PostconfOperation, 0, len(cm.State.CurrentActions.Postconf))
 
+	var errs []error
+
 	for key, valueSpec := range cm.State.CurrentActions.Postconf {
 		// Check for cancellation
 		select {
 		case <-ctx.Done():
 			logger.InfoContext(ctx, "Postconf operations cancelled by shutdown signal")
 
-			return
+			if len(errs) > 0 {
+				return errors.Join(errs...)
+			}
+
+			return nil
 		default:
 		}
 
@@ -37,6 +45,7 @@ func (cm *ConfigManager) doPostconf(ctx context.Context) {
 			logger.ErrorContext(ctx, "Failed to resolve postconf value",
 				"key", key,
 				"error", err)
+			errs = append(errs, err)
 
 			continue
 		}
@@ -53,6 +62,7 @@ func (cm *ConfigManager) doPostconf(ctx context.Context) {
 		if err := cm.mtaExecutor.ExecutePostconfBatch(ctx, ops); err != nil {
 			logger.ErrorContext(ctx, "Failed to execute postconf batch",
 				"error", err)
+			errs = append(errs, err)
 		} else {
 			logger.DebugContext(ctx, "Successfully executed postconf batch",
 				"operation_count", len(ops))
@@ -60,11 +70,17 @@ func (cm *ConfigManager) doPostconf(ctx context.Context) {
 	}
 
 	cm.State.ClearPostconf()
+
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+
+	return nil
 }
 
-func (cm *ConfigManager) doPostconfd(ctx context.Context) {
+func (cm *ConfigManager) doPostconfd(ctx context.Context) error {
 	if len(cm.State.CurrentActions.Postconfd) == 0 {
-		return
+		return nil
 	}
 
 	logger.DebugContext(ctx, "Executing postconfd commands")
@@ -78,7 +94,7 @@ func (cm *ConfigManager) doPostconfd(ctx context.Context) {
 		case <-ctx.Done():
 			logger.InfoContext(ctx, "Postconfd operations cancelled by shutdown signal")
 
-			return
+			return nil
 		default:
 		}
 
@@ -92,22 +108,29 @@ func (cm *ConfigManager) doPostconfd(ctx context.Context) {
 		if err := cm.mtaExecutor.ExecutePostconfdBatch(ctx, ops); err != nil {
 			logger.ErrorContext(ctx, "Failed to execute postconfd batch",
 				"error", err)
-		} else {
-			logger.DebugContext(ctx, "Successfully executed postconfd batch",
-				"operation_count", len(ops))
+			cm.State.ClearPostconfd()
+
+			return err
 		}
+
+		logger.DebugContext(ctx, "Successfully executed postconfd batch",
+			"operation_count", len(ops))
 	}
 
 	cm.State.ClearPostconfd()
+
+	return nil
 }
 
-func (cm *ConfigManager) doLdap(ctx context.Context) {
+func (cm *ConfigManager) doLdap(ctx context.Context) error {
 	if len(cm.State.CurrentActions.Ldap) == 0 {
-		return
+		return nil
 	}
 
 	logger.DebugContext(ctx, "Processing LDAP attributes",
 		"attribute_count", len(cm.State.CurrentActions.Ldap))
+
+	var errs []error
 
 	// Resolve and execute each LDAP directive
 	for key, valueSpec := range cm.State.CurrentActions.Ldap {
@@ -116,7 +139,11 @@ func (cm *ConfigManager) doLdap(ctx context.Context) {
 		case <-ctx.Done():
 			logger.InfoContext(ctx, "LDAP operations cancelled by shutdown signal")
 
-			return
+			if len(errs) > 0 {
+				return errors.Join(errs...)
+			}
+
+			return nil
 		default:
 		}
 
@@ -126,6 +153,7 @@ func (cm *ConfigManager) doLdap(ctx context.Context) {
 			logger.ErrorContext(ctx, "Failed to resolve LDAP value",
 				"key", key,
 				"error", err)
+			errs = append(errs, err)
 
 			continue
 		}
@@ -142,6 +170,7 @@ func (cm *ConfigManager) doLdap(ctx context.Context) {
 				"key", key,
 				"value", op.Value,
 				"error", err)
+			errs = append(errs, err)
 		} else {
 			logger.DebugContext(ctx, "Successfully executed LDAP write",
 				"key", key,
@@ -151,51 +180,78 @@ func (cm *ConfigManager) doLdap(ctx context.Context) {
 	}
 
 	logger.DebugContext(ctx, "LDAP operations complete")
+
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+
+	return nil
 }
 
-func (cm *ConfigManager) doMapfile(ctx context.Context) {
-	// MAPFILE operations are tracked in RequiredVars as type "MAPFILE" or "MAPLOCAL"
-	// We need to check for changed MAPFILE/MAPLOCAL variables and write them to files
+// doMapfileSection processes MAPFILE/MAPLOCAL operations for a single MTA
+// config section. It returns the slice of errors encountered while executing
+// individual mapfile operations.
+func (cm *ConfigManager) doMapfileSection(ctx context.Context, section *config.MtaConfigSection) []error {
+	if !section.Changed && !cm.State.FirstRun {
+		return nil
+	}
+
+	var errs []error
+
+	for varName, varType := range section.RequiredVars {
+		if varType != configTypeMAPFILE && varType != configTypeMAPLOCAL {
+			continue
+		}
+
+		op := mtaops.MapfileOperation{
+			Key:     varName,
+			IsLocal: varType == configTypeMAPLOCAL,
+		}
+
+		if err := cm.mtaExecutor.ExecuteMapfile(ctx, op); err != nil {
+			logger.ErrorContext(ctx, "Failed to execute MAPFILE",
+				"var_name", varName,
+				"error", err)
+			errs = append(errs, err)
+
+			continue
+		}
+
+		logger.DebugContext(ctx, "Successfully executed MAPFILE", "var_name", varName)
+	}
+
+	return errs
+}
+
+func (cm *ConfigManager) doMapfile(ctx context.Context) error {
+	// MAPFILE operations are tracked in RequiredVars as type "MAPFILE" or
+	// "MAPLOCAL". We need to check for changed sections and write the
+	// corresponding files.
 	logger.DebugContext(ctx, "Checking for MAPFILE operations")
 
+	var errs []error
+
 	for _, section := range cm.State.MtaConfig.Sections {
-		// Check for cancellation
 		select {
 		case <-ctx.Done():
 			logger.InfoContext(ctx, "Mapfile operations cancelled by shutdown signal")
 
-			return
+			if len(errs) > 0 {
+				return errors.Join(errs...)
+			}
+
+			return nil
 		default:
 		}
 
-		if !section.Changed && !cm.State.FirstRun {
-			continue
-		}
-
-		for varName, varType := range section.RequiredVars {
-			if varType != configTypeMAPFILE && varType != configTypeMAPLOCAL {
-				continue
-			}
-
-			isLocal := (varType == "MAPLOCAL")
-
-			// Create the operation
-			op := mtaops.MapfileOperation{
-				Key:     varName,
-				IsLocal: isLocal,
-			}
-
-			// Execute the operation (fetches from LDAP, decodes, writes file)
-			if err := cm.mtaExecutor.ExecuteMapfile(ctx, op); err != nil {
-				logger.ErrorContext(ctx, "Failed to execute MAPFILE",
-					"var_name", varName,
-					"error", err)
-			} else {
-				logger.DebugContext(ctx, "Successfully executed MAPFILE",
-					"var_name", varName)
-			}
-		}
+		errs = append(errs, cm.doMapfileSection(ctx, section)...)
 	}
 
 	logger.DebugContext(ctx, "MAPFILE operations complete")
+
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+
+	return nil
 }

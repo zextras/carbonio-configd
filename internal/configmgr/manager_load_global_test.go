@@ -16,7 +16,6 @@ func TestFetchGlobalConfig_Success(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: has retry delays")
 	}
-	commands.Initialize()
 
 	cm := newTestConfigManager(t)
 
@@ -26,7 +25,7 @@ zimbraAmavisQuarantineAccount: quarantine@example.com
 zimbraMailboxdSSLProtocols: TLSv1.2 TLSv1.3
 zimbraSSLIncludeCipherSuites: ECDHE-RSA-AES256-GCM-SHA384 AES256-GCM-SHA384`
 
-	commands.Commands["gacf"] = commands.NewCommand(
+	cm.CommandRegistry.Commands["gacf"] = commands.NewCommand(
 		"Global config test",
 		"gacf",
 		func(_ context.Context, args ...string) (string, error) {
@@ -60,11 +59,10 @@ func TestFetchGlobalConfig_CommandNotAvailable(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: fetchGlobalConfig has retry delays")
 	}
-	commands.Initialize()
 
 	cm := newTestConfigManager(t)
 
-	commands.Commands = make(map[string]*commands.Command)
+	cm.CommandRegistry.Commands = make(map[string]*commands.Command)
 
 	result, err := cm.fetchGlobalConfig(context.Background(), 3)
 	if err == nil {
@@ -81,12 +79,11 @@ func TestFetchGlobalConfig_CommandFails(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: has retry delays")
 	}
-	commands.Initialize()
 
 	cm := newTestConfigManager(t)
 
 	attempts := 0
-	commands.Commands["gacf"] = commands.NewCommand(
+	cm.CommandRegistry.Commands["gacf"] = commands.NewCommand(
 		"Global config test",
 		"gacf",
 		func(_ context.Context, args ...string) (string, error) {
@@ -114,11 +111,9 @@ func TestFetchGlobalConfig_EmptyOutput(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: has retry delays")
 	}
-	commands.Initialize()
-
 	cm := newTestConfigManager(t)
 
-	commands.Commands["gacf"] = commands.NewCommand(
+	cm.CommandRegistry.Commands["gacf"] = commands.NewCommand(
 		"Global config test",
 		"gacf",
 		func(_ context.Context, args ...string) (string, error) {
@@ -147,7 +142,6 @@ func TestFetchGlobalConfig_QuarantineBannedItemsFalse(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: has retry delays")
 	}
-	commands.Initialize()
 
 	cm := newTestConfigManager(t)
 
@@ -155,7 +149,7 @@ func TestFetchGlobalConfig_QuarantineBannedItemsFalse(t *testing.T) {
 	mockOutput := `zimbraMtaBlockedExtensionWarnRecipient: FALSE
 zimbraAmavisQuarantineAccount: `
 
-	commands.Commands["gacf"] = commands.NewCommand(
+	cm.CommandRegistry.Commands["gacf"] = commands.NewCommand(
 		"Global config test",
 		"gacf",
 		func(_ context.Context, args ...string) (string, error) {
@@ -180,7 +174,6 @@ func TestLoadGlobalConfigWithRetry_Success(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: has retry delays")
 	}
-	commands.Initialize()
 
 	cm := newTestConfigManager(t)
 
@@ -188,7 +181,7 @@ func TestLoadGlobalConfigWithRetry_Success(t *testing.T) {
 zimbraAmavisQuarantineAccount: virus-quarantine.account@example.com
 zimbraMailboxdSSLProtocols: TLSv1.2 TLSv1.3`
 
-	commands.Commands["gacf"] = commands.NewCommand(
+	cm.CommandRegistry.Commands["gacf"] = commands.NewCommand(
 		"Global config test",
 		"gacf",
 		func(_ context.Context, args ...string) (string, error) {
@@ -202,15 +195,15 @@ zimbraMailboxdSSLProtocols: TLSv1.2 TLSv1.3`
 	}
 
 	// Verify data was loaded
-	if cm.State.GlobalConfig.Data["zimbraMtaBlockedExtensionWarnRecipient"] != "TRUE" {
+	if cm.State.GlobalConfig.Data.GetOr("zimbraMtaBlockedExtensionWarnRecipient", "") != "TRUE" {
 		t.Errorf("Expected zimbraMtaBlockedExtensionWarnRecipient to be TRUE, got: %s",
-			cm.State.GlobalConfig.Data["zimbraMtaBlockedExtensionWarnRecipient"])
+			cm.State.GlobalConfig.Data.GetOr("zimbraMtaBlockedExtensionWarnRecipient", ""))
 	}
 
 	// Verify zimbraQuarantineBannedItems was set based on conditions
-	if cm.State.GlobalConfig.Data["zimbraQuarantineBannedItems"] != "TRUE" {
+	if cm.State.GlobalConfig.Data.GetOr("zimbraQuarantineBannedItems", "") != "TRUE" {
 		t.Errorf("Expected zimbraQuarantineBannedItems to be TRUE, got: %s",
-			cm.State.GlobalConfig.Data["zimbraQuarantineBannedItems"])
+			cm.State.GlobalConfig.Data.GetOr("zimbraQuarantineBannedItems", ""))
 	}
 }
 
@@ -219,14 +212,13 @@ func TestLoadGlobalConfigWithRetry_NoCache(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: has retry delays")
 	}
-	commands.Initialize()
 
 	cm := newTestConfigManager(t)
 	cm.Cache = nil // Disable cache
 
 	mockOutput := `zimbraMtaBlockedExtensionWarnRecipient: FALSE`
 
-	commands.Commands["gacf"] = commands.NewCommand(
+	cm.CommandRegistry.Commands["gacf"] = commands.NewCommand(
 		"Global config test",
 		"gacf",
 		func(_ context.Context, args ...string) (string, error) {
@@ -240,9 +232,9 @@ func TestLoadGlobalConfigWithRetry_NoCache(t *testing.T) {
 	}
 
 	// Verify data was loaded even without cache
-	if cm.State.GlobalConfig.Data["zimbraMtaBlockedExtensionWarnRecipient"] != "FALSE" {
+	if cm.State.GlobalConfig.Data.GetOr("zimbraMtaBlockedExtensionWarnRecipient", "") != "FALSE" {
 		t.Errorf("Expected zimbraMtaBlockedExtensionWarnRecipient to be FALSE, got: %s",
-			cm.State.GlobalConfig.Data["zimbraMtaBlockedExtensionWarnRecipient"])
+			cm.State.GlobalConfig.Data.GetOr("zimbraMtaBlockedExtensionWarnRecipient", ""))
 	}
 }
 
@@ -251,14 +243,13 @@ func TestLoadGlobalConfigWithRetry_CachedData(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: has retry delays")
 	}
-	commands.Initialize()
 
 	cm := newTestConfigManager(t)
 
 	callCount := 0
 	mockOutput := `zimbraMtaBlockedExtensionWarnRecipient: TRUE`
 
-	commands.Commands["gacf"] = commands.NewCommand(
+	cm.CommandRegistry.Commands["gacf"] = commands.NewCommand(
 		"Global config test",
 		"gacf",
 		func(_ context.Context, args ...string) (string, error) {

@@ -21,17 +21,15 @@ func TestMainLoopActionTrigger_TriggerRewrite(t *testing.T) {
 	reloadChan := make(chan struct{}, 1)
 
 	trigger := &MainLoopActionTrigger{
-		ReloadChan:   reloadChan,
-		State:        appState,
-		EventCounter: 0,
-		Ctx:          ctx,
+		ReloadChan: reloadChan,
+		State:      appState,
 	}
 
 	configs := []string{"proxy", "mta"}
-	trigger.TriggerRewrite(configs)
+	trigger.TriggerRewrite(ctx, configs)
 
-	if trigger.EventCounter != 1 {
-		t.Errorf("expected EventCounter 1, got %d", trigger.EventCounter)
+	if trigger.EventCounter.Load() != 1 {
+		t.Errorf("expected EventCounter 1, got %d", trigger.EventCounter.Load())
 	}
 
 	select {
@@ -48,18 +46,16 @@ func TestMainLoopActionTrigger_TriggerRewrite_MultipleEvents(t *testing.T) {
 	reloadChan := make(chan struct{}, 1)
 
 	trigger := &MainLoopActionTrigger{
-		ReloadChan:   reloadChan,
-		State:        appState,
-		EventCounter: 0,
-		Ctx:          ctx,
+		ReloadChan: reloadChan,
+		State:      appState,
 	}
 
-	trigger.TriggerRewrite([]string{"proxy"})
-	trigger.TriggerRewrite([]string{"mta"})
-	trigger.TriggerRewrite([]string{"ldap"})
+	trigger.TriggerRewrite(ctx, []string{"proxy"})
+	trigger.TriggerRewrite(ctx, []string{"mta"})
+	trigger.TriggerRewrite(ctx, []string{"ldap"})
 
-	if trigger.EventCounter != 3 {
-		t.Errorf("expected EventCounter 3, got %d", trigger.EventCounter)
+	if trigger.EventCounter.Load() != 3 {
+		t.Errorf("expected EventCounter 3, got %d", trigger.EventCounter.Load())
 	}
 }
 
@@ -69,16 +65,14 @@ func TestMainLoopActionTrigger_TriggerRewrite_EmptyConfigs(t *testing.T) {
 	reloadChan := make(chan struct{}, 1)
 
 	trigger := &MainLoopActionTrigger{
-		ReloadChan:   reloadChan,
-		State:        appState,
-		EventCounter: 0,
-		Ctx:          ctx,
+		ReloadChan: reloadChan,
+		State:      appState,
 	}
 
-	trigger.TriggerRewrite([]string{})
+	trigger.TriggerRewrite(ctx, []string{})
 
-	if trigger.EventCounter != 1 {
-		t.Errorf("expected EventCounter 1, got %d", trigger.EventCounter)
+	if trigger.EventCounter.Load() != 1 {
+		t.Errorf("expected EventCounter 1, got %d", trigger.EventCounter.Load())
 	}
 
 	select {
@@ -181,20 +175,18 @@ func TestMainLoopActionTrigger_TriggerRewrite_ChannelBlocked(t *testing.T) {
 	reloadChan := make(chan struct{}, 1)
 
 	trigger := &MainLoopActionTrigger{
-		ReloadChan:   reloadChan,
-		State:        appState,
-		EventCounter: 0,
-		Ctx:          ctx,
+		ReloadChan: reloadChan,
+		State:      appState,
 	}
 
 	// Fill the channel
 	reloadChan <- struct{}{}
 
 	// This should not block even though channel is full
-	trigger.TriggerRewrite([]string{"proxy"})
+	trigger.TriggerRewrite(ctx, []string{"proxy"})
 
-	if trigger.EventCounter != 1 {
-		t.Errorf("expected EventCounter 1, got %d", trigger.EventCounter)
+	if trigger.EventCounter.Load() != 1 {
+		t.Errorf("expected EventCounter 1, got %d", trigger.EventCounter.Load())
 	}
 
 	// Channel should still have only one item

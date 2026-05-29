@@ -27,7 +27,10 @@ func TestInitNativeLdapClient_LoadFails(t *testing.T) {
 		return nil, errors.New("disk read failed")
 	})
 
-	cm := &ConfigManager{mainConfig: &config.Config{}}
+	cm := &ConfigManager{
+		mainConfig:      &config.Config{},
+		CommandRegistry: commands.NewRegistry(""),
+	}
 	cm.initNativeLdapClient(context.Background())
 
 	if cm.NativeLdapClient != nil {
@@ -43,7 +46,10 @@ func TestInitNativeLdapClient_MissingURL(t *testing.T) {
 		}, nil
 	})
 
-	cm := &ConfigManager{mainConfig: &config.Config{}}
+	cm := &ConfigManager{
+		mainConfig:      &config.Config{},
+		CommandRegistry: commands.NewRegistry(""),
+	}
 	cm.initNativeLdapClient(context.Background())
 
 	if cm.NativeLdapClient != nil {
@@ -60,7 +66,10 @@ func TestInitNativeLdapClient_WhitespaceURL(t *testing.T) {
 		}, nil
 	})
 
-	cm := &ConfigManager{mainConfig: &config.Config{}}
+	cm := &ConfigManager{
+		mainConfig:      &config.Config{},
+		CommandRegistry: commands.NewRegistry(""),
+	}
 	cm.initNativeLdapClient(context.Background())
 
 	if cm.NativeLdapClient != nil {
@@ -76,7 +85,10 @@ func TestInitNativeLdapClient_MissingBindDN(t *testing.T) {
 		}, nil
 	})
 
-	cm := &ConfigManager{mainConfig: &config.Config{}}
+	cm := &ConfigManager{
+		mainConfig:      &config.Config{},
+		CommandRegistry: commands.NewRegistry(""),
+	}
 	cm.initNativeLdapClient(context.Background())
 
 	if cm.NativeLdapClient != nil {
@@ -92,7 +104,10 @@ func TestInitNativeLdapClient_MissingPassword(t *testing.T) {
 		}, nil
 	})
 
-	cm := &ConfigManager{mainConfig: &config.Config{}}
+	cm := &ConfigManager{
+		mainConfig:      &config.Config{},
+		CommandRegistry: commands.NewRegistry(""),
+	}
 	cm.initNativeLdapClient(context.Background())
 
 	if cm.NativeLdapClient != nil {
@@ -109,17 +124,13 @@ func TestInitNativeLdapClient_MultiURLSucceedsBuilding(t *testing.T) {
 		}, nil
 	})
 
-	// RegisterLDAPCommands writes to the global commands.Commands map.
-	// Remove the LDAP entries after the test to prevent later tests from
-	// executing real (network) LDAP queries against the fake server addresses.
-	ldapCommandKeys := []string{"gacf", "gamau", "garpb", "garpu", "gs", "gs:enabled"}
-	t.Cleanup(func() {
-		for _, k := range ldapCommandKeys {
-			delete(commands.Commands, k)
-		}
-	})
+	// Note: RegisterLDAPCommands now registers to the per-instance registry,
+	// so no global cleanup is needed.
 
-	cm := &ConfigManager{mainConfig: &config.Config{}}
+	cm := &ConfigManager{
+		mainConfig:      &config.Config{},
+		CommandRegistry: commands.NewRegistry(""),
+	}
 	cm.initNativeLdapClient(context.Background())
 
 	if cm.NativeLdapClient == nil {

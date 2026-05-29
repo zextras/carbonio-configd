@@ -87,11 +87,11 @@ exit 0
 	gen := &Generator{
 		Config:        cfg,
 		upstreamCache: &upstreamQueryCache{},
-		LocalConfig:   &config.LocalConfig{Data: make(map[string]string)},
-		GlobalConfig:  &config.GlobalConfig{Data: make(map[string]string)},
+		LocalConfig:   &config.LocalConfig{Data: config.NewConfigMap()},
+		GlobalConfig:  &config.GlobalConfig{Data: config.NewConfigMap()},
 		ServerConfig: &config.ServerConfig{
-			Data:          make(map[string]string),
-			ServiceConfig: make(map[string]string),
+			Data:          config.NewConfigMap(),
+			ServiceConfig: config.NewConfigMap(),
 		},
 	}
 
@@ -198,11 +198,11 @@ exit 0
 	gen := &Generator{
 		Config:        cfg,
 		upstreamCache: &upstreamQueryCache{},
-		LocalConfig:   &config.LocalConfig{Data: make(map[string]string)},
-		GlobalConfig:  &config.GlobalConfig{Data: make(map[string]string)},
+		LocalConfig:   &config.LocalConfig{Data: config.NewConfigMap()},
+		GlobalConfig:  &config.GlobalConfig{Data: config.NewConfigMap()},
 		ServerConfig: &config.ServerConfig{
-			Data:          make(map[string]string),
-			ServiceConfig: make(map[string]string),
+			Data:          config.NewConfigMap(),
+			ServiceConfig: config.NewConfigMap(),
 		},
 	}
 
@@ -241,11 +241,11 @@ func TestClearUpstreamCache(t *testing.T) {
 	gen := &Generator{
 		Config:        cfg,
 		upstreamCache: &upstreamQueryCache{},
-		LocalConfig:   &config.LocalConfig{Data: make(map[string]string)},
-		GlobalConfig:  &config.GlobalConfig{Data: make(map[string]string)},
+		LocalConfig:   &config.LocalConfig{Data: config.NewConfigMap()},
+		GlobalConfig:  &config.GlobalConfig{Data: config.NewConfigMap()},
 		ServerConfig: &config.ServerConfig{
-			Data:          make(map[string]string),
-			ServiceConfig: make(map[string]string),
+			Data:          config.NewConfigMap(),
+			ServiceConfig: config.NewConfigMap(),
 		},
 	}
 
@@ -291,11 +291,11 @@ func TestReloadConfigurationInvalidatesCache(t *testing.T) {
 	gen := &Generator{
 		Config:        cfg,
 		upstreamCache: &upstreamQueryCache{},
-		LocalConfig:   &config.LocalConfig{Data: make(map[string]string)},
-		GlobalConfig:  &config.GlobalConfig{Data: make(map[string]string)},
+		LocalConfig:   &config.LocalConfig{Data: config.NewConfigMap()},
+		GlobalConfig:  &config.GlobalConfig{Data: config.NewConfigMap()},
 		ServerConfig: &config.ServerConfig{
-			Data:          make(map[string]string),
-			ServiceConfig: make(map[string]string),
+			Data:          config.NewConfigMap(),
+			ServiceConfig: config.NewConfigMap(),
 		},
 		Variables: make(map[string]*Variable),
 	}
@@ -305,11 +305,11 @@ func TestReloadConfigurationInvalidatesCache(t *testing.T) {
 	gen.upstreamCache.populated = true
 
 	// Reload configuration
-	newLocal := &config.LocalConfig{Data: map[string]string{"key": "value"}}
-	newGlobal := &config.GlobalConfig{Data: map[string]string{"key": "value"}}
+	newLocal := &config.LocalConfig{Data: config.NewConfigMapFrom(map[string]string{"key": "value"})}
+	newGlobal := &config.GlobalConfig{Data: config.NewConfigMapFrom(map[string]string{"key": "value"})}
 	newServer := &config.ServerConfig{
-		Data:          map[string]string{"key": "value"},
-		ServiceConfig: make(map[string]string),
+		Data:          config.NewConfigMapFrom(map[string]string{"key": "value"}),
+		ServiceConfig: config.NewConfigMap(),
 	}
 
 	err := gen.ReloadConfiguration(context.Background(), newLocal, newGlobal, newServer)
@@ -372,11 +372,11 @@ exit 0
 	gen := &Generator{
 		Config:        cfg,
 		upstreamCache: &upstreamQueryCache{},
-		LocalConfig:   &config.LocalConfig{Data: make(map[string]string)},
-		GlobalConfig:  &config.GlobalConfig{Data: make(map[string]string)},
+		LocalConfig:   &config.LocalConfig{Data: config.NewConfigMap()},
+		GlobalConfig:  &config.GlobalConfig{Data: config.NewConfigMap()},
 		ServerConfig: &config.ServerConfig{
-			Data:          make(map[string]string),
-			ServiceConfig: make(map[string]string),
+			Data:          config.NewConfigMap(),
+			ServiceConfig: config.NewConfigMap(),
 		},
 	}
 

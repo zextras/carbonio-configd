@@ -41,8 +41,14 @@ func (tp *TemplateProcessor) interpolateLine(ctx context.Context, line string) (
 
 	// Normal variable substitution for non-enabler variables
 	result := tp.varPattern.ReplaceAllStringFunc(line, func(match string) string {
-		// Extract variable name from ${VAR}
-		varName := tp.varPattern.FindStringSubmatch(match)[1]
+		// Extract variable name from ${VAR}. The match already satisfied
+		// varPattern, so the submatch is guaranteed; compute it once.
+		sub := tp.varPattern.FindStringSubmatch(match)
+		if len(sub) < 2 {
+			return match
+		}
+
+		varName := sub[1]
 
 		// Look up variable value
 		value, err := tp.generator.ExpandVariable(ctx, varName)

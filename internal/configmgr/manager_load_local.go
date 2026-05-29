@@ -61,10 +61,14 @@ func (cm *ConfigManager) loadLocalConfigWithRetry(ctx context.Context, maxRetrie
 // executeLocalConfigCommand loads localconfig by directly parsing XML file.
 func (cm *ConfigManager) executeLocalConfigCommand(ctx context.Context) (string, error) {
 	// Check if we have cached output from previous runs
-	if cm.cachedLocalConfigOutput != "" {
+	cm.cachedLocalConfigMu.RLock()
+	cachedOutput := cm.cachedLocalConfigOutput
+	cm.cachedLocalConfigMu.RUnlock()
+
+	if cachedOutput != "" {
 		logger.DebugContext(ctx, "Using cached localconfig output")
 
-		return cm.cachedLocalConfigOutput, nil
+		return cachedOutput, nil
 	}
 
 	// Load configuration directly from XML file
@@ -77,7 +81,9 @@ func (cm *ConfigManager) executeLocalConfigCommand(ctx context.Context) (string,
 	output := localconfig.FormatAsKeyValue(localCfg)
 
 	// Cache the output for subsequent runs
+	cm.cachedLocalConfigMu.Lock()
 	cm.cachedLocalConfigOutput = output
+	cm.cachedLocalConfigMu.Unlock()
 
 	logger.DebugContext(ctx, "Loaded and cached localconfig from XML",
 		"key_count", len(localCfg))
@@ -98,7 +104,7 @@ func (cm *ConfigManager) parseLocalConfigOutput(ctx context.Context, output stri
 	}
 
 	// Parse key=value pairs
-	cm.State.LocalConfig.Data = make(map[string]string)
+	cm.State.LocalConfig.Data.Clear()
 
 	for _, line := range lines {
 		parts := strings.SplitN(strings.TrimSpace(line), "=", 2)
@@ -106,7 +112,7 @@ func (cm *ConfigManager) parseLocalConfigOutput(ctx context.Context, output stri
 			continue
 		}
 
-		cm.State.LocalConfig.Data[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+		cm.State.LocalConfig.Data.Set(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
 	}
 
 	return nil
@@ -115,12 +121,12 @@ func (cm *ConfigManager) parseLocalConfigOutput(ctx context.Context, output stri
 // postProcessLocalConfig performs post-processing on local configuration.
 func (cm *ConfigManager) postProcessLocalConfig() {
 	// Set default for zmconfigd_listen_port if not present
-	if _, ok := cm.State.LocalConfig.Data["zmconfigd_listen_port"]; !ok {
-		cm.State.LocalConfig.Data["zmconfigd_listen_port"] = "7171"
+	if _, ok := cm.State.LocalConfig.Data.Get("zmconfigd_listen_port"); !ok {
+		cm.State.LocalConfig.Data.Set("zmconfigd_listen_port", "7171")
 	}
 
 	// Derive OpenDKIM URIs from ldap_url if present
-	if ldapURL, ok := cm.State.LocalConfig.Data["ldap_url"]; ok && ldapURL != "" {
+	if ldapURL, ok := cm.State.LocalConfig.Data.Get("ldap_url"); ok && ldapURL != "" {
 		urls := strings.Fields(ldapURL)
 		signingTableURIs := make([]string, len(urls))
 		keyTableURIs := make([]string, len(urls))
@@ -130,7 +136,7 @@ func (cm *ConfigManager) postProcessLocalConfig() {
 			keyTableURIs[i] = url + "/?DKIMDomain,DKIMSelector,DKIMKey,?sub?(DKIMSelector=$d)"
 		}
 
-		cm.State.LocalConfig.Data["opendkim_signingtable_uri"] = strings.Join(signingTableURIs, " ")
-		cm.State.LocalConfig.Data["opendkim_keytable_uri"] = strings.Join(keyTableURIs, " ")
+		cm.State.LocalConfig.Data.Set("opendkim_signingtable_uri", strings.Join(signingTableURIs, " "))
+		cm.State.LocalConfig.Data.Set("opendkim_keytable_uri", strings.Join(keyTableURIs, " "))
 	}
 }

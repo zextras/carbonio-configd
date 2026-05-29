@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -85,8 +86,8 @@ func initializeConfig() (*config.Config, *state.State, *ldap.Ldap) {
 		appState.GlobalConfig, appState.MiscConfig, appState.ServerConfig, appState.MtaConfig)
 
 	// Load initial local config to get listen port and IP mode for contact_service
-	appState.LocalConfig.Data["zmconfigd_listen_port"] = "7171"
-	appState.LocalConfig.Data["zimbraIPMode"] = ipModeIPv4
+	appState.LocalConfig.Data.Set("zmconfigd_listen_port", "7171")
+	appState.LocalConfig.Data.Set("zimbraIPMode", ipModeIPv4)
 
 	return mainCfg, appState, ldapClient
 }
@@ -102,8 +103,9 @@ func handleForcedConfigs(ctx context.Context, args *Args, appState *state.State)
 		return
 	}
 
-	listenPort, _ := strconv.Atoi(appState.LocalConfig.Data["zmconfigd_listen_port"])
-	ipMode := appState.LocalConfig.Data["zimbraIPMode"]
+	listenPortStr, _ := appState.LocalConfig.Data.Get("zmconfigd_listen_port")
+	listenPort, _ := strconv.Atoi(listenPortStr)
+	ipMode, _ := appState.LocalConfig.Data.Get("zimbraIPMode")
 
 	if ContactService("REWRITE", args.ForcedConfigs, listenPort, ipMode) {
 		logger.ErrorContext(ctx, "Failed to contact configd service",
@@ -188,8 +190,8 @@ func ensureZextrasPerlEnv() {
 		return
 	}
 
-	base := "/opt/zextras/common/lib/perl5"
-	lib := base + "/" + archname + ":" + base
+	base := basePath("common", "lib", "perl5")
+	lib := filepath.Join(base, archname) + ":" + base
 
 	_ = os.Setenv("PERLLIB", lib)
 	_ = os.Setenv("PERL5LIB", lib)

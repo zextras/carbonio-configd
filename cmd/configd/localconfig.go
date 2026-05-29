@@ -20,7 +20,7 @@ const (
 // LocalconfigCmd handles the "configd localconfig" subcommand.
 type LocalconfigCmd struct {
 	Mode          string   `short:"m" default:"plain" help:"Output mode: plain, shell, export, nokey, xml"`
-	ConfigPath    string   `short:"c" default:"/opt/zextras/conf/localconfig.xml" help:"Path to localconfig.xml"`
+	ConfigPath    string   `short:"c" help:"Path to localconfig.xml"`
 	Quiet         bool     `short:"q" help:"Quiet mode (suppress warnings)"`
 	ShowPath      bool     `short:"p" help:"Print config file path and exit"`
 	ShowPasswords bool     `short:"s" help:"Show password values (default: masked)"`
@@ -39,9 +39,14 @@ type LocalconfigCmd struct {
 //
 //nolint:unparam // Kong interface requires error return
 func (c *LocalconfigCmd) Run() error {
+	configPath := c.ConfigPath
+	if configPath == "" {
+		configPath = basePath("conf", "localconfig.xml")
+	}
+
 	opts := &localconfigOpts{
 		mode:          c.Mode,
-		configPath:    c.ConfigPath,
+		configPath:    configPath,
 		quiet:         c.Quiet,
 		showPath:      c.ShowPath,
 		showPasswords: c.ShowPasswords,

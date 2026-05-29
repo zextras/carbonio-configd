@@ -17,51 +17,51 @@ import (
 func TestResolveLookupHandlers(t *testing.T) {
 	tests := []struct {
 		name         string
-		globalData   map[string]string
-		localData    map[string]string
+		globalData   *config.ConfigMap
+		localData    *config.ConfigMap
 		containsURL  string
 		containsPort string
 	}{
 		{
 			name:         "fallback to localhost when no config",
-			globalData:   map[string]string{},
-			localData:    map[string]string{},
+			globalData:   config.NewConfigMapFrom(map[string]string{}),
+			localData:    config.NewConfigMapFrom(map[string]string{}),
 			containsPort: "7072",
 			containsURL:  "nginx-lookup",
 		},
 		{
 			name: "uses custom extension port",
-			globalData: map[string]string{
+			globalData: config.NewConfigMapFrom(map[string]string{
 				"zimbraExtensionBindPort": "9090",
-			},
-			localData:    map[string]string{},
+			}),
+			localData:    config.NewConfigMapFrom(map[string]string{}),
 			containsPort: "9090",
 			containsURL:  "nginx-lookup",
 		},
 		{
 			name:       "uses zimbra_server_hostname from local config when no lookup targets",
-			globalData: map[string]string{},
-			localData: map[string]string{
+			globalData: config.NewConfigMapFrom(map[string]string{}),
+			localData: config.NewConfigMapFrom(map[string]string{
 				"zimbra_server_hostname": "127.0.0.1",
-			},
+			}),
 			containsPort: "7072",
 			containsURL:  "nginx-lookup",
 		},
 		{
 			name: "lookup targets override local hostname",
-			globalData: map[string]string{
+			globalData: config.NewConfigMapFrom(map[string]string{
 				"zimbraReverseProxyAvailableLookupTargets": "127.0.0.1",
-			},
-			localData:    map[string]string{},
+			}),
+			localData:    config.NewConfigMapFrom(map[string]string{}),
 			containsPort: "7072",
 			containsURL:  "nginx-lookup",
 		},
 		{
 			name: "multi-host (newline-joined LDAP multi-value) renders one URL per host",
-			globalData: map[string]string{
+			globalData: config.NewConfigMapFrom(map[string]string{
 				"zimbraReverseProxyAvailableLookupTargets": "127.0.0.1\n127.0.0.2",
-			},
-			localData:    map[string]string{},
+			}),
+			localData:    config.NewConfigMapFrom(map[string]string{}),
 			containsPort: "7072",
 			containsURL:  "nginx-lookup",
 		},
@@ -155,7 +155,7 @@ func TestResolveMemcacheServers(t *testing.T) {
 func TestResolveUpstreamFairShmSize(t *testing.T) {
 	t.Run("returns default 32k when not configured", func(t *testing.T) {
 		g := &Generator{
-			GlobalConfig: &config.GlobalConfig{Data: map[string]string{}},
+			GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMap()},
 		}
 		result, err := g.resolveUpstreamFairShmSize(context.Background())
 		if err != nil {
@@ -168,9 +168,9 @@ func TestResolveUpstreamFairShmSize(t *testing.T) {
 
 	t.Run("returns configured size", func(t *testing.T) {
 		g := &Generator{
-			GlobalConfig: &config.GlobalConfig{Data: map[string]string{
+			GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMapFrom(map[string]string{
 				"zimbraReverseProxyUpstreamFairShmSize": "64",
-			}},
+			})},
 		}
 		result, err := g.resolveUpstreamFairShmSize(context.Background())
 		if err != nil {
@@ -183,9 +183,9 @@ func TestResolveUpstreamFairShmSize(t *testing.T) {
 
 	t.Run("uses minimum 32k for small values", func(t *testing.T) {
 		g := &Generator{
-			GlobalConfig: &config.GlobalConfig{Data: map[string]string{
+			GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMapFrom(map[string]string{
 				"zimbraReverseProxyUpstreamFairShmSize": "16",
-			}},
+			})},
 		}
 		result, err := g.resolveUpstreamFairShmSize(context.Background())
 		if err != nil {
@@ -198,9 +198,9 @@ func TestResolveUpstreamFairShmSize(t *testing.T) {
 
 	t.Run("uses default 32k for invalid string", func(t *testing.T) {
 		g := &Generator{
-			GlobalConfig: &config.GlobalConfig{Data: map[string]string{
+			GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMapFrom(map[string]string{
 				"zimbraReverseProxyUpstreamFairShmSize": "notanumber",
-			}},
+			})},
 		}
 		result, err := g.resolveUpstreamFairShmSize(context.Background())
 		if err != nil {
@@ -216,28 +216,28 @@ func TestResolveUpstreamFairShmSize(t *testing.T) {
 func TestMakeUpstreamTargetResolver(t *testing.T) {
 	tests := []struct {
 		name       string
-		serverData map[string]string
+		serverData *config.ConfigMap
 		sslName    string
 		nonSSLName string
 		expected   string
 	}{
 		{
 			name:       "defaults to ssl upstream when not configured",
-			serverData: map[string]string{},
+			serverData: config.NewConfigMapFrom(map[string]string{}),
 			sslName:    "zimbra_ssl",
 			nonSSLName: "zimbra",
 			expected:   "https://zimbra_ssl",
 		},
 		{
 			name:       "uses ssl upstream when explicitly enabled",
-			serverData: map[string]string{"zimbraReverseProxySSLToUpstreamEnabled": "TRUE"},
+			serverData: config.NewConfigMapFrom(map[string]string{"zimbraReverseProxySSLToUpstreamEnabled": "TRUE"}),
 			sslName:    "zimbra_ssl",
 			nonSSLName: "zimbra",
 			expected:   "https://zimbra_ssl",
 		},
 		{
 			name:       "uses non-ssl upstream when ssl disabled",
-			serverData: map[string]string{"zimbraReverseProxySSLToUpstreamEnabled": "FALSE"},
+			serverData: config.NewConfigMapFrom(map[string]string{"zimbraReverseProxySSLToUpstreamEnabled": "FALSE"}),
 			sslName:    "zimbra_ssl",
 			nonSSLName: "zimbra",
 			expected:   "http://zimbra",

@@ -161,7 +161,7 @@ func (cm *ConfigManager) LoadAllConfigsWithRetry(ctx context.Context, maxRetries
 
 	cm.State.FileCache = make(map[string]string)
 
-	threadWaitTime := parseLDAPReadTimeout(cm.State.LocalConfig.Data)
+	threadWaitTime := parseLDAPReadTimeout(cm.State.LocalConfig.Data.Snapshot())
 
 	loadFuncs := []loadFunc{
 		{"lc", cm.LoadLocalConfig},  // Thread name matches Python

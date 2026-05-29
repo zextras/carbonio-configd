@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zextras/carbonio-configd/internal/commands"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/tracing"
 )
@@ -48,8 +47,8 @@ func (cm *ConfigManager) loadServerConfigWithRetry(ctx context.Context, maxRetri
 		return err
 	}
 
-	cm.State.ServerConfig.Data = configData.Data
-	cm.State.ServerConfig.ServiceConfig = configData.ServiceConfig
+	cm.State.ServerConfig.Data.Replace(configData.Data)
+	cm.State.ServerConfig.ServiceConfig.Replace(configData.ServiceConfig)
 
 	dt := time.Since(t1)
 	logger.DebugContext(ctx, "ServerConfig loaded",
@@ -61,9 +60,9 @@ func (cm *ConfigManager) loadServerConfigWithRetry(ctx context.Context, maxRetri
 // fetchServerConfig fetches fresh server config from LDAP (cache miss path)
 func (cm *ConfigManager) fetchServerConfig(ctx context.Context, maxRetries int) (*ServerConfigData, error) {
 	return retryWithBackoff(ctx, "ServerConfig", maxRetries, func() (*ServerConfigData, error) {
-		cmd := commands.Commands["gs"]
+		cmd := cm.CommandRegistry.Commands["gs"]
 		if cmd == nil {
-			return nil, fmt.Errorf("gs command not available (commands.Initialize() not called)")
+			return nil, fmt.Errorf("gs command not available (LDAP commands not registered)")
 		}
 
 		rc, output, errMsg := cmd.Execute(ctx, cm.mainConfig.Hostname)

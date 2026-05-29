@@ -6,10 +6,10 @@ package main
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/alecthomas/kong"
 	"github.com/willabides/kongplete"
-	"github.com/zextras/carbonio-configd/internal/commands"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/sdnotify"
 )
@@ -45,8 +45,6 @@ func (c *DaemonCmd) Run(cli *CLI) error {
 	ctx := initializeLogging()
 	ctx = logger.ContextWithComponent(ctx, "main")
 
-	commands.Initialize()
-
 	notifier, err := sdnotify.New()
 	if err != nil {
 		logger.ErrorContext(ctx, "Failed to initialize sd_notify", "error", err)
@@ -59,19 +57,19 @@ func (c *DaemonCmd) Run(cli *CLI) error {
 	args := cli.toArgs()
 
 	profilingConfig, tracingConfig := setupProfilingAndTracing(ctx, args)
-	if profilingConfig != nil {
-		defer StopProfiling(profilingConfig)
-	}
-
-	if tracingConfig != nil {
-		defer StopTracing(tracingConfig)
-	}
 
 	mainCfg, appState, ldapClient := initializeConfig()
 
-	RunMainLoop(ctx, mainCfg, appState, ldapClient, args, notifier)
+	exitCode := RunMainLoop(ctx, mainCfg, appState, ldapClient, args, notifier)
 
 	logger.InfoContext(ctx, "Process exited", "program", mainCfg.Progname)
+
+	// Stop profiling/tracing explicitly so os.Exit can't skip a deferred call
+	// (exitAfterDefer). Both helpers are nil-safe.
+	StopProfiling(profilingConfig)
+	StopTracing(tracingConfig)
+
+	os.Exit(exitCode)
 
 	return nil
 }

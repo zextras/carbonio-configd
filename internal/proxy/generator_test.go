@@ -416,11 +416,11 @@ func TestGenerateAllIntegration(t *testing.T) {
 	}
 
 	// Create minimal local/global/server configs
-	localCfg := &config.LocalConfig{Data: make(map[string]string)}
-	globalCfg := &config.GlobalConfig{Data: make(map[string]string)}
+	localCfg := &config.LocalConfig{Data: config.NewConfigMap()}
+	globalCfg := &config.GlobalConfig{Data: config.NewConfigMap()}
 	serverCfg := &config.ServerConfig{
-		Data:          make(map[string]string),
-		ServiceConfig: make(map[string]string),
+		Data:          config.NewConfigMap(),
+		ServiceConfig: config.NewConfigMap(),
 	}
 
 	// Create LDAP client (can be nil for this test)
@@ -623,7 +623,7 @@ func TestGetCarboVersion(t *testing.T) {
 	t.Run("returns carbonio_version when set", func(t *testing.T) {
 		gen := &Generator{
 			LocalConfig: &config.LocalConfig{
-				Data: map[string]string{"carbonio_version": "25.3.0"},
+				Data: config.NewConfigMapFrom(map[string]string{"carbonio_version": "25.3.0"}),
 			},
 		}
 		if v := gen.GetCarboVersion(); v != "25.3.0" {
@@ -634,7 +634,7 @@ func TestGetCarboVersion(t *testing.T) {
 	t.Run("falls back to zimbra_version", func(t *testing.T) {
 		gen := &Generator{
 			LocalConfig: &config.LocalConfig{
-				Data: map[string]string{"zimbra_version": "9.0.0"},
+				Data: config.NewConfigMapFrom(map[string]string{"zimbra_version": "9.0.0"}),
 			},
 		}
 		if v := gen.GetCarboVersion(); v != "9.0.0" {
@@ -653,7 +653,7 @@ func TestGetCarboVersion(t *testing.T) {
 	t.Run("returns default when no version keys set", func(t *testing.T) {
 		gen := &Generator{
 			LocalConfig: &config.LocalConfig{
-				Data: map[string]string{"some_other_key": "value"},
+				Data: config.NewConfigMapFrom(map[string]string{"some_other_key": "value"}),
 			},
 		}
 		v := gen.GetCarboVersion()
@@ -1147,11 +1147,11 @@ func TestLoadConfigurationWithConfigs(t *testing.T) {
 		Hostname: "test.local",
 	}
 
-	localCfg := &config.LocalConfig{Data: map[string]string{"key": "val"}}
-	globalCfg := &config.GlobalConfig{Data: map[string]string{"gkey": "gval"}}
+	localCfg := &config.LocalConfig{Data: config.NewConfigMapFrom(map[string]string{"key": "val"})}
+	globalCfg := &config.GlobalConfig{Data: config.NewConfigMapFrom(map[string]string{"gkey": "gval"})}
 	serverCfg := &config.ServerConfig{
-		Data:          map[string]string{"skey": "sval"},
-		ServiceConfig: make(map[string]string),
+		Data:          config.NewConfigMapFrom(map[string]string{"skey": "sval"}),
+		ServiceConfig: config.NewConfigMap(),
 	}
 
 	gen, err := LoadConfiguration(context.Background(), cfg, localCfg, globalCfg, serverCfg, nil, nil)

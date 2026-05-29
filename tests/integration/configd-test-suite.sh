@@ -14,9 +14,18 @@ PASS=0
 FAIL=0
 SKIP=0
 
-pass() { ((PASS++)); echo "  PASS $1"; }
-fail() { ((FAIL++)); echo "  FAIL $1: $2"; }
-skip() { ((SKIP++)); echo "  SKIP $1: $2"; }
+pass() {
+  ((PASS++))
+  echo "  PASS $1"
+}
+fail() {
+  ((FAIL++))
+  echo "  FAIL $1: $2"
+}
+skip() {
+  ((SKIP++))
+  echo "  SKIP $1: $2"
+}
 
 assert_contains() { echo "$1" | grep -q "$2" && pass "$3" || fail "$3" "output missing '$2'"; }
 assert_exit_ok() { eval "$1" >/dev/null 2>&1 && pass "$2" || fail "$2" "non-zero exit"; }

@@ -146,12 +146,12 @@ func TestConfig_SetVals(t *testing.T) {
 		{
 			name: "set LDAP master configuration",
 			localConfig: &LocalConfig{
-				Data: map[string]string{
+				Data: NewConfigMapFrom(map[string]string{
 					"ldap_is_master":         "TRUE",
 					"ldap_root_password":     "secret123",
 					"ldap_master_url":        "ldap://master.example.com",
 					"ldap_starttls_required": "TRUE",
-				},
+				}),
 			},
 			validate: func(t *testing.T, cfg *Config) {
 				if !cfg.LdapIsMaster {
@@ -171,10 +171,10 @@ func TestConfig_SetVals(t *testing.T) {
 		{
 			name: "set configd intervals",
 			localConfig: &LocalConfig{
-				Data: map[string]string{
+				Data: NewConfigMapFrom(map[string]string{
 					"zmconfigd_interval":          "600",
 					"zmconfigd_watchdog_interval": "180",
-				},
+				}),
 			},
 			validate: func(t *testing.T, cfg *Config) {
 				if cfg.Interval != 600 {
@@ -188,12 +188,12 @@ func TestConfig_SetVals(t *testing.T) {
 		{
 			name: "set boolean flags",
 			localConfig: &LocalConfig{
-				Data: map[string]string{
+				Data: NewConfigMapFrom(map[string]string{
 					"zmconfigd_debug":                  "TRUE",
 					"zmconfigd_watchdog":               "FALSE",
 					"zmconfigd_skip_idle_polls":        "FALSE",
 					"zmconfigd_enable_config_restarts": "TRUE",
-				},
+				}),
 			},
 			validate: func(t *testing.T, cfg *Config) {
 				if !cfg.Debug {
@@ -213,9 +213,9 @@ func TestConfig_SetVals(t *testing.T) {
 		{
 			name: "set watchdog services",
 			localConfig: &LocalConfig{
-				Data: map[string]string{
+				Data: NewConfigMapFrom(map[string]string{
 					"zmconfigd_watchdog_services": "antivirus antispam ldap",
-				},
+				}),
 			},
 			validate: func(t *testing.T, cfg *Config) {
 				if len(cfg.WdList) != 3 {
@@ -232,12 +232,12 @@ func TestConfig_SetVals(t *testing.T) {
 		{
 			name: "case insensitive boolean parsing",
 			localConfig: &LocalConfig{
-				Data: map[string]string{
+				Data: NewConfigMapFrom(map[string]string{
 					"ldap_is_master":            "true",
 					"ldap_starttls_required":    "false",
 					"zmconfigd_watchdog":        "False",
 					"zmconfigd_skip_idle_polls": "FALSE",
-				},
+				}),
 			},
 			validate: func(t *testing.T, cfg *Config) {
 				if !cfg.LdapIsMaster {
@@ -257,11 +257,11 @@ func TestConfig_SetVals(t *testing.T) {
 		{
 			name: "invalid interval values ignored",
 			localConfig: &LocalConfig{
-				Data: map[string]string{
+				Data: NewConfigMapFrom(map[string]string{
 					"zmconfigd_interval":          "invalid",
 					"zmconfigd_watchdog_interval": "not-a-number",
 					"zmconfigd_log_level":         "abc",
-				},
+				}),
 			},
 			validate: func(t *testing.T, cfg *Config) {
 				// Should keep default values when parsing fails
@@ -279,10 +279,10 @@ func TestConfig_SetVals(t *testing.T) {
 		{
 			name: "empty string values",
 			localConfig: &LocalConfig{
-				Data: map[string]string{
+				Data: NewConfigMapFrom(map[string]string{
 					"zmconfigd_interval":          "",
 					"zmconfigd_watchdog_interval": "",
-				},
+				}),
 			},
 			validate: func(t *testing.T, cfg *Config) {
 				// Empty strings should not override defaults
@@ -424,48 +424,49 @@ func TestRewriteEntry(t *testing.T) {
 
 func TestLocalConfig(t *testing.T) {
 	lc := &LocalConfig{
-		Data: make(map[string]string),
+		Data: NewConfigMap(),
 	}
 
-	lc.Data["key1"] = "value1"
-	lc.Data["key2"] = "value2"
+	lc.Data.Set("key1", "value1")
+	lc.Data.Set("key2", "value2")
 
-	if lc.Data["key1"] != "value1" {
-		t.Errorf("Data[key1] = %v, want value1", lc.Data["key1"])
+	if val, ok := lc.Data.Get("key1"); !ok || val != "value1" {
+		t.Errorf("Data[key1] = %v, want value1", val)
 	}
 
-	if len(lc.Data) != 2 {
-		t.Errorf("Data length = %v, want 2", len(lc.Data))
+	if lc.Data.Len() != 2 {
+		t.Errorf("Data length = %v, want 2", lc.Data.Len())
 	}
 }
 
 func TestGlobalConfig(t *testing.T) {
 	gc := &GlobalConfig{
-		Data: make(map[string]string),
+		Data: NewConfigMap(),
 	}
 
-	gc.Data["global_key"] = "global_value"
+	gc.Data.Set("global_key", "global_value")
 
-	if gc.Data["global_key"] != "global_value" {
-		t.Errorf("Data[global_key] = %v, want global_value", gc.Data["global_key"])
+	val, _ := gc.Data.Get("global_key")
+	if val != "global_value" {
+		t.Errorf("Data[global_key] = %v, want global_value", val)
 	}
 }
 
 func TestServerConfig(t *testing.T) {
 	sc := &ServerConfig{
-		Data:          make(map[string]string),
-		ServiceConfig: make(map[string]string),
+		Data:          NewConfigMap(),
+		ServiceConfig: NewConfigMap(),
 	}
 
-	sc.Data["server_key"] = "server_value"
-	sc.ServiceConfig["service1"] = "enabled"
+	sc.Data.Set("server_key", "server_value")
+	sc.ServiceConfig.Set("service1", "enabled")
 
-	if sc.Data["server_key"] != "server_value" {
-		t.Errorf("Data[server_key] = %v, want server_value", sc.Data["server_key"])
+	if v, _ := sc.Data.Get("server_key"); v != "server_value" {
+		t.Errorf("Data[server_key] = %v, want server_value", v)
 	}
 
-	if sc.ServiceConfig["service1"] != "enabled" {
-		t.Errorf("ServiceConfig[service1] = %v, want enabled", sc.ServiceConfig["service1"])
+	if v, _ := sc.ServiceConfig.Get("service1"); v != "enabled" {
+		t.Errorf("ServiceConfig[service1] = %v, want enabled", v)
 	}
 }
 

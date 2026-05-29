@@ -7,12 +7,11 @@ package main
 
 import (
 	"context"
-	"os"
 	"slices"
 	"strconv"
+	"sync/atomic"
 	"time"
 
-	"github.com/zextras/carbonio-configd/internal/cache"
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/configmgr"
 	"github.com/zextras/carbonio-configd/internal/ldap"
@@ -21,7 +20,6 @@ import (
 	"github.com/zextras/carbonio-configd/internal/sdnotify"
 	"github.com/zextras/carbonio-configd/internal/services"
 	"github.com/zextras/carbonio-configd/internal/state"
-	"github.com/zextras/carbonio-configd/internal/systemd"
 	"github.com/zextras/carbonio-configd/internal/watchdog"
 )
 
@@ -29,14 +27,11 @@ import (
 type MainLoopActionTrigger struct {
 	ReloadChan   chan struct{}
 	State        *state.State
-	EventCounter int // Track number of events received since last poll
-	Ctx          context.Context
+	EventCounter atomic.Int64 // Track number of events received since last poll
 }
 
 // TriggerRewrite is called by the network handler to signal a rewrite.
-func (t *MainLoopActionTrigger) TriggerRewrite(configs []string) {
-	// Use the stored context from main loop
-	ctx := t.Ctx
+func (t *MainLoopActionTrigger) TriggerRewrite(ctx context.Context, configs []string) {
 	ctx = logger.ContextWithComponent(ctx, "mainloop")
 	logger.DebugContext(ctx, "Triggering rewrite for configs", "configs", configs)
 
@@ -45,7 +40,7 @@ func (t *MainLoopActionTrigger) TriggerRewrite(configs []string) {
 	}
 
 	t.State.AddRequestedConfigs(ctx, configs)
-	t.EventCounter++ // Track that we received an event
+	t.EventCounter.Add(1) // Track that we received an event
 
 	select {
 	case t.ReloadChan <- struct{}{}:
@@ -53,28 +48,6 @@ func (t *MainLoopActionTrigger) TriggerRewrite(configs []string) {
 	default:
 		logger.DebugContext(ctx, "Reload channel blocked, main loop already processing or not ready")
 	}
-}
-
-// startSdWatchdogKeepAlive launches a goroutine that pings systemd's watchdog at pingInterval.
-func startSdWatchdogKeepAlive(ctx context.Context, notifier *sdnotify.Notifier, pingInterval time.Duration) {
-	logger.InfoContext(ctx, "Starting systemd watchdog keep-alive",
-		"ping_interval", pingInterval)
-
-	go func() {
-		ticker := time.NewTicker(pingInterval)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				if err := notifier.WatchdogPing(); err != nil {
-					logger.ErrorContext(ctx, "Failed to send watchdog ping", "error", err)
-				}
-			}
-		}
-	}()
 }
 
 // runForcedMode processes forced rewrites and returns; the caller exits after.
@@ -120,10 +93,10 @@ func isIdlePoll(
 	cfg *config.Config,
 	appState *state.State,
 	trigger *MainLoopActionTrigger,
-	lastEventCount int,
+	lastEventCount int64,
 	reloadSignaled bool,
 ) bool {
-	return cfg.SkipIdlePolls && !appState.FirstRun && !reloadSignaled && trigger.EventCounter == lastEventCount
+	return cfg.SkipIdlePolls && !appState.FirstRun && !reloadSignaled && trigger.EventCounter.Load() == lastEventCount
 }
 
 // runLoadAndParse runs LoadAllConfigs then ParseMtaConfig, logging errors internally.
@@ -189,11 +162,13 @@ func maybeStartListener(
 		return server
 	}
 
-	listenerPort, _ := strconv.Atoi(appState.LocalConfig.Data["zmconfigd_listen_port"])
+	listenerPortStr, _ := appState.LocalConfig.Data.Get("zmconfigd_listen_port")
+	listenerPort, _ := strconv.Atoi(listenerPortStr)
 	listenerAddr := "127.0.0.1"
 	ipv6 := false
 
-	if appState.ServerConfig.Data["zimbraIPMode"] == "ipv6" {
+	ipMode, _ := appState.ServerConfig.Data.Get("zimbraIPMode")
+	if ipMode == "ipv6" {
 		listenerAddr = "::1"
 		ipv6 = true
 	}
@@ -320,7 +295,7 @@ type daemonLoopDeps struct {
 
 // loopIterState carries mutable per-iteration counters between runs.
 type loopIterState struct {
-	lastEventCount int
+	lastEventCount int64
 	loopCount      int
 	reloadSignaled bool
 	server         *network.ThreadedStreamServer
@@ -345,10 +320,17 @@ func runDaemonLoop(ctx context.Context, deps *daemonLoopDeps) {
 	}()
 
 	for {
-		if runLoopIteration(ctx, deps, st) == iterExit {
+		outcome := runLoopIterationSafe(ctx, deps, st)
+		if outcome == iterExit {
 			return
 		}
 	}
+}
+
+// runLoopIterationSafe wraps runLoopIteration with panic recovery.
+func runLoopIterationSafe(ctx context.Context, deps *daemonLoopDeps, st *loopIterState) iterOutcome {
+	defer recoverGoroutine(ctx, "main-loop")
+	return runLoopIteration(ctx, deps, st)
 }
 
 // runLoopIteration performs one main-loop iteration. It returns iterExit
@@ -364,7 +346,7 @@ func runLoopIteration(ctx context.Context, deps *daemonLoopDeps, st *loopIterSta
 		return iterContinue
 	}
 
-	st.lastEventCount = deps.trigger.EventCounter
+	st.lastEventCount = deps.trigger.EventCounter.Load()
 	t1 := time.Now()
 
 	loadDur, parseDur, err := runLoadAndParse(ctx, deps.configManager, deps.cfg)
@@ -518,62 +500,24 @@ func finalizeIteration(
 }
 
 // RunMainLoop contains the core logic of the configd daemon.
+// It returns an exit code: 0 for success, 1 for error.
 func RunMainLoop(
 	ctx context.Context,
 	mainCfg *config.Config,
 	appState *state.State,
 	ldapClient *ldap.Ldap,
 	args *Args,
-	notifier *sdnotify.Notifier) {
+	notifier *sdnotify.Notifier) int {
 	ctx = logger.ContextWithComponent(ctx, "mainloop")
 	// Create cancellable context for graceful shutdown
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	cacheInstance := cache.New(ctx, false) // skipCache=false to enable caching
+	// Bootstrap core dependencies
+	configManager, serviceManager, wd := bootstrapDependencies(ctx, mainCfg, appState, ldapClient, args)
 
-	configManager := configmgr.NewConfigManager(ctx, mainCfg, appState, ldapClient, cacheInstance)
-	serviceManager := services.NewServiceManager()
-
-	systemdManager := systemd.NewManager()
-	if systemdManager.IsSystemdEnabled(ctx) {
-		logger.InfoContext(ctx, "Detected systemd-enabled environment",
-			"use_systemctl", true,
-			"fallback", "zm*ctl")
-
-		serviceManager.UseSystemd = true
-
-		configManager.ServiceMgr.SetUseSystemd(true)
-	} else {
-		logger.InfoContext(ctx, "Detected traditional environment",
-			"use_systemctl", false,
-			"scripts_only", "zm*ctl")
-
-		serviceManager.UseSystemd = false
-	}
-
-	serviceManager.DisableRestarts = args.DisableRestarts
-
-	watchdogInterval := time.Duration(mainCfg.WatchdogInterval) * time.Second
-	if watchdogInterval == 0 {
-		watchdogInterval = 120 * time.Second
-	}
-
-	wd := watchdog.NewWatchdog(watchdog.Config{
-		CheckInterval:  watchdogInterval,
-		ServiceManager: serviceManager,
-		State:          appState,
-		ConfigLookup: func(key string) string {
-			if val, exists := appState.LocalConfig.Data[key]; exists {
-				return val
-			}
-
-			return ""
-		},
-	})
-
-	reloadChan := make(chan struct{}, 1)
-	SetupSignalHandler(appState, cancel, reloadChan, notifier)
+	// Bootstrap systemd integration
+	reloadChan := bootstrapSystemd(ctx, appState, cancel, notifier)
 
 	// Start watchdog in daemon mode (not for forced configs)
 	if !args.HasForcedConfigs() {
@@ -581,24 +525,15 @@ func RunMainLoop(
 		defer wd.Stop(ctx)
 	}
 
-	// Start systemd watchdog keep-alive goroutine if WATCHDOG_USEC is set.
-	// Pings at half the interval so we stay well within the WatchdogSec deadline.
-	if wdInterval, ok := sdnotify.WatchdogEnabled(); ok {
-		pingInterval := wdInterval / 2 //nolint:mnd // half of WatchdogSec is the recommended ping interval
-		startSdWatchdogKeepAlive(ctx, notifier, pingInterval)
-	}
-
 	mainLoopTrigger := &MainLoopActionTrigger{
-		ReloadChan:   reloadChan,
-		State:        appState,
-		EventCounter: 0,
-		Ctx:          ctx,
+		ReloadChan: reloadChan,
+		State:      appState,
 	}
 
 	if args.HasForcedConfigs() {
 		runForcedMode(ctx, args, appState, mainCfg, configManager, serviceManager)
-		// Watchdog was never started in forced config mode, no defer to worry about
-		os.Exit(0) //nolint:gocritic // exitAfterDefer false positive - wd.Stop() defer is in mutually exclusive if block
+		// Watchdog was never started in forced config mode, deferred wd.Stop() will not run
+		return 0
 	}
 
 	runDaemonLoop(ctx, &daemonLoopDeps{
@@ -612,6 +547,8 @@ func RunMainLoop(
 		trigger:        mainLoopTrigger,
 		reloadChan:     reloadChan,
 	})
+
+	return 0
 }
 
 // buildServiceDependencies extracts dependencies from MTA config sections and sets them in the service manager.
