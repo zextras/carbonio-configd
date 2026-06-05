@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 library(
-    identifier: 'jenkins-lib-common@v2.11.3',
+    identifier: 'jenkins-lib-common@v4.1.0',
     retriever: modernSCM([
         $class: 'GitSCMSource',
         credentialsId: 'jenkins-integration-with-github-account',
@@ -75,7 +75,6 @@ pipeline {
                     script {
                         scannerHome = tool 'SonarScanner'
                     }
-                    // Non-blocking run to produce the checkstyle report for SonarQube
                     sh 'golangci-lint run ./... --issues-exit-code 0 --output.checkstyle.path linter.out'
                 }
                 withSonarQubeEnv(credentialsId: 'sonarqube-user-token',
@@ -83,7 +82,6 @@ pipeline {
                     sh "${scannerHome}/bin/sonar-scanner"
                 }
                 container('golangci-lint') {
-                    // Blocking gate: fail the build on any lint issue (cached, so this is fast)
                     sh 'golangci-lint run ./...'
                 }
             }
