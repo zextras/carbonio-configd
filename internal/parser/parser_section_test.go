@@ -347,6 +347,7 @@ func TestParser_PostconfdDirective(t *testing.T) {
 func TestParser_LdapDirective(t *testing.T) {
 	input := `SECTION ldap
 	LDAP server_host LOCAL ldap_url
+	LDAP dh_param MAPLOCAL zimbraSSLDHParam
 	LDAP bind_dn VAR zimbraLdapUserDn
 `
 	cfg, err := new(parser).ParseString(context.Background(), input)
@@ -362,8 +363,13 @@ func TestParser_LdapDirective(t *testing.T) {
 	if val := section.Ldap["server_host"]; val != "LOCAL:ldap_url" {
 		t.Errorf("Expected 'LOCAL:ldap_url', got '%s'", val)
 	}
-	if val := section.Ldap["bind_dn"]; val != "VAR:zimbraLdapUserDn" {
-		t.Errorf("Expected 'VAR:zimbraLdapUserDn', got '%s'", val)
+	if val := section.Ldap["dh_param"]; val != "MAPLOCAL:zimbraSSLDHParam" {
+		t.Errorf("Expected 'MAPLOCAL:zimbraSSLDHParam', got '%s'", val)
+	}
+	// Non-LOCAL/MAPLOCAL LDAP directives are dropped, mirroring
+	// jylibs/mtaconfig.py parseLdap (only LOCAL|MAPLOCAL recorded).
+	if val, ok := section.Ldap["bind_dn"]; ok {
+		t.Errorf("VAR-typed LDAP directive should be dropped, got %q", val)
 	}
 }
 
@@ -448,5 +454,27 @@ func TestParser_ParseSection_MissingNewlineAfterHeader(t *testing.T) {
 	_, err := p.ParseString(context.Background(), input)
 	if err == nil {
 		t.Error("Expected error for missing newline after section header")
+	}
+}
+
+// TestParser_ParseSection_EmptyLinesInBody exercises the TokenNewline continue
+// branch (L154-157) where empty lines between directives inside a section body
+// are skipped.
+func TestParser_ParseSection_EmptyLinesInBody(t *testing.T) {
+	input := "SECTION test\n\tVAR key1 val1\n\n\tVAR key2 val2\n"
+	p := &parser{errors: []error{}}
+	cfg, err := p.ParseString(context.Background(), input)
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("Expected config, got nil")
+	}
+	section, ok := cfg.Sections["test"]
+	if !ok {
+		t.Fatal("Expected section 'test'")
+	}
+	if len(section.RequiredVars) != 2 {
+		t.Errorf("Expected 2 required vars, got %d", len(section.RequiredVars))
 	}
 }

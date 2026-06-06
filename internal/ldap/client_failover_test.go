@@ -102,3 +102,38 @@ func TestClient_DialAndBind_LDAPSPath(t *testing.T) {
 		t.Errorf("ldaps path did not reach dialer with expected URL: got %q", got)
 	}
 }
+
+// TestClient_DialAndBind_LDAPIPath verifies the ldapi:// unix-socket scheme is
+// accepted (not rejected as unsupported) and reaches the dialer with the socket
+// path intact, dialed without TLS options.
+func TestClient_DialAndBind_LDAPIPath(t *testing.T) {
+	var (
+		got     string
+		optsLen int
+	)
+
+	withClientDial(t, func(url string, opts ...ldap.DialOpt) (*ldap.Conn, error) {
+		got = url
+		optsLen = len(opts)
+
+		return nil, errors.New("forced")
+	})
+
+	c := &Client{}
+	_, err := c.dialAndBind("ldapi:///run/carbonio/run/ldapi")
+
+	// Must reach the dialer (forced error), not the unsupported-scheme branch.
+	if err == nil || strings.Contains(err.Error(), "unsupported LDAP URL scheme") {
+		t.Fatalf("ldapi scheme rejected: err=%v", err)
+	}
+
+	if got != "ldapi:///run/carbonio/run/ldapi" {
+		t.Errorf("ldapi path did not reach dialer with expected URL: got %q", got)
+	}
+
+	// ldapi is a trusted local socket: dialed with the base dialer opt only
+	// (no TLS opt). ldaps:// would add a second (TLS) opt.
+	if optsLen != 1 {
+		t.Errorf("ldapi dialed with %d opts, want 1 (dialer only, no TLS)", optsLen)
+	}
+}

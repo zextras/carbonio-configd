@@ -117,7 +117,8 @@ func TestParseMtaConfig_InvalidFile(t *testing.T) {
 	}
 }
 
-// TestParseMtaConfig_EmptyFile tests parsing an empty file
+// TestParseMtaConfig_EmptyFile tests that an empty config file is rejected,
+// mirroring jylibs/mtaconfig.py load() which raises on an empty cf.
 func TestParseMtaConfig_EmptyFile(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: configmgr test may have retry delays")
@@ -133,13 +134,8 @@ func TestParseMtaConfig_EmptyFile(t *testing.T) {
 	cm := setupTestConfigManagerForParser(tempDir)
 
 	err = cm.ParseMtaConfig(context.Background(), configFile)
-	if err != nil {
-		t.Fatalf("Expected no error for empty file, got: %v", err)
-	}
-
-	// Empty file should have no sections
-	if len(cm.State.MtaConfig.Sections) != 0 {
-		t.Errorf("Expected 0 sections, got: %d", len(cm.State.MtaConfig.Sections))
+	if err == nil {
+		t.Fatal("Expected an error for an empty config file, got nil")
 	}
 }
 
@@ -263,6 +259,8 @@ func TestParseMtaConfig_LDAPLookup(t *testing.T) {
 	}
 
 	cm := setupTestConfigManagerForParser(tempDir)
+	// Enable mta on this node so the section is not gated out at parse time.
+	cm.State.ServerConfig.ServiceConfig.Set("mta", "TRUE")
 	// Set up config values for lookup
 	cm.State.LocalConfig.Data.Set("ldap_url", "ldap://localhost:389")
 	cm.State.LocalConfig.Data.Set("zimbra_server_hostname", "mail.example.com")
@@ -313,6 +311,8 @@ func TestParseMtaConfig_LDAPLookupFailure(t *testing.T) {
 	}
 
 	cm := setupTestConfigManagerForParser(tempDir)
+	// Enable mta on this node so the section is not gated out at parse time.
+	cm.State.ServerConfig.ServiceConfig.Set("mta", "TRUE")
 
 	err = cm.ParseMtaConfig(context.Background(), configFile)
 	if err != nil {

@@ -31,6 +31,8 @@ import (
 const (
 	constTRUE                     = "TRUE"
 	constFALSE                    = "FALSE"
+	constYes                      = "yes"
+	constNo                       = "no"
 	constIPv4                     = "ipv4"
 	constIPv6                     = "ipv6"
 	zimbraServiceEnabled          = "zimbraServiceEnabled"
@@ -45,6 +47,12 @@ const (
 	configTypeSERVICE             = "SERVICE"  // Config lookup type for service status
 	componentProxy                = "proxy"
 	serviceMTA                    = "mta"
+	serviceMailbox                = "mailbox"
+	sectionAmavis                 = "amavis"
+	sectionDhparam                = "dhparam"
+	sectionSasl                   = "sasl"
+	sectionWebxml                 = "webxml"
+	sectionNginx                  = "nginx"
 	restrictionRejectRBLClient    = "reject_rbl_client"
 	restrictionRejectRHSBLClient  = "reject_rhsbl_client"
 	inetFamily                    = "inet"
@@ -61,7 +69,8 @@ type ConfigManager struct {
 	mainConfig              *config.Config
 	State                   *state.State // Reference to the central state object
 	LdapClient              *ldap.Ldap
-	NativeLdapClient        *ldap.Client       // Native LDAP client for direct queries
+	NativeLdapClient        *ldap.Client       // Native LDAP client for direct queries (cn=zimbra, TCP)
+	ConfigLdapClient        *ldap.Client       // Config LDAP client for cn=config writes (ldapi, rootDN)
 	Cache                   *cache.ConfigCache // Configuration cache for LDAP and other data
 	Transformer             *transformer.Transformer
 	ServiceMgr              services.Manager   // Service manager interface
@@ -170,6 +179,53 @@ func (cm *ConfigManager) initNativeLdapClient(ctx context.Context) {
 	if cm.LdapClient != nil {
 		cm.LdapClient.SetNativeClient(ctx, nativeClient)
 	}
+
+	cm.initConfigLdapClient(ctx, localCfg)
+}
+
+// initConfigLdapClient builds the slapd-config (cn=config) write client and
+// wires it into the Ldap wrapper. Config-backend writes (every keymap entry)
+// require binding as the cn=config rootDN over the local ldapi socket; the
+// data-suffix client (uid=zimbra) cannot write cn=config (LDAP code 50).
+//
+// Failure here is asymmetric to the data client: the data client degrades to
+// zmprov on failure, but the config client is the only correct write path, so
+// a missing root password is logged at error level and writes will fail fast
+// at call time (ModifyAttribute returns a config error) rather than silently
+// using the wrong identity.
+func (cm *ConfigManager) initConfigLdapClient(ctx context.Context, localCfg map[string]string) {
+	if cm.LdapClient == nil {
+		return
+	}
+
+	rootPassword, ok := localCfg["ldap_root_password"]
+	if !ok || rootPassword == "" {
+		logger.ErrorContext(ctx, "ldap_root_password not found in localconfig - cn=config writes will fail")
+
+		return
+	}
+
+	configClient, err := ldap.NewClient(&ldap.ClientConfig{
+		URL:      ldap.ConfigBackendURL,
+		BindDN:   ldap.ConfigBackendDN,
+		Password: rootPassword,
+		BaseDN:   ldap.ConfigBackendDN,
+		PoolSize: 1, // serialized low-volume reconcile writes
+		StartTLS: false,
+	})
+	if err != nil {
+		logger.ErrorContext(ctx, "Failed to create config LDAP client - cn=config writes will fail",
+			"error", err)
+
+		return
+	}
+
+	cm.ConfigLdapClient = configClient
+	cm.LdapClient.SetConfigClient(ctx, configClient)
+
+	logger.InfoContext(ctx, "Config LDAP client initialized successfully",
+		"ldap_url", ldap.ConfigBackendURL,
+		"bind_dn", ldap.ConfigBackendDN)
 }
 
 // lookupVarKey checks GlobalConfig → MiscConfig → ServerConfig for key.

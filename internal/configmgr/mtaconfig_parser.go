@@ -30,9 +30,21 @@ func (cm *ConfigManager) ParseMtaConfig(ctx context.Context, configFile string) 
 		return fmt.Errorf("failed to parse MTA config file %s: %w", configFile, err)
 	}
 
+	serviceConfig := cm.State.ServerConfig.ServiceConfig.Snapshot()
+
 	for sectionName, section := range mtaConfig.Sections {
 		logger.DebugContext(ctx, "Found SECTION",
 			"section_name", sectionName)
+
+		// Mirror the legacy Jython zmconfigd: skip sections whose mapped node
+		// service is not enabled, so their LDAP directives are not resolved
+		// (and later not compiled) on nodes that don't run that component.
+		if !sectionEnabledOnNode(sectionName, serviceConfig) {
+			logger.DebugContext(ctx, "Section service not enabled on node, skipping LDAP resolution",
+				"section", sectionName)
+
+			continue
+		}
 
 		cm.resolveSectionLDAP(ctx, sectionName, section)
 		logSectionDetails(ctx, sectionName, section)

@@ -207,14 +207,14 @@ func TestLdap_ModifyAttribute(t *testing.T) {
 			key:      keyLDAPCommonLoglevel,
 			value:    "256",
 			isMaster: true,
-			wantErr:  true, // nil NativeClient → write guard error
+			wantErr:  true, // nil ConfigClient → write guard error
 		},
 		{
 			name:     "valid_require_tls",
 			key:      keyLDAPCommonRequireTLS,
 			value:    "128",
 			isMaster: true,
-			wantErr:  true, // nil NativeClient → write guard error
+			wantErr:  true, // nil ConfigClient → write guard error
 		},
 		{
 			name:     "master_required_key_as_non_master",
@@ -615,6 +615,42 @@ func TestLdap_SetNativeClient(t *testing.T) {
 	}
 }
 
+// TestLdap_SetConfigClient tests the cn=config write-client setter.
+func TestLdap_SetConfigClient(t *testing.T) {
+	cfg := &config.Config{}
+	l := NewLdap(context.Background(), cfg)
+
+	client := &Client{}
+	l.SetConfigClient(context.Background(), client)
+	if l.ConfigClient != client {
+		t.Errorf("SetConfigClient() failed to set client")
+	}
+
+	l.SetConfigClient(context.Background(), nil)
+	if l.ConfigClient != nil {
+		t.Errorf("SetConfigClient() failed to clear client")
+	}
+}
+
+// TestLdap_ModifyAttribute_RoutesToConfigClient verifies writes use ConfigClient
+// and never fall back to NativeClient: with a NativeClient present but
+// ConfigClient nil, the write must still hit the nil-ConfigClient guard.
+func TestLdap_ModifyAttribute_RoutesToConfigClient(t *testing.T) {
+	cfg := &config.Config{LdapIsMaster: true}
+	l := NewLdap(context.Background(), cfg)
+	l.IsMaster = true
+	l.MaxRetries = 0
+	l.NativeClient = &Client{} // data client present — must NOT be used for writes
+
+	err := l.ModifyAttribute(context.Background(), keyLDAPCommonLoglevel, "256")
+	if err == nil {
+		t.Fatal("ModifyAttribute() expected config-client guard error, got nil")
+	}
+	if !contains(err.Error(), "config client not initialized") {
+		t.Errorf("ModifyAttribute() error = %v, want 'config client not initialized'", err)
+	}
+}
+
 // TestLdap_ModifyAttribute_WithNativeClient covers the path where the nil-client
 // guard passes (NativeClient set) and execution reaches the withRetry/native
 // modify stage. An empty *Client has no configured URLs, so connect() fails fast
@@ -624,12 +660,12 @@ func TestLdap_ModifyAttribute_WithNativeClient(t *testing.T) {
 	l := NewLdap(context.Background(), cfg)
 	l.IsMaster = true
 	l.MaxRetries = 0 // avoid retry sleeps
-	l.NativeClient = &Client{}
+	l.ConfigClient = &Client{}
 
-	// Valid key resolves; native modify fails fast (no URLs to dial).
+	// Valid key resolves; config modify fails fast (no URLs to dial).
 	err := l.ModifyAttribute(context.Background(), keyLDAPCommonLoglevel, "256")
 	if err == nil {
-		t.Fatal("ModifyAttribute() expected error from native client with no URLs, got nil")
+		t.Fatal("ModifyAttribute() expected error from config client with no URLs, got nil")
 	}
 }
 
@@ -639,7 +675,7 @@ func TestLdap_ModifyAttribute_LookupErrorBeforeClient(t *testing.T) {
 	cfg := &config.Config{LdapIsMaster: true}
 	l := NewLdap(context.Background(), cfg)
 	l.IsMaster = true
-	l.NativeClient = &Client{} // present, but lookup should fail first
+	l.ConfigClient = &Client{} // present, but lookup should fail first
 
 	err := l.ModifyAttribute(context.Background(), "totally_unknown_key", "x")
 	if err == nil {
@@ -675,8 +711,8 @@ func TestLdap_ModifyAttributeBatch_NilClient(t *testing.T) {
 	if err == nil {
 		t.Fatal("ModifyAttributeBatch() expected nil-client guard error, got nil")
 	}
-	if !contains(err.Error(), "native client not initialized") {
-		t.Errorf("ModifyAttributeBatch() error = %v, want 'native client not initialized'", err)
+	if !contains(err.Error(), "config client not initialized") {
+		t.Errorf("ModifyAttributeBatch() error = %v, want 'config client not initialized'", err)
 	}
 }
 
@@ -687,7 +723,7 @@ func TestLdap_ModifyAttributeBatch_LookupError(t *testing.T) {
 	l := NewLdap(context.Background(), cfg)
 	l.IsMaster = true
 	l.MaxRetries = 0
-	l.NativeClient = &Client{}
+	l.ConfigClient = &Client{}
 
 	err := l.ModifyAttributeBatch(context.Background(), map[string]string{
 		"unknown_ldap_key": "value",
@@ -708,7 +744,7 @@ func TestLdap_ModifyAttributeBatch_WithNativeClient(t *testing.T) {
 	l := NewLdap(context.Background(), cfg)
 	l.IsMaster = true
 	l.MaxRetries = 0
-	l.NativeClient = &Client{}
+	l.ConfigClient = &Client{}
 
 	// Two DNs (cn=config and olcDatabase={3}mdb,cn=config) exercise grouping.
 	err := l.ModifyAttributeBatch(context.Background(), map[string]string{

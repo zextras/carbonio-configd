@@ -7,11 +7,32 @@ package configmgr
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/mtaops"
 )
+
+// normalizePostconfBool mirrors the legacy Jython zmconfigd (jylibs/mtaconfig.py):
+// POSTCONF values resolved from a typed lookup (VAR/LOCAL/FILE/MAPLOCAL) are
+// normalized to Postfix booleans — "TRUE" -> "yes", "FALSE" -> "no" —
+// case-insensitively. Literal POSTCONF values are passed through unchanged, so
+// a literal "TRUE" stays "TRUE" exactly as the legacy implementation did.
+func normalizePostconfBool(valueSpec, resolved string) string {
+	if valueType, _ := parseValueSpec(valueSpec); valueType == configTypeLITERAL {
+		return resolved
+	}
+
+	switch strings.ToUpper(resolved) {
+	case constTRUE:
+		return constYes
+	case constFALSE:
+		return constNo
+	default:
+		return resolved
+	}
+}
 
 func (cm *ConfigManager) doPostconf(ctx context.Context) error {
 	if len(cm.State.CurrentActions.Postconf) == 0 {
@@ -53,7 +74,7 @@ func (cm *ConfigManager) doPostconf(ctx context.Context) error {
 		// Add to batch
 		ops = append(ops, mtaops.PostconfOperation{
 			Key:   key,
-			Value: resolvedValue,
+			Value: normalizePostconfBool(valueSpec, resolvedValue),
 		})
 	}
 

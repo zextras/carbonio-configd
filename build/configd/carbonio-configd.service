@@ -15,7 +15,7 @@ Wants=network-online.target
 Type=notify
 User=zextras
 EnvironmentFile=-/opt/zextras/data/systemd.env
-ExecStartPre=nc -z $ldap_domain $ldap_port
+ExecStartPre=/bin/bash -c 'for i in $(seq 1 30); do nc -z $ldap_domain $ldap_port && exit 0; sleep 2; done; echo "LDAP not reachable after 60s"; exit 1'
 ExecStart=/opt/zextras/bin/configd
 ExecReload=/bin/kill -HUP $MAINPID
 NotifyAccess=main
@@ -48,7 +48,7 @@ OOMScoreAdjust=-500
 
 # ── Security: Filesystem ──────────────────────────────────────────────
 ProtectSystem=strict
-ReadWritePaths=/opt/zextras/data /opt/zextras/log /opt/zextras/conf /run/carbonio
+ReadWritePaths=/opt/zextras/conf /opt/zextras/log /opt/zextras/data /opt/zextras/common/conf /run/carbonio
 ProtectHome=yes
 PrivateTmp=yes
 UMask=0027

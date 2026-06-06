@@ -296,8 +296,9 @@ func TestParser_ConditionalLdap(t *testing.T) {
 	if val := cond.Ldap["server_host"]; val != "LOCAL:ldap_url" {
 		t.Errorf("Expected 'LOCAL:ldap_url', got '%s'", val)
 	}
-	if val := cond.Ldap["timeout"]; val != "VAR:zimbraLdapTimeout" {
-		t.Errorf("Expected 'VAR:zimbraLdapTimeout', got '%s'", val)
+	// Non-LOCAL/MAPLOCAL LDAP directives are dropped (jylibs/mtaconfig.py parseLdap).
+	if val, ok := cond.Ldap["timeout"]; ok {
+		t.Errorf("VAR-typed conditional LDAP directive should be dropped, got %q", val)
 	}
 }
 

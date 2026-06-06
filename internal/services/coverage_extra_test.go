@@ -6,6 +6,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -357,7 +358,7 @@ func TestWaitForSDNotify_CtxCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	if err := waitForSDNotify(ctx, conn, "svc"); err == nil {
+	if err := waitForSDNotify(ctx, conn, "svc", nil); err == nil {
 		t.Error("expected error from cancelled ctx")
 	}
 }
@@ -382,7 +383,34 @@ func TestWaitForSDNotify_ReadyReceived(t *testing.T) {
 		_, _ = client.Write([]byte("READY=1\n"))
 	}()
 
-	if err := waitForSDNotify(context.Background(), conn, "svc"); err != nil {
+	if err := waitForSDNotify(context.Background(), conn, "svc", nil); err != nil {
 		t.Errorf("expected READY=1 to succeed, got %v", err)
+	}
+}
+
+// TestWaitForSDNotify_ChildExitFailsFast verifies that an early child exit is
+// detected immediately instead of waiting out the 30s readiness deadline.
+func TestWaitForSDNotify_ChildExitFailsFast(t *testing.T) {
+	dir := t.TempDir()
+	addr := &net.UnixAddr{Name: filepath.Join(dir, "e.sock"), Net: "unixgram"}
+	conn, err := net.ListenUnixgram("unixgram", addr)
+	if err != nil {
+		t.Fatalf("ListenUnixgram: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	exited := make(chan error, 1)
+	exited <- errors.New("exit status 1")
+
+	start := time.Now()
+	err = waitForSDNotify(context.Background(), conn, "svc", exited)
+	if err == nil {
+		t.Fatal("expected error when child exits before READY=1")
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("waitForSDNotify took %v, expected fast fail on child exit", elapsed)
+	}
+	if !strings.Contains(err.Error(), "exited during startup") {
+		t.Errorf("error = %v, want 'exited during startup'", err)
 	}
 }

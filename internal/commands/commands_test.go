@@ -985,35 +985,46 @@ func TestBuildBackendURL(t *testing.T) {
 		wantOK  bool
 	}{
 		{
-			name: "valid backend",
+			name: "https mode uses ssl port",
 			attrs: map[string]string{
 				zimbraServiceHostname:              "mail.example.com",
 				attrZimbraReverseProxyLookupTarget: "TRUE",
 				attrZimbraMailMode:                 "https",
 				attrZimbraMailSSLPort:              "8443",
 			},
-			wantURL: "https://mail.example.com:8443",
+			wantURL: "mail.example.com:8443",
 			wantOK:  true,
 		},
 		{
-			name: "default port when missing",
+			name: "https mode missing ssl port uses default 0",
 			attrs: map[string]string{
 				zimbraServiceHostname:              "mail.example.com",
 				attrZimbraReverseProxyLookupTarget: "TRUE",
 				attrZimbraMailMode:                 "https",
 			},
-			wantURL: "https://mail.example.com:443",
+			wantURL: "mail.example.com:0",
 			wantOK:  true,
 		},
 		{
-			name: "case insensitive lookup target",
+			name: "both mode uses plaintext mail port",
 			attrs: map[string]string{
 				zimbraServiceHostname:              "mail.example.com",
 				attrZimbraReverseProxyLookupTarget: "true",
 				attrZimbraMailMode:                 "both",
+				attrZimbraMailPort:                 "8080",
 				attrZimbraMailSSLPort:              "7443",
 			},
-			wantURL: "https://mail.example.com:7443",
+			wantURL: "mail.example.com:8080",
+			wantOK:  true,
+		},
+		{
+			name: "http mode missing mail port uses default 80",
+			attrs: map[string]string{
+				zimbraServiceHostname:              "mail.example.com",
+				attrZimbraReverseProxyLookupTarget: "TRUE",
+				attrZimbraMailMode:                 "http",
+			},
+			wantURL: "mail.example.com:80",
 			wantOK:  true,
 		},
 		{

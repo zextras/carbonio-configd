@@ -18,6 +18,50 @@ import (
 	"testing"
 )
 
+func TestSectionEnabledOnNode(t *testing.T) {
+	// A mailbox+service-only node (e.g. srv3): no mta, proxy, ldap, dhparam.
+	mailboxNode := map[string]string{"mailbox": "", "service": ""}
+	// A proxy node.
+	proxyNode := map[string]string{"proxy": ""}
+	// An ldap+mta node.
+	ldapMtaNode := map[string]string{"ldap": "", "mta": ""}
+
+	tests := []struct {
+		name     string
+		section  string
+		services map[string]string
+		want     bool
+	}{
+		// Mapped sections gate on their mapped service.
+		{"amavis maps to mta - mailbox node skips", "amavis", mailboxNode, false},
+		{"amavis maps to mta - mta node runs", "amavis", ldapMtaNode, true},
+		{"sasl maps to mta - mailbox node skips", "sasl", mailboxNode, false},
+		{"webxml maps to mailbox - mailbox node runs", "webxml", mailboxNode, true},
+		{"nginx maps to proxy - mailbox node skips", "nginx", mailboxNode, false},
+		{"nginx maps to proxy - proxy node runs", "nginx", proxyNode, true},
+		// dhparam is negated: runs only when dhparam service is NOT present.
+		{"dhparam negated - mailbox node runs", "dhparam", mailboxNode, true},
+		{"dhparam negated - present means skip", "dhparam", map[string]string{"dhparam": ""}, false},
+		// Unmapped sections gate on a same-named service.
+		{"mta section - mailbox node skips", "mta", mailboxNode, false},
+		{"mta section - mta node runs", "mta", ldapMtaNode, true},
+		{"mailbox section - mailbox node runs", "mailbox", mailboxNode, true},
+		{"proxy section - mailbox node skips", "proxy", mailboxNode, false},
+		{"ldap section - mailbox node skips", "ldap", mailboxNode, false},
+		{"ldap section - ldap node runs", "ldap", ldapMtaNode, true},
+		{"stats section - mailbox node skips", "stats", mailboxNode, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sectionEnabledOnNode(tt.section, tt.services); got != tt.want {
+				t.Errorf("sectionEnabledOnNode(%q, %v) = %v, want %v",
+					tt.section, tt.services, got, tt.want)
+			}
+		})
+	}
+}
+
 // mockServiceManager is a mock implementation of services.Manager for testing
 // Shared across all test files in the configmgr package
 type mockServiceManager struct {
@@ -560,6 +604,8 @@ func TestCompileActions(t *testing.T) {
 
 		// Set first run
 		cm.State.FirstRun = true
+		// Enable the section's service on this node so it is not gated out.
+		cm.State.ServerConfig.ServiceConfig.Set("testservice", "TRUE")
 
 		// Add a section to MtaConfig
 		section := &config.MtaConfigSection{
@@ -609,6 +655,8 @@ func TestCompileActions(t *testing.T) {
 		cm.State.ForcedConfig = map[string]string{
 			"proxy": "forced",
 		}
+		// Enable proxy on this node so the section is not gated out.
+		cm.State.ServerConfig.ServiceConfig.Set("proxy", "TRUE")
 
 		// Add a section
 		section := &config.MtaConfigSection{

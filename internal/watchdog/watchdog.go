@@ -9,6 +9,7 @@ package watchdog
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"time"
 
@@ -41,6 +42,11 @@ type Watchdog struct {
 
 	// ServiceEnabled maps service names to their enabled status
 	ServiceEnabled map[string]bool
+
+	// prevServices records each monitored service's last observed run state
+	// ("running"/"stopped") so status flips can be logged per cycle, mirroring
+	// jylibs configd.py prevServices tracking.
+	prevServices map[string]string
 
 	// configLookup function for checking service configuration
 	configLookup func(string) string
@@ -116,6 +122,7 @@ func NewWatchdog(cfg Config) *Watchdog {
 		stopChan:       make(chan struct{}),
 		runningChan:    make(chan struct{}),
 		ServiceEnabled: make(map[string]bool),
+		prevServices:   make(map[string]string),
 		configLookup:   cfg.ConfigLookup,
 	}
 }
@@ -250,8 +257,58 @@ func (w *Watchdog) checkServices(ctx context.Context) {
 
 	logger.DebugContext(ctx, "Checking service health")
 
+	w.logServiceStatusChanges(ctx)
+
 	for _, service := range w.getTrackedServices() {
 		w.checkOneService(ctx, service)
+	}
+}
+
+// logServiceStatusChanges emits a diagnostic line whenever a monitored
+// service's running state flips between checks, mirroring the
+// "Service status change" log in jylibs configd.py watchdog(). It is purely
+// observational: it never queues restarts. prevServices is seeded on the first
+// observation so only genuine transitions (not the initial reading) are logged.
+func (w *Watchdog) logServiceStatusChanges(ctx context.Context) {
+	w.mu.Lock()
+
+	monitored := make([]string, 0, len(w.ServiceEnabled))
+	for svc := range w.ServiceEnabled {
+		monitored = append(monitored, svc)
+	}
+	w.mu.Unlock()
+
+	sort.Strings(monitored)
+
+	hostname := ""
+	if w.configLookup != nil {
+		hostname = w.configLookup("zimbra_server_hostname")
+	}
+
+	for _, service := range monitored {
+		running, err := w.serviceManager.IsRunning(ctx, service)
+		if err != nil {
+			// Don't record a status when the probe itself failed.
+			continue
+		}
+
+		curStatus := "stopped"
+		if running {
+			curStatus = "running"
+		}
+
+		w.mu.Lock()
+		prevStatus, seen := w.prevServices[service]
+		w.prevServices[service] = curStatus
+		w.mu.Unlock()
+
+		if seen && prevStatus != curStatus {
+			logger.InfoContext(ctx, "Service status change",
+				"hostname", hostname,
+				"service", service,
+				"from", prevStatus,
+				"to", curStatus)
+		}
 	}
 }
 

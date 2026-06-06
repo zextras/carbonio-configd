@@ -6,6 +6,7 @@ package configmgr
 
 import (
 	"context"
+	"strings"
 
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/logger"
@@ -16,6 +17,44 @@ const (
 	serviceEnabled  = "enabled"
 	serviceDisabled = "disabled"
 )
+
+// sectionServiceMap maps a zmconfigd.cf SECTION name to the node service that
+// must be enabled for the section to be processed. A leading "!" negates the
+// check (process only when the service is NOT enabled). Sections absent from
+// this map gate on a service of the same name. Ported verbatim from the legacy
+// Jython zmconfigd (jylibs/mtaconfig.py sectionMap), which skips an entire
+// section when its mapped service is not enabled on the local node.
+var sectionServiceMap = map[string]string{
+	sectionAmavis:  serviceMTA,
+	sectionDhparam: "!" + sectionDhparam,
+	sectionSasl:    serviceMTA,
+	sectionWebxml:  serviceMailbox,
+	sectionNginx:   componentProxy,
+}
+
+// sectionEnabledOnNode reports whether a section should be processed on this
+// node, mirroring the legacy getServiceMap + checkConditional("SERVICE", ...).
+// serviceConfig holds the node's enabled services (presence == enabled), the
+// same source LookUpConfig(SERVICE, key) consults.
+func sectionEnabledOnNode(sectionName string, serviceConfig map[string]string) bool {
+	svc, ok := sectionServiceMap[sectionName]
+	if !ok {
+		svc = sectionName
+	}
+
+	negated := false
+	if strings.HasPrefix(svc, "!") {
+		negated = true
+		svc = strings.TrimPrefix(svc, "!")
+	}
+
+	_, enabled := serviceConfig[svc]
+	if negated {
+		return !enabled
+	}
+
+	return enabled
+}
 
 // CompileActions compiles the MTA configuration actions.
 func (cm *ConfigManager) CompileActions(ctx context.Context) {
@@ -35,6 +74,13 @@ func (cm *ConfigManager) CompileActions(ctx context.Context) {
 	for sn, section := range mtaSections {
 		logger.DebugContext(ctx, "Compiling actions for section",
 			"section", sn)
+
+		if !sectionEnabledOnNode(sn, serviceConfig) {
+			logger.DebugContext(ctx, "Section service not enabled on node, skipping section",
+				"section", sn)
+
+			continue
+		}
 
 		if !shouldProcessSection(ctx, sn, section, forcedConfig, requestedConfigs, firstRun) {
 			logger.DebugContext(ctx, "Section did not change, skipping action compilation",
@@ -79,6 +125,14 @@ func (cm *ConfigManager) compileSectionRestarts(
 		if err == nil && state.IsTrueValue(isServiceEnabled) {
 			logger.DebugContext(ctx, "Adding restart", "service", restartService)
 			cm.State.CurRestarts(restartService, -1)
+
+			continue
+		}
+
+		// archiving is never stopped here when disabled, mirroring
+		// jylibs/state.py:587-588 ("archiving not enabled, skipping stop").
+		if restartService == "archiving" {
+			logger.DebugContext(ctx, "archiving not enabled, skipping stop")
 
 			continue
 		}

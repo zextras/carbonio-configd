@@ -117,6 +117,36 @@ func ServiceStart(ctx context.Context, name string) error {
 	return nil
 }
 
+// ServiceStartSystemd is the leaf start path invoked from the carbonio-*.service
+// unit's ExecStart (via the zm*ctl wrapper -> `configd service start-systemd
+// <name>`). It launches the service in-process through the legacy/custom
+// launcher (CustomStart, then BinaryPath) and NEVER calls systemctl. This is
+// what breaks the otherwise-infinite loop: `configd service start <name>` ->
+// `systemctl start carbonio-<name>.service` -> ExecStart -> here, which spawns
+// the workers directly instead of re-entering systemctl.
+func ServiceStartSystemd(ctx context.Context, name string) error {
+	ctx = logger.ContextWithComponentOnce(ctx, serviceCliComponent)
+
+	def := LookupService(name)
+	if def == nil {
+		return fmt.Errorf(errUnknownService, name)
+	}
+
+	sm := newCLIServiceManager()
+
+	if err := runPreStartHooks(ctx, name, sm, def); err != nil {
+		return err
+	}
+
+	if err := startWithoutSystemd(ctx, name, def); err != nil {
+		return fmt.Errorf("start service %s: %w", name, err)
+	}
+
+	runPostStartHooks(ctx, name, sm, def)
+
+	return nil
+}
+
 func startEnabledDependencies(ctx context.Context, name string, def *ServiceDef) error {
 	for _, dep := range def.Dependencies {
 		if !isDepEnabled(ctx, dep) {
@@ -187,6 +217,33 @@ func ServiceStop(ctx context.Context, name string) error {
 		if err := ServiceStop(ctx, dep); err != nil {
 			logger.WarnContext(ctx, "Failed to stop dependency", "dependency", dep, "error", err)
 		}
+	}
+
+	return nil
+}
+
+// ServiceStopSystemd is the leaf stop path invoked from the carbonio-*.service
+// unit's ExecStop (via `configd service stop-systemd <name>`). It shuts the
+// service down in-process via the legacy/custom path (CustomStop, then pkill by
+// ProcessName) and NEVER calls systemctl, mirroring ServiceStartSystemd.
+func ServiceStopSystemd(ctx context.Context, name string) error {
+	ctx = logger.ContextWithComponentOnce(ctx, serviceCliComponent)
+
+	def := LookupService(name)
+	if def == nil {
+		return fmt.Errorf(errUnknownService, name)
+	}
+
+	sm := newCLIServiceManager()
+
+	for _, hook := range def.PreStop {
+		if err := hook(ctx, sm); err != nil {
+			logger.WarnContext(ctx, "Pre-stop hook failed", "service", name, "error", err)
+		}
+	}
+
+	if err := stopWithoutSystemd(ctx, name, def); err != nil {
+		return fmt.Errorf("stop service %s: %w", name, err)
 	}
 
 	return nil
