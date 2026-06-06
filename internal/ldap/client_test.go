@@ -451,3 +451,22 @@ func BenchmarkFormatAsZmprovOutput(b *testing.B) {
 		_ = FormatAsZmprovOutput(config)
 	}
 }
+
+// TestNextRetryDelay tests the exponential backoff cap logic. The function
+// calls time.Sleep as a side effect; test values are kept tiny to avoid
+// slowing the suite.
+func TestNextRetryDelay(t *testing.T) {
+	c := &Client{maxRetryDelay: 5 * time.Millisecond}
+
+	// Below cap: 1ms * 2 = 2ms < 5ms → returns 2ms
+	got := c.nextRetryDelay(1 * time.Millisecond)
+	if got != 2*time.Millisecond {
+		t.Errorf("nextRetryDelay(1ms) = %v, want 2ms", got)
+	}
+
+	// At cap: 3ms * 2 = 6ms > 5ms → returns 5ms
+	got = c.nextRetryDelay(3 * time.Millisecond)
+	if got != 5*time.Millisecond {
+		t.Errorf("nextRetryDelay(3ms) = %v, want 5ms (cap)", got)
+	}
+}
