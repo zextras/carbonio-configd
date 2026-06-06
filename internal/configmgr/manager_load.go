@@ -201,9 +201,12 @@ func (cm *ConfigManager) LoadAllConfigsWithRetry(ctx context.Context, maxRetries
 }
 
 func parseLDAPReadTimeout(localConfigData map[string]string) time.Duration {
-	const defaultTimeoutMs = 60000
+	const (
+		thresholdMs      = 60000 // ldap_read_timeout floor (ms) below which the wait stays at the minimum
+		minThreadWaitSec = 60    // jylibs/state.py default thread_wait_time
+	)
 
-	ldapReadTimeout := defaultTimeoutMs
+	ldapReadTimeout := thresholdMs
 
 	if s, ok := localConfigData["ldap_read_timeout"]; ok {
 		if v, err := strconv.Atoi(s); err == nil {
@@ -211,7 +214,16 @@ func parseLDAPReadTimeout(localConfigData map[string]string) time.Duration {
 		}
 	}
 
-	return time.Duration(ldapReadTimeout/1000) * time.Second
+	// Mirror jylibs/state.py:286-288: thread_wait_time is 60s unless the
+	// configured ldap_read_timeout (in ms) is at least 60000, in which case it
+	// scales as ldap_read_timeout/1000. This enforces a 60s floor so a small
+	// ldap_read_timeout cannot drop the per-attempt wait below a minute.
+	threadWaitSec := minThreadWaitSec
+	if ldapReadTimeout >= thresholdMs {
+		threadWaitSec = ldapReadTimeout / 1000
+	}
+
+	return time.Duration(threadWaitSec) * time.Second
 }
 
 func evaluateLoadResult(

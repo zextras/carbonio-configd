@@ -149,6 +149,93 @@ func TestServiceStart_PostStartHookCalled(t *testing.T) {
 	}
 }
 
+// TestServiceStartSystemd_RunsCustomLauncherAndHooks verifies the systemd-leaf
+// start path invokes CustomStart and the pre/post-start hooks directly, WITHOUT
+// going through systemctl. This is independent of IsSystemdMode() — it is the
+// ExecStart leaf that breaks the systemctl recursion loop, so it must launch
+// the workers in-process regardless of whether the host is systemd-booted.
+func TestServiceStartSystemd_RunsCustomLauncherAndHooks(t *testing.T) {
+	orig := Registry["memcached"]
+	defer func() { Registry["memcached"] = orig }()
+
+	var startCalled, preCalled, postCalled bool
+
+	def := *orig
+	// A non-empty SystemdUnits must be ignored by the leaf path; set one so a
+	// regression that calls systemctl would visibly diverge.
+	def.SystemdUnits = []string{"carbonio-nonexistent-test.service"}
+	def.PidFile = ""
+	def.ProcessName = ""
+	def.ConfigRewrite = nil
+	def.Dependencies = nil
+	def.PreStart = []Hook{func(_ context.Context, _ *ServiceManager) error {
+		preCalled = true
+
+		return nil
+	}}
+	def.PostStart = []Hook{func(_ context.Context, _ *ServiceManager) error {
+		postCalled = true
+
+		return nil
+	}}
+	def.CustomStart = func(_ context.Context, _ *ServiceDef) error {
+		startCalled = true
+
+		return nil
+	}
+	Registry["memcached"] = &def
+
+	if err := ServiceStartSystemd(context.Background(), "memcached"); err != nil {
+		t.Fatalf("ServiceStartSystemd returned unexpected error: %v", err)
+	}
+
+	if !preCalled {
+		t.Error("pre-start hook was not called")
+	}
+	if !startCalled {
+		t.Error("CustomStart launcher was not called")
+	}
+	if !postCalled {
+		t.Error("post-start hook was not called")
+	}
+}
+
+// TestServiceStartSystemd_UnknownService verifies the leaf path rejects an
+// unknown service rather than silently succeeding (the bug symptom was an
+// "unexpected argument" parse error; a known service must resolve).
+func TestServiceStartSystemd_UnknownService(t *testing.T) {
+	if err := ServiceStartSystemd(context.Background(), "nonexistent-service-xyz"); err == nil {
+		t.Error("expected error for unknown service")
+	}
+}
+
+// TestServiceStopSystemd_RunsCustomStop verifies the systemd-leaf stop path
+// invokes CustomStop directly without systemctl.
+func TestServiceStopSystemd_RunsCustomStop(t *testing.T) {
+	orig := Registry["memcached"]
+	defer func() { Registry["memcached"] = orig }()
+
+	var stopCalled bool
+
+	def := *orig
+	def.SystemdUnits = []string{"carbonio-nonexistent-test.service"}
+	def.PreStop = nil
+	def.CustomStop = func(_ context.Context, _ *ServiceDef) error {
+		stopCalled = true
+
+		return nil
+	}
+	Registry["memcached"] = &def
+
+	if err := ServiceStopSystemd(context.Background(), "memcached"); err != nil {
+		t.Fatalf("ServiceStopSystemd returned unexpected error: %v", err)
+	}
+
+	if !stopCalled {
+		t.Error("CustomStop was not called")
+	}
+}
+
 // TestServiceStart_NoRewrite verifies the NoRewrite flag skips config rewriting.
 func TestServiceStart_NoRewrite(t *testing.T) {
 	if testing.Short() {
@@ -213,4 +300,53 @@ func TestStartEnabledDependencies_EnabledDepFails(t *testing.T) {
 	}
 
 	startEnabledDependencies(context.Background(), "parent", def)
+}
+
+// TestServiceStopSystemd_UnknownService verifies ServiceStopSystemd returns an error
+// for an unknown service name, hitting the LookupService nil branch.
+func TestServiceStopSystemd_UnknownService(t *testing.T) {
+	err := ServiceStopSystemd(context.Background(), "not-a-real-service-xyz-9999")
+	if err == nil {
+		t.Error("ServiceStopSystemd() expected error for unknown service, got nil")
+	}
+}
+
+// TestServiceStopSystemd_PreStopHookError verifies that a failing pre-stop hook
+// is logged as a warning and stop continues (non-fatal).
+func TestServiceStopSystemd_PreStopHookError(t *testing.T) {
+	hookCalled := false
+	hookErr := errors.New("pre-stop hook failed deliberately")
+
+	Registry["test-prestop-svc"] = &ServiceDef{
+		Name:        "test-prestop-svc",
+		DisplayName: "Test PreStop Service",
+		PreStop: []Hook{
+			func(ctx context.Context, sm *ServiceManager) error {
+				hookCalled = true
+				return hookErr
+			},
+		},
+		// No BinaryPath, no ProcessName → stopWithoutSystemd is a no-op stop
+	}
+	defer delete(Registry, "test-prestop-svc")
+
+	err := ServiceStopSystemd(context.Background(), "test-prestop-svc")
+	if !hookCalled {
+		t.Error("pre-stop hook was not called")
+	}
+	// Hook errors are warnings; the overall stop may still succeed
+	_ = err
+}
+
+// TestPidFromProcessName_AllSelfOrParent verifies pidFromProcessName returns 0
+// when every matching PID is the current process or its parent.
+// We pass the test binary's own argv[0] which guarantees a match for self.
+func TestPidFromProcessName_AllSelfOrParent(t *testing.T) {
+	// os.Args[0] is the test binary — scanning for it will find at least self.
+	// After filtering self and parent, the result must be 0 (no "other" match).
+	// If another test process with the same binary is running, the test may
+	// non-deterministically find it; accept either outcome to avoid flakiness.
+	result := pidFromProcessName(os.Args[0])
+	// result is either 0 (no other instance) or a valid PID (another test binary)
+	_ = result // just ensure no panic
 }

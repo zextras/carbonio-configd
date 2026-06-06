@@ -587,7 +587,46 @@ func TestProcessEnablerLineFalseEnabler(t *testing.T) {
 	}
 }
 
-// TestProcessEnablerLineStringEnabler tests processEnablerLine with string enabler values
+// TestProcessEnablerLineFalseEnablerMultiLine tests that when the expanded value is
+// multi-line (e.g. a :servers variable with multiple upstreams), every line is
+// commented out, not just the first.
+func TestProcessEnablerLineFalseEnablerMultiLine(t *testing.T) {
+	cfg := &config.Config{BaseDir: "/tmp/test"}
+	gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewGenerator: %v", err)
+	}
+
+	gen.Variables["web.ews.upstream.disable"] = &Variable{
+		Keyword:   "web.ews.upstream.disable",
+		ValueType: ValueTypeEnabler,
+		Value:     false,
+	}
+	// Simulate a :servers expansion that yields two server lines.
+	gen.Variables["web.upstream.ewsserver.:servers"] = &Variable{
+		Keyword: "web.upstream.ewsserver.:servers",
+		Value:   "server srv1:8080 fail_timeout=10s;\n    server srv2:8080 fail_timeout=10s;",
+	}
+
+	processor := NewTemplateProcessor(gen, "", "")
+
+	line := "    ${web.ews.upstream.disable}    ${web.upstream.ewsserver.:servers}"
+	result, err := processor.interpolateLine(context.Background(), line)
+	if err != nil {
+		t.Fatalf("interpolateLine: %v", err)
+	}
+
+	for _, l := range strings.Split(result, "\n") {
+		trimmed := strings.TrimSpace(l)
+		if trimmed == "" {
+			continue
+		}
+		if !strings.HasPrefix(strings.TrimLeft(l, " \t"), "#") {
+			t.Errorf("line not commented out: %q", l)
+		}
+	}
+}
+
 func TestProcessEnablerLineStringEnabler(t *testing.T) {
 	cfg := &config.Config{BaseDir: "/tmp/test"}
 	gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
@@ -637,6 +676,37 @@ func TestProcessEnablerLineIntEnabler(t *testing.T) {
 	}
 	if !strings.Contains(result, "#") {
 		t.Errorf("Expected commented-out line for int(0) enabler, got: %q", result)
+	}
+}
+
+// TestProcessEnablerLineUnexpectedType exercises the default type-switch
+// branch (L131-135) when an enabler variable holds a non-bool/non-string/non-int value.
+func TestProcessEnablerLineUnexpectedType(t *testing.T) {
+	cfg := &config.Config{BaseDir: "/tmp/test"}
+	gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewGenerator: %v", err)
+	}
+
+	// float64 is not handled by any explicit type case — falls to default
+	gen.Variables["mail.imaps.enabled"] = &Variable{
+		Keyword:   "mail.imaps.enabled",
+		ValueType: ValueTypeEnabler,
+		Value:     float64(3.14),
+	}
+
+	processor := NewTemplateProcessor(gen, "", "")
+
+	// The default branch treats the enabler as disabled, so the line should be
+	// commented out (same as a disabled bool/string/int(0) enabler).
+	line := "    ${mail.imaps.enabled}listen 993 ssl;"
+	result, err := processor.interpolateLine(context.Background(), line)
+	if err != nil {
+		t.Fatalf("interpolateLine: %v", err)
+	}
+	// Unexpected type: isEnabled remains false (zero-value), so line is commented out.
+	if !strings.HasPrefix(result, "#") && !strings.HasPrefix(result, "    #") {
+		t.Errorf("Expected commented-out line for unexpected enabler type, got: %q", result)
 	}
 }
 

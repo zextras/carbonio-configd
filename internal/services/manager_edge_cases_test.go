@@ -625,7 +625,7 @@ func TestWaitForSDNotify_NonReadyDatagram(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- waitForSDNotify(ctx, conn, "test-service")
+		done <- waitForSDNotify(ctx, conn, "test-service", nil)
 	}()
 
 	sender, dialErr := dialUnixgram(socketPath)

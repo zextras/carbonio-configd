@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -129,14 +130,15 @@ func TestLdapCustomStart_WithFakeSlapd(t *testing.T) {
 	logPath = logDir
 	defer func() { logPath = oldLog }()
 
-	socketPath := expectedSocketPath("ldap")
+	// slapd has no sd_notify; readiness is determined by the LDAP probe.
+	// Stub the probe to succeed so ldapCustomStart returns once the fake
+	// slapd is launched.
+	withLdapProbe(t, func(_ context.Context, _ []string) error { return nil })
 
 	done := make(chan error, 1)
 	go func() {
 		done <- ldapCustomStart(context.Background(), &ServiceDef{Name: "ldap"})
 	}()
-
-	sendReady(t, socketPath)
 
 	select {
 	case err := <-done:
@@ -191,6 +193,11 @@ func TestLdapCustomStart_ContextTimeout(t *testing.T) {
 	logPath = logDir
 	defer func() { logPath = oldLog }()
 
+	// Probe never succeeds, so readiness depends solely on ctx/timeout.
+	withLdapProbe(t, func(_ context.Context, _ []string) error {
+		return fmt.Errorf("not ready")
+	})
+
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
@@ -203,7 +210,7 @@ func TestLdapCustomStart_ContextTimeout(t *testing.T) {
 // --- renderLDAPTable ---
 
 func TestRenderLDAPTable(t *testing.T) {
-	got := renderLDAPTable("ldap://test", "389", "yes", "secret", "query_filter = (cn=%s)\nresult_attribute = cn\n", "extra = line\n")
+	got := renderLDAPTable("ldap://test", "389", startTLSYes, "secret", "query_filter = (cn=%s)\nresult_attribute = cn\n", "extra = line\n")
 
 	want := `server_host = ldap://test
 server_port = 389
@@ -238,7 +245,7 @@ func TestRenderLDAPTable_NoExtra(t *testing.T) {
 }
 
 func TestRenderLDAPTable_AllFields(t *testing.T) {
-	got := renderLDAPTable("ldap://host", "636", "yes", "secret123",
+	got := renderLDAPTable("ldap://host", "636", startTLSYes, "secret123",
 		"query_filter = (uid=%s)\nresult_attribute = uid\n",
 		"special_result_attribute = member\n")
 
@@ -256,5 +263,118 @@ func TestRenderLDAPTable_AllFields(t *testing.T) {
 	}
 	if !strings.Contains(got, "special_result_attribute = member") {
 		t.Error("missing special_result_attribute")
+	}
+}
+
+// --- startThenProbe ---
+
+func withLdapProbe(t *testing.T, fn func(context.Context, []string) error) {
+	t.Helper()
+
+	prev := ldapProbeFn
+	t.Cleanup(func() { ldapProbeFn = prev })
+
+	ldapProbeFn = fn
+}
+
+// TestStartThenProbe_ReadyOnProbe verifies a fast return once the probe
+// succeeds, without waiting for sd_notify or the full timeout.
+func TestStartThenProbe_ReadyOnProbe(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: spawns a child process")
+	}
+
+	withLdapProbe(t, func(_ context.Context, _ []string) error { return nil })
+
+	cmd := exec.Command("sleep", "30")
+
+	start := time.Now()
+	err := startThenProbe(context.Background(), cmd, "ldap://localhost:389")
+
+	if cmd.Process != nil {
+		_ = cmd.Process.Kill()
+		go func() { _, _ = cmd.Process.Wait() }()
+	}
+
+	if err != nil {
+		t.Fatalf("startThenProbe returned error: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Errorf("startThenProbe took %v, expected fast return on probe success", elapsed)
+	}
+}
+
+// TestStartThenProbe_ChildExitFailsFast verifies that if the child exits before
+// the probe ever succeeds, we fail immediately rather than polling to timeout.
+func TestStartThenProbe_ChildExitFailsFast(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: spawns a child process")
+	}
+
+	// Probe never succeeds.
+	withLdapProbe(t, func(_ context.Context, _ []string) error {
+		return fmt.Errorf("not ready")
+	})
+
+	// Child exits almost immediately.
+	cmd := exec.Command("true")
+
+	start := time.Now()
+	err := startThenProbe(context.Background(), cmd, "ldap://localhost:389")
+	if err == nil {
+		t.Fatal("expected error when child exits before readiness")
+	}
+	if !strings.Contains(err.Error(), "exited during startup") {
+		t.Errorf("error = %v, want 'exited during startup'", err)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("startThenProbe took %v, expected fast fail on child exit", elapsed)
+	}
+}
+
+// TestStartThenProbe_CtxCancel verifies ctx cancellation aborts the wait.
+func TestStartThenProbe_CtxCancel(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: spawns a child process")
+	}
+
+	withLdapProbe(t, func(_ context.Context, _ []string) error {
+		return fmt.Errorf("not ready")
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cmd := exec.Command("sleep", "30")
+
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		cancel()
+	}()
+
+	err := startThenProbe(ctx, cmd, "ldap://localhost:389")
+
+	if cmd.Process != nil {
+		_ = cmd.Process.Kill()
+		go func() { _, _ = cmd.Process.Wait() }()
+	}
+
+	if err == nil {
+		t.Fatal("expected error from cancelled ctx")
+	}
+}
+
+// TestProbeLDAPReady_EmptyURLs verifies that an empty URL list causes an error.
+func TestProbeLDAPReady_EmptyURLs(t *testing.T) {
+	err := probeLDAPReady(context.Background(), []string{})
+	if err == nil {
+		t.Error("expected non-nil error for empty URL list")
+	}
+}
+
+// TestProbeLDAPReady_UnreachableURL verifies that an unreachable host returns
+// a non-nil error.
+func TestProbeLDAPReady_UnreachableURL(t *testing.T) {
+	err := probeLDAPReady(context.Background(), []string{"ldap://127.0.0.1:1"})
+	if err == nil {
+		t.Error("expected non-nil error for unreachable LDAP URL")
 	}
 }

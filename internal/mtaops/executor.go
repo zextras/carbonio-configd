@@ -177,42 +177,28 @@ func (e *executor) ExecutePostconfdBatch(ctx context.Context, ops []PostconfdOpe
 	return nil
 }
 
-// handleEmptyMapfileData handles the case when MAPFILE has no data in LDAP.
-// It tries to restore from .crb backup or leaves existing file untouched.
+// handleEmptyMapfileData mirrors jylibs/state.py:408-410: when the MAPFILE VAR
+// is empty, an existing mapped file is removed so a cleared value (e.g.
+// zimbraSSLDHParam -> conf/dhparam.pem) does not leave a stale file behind. A
+// missing file is a no-op.
 func (e *executor) handleEmptyMapfileData(ctx context.Context, op MapfileOperation, filePath string) error {
-	// Try to restore from .crb backup instead of deleting
-	backupPath := filePath + ".crb"
+	if _, err := os.Stat(filePath); err != nil {
+		if os.IsNotExist(err) {
+			logger.DebugContext(ctx, "MAPFILE no data in LDAP and no existing file",
+				"key", op.Key,
+				"file_path", filePath)
 
-	//nolint:gosec // G304: File path comes from trusted MAPPEDFILES map
-	backupData, err := os.ReadFile(backupPath)
-	if err == nil && len(backupData) > 0 {
-		// Restore from backup
-		//nolint:gosec // G306: File permissions 0o600 are intentionally restrictive for security
-		if err := os.WriteFile(filePath, backupData, 0o600); err != nil {
-			return fmt.Errorf("MAPFILE %s: failed to restore from backup %s: %w", op.Key, backupPath, err)
+			return nil
 		}
 
-		logger.InfoContext(ctx, "MAPFILE restored from backup (no data in LDAP)",
-			"key", op.Key,
-			"file_path", filePath,
-			"backup_path", backupPath,
-			"bytes_written", len(backupData))
-
-		return nil
+		return fmt.Errorf("MAPFILE %s: error checking file %s: %w", op.Key, filePath, err)
 	}
 
-	// No backup available, check if file already exists
-	if _, err := os.Stat(filePath); err == nil {
-		// File exists, leave it untouched rather than deleting it
-		logger.InfoContext(ctx, "MAPFILE no data in LDAP, leaving existing file untouched",
-			"key", op.Key,
-			"file_path", filePath)
-
-		return nil
+	if err := os.Remove(filePath); err != nil {
+		return fmt.Errorf("MAPFILE %s: failed to remove stale file %s: %w", op.Key, filePath, err)
 	}
 
-	// No data in LDAP, no backup, and no existing file - this is expected
-	logger.DebugContext(ctx, "MAPFILE no data in LDAP and no existing file",
+	logger.InfoContext(ctx, "MAPFILE removed (no data in LDAP)",
 		"key", op.Key,
 		"file_path", filePath)
 

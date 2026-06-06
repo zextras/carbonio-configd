@@ -67,21 +67,25 @@ func TestConfigdRequestHandlerRewrite(t *testing.T) {
 		name             string
 		args             []string
 		expectedResponse string
+		expectTrigger    bool
 	}{
 		{
 			name:             "rewrite with no args",
 			args:             []string{},
-			expectedResponse: "SUCCESS REWRITES COMPLETE",
+			expectedResponse: "ERROR NO SERVICES LISTED",
+			expectTrigger:    false,
 		},
 		{
 			name:             "rewrite with single config",
 			args:             []string{"dhparam"},
 			expectedResponse: "SUCCESS REWRITES COMPLETE",
+			expectTrigger:    true,
 		},
 		{
 			name:             "rewrite with multiple configs",
 			args:             []string{"amavis", "antivirus", "mta"},
 			expectedResponse: "SUCCESS REWRITES COMPLETE",
+			expectTrigger:    true,
 		},
 	}
 
@@ -97,6 +101,15 @@ func TestConfigdRequestHandlerRewrite(t *testing.T) {
 
 			if response != tt.expectedResponse {
 				t.Errorf("REWRITE response: got %q, want %q", response, tt.expectedResponse)
+			}
+
+			if !tt.expectTrigger {
+				if mockTrigger.GetRewriteCallCount() != 0 {
+					t.Errorf("TriggerRewrite call count: got %d, want 0 (no services listed)",
+						mockTrigger.GetRewriteCallCount())
+				}
+
+				return
 			}
 
 			if mockTrigger.GetRewriteCallCount() != 1 {
@@ -246,28 +259,32 @@ func TestThreadedStreamServerRewriteCommand(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	tests := []struct {
-		name         string
-		command      string
-		expectedResp string
-		expectedArgs []string
+		name          string
+		command       string
+		expectedResp  string
+		expectedArgs  []string
+		expectTrigger bool
 	}{
 		{
-			name:         "rewrite no args",
-			command:      "REWRITE",
-			expectedResp: "SUCCESS REWRITES COMPLETE",
-			expectedArgs: []string{},
+			name:          "rewrite no args",
+			command:       "REWRITE",
+			expectedResp:  "ERROR NO SERVICES LISTED",
+			expectedArgs:  []string{},
+			expectTrigger: false,
 		},
 		{
-			name:         "rewrite single arg",
-			command:      "REWRITE dhparam",
-			expectedResp: "SUCCESS REWRITES COMPLETE",
-			expectedArgs: []string{"dhparam"},
+			name:          "rewrite single arg",
+			command:       "REWRITE dhparam",
+			expectedResp:  "SUCCESS REWRITES COMPLETE",
+			expectedArgs:  []string{"dhparam"},
+			expectTrigger: true,
 		},
 		{
-			name:         "rewrite multiple args",
-			command:      "REWRITE amavis antivirus mta",
-			expectedResp: "SUCCESS REWRITES COMPLETE",
-			expectedArgs: []string{"amavis", "antivirus", "mta"},
+			name:          "rewrite multiple args",
+			command:       "REWRITE amavis antivirus mta",
+			expectedResp:  "SUCCESS REWRITES COMPLETE",
+			expectedArgs:  []string{"amavis", "antivirus", "mta"},
+			expectTrigger: true,
 		},
 	}
 
@@ -302,6 +319,15 @@ func TestThreadedStreamServerRewriteCommand(t *testing.T) {
 			response = strings.TrimSpace(response)
 			if response != tt.expectedResp {
 				t.Errorf("response: got %q, want %q", response, tt.expectedResp)
+			}
+
+			if !tt.expectTrigger {
+				if mockTrigger.GetRewriteCallCount() != 0 {
+					t.Errorf("TriggerRewrite call count: got %d, want 0 (no services listed)",
+						mockTrigger.GetRewriteCallCount())
+				}
+
+				return
 			}
 
 			// Verify trigger was called
@@ -564,6 +590,12 @@ func (e *errorConn) Close() error {
 	return nil
 }
 
+// SetReadDeadline is a no-op so handleConnection's deadline call works on the
+// fake conn (the embedded net.Conn is nil and would otherwise panic).
+func (e *errorConn) SetReadDeadline(time.Time) error {
+	return nil
+}
+
 // TestHandleConnectionReadError tests the read error path in handleConnection (covers server.go:136-141)
 // Triggered by a connection that is closed before sending a newline-terminated line.
 func TestHandleConnectionReadError(t *testing.T) {
@@ -669,5 +701,44 @@ func TestThreadedStreamServerEmptyCommand(t *testing.T) {
 
 	if response != expected {
 		t.Errorf("response: got %q, want %q", response, expected)
+	}
+}
+
+// TestThreadedStreamServerReadTimeout verifies that a connection which never
+// sends a command line is closed by the read deadline, so a stalled client
+// cannot hold a goroutine open and block graceful shutdown.
+func TestThreadedStreamServerReadTimeout(t *testing.T) {
+	// Shorten the deadline for the duration of this test.
+	orig := connReadTimeout
+	connReadTimeout = 150 * time.Millisecond
+	defer func() { connReadTimeout = orig }()
+
+	handler := &ConfigdRequestHandler{}
+	server := NewThreadedStreamServer("127.0.0.1", 0, false, handler)
+
+	if err := server.ServeForever(context.Background()); err != nil {
+		t.Fatalf("Failed to start server: %v", err)
+	}
+	defer server.Shutdown(context.Background())
+
+	addr := server.listener.Addr().String()
+	time.Sleep(100 * time.Millisecond)
+
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatalf("Failed to connect to server: %v", err)
+	}
+	defer conn.Close()
+
+	// Never write a command line; the server must close the connection once
+	// the read deadline elapses. A read here should return (EOF/error) well
+	// before this generous client-side deadline.
+	if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatalf("Failed to set client read deadline: %v", err)
+	}
+
+	reader := bufio.NewReader(conn)
+	if _, err := reader.ReadString('\n'); err == nil {
+		t.Fatal("expected stalled connection to be closed by server, got no error")
 	}
 }

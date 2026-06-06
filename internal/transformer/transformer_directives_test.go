@@ -1071,3 +1071,25 @@ func TestProcessPrefixDirective_NoClosingDelimiter(t *testing.T) {
 		t.Errorf("expected original line returned, got %q", result)
 	}
 }
+
+// TestProcessWrappingDirective_ContainsWithEmbeddedVar exercises the
+// %%VAR:key%% substitution branch (L195-200) inside a %%contains...%% directive
+// where the needle value comes from another variable.
+func TestProcessWrappingDirective_ContainsWithEmbeddedVar(t *testing.T) {
+	ctx := context.Background()
+	mockLookup := testutil.NewMockConfigLookupWithData(map[string]map[string]string{
+		"VAR": {
+			"zimbraMtaBlockedExtension": "exe bat com pif scr vbs",
+			"needle_key":                "exe",
+		},
+	})
+
+	tr := NewTransformer(mockLookup, &state.State{})
+
+	// The embedded %%VAR:needle_key%% should resolve to "exe" before
+	// the contains directive is evaluated against zimbraMtaBlockedExtension.
+	result := tr.Transform(ctx, "%%contains VAR:zimbraMtaBlockedExtension %%VAR:needle_key%%^FOUND^NOTFOUND%%")
+	if result != "FOUND\n" {
+		t.Errorf("expected 'FOUND\\n', got %q", result)
+	}
+}

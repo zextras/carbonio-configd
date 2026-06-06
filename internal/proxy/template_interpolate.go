@@ -156,10 +156,19 @@ func (tp *TemplateProcessor) processEnablerLine(
 	logger.DebugContext(ctx, "Enabler is FALSE, commenting out line",
 		"variable", varName)
 
-	// Remove the indent from processed line and add it back with comment
-	trimmedLine := strings.TrimLeft(processedRest, " \t")
+	// Comment out every line of the expanded value (multi-line :servers expansions
+	// produce one "server host:port;" line per upstream; each must be commented).
+	lines := strings.Split(processedRest, "\n")
+	for i, l := range lines {
+		trimmed := strings.TrimLeft(l, " \t")
+		if trimmed == "" {
+			lines[i] = l // preserve blank lines as-is
+		} else {
+			lines[i] = indent + "#" + trimmed
+		}
+	}
 
-	return indent + "#" + trimmedLine, true, nil
+	return strings.Join(lines, "\n"), true, nil
 }
 
 // ExpandVariable expands a single variable by name

@@ -44,6 +44,20 @@ func (c *Client) QueryDomains(ctx context.Context) ([]Domain, error) {
 	return domains, nil
 }
 
+// serverHasService reports whether the (possibly multi-valued, newline-joined)
+// zimbraServiceEnabled value contains serviceName as an exact value. This mirrors
+// the Java LDAP equality filter (zimbraServiceEnabled=<service>) and avoids the
+// substring bug where "zimbra" would match "zimbraAdmin".
+func serverHasService(serviceEnabled, serviceName string) bool {
+	for v := range strings.SplitSeq(serviceEnabled, "\n") {
+		if strings.TrimSpace(v) == serviceName {
+			return true
+		}
+	}
+
+	return false
+}
+
 // QueryServers returns servers with the named service enabled.
 func (c *Client) QueryServers(ctx context.Context, serviceName string) ([]Server, error) {
 	ctx = logger.ContextWithComponentOnce(ctx, "ldap")
@@ -62,11 +76,11 @@ func (c *Client) QueryServers(ctx context.Context, serviceName string) ([]Server
 			continue
 		}
 
-		if !strings.Contains(a[attrZimbraServiceEnabled], serviceName) {
+		if !serverHasService(a[attrZimbraServiceEnabled], serviceName) {
 			continue
 		}
 
-		servers = append(servers, Server{ServerID: id, ServiceHostname: host})
+		servers = append(servers, Server{ServerID: id, ServiceHostname: host, Attributes: a})
 	}
 
 	logger.DebugContext(ctx, "QueryServers completed",

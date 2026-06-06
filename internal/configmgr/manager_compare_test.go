@@ -6,11 +6,12 @@ package configmgr
 
 import (
 	"context"
-	"github.com/zextras/carbonio-configd/internal/config"
-	"github.com/zextras/carbonio-configd/internal/logger"
 	"log/slog"
 	"os"
 	"testing"
+
+	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/logger"
 )
 
 func TestMain(m *testing.M) {
@@ -623,5 +624,16 @@ func TestCompareKeys_ReuseComparator(t *testing.T) {
 
 	if firstComparator != secondComparator {
 		t.Error("Expected comparator to be reused on subsequent calls")
+	}
+}
+
+// TestConfigManager_Comparator verifies the Comparator() accessor returns the
+// embedded comparator that was initialised by the constructor.
+func TestConfigManager_Comparator(t *testing.T) {
+	cm := newTestConfigManager(t)
+
+	comp := cm.Comparator()
+	if comp == nil {
+		t.Fatal("Comparator() returned nil, expected a valid Comparator instance")
 	}
 }

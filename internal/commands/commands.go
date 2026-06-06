@@ -365,21 +365,58 @@ func (e *CommandExecutor) getAllServersWithAttribute(
 
 func (e *CommandExecutor) gamau(ctx context.Context, args ...string) (string, error) {
 	logger.DebugContext(ctx, "Executing gamau (getAllMtaAuthURLs) command")
-	// Query all servers with zimbraMtaAuthTarget=TRUE
-	// Build MTA auth URLs (http://hostname:7025)
-	return e.getAllServersWithAttribute(ctx, "zimbraMtaAuthTarget", "http://%s:7025", "gamau")
+
+	if e.ldapClient == nil {
+		return "", stderrors.New(errLDAPNotInitialized)
+	}
+
+	// Mirror jylibs/commands.py gamau: for every server flagged
+	// zimbraMtaAuthTarget, build URLUtil.getMtaAuthURL(server) =
+	// zimbra_admin_service_scheme ("https://") + host + ":" + zimbraMtaAuthPort
+	// (default 7073) + AdminConstants.ADMIN_SERVICE_URI ("/service/admin/soap/").
+	servers, err := e.ldapClient.GetAllServersWithAttributes()
+	if err != nil {
+		return "", fmt.Errorf("gamau: failed to query servers: %w", err)
+	}
+
+	var urls []string
+
+	for _, attrs := range servers {
+		hostname := attrs[zimbraServiceHostname]
+		if hostname == "" {
+			continue
+		}
+
+		if !strings.EqualFold(attrs[attrZimbraMtaAuthTarget], "TRUE") {
+			continue
+		}
+
+		port := attrs[attrZimbraMtaAuthPort]
+		if port == "" {
+			port = defaultMtaAuthPort
+		}
+
+		urls = append(urls, fmt.Sprintf("https://%s:%s/service/admin/soap/", hostname, port))
+	}
+
+	return strings.Join(urls, " "), nil
 }
 
 func (e *CommandExecutor) garpu(ctx context.Context, args ...string) (string, error) {
 	logger.DebugContext(ctx, "Executing garpu (getAllReverseProxyURLs) command")
-	// Query all mail client servers with zimbraReverseProxyLookupTarget=TRUE
-	// Build reverse proxy URLs (https://hostname:7072/nginx-lookup)
-	return e.getAllServersWithAttribute(ctx, "zimbraReverseProxyLookupTarget",
-		"https://%s:7072/service/extension/nginx-lookup", "garpu")
+	// Mirror jylibs/commands.py garpu: REVERSE_PROXY_PROTO is empty, so the URL
+	// is the bare "host:7072" + ExtensionDispatcherServlet.EXTENSION_PATH
+	// ("/service/extension") + "/nginx-lookup" with NO scheme prefix.
+	return e.getAllServersWithAttribute(ctx, attrZimbraReverseProxyLookupTarget,
+		"%s:7072/service/extension/nginx-lookup", "garpu")
 }
 
-// buildBackendURL returns the HTTPS backend URL for a server attribute map.
-// Returns ("", false) when the server does not qualify as a reverse proxy backend.
+// buildBackendURL returns the reverse-proxy backend "host:port" for a server
+// attribute map, mirroring jylibs/commands.py garpb. No scheme is prefixed
+// (REVERSE_PROXY_PROTO is empty). The port is the plaintext zimbraMailPort
+// (default 80) for http/mixed/both mail modes and the zimbraMailSSLPort
+// (default 0) otherwise. Returns ("", false) when the server is not a reverse
+// proxy lookup target or has no zimbraMailMode (Jython skips mode==None).
 func buildBackendURL(attrs map[string]string) (string, bool) {
 	hostname := attrs[zimbraServiceHostname]
 	if hostname == "" {
@@ -395,13 +432,27 @@ func buildBackendURL(attrs map[string]string) (string, bool) {
 		return "", false
 	}
 
-	httpsPort := attrs[attrZimbraMailSSLPort]
-	if httpsPort == "" {
-		httpsPort = "443"
+	var port string
+
+	switch strings.ToLower(mailMode) {
+	case "http", "mixed", "both":
+		port = attrs[attrZimbraMailPort]
+		if port == "" {
+			port = defaultMailPort
+		}
+	default:
+		port = attrs[attrZimbraMailSSLPort]
+		if port == "" {
+			port = defaultMailSSLPort
+		}
 	}
 
-	return fmt.Sprintf("https://%s:%s", hostname, httpsPort), true
+	return fmt.Sprintf("%s:%s", hostname, port), true
 }
+
+// garpbEmptyFallback is the single backend emitted when no reverse-proxy backend
+// qualifies, mirroring the Jython garpb hack (["    server localhost:8080;"]).
+const garpbEmptyFallback = "    server localhost:8080;"
 
 func (e *CommandExecutor) garpb(ctx context.Context, args ...string) (string, error) {
 	logger.DebugContext(ctx, "Executing garpb (getAllReverseProxyBackends) command")
@@ -425,6 +476,10 @@ func (e *CommandExecutor) garpb(ctx context.Context, args ...string) (string, er
 
 	logger.DebugContext(ctx, "Reverse proxy backends query completed",
 		"backends_found", len(backends))
+
+	if len(backends) == 0 {
+		return garpbEmptyFallback, nil
+	}
 
 	return strings.Join(backends, " "), nil
 }

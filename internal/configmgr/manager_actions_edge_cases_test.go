@@ -313,6 +313,53 @@ func TestDoPostconf_SingleLiteral(t *testing.T) {
 	}
 }
 
+// TestDoPostconf_BooleanNormalization verifies that POSTCONF values resolved
+// from a typed lookup (VAR/LOCAL/FILE/MAPLOCAL) are normalized to Postfix
+// booleans (TRUE->yes, FALSE->no), while literal values pass through unchanged.
+// This mirrors the legacy Jython zmconfigd (jylibs/mtaconfig.py).
+func TestDoPostconf_BooleanNormalization(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: configmgr test may have retry delays")
+	}
+
+	tests := []struct {
+		name      string
+		valueSpec string
+		resolved  string // value the resolver returns for the spec's key
+		want      string
+	}{
+		{name: "VAR TRUE -> yes", valueSpec: "VAR:zimbraBool", resolved: "TRUE", want: constYes},
+		{name: "VAR FALSE -> no", valueSpec: "VAR:zimbraBool", resolved: "FALSE", want: constNo},
+		{name: "VAR lowercase true -> yes", valueSpec: "VAR:zimbraBool", resolved: "true", want: constYes},
+		{name: "VAR non-bool passthrough", valueSpec: "VAR:zimbraBool", resolved: "mail.example.com", want: "mail.example.com"},
+		{name: "LOCAL FALSE -> no", valueSpec: "LOCAL:someKey", resolved: "FALSE", want: constNo},
+		{name: "literal TRUE stays TRUE", valueSpec: "TRUE", resolved: "", want: "TRUE"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cm, exec := newTestCMWithExecutor(t)
+
+			// Drive the mock resolver to return tt.resolved for the spec's key.
+			if tt.resolved != "" {
+				_, valueKey := parseValueSpec(tt.valueSpec)
+				cm.mtaResolver.(*mockMtaResolver).values = map[string]string{valueKey: tt.resolved}
+			}
+
+			cm.State.CurrentActions.Postconf["param"] = tt.valueSpec
+
+			cm.doPostconf(context.Background())
+
+			if len(exec.postconfOps) != 1 {
+				t.Fatalf("expected 1 postconf op, got %d", len(exec.postconfOps))
+			}
+			if exec.postconfOps[0].Value != tt.want {
+				t.Errorf("postconf value: got %q, want %q", exec.postconfOps[0].Value, tt.want)
+			}
+		})
+	}
+}
+
 // TestDoPostconf_MultipleEntries exercises the batch with multiple entries.
 func TestDoPostconf_MultipleEntries(t *testing.T) {
 	if testing.Short() {

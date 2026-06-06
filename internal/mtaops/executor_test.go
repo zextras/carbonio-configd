@@ -342,46 +342,7 @@ func TestExecuteMapfile_MAPLOCAL_FileNotExists(t *testing.T) {
 	}
 }
 
-func TestHandleEmptyMapfileData_RestoreFromBackup(t *testing.T) {
-	mockLdap := &mockLdapManager{}
-	tmpDir := t.TempDir()
-
-	executor := NewExecutor(tmpDir, mockLdap).(*executor)
-
-	testFilePath := filepath.Join(tmpDir, "test.pem")
-	backupPath := testFilePath + ".crb"
-
-	executor.mappedFiles["testKey"] = testFilePath
-
-	// Create backup file
-	backupData := []byte("backup content")
-	if err := os.WriteFile(backupPath, backupData, 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	op := MapfileOperation{
-		Key:        "testKey",
-		IsLocal:    false,
-		Base64Data: "", // Empty data
-	}
-
-	err := executor.ExecuteMapfile(context.Background(), op)
-	if err != nil {
-		t.Fatalf("ExecuteMapfile with empty data should restore from backup: %v", err)
-	}
-
-	// Verify file was restored from backup
-	restoredData, err := os.ReadFile(testFilePath)
-	if err != nil {
-		t.Fatalf("Failed to read restored file: %v", err)
-	}
-
-	if string(restoredData) != string(backupData) {
-		t.Errorf("Restored data = %q, want %q", string(restoredData), string(backupData))
-	}
-}
-
-func TestHandleEmptyMapfileData_LeaveExistingUntouched(t *testing.T) {
+func TestHandleEmptyMapfileData_RemovesStaleFile(t *testing.T) {
 	mockLdap := &mockLdapManager{}
 	tmpDir := t.TempDir()
 
@@ -390,31 +351,24 @@ func TestHandleEmptyMapfileData_LeaveExistingUntouched(t *testing.T) {
 	testFilePath := filepath.Join(tmpDir, "test.pem")
 	executor.mappedFiles["testKey"] = testFilePath
 
-	// Create existing file (no backup)
-	existingData := []byte("existing content")
-	if err := os.WriteFile(testFilePath, existingData, 0o600); err != nil {
+	// Existing mapped file that should be removed when the VAR is cleared,
+	// mirroring jylibs/state.py os.remove(mapfile) (e.g. clearing zimbraSSLDHParam).
+	if err := os.WriteFile(testFilePath, []byte("stale content"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
 	op := MapfileOperation{
 		Key:        "testKey",
 		IsLocal:    false,
-		Base64Data: "", // Empty data
+		Base64Data: "", // Empty data => VAR cleared
 	}
 
-	err := executor.ExecuteMapfile(context.Background(), op)
-	if err != nil {
-		t.Fatalf("ExecuteMapfile with empty data should leave existing file: %v", err)
+	if err := executor.ExecuteMapfile(context.Background(), op); err != nil {
+		t.Fatalf("ExecuteMapfile with empty data should remove the stale file: %v", err)
 	}
 
-	// Verify file was not deleted
-	unchangedData, err := os.ReadFile(testFilePath)
-	if err != nil {
-		t.Fatalf("Existing file should not be deleted: %v", err)
-	}
-
-	if string(unchangedData) != string(existingData) {
-		t.Errorf("File was modified, want unchanged")
+	if _, err := os.Stat(testFilePath); !os.IsNotExist(err) {
+		t.Errorf("stale mapfile should have been removed, stat err = %v", err)
 	}
 }
 
@@ -493,6 +447,37 @@ func TestExecuteLdapWrite_Failure(t *testing.T) {
 	}
 }
 
+// TestExecutePostconfdBatch_SuccessWithOutput covers the debug-output branch
+// (L172-175) where postconf -X succeeds and produces stdout.
+func TestExecutePostconfdBatch_SuccessWithOutput(t *testing.T) {
+	mockLdap := &mockLdapManager{}
+	tmpDir := t.TempDir()
+
+	postconfPath := filepath.Join(tmpDir, "common", "sbin", "postconf")
+	if err := os.MkdirAll(filepath.Dir(postconfPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	script := `#!/bin/sh
+echo "postconf: deprecated: some_param"
+exit 0
+`
+	if err := os.WriteFile(postconfPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	executor := NewExecutor(tmpDir, mockLdap)
+
+	ops := []PostconfdOperation{
+		{Key: "some_param"},
+	}
+
+	err := executor.ExecutePostconfdBatch(context.Background(), ops)
+	if err != nil {
+		t.Errorf("ExecutePostconfdBatch with output should not error: %v", err)
+	}
+}
+
 // Helper function to check if a string contains a substring
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
@@ -506,4 +491,57 @@ func findSubstring(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// TestExecutePostconfdBatch_NilOps verifies ExecutePostconfdBatch returns nil for nil ops.
+func TestExecutePostconfdBatch_NilOps(t *testing.T) {
+	e := NewExecutor("/opt/zextras", nil)
+	err := e.ExecutePostconfdBatch(context.Background(), nil)
+	if err != nil {
+		t.Errorf("ExecutePostconfdBatch(nil) = %v, want nil", err)
+	}
+}
+
+// TestHandleEmptyMapfileData_RemoveError covers the os.Remove error branch in
+// handleEmptyMapfileData (line 197-199): the file exists but cannot be removed
+// because the parent directory is read-only.
+func TestHandleEmptyMapfileData_RemoveError(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root bypasses directory permission checks")
+	}
+
+	mockLdap := &mockLdapManager{}
+	tmpDir := t.TempDir()
+
+	// Create a sub-directory to hold the file; we'll make it read-only so
+	// os.Remove inside it fails.
+	subDir := filepath.Join(tmpDir, "protected")
+	if err := os.Mkdir(subDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	testFilePath := filepath.Join(subDir, "stale.pem")
+	if err := os.WriteFile(testFilePath, []byte("stale"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Make the parent dir read-only so os.Remove fails.
+	if err := os.Chmod(subDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(subDir, 0o755) //nolint:errcheck // best-effort cleanup
+
+	ex := NewExecutor(tmpDir, mockLdap).(*executor)
+	ex.mappedFiles["staleKey"] = testFilePath
+
+	op := MapfileOperation{
+		Key:        "staleKey",
+		IsLocal:    false,
+		Base64Data: "", // empty => handleEmptyMapfileData
+	}
+
+	err := ex.ExecuteMapfile(context.Background(), op)
+	if err == nil {
+		t.Error("expected an error when os.Remove fails, got nil")
+	}
 }

@@ -30,6 +30,9 @@ var (
 	aliasesPath  = "/etc/aliases"
 )
 
+// startTLSYes is the Postfix boolean literal for "yes", used in LDAP table rendering.
+const startTLSYes = "yes"
+
 // mtaCustomStart replaces legacy /opt/zextras/bin/postfix start. The legacy
 // wrapper composed five steps; each is reimplemented natively here so
 // carbonio-configd carries no runtime dependency on the shell-script MTA
@@ -157,7 +160,7 @@ func writePostfixLDAPConfig(ctx context.Context, lc map[string]string) error {
 	startTLS := "no"
 
 	if isTruthy(lc["ldap_starttls_supported"]) {
-		startTLS = "yes"
+		startTLS = startTLSYes
 	}
 
 	if ldapURL == "" || ldapPort == "" {

@@ -187,6 +187,18 @@ func (t *Transformer) processWrappingDirective(ctx context.Context, line string)
 		return line, false
 	}
 
+	// For %%contains...%% lines, pre-substitute any embedded %%VAR:key%%
+	// variables before evaluating the directive, mirroring jylibs/state.py
+	// transform() which runs xformConfigVariable over the inner content of a
+	// %%contains...%% line prior to the contains evaluation. Other wrapping
+	// directives are passed through unchanged (their handlers parse VAR:key).
+	if strings.HasPrefix(innerContent, "contains ") {
+		substituted := configVarRe.ReplaceAllStringFunc(innerContent, func(match string) string {
+			return t.xformConfigVariable(ctx, match)
+		})
+		line = "%%" + substituted + "%%"
+	}
+
 	// This is a directive line - process it directly without VAR substitution
 	// The directive handlers will parse VAR:key patterns themselves
 	result := t.xformConfig(ctx, line)
@@ -239,8 +251,12 @@ func (t *Transformer) xformLocalConfig(ctx context.Context, match string) string
 
 	switch funcName {
 	case "SPLIT":
-		// Jython's SPLIT takes the first part of a space-separated string
-		return strings.Fields(val)[0]
+		// Jython's SPLIT is val.split(' ', 1)[0]: the substring before the FIRST
+		// space only. Tabs (or any other whitespace) are preserved, unlike
+		// strings.Fields which splits on all whitespace.
+		before, _, _ := strings.Cut(val, " ")
+
+		return before
 	case "PERDITION_LDAP_SPLIT":
 		// This is a complex legacy transformation, simplifying for now
 		// It extracts hostnames from LDAP URLs

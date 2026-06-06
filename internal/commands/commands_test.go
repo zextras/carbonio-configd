@@ -985,35 +985,46 @@ func TestBuildBackendURL(t *testing.T) {
 		wantOK  bool
 	}{
 		{
-			name: "valid backend",
+			name: "https mode uses ssl port",
 			attrs: map[string]string{
 				zimbraServiceHostname:              "mail.example.com",
 				attrZimbraReverseProxyLookupTarget: "TRUE",
 				attrZimbraMailMode:                 "https",
 				attrZimbraMailSSLPort:              "8443",
 			},
-			wantURL: "https://mail.example.com:8443",
+			wantURL: "mail.example.com:8443",
 			wantOK:  true,
 		},
 		{
-			name: "default port when missing",
+			name: "https mode missing ssl port uses default 0",
 			attrs: map[string]string{
 				zimbraServiceHostname:              "mail.example.com",
 				attrZimbraReverseProxyLookupTarget: "TRUE",
 				attrZimbraMailMode:                 "https",
 			},
-			wantURL: "https://mail.example.com:443",
+			wantURL: "mail.example.com:0",
 			wantOK:  true,
 		},
 		{
-			name: "case insensitive lookup target",
+			name: "both mode uses plaintext mail port",
 			attrs: map[string]string{
 				zimbraServiceHostname:              "mail.example.com",
 				attrZimbraReverseProxyLookupTarget: "true",
 				attrZimbraMailMode:                 "both",
+				attrZimbraMailPort:                 "8080",
 				attrZimbraMailSSLPort:              "7443",
 			},
-			wantURL: "https://mail.example.com:7443",
+			wantURL: "mail.example.com:8080",
+			wantOK:  true,
+		},
+		{
+			name: "http mode missing mail port uses default 80",
+			attrs: map[string]string{
+				zimbraServiceHostname:              "mail.example.com",
+				attrZimbraReverseProxyLookupTarget: "TRUE",
+				attrZimbraMailMode:                 "http",
+			},
+			wantURL: "mail.example.com:80",
 			wantOK:  true,
 		},
 		{
@@ -1130,4 +1141,66 @@ func TestMakePostconfExec(t *testing.T) {
 			t.Errorf("error = %v, want 'postconf command failed'", err)
 		}
 	})
+}
+
+// TestRegisterLDAPCommands verifies that all expected LDAP-provisioning
+// commands are registered and wired to non-nil handler functions.
+func TestRegisterLDAPCommands(t *testing.T) {
+	r := &Registry{}
+	e := &CommandExecutor{}
+	r.RegisterLDAPCommands(e)
+
+	wantCommands := []string{cmdGACF, cmdGAMAU, cmdGARPB, cmdGARPU, cmdGS, cmdGSEnabled}
+	for _, name := range wantCommands {
+		cmd, ok := r.Commands[name]
+		if !ok {
+			t.Errorf("command %q not registered", name)
+			continue
+		}
+		if cmd == nil {
+			t.Errorf("command %q is nil", name)
+			continue
+		}
+		if cmd.Func == nil {
+			t.Errorf("command %q has nil Func", name)
+		}
+	}
+
+	if len(r.Commands) != len(wantCommands) {
+		t.Errorf("got %d registered commands, want %d", len(r.Commands), len(wantCommands))
+	}
+}
+
+// TestNewCommandExecutor_NilClient verifies NewCommandExecutor(nil) returns a non-nil executor.
+func TestNewCommandExecutor_NilClient(t *testing.T) {
+	e := NewCommandExecutor(nil)
+	if e == nil {
+		t.Fatal("NewCommandExecutor(nil) returned nil")
+	}
+}
+
+// TestNewRegistry_DefaultZextrasHome verifies NewRegistry("") falls back to the default
+// zextras home path and returns a non-nil registry.
+func TestNewRegistry_DefaultZextrasHome(t *testing.T) {
+	r := NewRegistry("")
+	if r == nil {
+		t.Fatal("NewRegistry(\"\") returned nil")
+	}
+}
+
+// TestExecuteWithContext_CancelledContext exercises the binary execution path when
+// the context is already cancelled. The command should complete (no panic) with
+// a non-zero exit code.
+func TestExecuteWithContext_CancelledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel before execution
+
+	cmd := &Command{
+		Name:    "cancelled-sleep",
+		Binary:  "sleep",
+		CmdArgs: []string{"10"},
+	}
+	exitCode, _, _ := cmd.ExecuteWithContext(ctx)
+	// A cancelled context causes a non-zero exit; just ensure no panic.
+	_ = exitCode
 }

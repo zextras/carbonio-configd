@@ -5,11 +5,14 @@
 package ldap
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
 
-	"github.com/go-ldap/ldap/v3"
+	ldap "github.com/go-ldap/ldap/v3"
+	errs "github.com/zextras/carbonio-configd/internal/errors"
 )
 
 func TestNewClient(t *testing.T) {
@@ -450,4 +453,52 @@ func BenchmarkFormatAsZmprovOutput(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_ = FormatAsZmprovOutput(config)
 	}
+}
+
+// TestNextRetryDelay tests the exponential backoff cap logic. The function
+// calls time.Sleep as a side effect; test values are kept tiny to avoid
+// slowing the suite.
+func TestNextRetryDelay(t *testing.T) {
+	c := &Client{maxRetryDelay: 5 * time.Millisecond}
+
+	// Below cap: 1ms * 2 = 2ms < 5ms → returns 2ms
+	got := c.nextRetryDelay(1 * time.Millisecond)
+	if got != 2*time.Millisecond {
+		t.Errorf("nextRetryDelay(1ms) = %v, want 2ms", got)
+	}
+
+	// At cap: 3ms * 2 = 6ms > 5ms → returns 5ms
+	got = c.nextRetryDelay(3 * time.Millisecond)
+	if got != 5*time.Millisecond {
+		t.Errorf("nextRetryDelay(3ms) = %v, want 5ms (cap)", got)
+	}
+}
+
+// TestClient_HandleOperationError_ConnectionError_NilConn verifies that a connection
+// error with a nil conn wraps ErrLDAPUnhealthyConnection.
+func TestClient_HandleOperationError_ConnectionError_NilConn(t *testing.T) {
+	c := &Client{}
+	origErr := fmt.Errorf("connection error: %w", context.DeadlineExceeded)
+	result := c.handleOperationError(nil, origErr)
+	if !errors.Is(result, errs.ErrLDAPUnhealthyConnection) {
+		t.Fatalf("handleOperationError() with connection error: want ErrLDAPUnhealthyConnection, got %v", result)
+	}
+}
+
+// TestClient_HandleOperationError_NonConnectionError verifies that a non-connection
+// error is returned as-is (conn nil is a no-op returnConnection).
+func TestClient_HandleOperationError_NonConnectionError(t *testing.T) {
+	c := &Client{}
+	origErr := fmt.Errorf("no such object")
+	result := c.handleOperationError(nil, origErr)
+	if result != origErr {
+		t.Fatalf("handleOperationError() non-connection error: want original error, got %v", result)
+	}
+}
+
+// TestClient_ReturnConnection_NilConn verifies that returnConnection with a nil conn
+// does not panic.
+func TestClient_ReturnConnection_NilConn(t *testing.T) {
+	c := &Client{}
+	c.returnConnection(nil) // must not panic
 }

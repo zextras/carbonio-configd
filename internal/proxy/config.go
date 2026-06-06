@@ -32,22 +32,19 @@ func NewGenerator(ctx context.Context, cfg *config.Config,
 
 	// Initialize generator with configuration
 	g := &Generator{
-		Config:       cfg,
-		LocalConfig:  localCfg,
-		GlobalConfig: globalCfg,
-		ServerConfig: serverCfg,
-		LdapClient:   ldapClient,
-		Cache:        cacheInstance,
-		upstreamCache: &upstreamQueryCache{
-			attributeServers:    make(map[string][]UpstreamServer),
-			attributeServersSSL: make(map[string][]UpstreamServer),
-		}, // Initialize upstream query cache with attribute maps
-		WorkingDir:  cfg.BaseDir,
-		TemplateDir: filepath.Join(cfg.BaseDir, "conf", "nginx", "templates"),
-		ConfDir:     filepath.Join(cfg.BaseDir, "conf"),
-		IncludesDir: filepath.Join(cfg.BaseDir, "conf", "nginx", "includes"),
-		Hostname:    cfg.Hostname,
-		DryRun:      false,
+		Config:        cfg,
+		LocalConfig:   localCfg,
+		GlobalConfig:  globalCfg,
+		ServerConfig:  serverCfg,
+		LdapClient:    ldapClient,
+		Cache:         cacheInstance,
+		upstreamCache: &upstreamQueryCache{},
+		WorkingDir:    cfg.BaseDir,
+		TemplateDir:   filepath.Join(cfg.BaseDir, "conf", "nginx", "templates"),
+		ConfDir:       filepath.Join(cfg.BaseDir, "conf"),
+		IncludesDir:   filepath.Join(cfg.BaseDir, "conf", "nginx", "includes"),
+		Hostname:      cfg.Hostname,
+		DryRun:        false,
 	}
 
 	logger.DebugContext(ctx, "Initializing proxy generator",
@@ -207,14 +204,6 @@ func (g *Generator) ClearUpstreamCache(ctx context.Context) {
 		g.upstreamCache.reverseProxyBackends = nil
 		g.upstreamCache.reverseProxyBackendsSSL = nil
 		g.upstreamCache.memcachedServers = nil
-		// Clear attribute caches
-		if g.upstreamCache.attributeServers != nil {
-			g.upstreamCache.attributeServers = make(map[string][]UpstreamServer)
-		}
-
-		if g.upstreamCache.attributeServersSSL != nil {
-			g.upstreamCache.attributeServersSSL = make(map[string][]UpstreamServer)
-		}
 		// Clear cached gas output
 		g.upstreamCache.gasOutput = ""
 		g.upstreamCache.populated = false

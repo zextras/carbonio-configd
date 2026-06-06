@@ -194,21 +194,14 @@ func (p *parser) parseConditionalPostconfd(cond *config.Conditional) error {
 
 // parseConditionalLdap parses an LDAP directive within a conditional.
 func (p *parser) parseConditionalLdap(cond *config.Conditional) error {
-	p.advance() // skip LDAP
-
-	// Get key
-	if p.current.Type != TokenIdentifier {
-		return fmt.Errorf("expected LDAP key at line %d", p.current.Line)
+	key, value, ok, err := p.parseLdapDirective()
+	if err != nil {
+		return err
 	}
 
-	key := p.current.Literal
-	p.advance()
-
-	// Get value
-	value := p.parseValue()
-	cond.Ldap[key] = value
-
-	p.skipToNewline()
+	if ok {
+		cond.Ldap[key] = value
+	}
 
 	return nil
 }

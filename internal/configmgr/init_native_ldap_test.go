@@ -11,6 +11,7 @@ import (
 
 	"github.com/zextras/carbonio-configd/internal/commands"
 	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/ldap"
 )
 
 func withLocalConfigForLDAP(t *testing.T, fn func() (map[string]string, error)) {
@@ -135,5 +136,55 @@ func TestInitNativeLdapClient_MultiURLSucceedsBuilding(t *testing.T) {
 
 	if cm.NativeLdapClient == nil {
 		t.Fatal("NativeLdapClient should be created when localconfig is complete (multi-URL form)")
+	}
+}
+
+func TestInitNativeLdapClient_ConfigClientWiredWithRootPassword(t *testing.T) {
+	withLocalConfigForLDAP(t, func() (map[string]string, error) {
+		return map[string]string{
+			"ldap_url":             "ldap://srv1:389",
+			"zimbra_ldap_userdn":   "uid=zimbra,cn=admins,cn=zimbra",
+			"zimbra_ldap_password": "secret",
+			"ldap_root_password":   "rootpw",
+		}, nil
+	})
+
+	cm := &ConfigManager{
+		mainConfig:      &config.Config{},
+		CommandRegistry: commands.NewRegistry(""),
+		LdapClient:      ldap.NewLdap(context.Background(), &config.Config{}),
+	}
+	cm.initNativeLdapClient(context.Background())
+
+	if cm.ConfigLdapClient == nil {
+		t.Fatal("ConfigLdapClient should be created when ldap_root_password is present")
+	}
+	if cm.LdapClient.ConfigClient == nil {
+		t.Error("config client should be wired into the Ldap wrapper")
+	}
+	// Writes must NOT reuse the data client identity.
+	if cm.LdapClient.ConfigClient == cm.LdapClient.NativeClient {
+		t.Error("config client must be a distinct client from the data NativeClient")
+	}
+}
+
+func TestInitNativeLdapClient_ConfigClientNilWithoutRootPassword(t *testing.T) {
+	withLocalConfigForLDAP(t, func() (map[string]string, error) {
+		return map[string]string{
+			"ldap_url":             "ldap://srv1:389",
+			"zimbra_ldap_userdn":   "uid=zimbra,cn=admins,cn=zimbra",
+			"zimbra_ldap_password": "secret",
+		}, nil
+	})
+
+	cm := &ConfigManager{
+		mainConfig:      &config.Config{},
+		CommandRegistry: commands.NewRegistry(""),
+		LdapClient:      ldap.NewLdap(context.Background(), &config.Config{}),
+	}
+	cm.initNativeLdapClient(context.Background())
+
+	if cm.ConfigLdapClient != nil {
+		t.Error("ConfigLdapClient should be nil when ldap_root_password is absent")
 	}
 }
