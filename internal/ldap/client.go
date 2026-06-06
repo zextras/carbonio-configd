@@ -237,6 +237,12 @@ func (c *Client) dialAndBind(url string) (*ldap.Conn, error) {
 	switch {
 	case strings.HasPrefix(url, "ldaps://"):
 		conn, err = clientDial(url, dialer, ldap.DialWithTLSConfig(c.tlsConfig))
+	case strings.HasPrefix(url, "ldapi://"):
+		// Unix-socket connection to the local slapd-config backend. No TLS and
+		// no StartTLS: the socket is already a trusted local channel gated by
+		// filesystem permissions. go-ldap dials the path component as a unix
+		// socket (e.g. ldapi:///run/carbonio/run/ldapi).
+		conn, err = clientDial(url, dialer)
 	case strings.HasPrefix(url, "ldap://"):
 		conn, err = clientDial(url, dialer)
 	default:
@@ -474,6 +480,40 @@ func (c *Client) GetEntry(dn string, attributes []string) (*ldap.Entry, error) {
 	}
 
 	return result.Entries[0], nil
+}
+
+// ReadAttribute reads a single attribute value from an entry by DN using a
+// base-scoped search. present reports whether the attribute exists on the
+// entry, distinguishing an absent attribute from an empty value. Used for
+// change-detection before a replace (mirrors jylibs/ldap.py).
+func (c *Client) ReadAttribute(dn, attribute string) (value string, present bool, err error) {
+	entry, err := c.GetEntry(dn, []string{attribute})
+	if err != nil {
+		return "", false, err
+	}
+
+	for _, a := range entry.Attributes {
+		if a.Name != attribute {
+			continue
+		}
+
+		if len(a.Values) > 0 {
+			return a.Values[0], true, nil
+		}
+
+		return "", true, nil
+	}
+
+	return "", false, nil
+}
+
+// ProbeDN reports whether a base-scoped search on dn succeeds, i.e. the entry
+// exists. Mirrors the cn=accesslog probe in jylibs/ldap.py used to confirm LDAP
+// master status; any search error (including "no such object") yields false.
+func (c *Client) ProbeDN(dn string) bool {
+	_, err := c.Search(dn, ldapFilterAllObjects, []string{"1.1"}, ldap.ScopeBaseObject)
+
+	return err == nil
 }
 
 // getEntityConfig is a helper function to retrieve config for a specific entity by DN.

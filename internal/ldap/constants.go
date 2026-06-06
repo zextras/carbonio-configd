@@ -20,4 +20,26 @@ const (
 const (
 	olcDBMaxsizeAttr         = "olcDbMaxsize"
 	ldapOverlaySyncprovDB3DN = "olcOverlay={0}syncprov,olcDatabase={3}mdb,cn=config"
+	attrOlcSpSessionlog      = "olcSpSessionlog"
+
+	// ldapAccesslogSuffix is the data suffix probed to confirm LDAP master
+	// status; it exists only on masters carrying the accesslog overlay.
+	// Mirrors atbase="cn=accesslog" in jylibs/ldap.py modify_attribute.
+	ldapAccesslogSuffix = "cn=accesslog"
+)
+
+// Config-backend (cn=config) connection constants.
+//
+// The slapd-config backend is only writable by the cn=config rootDN over the
+// local ldapi unix socket (the data-suffix admin uid=zimbra has no access —
+// OpenLDAP returns code 50). This mirrors the legacy Jython zmconfigd, which
+// bound as cn=config over ldapi:/// with ldap_root_password.
+const (
+	// ConfigBackendDN is the rootDN used to bind to the slapd-config backend.
+	ConfigBackendDN = "cn=config"
+	// ConfigBackendURL is the explicit ldapi unix-socket URL for Carbonio's
+	// slapd. The path component is mandatory: go-ldap defaults a bare
+	// ldapi:/// to /var/run/slapd/ldapi, which is NOT Carbonio's socket
+	// (verified on a live host: slapd listens on /run/carbonio/run/ldapi).
+	ConfigBackendURL = "ldapi:///run/carbonio/run/ldapi"
 )

@@ -17,12 +17,14 @@ const norewriteArg = "norewrite"
 
 // ServiceCmd handles the "configd service" subcommand.
 type ServiceCmd struct {
-	List    ServiceListCmd    `cmd:"" help:"List all services with status"`
-	Start   ServiceStartCmd   `cmd:"" help:"Start a service"`
-	Stop    ServiceStopCmd    `cmd:"" help:"Stop a service"`
-	Restart ServiceRestartCmd `cmd:"" help:"Restart a service"`
-	Reload  ServiceReloadCmd  `cmd:"" help:"Reload a service"`
-	Status  ServiceStatusCmd  `cmd:"" help:"Show service status"`
+	List         ServiceListCmd         `cmd:"" help:"List all services with status"`
+	Start        ServiceStartCmd        `cmd:"" help:"Start a service"`
+	Stop         ServiceStopCmd         `cmd:"" help:"Stop a service"`
+	Restart      ServiceRestartCmd      `cmd:"" help:"Restart a service"`
+	Reload       ServiceReloadCmd       `cmd:"" help:"Reload a service"`
+	Status       ServiceStatusCmd       `cmd:"" help:"Show service status"`
+	StartSystemd ServiceStartSystemdCmd `cmd:"" name:"start-systemd" hidden:"" help:"systemd ExecStart leaf"`
+	StopSystemd  ServiceStopSystemdCmd  `cmd:"" name:"stop-systemd" hidden:"" help:"systemd ExecStop leaf (no systemctl)"`
 }
 
 // ServiceListCmd lists all services with their status.
@@ -65,6 +67,49 @@ func (c *ServiceStartCmd) Run() error {
 
 	if err := services.ServiceStart(ctx, c.Name); err != nil {
 		return fmt.Errorf("failed to start service %s: %w", c.Name, err)
+	}
+
+	return nil
+}
+
+// ServiceStartSystemdCmd is the systemd ExecStart leaf: it launches the service
+// in-process and never calls systemctl, so it is safe to invoke from the
+// carbonio-<name>.service unit without re-entering systemctl.
+type ServiceStartSystemdCmd struct {
+	Name  string   `arg:"" help:"Service name"`
+	Extra []string `arg:"" optional:"" hidden:""`
+}
+
+// Run executes the systemd-leaf start command.
+func (c *ServiceStartSystemdCmd) Run() error {
+	requireZextras()
+	initCLILogging()
+
+	ctx := context.Background()
+
+	if err := services.ServiceStartSystemd(ctx, c.Name); err != nil {
+		return fmt.Errorf("failed to start service %s: %w", c.Name, err)
+	}
+
+	return nil
+}
+
+// ServiceStopSystemdCmd is the systemd ExecStop leaf: it stops the service
+// in-process and never calls systemctl.
+type ServiceStopSystemdCmd struct {
+	Name  string   `arg:"" help:"Service name"`
+	Extra []string `arg:"" optional:"" hidden:""`
+}
+
+// Run executes the systemd-leaf stop command.
+func (c *ServiceStopSystemdCmd) Run() error {
+	requireZextras()
+	initCLILogging()
+
+	ctx := context.Background()
+
+	if err := services.ServiceStopSystemd(ctx, c.Name); err != nil {
+		return fmt.Errorf("failed to stop service %s: %w", c.Name, err)
 	}
 
 	return nil

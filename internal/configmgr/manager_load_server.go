@@ -112,10 +112,10 @@ func (cm *ConfigManager) postProcessServerConfig(configData *ServerConfigData) {
 		for s := range strings.FieldsSeq(serviceList) {
 			svc[s] = zimbraServiceEnabled
 			switch s {
-			case "mailbox":
+			case serviceMailbox:
 				svc["mailboxd"] = zimbraServiceEnabled
 			case serviceMTA:
-				svc["sasl"] = zimbraServiceEnabled
+				svc[sectionSasl] = zimbraServiceEnabled
 			}
 		}
 	}

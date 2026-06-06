@@ -358,6 +358,14 @@ func runLoopIteration(ctx context.Context, deps *daemonLoopDeps, st *loopIterSta
 
 	st.server = maybeStartListener(ctx, deps.appState, deps.args, deps.trigger, st.server)
 
+	// Signal readiness as soon as the IPC listener is serving on 7171. The first
+	// config rewrite is steady-state reconciliation (re-run every interval), not a
+	// startup precondition, so gating READY=1 on it needlessly delays "active" by
+	// the rewrite duration and creates a startup race for external orchestrators.
+	if st.server != nil && st.loopCount == 0 {
+		notifyReady(ctx, deps.notifier, st.loopCount)
+	}
+
 	timings, skipIter := runConfigPhases(
 		ctx, deps.cfg, deps.appState, deps.configManager,
 		deps.serviceManager, deps.wd, deps.reloadChan,
@@ -465,8 +473,8 @@ func finalizeIteration(
 
 	lt := time.Since(dur.t1)
 
-	notifyReady(ctx, deps.notifier, st.loopCount)
-
+	// READY=1 is sent earlier (post-listener, in runLoopIteration). The first
+	// rewrite pass is steady-state reconciliation, not a readiness gate.
 	st.reloadSignaled = false
 	st.loopCount++
 

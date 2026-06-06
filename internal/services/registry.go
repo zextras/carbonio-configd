@@ -339,9 +339,13 @@ var Registry = map[string]*ServiceDef{
 		SystemdUnits: []string{unitOpenldap},
 		PidFile:      pidDir + "/slapd.pid",
 		ProcessName:  "slapd",
-		UseSDNotify:  true,
-		CustomStart:  ldapCustomStart,
-		CustomStop:   ldapCustomStop,
+		// slapd is built without libsystemd and never emits sd_notify
+		// (READY=1 / STOPPING=1). Readiness is determined by an active LDAP
+		// probe in ldapCustomStart instead; leave UseSDNotify false so the
+		// stop path does not wait on a STOPPING datagram that never arrives.
+		UseSDNotify: false,
+		CustomStart: ldapCustomStart,
+		CustomStop:  ldapCustomStop,
 	},
 	svcConfigd: {
 		Name:         svcConfigd,

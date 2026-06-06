@@ -347,6 +347,7 @@ func TestParser_PostconfdDirective(t *testing.T) {
 func TestParser_LdapDirective(t *testing.T) {
 	input := `SECTION ldap
 	LDAP server_host LOCAL ldap_url
+	LDAP dh_param MAPLOCAL zimbraSSLDHParam
 	LDAP bind_dn VAR zimbraLdapUserDn
 `
 	cfg, err := new(parser).ParseString(context.Background(), input)
@@ -362,8 +363,13 @@ func TestParser_LdapDirective(t *testing.T) {
 	if val := section.Ldap["server_host"]; val != "LOCAL:ldap_url" {
 		t.Errorf("Expected 'LOCAL:ldap_url', got '%s'", val)
 	}
-	if val := section.Ldap["bind_dn"]; val != "VAR:zimbraLdapUserDn" {
-		t.Errorf("Expected 'VAR:zimbraLdapUserDn', got '%s'", val)
+	if val := section.Ldap["dh_param"]; val != "MAPLOCAL:zimbraSSLDHParam" {
+		t.Errorf("Expected 'MAPLOCAL:zimbraSSLDHParam', got '%s'", val)
+	}
+	// Non-LOCAL/MAPLOCAL LDAP directives are dropped, mirroring
+	// jylibs/mtaconfig.py parseLdap (only LOCAL|MAPLOCAL recorded).
+	if val, ok := section.Ldap["bind_dn"]; ok {
+		t.Errorf("VAR-typed LDAP directive should be dropped, got %q", val)
 	}
 }
 

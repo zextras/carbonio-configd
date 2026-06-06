@@ -7,10 +7,12 @@ package services
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"syscall"
 	"testing"
+	"time"
 )
 
 // --- isTruthy ---
@@ -157,5 +159,77 @@ func TestSignalViaPidfile_ValidPidSignalSent(t *testing.T) {
 	// pidfile should be removed on success
 	if _, statErr := os.Stat(pidFile); !os.IsNotExist(statErr) {
 		t.Error("expected pidfile to be removed after successful signal")
+	}
+}
+
+func TestGracefulStopViaPidfile_NoPidfile(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: may invoke real system commands")
+	}
+	err := gracefulStopViaPidfile(context.Background(), "/nonexistent/x.pid", "svc", time.Second)
+	if err != nil {
+		t.Errorf("missing pidfile should be treated as stopped, got: %v", err)
+	}
+}
+
+func TestGracefulStopViaPidfile_InvalidPid(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: may invoke real system commands")
+	}
+	tmp := t.TempDir()
+	pidFile := filepath.Join(tmp, "bad.pid")
+	if err := os.WriteFile(pidFile, []byte("notapid\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := gracefulStopViaPidfile(context.Background(), pidFile, "svc", time.Second); err == nil {
+		t.Error("expected error for non-numeric pid")
+	}
+}
+
+// TestGracefulStopViaPidfile_TermExits verifies a child that handles SIGTERM
+// exits within the timeout (no SIGKILL escalation) and the pidfile is removed.
+func TestGracefulStopViaPidfile_TermExits(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: spawns a child process")
+	}
+	// sh that exits on SIGTERM (default disposition) — sleeps otherwise.
+	cmd := exec.Command("sh", "-c", "sleep 30")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start child: %v", err)
+	}
+
+	tmp := t.TempDir()
+	pidFile := filepath.Join(tmp, "child.pid")
+	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	go func() { _, _ = cmd.Process.Wait() }()
+
+	start := time.Now()
+	if err := gracefulStopViaPidfile(context.Background(), pidFile, "svc", 5*time.Second); err != nil {
+		t.Fatalf("graceful stop: %v", err)
+	}
+
+	// SIGTERM kills `sleep` immediately, so this must return well under the
+	// timeout (proving it did not wait the full budget / escalate needlessly).
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Errorf("graceful stop took %v, expected fast SIGTERM exit", elapsed)
+	}
+
+	if _, statErr := os.Stat(pidFile); !os.IsNotExist(statErr) {
+		t.Error("expected pidfile removed after stop")
+	}
+}
+
+// TestWaitForProcessExit_AlreadyGone verifies a non-existent pid is reported as
+// exited immediately.
+func TestWaitForProcessExit_AlreadyGone(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: may invoke real system commands")
+	}
+	// PID 0x7FFFFFFF is effectively never a live process.
+	if !waitForProcessExit(context.Background(), 0x7FFFFFFF, time.Second) {
+		t.Error("expected non-existent pid to be reported as exited")
 	}
 }

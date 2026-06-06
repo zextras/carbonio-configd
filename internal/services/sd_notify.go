@@ -74,7 +74,14 @@ func startWithSDNotify(ctx context.Context, cmd *exec.Cmd, service string) error
 		return fmt.Errorf("start %s: %w", service, err)
 	}
 
-	return waitForSDNotify(ctx, conn, service)
+	// Watch for early child exit so we fail fast instead of burning the full
+	// readiness timeout when slapd dies during startup (e.g. it cannot bind its
+	// listener because a previous instance has not released the port/socket).
+	exited := make(chan error, 1)
+
+	go func() { exited <- cmd.Wait() }()
+
+	return waitForSDNotify(ctx, conn, service, exited)
 }
 
 // awaitSDNotifyStopping opens the service's persistent notify socket and
@@ -135,7 +142,7 @@ func awaitSDNotifyStopping(ctx context.Context, service string) {
 // waitForSDNotify reads datagrams from conn until READY=1 is received,
 // the context is cancelled, or 30 seconds elapse. A 1-second read deadline
 // is used per iteration so context cancellation is checked regularly.
-func waitForSDNotify(ctx context.Context, conn *net.UnixConn, service string) error {
+func waitForSDNotify(ctx context.Context, conn *net.UnixConn, service string, exited <-chan error) error {
 	deadline := time.Now().Add(30 * time.Second)
 	buf := make([]byte, 512)
 
@@ -143,6 +150,10 @@ func waitForSDNotify(ctx context.Context, conn *net.UnixConn, service string) er
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case waitErr := <-exited:
+			// Child process exited before signaling READY=1. Fail immediately
+			// rather than waiting out the full deadline.
+			return fmt.Errorf("%s exited during startup before signaling READY=1: %w", service, waitErr)
 		default:
 		}
 

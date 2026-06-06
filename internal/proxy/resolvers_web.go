@@ -18,10 +18,9 @@ const (
 	tlsV13 = "TLSv1.3"
 )
 
-// resolveLoginUpstreamDisable returns "#" to comment out login upstream block if no servers configured
-// Returns "" (empty string) if servers are configured to enable the upstream block
+// resolveLoginUpstreamDisable matches Java LoginEnablerVar: disable when no login servers.
 func (g *Generator) resolveLoginUpstreamDisable(ctx context.Context) (any, error) {
-	return g.resolveUpstreamDisable(ctx, "zimbraReverseProxyUpstreamLoginServers", "Login")
+	return g.disableForUpstream(ctx, loginUpstreamSpec(), "Login")
 }
 
 // resolveStrictServerName returns "" to enable strict server name block if enabled in config
@@ -356,52 +355,67 @@ func (g *Generator) resolveHTTPSEnabled(ctx context.Context) (any, error) {
 	return true, nil
 }
 
-// resolveUpstreamDisable is a generic helper that returns "#" to comment out upstream blocks if no servers configured.
-// Returns "" (empty string) if servers are configured to enable the upstream block.
-func (g *Generator) resolveUpstreamDisable(
-	ctx context.Context,
-	attributeName string,
-	upstreamName string) (any, error) {
-	servers, err := g.getUpstreamServersByAttribute(ctx, attributeName)
-	logger.DebugContext(ctx, "Resolving upstream disable",
-		"upstream", upstreamName,
-		"server_count", len(servers),
-		"error", err)
+// disableForUpstream returns "#" (comment out) when spec yields no valid upstream
+// servers, "" (enabled) otherwise. The decision uses the exact same spec as the
+// corresponding :servers variable, so the enabler is always consistent with the
+// rendered server list (no commented-out bare "server" lines).
+func (g *Generator) disableForUpstream(ctx context.Context, spec *upstreamSpec, name string) (any, error) {
+	if g.upstreamHasServers(ctx, spec) {
+		logger.InfoContext(ctx, name+" upstream enabled")
 
-	if err != nil || len(servers) == 0 {
-		// No servers configured - comment out the upstream block
-		logger.InfoContext(ctx, upstreamName+" upstream disabled - no servers configured")
-
-		return "#", nil //nolint:nilerr // Intentional: disable upstream block on error or empty servers
+		return "", nil
 	}
-	// Servers are configured - enable the upstream block
-	logger.InfoContext(ctx, upstreamName+" upstream enabled",
-		"server_count", len(servers))
 
-	return "", nil
+	logger.InfoContext(ctx, name+" upstream disabled - no servers configured")
+
+	return "#", nil
 }
 
-// resolveEwsUpstreamDisable returns "#" to comment out EWS upstream block if no servers configured
-// Returns "" (empty string) if servers are configured to enable the upstream block
-// Matches Java EwsEnablerVar logic
+// ewsUpstreamSpec / loginUpstreamSpec mirror the HTTP servers var specs for EWS
+// and login; the enabler and servers var must share the same source.
+func ewsUpstreamSpec() *upstreamSpec {
+	return &upstreamSpec{
+		attrList:        attrUpstreamEwsServers,
+		portAttrKey:     attrHTTPPortAttribute,
+		portAttrDefault: defaultHTTPPortAttr,
+	}
+}
+
+func loginUpstreamSpec() *upstreamSpec {
+	return &upstreamSpec{
+		attrList:        attrUpstreamLoginServers,
+		portAttrKey:     attrHTTPPortAttribute,
+		portAttrDefault: defaultHTTPPortAttr,
+	}
+}
+
+// resolveEwsUpstreamDisable matches Java EwsEnablerVar: disable when no EWS servers.
 func (g *Generator) resolveEwsUpstreamDisable(ctx context.Context) (any, error) {
-	return g.resolveUpstreamDisable(ctx, "zimbraReverseProxyUpstreamEwsServers", "EWS")
+	return g.disableForUpstream(ctx, ewsUpstreamSpec(), "EWS")
 }
 
-// resolveZxUpstreamDisable returns "#" to comment out ZX upstream block if no servers configured
-// Returns "" (empty string) if servers are configured to enable the upstream block
+// resolveZxUpstreamDisable disables the ZX block when no valid mail-client servers exist.
 func (g *Generator) resolveZxUpstreamDisable(ctx context.Context) (any, error) {
-	return g.resolveUpstreamDisable(ctx, "zimbraReverseProxyUpstreamZxServers", "ZX")
+	return g.disableForUpstream(ctx,
+		&upstreamSpec{services: []string{serviceMailbox, serviceMailclient}, fixedPort: zxUpstreamPort}, "ZX")
 }
 
-// resolveWebclientUpstreamDisable returns "#" to comment out webclient upstream block if no servers configured
-// Returns "" (empty string) if servers are configured to enable the upstream block
+// resolveWebclientUpstreamDisable disables the webclient block when no webclient servers exist.
 func (g *Generator) resolveWebclientUpstreamDisable(ctx context.Context) (any, error) {
-	return g.resolveUpstreamDisable(ctx, "zimbraReverseProxyUpstreamClientServers", "Webclient")
+	return g.disableForUpstream(ctx,
+		&upstreamSpec{
+			services:        []string{serviceMailbox, serviceWebclient},
+			portAttrKey:     attrHTTPPortAttribute,
+			portAttrDefault: defaultHTTPPortAttr,
+		}, "Webclient")
 }
 
-// resolveAdminUpstreamDisable returns "#" to comment out admin upstream block if no servers configured
-// Returns "" (empty string) if servers are configured to enable the upstream block
+// resolveAdminUpstreamDisable disables the admin block when no admin servers exist.
 func (g *Generator) resolveAdminUpstreamDisable(ctx context.Context) (any, error) {
-	return g.resolveUpstreamDisable(ctx, "zimbraReverseProxyUpstreamAdminServers", "Admin")
+	return g.disableForUpstream(ctx,
+		&upstreamSpec{
+			services:        []string{serviceMailbox, serviceMailclient},
+			portAttrKey:     attrAdminPortAttribute,
+			portAttrDefault: defaultAdminPortAttr,
+		}, "Admin")
 }

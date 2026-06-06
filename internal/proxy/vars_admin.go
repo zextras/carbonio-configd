@@ -10,22 +10,22 @@ func (g *Generator) registerAdminVariables() {
 		withValueType(ValueTypeString),
 		withDescription("Upstream name for admin console"),
 	)
-	g.registerVar("admin.upstream.:servers", "",
-		withValueType(ValueTypeCustom),
-		withOverrideType(OverrideCustom),
-		withDescription("List of upstream servers for admin console"),
-		withCustomResolver(g.makeBackendResolver(false)),
-	)
+	g.registerUpstreamServersVar("admin.upstream.:servers", "List of upstream servers for admin console",
+		&upstreamSpec{
+			services:        []string{serviceMailbox, serviceMailclient},
+			portAttrKey:     attrAdminPortAttribute,
+			portAttrDefault: defaultAdminPortAttr,
+		})
 	g.registerVar("admin.console.proxy.port", 9071,
 		withAttribute("zimbraAdminProxyPort"),
 		withValueType(ValueTypeInteger),
 		withOverrideType(OverrideConfig),
 		withDescription("Admin console proxy port"),
 	)
-	g.registerVar("admin.console.upstream.adminclient.:servers", []string{},
-		withValueType(ValueTypeString),
-		withOverrideType(OverrideConfig),
-		withDescription("List of upstream admin client servers"),
-		withCustomResolver(g.makeBackendResolver(false)),
-	)
+	g.registerUpstreamServersVar("admin.console.upstream.adminclient.:servers", "List of upstream admin client servers",
+		&upstreamSpec{
+			services:        []string{serviceMailbox, serviceAdminclient},
+			portAttrKey:     attrAdminPortAttribute,
+			portAttrDefault: defaultAdminPortAttr,
+		})
 }

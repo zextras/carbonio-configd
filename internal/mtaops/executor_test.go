@@ -342,46 +342,7 @@ func TestExecuteMapfile_MAPLOCAL_FileNotExists(t *testing.T) {
 	}
 }
 
-func TestHandleEmptyMapfileData_RestoreFromBackup(t *testing.T) {
-	mockLdap := &mockLdapManager{}
-	tmpDir := t.TempDir()
-
-	executor := NewExecutor(tmpDir, mockLdap).(*executor)
-
-	testFilePath := filepath.Join(tmpDir, "test.pem")
-	backupPath := testFilePath + ".crb"
-
-	executor.mappedFiles["testKey"] = testFilePath
-
-	// Create backup file
-	backupData := []byte("backup content")
-	if err := os.WriteFile(backupPath, backupData, 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	op := MapfileOperation{
-		Key:        "testKey",
-		IsLocal:    false,
-		Base64Data: "", // Empty data
-	}
-
-	err := executor.ExecuteMapfile(context.Background(), op)
-	if err != nil {
-		t.Fatalf("ExecuteMapfile with empty data should restore from backup: %v", err)
-	}
-
-	// Verify file was restored from backup
-	restoredData, err := os.ReadFile(testFilePath)
-	if err != nil {
-		t.Fatalf("Failed to read restored file: %v", err)
-	}
-
-	if string(restoredData) != string(backupData) {
-		t.Errorf("Restored data = %q, want %q", string(restoredData), string(backupData))
-	}
-}
-
-func TestHandleEmptyMapfileData_LeaveExistingUntouched(t *testing.T) {
+func TestHandleEmptyMapfileData_RemovesStaleFile(t *testing.T) {
 	mockLdap := &mockLdapManager{}
 	tmpDir := t.TempDir()
 
@@ -390,31 +351,24 @@ func TestHandleEmptyMapfileData_LeaveExistingUntouched(t *testing.T) {
 	testFilePath := filepath.Join(tmpDir, "test.pem")
 	executor.mappedFiles["testKey"] = testFilePath
 
-	// Create existing file (no backup)
-	existingData := []byte("existing content")
-	if err := os.WriteFile(testFilePath, existingData, 0o600); err != nil {
+	// Existing mapped file that should be removed when the VAR is cleared,
+	// mirroring jylibs/state.py os.remove(mapfile) (e.g. clearing zimbraSSLDHParam).
+	if err := os.WriteFile(testFilePath, []byte("stale content"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
 	op := MapfileOperation{
 		Key:        "testKey",
 		IsLocal:    false,
-		Base64Data: "", // Empty data
+		Base64Data: "", // Empty data => VAR cleared
 	}
 
-	err := executor.ExecuteMapfile(context.Background(), op)
-	if err != nil {
-		t.Fatalf("ExecuteMapfile with empty data should leave existing file: %v", err)
+	if err := executor.ExecuteMapfile(context.Background(), op); err != nil {
+		t.Fatalf("ExecuteMapfile with empty data should remove the stale file: %v", err)
 	}
 
-	// Verify file was not deleted
-	unchangedData, err := os.ReadFile(testFilePath)
-	if err != nil {
-		t.Fatalf("Existing file should not be deleted: %v", err)
-	}
-
-	if string(unchangedData) != string(existingData) {
-		t.Errorf("File was modified, want unchanged")
+	if _, err := os.Stat(testFilePath); !os.IsNotExist(err) {
+		t.Errorf("stale mapfile should have been removed, stat err = %v", err)
 	}
 }
 

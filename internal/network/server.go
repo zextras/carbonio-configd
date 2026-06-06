@@ -23,8 +23,15 @@ const (
 	errUnknownCommand    = "ERROR UNKNOWN COMMAND"
 	respSuccessActive    = "SUCCESS ACTIVE"
 	respRewritesComplete = "SUCCESS REWRITES COMPLETE"
+	errNoServicesListed  = "ERROR NO SERVICES LISTED"
 	acceptErrorBackoff   = 100 * time.Millisecond
 )
+
+// connReadTimeout bounds how long a single connection may take to send its
+// command line. Without it, a stalled client holds a goroutine open and
+// blocks graceful shutdown (which waits on all connection goroutines).
+// It is a variable rather than a const so tests can shorten it.
+var connReadTimeout = 120 * time.Second
 
 // ActionTrigger defines the interface for triggering actions in the main application logic.
 type ActionTrigger interface {
@@ -142,6 +149,13 @@ func (s *ThreadedStreamServer) handleConnection(ctx context.Context, conn net.Co
 		}
 	}()
 
+	if err := conn.SetReadDeadline(time.Now().Add(connReadTimeout)); err != nil {
+		logger.ErrorContext(ctx, "Error setting read deadline",
+			"error", err)
+
+		return
+	}
+
 	reader := bufio.NewReader(conn)
 
 	message, err := reader.ReadString('\n')
@@ -158,7 +172,7 @@ func (s *ThreadedStreamServer) handleConnection(ctx context.Context, conn net.Co
 
 	parts := strings.Fields(message)
 	if len(parts) == 0 {
-		if _, err := conn.Write([]byte("ERROR UNKNOWN COMMAND\n")); err != nil {
+		if _, err := conn.Write([]byte(errUnknownCommand + "\n")); err != nil {
 			logger.ErrorContext(ctx, "Error writing to connection",
 				"error", err)
 		}
@@ -196,6 +210,12 @@ func (h *ConfigdRequestHandler) HandleRequest(ctx context.Context, command strin
 	case "STATUS":
 		return respSuccessActive
 	case "REWRITE":
+		// Mirror jylibs/listener.py:31-32: REWRITE with no service arguments is
+		// rejected rather than treated as a no-op success.
+		if len(args) == 0 {
+			return errNoServicesListed
+		}
+
 		if h.ActionTrigger != nil {
 			h.ActionTrigger.TriggerRewrite(ctx, args)
 			logger.DebugContext(ctx, "Triggered REWRITE command",

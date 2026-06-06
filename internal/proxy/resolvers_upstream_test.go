@@ -261,174 +261,43 @@ func TestMakeUpstreamTargetResolver(t *testing.T) {
 	}
 }
 
-// TestMakeBackendResolver tests makeBackendResolver branches
-func TestMakeBackendResolver(t *testing.T) {
-	t.Run("returns empty string when no backends (nil LDAP)", func(t *testing.T) {
-		g := &Generator{
-			LdapClient: nil,
-		}
-		resolver := g.makeBackendResolver(false)
-		result, err := resolver(context.Background())
-		if err != nil {
-			t.Fatalf("backend resolver failed: %v", err)
-		}
-		str, ok := result.(string)
-		if !ok {
-			t.Fatalf("expected string, got %T", result)
-		}
-		if str != "" {
-			t.Errorf("expected empty string with no backends, got %q", str)
-		}
-	})
-
-	t.Run("returns formatted servers with cached backends", func(t *testing.T) {
-		g := &Generator{
-			upstreamCache: &upstreamQueryCache{
-				populated:            true,
-				reverseProxyBackends: []UpstreamServer{{Host: "server1.example.com", Port: 8080}},
-			},
-		}
-		resolver := g.makeBackendResolver(false)
-		result, err := resolver(context.Background())
-		if err != nil {
-			t.Fatalf("backend resolver failed: %v", err)
-		}
-		str, ok := result.(string)
-		if !ok {
-			t.Fatalf("expected string, got %T", result)
-		}
-		if !strings.Contains(str, "server1.example.com") {
-			t.Errorf("expected server1.example.com in result, got %q", str)
-		}
-	})
-
-	t.Run("returns formatted SSL backends", func(t *testing.T) {
-		g := &Generator{
-			upstreamCache: &upstreamQueryCache{
-				populated:               true,
-				reverseProxyBackendsSSL: []UpstreamServer{{Host: "ssl-server.example.com", Port: 8443}},
-			},
-		}
-		resolver := g.makeBackendResolver(true)
-		result, err := resolver(context.Background())
-		if err != nil {
-			t.Fatalf("backend resolver failed: %v", err)
-		}
-		str, ok := result.(string)
-		if !ok {
-			t.Fatalf("expected string, got %T", result)
-		}
-		if !strings.Contains(str, "ssl-server.example.com") {
-			t.Errorf("expected ssl-server.example.com in result, got %q", str)
-		}
-	})
-}
-
-// TestMakeAttributeResolver tests makeAttributeResolver branches
-func TestMakeAttributeResolver(t *testing.T) {
-	t.Run("returns empty string when no servers (nil LDAP)", func(t *testing.T) {
-		g := &Generator{
-			LdapClient: nil,
-		}
-		resolver := g.makeAttributeResolver("zimbraReverseProxyUpstreamEwsServers", false)
-		result, err := resolver(context.Background())
-		if err != nil {
-			t.Fatalf("attribute resolver failed: %v", err)
-		}
-		str, ok := result.(string)
-		if !ok {
-			t.Fatalf("expected string, got %T", result)
-		}
-		if str != "" {
-			t.Errorf("expected empty string with no servers, got %q", str)
-		}
-	})
-
-	t.Run("returns formatted servers with cached attribute backends", func(t *testing.T) {
-		g := &Generator{
-			upstreamCache: &upstreamQueryCache{
-				populated: true,
-				attributeServers: map[string][]UpstreamServer{
-					"zimbraReverseProxyUpstreamEwsServers": {{Host: "ews-server.example.com", Port: 8443}},
-				},
-				attributeServersSSL: map[string][]UpstreamServer{},
-			},
-		}
-		resolver := g.makeAttributeResolver("zimbraReverseProxyUpstreamEwsServers", false)
-		result, err := resolver(context.Background())
-		if err != nil {
-			t.Fatalf("attribute resolver failed: %v", err)
-		}
-		str, ok := result.(string)
-		if !ok {
-			t.Fatalf("expected string, got %T", result)
-		}
-		if !strings.Contains(str, "ews-server.example.com") {
-			t.Errorf("expected ews-server.example.com in result, got %q", str)
-		}
-	})
-
-	t.Run("returns formatted SSL attribute servers", func(t *testing.T) {
-		g := &Generator{
-			upstreamCache: &upstreamQueryCache{
-				populated: true,
-				attributeServersSSL: map[string][]UpstreamServer{
-					"zimbraReverseProxyUpstreamEwsServers": {{Host: "ssl-ews.example.com", Port: 9443}},
-				},
-				attributeServers: map[string][]UpstreamServer{},
-			},
-		}
-		resolver := g.makeAttributeResolver("zimbraReverseProxyUpstreamEwsServers", true)
-		result, err := resolver(context.Background())
-		if err != nil {
-			t.Fatalf("attribute resolver failed: %v", err)
-		}
-		str, ok := result.(string)
-		if !ok {
-			t.Fatalf("expected string, got %T", result)
-		}
-		if !strings.Contains(str, "ssl-ews.example.com") {
-			t.Errorf("expected ssl-ews.example.com in result, got %q", str)
-		}
-	})
-}
-
-// TestResolveUpstreamDisableNoServers tests resolveUpstreamDisable returns "#" when no servers
-func TestResolveUpstreamDisableNoServers(t *testing.T) {
+// TestResolveEwsUpstreamDisableNoServers checks "#" is returned when no EWS servers exist.
+func TestResolveEwsUpstreamDisableNoServers(t *testing.T) {
 	ctx := context.Background()
-	// No cache, no LDAP → getUpstreamServersByAttribute will fail → returns "#"
-	g := &Generator{
-		upstreamCache: &upstreamQueryCache{
-			attributeServers:    map[string][]UpstreamServer{},
-			attributeServersSSL: map[string][]UpstreamServer{},
-		},
-		LdapClient: nil,
-	}
-	result, err := g.resolveUpstreamDisable(ctx, "zimbraReverseProxyUpstreamEwsServers", "ews")
+	g := newSpecTestGenerator(map[string]map[string]string{})
+
+	result, err := g.resolveEwsUpstreamDisable(ctx)
 	if err != nil {
-		t.Fatalf("resolveUpstreamDisable: %v", err)
+		t.Fatalf("resolveEwsUpstreamDisable: %v", err)
 	}
+
 	if result != "#" {
 		t.Errorf("expected '#' when no servers, got %v", result)
 	}
 }
 
-// TestResolveUpstreamDisableWithServers tests resolveUpstreamDisable returns "" when servers present
-func TestResolveUpstreamDisableWithServers(t *testing.T) {
+// TestResolveEwsUpstreamDisableWithServers checks "" is returned when an EWS server exists,
+// and that the enabler decision is consistent with the servers var (same spec/source).
+func TestResolveEwsUpstreamDisableWithServers(t *testing.T) {
 	ctx := context.Background()
-	attrName := "zimbraReverseProxyUpstreamEwsServers"
-	g := &Generator{
-		upstreamCache: &upstreamQueryCache{
-			attributeServers: map[string][]UpstreamServer{
-				attrName: {{Host: "server1.example.com", Port: 8080}},
-			},
-			attributeServersSSL: map[string][]UpstreamServer{},
+	g := newSpecTestGenerator(map[string]map[string]string{
+		"ews": {
+			zimbraServiceHostnameAttr:          "ews.example.com",
+			zimbraServiceEnabledAttr:           "mailbox",
+			zimbraReverseProxyLookupTargetAttr: "TRUE",
+			zimbraMailModeAttr:                 "https",
+			zimbraMailPortAttr:                 "8080",
 		},
-	}
-	result, err := g.resolveUpstreamDisable(ctx, attrName, "ews")
+	})
+	g.GlobalConfig = &config.GlobalConfig{Data: config.NewConfigMapFrom(map[string]string{
+		"zimbraReverseProxyUpstreamEwsServers": "ews.example.com",
+	})}
+
+	result, err := g.resolveEwsUpstreamDisable(ctx)
 	if err != nil {
-		t.Fatalf("resolveUpstreamDisable: %v", err)
+		t.Fatalf("resolveEwsUpstreamDisable: %v", err)
 	}
+
 	if result != "" {
 		t.Errorf("expected empty string when servers present, got %v", result)
 	}

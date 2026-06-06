@@ -15,7 +15,18 @@ const (
 	attrZimbraServiceEnabled           = "zimbraServiceEnabled"
 	attrZimbraReverseProxyLookupTarget = "zimbraReverseProxyLookupTarget"
 	attrZimbraMailMode                 = "zimbraMailMode"
+	attrZimbraMailPort                 = "zimbraMailPort"
 	attrZimbraMailSSLPort              = "zimbraMailSSLPort"
+	attrZimbraMtaAuthTarget            = "zimbraMtaAuthTarget"
+	attrZimbraMtaAuthPort              = "zimbraMtaAuthPort"
+)
+
+// Provisioning attribute defaults, mirroring the ZAttr getters used by
+// jylibs/commands.py (URLUtil.getMtaAuthURL and garpb backend-port selection).
+const (
+	defaultMtaAuthPort = "7073" // zimbraMtaAuthPort
+	defaultMailPort    = "80"   // zimbraMailPort
+	defaultMailSSLPort = "0"    // zimbraMailSSLPort
 )
 
 // Command names

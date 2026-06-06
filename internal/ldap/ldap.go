@@ -40,8 +40,16 @@ type Ldap struct {
 	RetryDelay    time.Duration // Initial retry delay (default: 100ms)
 	MaxRetryDelay time.Duration // Maximum retry delay (default: 5s)
 
-	// Native LDAP client for direct LDAP queries
+	// Native LDAP client for direct LDAP queries against the cn=zimbra data
+	// suffix (bound as uid=zimbra over TCP). Used for reads only.
 	NativeClient *Client
+
+	// ConfigClient writes the slapd-config (cn=config) backend, bound as the
+	// cn=config rootDN over the local ldapi socket. All keymap entries target
+	// cn=config, so this owns 100% of write traffic. The data-suffix
+	// NativeClient cannot write cn=config (LDAP code 50), so writes must never
+	// fall back to it.
+	ConfigClient *Client
 }
 
 // LdapKeyMapEntry represents an entry in the LDAP key map.
@@ -120,6 +128,20 @@ func (l *Ldap) SetNativeClient(ctx context.Context, client *Client) {
 	}
 }
 
+// SetConfigClient sets the slapd-config (cn=config) write client, bound as the
+// cn=config rootDN over the local ldapi socket. ConfigManager calls this after
+// initializing the config client. All keymap writes are routed here.
+func (l *Ldap) SetConfigClient(ctx context.Context, client *Client) {
+	ctx = logger.ContextWithComponentOnce(ctx, "ldap")
+	l.ConfigClient = client
+
+	if client != nil {
+		logger.DebugContext(ctx, "Config LDAP client set for Ldap manager")
+	} else {
+		logger.DebugContext(ctx, "Config LDAP client cleared")
+	}
+}
+
 // AddChange adds an LDAP change to the pending queue.
 func (l *Ldap) AddChange(ctx context.Context, key, value string) {
 	ctx = logger.ContextWithComponentOnce(ctx, "ldap")
@@ -148,11 +170,7 @@ func (l *Ldap) ModifyAttribute(ctx context.Context, key, value string) error {
 		"key", key,
 		"value", value)
 
-	if l.config.LdapIsMaster {
-		l.IsMaster = true
-
-		logger.DebugContext(ctx, "LDAP config is master")
-	}
+	l.refreshMasterStatus(ctx)
 
 	// Validation happens outside retry logic (not retryable)
 	entry, err := l.lookupKey(ctx, key)
@@ -166,19 +184,95 @@ func (l *Ldap) ModifyAttribute(ctx context.Context, key, value string) error {
 
 	val := fmt.Sprintf(entry.TransformFmt, value)
 
-	if l.NativeClient == nil {
-		return fmt.Errorf("cannot modify LDAP attribute %q: native client not initialized", key)
+	// Writes target the slapd-config (cn=config) backend, which is only
+	// writable by the cn=config rootDN over ldapi. Never fall back to the
+	// data-suffix NativeClient (uid=zimbra) — it has no cn=config access and
+	// would fail every attempt with LDAP code 50.
+	if l.ConfigClient == nil {
+		return fmt.Errorf("cannot modify LDAP attribute %q: config client not initialized", key)
 	}
 
 	// Execute LDAP modification with retry logic.
 	return l.withRetry(ctx, fmt.Sprintf("modify %s=%s", key, value), func() error {
-		logger.DebugContext(ctx, "Modifying LDAP attribute",
-			"dn", entry.DN,
-			"attr", entry.Attr,
+		return l.applyConfigModify(ctx, entry.DN, entry.Attr, val)
+	})
+}
+
+// refreshMasterStatus mirrors jylibs/ldap.py modify_attribute: when the local
+// node is configured as an LDAP master, probe cn=accesslog to confirm the
+// accesslog database is actually present. A configured-but-unreachable master
+// must not attempt master-only modifications, so the probe result (not the raw
+// config flag) drives IsMaster. With no config client to probe, the config flag
+// is trusted as a last resort.
+func (l *Ldap) refreshMasterStatus(ctx context.Context) {
+	if !l.config.LdapIsMaster {
+		return
+	}
+
+	if l.ConfigClient == nil {
+		l.IsMaster = true
+
+		return
+	}
+
+	if l.ConfigClient.ProbeDN(ldapAccesslogSuffix) {
+		l.IsMaster = true
+
+		logger.DebugContext(ctx, "LDAP config is master")
+	} else {
+		l.IsMaster = false
+
+		logger.DebugContext(ctx, "LDAP master probe failed; treating node as non-master")
+	}
+}
+
+// applyConfigModify reads the current attribute value and replaces it only when
+// it differs, mirroring the change-detection in jylibs/ldap.py:98. The
+// olcSpSessionlog overlay attribute is skipped when absent because slapd rejects
+// a replace of a non-existent sessionlog directive (ldap.py:99-100). Must be
+// called with a non-nil ConfigClient.
+func (l *Ldap) applyConfigModify(ctx context.Context, dn, attr, val string) error {
+	origValue, present, err := l.ConfigClient.ReadAttribute(dn, attr)
+	if err != nil {
+		// On a read failure, fall back to the legacy presence semantics: skip
+		// olcSpSessionlog (treated as absent) and otherwise attempt the replace.
+		if attr == attrOlcSpSessionlog {
+			logger.InfoContext(ctx, "olcSpSessionlog attribute is not present, skipping replace",
+				"dn", dn)
+
+			return nil
+		}
+
+		logger.DebugContext(ctx, "Could not read config attribute, attempting replace",
+			"dn", dn,
+			"attr", attr,
+			"error", err)
+
+		return l.ConfigClient.ModifyAttribute(dn, attr, val)
+	}
+
+	if origValue == val {
+		logger.DebugContext(ctx, "LDAP attribute unchanged, skipping",
+			"dn", dn,
+			"attr", attr,
 			"value", val)
 
-		return l.NativeClient.ModifyAttribute(entry.DN, entry.Attr, val)
-	})
+		return nil
+	}
+
+	if attr == attrOlcSpSessionlog && !present {
+		logger.InfoContext(ctx, "olcSpSessionlog attribute is not present, skipping replace",
+			"dn", dn)
+
+		return nil
+	}
+
+	logger.DebugContext(ctx, "Modifying LDAP attribute",
+		"dn", dn,
+		"attr", attr,
+		"value", val)
+
+	return l.ConfigClient.ModifyAttribute(dn, attr, val)
 }
 
 // lookupKey mirrors the lookupKey method in jylibs/ldap.py.
@@ -222,16 +316,14 @@ func (l *Ldap) ModifyAttributeBatch(ctx context.Context, changes map[string]stri
 	logger.DebugContext(ctx, "Batch modifying LDAP attributes",
 		"count", len(changes))
 
-	// Set master flag if needed
-	if l.config.LdapIsMaster {
-		l.IsMaster = true
-	}
+	l.refreshMasterStatus(ctx)
 
-	// A missing native client is a configuration error, not a transient
+	// A missing config client is a configuration error, not a transient
 	// failure: fail fast before entering the retry loop (which would
-	// otherwise sleep/backoff per DN for an unrecoverable condition).
-	if l.NativeClient == nil {
-		return fmt.Errorf("cannot batch modify LDAP attributes: native client not initialized")
+	// otherwise sleep/backoff per DN for an unrecoverable condition). Writes
+	// must use the cn=config client (ldapi), never the data-suffix client.
+	if l.ConfigClient == nil {
+		return fmt.Errorf("cannot batch modify LDAP attributes: config client not initialized")
 	}
 
 	// Group changes by DN
@@ -285,16 +377,12 @@ func (l *Ldap) executeBatchModifyInternal(ctx context.Context, dn string, attrs 
 		"dn", dn,
 		"attribute_count", len(attrs))
 
-	if l.NativeClient == nil {
-		return fmt.Errorf("cannot batch modify DN %q: native client not initialized", dn)
+	if l.ConfigClient == nil {
+		return fmt.Errorf("cannot batch modify DN %q: config client not initialized", dn)
 	}
 
 	for attr, val := range attrs {
-		logger.DebugContext(ctx, "Batch attribute",
-			"attr", attr,
-			"value", val)
-
-		if err := l.NativeClient.ModifyAttribute(dn, attr, val); err != nil {
+		if err := l.applyConfigModify(ctx, dn, attr, val); err != nil {
 			return fmt.Errorf("modify %s on %s: %w", attr, dn, err)
 		}
 	}
@@ -399,6 +487,11 @@ type Domain struct {
 type Server struct {
 	ServerID        string // zimbraId
 	ServiceHostname string // zimbraServiceHostname
+	// Attributes holds the full set of LDAP attributes for the server entry.
+	// Multi-valued attributes are joined with "\n" (see entryToMap). Used by
+	// the proxy upstream resolvers to read mail mode, ports, and proxy tuning
+	// attributes without issuing additional per-server queries.
+	Attributes map[string]string
 }
 
 // Helper function to simulate LDAP search for master check

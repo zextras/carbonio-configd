@@ -221,44 +221,62 @@ func (g *Generator) registerWebAuthVariables() {
 		"Returns '#' to comment out admin upstream block if no servers configured",
 		withCustomResolver(g.resolveAdminUpstreamDisable))
 
-	// HTTP upstream :servers (makeBackendResolver(false))
-	g.registerBackendServerVar("web.upstream.:servers", "List of upstream servers for web proxy", false)
-	g.registerBackendServerVar("web.upstream.webclient.:servers", "List of upstream HTTP webclient servers", false)
-	g.registerBackendServerVar("web.upstream.zx.:servers", "List of upstream HTTP zx servers", false)
-	g.registerBackendServerVar(
-		"web.upstream.ewsserver.:servers",
-		"List of EWS (Exchange Web Services) upstream servers",
-		false,
-	)
-	g.registerBackendServerVar("web.upstream.loginserver.:servers", "List of upstream login servers", false)
+	// Upstream :servers variables. Each mirrors a Java *UpstreamServersVar subclass:
+	// the candidate servers come from a per-service union (getAllMailClientServers /
+	// getAllWebClientServers / getAllAdminClientServers) or an explicit attribute list
+	// (EWS / login), filtered by isValidUpstream, with ports from the configured port
+	// attribute (or the fixed ZX ports). See upstream_spec.go.
+	mailClientSvcs := []string{serviceMailbox, serviceMailclient}
+	webClientSvcs := []string{serviceMailbox, serviceWebclient}
+	adminClientSvcs := []string{serviceMailbox, serviceAdminclient}
 
-	// HTTPS upstream :servers (makeBackendResolver(true))
-	g.registerBackendServerVar("web.ssl.upstream.:servers", "List of upstream HTTPS servers", true)
-	g.registerBackendServerVar("web.ssl.upstream.webclient.:servers", "List of upstream HTTPS webclient servers", true)
-	g.registerBackendServerVar("web.ssl.upstream.zx.:servers", "List of upstream HTTPS zx servers", true)
+	// HTTP (non-SSL): port from zimbraReverseProxyHttpPortAttribute (def zimbraMailPort)
+	g.registerUpstreamServersVar("web.upstream.:servers", "List of upstream HTTP servers used by Web Proxy",
+		&upstreamSpec{services: mailClientSvcs, portAttrKey: attrHTTPPortAttribute, portAttrDefault: defaultHTTPPortAttr})
+	g.registerUpstreamServersVar("web.upstream.webclient.:servers", "List of upstream HTTP webclient servers",
+		&upstreamSpec{services: webClientSvcs, portAttrKey: attrHTTPPortAttribute, portAttrDefault: defaultHTTPPortAttr})
+	g.registerUpstreamServersVar("web.upstream.zx.:servers", "List of upstream HTTP zx servers",
+		&upstreamSpec{services: mailClientSvcs, fixedPort: zxUpstreamPort})
+	g.registerUpstreamServersVar("web.upstream.ewsserver.:servers", "List of EWS upstream servers",
+		&upstreamSpec{
+			attrList: attrUpstreamEwsServers, portAttrKey: attrHTTPPortAttribute, portAttrDefault: defaultHTTPPortAttr,
+		})
+	g.registerUpstreamServersVar("web.upstream.loginserver.:servers", "List of upstream login servers",
+		&upstreamSpec{
+			attrList: attrUpstreamLoginServers, portAttrKey: attrHTTPPortAttribute, portAttrDefault: defaultHTTPPortAttr,
+		})
 
-	// web.ssl.upstream.ewsserver.:servers - Upstream SSL EWS servers
-	g.registerVar("web.ssl.upstream.ewsserver.:servers", "",
-		withValueType(ValueTypeCustom),
-		withOverrideType(OverrideCustom),
-		withDescription("List of upstream HTTPS EWS servers"),
-		withCustomResolver(g.makeAttributeResolver("zimbraReverseProxyUpstreamEwsServers", true)),
-	)
+	// HTTPS (SSL): port from zimbraReverseProxyHttpSSLPortAttribute (def zimbraMailSSLPort)
+	g.registerUpstreamServersVar("web.ssl.upstream.:servers", "List of upstream HTTPS servers",
+		&upstreamSpec{
+			services: mailClientSvcs, portAttrKey: attrHTTPSSLPortAttribute, portAttrDefault: defaultHTTPSSLPortAttr,
+		})
+	g.registerUpstreamServersVar("web.ssl.upstream.webclient.:servers", "List of upstream HTTPS webclient servers",
+		&upstreamSpec{
+			services: webClientSvcs, portAttrKey: attrHTTPSSLPortAttribute, portAttrDefault: defaultHTTPSSLPortAttr,
+		})
+	g.registerUpstreamServersVar("web.ssl.upstream.zx.:servers", "List of upstream HTTPS zx servers",
+		&upstreamSpec{services: mailClientSvcs, fixedPort: zxUpstreamSSLPort})
+	g.registerUpstreamServersVar("web.ssl.upstream.ewsserver.:servers", "List of upstream HTTPS EWS servers",
+		&upstreamSpec{
+			attrList: attrUpstreamEwsServers, portAttrKey: attrHTTPSSLPortAttribute, portAttrDefault: defaultHTTPSSLPortAttr,
+		})
+	g.registerUpstreamServersVar("web.ssl.upstream.loginserver.:servers", "List of upstream HTTPS login servers",
+		&upstreamSpec{
+			attrList: attrUpstreamLoginServers, portAttrKey: attrHTTPSSLPortAttribute, portAttrDefault: defaultHTTPSSLPortAttr,
+		})
 
-	// web.ssl.upstream.loginserver.:servers - Upstream SSL login servers
-	g.registerVar("web.ssl.upstream.loginserver.:servers", "",
-		withValueType(ValueTypeCustom),
-		withOverrideType(OverrideCustom),
-		withDescription("List of upstream HTTPS login servers"),
-		withCustomResolver(g.makeAttributeResolver("zimbraReverseProxyUpstreamLoginServers", true)),
-	)
-
-	// admin console upstream :servers
-	g.registerBackendServerVar("web.admin.upstream.:servers", "List of upstream admin console servers", false)
-	g.registerBackendServerVar("web.admin.upstream.adminclient.:servers", "List of upstream admin client servers", false)
-	g.registerBackendServerVar("web.admin.ssl.upstream.:servers", "List of upstream HTTPS admin console servers", true)
-	g.registerBackendServerVar("web.admin.ssl.upstream.adminclient.:servers",
-		"List of upstream HTTPS admin client servers", true)
+	// Admin console: port from zimbraReverseProxyAdminPortAttribute (def zimbraAdminPort).
+	// Java has no separate SSL admin servers var; the SSL keys mirror the non-SSL ones.
+	g.registerUpstreamServersVar("web.admin.upstream.:servers", "List of upstream admin console servers",
+		&upstreamSpec{services: mailClientSvcs, portAttrKey: attrAdminPortAttribute, portAttrDefault: defaultAdminPortAttr})
+	g.registerUpstreamServersVar("web.admin.upstream.adminclient.:servers", "List of upstream admin client servers",
+		&upstreamSpec{services: adminClientSvcs, portAttrKey: attrAdminPortAttribute, portAttrDefault: defaultAdminPortAttr})
+	g.registerUpstreamServersVar("web.admin.ssl.upstream.:servers", "List of upstream HTTPS admin console servers",
+		&upstreamSpec{services: mailClientSvcs, portAttrKey: attrAdminPortAttribute, portAttrDefault: defaultAdminPortAttr})
+	g.registerUpstreamServersVar("web.admin.ssl.upstream.adminclient.:servers",
+		"List of upstream HTTPS admin client servers",
+		&upstreamSpec{services: adminClientSvcs, portAttrKey: attrAdminPortAttribute, portAttrDefault: defaultAdminPortAttr})
 
 	// upstream target URLs (scheme determined by zimbraReverseProxySSLToUpstreamEnabled)
 	g.registerUpstreamTargetVar("web.upstream.zx", "http://zx", "zx_ssl", "zx",
@@ -435,14 +453,14 @@ func (g *Generator) registerStringVar(key, defaultVal, desc string) {
 	)
 }
 
-// registerBackendServerVar registers a :servers variable using makeBackendResolver.
-// ssl=true registers an HTTPS upstream, ssl=false registers an HTTP upstream.
-func (g *Generator) registerBackendServerVar(key, desc string, ssl bool) {
+// registerUpstreamServersVar registers a :servers variable resolved by the
+// Java-faithful upstream resolver (see upstream_spec.go / makeUpstreamResolver).
+func (g *Generator) registerUpstreamServersVar(key, desc string, spec *upstreamSpec) {
 	g.registerVar(key, "",
 		withValueType(ValueTypeCustom),
 		withOverrideType(OverrideCustom),
 		withDescription(desc),
-		withCustomResolver(g.makeBackendResolver(ssl)),
+		withCustomResolver(g.makeUpstreamResolver(spec)),
 	)
 }
 

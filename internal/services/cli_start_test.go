@@ -149,6 +149,93 @@ func TestServiceStart_PostStartHookCalled(t *testing.T) {
 	}
 }
 
+// TestServiceStartSystemd_RunsCustomLauncherAndHooks verifies the systemd-leaf
+// start path invokes CustomStart and the pre/post-start hooks directly, WITHOUT
+// going through systemctl. This is independent of IsSystemdMode() — it is the
+// ExecStart leaf that breaks the systemctl recursion loop, so it must launch
+// the workers in-process regardless of whether the host is systemd-booted.
+func TestServiceStartSystemd_RunsCustomLauncherAndHooks(t *testing.T) {
+	orig := Registry["memcached"]
+	defer func() { Registry["memcached"] = orig }()
+
+	var startCalled, preCalled, postCalled bool
+
+	def := *orig
+	// A non-empty SystemdUnits must be ignored by the leaf path; set one so a
+	// regression that calls systemctl would visibly diverge.
+	def.SystemdUnits = []string{"carbonio-nonexistent-test.service"}
+	def.PidFile = ""
+	def.ProcessName = ""
+	def.ConfigRewrite = nil
+	def.Dependencies = nil
+	def.PreStart = []Hook{func(_ context.Context, _ *ServiceManager) error {
+		preCalled = true
+
+		return nil
+	}}
+	def.PostStart = []Hook{func(_ context.Context, _ *ServiceManager) error {
+		postCalled = true
+
+		return nil
+	}}
+	def.CustomStart = func(_ context.Context, _ *ServiceDef) error {
+		startCalled = true
+
+		return nil
+	}
+	Registry["memcached"] = &def
+
+	if err := ServiceStartSystemd(context.Background(), "memcached"); err != nil {
+		t.Fatalf("ServiceStartSystemd returned unexpected error: %v", err)
+	}
+
+	if !preCalled {
+		t.Error("pre-start hook was not called")
+	}
+	if !startCalled {
+		t.Error("CustomStart launcher was not called")
+	}
+	if !postCalled {
+		t.Error("post-start hook was not called")
+	}
+}
+
+// TestServiceStartSystemd_UnknownService verifies the leaf path rejects an
+// unknown service rather than silently succeeding (the bug symptom was an
+// "unexpected argument" parse error; a known service must resolve).
+func TestServiceStartSystemd_UnknownService(t *testing.T) {
+	if err := ServiceStartSystemd(context.Background(), "nonexistent-service-xyz"); err == nil {
+		t.Error("expected error for unknown service")
+	}
+}
+
+// TestServiceStopSystemd_RunsCustomStop verifies the systemd-leaf stop path
+// invokes CustomStop directly without systemctl.
+func TestServiceStopSystemd_RunsCustomStop(t *testing.T) {
+	orig := Registry["memcached"]
+	defer func() { Registry["memcached"] = orig }()
+
+	var stopCalled bool
+
+	def := *orig
+	def.SystemdUnits = []string{"carbonio-nonexistent-test.service"}
+	def.PreStop = nil
+	def.CustomStop = func(_ context.Context, _ *ServiceDef) error {
+		stopCalled = true
+
+		return nil
+	}
+	Registry["memcached"] = &def
+
+	if err := ServiceStopSystemd(context.Background(), "memcached"); err != nil {
+		t.Fatalf("ServiceStopSystemd returned unexpected error: %v", err)
+	}
+
+	if !stopCalled {
+		t.Error("CustomStop was not called")
+	}
+}
+
 // TestServiceStart_NoRewrite verifies the NoRewrite flag skips config rewriting.
 func TestServiceStart_NoRewrite(t *testing.T) {
 	if testing.Short() {

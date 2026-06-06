@@ -587,7 +587,46 @@ func TestProcessEnablerLineFalseEnabler(t *testing.T) {
 	}
 }
 
-// TestProcessEnablerLineStringEnabler tests processEnablerLine with string enabler values
+// TestProcessEnablerLineFalseEnablerMultiLine tests that when the expanded value is
+// multi-line (e.g. a :servers variable with multiple upstreams), every line is
+// commented out, not just the first.
+func TestProcessEnablerLineFalseEnablerMultiLine(t *testing.T) {
+	cfg := &config.Config{BaseDir: "/tmp/test"}
+	gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewGenerator: %v", err)
+	}
+
+	gen.Variables["web.ews.upstream.disable"] = &Variable{
+		Keyword:   "web.ews.upstream.disable",
+		ValueType: ValueTypeEnabler,
+		Value:     false,
+	}
+	// Simulate a :servers expansion that yields two server lines.
+	gen.Variables["web.upstream.ewsserver.:servers"] = &Variable{
+		Keyword: "web.upstream.ewsserver.:servers",
+		Value:   "server srv1:8080 fail_timeout=10s;\n    server srv2:8080 fail_timeout=10s;",
+	}
+
+	processor := NewTemplateProcessor(gen, "", "")
+
+	line := "    ${web.ews.upstream.disable}    ${web.upstream.ewsserver.:servers}"
+	result, err := processor.interpolateLine(context.Background(), line)
+	if err != nil {
+		t.Fatalf("interpolateLine: %v", err)
+	}
+
+	for _, l := range strings.Split(result, "\n") {
+		trimmed := strings.TrimSpace(l)
+		if trimmed == "" {
+			continue
+		}
+		if !strings.HasPrefix(strings.TrimLeft(l, " \t"), "#") {
+			t.Errorf("line not commented out: %q", l)
+		}
+	}
+}
+
 func TestProcessEnablerLineStringEnabler(t *testing.T) {
 	cfg := &config.Config{BaseDir: "/tmp/test"}
 	gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)

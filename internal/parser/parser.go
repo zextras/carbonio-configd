@@ -63,6 +63,12 @@ func (p *parser) Parse(ctx context.Context, filepath string) (*config.MtaConfig,
 
 // ParseString parses zmconfigd.cf content from a string.
 func (p *parser) ParseString(ctx context.Context, content string) (*config.MtaConfig, error) {
+	// Mirror jylibs/mtaconfig.py load(): an empty config file is an error rather
+	// than a silently accepted zero-section config.
+	if content == "" {
+		return nil, fmt.Errorf("empty config file")
+	}
+
 	// Create a new lexer from content
 	lexer := NewLexer(ctx, strings.NewReader(content))
 	p.lexer = lexer
@@ -366,23 +372,46 @@ func (p *parser) parseRestart(section *config.MtaConfigSection) error {
 	return nil
 }
 
-// parseLdap parses an LDAP directive.
-func (p *parser) parseLdap(section *config.MtaConfigSection) error {
+// parseLdapDirective consumes an LDAP directive (`LDAP <key> <value>`) and
+// returns the key and value when the value is a LOCAL/MAPLOCAL lookup. Mirroring
+// jylibs/mtaconfig.py parseLdap, a directive of any other type (VAR, FILE,
+// literal) is consumed but reported as not recordable (ok=false). Shared by the
+// section and conditional LDAP parsers.
+func (p *parser) parseLdapDirective() (key, value string, ok bool, err error) {
 	p.advance() // skip LDAP
 
 	// Get key
 	if p.current.Type != TokenIdentifier {
-		return fmt.Errorf("expected LDAP key at line %d", p.current.Line)
+		return "", "", false, fmt.Errorf("expected LDAP key at line %d", p.current.Line)
 	}
 
-	key := p.current.Literal
+	key = p.current.Literal
 	p.advance()
 
 	// Get value
-	value := p.parseValue()
-	section.Ldap[key] = value
-
+	value = p.parseValue()
 	p.skipToNewline()
+
+	return key, value, isLdapLocalValue(value), nil
+}
+
+// isLdapLocalValue reports whether an LDAP directive value is a LOCAL or
+// MAPLOCAL lookup — the only types jylibs/mtaconfig.py records for LDAP writes.
+func isLdapLocalValue(value string) bool {
+	return strings.HasPrefix(value, ConfigTypeLOCAL+":") ||
+		strings.HasPrefix(value, ConfigTypeMAPLOCAL+":")
+}
+
+// parseLdap parses an LDAP directive within a section body.
+func (p *parser) parseLdap(section *config.MtaConfigSection) error {
+	key, value, ok, err := p.parseLdapDirective()
+	if err != nil {
+		return err
+	}
+
+	if ok {
+		section.Ldap[key] = value
+	}
 
 	return nil
 }
