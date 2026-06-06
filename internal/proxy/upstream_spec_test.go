@@ -238,3 +238,42 @@ func TestMakeUpstreamResolver_SkipsInvalid(t *testing.T) {
 		t.Errorf("resolver =\n%q\nwant\n%q (invalid server should be skipped)", out, want)
 	}
 }
+
+// TestResolveServerPort exercises all branches: fixed port, attribute lookup,
+// global config fallback, and zero default.
+func TestResolveServerPort(t *testing.T) {
+	gen := &Generator{
+		GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMap()},
+		ServerConfig: &config.ServerConfig{Data: config.NewConfigMap()},
+	}
+
+	t.Run("fixed port wins", func(t *testing.T) {
+		got := gen.resolveServerPort(nil, 8443, "")
+		if got != 8443 {
+			t.Errorf("got %d, want 8443", got)
+		}
+	})
+
+	t.Run("attribute port", func(t *testing.T) {
+		attrs := map[string]string{"zimbraMailPort": "7025"}
+		got := gen.resolveServerPort(attrs, 0, "zimbraMailPort")
+		if got != 7025 {
+			t.Errorf("got %d, want 7025", got)
+		}
+	})
+
+	t.Run("global config fallback", func(t *testing.T) {
+		gen.GlobalConfig.Data.Set("zimbraMailPort", "8025")
+		got := gen.resolveServerPort(nil, 0, "zimbraMailPort")
+		if got != 8025 {
+			t.Errorf("got %d, want 8025", got)
+		}
+	})
+
+	t.Run("zero default when nothing found", func(t *testing.T) {
+		got := gen.resolveServerPort(nil, 0, "noSuchAttr")
+		if got != 0 {
+			t.Errorf("got %d, want 0", got)
+		}
+	})
+}

@@ -1142,3 +1142,31 @@ func TestMakePostconfExec(t *testing.T) {
 		}
 	})
 }
+
+// TestRegisterLDAPCommands verifies that all expected LDAP-provisioning
+// commands are registered and wired to non-nil handler functions.
+func TestRegisterLDAPCommands(t *testing.T) {
+	r := &Registry{}
+	e := &CommandExecutor{}
+	r.RegisterLDAPCommands(e)
+
+	wantCommands := []string{cmdGACF, cmdGAMAU, cmdGARPB, cmdGARPU, cmdGS, cmdGSEnabled}
+	for _, name := range wantCommands {
+		cmd, ok := r.Commands[name]
+		if !ok {
+			t.Errorf("command %q not registered", name)
+			continue
+		}
+		if cmd == nil {
+			t.Errorf("command %q is nil", name)
+			continue
+		}
+		if cmd.Func == nil {
+			t.Errorf("command %q has nil Func", name)
+		}
+	}
+
+	if len(r.Commands) != len(wantCommands) {
+		t.Errorf("got %d registered commands, want %d", len(r.Commands), len(wantCommands))
+	}
+}
