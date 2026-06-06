@@ -231,10 +231,17 @@ var Registry = map[string]*ServiceDef{
 			"--config-file=" + confPath + "/freshclam.conf",
 			"--quiet", "-d", "--checks=12", "--foreground=true",
 		},
-		Detached:    true,
-		UseSDNotify: true,
-		PidFile:     pidDir + "/freshclam.pid",
-		ProcessName: svcFreshclam,
+		PidFile: pidDir + "/freshclam.pid",
+		// Path fragment, not the bare token "freshclam": the bare token matches
+		// any process whose argv references freshclam.conf (e.g. a transient
+		// config-rewrite), which would make ServiceStatus false-positive and make
+		// ServiceStart skip freshclam via the already-running short-circuit.
+		ProcessName: "/bin/freshclam",
+		// freshclam runs --foreground=true and never emits sd_notify READY=1, so
+		// it uses a pidfile-readiness CustomStart/CustomStop instead of
+		// UseSDNotify (which would burn the full timeout and fail the start).
+		CustomStart: freshclamCustomStart,
+		CustomStop:  freshclamCustomStop,
 	},
 	svcSaslauthd: {
 		Name:          svcSaslauthd,
@@ -265,15 +272,19 @@ var Registry = map[string]*ServiceDef{
 		ConfigRewrite: []string{svcAmavis, svcAntispam},
 	},
 	svcAntivirus: {
-		Name:          svcAntivirus,
-		DisplayName:   svcAntivirus,
-		SystemdUnits:  []string{unitAntivirus},
-		BinaryPath:    commonPath + "/sbin/clamd",
-		BinaryArgs:    []string{"--config-file=" + confPath + "/clamd.conf"},
-		Detached:      true,
-		PidFile:       pidDir + "/clamd.pid",
-		ProcessName:   "clamd",
-		UseSDNotify:   true,
+		Name:         svcAntivirus,
+		DisplayName:  svcAntivirus,
+		SystemdUnits: []string{unitAntivirus},
+		BinaryPath:   commonPath + "/sbin/clamd",
+		BinaryArgs:   []string{"--config-file=" + confPath + "/clamd.conf"},
+		PidFile:      pidDir + "/clamd.pid",
+		// Path fragment, not the bare token "clamd": the bare token matches any
+		// process whose argv references clamd.conf (e.g. a transient config-rewrite
+		// or freshclam helper), which would make ServiceStatus false-positive and
+		// make ServiceStart skip clamd via the already-running short-circuit.
+		ProcessName:   "/sbin/clamd",
+		CustomStart:   clamdCustomStart,
+		CustomStop:    clamdCustomStop,
 		ConfigRewrite: []string{svcAntivirus},
 		PreStart:      []Hook{clamdDirInit},
 		Dependencies:  []string{svcFreshclam},
@@ -311,7 +322,8 @@ var Registry = map[string]*ServiceDef{
 		// /usr/bin/carbonio-prometheus-nginx-exporter, whose argv
 		// contains "nginx" multiple times.
 		ProcessName:   "/sbin/nginx",
-		UseSDNotify:   true,
+		CustomStart:   nginxCustomStart,
+		CustomStop:    nginxCustomStop,
 		ConfigRewrite: []string{svcProxy},
 	},
 	svcMailbox: {

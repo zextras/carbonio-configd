@@ -217,20 +217,22 @@ func TestRegistryAntivirusLegacyFields(t *testing.T) {
 		t.Errorf("BinaryArgs[0] = %q, want %q", def.BinaryArgs[0], expectedArg)
 	}
 
-	// Detached should be true
-	if !def.Detached {
-		t.Error("Detached = false, want true")
-	}
-
 	// PidFile should be pidDir + "/clamd.pid"
 	expectedPidFile := pidDir + "/clamd.pid"
 	if def.PidFile != expectedPidFile {
 		t.Errorf("PidFile = %q, want %q", def.PidFile, expectedPidFile)
 	}
 
-	// UseSDNotify should be true
-	if !def.UseSDNotify {
-		t.Error("UseSDNotify = false, want true")
+	// clamd self-daemonizes and does not emit sd_notify READY=1, so it uses a
+	// pidfile-readiness CustomStart/CustomStop instead of UseSDNotify/Detached.
+	if def.CustomStart == nil {
+		t.Error("CustomStart = nil, want clamdCustomStart")
+	}
+	if def.CustomStop == nil {
+		t.Error("CustomStop = nil, want clamdCustomStop")
+	}
+	if def.UseSDNotify {
+		t.Error("UseSDNotify = true, want false (clamd does not emit READY=1)")
 	}
 
 	// ConfigRewrite should contain "antivirus"

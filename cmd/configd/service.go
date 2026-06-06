@@ -209,9 +209,16 @@ func (c *ServiceStatusCmd) Run() error {
 
 	fmt.Printf("%s is running.\n", def.DisplayName)
 
-	// Show systemd unit details
-	for _, unit := range def.SystemdUnits {
-		showUnitDetail(ctx, unit)
+	// In legacy (non-systemd) mode the systemd units may be absent or stale, so
+	// `systemctl show` would print a leftover ActiveEnterTimestamp from before
+	// the teardown. Derive PID/since from /proc instead, matching the live
+	// process configd actually spawned. Only consult systemctl in systemd mode.
+	if services.IsSystemdMode() {
+		for _, unit := range def.SystemdUnits {
+			showUnitDetail(ctx, unit)
+		}
+	} else if detail := serviceDetailFromProc(def); detail != "" {
+		fmt.Printf("  %s\n", detail)
 	}
 
 	return nil

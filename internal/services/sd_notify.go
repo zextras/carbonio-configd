@@ -152,7 +152,14 @@ func waitForSDNotify(ctx context.Context, conn *net.UnixConn, service string, ex
 			return ctx.Err()
 		case waitErr := <-exited:
 			// Child process exited before signaling READY=1. Fail immediately
-			// rather than waiting out the full deadline.
+			// rather than waiting out the full deadline. A nil waitErr means the
+			// process exited with status 0 (e.g. a daemon that forked a child
+			// and exited its parent) — avoid wrapping nil, which renders as
+			// "%!w(<nil>)".
+			if waitErr == nil {
+				return fmt.Errorf("%s exited during startup before signaling READY=1", service)
+			}
+
 			return fmt.Errorf("%s exited during startup before signaling READY=1: %w", service, waitErr)
 		default:
 		}
