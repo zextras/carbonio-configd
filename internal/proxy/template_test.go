@@ -679,6 +679,37 @@ func TestProcessEnablerLineIntEnabler(t *testing.T) {
 	}
 }
 
+// TestProcessEnablerLineUnexpectedType exercises the default type-switch
+// branch (L131-135) when an enabler variable holds a non-bool/non-string/non-int value.
+func TestProcessEnablerLineUnexpectedType(t *testing.T) {
+	cfg := &config.Config{BaseDir: "/tmp/test"}
+	gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewGenerator: %v", err)
+	}
+
+	// float64 is not handled by any explicit type case — falls to default
+	gen.Variables["mail.imaps.enabled"] = &Variable{
+		Keyword:   "mail.imaps.enabled",
+		ValueType: ValueTypeEnabler,
+		Value:     float64(3.14),
+	}
+
+	processor := NewTemplateProcessor(gen, "", "")
+
+	// The default branch treats the enabler as disabled, so the line should be
+	// commented out (same as a disabled bool/string/int(0) enabler).
+	line := "    ${mail.imaps.enabled}listen 993 ssl;"
+	result, err := processor.interpolateLine(context.Background(), line)
+	if err != nil {
+		t.Fatalf("interpolateLine: %v", err)
+	}
+	// Unexpected type: isEnabled remains false (zero-value), so line is commented out.
+	if !strings.HasPrefix(result, "#") && !strings.HasPrefix(result, "    #") {
+		t.Errorf("Expected commented-out line for unexpected enabler type, got: %q", result)
+	}
+}
+
 // TestProcessEnablerLineNotEnabler tests that a non-enabler variable in enabler position is ignored
 func TestProcessEnablerLineNotEnabler(t *testing.T) {
 	cfg := &config.Config{BaseDir: "/tmp/test"}

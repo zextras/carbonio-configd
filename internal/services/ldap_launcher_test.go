@@ -361,3 +361,20 @@ func TestStartThenProbe_CtxCancel(t *testing.T) {
 		t.Fatal("expected error from cancelled ctx")
 	}
 }
+
+// TestProbeLDAPReady_EmptyURLs verifies that an empty URL list causes an error.
+func TestProbeLDAPReady_EmptyURLs(t *testing.T) {
+	err := probeLDAPReady(context.Background(), []string{})
+	if err == nil {
+		t.Error("expected non-nil error for empty URL list")
+	}
+}
+
+// TestProbeLDAPReady_UnreachableURL verifies that an unreachable host returns
+// a non-nil error.
+func TestProbeLDAPReady_UnreachableURL(t *testing.T) {
+	err := probeLDAPReady(context.Background(), []string{"ldap://127.0.0.1:1"})
+	if err == nil {
+		t.Error("expected non-nil error for unreachable LDAP URL")
+	}
+}

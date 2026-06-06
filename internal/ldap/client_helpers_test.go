@@ -5,6 +5,7 @@
 package ldap
 
 import (
+	"context"
 	"testing"
 )
 
@@ -61,5 +62,31 @@ func TestServerHasService(t *testing.T) {
 					tt.serviceEnabled, tt.serviceName, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestQueryDomains_LDAPClientError verifies that QueryDomains returns a non-nil error
+// when the underlying LDAP client has no URLs configured.
+func TestQueryDomains_LDAPClientError(t *testing.T) {
+	c := &Client{} // no URLs → GetAllDomainsWithAttributes will fail
+	domains, err := c.QueryDomains(context.Background())
+	if err == nil {
+		t.Fatal("QueryDomains() with no URLs: expected error, got nil")
+	}
+	if domains != nil {
+		t.Fatalf("QueryDomains() with no URLs: expected nil slice, got %v", domains)
+	}
+}
+
+// TestQueryServers_LDAPClientError verifies that QueryServers returns a non-nil error
+// when the underlying LDAP client has no URLs configured.
+func TestQueryServers_LDAPClientError(t *testing.T) {
+	c := &Client{} // no URLs → GetAllServersWithAttributes will fail
+	servers, err := c.QueryServers(context.Background(), "mailbox")
+	if err == nil {
+		t.Fatal("QueryServers() with no URLs: expected error, got nil")
+	}
+	if servers != nil {
+		t.Fatalf("QueryServers() with no URLs: expected nil slice, got %v", servers)
 	}
 }

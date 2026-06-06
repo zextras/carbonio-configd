@@ -755,3 +755,57 @@ func TestLdap_ModifyAttributeBatch_WithNativeClient(t *testing.T) {
 		t.Fatal("ModifyAttributeBatch() expected native modify error with no URLs, got nil")
 	}
 }
+
+// TestLdap_RefreshMasterStatus_NotMasterConfig verifies that refreshMasterStatus
+// returns early without modifying IsMaster when LdapIsMaster is false.
+func TestLdap_RefreshMasterStatus_NotMasterConfig(t *testing.T) {
+	cfg := &config.Config{LdapIsMaster: false}
+	l := NewLdap(context.Background(), cfg)
+	l.IsMaster = false
+	l.refreshMasterStatus(context.Background())
+	if l.IsMaster {
+		t.Fatal("refreshMasterStatus() should not set IsMaster when LdapIsMaster=false")
+	}
+}
+
+// TestLdap_ApplyConfigModify_OlcSpSessionlogReadError verifies that a ReadAttribute
+// failure on attrOlcSpSessionlog causes applyConfigModify to skip the modify and
+// return nil.
+func TestLdap_ApplyConfigModify_OlcSpSessionlogReadError(t *testing.T) {
+	cfg := &config.Config{}
+	l := NewLdap(context.Background(), cfg)
+	l.ConfigClient = &Client{} // no URLs → ReadAttribute will fail
+	err := l.applyConfigModify(context.Background(), "cn=config", attrOlcSpSessionlog, "10")
+	if err != nil {
+		t.Fatalf("applyConfigModify() with olcSpSessionlog read error: want nil, got %v", err)
+	}
+}
+
+// TestLdap_ApplyConfigModify_NonSessionlogAttrReadError verifies that a ReadAttribute
+// failure on a non-olcSpSessionlog attribute causes applyConfigModify to attempt
+// ModifyAttribute, which also fails → non-nil error returned.
+func TestLdap_ApplyConfigModify_NonSessionlogAttrReadError(t *testing.T) {
+	cfg := &config.Config{}
+	l := NewLdap(context.Background(), cfg)
+	l.ConfigClient = &Client{} // no URLs → ReadAttribute and ModifyAttribute both fail
+	err := l.applyConfigModify(context.Background(), "cn=config", "olcLogLevel", "256")
+	if err == nil {
+		t.Fatal("applyConfigModify() non-sessionlog attr with no URLs: expected error, got nil")
+	}
+}
+
+// TestLdap_ExecuteBatchModifyInternal_NilConfigClient verifies that
+// executeBatchModifyInternal returns an error containing "config client not initialized"
+// when ConfigClient is nil.
+func TestLdap_ExecuteBatchModifyInternal_NilConfigClient(t *testing.T) {
+	cfg := &config.Config{}
+	l := NewLdap(context.Background(), cfg)
+	l.ConfigClient = nil
+	err := l.executeBatchModifyInternal(context.Background(), "cn=config", map[string]string{"olcLogLevel": "256"})
+	if err == nil {
+		t.Fatal("executeBatchModifyInternal() with nil ConfigClient: expected error, got nil")
+	}
+	if !contains(err.Error(), "config client not initialized") {
+		t.Fatalf("expected error to contain %q, got %q", "config client not initialized", err.Error())
+	}
+}

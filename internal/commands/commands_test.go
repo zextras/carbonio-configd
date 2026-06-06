@@ -1170,3 +1170,37 @@ func TestRegisterLDAPCommands(t *testing.T) {
 		t.Errorf("got %d registered commands, want %d", len(r.Commands), len(wantCommands))
 	}
 }
+
+// TestNewCommandExecutor_NilClient verifies NewCommandExecutor(nil) returns a non-nil executor.
+func TestNewCommandExecutor_NilClient(t *testing.T) {
+	e := NewCommandExecutor(nil)
+	if e == nil {
+		t.Fatal("NewCommandExecutor(nil) returned nil")
+	}
+}
+
+// TestNewRegistry_DefaultZextrasHome verifies NewRegistry("") falls back to the default
+// zextras home path and returns a non-nil registry.
+func TestNewRegistry_DefaultZextrasHome(t *testing.T) {
+	r := NewRegistry("")
+	if r == nil {
+		t.Fatal("NewRegistry(\"\") returned nil")
+	}
+}
+
+// TestExecuteWithContext_CancelledContext exercises the binary execution path when
+// the context is already cancelled. The command should complete (no panic) with
+// a non-zero exit code.
+func TestExecuteWithContext_CancelledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel before execution
+
+	cmd := &Command{
+		Name:    "cancelled-sleep",
+		Binary:  "sleep",
+		CmdArgs: []string{"10"},
+	}
+	exitCode, _, _ := cmd.ExecuteWithContext(ctx)
+	// A cancelled context causes a non-zero exit; just ensure no panic.
+	_ = exitCode
+}

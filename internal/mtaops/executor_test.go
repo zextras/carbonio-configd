@@ -492,3 +492,56 @@ func findSubstring(s, substr string) bool {
 	}
 	return false
 }
+
+// TestExecutePostconfdBatch_NilOps verifies ExecutePostconfdBatch returns nil for nil ops.
+func TestExecutePostconfdBatch_NilOps(t *testing.T) {
+	e := NewExecutor("/opt/zextras", nil)
+	err := e.ExecutePostconfdBatch(context.Background(), nil)
+	if err != nil {
+		t.Errorf("ExecutePostconfdBatch(nil) = %v, want nil", err)
+	}
+}
+
+// TestHandleEmptyMapfileData_RemoveError covers the os.Remove error branch in
+// handleEmptyMapfileData (line 197-199): the file exists but cannot be removed
+// because the parent directory is read-only.
+func TestHandleEmptyMapfileData_RemoveError(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root bypasses directory permission checks")
+	}
+
+	mockLdap := &mockLdapManager{}
+	tmpDir := t.TempDir()
+
+	// Create a sub-directory to hold the file; we'll make it read-only so
+	// os.Remove inside it fails.
+	subDir := filepath.Join(tmpDir, "protected")
+	if err := os.Mkdir(subDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	testFilePath := filepath.Join(subDir, "stale.pem")
+	if err := os.WriteFile(testFilePath, []byte("stale"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Make the parent dir read-only so os.Remove fails.
+	if err := os.Chmod(subDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(subDir, 0o755) //nolint:errcheck // best-effort cleanup
+
+	ex := NewExecutor(tmpDir, mockLdap).(*executor)
+	ex.mappedFiles["staleKey"] = testFilePath
+
+	op := MapfileOperation{
+		Key:        "staleKey",
+		IsLocal:    false,
+		Base64Data: "", // empty => handleEmptyMapfileData
+	}
+
+	err := ex.ExecuteMapfile(context.Background(), op)
+	if err == nil {
+		t.Error("expected an error when os.Remove fails, got nil")
+	}
+}

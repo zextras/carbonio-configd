@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/ldap"
 )
 
 // newSpecTestGenerator builds a Generator with the upstream cache pre-populated
@@ -276,4 +277,142 @@ func TestResolveServerPort(t *testing.T) {
 			t.Errorf("got %d, want 0", got)
 		}
 	})
+}
+func TestUpstreamHasServers_ErrorPath(t *testing.T) {
+	g := &Generator{
+		GlobalConfig:  &config.GlobalConfig{Data: config.NewConfigMap()},
+		ServerConfig:  &config.ServerConfig{Data: config.NewConfigMap()},
+		upstreamCache: &upstreamQueryCache{serverAttrsByHost: map[string]map[string]string{}},
+	}
+	spec := &upstreamSpec{services: []string{"mailbox"}, fixedPort: 8080}
+	result := g.upstreamHasServers(context.Background(), spec)
+	if result {
+		t.Errorf("expected false (no servers), got true")
+	}
+}
+
+func TestMakeUpstreamResolver_ErrorReturnsEmpty(t *testing.T) {
+	g := newSpecTestGenerator(map[string]map[string]string{})
+	spec := &upstreamSpec{services: []string{"mailbox"}, fixedPort: 8080}
+	resolver := g.makeUpstreamResolver(spec)
+	val, err := resolver(context.Background())
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	s, _ := val.(string)
+	if s != "" {
+		t.Errorf("expected empty string, got %q", s)
+	}
+}
+
+func TestResolveUpstreamPortAttr_FixedPort(t *testing.T) {
+	g := newSpecTestGenerator(nil)
+	spec := &upstreamSpec{fixedPort: 7025, portAttrKey: "zimbraMailPort", portAttrDefault: "25"}
+	result := g.resolveUpstreamPortAttr(spec)
+	if result != "" {
+		t.Errorf("expected empty string, got %q", result)
+	}
+}
+
+func TestResolveUpstreamPortAttr_GlobalConfigValue(t *testing.T) {
+	g := newSpecTestGenerator(nil)
+	g.GlobalConfig.Data.Set("zimbraMailPort", "8025")
+	spec := &upstreamSpec{fixedPort: 0, portAttrKey: "zimbraMailPort", portAttrDefault: "25"}
+	result := g.resolveUpstreamPortAttr(spec)
+	if result != "8025" {
+		t.Errorf("expected 8025, got %q", result)
+	}
+}
+
+func TestGetServerAttrsByHostname_NilLdapClient(t *testing.T) {
+	g := &Generator{
+		GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMap()},
+		ServerConfig: &config.ServerConfig{Data: config.NewConfigMap()},
+	}
+	result, err := g.getServerAttrsByHostname(context.Background())
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+	if len(result) != 0 {
+		t.Errorf("expected empty map, got %d entries", len(result))
+	}
+}
+
+func TestGetServerAttrsByHostname_CacheHit(t *testing.T) {
+	servers := map[string]map[string]string{
+		"srv1": {"zimbraServiceHostname": "srv1.example.com"},
+	}
+	g := newSpecTestGenerator(servers)
+	result, err := g.getServerAttrsByHostname(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result) != 1 {
+		t.Errorf("want 1 server, got %d", len(result))
+	}
+}
+
+// TestGetServerAttrsByHostname_LDAPQueryError verifies the LDAP error path:
+// when LdapClient and NativeClient are set but the LDAP connection fails,
+// getServerAttrsByHostname returns nil map and a non-nil error.
+func TestGetServerAttrsByHostname_LDAPQueryError(t *testing.T) {
+	// New zero-value Ldap manager with a zero-value NativeClient.
+	// zero-value Client has no URLs → GetAllServersWithAttributes fails immediately.
+	l := ldap.NewLdap(context.Background(), &config.Config{})
+	l.NativeClient = new(ldap.Client) // zero-value: no URLs → query will fail
+
+	g := &Generator{
+		GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMap()},
+		ServerConfig: &config.ServerConfig{Data: config.NewConfigMap()},
+		LdapClient:   l,
+		// upstreamCache is nil — forces the LDAP path
+	}
+
+	_, err := g.getServerAttrsByHostname(context.Background())
+	if err == nil {
+		t.Error("expected error from failing LDAP query, got nil")
+	}
+}
+
+// TestMakeUpstreamResolver_LDAPError verifies the error-fallback path in the
+// makeUpstreamResolver closure: when upstreamCandidates fails (LDAP error),
+// the resolver returns ("", nil) instead of propagating the error.
+func TestMakeUpstreamResolver_LDAPError(t *testing.T) {
+	l := ldap.NewLdap(context.Background(), &config.Config{})
+	l.NativeClient = new(ldap.Client) // zero-value → LDAP query fails
+
+	g := &Generator{
+		GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMap()},
+		ServerConfig: &config.ServerConfig{Data: config.NewConfigMap()},
+		LdapClient:   l,
+	}
+
+	spec := &upstreamSpec{services: []string{"mailbox"}, fixedPort: 8080}
+	resolver := g.makeUpstreamResolver(spec)
+	val, err := resolver(context.Background())
+	if err != nil {
+		t.Errorf("expected nil error (fallback on LDAP error), got %v", err)
+	}
+	s, _ := val.(string)
+	if s != "" {
+		t.Errorf("expected empty string on LDAP error, got %q", s)
+	}
+}
+
+// TestUpstreamHasServers_LDAPError verifies upstreamHasServers returns false
+// when upstreamCandidates returns an error (LDAP failure).
+func TestUpstreamHasServers_LDAPError(t *testing.T) {
+	l := ldap.NewLdap(context.Background(), &config.Config{})
+	l.NativeClient = new(ldap.Client)
+
+	g := &Generator{
+		GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMap()},
+		ServerConfig: &config.ServerConfig{Data: config.NewConfigMap()},
+		LdapClient:   l,
+	}
+
+	spec := &upstreamSpec{services: []string{"mailbox"}, fixedPort: 8080}
+	if g.upstreamHasServers(context.Background(), spec) {
+		t.Error("expected false when LDAP query fails, got true")
+	}
 }

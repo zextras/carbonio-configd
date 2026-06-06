@@ -5,11 +5,14 @@
 package ldap
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
 
-	"github.com/go-ldap/ldap/v3"
+	ldap "github.com/go-ldap/ldap/v3"
+	errs "github.com/zextras/carbonio-configd/internal/errors"
 )
 
 func TestNewClient(t *testing.T) {
@@ -469,4 +472,33 @@ func TestNextRetryDelay(t *testing.T) {
 	if got != 5*time.Millisecond {
 		t.Errorf("nextRetryDelay(3ms) = %v, want 5ms (cap)", got)
 	}
+}
+
+// TestClient_HandleOperationError_ConnectionError_NilConn verifies that a connection
+// error with a nil conn wraps ErrLDAPUnhealthyConnection.
+func TestClient_HandleOperationError_ConnectionError_NilConn(t *testing.T) {
+	c := &Client{}
+	origErr := fmt.Errorf("connection error: %w", context.DeadlineExceeded)
+	result := c.handleOperationError(nil, origErr)
+	if !errors.Is(result, errs.ErrLDAPUnhealthyConnection) {
+		t.Fatalf("handleOperationError() with connection error: want ErrLDAPUnhealthyConnection, got %v", result)
+	}
+}
+
+// TestClient_HandleOperationError_NonConnectionError verifies that a non-connection
+// error is returned as-is (conn nil is a no-op returnConnection).
+func TestClient_HandleOperationError_NonConnectionError(t *testing.T) {
+	c := &Client{}
+	origErr := fmt.Errorf("no such object")
+	result := c.handleOperationError(nil, origErr)
+	if result != origErr {
+		t.Fatalf("handleOperationError() non-connection error: want original error, got %v", result)
+	}
+}
+
+// TestClient_ReturnConnection_NilConn verifies that returnConnection with a nil conn
+// does not panic.
+func TestClient_ReturnConnection_NilConn(t *testing.T) {
+	c := &Client{}
+	c.returnConnection(nil) // must not panic
 }

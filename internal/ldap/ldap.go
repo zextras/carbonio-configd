@@ -67,13 +67,14 @@ const (
 	ldapCnConfig       = "cn=config"
 	ldapDB3MdbCnConfig = "olcDatabase={3}mdb,cn=config"
 	ldapDB2MdbCnConfig = "olcDatabase={2}mdb,cn=config"
+	olcLogLevelAttr    = "olcLogLevel"
 )
 
 // keymap mirrors the keymap in jylibs/ldap.py
 //
 //nolint:lll
 var keymap = map[string]LdapKeyMapEntry{
-	keyLDAPCommonLoglevel:        {"olcLogLevel", ldapCnConfig, false, "%s"},
+	keyLDAPCommonLoglevel:        {olcLogLevelAttr, ldapCnConfig, false, "%s"},
 	keyLDAPCommonThreads:         {"olcThreads", ldapCnConfig, false, "%s"},
 	keyLDAPCommonToolthreads:     {"olcToolThreads", ldapCnConfig, false, "%s"},
 	keyLDAPCommonRequireTLS:      {"olcSecurity", ldapCnConfig, false, "ssf=%s"},

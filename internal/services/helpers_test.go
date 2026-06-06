@@ -259,3 +259,53 @@ func TestWaitForProcessExit_ContextCancelled(t *testing.T) {
 		t.Error("expected false when context cancelled while process is alive")
 	}
 }
+
+// TestGracefulStopViaPidfile_SigTermEsrch verifies that when the target process
+// does not exist (ESRCH / ErrProcessDone on SIGTERM), the pidfile is removed
+// and nil is returned.
+func TestGracefulStopViaPidfile_SigTermEsrch(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: may invoke real system commands")
+	}
+	tmp := t.TempDir()
+	pidFile := filepath.Join(tmp, "gone.pid")
+	// PID 2147483647 is the max int32 and will never be a live process.
+	if err := os.WriteFile(pidFile, []byte("2147483647\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := gracefulStopViaPidfile(context.Background(), pidFile, "svc", time.Second)
+	if err != nil {
+		t.Errorf("expected nil for non-existent pid, got: %v", err)
+	}
+	if _, statErr := os.Stat(pidFile); !os.IsNotExist(statErr) {
+		t.Error("expected pidfile to be removed after ESRCH")
+	}
+}
+
+// TestGracefulStopViaPidfile_KillEscalation verifies that a process ignoring
+// SIGTERM is escalated to SIGKILL after the timeout expires.
+func TestGracefulStopViaPidfile_KillEscalation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: spawns a child process")
+	}
+	// Shell that explicitly ignores SIGTERM.
+	cmd := exec.Command("/bin/sh", "-c", "trap '' TERM; sleep 60")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start child: %v", err)
+	}
+	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+
+	tmp := t.TempDir()
+	pidFile := filepath.Join(tmp, "stubborn.pid")
+	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Very short timeout so SIGKILL escalation is triggered quickly.
+	err := gracefulStopViaPidfile(context.Background(), pidFile, "svc", 100*time.Millisecond)
+	if err != nil {
+		t.Fatalf("expected nil after SIGKILL escalation, got: %v", err)
+	}
+	// Reap the now-dead process.
+	_ = cmd.Wait()
+}
