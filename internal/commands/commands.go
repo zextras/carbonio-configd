@@ -35,16 +35,31 @@ const (
 	errLDAPNotInitialized = "native LDAP client not initialized"
 )
 
+// provisioningLDAP is the subset of *internal/ldap.Client used by the
+// LDAP-backed provisioning commands. An interface so tests can stub the
+// LDAP round-trips; production passes the concrete client unchanged.
+type provisioningLDAP interface {
+	GetServerConfig(hostname string) (map[string]string, error)
+	GetGlobalConfig() (map[string]string, error)
+	GetAllServersWithAttributes() (map[string]map[string]string, error)
+}
+
 // CommandExecutor holds an LDAP client and provides methods for
 // executing LDAP-dependent provisioning commands. This replaces
 // the former package-level nativeLdapClient global variable.
 type CommandExecutor struct {
-	ldapClient *ldap.Client
+	ldapClient provisioningLDAP
 }
 
 // NewCommandExecutor creates a new CommandExecutor with the given LDAP client.
 // The client may be nil; LDAP-dependent commands will return an error in that case.
 func NewCommandExecutor(client *ldap.Client) *CommandExecutor {
+	if client == nil {
+		// Keep the interface itself nil so `ldapClient == nil` guards work;
+		// a typed-nil *ldap.Client inside the interface would defeat them.
+		return &CommandExecutor{}
+	}
+
 	return &CommandExecutor{ldapClient: client}
 }
 
@@ -435,7 +450,7 @@ func buildBackendURL(attrs map[string]string) (string, bool) {
 	var port string
 
 	switch strings.ToLower(mailMode) {
-	case "http", "mixed", "both":
+	case mailModeHTTP, "mixed", "both":
 		port = attrs[attrZimbraMailPort]
 		if port == "" {
 			port = defaultMailPort

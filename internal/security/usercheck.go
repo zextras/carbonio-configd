@@ -19,7 +19,7 @@ const RequiredUser = "zextras"
 // CheckUserPermissions verifies that configd is running strictly as the zextras user.
 // Root is not accepted. Returns an error for any other user.
 func CheckUserPermissions() error {
-	currentUser, err := user.Current()
+	currentUser, err := currentUserFn()
 	if err != nil {
 		return fmt.Errorf("failed to get current user: %w", err)
 	}
@@ -45,7 +45,12 @@ func MustCheckUserPermissions() error {
 	return nil
 }
 
+// currentUserFn resolves the current OS user. It is a variable so tests can
+// exercise both the zextras and non-zextras branches regardless of the user
+// actually running the test binary.
+var currentUserFn = user.Current
+
 // getCurrentUser returns the current user information.
 func getCurrentUser() (*user.User, error) {
-	return user.Current()
+	return currentUserFn()
 }

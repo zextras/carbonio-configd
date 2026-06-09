@@ -439,8 +439,8 @@ func (g *Generator) writeFile(ctx context.Context, path string, content []byte) 
 		return fmt.Errorf("failed to close temp file: %w", err)
 	}
 
-	// Set proper permissions (0644)
-	if err := os.Chmod(tempPath, 0o644); err != nil {
+	// Set proper permissions (0644): nginx config must be world-readable for the nginx worker user
+	if err := os.Chmod(tempPath, 0o644); err != nil { //nolint:gosec // G302: nginx must read the generated config
 		return fmt.Errorf("failed to set permissions: %w", err)
 	}
 

@@ -29,6 +29,9 @@ const (
 	defaultMailSSLPort = "0"    // zimbraMailSSLPort
 )
 
+// mailModeHTTP is the plaintext zimbraMailMode value selecting zimbraMailPort.
+const mailModeHTTP = "http"
+
 // Command names
 const (
 	cmdAmavis      = "amavis"

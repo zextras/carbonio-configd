@@ -20,8 +20,21 @@ import (
 	"strings"
 
 	"github.com/go-ldap/ldap/v3"
+)
 
-	carboldap "github.com/zextras/carbonio-configd/internal/ldap"
+// LDAPClient is the subset of *internal/ldap.Client used by the mail-mode
+// flow. Declared as an interface so tests can stub LDAP without a server;
+// production callers keep passing the concrete client unchanged.
+type LDAPClient interface {
+	GetEntry(dn string, attributes []string) (*ldap.Entry, error)
+	Search(baseDN, filter string, attributes []string, scope int) (*ldap.SearchResult, error)
+	ModifyAttribute(dn, attribute, value string) error
+}
+
+// LDAP attribute names used by the mail-mode validation flow.
+const (
+	attrReverseProxyMailMode = "zimbraReverseProxyMailMode"
+	attrReverseProxySSLToUp  = "zimbraReverseProxySSLToUpstreamEnabled"
 )
 
 // Mode represents a valid zimbraMailMode value.
@@ -88,7 +101,7 @@ func ServerBackendDN(hostname, baseDN string) string {
 // reverse-proxy lookup target (zimbraReverseProxyLookupTarget=TRUE). The legacy
 // `zmprov garpb` enumerates servers with this attribute; we check the single
 // local entry since that is all the validation flow needs.
-func IsReverseProxyBackend(c *carboldap.Client, hostname string) (bool, error) {
+func IsReverseProxyBackend(c LDAPClient, hostname string) (bool, error) {
 	dn := ServerBackendDN(hostname, zimbraBaseDN)
 
 	entry, err := c.GetEntry(dn, []string{"zimbraReverseProxyLookupTarget"})
@@ -101,7 +114,7 @@ func IsReverseProxyBackend(c *carboldap.Client, hostname string) (bool, error) {
 
 // EnumerateProxies returns the cn values of every server that has the proxy
 // service enabled (zimbraServiceEnabled=proxy).
-func EnumerateProxies(c *carboldap.Client) ([]string, error) {
+func EnumerateProxies(c LDAPClient) ([]string, error) {
 	filter := "(&(objectClass=zimbraServer)(zimbraServiceEnabled=proxy))"
 
 	res, err := c.Search("cn=servers,cn=zimbra", filter, []string{"cn"}, ldap.ScopeSingleLevel)
@@ -122,7 +135,7 @@ func EnumerateProxies(c *carboldap.Client) ([]string, error) {
 // GetProxiesForHost returns the proxies specifically designated for `host`
 // (via zimbraReverseProxyAvailableLookupTargets). If none are designated,
 // it falls back to every proxy in the cluster — mirroring the legacy script.
-func GetProxiesForHost(c *carboldap.Client, host string) ([]string, error) {
+func GetProxiesForHost(c LDAPClient, host string) ([]string, error) {
 	filter := fmt.Sprintf(
 		"(&(objectClass=zimbraServer)(zimbraReverseProxyAvailableLookupTargets=*%s*))",
 		ldap.EscapeFilter(host),
@@ -149,12 +162,12 @@ func GetProxiesForHost(c *carboldap.Client, host string) ([]string, error) {
 
 // ReadProxySettings loads zimbraReverseProxyMailMode and
 // zimbraReverseProxySSLToUpstreamEnabled from a proxy server entry.
-func ReadProxySettings(c *carboldap.Client, proxy string) (*ProxySettings, error) {
+func ReadProxySettings(c LDAPClient, proxy string) (*ProxySettings, error) {
 	dn := ServerBackendDN(proxy, zimbraBaseDN)
 
 	entry, err := c.GetEntry(dn, []string{
-		"zimbraReverseProxyMailMode",
-		"zimbraReverseProxySSLToUpstreamEnabled",
+		attrReverseProxyMailMode,
+		attrReverseProxySSLToUp,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("read proxy settings for %s: %w", proxy, err)
@@ -162,10 +175,10 @@ func ReadProxySettings(c *carboldap.Client, proxy string) (*ProxySettings, error
 
 	s := &ProxySettings{
 		Proxy:    proxy,
-		MailMode: strings.ToLower(entry.GetAttributeValue("zimbraReverseProxyMailMode")),
+		MailMode: strings.ToLower(entry.GetAttributeValue(attrReverseProxyMailMode)),
 	}
 
-	sslup := entry.GetAttributeValue("zimbraReverseProxySSLToUpstreamEnabled")
+	sslup := entry.GetAttributeValue(attrReverseProxySSLToUp)
 	if sslup != "" {
 		s.SSLToUpstreamValid = true
 		s.SSLToUpstreamTrue = strings.EqualFold(sslup, "TRUE")
@@ -223,7 +236,7 @@ func ValidateMode(requested Mode, s *ProxySettings) error {
 }
 
 // SetMailMode writes zimbraMailMode on the server entry for hostname.
-func SetMailMode(c *carboldap.Client, hostname string, mode Mode) error {
+func SetMailMode(c LDAPClient, hostname string, mode Mode) error {
 	dn := ServerBackendDN(hostname, zimbraBaseDN)
 
 	if err := c.ModifyAttribute(dn, "zimbraMailMode", string(mode)); err != nil {
