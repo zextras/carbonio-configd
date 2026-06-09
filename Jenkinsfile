@@ -54,8 +54,17 @@ pipeline {
             when { expression { params.SKIP_TEST != true } }
             steps {
                 container('golang') {
-                    sh 'go run gotest.tools/gotestsum@latest --format testname --junitfile tests.xml -- -coverprofile=coverage.out ./...'
+                    sh 'go run gotest.tools/gotestsum@latest --format testname --junitfile tests.xml -- -race -coverprofile=coverage.out ./...'
                     junit allowEmptyResults: false, checksName: 'Tests', testResults: 'tests.xml'
+                }
+            }
+        }
+
+        stage('Vulnerability scan') {
+            when { expression { params.SKIP_TEST != true } }
+            steps {
+                container('golang') {
+                    sh 'go run golang.org/x/vuln/cmd/govulncheck@latest ./...'
                 }
             }
         }
@@ -66,11 +75,16 @@ pipeline {
                     script {
                         scannerHome = tool 'SonarScanner'
                     }
+                    // Non-blocking run to produce the checkstyle report for SonarQube
                     sh 'golangci-lint run ./... --issues-exit-code 0 --output.checkstyle.path linter.out'
                 }
                 withSonarQubeEnv(credentialsId: 'sonarqube-user-token',
                     installationName: 'SonarQube instance') {
                     sh "${scannerHome}/bin/sonar-scanner"
+                }
+                container('golangci-lint') {
+                    // Blocking gate: fail the build on any lint issue (cached, so this is fast)
+                    sh 'golangci-lint run ./...'
                 }
             }
         }

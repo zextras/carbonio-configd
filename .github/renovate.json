@@ -1,4 +1,8 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["github>zextras/infra-renovate-config"]
+  "extends": ["github>zextras/infra-renovate-config"],
+  "gomod": {
+    "enabled": true
+  },
+  "postUpdateOptions": ["gomodTidy"]
 }
