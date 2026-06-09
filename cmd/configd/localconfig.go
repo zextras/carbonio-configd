@@ -14,8 +14,14 @@ import (
 
 const (
 	errFmt     = "Error: %v\n"
+	modePlain  = "plain"
+	modeShell  = "shell"
 	modeExport = "export"
+	modeNokey  = "nokey"
 )
+
+// lcKeyLDAPRootPassword is the localconfig key holding the LDAP root password.
+const lcKeyLDAPRootPassword = "ldap_root_password"
 
 // LocalconfigCmd handles the "configd localconfig" subcommand.
 type LocalconfigCmd struct {
@@ -110,7 +116,7 @@ type localconfigOpts struct {
 // dangerousKeys lists keys that require -force to edit.
 var dangerousKeys = map[string]bool{
 	lcKeyZimbraLDAPPassword:                true,
-	"ldap_root_password":                   true,
+	lcKeyLDAPRootPassword:                  true,
 	"zimbra_mysql_password":                true,
 	"mysql_root_password":                  true,
 	lcKeyZimbraLDAPUserDN:                  true,
@@ -236,13 +242,13 @@ func filterKeys(config map[string]string, opts *localconfigOpts) map[string]stri
 
 func writeOutput(config map[string]string, opts *localconfigOpts) {
 	switch opts.mode {
-	case "plain":
+	case modePlain:
 		localconfig.FormatPlain(os.Stdout, config)
-	case "shell":
+	case modeShell:
 		localconfig.FormatShell(os.Stdout, config)
 	case modeExport:
 		localconfig.FormatExport(os.Stdout, config)
-	case "nokey":
+	case modeNokey:
 		localconfig.FormatNokey(os.Stdout, config, opts.keys)
 	case outputFormatXML:
 		if err := localconfig.FormatXML(os.Stdout, config); err != nil {

@@ -64,7 +64,7 @@ func mailboxCustomStart(ctx context.Context, def *ServiceDef) error {
 	// Pre-create gc.log with correct permissions (Java needs write access)
 	gcLog := logPath + "/gc.log"
 	if _, statErr := os.Stat(gcLog); os.IsNotExist(statErr) {
-		if gcFd, createErr := os.OpenFile(gcLog, os.O_CREATE|os.O_WRONLY, 0o644); createErr == nil {
+		if gcFd, createErr := os.OpenFile(gcLog, os.O_CREATE|os.O_WRONLY, 0o640); createErr == nil {
 			_ = gcFd.Close()
 		}
 	}

@@ -57,7 +57,7 @@ func NewManager() *Manager {
 // IsActive checks if a systemd service is active.
 func (m *Manager) IsActive(ctx context.Context, service string) (bool, error) {
 	ctx = logger.ContextWithComponent(ctx, "systemd")
-	cmd := exec.CommandContext(ctx, "systemctl", "is-active", service)
+	cmd := exec.CommandContext(ctx, "systemctl", "is-active", service) //nolint:gosec // fixed binary, unit from registry
 	output, err := cmd.Output()
 	outputStr := strings.TrimSpace(string(output))
 
@@ -81,7 +81,7 @@ func (m *Manager) IsActive(ctx context.Context, service string) (bool, error) {
 // IsEnabled checks if a systemd unit is enabled.
 func (m *Manager) IsEnabled(ctx context.Context, unit string) bool {
 	ctx = logger.ContextWithComponent(ctx, "systemd")
-	cmd := exec.CommandContext(ctx, "systemctl", "is-enabled", unit)
+	cmd := exec.CommandContext(ctx, "systemctl", "is-enabled", unit) //nolint:gosec // fixed binary, unit from registry
 	err := cmd.Run()
 
 	return err == nil

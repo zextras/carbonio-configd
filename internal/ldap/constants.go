@@ -6,6 +6,7 @@ package ldap
 
 const (
 	attrZimbraServiceEnabled         = "zimbraServiceEnabled"
+	attrZimbraDomainName             = "zimbraDomainName"
 	keyLDAPCommonLoglevel            = "ldap_common_loglevel"
 	keyLDAPCommonThreads             = "ldap_common_threads"
 	keyLDAPCommonToolthreads         = "ldap_common_toolthreads"
