@@ -47,8 +47,12 @@ TasksMax=256
 OOMScoreAdjust=-500
 
 # ── Security: Filesystem ──────────────────────────────────────────────
-ProtectSystem=strict
-ReadWritePaths=/opt/zextras/conf /opt/zextras/log /opt/zextras/data /opt/zextras/common/conf /run/carbonio
+#ProtectSystem=strict
+#ReadWritePaths=/opt/zextras/conf /opt/zextras/log /opt/zextras/data /opt/zextras/common/conf /run/carbonio
+ProtectSystem=yes
+ReadOnlyPaths=/usr
+ReadOnlyPaths=/boot
+ReadOnlyPaths=/efi
 ProtectHome=yes
 PrivateTmp=yes
 UMask=0027
