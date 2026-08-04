@@ -190,6 +190,17 @@ linters:
           - wastedassign
           - whitespace
 
+      # internal/localconfig/lcdefaults.go is a line-for-line transcription of
+      # the 619 KnownKey defaults in carbonio-mailbox LC.java. goconst would
+      # have us hoist repeated literals like "true" or "/opt/zextras" into
+      # constants and lll trips on the long Java defaults (mailboxd_java_options
+      # is a single 650-char value); both would obscure the correspondence with
+      # LC.java that makes the table auditable.
+      - path: "^internal/localconfig/lcdefaults\\.go$"
+        linters:
+          - goconst
+          - lll
+
       # Narrow, documented exclusions for *_test.go files.
       # Rationale:
       #   - cyclop/gocyclo/nestif: table-driven subtests often exceed

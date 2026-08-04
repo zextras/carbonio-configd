@@ -66,7 +66,7 @@ func TestGeneratePassword_UsesCharset(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// With 1000 chars from a ~90 char charset, we should see variety
+	// With 1000 chars from a 64 char charset, we should see variety
 	unique := make(map[byte]bool)
 	for i := range len(pw) {
 		unique[pw[i]] = true
@@ -75,5 +75,25 @@ func TestGeneratePassword_UsesCharset(t *testing.T) {
 	// Should have at least 20 unique characters in 1000 random picks
 	if len(unique) < 20 {
 		t.Errorf("expected diverse charset usage, only got %d unique chars", len(unique))
+	}
+}
+
+// TestGeneratePassword_ShellSafe guards the contract that broke zmmyinit: the
+// generated value is interpolated unquoted into `su - zextras -c "..."` by
+// several libexec scripts, so it must contain nothing a shell would treat as
+// syntax.
+func TestGeneratePassword_ShellSafe(t *testing.T) {
+	pw, err := GeneratePassword(4096)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := range len(pw) {
+		c := pw[i]
+
+		alnum := (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+		if !alnum && c != '_' && c != '.' {
+			t.Fatalf("password contains shell-unsafe byte %q: %q", c, pw)
+		}
 	}
 }
