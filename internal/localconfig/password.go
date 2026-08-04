@@ -10,11 +10,19 @@ import (
 	"math/big"
 )
 
-// passwordCharset defines the characters used for random password generation.
-const passwordCharset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()-_=+[]{}|;:,.<>?"
+// passwordCharset is the alphabet used for random password generation. It is
+// the 64-entry ALPHABET of the Java com.zimbra.common.util.RandomPassword,
+// which "zmlocalconfig -r" used before configd took over the localconfig CLI.
+//
+// The set MUST stay free of shell metacharacters: callers such as
+// /opt/zextras/libexec/zmmyinit interpolate the generated value straight into
+// `su - zextras -c "... zmmypasswd $pw"`, so a password containing `(`, `&`,
+// `}` or `>` aborts the caller with a bash syntax error instead of setting the
+// password.
+const passwordCharset = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_."
 
 // GeneratePassword creates a cryptographically secure random password
-// of the given length using alphanumeric and special characters.
+// of the given length using passwordCharset.
 func GeneratePassword(length int) (string, error) {
 	if length <= 0 {
 		return "", fmt.Errorf("password length must be positive, got %d", length)
