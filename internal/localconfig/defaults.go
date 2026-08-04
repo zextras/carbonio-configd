@@ -4,82 +4,22 @@
 
 package localconfig
 
-// defaultMailboxdJavaOptions is the default value for mailboxd_java_options,
-// extracted as a constant to avoid a long map literal line.
-// This must match the Java LocalConfigCLI default exactly.
-const defaultMailboxdJavaOptions = "" +
-	"-server" +
-	" -Dhttps.protocols=TLSv1.2,TLSv1.3" +
-	" -Djdk.tls.client.protocols=TLSv1.2,TLSv1.3" +
-	" -Djava.awt.headless=true" +
-	" -Djava.net.preferIPv4Stack=true" +
-	" -Dsun.net.inetaddr.ttl=${networkaddress_cache_ttl}" +
-	" -Dorg.apache.jasper.compiler.disablejsr199=true" +
-	" -XX:+UseG1GC" +
-	" -XX:SoftRefLRUPolicyMSPerMB=1" +
-	" -XX:+UnlockExperimentalVMOptions" +
-	" -XX:G1NewSizePercent=15" +
-	" -XX:G1MaxNewSizePercent=45" +
-	" -XX:-OmitStackTraceInFastThrow" +
-	" -verbose:gc" +
-	" -Xlog:gc*=info,safepoint=info:file=/opt/zextras/log/gc.log:time:filecount=20,filesize=10m" +
-	" -Djava.security.egd=file:/dev/./urandom" +
-	" --add-opens java.base/java.lang=ALL-UNNAMED"
+import "maps"
 
-// defaultZmjavaOptions is the default value for zimbra_zmjava_options.
-const defaultZmjavaOptions = "" +
-	"-Xmx256m" +
-	" -Dhttps.protocols=TLSv1.2,TLSv1.3" +
-	" -Djdk.tls.client.protocols=TLSv1.2,TLSv1.3" +
-	" -Djava.net.preferIPv4Stack=true"
-
-// Defaults contains the hardcoded default values for localconfig keys,
-// matching the Java LocalConfigCLI behavior. Only keys consumed by
-// systemd-envscript.sh and configd itself are included here — not all ~600
-// keys from the Java implementation.
+// Defaults holds the default value for every known local-config key. It is the
+// Go equivalent of the KnownKey registry in the Java LC class and the fallback
+// consulted by MergeDefaults for keys absent from localconfig.xml.
 //
-// Values may contain ${variable} references that are resolved by
-// Interpolate after merging with XML overrides.
-var Defaults = map[string]string{
-	// Core paths
-	lcKeyZimbraHome:         defaultBaseDir,
-	lcKeyZimbraLogDirectory: defaultLogDir,
-	"mailboxd_directory":    "${zimbra_home}/mailboxd",
+// The contents come from lcDefaults (a verbatim port of LC.java) so that
+// "configd localconfig" is a true drop-in for the retired LocalConfigCLI.
+var Defaults = buildDefaults()
 
-	// Logging
-	"zimbra_log4j_properties": "${zimbra_home}/conf/log4j.properties",
+// buildDefaults materialises the registry. It is a copy rather than a direct
+// alias of lcDefaults so callers observing Defaults cannot mutate the ported
+// table, and so future intentional deviations have an obvious place to land.
+func buildDefaults() map[string]string {
+	d := make(map[string]string, len(lcDefaults))
+	maps.Copy(d, lcDefaults)
 
-	// Antispam
-	"antispam_enable_restarts":         boolTrueStr,
-	"antispam_enable_rule_compilation": "false",
-	"antispam_enable_rule_updates":     boolTrueStr,
-
-	// JVM / Mailbox
-	"networkaddress_cache_ttl":            "60",
-	"mailboxd_thread_stack_size":          "256k",
-	"mailboxd_java_heap_new_size_percent": "25",
-	"mailboxd_java_options":               defaultMailboxdJavaOptions,
-	"zimbra_zmjava_options":               defaultZmjavaOptions,
-	"zimbra_zmjava_java_library_path":     "",
-	"mailboxd_java_heap_size":             "",
-
-	// Configd
-	"zmconfigd_listen_port":        "7171",
-	"zimbra_configrewrite_timeout": "120",
-
-	// MySQL
-	"mysql_errlogfile": defaultBaseDir + "/log/mysql_error.log",
-	"mysql_mycnf":      defaultBaseDir + "/conf/my.cnf",
-
-	// LDAP (empty defaults — set in localconfig.xml per-installation)
-	lcKeyLDAPPort:   "",
-	"ldap_url":      "",
-	"ldap_bind_url": "",
-
-	// Server identity
-	"zimbra_server_hostname": localhostName,
-	lcKeyLDAPHost:            "",
-
-	// Mail service
-	"mail_service_port": "",
+	return d
 }
