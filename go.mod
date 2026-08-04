@@ -17,9 +17,9 @@ require (
 	github.com/testcontainers/testcontainers-go v0.42.0
 	github.com/willabides/kongplete v0.4.0
 	golang.org/x/crypto v0.54.0
-	k8s.io/api v0.36.1
-	k8s.io/apimachinery v0.36.1
-	k8s.io/client-go v0.36.1
+	k8s.io/api v0.36.3
+	k8s.io/apimachinery v0.36.3
+	k8s.io/client-go v0.36.3
 )
 
 require (
