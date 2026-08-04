@@ -5,7 +5,7 @@ go 1.26.0
 // Pin the toolchain to a stdlib with fixes for GO-2026-4918, GO-2026-4971,
 // GO-2026-5037 and GO-2026-5039 (all fixed by go1.26.4). With GOTOOLCHAIN=auto
 // older local toolchains transparently fetch this version.
-toolchain go1.26.4
+toolchain go1.26.5
 
 require (
 	github.com/alecthomas/kong v1.16.0
