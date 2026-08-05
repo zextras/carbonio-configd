@@ -23,7 +23,7 @@ var cacheFile = logPath + "/.zmcontrol.cache"
 var legacyServiceNames = map[string]bool{
 	"zimlet":      true,
 	"zimbraAdmin": true,
-	"zimbra":      true,
+	ldapServiceZimbra: true,
 }
 
 // DiscoverEnabledServices queries LDAP for services enabled on this host.

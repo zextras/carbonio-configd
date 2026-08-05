@@ -487,11 +487,22 @@ func serviceDetailFromProc(def *services.ServiceDef) string {
 
 	parts := []string{fmt.Sprintf("pid %d", pid)}
 
-	if info, err := os.Stat("/proc/" + strconv.Itoa(pid)); err == nil {
-		parts = append(parts, "since "+info.ModTime().UTC().Format("Mon 2006-01-02 15:04:05 MST"))
+	if since, ok := procStartTime(pid); ok {
+		parts = append(parts, "since "+since)
 	}
 
 	return "(" + strings.Join(parts, ", ") + ")"
+}
+
+// procStartTime formats /proc/<pid>'s mtime, which Linux sets when the
+// proc entry is created — close enough to process start for display.
+func procStartTime(pid int) (string, bool) {
+	info, err := os.Stat("/proc/" + strconv.Itoa(pid))
+	if err != nil {
+		return "", false
+	}
+
+	return info.ModTime().UTC().Format("Mon 2006-01-02 15:04:05 MST"), true
 }
 
 func checkAdvancedStatus(ctx context.Context) {

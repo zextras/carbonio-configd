@@ -169,6 +169,39 @@ func TestServiceDetailFromProc_WithPID(t *testing.T) {
 	}
 }
 
+// TestServiceDetailFromProc_IncludesSince guards the legacy-mode start time:
+// a live PID must yield a "since <timestamp>", never a missing or "n/a" value.
+func TestServiceDetailFromProc_IncludesSince(t *testing.T) {
+	self := os.Getpid()
+	pidFile := filepath.Join(t.TempDir(), "test.pid")
+
+	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(self)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	def := &services.ServiceDef{
+		Name:        "test",
+		DisplayName: "Test",
+		PidFile:     pidFile,
+		ProcessName: "nonexistent-for-test-xyz",
+	}
+
+	result := serviceDetailFromProc(def)
+	if !strings.Contains(result, "since ") || strings.Contains(result, "n/a") {
+		t.Errorf("expected detail to carry a real start time, got %q", result)
+	}
+}
+
+func TestProcStartTime(t *testing.T) {
+	if since, ok := procStartTime(os.Getpid()); !ok || since == "" {
+		t.Errorf("procStartTime(self) = %q, %v; want a timestamp", since, ok)
+	}
+
+	if since, ok := procStartTime(-1); ok {
+		t.Errorf("procStartTime(-1) = %q, true; want not-ok", since)
+	}
+}
+
 func TestServiceDetailFromSystemd_NilUnits(t *testing.T) {
 	def := &services.ServiceDef{
 		Name:         "testsvc",

@@ -22,28 +22,9 @@ func (c *StatusCmd) Run() error {
 
 	ctx := context.Background()
 
-	// Single service detail mode - delegate to service status
+	// Single service detail mode — same output as `configd service status`.
 	if c.Name != "" {
-		running, err := services.ServiceStatus(ctx, c.Name)
-		if err != nil {
-			return fmt.Errorf("failed to get status for service %s: %w", c.Name, err)
-		}
-
-		def := services.LookupService(c.Name)
-
-		if !running {
-			fmt.Printf("%s is not running.\n", def.DisplayName)
-			return fmt.Errorf("service %s is not running", c.Name)
-		}
-
-		fmt.Printf("%s is running.\n", def.DisplayName)
-
-		// Show systemd unit details
-		for _, unit := range def.SystemdUnits {
-			showUnitDetail(ctx, unit)
-		}
-
-		return nil
+		return printServiceStatus(ctx, c.Name)
 	}
 
 	// System-wide summary

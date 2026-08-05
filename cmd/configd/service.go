@@ -193,28 +193,58 @@ type ServiceStatusCmd struct {
 func (c *ServiceStatusCmd) Run() error {
 	initCLILogging()
 
-	ctx := context.Background()
+	return printServiceStatus(context.Background(), c.Name)
+}
 
-	running, err := services.ServiceStatus(ctx, c.Name)
+// printServiceStatus reports one service's state plus PID/uptime detail.
+// Shared by `configd service status <name>` and `configd status <name>`.
+func printServiceStatus(ctx context.Context, name string) error {
+	running, err := services.ServiceStatus(ctx, name)
 	if err != nil {
-		return fmt.Errorf("failed to get status for service %s: %w", c.Name, err)
+		return fmt.Errorf("failed to get status for service %s: %w", name, err)
 	}
 
-	def := services.LookupService(c.Name)
+	def := services.LookupService(name)
+	if def == nil {
+		return fmt.Errorf("unknown service: %s", name)
+	}
 
 	if !running {
 		fmt.Printf("%s is not running.\n", def.DisplayName)
-		return fmt.Errorf("service %s is not running", c.Name)
+
+		return fmt.Errorf("service %s is not running", name)
 	}
 
 	fmt.Printf("%s is running.\n", def.DisplayName)
-
-	// Show systemd unit details
-	for _, unit := range def.SystemdUnits {
-		showUnitDetail(ctx, unit)
-	}
+	showServiceDetail(ctx, def)
 
 	return nil
+}
+
+// showServiceDetail prints PID/uptime, sourced to match the orchestration
+// layer: systemctl show in strict systemd mode, /proc in legacy mode. Asking
+// systemctl in legacy mode reports the unit's state, not the process configd
+// actually spawned — on hosts with no unit at all (ubuntu-jammy, rocky-8)
+// that yielded "Since: n/a" for a healthy daemon.
+func showServiceDetail(ctx context.Context, def *services.ServiceDef) {
+	if services.IsSystemdMode() {
+		for _, unit := range def.SystemdUnits {
+			showUnitDetail(ctx, unit)
+		}
+
+		return
+	}
+
+	pid := services.RunningPID(def)
+	if pid == 0 {
+		return
+	}
+
+	fmt.Printf("  PID: %d\n", pid)
+
+	if since, ok := procStartTime(pid); ok {
+		fmt.Printf("  Since: %s\n", since)
+	}
 }
 
 func showUnitDetail(ctx context.Context, unit string) {
@@ -232,7 +262,9 @@ func showUnitDetail(ctx context.Context, unit string) {
 		fmt.Printf("  PID: %s\n", pid)
 	}
 
-	if ts, ok := props["ActiveEnterTimestamp"]; ok && ts != "" {
+	// systemd renders an unset timestamp as "n/a" — never print that as a
+	// start time.
+	if ts, ok := props["ActiveEnterTimestamp"]; ok && ts != "" && ts != "n/a" {
 		fmt.Printf("  Since: %s\n", ts)
 	}
 

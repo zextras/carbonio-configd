@@ -85,6 +85,11 @@ const (
 	saslMechZimbra = "zimbra"
 )
 
+// Legacy zimbraServiceEnabled values that no longer map to a real service.
+const (
+	ldapServiceZimbra = "zimbra"
+)
+
 // Socket families and protocols.
 const (
 	socketFamilyUnixgram = "unixgram"
