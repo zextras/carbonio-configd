@@ -136,56 +136,20 @@ func TestResolveValue_LOCAL(t *testing.T) {
 	}
 }
 
-// TestResolveValue_FILE tests resolving values from FILE type.
-func TestResolveValue_FILE(t *testing.T) {
-	// Create temp directory for test
-	tmpDir := t.TempDir()
-	confDir := filepath.Join(tmpDir, "conf")
-	if err := os.MkdirAll(confDir, 0755); err != nil {
-		t.Fatalf("Failed to create conf dir: %v", err)
-	}
-
-	// Create test file with multiple lines
-	testFile := filepath.Join(confDir, "mynetworks")
-	content := "127.0.0.0/8\n10.0.0.0/8\n  192.168.1.0/24  \n\n"
-	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
-		t.Fatalf("Failed to write test file: %v", err)
-	}
-
-	r := NewResolver(tmpDir)
+// TestResolveValue_FILE_NotHandled asserts that ResolveValue with type "FILE"
+// falls through to the literal branch and returns the key unchanged. mtaops
+// deliberately does not resolve FILE — transformer expansion of %%…%% directives
+// inside .cf fragments is owned by configmgr.lookupFileKey (CO-4096).
+func TestResolveValue_FILE_NotHandled(t *testing.T) {
+	r := NewResolver(t.TempDir())
 	st := &state.State{}
-
-	tests := []struct {
-		name      string
-		key       string
-		wantValue string
-		wantErr   bool
-	}{
-		{
-			name:      "FILE read and join with commas",
-			key:       "mynetworks",
-			wantValue: "127.0.0.0/8, 10.0.0.0/8, 192.168.1.0/24",
-			wantErr:   false,
-		},
-		{
-			name:      "FILE not found (returns empty)",
-			key:       "nonexistent",
-			wantValue: "",
-			wantErr:   false,
-		},
+	key := "zmconfigd/smtpd_sender_login_maps.cf"
+	got, err := r.ResolveValue(context.Background(), "FILE", key, st)
+	if err != nil {
+		t.Fatalf("ResolveValue() unexpected error: %v", err)
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := r.ResolveValue(context.Background(), "FILE", tt.key, st)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ResolveValue() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if got != tt.wantValue {
-				t.Errorf("ResolveValue() = %q, want %q", got, tt.wantValue)
-			}
-		})
+	if got != key {
+		t.Errorf("ResolveValue() = %q, want key unchanged %q", got, key)
 	}
 }
 

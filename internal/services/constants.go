@@ -73,9 +73,16 @@ const (
 	actionStart = "start"
 )
 
-// User and group identifiers.
+// User and group identifiers. Carbonio runs everything as zextras; there is
+// no zimbra account on a Carbonio host.
 const (
-	userZimbra = "zimbra"
+	userZextras = "zextras"
+)
+
+// SASL mechanisms. "zimbra" is the name of the Carbonio-patched saslauthd
+// authentication mechanism (saslauthd -a), not an OS user.
+const (
+	saslMechZimbra = "zimbra"
 )
 
 // Socket families and protocols.

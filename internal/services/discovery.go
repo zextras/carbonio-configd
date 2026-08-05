@@ -19,10 +19,11 @@ import (
 var cacheFile = logPath + "/.zmcontrol.cache"
 
 // legacyServiceNames are service names from LDAP that should be ignored.
+// These are zimbraServiceEnabled values, not OS users.
 var legacyServiceNames = map[string]bool{
 	"zimlet":      true,
 	"zimbraAdmin": true,
-	userZimbra:    true,
+	"zimbra":      true,
 }
 
 // DiscoverEnabledServices queries LDAP for services enabled on this host.

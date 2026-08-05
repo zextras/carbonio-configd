@@ -6,6 +6,7 @@ package transformer
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/zextras/carbonio-configd/internal/state"
@@ -1072,24 +1073,79 @@ func TestProcessPrefixDirective_NoClosingDelimiter(t *testing.T) {
 	}
 }
 
-// TestProcessWrappingDirective_ContainsWithEmbeddedVar exercises the
-// %%VAR:key%% substitution branch (L195-200) inside a %%contains...%% directive
-// where the needle value comes from another variable.
+// TestProcessWrappingDirective_ContainsWithEmbeddedVar exercises pre-substitution
+// of embedded variables inside full-line %%contains …%% directives.
+// It covers both paths in processWrappingDirective:
+//   - configVarRe: typed %%VAR:key%% is replaced before the directive is evaluated.
+//   - plainVarRe:  bare %%key%% (CO-4096) is replaced before the directive is evaluated,
+//     so postfix never sees an unexpanded %%…%% token in the written value.
 func TestProcessWrappingDirective_ContainsWithEmbeddedVar(t *testing.T) {
 	ctx := context.Background()
-	mockLookup := testutil.NewMockConfigLookupWithData(map[string]map[string]string{
-		"VAR": {
-			"zimbraMtaBlockedExtension": "exe bat com pif scr vbs",
-			"needle_key":                "exe",
+	st := &state.State{}
+
+	tests := []struct {
+		name    string
+		data    map[string]map[string]string
+		input   string
+		want    string // exact output, checked when non-empty
+		wantHas string // substring that must appear in output
+		wantNot string // substring that must not appear in output
+	}{
+		{
+			// configVarRe path: typed %%VAR:key%% inside a contains directive.
+			name: "typed embedded var - needle present",
+			data: map[string]map[string]string{
+				"VAR": {
+					"zimbraMtaBlockedExtension": "exe bat com pif scr vbs",
+					"needle_key":                "exe",
+				},
+			},
+			input: `%%contains VAR:zimbraMtaBlockedExtension %%VAR:needle_key%%^FOUND^NOTFOUND%%`,
+			want:  "FOUND\n",
 		},
-	})
+		{
+			// plainVarRe path (CO-4096): bare %%zimbraCBPolicydBindPort%% inside a
+			// contains directive where the haystack contains the needle.
+			// The port must be substituted; the output must never carry a raw %% token.
+			name: "bare nested var - needle present, port substituted (CO-4096)",
+			data: map[string]map[string]string{
+				"VAR": {
+					"zimbraServiceEnabled":    "cbpolicyd amavis mta",
+					"zimbraCBPolicydBindPort": "10031",
+				},
+			},
+			input:   "%%contains VAR:zimbraServiceEnabled cbpolicyd^ check_policy_service inet:localhost:%%zimbraCBPolicydBindPort%%%%",
+			wantHas: "inet:localhost:10031",
+			wantNot: "%%",
+		},
+		{
+			// plainVarRe path (CO-4096): haystack does not contain the needle →
+			// the alt-replacement (empty) is returned regardless of the port value.
+			name: "bare nested var - needle absent, empty output (CO-4096)",
+			data: map[string]map[string]string{
+				"VAR": {
+					"zimbraServiceEnabled":    "amavis mta",
+					"zimbraCBPolicydBindPort": "10031",
+				},
+			},
+			input: "%%contains VAR:zimbraServiceEnabled cbpolicyd^ check_policy_service inet:localhost:%%zimbraCBPolicydBindPort%%%%",
+			want:  "\n",
+		},
+	}
 
-	tr := NewTransformer(mockLookup, &state.State{})
-
-	// The embedded %%VAR:needle_key%% should resolve to "exe" before
-	// the contains directive is evaluated against zimbraMtaBlockedExtension.
-	result := tr.Transform(ctx, "%%contains VAR:zimbraMtaBlockedExtension %%VAR:needle_key%%^FOUND^NOTFOUND%%")
-	if result != "FOUND\n" {
-		t.Errorf("expected 'FOUND\\n', got %q", result)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tr := NewTransformer(testutil.NewMockConfigLookupWithData(tt.data), st)
+			got := tr.Transform(ctx, tt.input)
+			if tt.want != "" && got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+			if tt.wantHas != "" && !strings.Contains(got, tt.wantHas) {
+				t.Errorf("got %q, want it to contain %q", got, tt.wantHas)
+			}
+			if tt.wantNot != "" && strings.Contains(got, tt.wantNot) {
+				t.Errorf("got %q, want it NOT to contain %q", got, tt.wantNot)
+			}
+		})
 	}
 }
