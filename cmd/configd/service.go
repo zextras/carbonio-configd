@@ -196,10 +196,17 @@ func (c *ServiceStatusCmd) Run() error {
 	return printServiceStatus(context.Background(), c.Name)
 }
 
+// Overridable in tests, mirroring the isSystemdModeFn seam in internal/services:
+// both probes hit the live host, so CLI rendering is otherwise untestable.
+var (
+	serviceStatusFn = services.ServiceStatus
+	isSystemdModeFn = services.IsSystemdMode
+)
+
 // printServiceStatus reports one service's state plus PID/uptime detail.
 // Shared by `configd service status <name>` and `configd status <name>`.
 func printServiceStatus(ctx context.Context, name string) error {
-	running, err := services.ServiceStatus(ctx, name)
+	running, err := serviceStatusFn(ctx, name)
 	if err != nil {
 		return fmt.Errorf("failed to get status for service %s: %w", name, err)
 	}
@@ -227,7 +234,7 @@ func printServiceStatus(ctx context.Context, name string) error {
 // actually spawned — on hosts with no unit at all (ubuntu-jammy, rocky-8)
 // that yielded "Since: n/a" for a healthy daemon.
 func showServiceDetail(ctx context.Context, def *services.ServiceDef) {
-	if services.IsSystemdMode() {
+	if isSystemdModeFn() {
 		for _, unit := range def.SystemdUnits {
 			showUnitDetail(ctx, unit)
 		}

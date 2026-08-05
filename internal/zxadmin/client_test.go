@@ -7,6 +7,7 @@ package zxadmin
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -475,6 +476,32 @@ func TestGetAllServicesStatus_HTTP500(t *testing.T) {
 
 	if !strings.Contains(err.Error(), "HTTP 500") && !strings.Contains(err.Error(), "kaboom") {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// TestGetAllServicesStatus_HTTP404 pins the sentinel: mailboxd answers 404
+// with an HTML error page when the Advanced extension registered no handler.
+// Callers must be able to recognise that without the page leaking into output.
+func TestGetAllServicesStatus_HTTP404(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc(soapPath, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(goodAuthResponse))
+	})
+	mux.HandleFunc(statusPath, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte("<html><head><title>Error 404</title></head></html>"))
+	})
+
+	srv := httptest.NewTLSServer(mux)
+	defer srv.Close()
+
+	_, err := newTestClient(t, srv).GetAllServicesStatus(context.Background())
+	if !errors.Is(err, ErrAdvancedNotRunning) {
+		t.Fatalf("err = %v, want ErrAdvancedNotRunning", err)
+	}
+
+	if strings.Contains(err.Error(), "html") {
+		t.Errorf("error must not carry the HTML body: %v", err)
 	}
 }
 

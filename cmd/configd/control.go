@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -505,6 +506,9 @@ func procStartTime(pid int) (string, bool) {
 	return info.ModTime().UTC().Format("Mon 2006-01-02 15:04:05 MST"), true
 }
 
+// Overridable in tests: the real loader reads /opt/zextras/conf/localconfig.xml.
+var loadLocalConfigFn = localconfig.LoadLocalConfig
+
 func checkAdvancedStatus(ctx context.Context) {
 	if !advancedJARsPresent() {
 		return
@@ -512,10 +516,10 @@ func checkAdvancedStatus(ctx context.Context) {
 
 	fmt.Printf("\n\t%sCarbonio Advanced%s\n", colorCyan, colorReset)
 
-	cfg, err := localconfig.LoadLocalConfig()
+	cfg, err := loadLocalConfigFn()
 	if err != nil {
 		logger.WarnContext(ctx, "Advanced status check: localconfig load failed", "error", err)
-		fmt.Printf("\t%smodule status unavailable: %s%s\n", colorDim, shortErr(err), colorReset)
+		fmt.Printf("\t%s%s%s\n", colorDim, advancedErrorLine(err), colorReset)
 
 		return
 	}
@@ -523,7 +527,7 @@ func checkAdvancedStatus(ctx context.Context) {
 	modules, err := zxadmin.New(cfg).GetAllServicesStatus(ctx)
 	if err != nil {
 		logger.WarnContext(ctx, "Advanced status check failed", "error", err)
-		fmt.Printf("\t%smodule status unavailable: %s%s\n", colorDim, shortErr(err), colorReset)
+		fmt.Printf("\t%s%s%s\n", colorDim, advancedErrorLine(err), colorReset)
 
 		return
 	}
@@ -531,6 +535,18 @@ func checkAdvancedStatus(ctx context.Context) {
 	for _, m := range modules {
 		cliStatus(strings.ToLower(m.Name), m.Running, "")
 	}
+}
+
+// advancedErrorLine renders a failed Advanced status probe. A 404 from
+// mailboxd means the extension registered no handler, i.e. Advanced failed to
+// boot — report that like legacy advanced_status.sh did, instead of echoing
+// mailboxd's HTML error page.
+func advancedErrorLine(err error) string {
+	if errors.Is(err, zxadmin.ErrAdvancedNotRunning) {
+		return "Carbonio Advanced is not running"
+	}
+
+	return "module status unavailable: " + shortErr(err)
 }
 
 // shortErr returns a single-line, length-capped form of err for inline display.

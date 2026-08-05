@@ -17,6 +17,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -26,6 +27,13 @@ import (
 	"sync"
 	"time"
 )
+
+// ErrAdvancedNotRunning reports that mailboxd is up but the Carbonio Advanced
+// extension has no HTTP handler registered at statusPath — mailboxd answers
+// 404 and logs "Extension HTTP handler not found at /zextras". That means the
+// extension failed to boot (missing service-discover token, unreachable
+// Consul KV, no Advanced DB, …), not that configd asked the wrong endpoint.
+var ErrAdvancedNotRunning = errors.New("advanced extension handler not registered (HTTP 404)")
 
 const (
 	// AdminPort is the Carbonio admin HTTPS port.
@@ -209,6 +217,12 @@ func (c *Client) GetAllServicesStatus(ctx context.Context) ([]ModuleStatus, erro
 		c.expiresAt = time.Time{}
 
 		return nil, fmt.Errorf("zxadmin: status auth rejected: HTTP %d", resp.StatusCode)
+	}
+
+	// 404 means the extension handler is absent — report it as "not running"
+	// instead of echoing mailboxd's HTML error page into `zmcontrol status`.
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, ErrAdvancedNotRunning
 	}
 
 	if resp.StatusCode != http.StatusOK {
