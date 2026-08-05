@@ -204,8 +204,6 @@ func (g *Generator) ClearUpstreamCache(ctx context.Context) {
 		g.upstreamCache.reverseProxyBackends = nil
 		g.upstreamCache.reverseProxyBackendsSSL = nil
 		g.upstreamCache.memcachedServers = nil
-		// Clear cached gas output
-		g.upstreamCache.gasOutput = ""
 		g.upstreamCache.populated = false
 	}
 }

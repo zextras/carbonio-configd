@@ -15,7 +15,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/zextras/carbonio-configd/internal/config"
@@ -27,7 +26,7 @@ import (
 
 // defaultZextrasHome is the fallback installation root when neither
 // ZEXTRAS_HOME nor CARBONIO_BASE_DIR is set.
-const defaultZextrasHome = "/opt/zextras"
+const defaultZextrasHome = config.ZextrasBase
 
 // Configuration key constants
 const (
@@ -61,6 +60,15 @@ func NewCommandExecutor(client *ldap.Client) *CommandExecutor {
 	}
 
 	return &CommandExecutor{ldapClient: client}
+}
+
+// requireLDAP returns an error if the executor has no LDAP client configured.
+func (e *CommandExecutor) requireLDAP() error {
+	if e.ldapClient == nil {
+		return stderrors.New(errLDAPNotInitialized)
+	}
+
+	return nil
 }
 
 // Command represents a command to be executed, mirroring jylibs/commands.py Command class.
@@ -196,7 +204,6 @@ func (c *Command) ExecuteWithContext(ctx context.Context, args ...string) (exitC
 	return c.Status, c.Output, c.Error
 }
 
-// formatCmd returns the command string with the first argument substituted
 // runBinaryWithContext executes a command using the structured Binary+CmdArgs pattern.
 func (c *Command) runBinaryWithContext(ctx context.Context, args []string) (exitCode int, output string, err error) {
 	cmdArgs := make([]string, 0, len(c.CmdArgs)+len(args))
@@ -237,9 +244,8 @@ func (e *CommandExecutor) getserver(ctx context.Context, args ...string) (string
 
 	hostname := args[0]
 
-	// Use native LDAP client
-	if e.ldapClient == nil {
-		return "", stderrors.New(errLDAPNotInitialized)
+	if err := e.requireLDAP(); err != nil {
+		return "", err
 	}
 
 	logger.DebugContext(ctx, "Using native LDAP client for server query",
@@ -267,9 +273,8 @@ func (e *CommandExecutor) getserverenabled(ctx context.Context, args ...string) 
 
 	hostname := args[0]
 
-	// Use native LDAP client
-	if e.ldapClient == nil {
-		return "", stderrors.New(errLDAPNotInitialized)
+	if err := e.requireLDAP(); err != nil {
+		return "", err
 	}
 
 	logger.DebugContext(ctx, "Using native LDAP client for server enabled services query",
@@ -281,12 +286,12 @@ func (e *CommandExecutor) getserverenabled(ctx context.Context, args ...string) 
 	}
 
 	// Extract only zimbraServiceEnabled attribute
-	if services, ok := serverAttrs[attrZimbraServiceEnabled]; ok {
+	if services, ok := serverAttrs[ldap.AttrZimbraServiceEnabled]; ok {
 		logger.DebugContext(ctx, "Native LDAP query successful - found enabled services",
 			"hostname", hostname,
 			"services", services)
 
-		return attrZimbraServiceEnabled + ": " + services + "\n", nil
+		return ldap.AttrZimbraServiceEnabled + ": " + services + "\n", nil
 	}
 
 	logger.DebugContext(ctx, "No enabled services found for server",
@@ -296,9 +301,8 @@ func (e *CommandExecutor) getserverenabled(ctx context.Context, args ...string) 
 }
 
 func (e *CommandExecutor) getglobal(ctx context.Context, args ...string) (string, error) {
-	// Use native LDAP client
-	if e.ldapClient == nil {
-		return "", stderrors.New(errLDAPNotInitialized)
+	if err := e.requireLDAP(); err != nil {
+		return "", err
 	}
 
 	logger.DebugContext(ctx, "Using native LDAP client for global config query")
@@ -339,9 +343,8 @@ func getlocal(ctx context.Context, args ...string) (string, error) {
 func (e *CommandExecutor) getAllServersWithAttribute(
 	ctx context.Context, attributeKey, urlFormat, cmdName string,
 ) (string, error) {
-	// Use native LDAP client
-	if e.ldapClient == nil {
-		return "", stderrors.New(errLDAPNotInitialized)
+	if err := e.requireLDAP(); err != nil {
+		return "", err
 	}
 
 	logger.DebugContext(ctx, "Querying all servers with attribute",
@@ -381,8 +384,8 @@ func (e *CommandExecutor) getAllServersWithAttribute(
 func (e *CommandExecutor) gamau(ctx context.Context, args ...string) (string, error) {
 	logger.DebugContext(ctx, "Executing gamau (getAllMtaAuthURLs) command")
 
-	if e.ldapClient == nil {
-		return "", stderrors.New(errLDAPNotInitialized)
+	if err := e.requireLDAP(); err != nil {
+		return "", err
 	}
 
 	// Mirror jylibs/commands.py gamau: for every server flagged
@@ -472,8 +475,8 @@ const garpbEmptyFallback = "    server localhost:8080;"
 func (e *CommandExecutor) garpb(ctx context.Context, args ...string) (string, error) {
 	logger.DebugContext(ctx, "Executing garpb (getAllReverseProxyBackends) command")
 
-	if e.ldapClient == nil {
-		return "", stderrors.New(errLDAPNotInitialized)
+	if err := e.requireLDAP(); err != nil {
+		return "", err
 	}
 
 	servers, err := e.ldapClient.GetAllServersWithAttributes()
@@ -598,31 +601,28 @@ func makePostconfExec(postconfSpec string) func(ctx context.Context, args ...str
 			return "", fmt.Errorf("postconf requires arguments")
 		}
 
-		arg := args[0]
-
 		fields := strings.Fields(postconfSpec)
 		if len(fields) == 0 {
 			return "", fmt.Errorf("postconf executable path not configured")
 		}
 
-		cmd := exec.CommandContext(ctx, fields[0], "-e", arg)
+		cmd := &Command{Binary: fields[0], CmdArgs: []string{"-e"}}
 
-		output, err := cmd.CombinedOutput()
+		_, output, err := cmd.runBinaryWithContext(ctx, args[:1])
 		if err != nil {
-			return string(output), fmt.Errorf("postconf command failed: %w (output: %s)", err, string(output))
+			return output, fmt.Errorf("postconf command failed: %w (output: %s)", err, output)
 		}
 
-		return string(output), nil
+		return output, nil
 	}
 }
 
 // Registry holds command executables and command definitions for a specific ZEXTRAS_HOME.
-// It replaces the former package-level globals (Exe, Commands, initOnce) to enable
+// It replaces the former package-level globals (Exe, Commands) to enable
 // per-instance initialization and path overrides.
 type Registry struct {
 	Exe      map[string]string
 	Commands map[string]*Command
-	initOnce sync.Once
 }
 
 // NewRegistry creates a new Registry with executable paths and commands initialized
@@ -634,55 +634,52 @@ func NewRegistry(zextrasHome string) *Registry {
 		Commands: make(map[string]*Command),
 	}
 
-	// Initialize once per instance
-	r.initOnce.Do(func() {
-		baseDir := zextrasHome
-		if baseDir == "" {
-			baseDir = defaultZextrasHome
-		}
+	baseDir := zextrasHome
+	if baseDir == "" {
+		baseDir = defaultZextrasHome
+	}
 
-		binDir := baseDir + "/bin"
+	binDir := baseDir + "/bin"
 
-		r.Exe = map[string]string{
-			"AMAVIS":    binDir + "/zmamavisdctl",
-			"ANTISPAM":  binDir + "/zmantispamctl",
-			"ANTIVIRUS": binDir + "/zmclamdctl",
-			"CBPOLICYD": binDir + "/zmcbpolicydctl",
-			"LDAP":      binDir + "/ldap",
-			"MAILBOX":   binDir + "/zmstorectl",
-			"MAILBOXD":  binDir + "/zmmailboxdctl",
-			"MEMCACHED": binDir + "/zmmemcachedctl",
-			"MTA":       binDir + "/zmmtactl",
-			"OPENDKIM":  baseDir + "/bin/zmopendkimctl", // Assuming also in bin
-			"POSTCONF":  binDir + "/postconf -e",
-			"POSTCONFD": binDir + "/postconf -X",
-			"PROXY":     binDir + "/zmproxyctl",
-			"SASL":      binDir + "/zmsaslauthdctl",
-			"SERVICE":   binDir + "/zmmailboxdctl",
-			"STATS":     binDir + "/zmstatctl",
-		}
+	r.Exe = map[string]string{
+		"AMAVIS":    binDir + "/zmamavisdctl",
+		"ANTISPAM":  binDir + "/zmantispamctl",
+		"ANTIVIRUS": binDir + "/zmclamdctl",
+		"CBPOLICYD": binDir + "/zmcbpolicydctl",
+		"LDAP":      binDir + "/ldap",
+		"MAILBOX":   binDir + "/zmstorectl",
+		"MAILBOXD":  binDir + "/zmmailboxdctl",
+		"MEMCACHED": binDir + "/zmmemcachedctl",
+		"MTA":       binDir + "/zmmtactl",
+		"OPENDKIM":  baseDir + "/bin/zmopendkimctl", // Assuming also in bin
+		"POSTCONF":  binDir + "/postconf -e",
+		"POSTCONFD": binDir + "/postconf -X",
+		"PROXY":     binDir + "/zmproxyctl",
+		"SASL":      binDir + "/zmsaslauthdctl",
+		"SERVICE":   binDir + "/zmmailboxdctl",
+		"STATS":     binDir + "/zmstatctl",
+	}
 
-		r.Commands = map[string]*Command{
-			cmdAmavis:      {Desc: cmdAmavis, Name: cmdAmavis, Binary: r.Exe["AMAVIS"]},
-			cmdAntispam:    {Desc: cmdAntispam, Name: cmdAntispam, Binary: r.Exe["ANTISPAM"]},
-			cmdAntivirus:   {Desc: cmdAntivirus, Name: cmdAntivirus, Binary: r.Exe["ANTIVIRUS"]},
-			cmdCBPolicyd:   {Desc: cmdCBPolicyd, Name: cmdCBPolicyd, Binary: r.Exe["CBPOLICYD"]},
-			cmdLDAP:        {Desc: cmdLDAP, Name: cmdLDAP, Binary: r.Exe["LDAP"]},
-			cmdLocalconfig: {Desc: "Local server configuration", Name: cmdLocalconfig, Func: getlocal},
-			cmdMailbox:     {Desc: cmdMailbox, Name: cmdMailbox, Binary: r.Exe["MAILBOX"]},
-			cmdMailboxd:    {Desc: cmdMailboxd, Name: cmdMailboxd, Binary: r.Exe["MAILBOXD"]},
-			cmdMemcached:   {Desc: cmdMemcached, Name: cmdMemcached, Binary: r.Exe["MEMCACHED"]},
-			cmdMTA:         {Desc: cmdMTA, Name: cmdMTA, Binary: r.Exe["MTA"]},
-			cmdOpenDKIM:    {Desc: cmdOpenDKIM, Name: cmdOpenDKIM, Binary: r.Exe["OPENDKIM"]},
-			cmdPostconf:    {Desc: cmdPostconf, Name: cmdPostconf, Func: makePostconfExec(r.Exe["POSTCONF"])},
-			cmdPostconfd:   {Desc: cmdPostconfd, Name: cmdPostconfd, Binary: r.Exe["POSTCONFD"]},
-			cmdProxy:       {Desc: cmdProxy, Name: cmdProxy, Binary: r.Exe["PROXY"]},
-			cmdProxygen:    {Desc: cmdProxygen, Name: cmdProxygen, Func: proxygen},
-			cmdSASL:        {Desc: cmdSASL, Name: cmdSASL, Binary: r.Exe["SASL"]},
-			cmdService:     {Desc: cmdService, Name: cmdService, Binary: r.Exe["SERVICE"]},
-			cmdStats:       {Desc: cmdStats, Name: cmdStats, Binary: r.Exe["STATS"]},
-		}
-	})
+	r.Commands = map[string]*Command{
+		cmdAmavis:      {Desc: cmdAmavis, Name: cmdAmavis, Binary: r.Exe["AMAVIS"]},
+		cmdAntispam:    {Desc: cmdAntispam, Name: cmdAntispam, Binary: r.Exe["ANTISPAM"]},
+		cmdAntivirus:   {Desc: cmdAntivirus, Name: cmdAntivirus, Binary: r.Exe["ANTIVIRUS"]},
+		cmdCBPolicyd:   {Desc: cmdCBPolicyd, Name: cmdCBPolicyd, Binary: r.Exe["CBPOLICYD"]},
+		cmdLDAP:        {Desc: cmdLDAP, Name: cmdLDAP, Binary: r.Exe["LDAP"]},
+		cmdLocalconfig: {Desc: "Local server configuration", Name: cmdLocalconfig, Func: getlocal},
+		cmdMailbox:     {Desc: cmdMailbox, Name: cmdMailbox, Binary: r.Exe["MAILBOX"]},
+		cmdMailboxd:    {Desc: cmdMailboxd, Name: cmdMailboxd, Binary: r.Exe["MAILBOXD"]},
+		cmdMemcached:   {Desc: cmdMemcached, Name: cmdMemcached, Binary: r.Exe["MEMCACHED"]},
+		cmdMTA:         {Desc: cmdMTA, Name: cmdMTA, Binary: r.Exe["MTA"]},
+		cmdOpenDKIM:    {Desc: cmdOpenDKIM, Name: cmdOpenDKIM, Binary: r.Exe["OPENDKIM"]},
+		cmdPostconf:    {Desc: cmdPostconf, Name: cmdPostconf, Func: makePostconfExec(r.Exe["POSTCONF"])},
+		cmdPostconfd:   {Desc: cmdPostconfd, Name: cmdPostconfd, Binary: r.Exe["POSTCONFD"]},
+		cmdProxy:       {Desc: cmdProxy, Name: cmdProxy, Binary: r.Exe["PROXY"]},
+		cmdProxygen:    {Desc: cmdProxygen, Name: cmdProxygen, Func: proxygen},
+		cmdSASL:        {Desc: cmdSASL, Name: cmdSASL, Binary: r.Exe["SASL"]},
+		cmdService:     {Desc: cmdService, Name: cmdService, Binary: r.Exe["SERVICE"]},
+		cmdStats:       {Desc: cmdStats, Name: cmdStats, Binary: r.Exe["STATS"]},
+	}
 
 	return r
 }

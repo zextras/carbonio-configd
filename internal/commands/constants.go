@@ -12,7 +12,6 @@ const (
 
 // LDAP/Zimbra attributes
 const (
-	attrZimbraServiceEnabled           = "zimbraServiceEnabled"
 	attrZimbraReverseProxyLookupTarget = "zimbraReverseProxyLookupTarget"
 	attrZimbraMailMode                 = "zimbraMailMode"
 	attrZimbraMailPort                 = "zimbraMailPort"

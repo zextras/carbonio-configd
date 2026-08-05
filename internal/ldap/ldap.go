@@ -9,9 +9,12 @@ package ldap
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/go-ldap/ldap/v3"
 
 	"github.com/zextras/carbonio-configd/internal/config"
 	errs "github.com/zextras/carbonio-configd/internal/errors"
@@ -190,7 +193,7 @@ func (l *Ldap) ModifyAttribute(ctx context.Context, key, value string) error {
 	// data-suffix NativeClient (uid=zimbra) — it has no cn=config access and
 	// would fail every attempt with LDAP code 50.
 	if l.ConfigClient == nil {
-		return fmt.Errorf("cannot modify LDAP attribute %q: config client not initialized", key)
+		return errs.WrapConfig("modify", key, errors.New("config client not initialized"))
 	}
 
 	// Execute LDAP modification with retry logic.
@@ -324,7 +327,7 @@ func (l *Ldap) ModifyAttributeBatch(ctx context.Context, changes map[string]stri
 	// otherwise sleep/backoff per DN for an unrecoverable condition). Writes
 	// must use the cn=config client (ldapi), never the data-suffix client.
 	if l.ConfigClient == nil {
-		return fmt.Errorf("cannot batch modify LDAP attributes: config client not initialized")
+		return errs.WrapConfig("batch modify", "", errors.New("config client not initialized"))
 	}
 
 	// Group changes by DN
@@ -379,7 +382,7 @@ func (l *Ldap) executeBatchModifyInternal(ctx context.Context, dn string, attrs 
 		"attribute_count", len(attrs))
 
 	if l.ConfigClient == nil {
-		return fmt.Errorf("cannot batch modify DN %q: config client not initialized", dn)
+		return errs.WrapConfig("batch modify", dn, errors.New("config client not initialized"))
 	}
 
 	for attr, val := range attrs {
@@ -462,15 +465,21 @@ func isRetryableError(err error) bool {
 		return false
 	}
 
-	// In production, this would check for specific LDAP error codes:
-	// - LDAP_SERVER_DOWN (0x51)
-	// - LDAP_TIMEOUT (0x55)
-	// - LDAP_CONNECT_ERROR (0x5b)
-	// - LDAP_BUSY (0x33)
-	// - LDAP_UNAVAILABLE (0x34)
-	//
-	// For now, we assume other errors are transient and retryable
+	// Most error paths in this file return a plain fmt.Errorf wrapping
+	// whatever the native client (client.go) produced, so the underlying
+	// *ldap.Error result code — already classified once by
+	// Client.executeWithRetry/isLDAPErrorRetryable — is still reachable via
+	// errors.As through the %w chain. Reuse that classification instead of
+	// defaulting to retryable, or permanent LDAP failures (no such object,
+	// bad DN, bad credentials, ...) get retried a second time here after
+	// the native client already gave up on them.
+	var ldapErr *ldap.Error
+	if errors.As(err, &ldapErr) {
+		return isLDAPErrorRetryable(err)
+	}
 
+	// No structured LDAP result code (e.g. plain network/context errors):
+	// assume transient and retryable.
 	return true
 }
 

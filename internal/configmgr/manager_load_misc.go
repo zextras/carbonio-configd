@@ -195,18 +195,9 @@ func (cm *ConfigManager) loadGlobalConfigWithRetry(ctx context.Context, maxRetri
 // fetchGlobalConfig fetches fresh global config from LDAP (cache miss path)
 func (cm *ConfigManager) fetchGlobalConfig(ctx context.Context, maxRetries int) (map[string]string, error) {
 	return retryWithBackoff(ctx, "GlobalConfig", maxRetries, func() (map[string]string, error) {
-		cmd := cm.CommandRegistry.Commands["gacf"]
-		if cmd == nil {
-			return nil, fmt.Errorf("gacf command not available (LDAP commands not registered)")
-		}
-
-		rc, output, errMsg := cmd.Execute(ctx)
-		if rc != 0 {
-			return nil, fmt.Errorf("gacf command failed with rc=%d: %s", rc, errMsg)
-		}
-
-		if output == "" {
-			return nil, fmt.Errorf("no data returned from gacf")
+		output, err := cm.executeLDAPCommand(ctx, "gacf")
+		if err != nil {
+			return nil, err
 		}
 
 		// Parse LDAP attribute output (key: value format)

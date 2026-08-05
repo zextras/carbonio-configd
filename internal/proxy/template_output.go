@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/zextras/carbonio-configd/internal/fileutil"
 	"github.com/zextras/carbonio-configd/internal/logger"
 )
 
@@ -51,37 +52,12 @@ func (tp *TemplateProcessor) WriteOutput(ctx context.Context, name string, conte
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	// Write atomically using temp file + rename.
-	// Use os.CreateTemp in the output directory to avoid predictable temp paths
-	// and ensure the temp file is on the same filesystem for atomic rename.
-	tmpFile, err := os.CreateTemp(filepath.Dir(outputPath), ".configd-*.tmp")
-	if err != nil {
-		return fmt.Errorf("failed to create temp file: %w", err)
-	}
-
-	tmpPath := tmpFile.Name()
-
-	if _, err := tmpFile.WriteString(content); err != nil {
-		_ = tmpFile.Close()
-		_ = os.Remove(tmpPath)
-
-		return fmt.Errorf("failed to write temp file: %w", err)
-	}
-
-	if err := tmpFile.Close(); err != nil {
-		_ = os.Remove(tmpPath)
-
-		return fmt.Errorf("failed to close temp file: %w", err)
-	}
-
-	if err := os.Rename(tmpPath, outputPath); err != nil {
-		if rerr := os.Remove(tmpPath); rerr != nil {
-			logger.WarnContext(ctx, "Failed to remove temp file",
-				"path", tmpPath,
-				"error", rerr)
-		}
-
-		return fmt.Errorf("failed to rename temp file: %w", err)
+	// Write atomically using temp file + rename. AtomicWrite creates the temp
+	// file in filepath.Dir(outputPath) so the rename stays on one filesystem.
+	// No explicit chmod is requested (0o600, matching os.CreateTemp's default)
+	// to preserve this call's original behavior.
+	if err := fileutil.AtomicWrite(outputPath, []byte(content), 0o600); err != nil {
+		return fmt.Errorf("failed to write output: %w", err)
 	}
 
 	if verbose {

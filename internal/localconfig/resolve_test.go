@@ -226,36 +226,6 @@ func TestLoadResolvedConfigFromFile_XMLOverridesDefault(t *testing.T) {
 	}
 }
 
-func TestFormatAsShell(t *testing.T) {
-	config := map[string]string{
-		"key1": "simple_value",
-		"key2": "value with spaces",
-	}
-
-	output := FormatAsShell(config)
-
-	if !strings.Contains(output, "key1='simple_value';\n") {
-		t.Errorf("expected shell format for key1, got:\n%s", output)
-	}
-
-	if !strings.Contains(output, "key2='value with spaces';\n") {
-		t.Errorf("expected shell format for key2, got:\n%s", output)
-	}
-}
-
-func TestFormatAsShell_SingleQuoteEscaping(t *testing.T) {
-	config := map[string]string{
-		"key": "it's a test",
-	}
-
-	output := FormatAsShell(config)
-
-	expected := "key='it'\\''s a test';\n"
-	if output != expected {
-		t.Errorf("expected %q, got %q", expected, output)
-	}
-}
-
 func createResolveTestFile(t *testing.T, content string) string {
 	t.Helper()
 

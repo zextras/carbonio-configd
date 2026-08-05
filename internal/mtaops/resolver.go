@@ -8,7 +8,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
@@ -77,9 +76,7 @@ func (r *resolver) resolveLOCAL(ctx context.Context, key string, st *state.State
 }
 
 func (r *resolver) resolveMAPLOCAL(ctx context.Context, key string) (string, error) {
-	mappedFiles := map[string]string{
-		attrZimbraSSLDHParam: filepath.Join(r.baseDir, "conf", "dhparam.pem"),
-	}
+	mappedFiles := mappedFilePaths(r.baseDir)
 
 	filePath, exists := mappedFiles[key]
 	if !exists {
@@ -175,9 +172,7 @@ func (r *resolver) ResolveMapfileDirective(key string, isLocal bool, st *state.S
 	}
 
 	// Get mapped file path
-	mappedFiles := map[string]string{
-		"zimbraSSLDHParam": filepath.Join(r.baseDir, "conf", "dhparam.pem"),
-	}
+	mappedFiles := mappedFilePaths(r.baseDir)
 
 	filePath, exists := mappedFiles[key]
 	if !exists {

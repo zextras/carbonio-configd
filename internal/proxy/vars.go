@@ -14,11 +14,6 @@ import (
 	"github.com/zextras/carbonio-configd/internal/logger"
 )
 
-// isTruthy returns true for "TRUE" (case-insensitive) or "1".
-func isTruthy(val string) bool {
-	return strings.EqualFold(val, "TRUE") || val == "1"
-}
-
 // varOpt is a functional option for configuring a Variable during registration.
 type varOpt func(*Variable)
 

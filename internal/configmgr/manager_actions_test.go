@@ -7,15 +7,16 @@ package configmgr
 import (
 	"context"
 	"fmt"
-	"github.com/zextras/carbonio-configd/internal/cache"
-	"github.com/zextras/carbonio-configd/internal/config"
-	"github.com/zextras/carbonio-configd/internal/services"
-	"github.com/zextras/carbonio-configd/internal/state"
-	"github.com/zextras/carbonio-configd/internal/transformer"
 	"os"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/zextras/carbonio-configd/internal/cache"
+	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/state"
+	"github.com/zextras/carbonio-configd/internal/testutil"
+	"github.com/zextras/carbonio-configd/internal/transformer"
 )
 
 func TestSectionEnabledOnNode(t *testing.T) {
@@ -62,68 +63,6 @@ func TestSectionEnabledOnNode(t *testing.T) {
 	}
 }
 
-// mockServiceManager is a mock implementation of services.Manager for testing
-// Shared across all test files in the configmgr package
-type mockServiceManager struct {
-	commands        map[string]bool // For HasCommand() support
-	runningServices map[string]bool // For IsRunning() support
-	restartQueue    []string        // For restart tracking
-}
-
-func newMockServiceManager() *mockServiceManager {
-	return &mockServiceManager{
-		commands:        make(map[string]bool),
-		runningServices: make(map[string]bool),
-		restartQueue:    make([]string, 0),
-	}
-}
-
-func (m *mockServiceManager) ControlProcess(_ context.Context, service string, action services.ServiceAction) error {
-	return nil
-}
-
-func (m *mockServiceManager) IsRunning(_ context.Context, service string) (bool, error) {
-	running, ok := m.runningServices[service]
-	if !ok {
-		return false, nil
-	}
-	return running, nil
-}
-
-func (m *mockServiceManager) AddRestart(_ context.Context, service string) error {
-	m.restartQueue = append(m.restartQueue, service)
-	return nil
-}
-
-func (m *mockServiceManager) ProcessRestarts(_ context.Context, configLookup func(string) string) error {
-	return nil
-}
-
-func (m *mockServiceManager) ClearRestarts(_ context.Context) {
-	m.restartQueue = make([]string, 0)
-}
-
-func (m *mockServiceManager) GetPendingRestarts() []string {
-	return m.restartQueue
-}
-
-func (m *mockServiceManager) SetDependencies(_ context.Context, deps map[string][]string) {
-}
-
-func (m *mockServiceManager) AddDependencyRestarts(_ context.Context, sectionName string, configLookup func(string) string) {
-}
-
-func (m *mockServiceManager) HasCommand(service string) bool {
-	if m.commands == nil {
-		return true // Default to true for backward compatibility
-	}
-	return m.commands[service]
-}
-
-func (m *mockServiceManager) SetUseSystemd(enabled bool) {
-	// No-op for mock
-}
-
 // newTestTransformer creates a transformer for testing that returns lines unchanged
 func newTestTransformer(cm *ConfigManager, st *state.State) *transformer.Transformer {
 	return transformer.NewTransformer(cm, st)
@@ -137,9 +76,16 @@ func TestProcessIsRunning(t *testing.T) {
 	ctx := context.Background()
 	cacheInstance := cache.New(ctx, false)
 
-	mockSvcMgr := newMockServiceManager()
-	mockSvcMgr.runningServices["nginx"] = true
-	mockSvcMgr.runningServices["mta"] = false
+	runningServices := map[string]bool{"nginx": true, "mta": false}
+	mockSvcMgr := &testutil.MockServiceManager{
+		IsRunningFn: func(_ context.Context, service string) (bool, error) {
+			running, ok := runningServices[service]
+			if !ok {
+				return false, nil
+			}
+			return running, nil
+		},
+	}
 
 	cm := &ConfigManager{
 		mainConfig: &config.Config{
@@ -175,9 +121,16 @@ func TestProcessIsNotRunning(t *testing.T) {
 	ctx := context.Background()
 	cacheInstance := cache.New(ctx, false)
 
-	mockSvcMgr := newMockServiceManager()
-	mockSvcMgr.runningServices["nginx"] = true
-	mockSvcMgr.runningServices["mta"] = false
+	runningServices := map[string]bool{"nginx": true, "mta": false}
+	mockSvcMgr := &testutil.MockServiceManager{
+		IsRunningFn: func(_ context.Context, service string) (bool, error) {
+			running, ok := runningServices[service]
+			if !ok {
+				return false, nil
+			}
+			return running, nil
+		},
+	}
 
 	cm := &ConfigManager{
 		mainConfig: &config.Config{
@@ -210,6 +163,18 @@ func TestIsAlreadyClosedError(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
+
+	// A real double-close reproduces the exact error shape production code
+	// hits: an *fs.PathError wrapping os.ErrClosed.
+	tmpFile, err := os.CreateTemp(t.TempDir(), "already-closed")
+	if err != nil {
+		t.Fatalf("create temp file: %v", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		t.Fatalf("first close: %v", err)
+	}
+	doubleCloseErr := tmpFile.Close()
+
 	tests := []struct {
 		name     string
 		err      error
@@ -221,23 +186,28 @@ func TestIsAlreadyClosedError(t *testing.T) {
 			expected: false,
 		},
 		{
-			name:     "exact match",
-			err:      &testError{msg: "file already closed"},
+			name:     "real double close",
+			err:      doubleCloseErr,
 			expected: true,
 		},
 		{
-			name:     "contains match",
-			err:      &testError{msg: "error: connection already closed"},
+			name:     "sentinel directly",
+			err:      os.ErrClosed,
 			expected: true,
+		},
+		{
+			name:     "wrapped sentinel",
+			err:      fmt.Errorf("close: %w", os.ErrClosed),
+			expected: true,
+		},
+		{
+			name:     "message merely mentions closed, does not wrap the sentinel",
+			err:      &testError{msg: "error: connection already closed"},
+			expected: false,
 		},
 		{
 			name:     "different error",
 			err:      &testError{msg: "permission denied"},
-			expected: false,
-		},
-		{
-			name:     "empty error message",
-			err:      &testError{msg: ""},
 			expected: false,
 		},
 	}
@@ -368,7 +338,14 @@ func TestDoRestarts(t *testing.T) {
 	cacheInstance := cache.New(ctx, false)
 
 	t.Run("restart services from state", func(t *testing.T) {
-		mockSvcMgr := newMockServiceManager()
+		var restartQueue []string
+		mockSvcMgr := &testutil.MockServiceManager{
+			AddRestartFn: func(_ context.Context, service string) error {
+				restartQueue = append(restartQueue, service)
+				return nil
+			},
+			GetPendingRestartsFn: func() []string { return restartQueue },
+		}
 
 		cm := &ConfigManager{
 			mainConfig: &config.Config{
@@ -416,7 +393,7 @@ func TestDoRestarts(t *testing.T) {
 	})
 
 	t.Run("no restarts needed", func(t *testing.T) {
-		mockSvcMgr := newMockServiceManager()
+		mockSvcMgr := &testutil.MockServiceManager{}
 
 		cm := &ConfigManager{
 			mainConfig: &config.Config{
@@ -590,7 +567,7 @@ func TestCompileActions(t *testing.T) {
 	cacheInstance := cache.New(ctx, false)
 
 	t.Run("compile with first run", func(t *testing.T) {
-		mockSvcMgr := newMockServiceManager()
+		mockSvcMgr := &testutil.MockServiceManager{}
 
 		cm := &ConfigManager{
 			mainConfig: &config.Config{
@@ -639,7 +616,7 @@ func TestCompileActions(t *testing.T) {
 	})
 
 	t.Run("compile with forced config", func(t *testing.T) {
-		mockSvcMgr := newMockServiceManager()
+		mockSvcMgr := &testutil.MockServiceManager{}
 
 		cm := &ConfigManager{
 			mainConfig: &config.Config{
@@ -689,7 +666,7 @@ func TestCompileActions(t *testing.T) {
 	})
 
 	t.Run("skip unchanged sections", func(t *testing.T) {
-		mockSvcMgr := newMockServiceManager()
+		mockSvcMgr := &testutil.MockServiceManager{}
 
 		cm := &ConfigManager{
 			mainConfig: &config.Config{
@@ -735,6 +712,65 @@ func TestCompileActions(t *testing.T) {
 			t.Error("Expected no rewrites for unchanged section")
 		}
 	})
+}
+
+// TestCompileActions_ForcedSectionRestartsAreSectionScoped is a regression
+// test for a bug where forcing ANY section suppressed restart compilation
+// cycle-wide (checking len(forcedConfig) > 0 instead of forcedConfig[sn]).
+// Only the forced section's own restart must be skipped; a sibling section
+// whose variables changed must still get its restart compiled.
+func TestCompileActions_ForcedSectionRestartsAreSectionScoped(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: configmgr test may have retry delays")
+	}
+	ctx := context.Background()
+	cacheInstance := cache.New(ctx, false)
+
+	cm := &ConfigManager{
+		mainConfig: &config.Config{
+			BaseDir:  "/tmp",
+			Hostname: "testhost",
+		},
+		State:      state.NewState(),
+		ServiceMgr: &testutil.MockServiceManager{},
+		Cache:      cacheInstance,
+	}
+
+	cm.State.FirstRun = false
+	// Section "svca" is forced but not itself Changed.
+	cm.State.ForcedConfig = map[string]string{"svca": "forced"}
+	cm.State.RequestedConfig = make(map[string]string)
+
+	// Enable both sections' services on this node so neither is gated out.
+	cm.State.ServerConfig.ServiceConfig.Set("svca", "TRUE")
+	cm.State.ServerConfig.ServiceConfig.Set("svcb", "TRUE")
+
+	newSection := func(name string, changed bool) *config.MtaConfigSection {
+		return &config.MtaConfigSection{
+			Name:         name,
+			Depends:      make(map[string]bool),
+			Rewrites:     make(map[string]config.RewriteEntry),
+			Restarts:     map[string]bool{name + "restart": true},
+			RequiredVars: make(map[string]string),
+			Postconf:     make(map[string]string),
+			Postconfd:    make(map[string]string),
+			Ldap:         make(map[string]string),
+			Conditionals: make([]config.Conditional, 0),
+			Changed:      changed,
+		}
+	}
+
+	cm.State.MtaConfig.Sections["svca"] = newSection("svca", false)
+	cm.State.MtaConfig.Sections["svcb"] = newSection("svcb", true)
+
+	cm.CompileActions(ctx)
+
+	if _, ok := cm.State.CurrentActions.Restarts["svcarestart"]; ok {
+		t.Error("expected forced section svca's restart NOT to be compiled")
+	}
+	if _, ok := cm.State.CurrentActions.Restarts["svcbrestart"]; !ok {
+		t.Error("expected changed sibling section svcb's restart to be compiled")
+	}
 }
 
 // TestLookUpConfig tests the LookUpConfig method
@@ -1132,7 +1168,7 @@ func TestCompileSectionActions(t *testing.T) {
 				Hostname: "testhost",
 			},
 			State:      state.NewState(),
-			ServiceMgr: newMockServiceManager(),
+			ServiceMgr: &testutil.MockServiceManager{},
 			Cache:      cacheInstance,
 		}
 
@@ -1165,7 +1201,7 @@ func TestCompileSectionActions(t *testing.T) {
 				Hostname: "testhost",
 			},
 			State:      state.NewState(),
-			ServiceMgr: newMockServiceManager(),
+			ServiceMgr: &testutil.MockServiceManager{},
 			Cache:      cacheInstance,
 		}
 
@@ -1206,7 +1242,7 @@ func TestCompileSectionActions(t *testing.T) {
 				Hostname: "testhost",
 			},
 			State:      state.NewState(),
-			ServiceMgr: newMockServiceManager(),
+			ServiceMgr: &testutil.MockServiceManager{},
 			Cache:      cacheInstance,
 		}
 
@@ -1230,7 +1266,7 @@ func TestCompileSectionActions(t *testing.T) {
 				Hostname: "testhost",
 			},
 			State:      state.NewState(),
-			ServiceMgr: newMockServiceManager(),
+			ServiceMgr: &testutil.MockServiceManager{},
 			Cache:      cacheInstance,
 		}
 
@@ -1260,7 +1296,7 @@ func TestCompileSectionActions(t *testing.T) {
 				Hostname: "testhost",
 			},
 			State:      state.NewState(),
-			ServiceMgr: newMockServiceManager(),
+			ServiceMgr: &testutil.MockServiceManager{},
 			Cache:      cacheInstance,
 		}
 		cm.State.FirstRun = true
@@ -1288,7 +1324,7 @@ func TestCompileSectionActions(t *testing.T) {
 				Hostname: "testhost",
 			},
 			State:      state.NewState(),
-			ServiceMgr: newMockServiceManager(),
+			ServiceMgr: &testutil.MockServiceManager{},
 			Cache:      cacheInstance,
 		}
 		cm.State.FirstRun = false
@@ -1316,7 +1352,7 @@ func TestCompileSectionActions(t *testing.T) {
 				Hostname: "testhost",
 			},
 			State:      state.NewState(),
-			ServiceMgr: newMockServiceManager(),
+			ServiceMgr: &testutil.MockServiceManager{},
 			Cache:      cacheInstance,
 		}
 		cm.State.FirstRun = false
@@ -1343,7 +1379,7 @@ func TestCompileSectionActions(t *testing.T) {
 				Hostname: "testhost",
 			},
 			State:      state.NewState(),
-			ServiceMgr: newMockServiceManager(),
+			ServiceMgr: &testutil.MockServiceManager{},
 			Cache:      cacheInstance,
 		}
 		cm.State.FirstRun = false
@@ -1373,7 +1409,7 @@ func TestCompileSectionActions(t *testing.T) {
 				Hostname: "testhost",
 			},
 			State:      state.NewState(),
-			ServiceMgr: newMockServiceManager(),
+			ServiceMgr: &testutil.MockServiceManager{},
 			Cache:      cacheInstance,
 		}
 		cm.State.FirstRun = false
@@ -1403,7 +1439,7 @@ func TestCompileSectionActions(t *testing.T) {
 				Hostname: "testhost",
 			},
 			State:      state.NewState(),
-			ServiceMgr: newMockServiceManager(),
+			ServiceMgr: &testutil.MockServiceManager{},
 			Cache:      cacheInstance,
 		}
 		cm.State.FirstRun = false
@@ -1434,7 +1470,7 @@ func TestCompileSectionActions(t *testing.T) {
 				Hostname: "testhost",
 			},
 			State:      state.NewState(),
-			ServiceMgr: newMockServiceManager(),
+			ServiceMgr: &testutil.MockServiceManager{},
 			Cache:      cacheInstance,
 		}
 
@@ -1470,7 +1506,7 @@ func TestCompileSectionActions(t *testing.T) {
 				Hostname: "testhost",
 			},
 			State:      state.NewState(),
-			ServiceMgr: newMockServiceManager(),
+			ServiceMgr: &testutil.MockServiceManager{},
 			Cache:      cacheInstance,
 		}
 		cm.State.FirstRun = false
@@ -1480,7 +1516,7 @@ func TestCompileSectionActions(t *testing.T) {
 		section := &config.MtaConfigSection{
 			Name: "mta",
 			Rewrites: map[string]config.RewriteEntry{
-				"main.cf": {Value: "/opt/zimbra/conf/main.cf"},
+				"main.cf": {Value: "/opt/zextras/conf/main.cf"},
 			},
 			Postconf: map[string]string{
 				"myhostname": "mail.example.com",
@@ -1538,7 +1574,7 @@ func TestCompileActions_ConcurrentWithDelRewrite(t *testing.T) {
 			Hostname: "testhost",
 		},
 		State:      state.NewState(),
-		ServiceMgr: newMockServiceManager(),
+		ServiceMgr: &testutil.MockServiceManager{},
 		Cache:      cacheInstance,
 	}
 
@@ -1611,7 +1647,7 @@ func TestDoConfigRewrites_ErrorCollection(t *testing.T) {
 			Hostname: "testhost",
 		},
 		State:      state.NewState(),
-		ServiceMgr: newMockServiceManager(),
+		ServiceMgr: &testutil.MockServiceManager{},
 		Cache:      cacheInstance,
 	}
 
@@ -1646,7 +1682,7 @@ func TestDoConfigRewrites_ErrorSurfacing(t *testing.T) {
 			Hostname: "testhost",
 		},
 		State:      state.NewState(),
-		ServiceMgr: newMockServiceManager(),
+		ServiceMgr: &testutil.MockServiceManager{},
 		Cache:      cacheInstance,
 	}
 

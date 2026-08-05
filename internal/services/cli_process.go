@@ -155,6 +155,39 @@ func stopWithoutSystemd(ctx context.Context, name string, def *ServiceDef) error
 	return killProcess(ctx, def.ProcessName)
 }
 
+// reloadWithoutSystemd is the fast-path reload for non-systemd hosts.
+// systemctl is never invoked. MTA has a native reload ("postfix reload",
+// mirroring mta_launcher.go's direct sudo-postfix pattern); every other
+// service falls back to stopService+startService, which — already being in
+// legacy mode — resolve to CustomStop/CustomStart or ProcessName/BinaryPath,
+// never systemctl.
+func reloadWithoutSystemd(ctx context.Context, name string, def *ServiceDef) error {
+	if name == serviceMTA {
+		logger.InfoContext(ctx, "Reloading service via postfix reload (legacy mode)", "service", name)
+
+		return sudoRun(ctx, postfixBin, actionReload)
+	}
+
+	logger.InfoContext(ctx, "No native reload for service, restarting (legacy mode)", "service", name)
+
+	if err := stopService(ctx, name, def); err != nil {
+		return fmt.Errorf("failed to stop %s during reload fallback: %w", name, err)
+	}
+
+	return startService(ctx, name, def)
+}
+
+// selfOrParentFilter returns a predicate reporting whether a pid is the
+// current process or its parent, computed once so scanning many candidate
+// pids doesn't re-syscall Getpid/Getppid per candidate. Shared by every
+// /proc scan that must not match the CLI's own invocation:
+// pidFromProcessName (cli.go), isProcessRunning, and killProcess.
+func selfOrParentFilter() func(pid int) bool {
+	self, parent := os.Getpid(), os.Getppid()
+
+	return func(pid int) bool { return pid == self || pid == parent }
+}
+
 // startDirect starts a service binary directly (non-systemd fallback).
 //
 // For services that self-daemonize (postfix master, slapd -d 0, opendkim, etc.)
@@ -278,13 +311,12 @@ func killProcess(ctx context.Context, processName string) error {
 		return fmt.Errorf("scan processes for %s: %w", processName, err)
 	}
 
-	self := os.Getpid()
-	parent := os.Getppid()
+	isSelfOrParent := selfOrParentFilter()
 
 	targets := make([]int, 0, len(pids))
 
 	for _, pid := range pids {
-		if pid == self || pid == parent {
+		if isSelfOrParent(pid) {
 			continue
 		}
 
@@ -319,29 +351,11 @@ func signalPID(pid int, sig syscall.Signal) {
 // expires, then SIGKILLs any survivors. Parallel so that N slow-exiting
 // processes do not sum to N*timeout.
 func waitAndEscalate(ctx context.Context, pids []int, timeout time.Duration) {
-	deadline := time.Now().Add(timeout)
-
 	done := make(chan struct{}, len(pids))
 
 	for _, pid := range pids {
 		go func(p int) {
-			for time.Now().Before(deadline) {
-				if !processAlive(p) {
-					done <- struct{}{}
-
-					return
-				}
-
-				select {
-				case <-ctx.Done():
-					done <- struct{}{}
-
-					return
-				case <-time.After(200 * time.Millisecond):
-				}
-			}
-
-			if processAlive(p) {
+			if !pollUntilExit(ctx, p, timeout, 200*time.Millisecond) {
 				logger.WarnContext(ctx, "SIGTERM grace expired, escalating to SIGKILL",
 					"pid", p, "timeout", timeout)
 				signalPID(p, syscall.SIGKILL)
@@ -364,6 +378,31 @@ func processAlive(pid int) bool {
 	}
 
 	return !isZombie(pid)
+}
+
+// pollUntilExit polls processAlive(pid) at the given interval until it
+// exits, ctx is cancelled, or timeout elapses. Returns true once the
+// process is confirmed gone. Shared poll core for waitForProcessExit
+// (helpers.go, 50ms/single pid), waitAndEscalate (200ms/N pids in
+// parallel), and killByPIDWithGroupAndSudo (200ms/process group). What
+// happens after a false return (which signal, which target) differs per
+// caller and is intentionally left to them.
+func pollUntilExit(ctx context.Context, pid int, timeout, interval time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+
+	for time.Now().Before(deadline) {
+		if !processAlive(pid) {
+			return true
+		}
+
+		select {
+		case <-ctx.Done():
+			return !processAlive(pid)
+		case <-time.After(interval):
+		}
+	}
+
+	return !processAlive(pid)
 }
 
 // killProcessGroup sends sig to the process group led by pgid (negative PID
@@ -417,17 +456,8 @@ func killByPIDWithGroupAndSudo(ctx context.Context, pid int) bool {
 		}
 	}
 
-	deadline := time.Now().Add(killProcessTimeout)
-	for time.Now().Before(deadline) {
-		if !processAlive(pid) {
-			return true
-		}
-
-		select {
-		case <-ctx.Done():
-			return !processAlive(pid)
-		case <-time.After(200 * time.Millisecond):
-		}
+	if pollUntilExit(ctx, pid, killProcessTimeout, 200*time.Millisecond) {
+		return true
 	}
 
 	logger.WarnContext(ctx, "SIGTERM grace expired, escalating to SIGKILL on process group",
@@ -544,9 +574,7 @@ func isRunningByPidFile(pidFile string) (running bool, ok bool) {
 		return false, false // corrupt — fall through
 	}
 
-	_, err = os.Stat(procFSRoot + strconv.Itoa(pid))
-
-	return err == nil && !isZombie(pid), true
+	return processAlive(pid), true
 }
 
 // isZombie reports whether a process is in the zombie state (Z).
@@ -568,39 +596,6 @@ func isZombie(pid int) bool {
 	return false
 }
 
-// isOwnedByCurrentUser returns true if the process in procDir is owned by the
-// current effective UID. Processes owned by other users (e.g. root-elevated
-// children that self-re-exec via sudo) are excluded from status scans.
-func isOwnedByCurrentUser(procDir string) bool {
-	data, err := os.ReadFile(procDir + "/status") //nolint:gosec // path is /proc/<pid>/status
-	if err != nil {
-		return true // assume owned if unreadable
-	}
-
-	uid := os.Getuid()
-
-	for line := range strings.SplitSeq(string(data), "\n") {
-		val, ok := strings.CutPrefix(line, "Uid:")
-		if !ok {
-			continue
-		}
-
-		fields := strings.Fields(val)
-		if len(fields) == 0 {
-			break
-		}
-
-		realUID, parseErr := strconv.Atoi(fields[0])
-		if parseErr != nil {
-			break
-		}
-
-		return realUID == uid
-	}
-
-	return true
-}
-
 // isProcessRunning checks if a process with the given name is running.
 // It reports whether any *other* process has a command line that contains
 // processName. The current PID and its parent are excluded so a
@@ -612,11 +607,10 @@ func isProcessRunning(_ context.Context, processName string) bool {
 		return false
 	}
 
-	self := os.Getpid()
-	parent := os.Getppid()
+	isSelfOrParent := selfOrParentFilter()
 
 	for _, pid := range pids {
-		if pid != self && pid != parent {
+		if !isSelfOrParent(pid) {
 			return true
 		}
 	}

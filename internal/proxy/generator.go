@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zextras/carbonio-configd/internal/fileutil"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/tracing"
 )
@@ -390,9 +391,9 @@ func (g *Generator) ensureIncludesDir(ctx context.Context) error {
 	return nil
 }
 
-// writeFile writes a file atomically with proper permissions
-// Uses the pattern: write temp file → chmod → rename
-// This ensures no partial updates are visible
+// writeFile writes a file atomically with proper permissions via
+// fileutil.AtomicWrite (write temp file → fsync → chmod → rename), ensuring
+// no partial updates are ever visible.
 func (g *Generator) writeFile(ctx context.Context, path string, content []byte) error {
 	if g.DryRun {
 		logger.DebugContext(ctx, "DRY-RUN: Would write file",
@@ -402,55 +403,11 @@ func (g *Generator) writeFile(ctx context.Context, path string, content []byte) 
 		return nil
 	}
 
-	// Create temp file in the same directory
-	dir := filepath.Dir(path)
-
-	tempFile, err := os.CreateTemp(dir, ".configd-tmp-*")
-	if err != nil {
-		return fmt.Errorf("failed to create temp file: %w", err)
+	// Mode 0644: nginx config must be world-readable for the nginx worker user.
+	//nolint:gosec // G302: nginx must read the generated config
+	if err := fileutil.AtomicWrite(path, content, 0o644); err != nil {
+		return fmt.Errorf("failed to write file %s: %w", path, err)
 	}
-
-	tempPath := tempFile.Name()
-
-	// Clean up temp file on error
-	defer func() {
-		if tempFile != nil {
-			if err := os.Remove(tempPath); err != nil && !os.IsNotExist(err) {
-				logger.WarnContext(ctx, "Failed to remove temp file",
-					"path", tempPath,
-					"error", err)
-			}
-		}
-	}()
-
-	// Write content to temp file
-	if _, err := tempFile.Write(content); err != nil {
-		if cerr := tempFile.Close(); cerr != nil {
-			logger.WarnContext(ctx, "Failed to close temp file",
-				"path", tempPath,
-				"error", cerr)
-		}
-
-		return fmt.Errorf("failed to write temp file: %w", err)
-	}
-
-	// Close temp file
-	if err := tempFile.Close(); err != nil {
-		return fmt.Errorf("failed to close temp file: %w", err)
-	}
-
-	// Set proper permissions (0644): nginx config must be world-readable for the nginx worker user
-	if err := os.Chmod(tempPath, 0o644); err != nil { //nolint:gosec // G302: nginx must read the generated config
-		return fmt.Errorf("failed to set permissions: %w", err)
-	}
-
-	// Atomically rename to final location
-	if err := os.Rename(tempPath, path); err != nil {
-		return fmt.Errorf("failed to rename temp file: %w", err)
-	}
-
-	// Success - don't delete temp file
-	tempFile = nil
 
 	logger.DebugContext(ctx, "Wrote file",
 		"byte_count", len(content),

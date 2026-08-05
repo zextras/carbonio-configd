@@ -204,10 +204,46 @@ exit 1
 		{Key: "deprecated_param"},
 	}
 
-	// Should not return error even if postconf fails (acceptable behavior)
+	// postconf -X's "unknown parameter" warning is expected and must not error.
 	err := executor.ExecutePostconfdBatch(context.Background(), ops)
 	if err != nil {
 		t.Errorf("ExecutePostconfdBatch should not error on non-existent keys: %v", err)
+	}
+}
+
+// TestExecutePostconfdBatch_GenericFailure verifies that a postconf -X failure
+// unrelated to an unknown parameter (e.g. permission denied, crash) is reported
+// to the caller instead of being silently swallowed.
+func TestExecutePostconfdBatch_GenericFailure(t *testing.T) {
+	mockLdap := &mockLdapManager{}
+	tmpDir := t.TempDir()
+
+	postconfPath := filepath.Join(tmpDir, "common", "sbin", "postconf")
+	if err := os.MkdirAll(filepath.Dir(postconfPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	script := `#!/bin/sh
+echo "postconf: fatal: permission denied" >&2
+exit 1
+`
+	if err := os.WriteFile(postconfPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	executor := NewExecutor(tmpDir, mockLdap)
+
+	ops := []PostconfdOperation{
+		{Key: "some_param"},
+	}
+
+	err := executor.ExecutePostconfdBatch(context.Background(), ops)
+	if err == nil {
+		t.Fatal("ExecutePostconfdBatch should return an error for non-unknown-parameter failures")
+	}
+
+	if !contains(err.Error(), "permission denied") {
+		t.Errorf("error should include the postconf output snippet, got: %v", err)
 	}
 }
 

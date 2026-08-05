@@ -56,29 +56,6 @@ func BenchmarkCache_GetCachedConfigWithChangeDetection_New(b *testing.B) {
 	})
 }
 
-func BenchmarkCache_InvalidateRelatedCache(b *testing.B) {
-	// Setup cache
-	ctx := b.Context()
-	cache := New(ctx, false)
-
-	// Pre-populate cache with some entries
-	fetchFunc := func() (any, error) {
-		return "config_value", nil
-	}
-
-	for range 100 {
-		key := "postfix_config_test"
-		_, err := cache.GetCachedConfig(ctx, key, fetchFunc)
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
-
-	for b.Loop() {
-		cache.InvalidateRelatedCache("postfix")
-	}
-}
-
 func BenchmarkCache_GetMemoryCacheStats(b *testing.B) {
 	// Setup cache
 	ctx := b.Context()
@@ -169,35 +146,6 @@ func BenchmarkCache_ConcurrentOperations(b *testing.B) {
 				cache.GetMemoryCacheStats()
 			}
 			i++
-		}
-	})
-}
-
-func BenchmarkCache_LoadCache_Miss(b *testing.B) {
-	// Setup cache
-	ctx := b.Context()
-	cache := New(ctx, false)
-
-	b.ResetTimer()
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			_, err := cache.LoadCache("non_existent_key")
-			if err == nil {
-				b.Fatal("Expected error for non-existent key")
-			}
-		}
-	})
-}
-
-func BenchmarkCache_IsCacheValid(b *testing.B) {
-	// Setup cache
-	ctx := b.Context()
-	cache := New(ctx, false)
-
-	b.ResetTimer()
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			cache.IsCacheValid(nil) // Pass nil to test the basic logic
 		}
 	})
 }

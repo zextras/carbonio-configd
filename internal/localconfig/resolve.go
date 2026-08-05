@@ -76,18 +76,3 @@ func MergeDefaults(config map[string]string) {
 		}
 	}
 }
-
-// FormatAsShell converts a config map to shell-eval format matching
-// LocalConfigCLI -m shell output: key='value';
-func FormatAsShell(config map[string]string) string {
-	var builder strings.Builder
-	for key, value := range config {
-		builder.WriteString(key)
-		builder.WriteString("='")
-		// Escape single quotes within the value for shell safety
-		builder.WriteString(strings.ReplaceAll(value, "'", "'\\''"))
-		builder.WriteString("';\n")
-	}
-
-	return builder.String()
-}

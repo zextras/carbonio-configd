@@ -10,10 +10,7 @@ package cache
 
 import (
 	"context"
-	"crypto/md5" //nolint:gosec // MD5 used for non-cryptographic checksumming only
-	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -22,6 +19,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/config"
 	errs "github.com/zextras/carbonio-configd/internal/errors"
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/state"
 )
 
 // MemoryCacheEntry represents an in-memory cache entry
@@ -167,9 +165,7 @@ func (cc *ConfigCache) generateHash(data any) string {
 		return ""
 	}
 
-	hash := md5.Sum(jsonData) //nolint:gosec // MD5 used for non-cryptographic checksumming only
-
-	return hex.EncodeToString(hash[:])
+	return state.ComputeStringMD5(string(jsonData))
 }
 
 // getFromMemoryCache retrieves data from in-memory cache
@@ -226,17 +222,6 @@ func (cc *ConfigCache) SetSkipCache(skip bool) {
 	defer cc.mutex.Unlock()
 
 	cc.skipCache = skip
-}
-
-// IsCacheValid checks if cached data is still valid (for API compatibility)
-func (cc *ConfigCache) IsCacheValid(cachedData *config.CachedData) bool {
-	if cachedData == nil {
-		return false
-	}
-
-	age := time.Since(cachedData.Timestamp).Seconds()
-
-	return age < float64(cachedData.TTL)
 }
 
 // GetCachedConfig retrieves configuration with lightning-fast in-memory cache.
@@ -297,7 +282,7 @@ func (cc *ConfigCache) GetCachedConfigWithChangeDetection(ctx context.Context, k
 	}
 
 	if cc.skipCache {
-		d, ch, _, e := cc.fetchAndCache(ctx, key, fetchFunc, true, "")
+		d, ch, _, e := cc.fetchAndCache(ctx, key, fetchFunc)
 
 		return d, ch, e
 	}
@@ -320,7 +305,7 @@ func (cc *ConfigCache) GetCachedConfigWithChangeDetection(ctx context.Context, k
 	logger.DebugContext(ctx, "Memory cache miss",
 		"key", key)
 
-	data, _, newHash, err := cc.fetchAndCache(ctx, key, fetchFunc, true, previousHash)
+	data, _, newHash, err := cc.fetchAndCache(ctx, key, fetchFunc)
 	if err != nil {
 		return nil, false, err
 	}
@@ -361,8 +346,6 @@ func (cc *ConfigCache) fetchAndCache(
 	ctx context.Context,
 	key string,
 	fetchFunc func() (any, error),
-	isChanged bool,
-	_ string,
 ) (data any, changed bool, hash string, err error) {
 	// Fetch fresh data
 	logger.DebugContext(ctx, "Fetching fresh data",
@@ -383,7 +366,7 @@ func (cc *ConfigCache) fetchAndCache(
 		cc.setMemoryCache(ctx, key, freshData, newHash)
 	}
 
-	return freshData, isChanged, newHash, nil // New data, so it's considered "changed"
+	return freshData, true, newHash, nil // New data, so it's considered "changed"
 }
 
 // ClearCache removes all memory cache entries
@@ -399,63 +382,6 @@ func (cc *ConfigCache) ClearCache() error {
 		"removed_entries", memoryEntries)
 
 	return nil
-}
-
-// InvalidateRelatedCache clears memory cache entries related to a service
-func (cc *ConfigCache) InvalidateRelatedCache(configKey string) {
-	cc.mutex.Lock()
-	defer cc.mutex.Unlock()
-
-	// Map of services to their related cache keys
-	var cacheKeys []string
-
-	switch strings.ToLower(configKey) {
-	case "mta", "postfix", "proxy", "nginx", "ldap", "slapd",
-		"antispam", "spamassassin", "antivirus", "clamav",
-		"cbpolicyd", "policyd", "sasl", "saslauthd",
-		"amavis", "amavisd", "opendkim", "dkim",
-		"mailbox", "mailboxd", "zimbra":
-		// Service-related configs should invalidate all configuration caches
-		cacheKeys = []string{"serverconfig", "globalconfig", "enabledservices"}
-	default:
-		// For unknown configs, invalidate all caches to be safe
-		cacheKeys = []string{"serverconfig", "globalconfig", "enabledservices", "localconfig"}
-	}
-
-	invalidated := 0
-	ctx := backgroundCtx()
-
-	for _, key := range cacheKeys {
-		if _, exists := cc.memoryCache[key]; exists {
-			delete(cc.memoryCache, key)
-
-			invalidated++
-
-			logger.DebugContext(ctx, "Memory cache invalidated",
-				"key", key)
-		}
-	}
-
-	if invalidated > 0 {
-		logger.DebugContext(ctx, "Invalidated cache entries for config change",
-			"invalidated_count", invalidated,
-			"config_key", configKey)
-	}
-}
-
-// LoadCache loads cached data for external access (for API compatibility)
-func (cc *ConfigCache) LoadCache(key string) (*config.CachedData, error) {
-	if memEntry, found := cc.getFromMemoryCache(key); found {
-		// Convert memory cache entry to CachedData format for compatibility
-		return &config.CachedData{
-			Data:      memEntry.Data,
-			Timestamp: memEntry.Timestamp,
-			Hash:      memEntry.Hash,
-			TTL:       memEntry.TTL,
-		}, nil
-	}
-
-	return nil, errs.WrapCache("get", key, fmt.Errorf(errs.ErrCacheEntry))
 }
 
 // GetMemoryCacheStats returns statistics about the memory cache
@@ -505,19 +431,6 @@ func (cc *ConfigCache) GetMemoryCacheStats() map[string]any {
 	return stats
 }
 
-// SetMemoryCacheConfig allows tuning memory cache parameters
-func (cc *ConfigCache) SetMemoryCacheConfig(ttl time.Duration, maxItems int) {
-	cc.mutex.Lock()
-	defer cc.mutex.Unlock()
-
-	cc.memoryCacheTTL = ttl
-	cc.maxMemoryItems = maxItems
-
-	logger.DebugContext(backgroundCtx(), "Memory cache config updated",
-		"ttl", ttl,
-		"max_items", maxItems)
-}
-
 // GetCacheKeys returns all currently cached keys (useful for debugging)
 func (cc *ConfigCache) GetCacheKeys() []string {
 	cc.mutex.RLock()
@@ -557,34 +470,4 @@ func (cc *ConfigCache) InvalidateCacheByPrefix(prefix string) int {
 	}
 
 	return invalidated
-}
-
-// WarmCache pre-loads cache with data using provided fetch functions
-func (cc *ConfigCache) WarmCache(ctx context.Context, warmupConfigs map[string]func() (any, error)) error {
-	if ctx == nil {
-		ctx = backgroundCtx()
-	}
-
-	logger.DebugContext(ctx, "Warming memory cache",
-		"config_count", len(warmupConfigs))
-
-	warmed := 0
-
-	for key, fetchFunc := range warmupConfigs {
-		if _, err := cc.GetCachedConfig(ctx, key, fetchFunc); err != nil {
-			logger.WarnContext(ctx, "Failed to warm cache",
-				"key", key,
-				"error", err)
-		} else {
-			warmed++
-		}
-	}
-
-	stats := cc.GetMemoryCacheStats()
-	logger.DebugContext(ctx, "Cache warmed",
-		"loaded", warmed,
-		"requested", len(warmupConfigs),
-		"total_entries", stats["entries"])
-
-	return nil
 }

@@ -53,22 +53,6 @@ func (e *CacheError) Unwrap() error {
 	return e.Err
 }
 
-// CommandError represents command execution errors
-type CommandError struct {
-	Op   string // operation that failed
-	Cmd  string // command that failed
-	Err  error  // underlying error
-	Exit int    // exit code
-}
-
-func (e *CommandError) Error() string {
-	return fmt.Sprintf("command %s failed for '%s' (exit %d): %v", e.Op, e.Cmd, e.Exit, e.Err)
-}
-
-func (e *CommandError) Unwrap() error {
-	return e.Err
-}
-
 // Helper functions for creating wrapped errors
 
 // WrapConfig creates a new ConfigError with proper error wrapping
@@ -89,30 +73,10 @@ func WrapCache(op, key string, err error) error {
 	return &CacheError{Op: op, Key: key, Err: err}
 }
 
-// WrapCommand creates a new CommandError with proper error wrapping
-func WrapCommand(op, cmd string, exit int, err error) error {
-	if err == nil {
-		return nil
-	}
-
-	return &CommandError{Op: op, Cmd: cmd, Exit: exit, Err: err}
-}
-
 // Common error messages
 const (
-	ErrNotFound       = "not found"
-	ErrInvalidInput   = "invalid input"
-	ErrPermission     = "permission denied"
-	ErrTimeout        = "operation timed out"
-	ErrUnavailable    = "service unavailable"
-	ErrInvalidConfig  = "invalid configuration"
-	ErrUnknownKey     = "unknown key"
-	ErrNotMaster      = "not a master"
-	ErrEmptyCommand   = "empty command string"
-	ErrCacheEntry     = "cache entry does not exist"
-	ErrFailedToFetch  = "failed to fetch fresh data"
-	ErrAllDisabled    = "all services detected disabled"
-	ErrLoadingTimeout = "configuration loading timed out"
+	ErrInvalidConfig = "invalid configuration"
+	ErrNotMaster     = "not a master"
 )
 
 // Common error types
@@ -124,14 +88,6 @@ var (
 	// has failed with a transport or protocol error and must not be reused.
 	// Callers can detect this class via errors.Is.
 	ErrLDAPUnhealthyConnection = errors.New("ldap: unhealthy connection")
-
-	// ErrLDAPProtocol indicates an LDAP protocol-level failure that should
-	// invalidate the associated connection.
-	ErrLDAPProtocol = errors.New("ldap: protocol error")
-
-	// ErrLDAPTransport indicates an LDAP transport-layer failure that should
-	// invalidate the associated connection.
-	ErrLDAPTransport = errors.New("ldap: transport error")
 
 	// ErrLDAPParse is the sentinel for malformed LDAP command output lines.
 	// Wrap it with additional context (operation, line) for callers to

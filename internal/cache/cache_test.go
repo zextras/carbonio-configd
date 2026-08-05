@@ -226,39 +226,6 @@ func TestSetMemoryCache(t *testing.T) {
 	}
 }
 
-// TestIsCacheValid verifies cache validity checking
-func TestIsCacheValid(t *testing.T) {
-	ctx := context.Background()
-	cache := New(ctx, false)
-	defer cache.Stop()
-
-	t.Run("nil_cached_data", func(t *testing.T) {
-		if cache.IsCacheValid(nil) {
-			t.Error("Expected false for nil cached data")
-		}
-	})
-
-	t.Run("valid_cached_data", func(t *testing.T) {
-		data := &config.CachedData{
-			Timestamp: time.Now(),
-			TTL:       3600, // 1 hour
-		}
-		if !cache.IsCacheValid(data) {
-			t.Error("Expected true for valid cached data")
-		}
-	})
-
-	t.Run("expired_cached_data", func(t *testing.T) {
-		data := &config.CachedData{
-			Timestamp: time.Now().Add(-2 * time.Hour),
-			TTL:       3600, // 1 hour
-		}
-		if cache.IsCacheValid(data) {
-			t.Error("Expected false for expired cached data")
-		}
-	})
-}
-
 // TestGetCachedConfig verifies basic cache retrieval
 func TestGetCachedConfig(t *testing.T) {
 	ctx := context.Background()
@@ -504,91 +471,6 @@ func TestClearCache(t *testing.T) {
 	}
 }
 
-// TestInvalidateRelatedCache verifies cache invalidation
-func TestInvalidateRelatedCache(t *testing.T) {
-	ctx := context.Background()
-	cache := New(ctx, false)
-	defer cache.Stop()
-
-	// Populate cache with various keys
-	cache.setMemoryCache(ctx, "serverconfig", "data1", "hash1234567890")
-	cache.setMemoryCache(ctx, "globalconfig", "data2", "hash2234567890")
-	cache.setMemoryCache(ctx, "enabledservices", "data3", "hash3234567890")
-	cache.setMemoryCache(ctx, "localconfig", "data4", "hash4234567890")
-	cache.setMemoryCache(ctx, "other", "data5", "hash5234567890")
-
-	t.Run("invalidate_mta_service", func(t *testing.T) {
-		cache.InvalidateRelatedCache("mta")
-
-		// Should invalidate serverconfig, globalconfig, enabledservices
-		_, found := cache.getFromMemoryCache("serverconfig")
-		if found {
-			t.Error("Expected serverconfig to be invalidated")
-		}
-		_, found = cache.getFromMemoryCache("globalconfig")
-		if found {
-			t.Error("Expected globalconfig to be invalidated")
-		}
-		_, found = cache.getFromMemoryCache("enabledservices")
-		if found {
-			t.Error("Expected enabledservices to be invalidated")
-		}
-	})
-
-	t.Run("invalidate_unknown_service", func(t *testing.T) {
-		// Re-populate
-		cache.setMemoryCache(ctx, "serverconfig", "data1", "hash1234567890")
-		cache.setMemoryCache(ctx, "globalconfig", "data2", "hash2234567890")
-		cache.setMemoryCache(ctx, "enabledservices", "data3", "hash3234567890")
-		cache.setMemoryCache(ctx, "localconfig", "data4", "hash4234567890")
-
-		cache.InvalidateRelatedCache("unknown_service")
-
-		// Should invalidate all config caches
-		_, found := cache.getFromMemoryCache("serverconfig")
-		if found {
-			t.Error("Expected serverconfig to be invalidated")
-		}
-		_, found = cache.getFromMemoryCache("localconfig")
-		if found {
-			t.Error("Expected localconfig to be invalidated for unknown service")
-		}
-	})
-}
-
-// TestLoadCache verifies cache loading
-func TestLoadCache(t *testing.T) {
-	ctx := context.Background()
-	cache := New(ctx, false)
-	defer cache.Stop()
-
-	t.Run("cache_miss", func(t *testing.T) {
-		_, err := cache.LoadCache("nonexistent")
-		if err == nil {
-			t.Error("Expected error for nonexistent key")
-		}
-	})
-
-	t.Run("cache_hit", func(t *testing.T) {
-		cache.setMemoryCache(ctx, "loadkey", "loaddata", "loadhash123456")
-
-		data, err := cache.LoadCache("loadkey")
-		if err != nil {
-			t.Fatalf("Unexpected error: %v", err)
-		}
-
-		if data.Data != "loaddata" {
-			t.Errorf("Expected data='loaddata', got %v", data.Data)
-		}
-		if data.Hash != "loadhash123456" {
-			t.Errorf("Expected hash='loadhash123456', got %s", data.Hash)
-		}
-		if data.TTL != config.CacheTTL {
-			t.Errorf("Expected TTL=%d, got %d", config.CacheTTL, data.TTL)
-		}
-	})
-}
-
 // TestGetMemoryCacheStats verifies stats retrieval
 func TestGetMemoryCacheStats(t *testing.T) {
 	ctx := context.Background()
@@ -647,30 +529,6 @@ func TestGetMemoryCacheStats(t *testing.T) {
 			t.Error("Expected at least 1 expired entry")
 		}
 	})
-}
-
-// TestSetMemoryCacheConfig verifies cache configuration
-func TestSetMemoryCacheConfig(t *testing.T) {
-	ctx := context.Background()
-	cache := New(ctx, false)
-	defer cache.Stop()
-
-	newTTL := 300 * time.Second
-	newMax := 500
-
-	cache.SetMemoryCacheConfig(newTTL, newMax)
-
-	cache.mutex.RLock()
-	actualTTL := cache.memoryCacheTTL
-	actualMax := cache.maxMemoryItems
-	cache.mutex.RUnlock()
-
-	if actualTTL != newTTL {
-		t.Errorf("Expected TTL=%v, got %v", newTTL, actualTTL)
-	}
-	if actualMax != newMax {
-		t.Errorf("Expected max=%d, got %d", newMax, actualMax)
-	}
 }
 
 // TestGetCacheKeys verifies key retrieval
@@ -757,70 +615,6 @@ func TestInvalidateCacheByPrefix(t *testing.T) {
 	})
 }
 
-// TestWarmCache verifies cache warming
-func TestWarmCache(t *testing.T) {
-	ctx := context.Background()
-	cache := New(ctx, false)
-	defer cache.Stop()
-
-	t.Run("successful_warmup", func(t *testing.T) {
-		warmupConfigs := map[string]func() (any, error){
-			"config1": func() (any, error) { return "data1", nil },
-			"config2": func() (any, error) { return "data2", nil },
-			"config3": func() (any, error) { return "data3", nil },
-		}
-
-		err := cache.WarmCache(ctx, warmupConfigs)
-		if err != nil {
-			t.Fatalf("Unexpected error: %v", err)
-		}
-
-		// Verify all configs are cached
-		for key := range warmupConfigs {
-			_, found := cache.getFromMemoryCache(key)
-			if !found {
-				t.Errorf("Expected %s to be cached", key)
-			}
-		}
-
-		stats := cache.GetMemoryCacheStats()
-		if stats["entries"] != 3 {
-			t.Errorf("Expected 3 cached entries, got %v", stats["entries"])
-		}
-	})
-
-	t.Run("partial_failure", func(t *testing.T) {
-		cache.ClearCache() // Clear previous entries
-
-		warmupConfigs := map[string]func() (any, error){
-			"success1": func() (any, error) { return "data1", nil },
-			"failure":  func() (any, error) { return nil, errors.New("fetch failed") },
-			"success2": func() (any, error) { return "data2", nil },
-		}
-
-		err := cache.WarmCache(ctx, warmupConfigs)
-		if err != nil {
-			t.Fatalf("Unexpected error: %v", err)
-		}
-
-		// Verify successful configs are cached
-		_, found := cache.getFromMemoryCache("success1")
-		if !found {
-			t.Error("Expected success1 to be cached")
-		}
-		_, found = cache.getFromMemoryCache("success2")
-		if !found {
-			t.Error("Expected success2 to be cached")
-		}
-
-		// Verify failed config is not cached
-		_, found = cache.getFromMemoryCache("failure")
-		if found {
-			t.Error("Expected failure not to be cached")
-		}
-	})
-}
-
 // TestCleanupMemoryCache verifies automatic cleanup
 func TestCleanupMemoryCache(t *testing.T) {
 	t.Run("cleanup_stops_on_context_cancel", func(t *testing.T) {
@@ -886,7 +680,10 @@ func TestRunCleanup_EvictsOldestWhenOverLimit(t *testing.T) {
 	defer cache.Stop()
 
 	// Lower the limit so we can trigger eviction cheaply.
-	cache.SetMemoryCacheConfig(time.Hour, 3)
+	cache.mutex.Lock()
+	cache.memoryCacheTTL = time.Hour
+	cache.maxMemoryItems = 3
+	cache.mutex.Unlock()
 
 	// Insert 5 entries with distinct timestamps (oldest first).
 	base := time.Now().Add(-10 * time.Minute)
@@ -1086,7 +883,7 @@ func TestFetchAndCache_SkipCacheEnabled(t *testing.T) {
 	}
 
 	// With skipCache the entry is never stored; each call fetches fresh.
-	data, changed, _, err := cache.fetchAndCache(ctx, "skip_key", fetchFunc, true, "")
+	data, changed, _, err := cache.fetchAndCache(ctx, "skip_key", fetchFunc)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}

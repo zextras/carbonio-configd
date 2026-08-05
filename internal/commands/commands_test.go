@@ -559,115 +559,6 @@ func TestGetserver_ErrorCases(t *testing.T) {
 	}
 }
 
-func TestSplitCommandArgs(t *testing.T) {
-	tests := []struct {
-		name    string
-		input   string
-		want    []string
-		wantErr bool
-		errMsg  string
-	}{
-		{
-			name:  "simple command",
-			input: "echo hello",
-			want:  []string{"echo", "hello"},
-		},
-		{
-			name:  "command with quoted argument",
-			input: `echo "hello world"`,
-			want:  []string{"echo", "hello world"},
-		},
-		{
-			name:  "command with single quotes",
-			input: `echo 'hello world'`,
-			want:  []string{"echo", "hello world"},
-		},
-		{
-			name:  "command with escaped space",
-			input: `echo hello\ world`,
-			want:  []string{"echo", "hello world"},
-		},
-		{
-			name:  "command with escaped quote",
-			input: `echo "hello \"world\""`,
-			want:  []string{"echo", `hello "world"`},
-		},
-		{
-			name:  "multiple arguments",
-			input: `cmd arg1 "arg 2" arg3`,
-			want:  []string{"cmd", "arg1", "arg 2", "arg3"},
-		},
-		{
-			name:  "empty quotes",
-			input: `cmd ""`,
-			want:  []string{"cmd", ""},
-		},
-		{
-			name:  "mixed quotes",
-			input: `cmd "double" 'single'`,
-			want:  []string{"cmd", "double", "single"},
-		},
-		{
-			name:    "unterminated double quote",
-			input:   `echo "hello`,
-			wantErr: true,
-			errMsg:  "unterminated quote",
-		},
-		{
-			name:    "unterminated single quote",
-			input:   `echo 'hello`,
-			wantErr: true,
-			errMsg:  "unterminated quote",
-		},
-		{
-			name:    "trailing escape",
-			input:   `echo hello\`,
-			wantErr: true,
-			errMsg:  "trailing escape",
-		},
-		{
-			name:  "tabs as whitespace",
-			input: "echo\thello\tworld",
-			want:  []string{"echo", "hello", "world"},
-		},
-		{
-			name:  "multiple spaces",
-			input: "echo  hello   world",
-			want:  []string{"echo", "hello", "world"},
-		},
-		{
-			name:  "quote within different quote type",
-			input: `echo "it's working"`,
-			want:  []string{"echo", "it's working"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := splitCommandArgs(tt.input)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("splitCommandArgs() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if tt.wantErr && err != nil && !strings.Contains(err.Error(), tt.errMsg) {
-				t.Errorf("splitCommandArgs() error = %v, want error containing %v", err, tt.errMsg)
-				return
-			}
-			if !tt.wantErr {
-				if len(got) != len(tt.want) {
-					t.Errorf("splitCommandArgs() got %d args, want %d args\ngot:  %v\nwant: %v", len(got), len(tt.want), got, tt.want)
-					return
-				}
-				for i := range got {
-					if got[i] != tt.want[i] {
-						t.Errorf("splitCommandArgs() arg[%d] = %q, want %q", i, got[i], tt.want[i])
-					}
-				}
-			}
-		})
-	}
-}
-
 // TestRunBinaryWithContext tests the runBinaryWithContext method directly.
 func TestRunBinaryWithContext(t *testing.T) {
 	tests := []struct {
@@ -1176,6 +1067,21 @@ func TestNewCommandExecutor_NilClient(t *testing.T) {
 	e := NewCommandExecutor(nil)
 	if e == nil {
 		t.Fatal("NewCommandExecutor(nil) returned nil")
+	}
+}
+
+// TestCommandExecutor_requireLDAP verifies the shared nil-client guard used by
+// every LDAP-backed CommandExecutor method.
+func TestCommandExecutor_requireLDAP(t *testing.T) {
+	if err := NewCommandExecutor(nil).requireLDAP(); err == nil {
+		t.Fatal("requireLDAP() with nil client returned nil error")
+	} else if !strings.Contains(err.Error(), errLDAPNotInitialized) {
+		t.Errorf("requireLDAP() error = %v, want to contain %q", err, errLDAPNotInitialized)
+	}
+
+	e := &CommandExecutor{ldapClient: &stubProvisioningLDAP{}}
+	if err := e.requireLDAP(); err != nil {
+		t.Errorf("requireLDAP() with configured client = %v, want nil", err)
 	}
 }
 

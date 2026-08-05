@@ -60,18 +60,9 @@ func (cm *ConfigManager) loadServerConfigWithRetry(ctx context.Context, maxRetri
 // fetchServerConfig fetches fresh server config from LDAP (cache miss path)
 func (cm *ConfigManager) fetchServerConfig(ctx context.Context, maxRetries int) (*ServerConfigData, error) {
 	return retryWithBackoff(ctx, "ServerConfig", maxRetries, func() (*ServerConfigData, error) {
-		cmd := cm.CommandRegistry.Commands["gs"]
-		if cmd == nil {
-			return nil, fmt.Errorf("gs command not available (LDAP commands not registered)")
-		}
-
-		rc, output, errMsg := cmd.Execute(ctx, cm.mainConfig.Hostname)
-		if rc != 0 {
-			return nil, fmt.Errorf("gs command failed with rc=%d: %s", rc, errMsg)
-		}
-
-		if output == "" {
-			return nil, fmt.Errorf("no data returned from gs")
+		output, err := cm.executeLDAPCommand(ctx, "gs", cm.mainConfig.Hostname)
+		if err != nil {
+			return nil, err
 		}
 
 		// Parse LDAP attribute output (key: value format)

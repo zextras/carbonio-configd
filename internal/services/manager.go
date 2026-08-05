@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/intern"
 	"github.com/zextras/carbonio-configd/internal/logger"
 )
@@ -468,7 +469,7 @@ func (sm *ServiceManager) queueDependencyRestart(
 	serviceKey := "SERVICE_" + strings.ToUpper(depService)
 	serviceStatus := configLookup(serviceKey)
 
-	if isTruthy(serviceStatus) || serviceStatus == serviceStatusEnabled {
+	if config.IsTruthy(serviceStatus) || serviceStatus == serviceStatusEnabled {
 		sm.addRestartLogged(ctx, depService, depService)
 	} else {
 		logger.DebugContext(ctx, "Skipped dependency restart for disabled service", "service", depService)

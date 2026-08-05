@@ -334,30 +334,6 @@ func showProxyStatus() {
 	}
 }
 
-// buildProxyLDAPClient builds a write-capable LDAP client from a resolved
-// localconfig map. Splits ldap_master_url via ParseURLs so connect-time
-// failover works on multi-URL HA setups (CO-3565).
-func buildProxyLDAPClient(lc map[string]string) (*carboldap.Client, string, error) {
-	ldapURLs := carboldap.ParseURLs(lc["ldap_master_url"])
-	if len(ldapURLs) == 0 {
-		return nil, "", fmt.Errorf(
-			"LDAP not configured (ldap_master_url is empty); " +
-				"directory server may not be running or localconfig is incomplete")
-	}
-
-	client, err := carboldap.NewClient(&carboldap.ClientConfig{
-		URLs:     ldapURLs,
-		BindDN:   lc["zimbra_ldap_userdn"],
-		Password: lc["zimbra_ldap_password"],
-		StartTLS: true,
-	})
-	if err != nil {
-		return nil, "", fmt.Errorf("connecting to LDAP: %w", err)
-	}
-
-	return client, lc["zimbra_server_hostname"], nil
-}
-
 func connectLDAP() (client *carboldap.Client, hostname string) {
 	lc, err := localconfig.LoadResolvedConfig()
 	if err != nil {
@@ -365,11 +341,11 @@ func connectLDAP() (client *carboldap.Client, hostname string) {
 		os.Exit(1)
 	}
 
-	client, hostname, err = buildProxyLDAPClient(lc)
+	client, err = openWriteLDAPClient(lc)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	return client, hostname
+	return client, lc[lcKeyZimbraServerHostname]
 }

@@ -14,8 +14,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/zextras/carbonio-configd/internal/fileutil"
 	"github.com/zextras/carbonio-configd/internal/ldap"
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/state"
 	"github.com/zextras/carbonio-configd/internal/tracing"
 )
 
@@ -33,10 +35,20 @@ func NewExecutor(baseDir string, ldapManager ldap.AttributeModifier) Executor {
 		baseDir:      baseDir,
 		postconfPath: filepath.Join(baseDir, "common", "sbin", "postconf"),
 		ldapManager:  ldapManager,
-		mappedFiles: map[string]string{
-			attrZimbraSSLDHParam: filepath.Join(baseDir, "conf", "dhparam.pem"),
-		},
+		mappedFiles:  mappedFilePaths(baseDir),
 	}
+}
+
+// mappedFilePaths resolves state.MAPPEDFILES (the canonical key -> relative
+// path table) to absolute paths under baseDir, so a new mapped-file key only
+// needs to be added in one place.
+func mappedFilePaths(baseDir string) map[string]string {
+	paths := make(map[string]string, len(state.MAPPEDFILES))
+	for key, relPath := range state.MAPPEDFILES {
+		paths[key] = filepath.Join(baseDir, relPath)
+	}
+
+	return paths
 }
 
 // ExecutePostconf executes a postconf -e operation.
@@ -47,8 +59,9 @@ func (e *executor) ExecutePostconf(ctx context.Context, op PostconfOperation) er
 
 // ExecutePostconfBatch executes multiple postconf -e operations in a single call.
 // This is much more efficient than calling postconf individually for each setting.
-// Values with newlines are executed separately as postconf doesn't support multi-line
-// values in batch mode.
+// Values containing newlines (e.g. multi-value LDAP attributes) are normalized in
+// place: split on newlines, trimmed, and rejoined with ", " so they stay part of
+// the same batch invocation instead of postconf's multi-line syntax.
 func (e *executor) ExecutePostconfBatch(ctx context.Context, ops []PostconfOperation) error {
 	ctx = logger.ContextWithComponentOnce(ctx, "mtaops")
 
@@ -159,11 +172,22 @@ func (e *executor) ExecutePostconfdBatch(ctx context.Context, ops []PostconfdOpe
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		// postconf -X might fail if keys don't exist, which is acceptable
-		logger.DebugContext(ctx, "Postconf -X batch completed with error (may be expected if keys don't exist)",
-			"error", err)
+		// postconf -X warns (and exits non-zero) when a key doesn't exist; that's
+		// expected and safe to ignore. Any other failure (missing binary, permission
+		// denied, crash, ...) must surface to the caller.
+		if strings.Contains(strings.ToLower(string(output)), "unknown parameter") {
+			logger.DebugContext(ctx, "Postconf -X batch reported unknown parameter (acceptable)",
+				"error", err,
+				"output", string(output))
 
-		return nil // Don't treat as error
+			return nil
+		}
+
+		logger.ErrorContext(ctx, "Postconf -X batch failed",
+			"error", err,
+			"output", string(output))
+
+		return fmt.Errorf("postconf -X batch failed: %w, output: %s", err, string(output))
 	}
 
 	logger.DebugContext(ctx, "Postconf -X batch completed",
@@ -277,8 +301,8 @@ func (e *executor) executeMapFile(ctx context.Context, op MapfileOperation, file
 		return nil
 	}
 
-	//nolint:gosec // G306: File permissions 0o600 are intentionally restrictive for security
-	if err := os.WriteFile(filePath, data, 0o600); err != nil {
+	// File permissions 0o600 are intentionally restrictive for security.
+	if err := fileutil.AtomicWrite(filePath, data, 0o600); err != nil {
 		return fmt.Errorf("MAPFILE %s: failed to write file %s: %w", op.Key, filePath, err)
 	}
 

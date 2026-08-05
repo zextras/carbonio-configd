@@ -10,41 +10,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
-	"syscall"
 	"testing"
 	"time"
 )
-
-// --- isTruthy ---
-
-func TestIsTruthy(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	tests := []struct {
-		input string
-		want  bool
-	}{
-		{"TRUE", true},
-		{"true", true},
-		{"True", true},
-		{"1", true},
-		{"FALSE", false},
-		{"false", false},
-		{"0", false},
-		{"yes", false},
-		{"", false},
-		{"2", false},
-		{"TRUE ", false}, // trailing space — not trimmed by isTruthy
-	}
-
-	for _, tt := range tests {
-		got := isTruthy(tt.input)
-		if got != tt.want {
-			t.Errorf("isTruthy(%q) = %v, want %v", tt.input, got, tt.want)
-		}
-	}
-}
 
 // --- openLogFile ---
 
@@ -103,62 +71,6 @@ func TestOpenLogFile_InvalidPath(t *testing.T) {
 	_, err := openLogFile("/nonexistent/directory/test.log")
 	if err == nil {
 		t.Error("expected error for invalid path")
-	}
-}
-
-// --- signalViaPidfile ---
-
-func TestSignalViaPidfile_NoSuchFile(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	ctx := context.Background()
-	err := signalViaPidfile(ctx, "/nonexistent/path/service.pid", "testsvc", syscall.SIGTERM)
-	// Missing pidfile is treated as "already stopped" — no error.
-	if err != nil {
-		t.Errorf("expected nil for missing pidfile, got: %v", err)
-	}
-}
-
-func TestSignalViaPidfile_InvalidPid(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	tmp := t.TempDir()
-	pidFile := filepath.Join(tmp, "bad.pid")
-	if err := os.WriteFile(pidFile, []byte("notanumber\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	ctx := context.Background()
-	err := signalViaPidfile(ctx, pidFile, "testsvc", syscall.SIGTERM)
-	if err == nil {
-		t.Error("expected error for non-numeric pid in pidfile")
-	}
-}
-
-func TestSignalViaPidfile_ValidPidSignalSent(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	// Use the current process PID — sending SIGCONT to ourselves is safe (no-op).
-	tmp := t.TempDir()
-	pidFile := filepath.Join(tmp, "self.pid")
-	selfPid := os.Getpid()
-
-	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(selfPid)+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	ctx := context.Background()
-	err := signalViaPidfile(ctx, pidFile, "testsvc", syscall.SIGCONT)
-	if err != nil {
-		t.Errorf("unexpected error sending SIGCONT to self: %v", err)
-	}
-
-	// pidfile should be removed on success
-	if _, statErr := os.Stat(pidFile); !os.IsNotExist(statErr) {
-		t.Error("expected pidfile to be removed after successful signal")
 	}
 }
 

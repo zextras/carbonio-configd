@@ -15,6 +15,29 @@ import (
 
 const norewriteArg = "norewrite"
 
+// cliPreamble runs the common Kong Run() setup shared by every
+// root-requiring CLI command: enforce root, initialize CLI logging, and
+// return a background context for the command body.
+func cliPreamble() context.Context {
+	requireZextras()
+	initCLILogging()
+
+	return context.Background()
+}
+
+// runServiceAction runs cliPreamble, then invokes fn and wraps any error
+// with the verb and service name to match each command's original
+// user-facing message. Shared by every service-mutating Kong command.
+func runServiceAction(name, verb string, fn func(context.Context, string) error) error {
+	ctx := cliPreamble()
+
+	if err := fn(ctx, name); err != nil {
+		return fmt.Errorf("failed to %s service %s: %w", verb, name, err)
+	}
+
+	return nil
+}
+
 // ServiceCmd handles the "configd service" subcommand.
 type ServiceCmd struct {
 	List         ServiceListCmd         `cmd:"" help:"List all services with status"`
@@ -51,12 +74,7 @@ type ServiceStartCmd struct {
 
 // Run executes the service start command.
 func (c *ServiceStartCmd) Run() error {
-	requireZextras()
-	initCLILogging()
-
-	ctx := context.Background()
-
-	// Supports both --no-rewrite flag and legacy "norewrite" positional arg
+	// Supports both --no-rewrite flag and legacy "norewrite" positional arg.
 	for _, a := range c.Extra {
 		if a == norewriteArg {
 			c.NoRewrite = true
@@ -65,54 +83,30 @@ func (c *ServiceStartCmd) Run() error {
 
 	services.NoRewrite = c.NoRewrite
 
-	if err := services.ServiceStart(ctx, c.Name); err != nil {
-		return fmt.Errorf("failed to start service %s: %w", c.Name, err)
-	}
-
-	return nil
+	return runServiceAction(c.Name, "start", services.ServiceStart)
 }
 
 // ServiceStartSystemdCmd is the systemd ExecStart leaf: it launches the service
 // in-process and never calls systemctl, so it is safe to invoke from the
 // carbonio-<name>.service unit without re-entering systemctl.
 type ServiceStartSystemdCmd struct {
-	Name  string   `arg:"" help:"Service name"`
-	Extra []string `arg:"" optional:"" hidden:""`
+	Name string `arg:"" help:"Service name"`
 }
 
 // Run executes the systemd-leaf start command.
 func (c *ServiceStartSystemdCmd) Run() error {
-	requireZextras()
-	initCLILogging()
-
-	ctx := context.Background()
-
-	if err := services.ServiceStartSystemd(ctx, c.Name); err != nil {
-		return fmt.Errorf("failed to start service %s: %w", c.Name, err)
-	}
-
-	return nil
+	return runServiceAction(c.Name, "start", services.ServiceStartSystemd)
 }
 
 // ServiceStopSystemdCmd is the systemd ExecStop leaf: it stops the service
 // in-process and never calls systemctl.
 type ServiceStopSystemdCmd struct {
-	Name  string   `arg:"" help:"Service name"`
-	Extra []string `arg:"" optional:"" hidden:""`
+	Name string `arg:"" help:"Service name"`
 }
 
 // Run executes the systemd-leaf stop command.
 func (c *ServiceStopSystemdCmd) Run() error {
-	requireZextras()
-	initCLILogging()
-
-	ctx := context.Background()
-
-	if err := services.ServiceStopSystemd(ctx, c.Name); err != nil {
-		return fmt.Errorf("failed to stop service %s: %w", c.Name, err)
-	}
-
-	return nil
+	return runServiceAction(c.Name, "stop", services.ServiceStopSystemd)
 }
 
 // ServiceStopCmd stops a service.
@@ -122,16 +116,7 @@ type ServiceStopCmd struct {
 
 // Run executes the service stop command.
 func (c *ServiceStopCmd) Run() error {
-	requireZextras()
-	initCLILogging()
-
-	ctx := context.Background()
-
-	if err := services.ServiceStop(ctx, c.Name); err != nil {
-		return fmt.Errorf("failed to stop service %s: %w", c.Name, err)
-	}
-
-	return nil
+	return runServiceAction(c.Name, "stop", services.ServiceStop)
 }
 
 // ServiceRestartCmd restarts a service.
@@ -143,11 +128,6 @@ type ServiceRestartCmd struct {
 
 // Run executes the service restart command.
 func (c *ServiceRestartCmd) Run() error {
-	requireZextras()
-	initCLILogging()
-
-	ctx := context.Background()
-
 	// Parse extra args for --no-rewrite / -R flag, then propagate to the services package.
 	// services.NoRewrite is checked by ServiceRestart before rewriting configs.
 	for _, a := range c.Extra {
@@ -158,11 +138,7 @@ func (c *ServiceRestartCmd) Run() error {
 
 	services.NoRewrite = c.NoRewrite
 
-	if err := services.ServiceRestart(ctx, c.Name); err != nil {
-		return fmt.Errorf("failed to restart service %s: %w", c.Name, err)
-	}
-
-	return nil
+	return runServiceAction(c.Name, "restart", services.ServiceRestart)
 }
 
 // ServiceReloadCmd reloads a service.
@@ -172,16 +148,7 @@ type ServiceReloadCmd struct {
 
 // Run executes the service reload command.
 func (c *ServiceReloadCmd) Run() error {
-	requireZextras()
-	initCLILogging()
-
-	ctx := context.Background()
-
-	if err := services.ServiceReload(ctx, c.Name); err != nil {
-		return fmt.Errorf("failed to reload service %s: %w", c.Name, err)
-	}
-
-	return nil
+	return runServiceAction(c.Name, "reload", services.ServiceReload)
 }
 
 // ServiceStatusCmd shows detailed status for a service.

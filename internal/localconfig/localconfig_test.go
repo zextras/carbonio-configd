@@ -212,6 +212,30 @@ func TestFormatAsKeyValue_EmptyMap(t *testing.T) {
 	}
 }
 
+// TestFormatAsKeyValue_SortedOrder verifies FormatAsKeyValue emits keys in
+// deterministic sorted order across repeated calls, matching zmlocalconfig
+// -s output consumed by internal/commands and internal/configmgr.
+func TestFormatAsKeyValue_SortedOrder(t *testing.T) {
+	config := map[string]string{
+		"zimbra_home":   "/opt/zextras",
+		"ldap_host":     "localhost",
+		"ldap_port":     "389",
+		"mailbox_index": "/opt/zextras/index",
+	}
+
+	expected := "ldap_host = localhost\n" +
+		"ldap_port = 389\n" +
+		"mailbox_index = /opt/zextras/index\n" +
+		"zimbra_home = /opt/zextras\n"
+
+	for i := range 10 {
+		output := FormatAsKeyValue(config)
+		if output != expected {
+			t.Fatalf("run %d: expected sorted output:\n%s\ngot:\n%s", i, expected, output)
+		}
+	}
+}
+
 // TestLoadLocalConfig_UsesDefaultPath tests that LoadLocalConfig uses the default path
 func TestLoadLocalConfig_UsesDefaultPath(t *testing.T) {
 	// This test will only pass if running in actual Carbonio environment

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/logger"
 )
 
@@ -92,7 +93,7 @@ func antispamDBEnabled(ctx context.Context) bool {
 		return false
 	}
 
-	if !isTruthy(lc["antispam_mysql_enabled"]) {
+	if !config.IsTruthy(lc["antispam_mysql_enabled"]) {
 		return false
 	}
 

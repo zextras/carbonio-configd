@@ -4,6 +4,8 @@
 
 package services
 
+import "github.com/zextras/carbonio-configd/internal/config"
+
 // Service name identifiers used across the package.
 const (
 	svcAmavis          = "amavis"
@@ -71,12 +73,13 @@ const (
 // Action and state words.
 const (
 	actionStart = "start"
+	actionStop  = "stop"
 )
 
 // User and group identifiers. Carbonio runs everything as zextras; there is
 // no zimbra account on a Carbonio host.
 const (
-	userZextras = "zextras"
+	userZextras = config.ZextrasUser
 )
 
 // SASL mechanisms. "zimbra" is the name of the Carbonio-patched saslauthd

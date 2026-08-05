@@ -6,11 +6,10 @@
 package proxy
 
 import (
-	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
@@ -18,7 +17,6 @@ import (
 
 const (
 	errGetAllServers                   = "failed to get all servers: %w"
-	serverNamePrefix                   = "# name "
 	zimbraServiceHostnameAttr          = "zimbraServiceHostname"
 	zimbraReverseProxyLookupTargetAttr = "zimbraReverseProxyLookupTarget"
 	zimbraMailModeAttr                 = "zimbraMailMode"
@@ -31,7 +29,15 @@ const (
 	mailModeMixed                      = "mixed"
 	mailModeHTTPS                      = "https"
 	mailModeRedirect                   = "redirect"
+	memcachedService                   = "memcached"
+	defaultMailPort                    = 80
+	defaultMailSSLPort                 = 443
+	defaultMemcachedPort               = 11211
 )
+
+// errNativeLDAPClientNotInitialized is returned when a native-LDAP-backed
+// lookup is attempted without a configured LdapClient/NativeClient.
+var errNativeLDAPClientNotInitialized = errors.New("native LDAP client not initialized")
 
 // MemcacheServer represents a memcached server
 type MemcacheServer struct {
@@ -39,74 +45,58 @@ type MemcacheServer struct {
 	Port     int    // zimbraMemcachedBindPort
 }
 
-// serverData holds server attributes during parsing
-type serverData struct {
-	hostname     string
-	lookupTarget bool
-	mailMode     string
-	mailPort     int
-	mailSSLPort  int
-}
+// buildReverseProxyBackends filters byHost (as returned by
+// getServerAttrsByHostname) down to servers that qualify as reverse proxy
+// backends (non-empty zimbraServiceHostname and
+// zimbraReverseProxyLookupTarget=TRUE), building an UpstreamServer per
+// qualifying server via buildFn. Results are sorted by hostname.
+func buildReverseProxyBackends(
+	byHost map[string]map[string]string,
+	buildFn func(hostname string, attrs map[string]string) UpstreamServer,
+) []UpstreamServer {
+	var servers []UpstreamServer
 
-// mcServerData holds memcached server attributes during parsing.
-type mcServerData struct {
-	hostname      string
-	hasMemcached  bool
-	memcachedPort int
-}
-
-// applyServerAttr updates cur with a parsed key/value attribute pair.
-func applyServerAttr(key, value string, cur *serverData) {
-	switch key {
-	case zimbraServiceHostnameAttr:
-		cur.hostname = value
-	case zimbraReverseProxyLookupTargetAttr:
-		cur.lookupTarget = strings.EqualFold(value, "TRUE")
-	case zimbraMailModeAttr:
-		cur.mailMode = strings.ToLower(value)
-	case zimbraMailPortAttr:
-		if port, err := strconv.Atoi(value); err == nil {
-			cur.mailPort = port
+	for _, attrs := range byHost {
+		hostname := attrs[zimbraServiceHostnameAttr]
+		if hostname == "" || !strings.EqualFold(attrs[zimbraReverseProxyLookupTargetAttr], "TRUE") {
+			continue
 		}
-	case zimbraMailSSLPortAttr:
-		if port, err := strconv.Atoi(value); err == nil {
-			cur.mailSSLPort = port
+
+		if s := buildFn(hostname, attrs); s.Port > 0 {
+			servers = append(servers, s)
 		}
 	}
+
+	slices.SortFunc(servers, func(a, b UpstreamServer) int { return strings.Compare(a.Host, b.Host) })
+
+	return servers
 }
 
-// appendValidUpstream appends an UpstreamServer if cur qualifies as a proxy backend.
-func appendValidUpstream(servers *[]UpstreamServer, cur serverData, portSelector func(serverData) UpstreamServer) {
-	if cur.hostname == "" || !cur.lookupTarget {
-		return
+// buildUpstreamServer builds an UpstreamServer for hostname based on mail mode.
+// Logic from Jython:
+// - If mailMode is http, mixed, or both -> use zimbraMailPort
+// - Otherwise -> use zimbraMailSSLPort
+func (g *Generator) buildUpstreamServer(hostname string, attrs map[string]string) UpstreamServer {
+	server := UpstreamServer{Host: hostname}
+
+	switch strings.ToLower(attrs[zimbraMailModeAttr]) {
+	case mailModeHTTP, mailModeMixed, ipModeBoth:
+		server.Port = atoiOr(attrs[zimbraMailPortAttr], defaultMailPort)
+	default:
+		// For "https", "redirect", or any other mode, use SSL port
+		server.Port = atoiOr(attrs[zimbraMailSSLPortAttr], defaultMailSSLPort)
 	}
 
-	s := portSelector(cur)
-	if s.Port > 0 {
-		*servers = append(*servers, s)
-	}
+	return server
 }
 
-// applyMcAttr updates cur with a parsed key/value attribute pair.
-func applyMcAttr(key, value string, cur *mcServerData) {
-	switch key {
-	case zimbraServiceHostnameAttr:
-		cur.hostname = value
-	case zimbraServiceEnabledAttr:
-		if value == "memcached" {
-			cur.hasMemcached = true
-		}
-	case zimbraMemcachedBindPortAttr:
-		if port, err := strconv.Atoi(value); err == nil {
-			cur.memcachedPort = port
-		}
-	}
-}
-
-// appendValidMcServer appends a MemcacheServer if cur has memcached enabled.
-func appendValidMcServer(servers *[]MemcacheServer, cur mcServerData) {
-	if cur.hostname != "" && cur.hasMemcached && cur.memcachedPort > 0 {
-		*servers = append(*servers, MemcacheServer{Hostname: cur.hostname, Port: cur.memcachedPort})
+// buildUpstreamServerSSL builds an UpstreamServer for SSL upstreams.
+// Always uses zimbraMailSSLPort (Java behavior from ProxyConfVar.java:304)
+// This matches the Java implementation which uses zimbraReverseProxyHttpSSLPortAttribute
+func (g *Generator) buildUpstreamServerSSL(hostname string, attrs map[string]string) UpstreamServer {
+	return UpstreamServer{
+		Host: hostname,
+		Port: atoiOr(attrs[zimbraMailSSLPortAttr], defaultMailSSLPort),
 	}
 }
 
@@ -115,101 +105,6 @@ func appendValidMcServer(servers *[]MemcacheServer, cur mcServerData) {
 // Results are cached to avoid repeated expensive LDAP calls.
 func (g *Generator) getAllReverseProxyBackends(ctx context.Context) ([]UpstreamServer, error) {
 	return g.getAllReverseProxyBackendsBy(ctx, false)
-}
-
-// parseReverseProxyBackends parses zmprov gas output to find servers with zimbraReverseProxyLookupTarget=TRUE
-//
-// This function parses the zmprov -l gas output format:
-// # name server1.example.com
-// zimbraServiceHostname: server1.example.com
-// zimbraReverseProxyLookupTarget: TRUE
-// zimbraMailMode: http
-// zimbraMailPort: 8080
-// zimbraMailSSLPort: 8443
-//
-// Expected attributes:
-// - zimbraReverseProxyLookupTarget: TRUE/FALSE
-// - zimbraMailMode: http, https, mixed, both
-// - zimbraMailPort: integer (default 80)
-// - zimbraMailSSLPort: integer (default 443)
-// - zimbraServiceHostname: string
-func (g *Generator) parseReverseProxyBackends(output string) []UpstreamServer {
-	return g.parseReverseProxyBackendsGeneric(output, g.buildUpstreamServer)
-}
-
-// parseReverseProxyBackendsSSL parses zmprov gas output for SSL upstream servers
-func (g *Generator) parseReverseProxyBackendsSSL(output string) []UpstreamServer {
-	return g.parseReverseProxyBackendsGeneric(output, g.buildUpstreamServerSSL)
-}
-
-// parseReverseProxyBackendsGeneric is a generic helper for parsing reverse proxy backends.
-// It accepts a port selector function to determine which port to use for each server.
-func (g *Generator) parseReverseProxyBackendsGeneric(
-	output string,
-	portSelector func(serverData) UpstreamServer) []UpstreamServer {
-	var servers []UpstreamServer
-
-	scanner := bufio.NewScanner(strings.NewReader(output))
-	current := serverData{mailPort: 80, mailSSLPort: 443}
-
-	for scanner.Scan() {
-		trimmed := strings.TrimSpace(scanner.Text())
-		if trimmed == "" {
-			continue
-		}
-
-		if strings.HasPrefix(trimmed, "#") {
-			appendValidUpstream(&servers, current, portSelector)
-			current = serverData{mailPort: 80, mailSSLPort: 443}
-
-			continue
-		}
-
-		parts := strings.SplitN(trimmed, ":", 2)
-		if len(parts) == 2 {
-			applyServerAttr(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), &current)
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		logger.ErrorContext(context.Background(), "Error scanning reverse proxy backends",
-			"error", err)
-	}
-
-	appendValidUpstream(&servers, current, portSelector)
-
-	return servers
-}
-
-// buildUpstreamServer builds an UpstreamServer based on mail mode
-// Logic from Jython:
-// - If mailMode is http, mixed, or both -> use zimbraMailPort
-// - Otherwise -> use zimbraMailSSLPort
-func (g *Generator) buildUpstreamServer(data serverData) UpstreamServer {
-	server := UpstreamServer{
-		Host: data.hostname,
-	}
-
-	// Determine port based on mail mode
-	switch data.mailMode {
-	case mailModeHTTP, mailModeMixed, ipModeBoth:
-		server.Port = data.mailPort
-	default:
-		// For "https", "redirect", or any other mode, use SSL port
-		server.Port = data.mailSSLPort
-	}
-
-	return server
-}
-
-// buildUpstreamServerSSL builds an UpstreamServer for SSL upstreams
-// Always uses zimbraMailSSLPort (Java behavior from ProxyConfVar.java:304)
-// This matches the Java implementation which uses zimbraReverseProxyHttpSSLPortAttribute
-func (g *Generator) buildUpstreamServerSSL(data serverData) UpstreamServer {
-	return UpstreamServer{
-		Host: data.hostname,
-		Port: data.mailSSLPort,
-	}
 }
 
 // getAllReverseProxyBackendsSSL queries all servers that should be SSL reverse proxy backends.
@@ -221,7 +116,7 @@ func (g *Generator) getAllReverseProxyBackendsSSL(ctx context.Context) ([]Upstre
 // getAllReverseProxyBackendsBy is the shared implementation for backend discovery.
 // When ssl=true, it uses SSL ports and cache fields; otherwise plain HTTP.
 func (g *Generator) getAllReverseProxyBackendsBy(ctx context.Context, ssl bool) ([]UpstreamServer, error) {
-	label, fallbackPort, parser, cached := g.backendsByParams(ssl)
+	label, fallbackPort, buildFn, cached := g.backendsByParams(ssl)
 
 	if g.upstreamCache != nil && g.upstreamCache.populated && cached != nil {
 		logger.DebugContext(ctx, "Using cached "+label+"reverse proxy backends",
@@ -232,12 +127,18 @@ func (g *Generator) getAllReverseProxyBackendsBy(ctx context.Context, ssl bool) 
 
 	logger.DebugContext(ctx, "Querying all "+label+"reverse proxy backend servers (cache miss)")
 
-	outputStr, err := g.getOrCacheServersOutput()
+	if g.upstreamCache == nil || g.upstreamCache.serverAttrsByHost == nil {
+		if g.LdapClient == nil || g.LdapClient.NativeClient == nil {
+			return nil, fmt.Errorf(errGetAllServers, errNativeLDAPClientNotInitialized)
+		}
+	}
+
+	byHost, err := g.getServerAttrsByHostname(ctx)
 	if err != nil {
 		return nil, fmt.Errorf(errGetAllServers, err)
 	}
 
-	servers := parser(outputStr)
+	servers := buildReverseProxyBackends(byHost, buildFn)
 
 	logger.DebugContext(ctx, "Found "+label+"reverse proxy backend servers",
 		"server_count", len(servers))
@@ -262,12 +163,12 @@ func (g *Generator) getAllReverseProxyBackendsBy(ctx context.Context, ssl bool) 
 
 // backendsByParams returns the parameters that vary between SSL and non-SSL backend lookups.
 func (g *Generator) backendsByParams(ssl bool) (
-	label string, fallbackPort int, parser func(string) []UpstreamServer, cached *[]UpstreamServer,
+	label string, fallbackPort int, buildFn func(string, map[string]string) UpstreamServer, cached *[]UpstreamServer,
 ) {
 	if ssl {
 		label = "SSL "
 		fallbackPort = 8443
-		parser = g.parseReverseProxyBackendsSSL
+		buildFn = g.buildUpstreamServerSSL
 
 		if g.upstreamCache != nil {
 			cached = &g.upstreamCache.reverseProxyBackendsSSL
@@ -275,32 +176,37 @@ func (g *Generator) backendsByParams(ssl bool) (
 	} else {
 		label = ""
 		fallbackPort = 8080
-		parser = g.parseReverseProxyBackends
+		buildFn = g.buildUpstreamServer
 
 		if g.upstreamCache != nil {
 			cached = &g.upstreamCache.reverseProxyBackends
 		}
 	}
 
-	return label, fallbackPort, parser, cached
+	return label, fallbackPort, buildFn, cached
 }
 
-// getOrCacheServersOutput returns the cached gas output, fetching it from LDAP when missing.
-func (g *Generator) getOrCacheServersOutput() (string, error) {
-	if g.upstreamCache != nil && g.upstreamCache.gasOutput != "" {
-		return g.upstreamCache.gasOutput, nil
+// buildMemcachedServers filters byHost (as returned by
+// getServerAttrsByHostname) down to servers that have the memcached service
+// enabled (zimbraServiceEnabled contains "memcached") and a non-empty
+// zimbraServiceHostname. Results are sorted by hostname.
+func buildMemcachedServers(byHost map[string]map[string]string) []MemcacheServer {
+	var servers []MemcacheServer
+
+	for _, attrs := range byHost {
+		hostname := attrs[zimbraServiceHostnameAttr]
+		if hostname == "" || !serverEnablesAnyService(attrs, []string{memcachedService}) {
+			continue
+		}
+
+		if port := atoiOr(attrs[zimbraMemcachedBindPortAttr], defaultMemcachedPort); port > 0 {
+			servers = append(servers, MemcacheServer{Hostname: hostname, Port: port})
+		}
 	}
 
-	outputStr, err := g.getAllServersOutput()
-	if err != nil {
-		return "", err
-	}
+	slices.SortFunc(servers, func(a, b MemcacheServer) int { return strings.Compare(a.Hostname, b.Hostname) })
 
-	if g.upstreamCache != nil {
-		g.upstreamCache.gasOutput = outputStr
-	}
-
-	return outputStr, nil
+	return servers
 }
 
 // getAllMemcachedServers queries all memcached servers
@@ -317,13 +223,18 @@ func (g *Generator) getAllMemcachedServers(ctx context.Context) ([]MemcacheServe
 
 	logger.DebugContext(ctx, "Querying all memcached servers (cache miss)")
 
-	// Get all servers with attributes using native LDAP client
-	outputStr, err := g.getAllServersOutput()
+	if g.upstreamCache == nil || g.upstreamCache.serverAttrsByHost == nil {
+		if g.LdapClient == nil || g.LdapClient.NativeClient == nil {
+			return nil, fmt.Errorf(errGetAllServers, errNativeLDAPClientNotInitialized)
+		}
+	}
+
+	byHost, err := g.getServerAttrsByHostname(ctx)
 	if err != nil {
 		return nil, fmt.Errorf(errGetAllServers, err)
 	}
 
-	servers := g.parseMemcachedServers(outputStr)
+	servers := buildMemcachedServers(byHost)
 
 	logger.DebugContext(ctx, "Found memcached servers",
 		"server_count", len(servers))
@@ -336,42 +247,6 @@ func (g *Generator) getAllMemcachedServers(ctx context.Context) ([]MemcacheServe
 	}
 
 	return servers, nil
-}
-
-// parseMemcachedServers parses zmprov gas output to find servers with memcached service enabled.
-func (g *Generator) parseMemcachedServers(output string) []MemcacheServer {
-	var servers []MemcacheServer
-
-	scanner := bufio.NewScanner(strings.NewReader(output))
-	current := mcServerData{memcachedPort: 11211}
-
-	for scanner.Scan() {
-		trimmed := strings.TrimSpace(scanner.Text())
-		if trimmed == "" {
-			continue
-		}
-
-		if strings.HasPrefix(trimmed, "#") {
-			appendValidMcServer(&servers, current)
-			current = mcServerData{memcachedPort: 11211}
-
-			continue
-		}
-
-		parts := strings.SplitN(trimmed, ":", 2)
-		if len(parts) == 2 {
-			applyMcAttr(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), &current)
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		logger.ErrorContext(context.Background(), "Error scanning memcached servers",
-			"error", err)
-	}
-
-	appendValidMcServer(&servers, current)
-
-	return servers
 }
 
 // formatMemcacheServers formats memcache servers for nginx config
@@ -387,65 +262,4 @@ func formatMemcacheServers(servers []MemcacheServer) string {
 	}
 
 	return strings.Join(lines, "\n")
-}
-
-// getAllServersOutput retrieves all servers with attributes using the native LDAP client
-// and formats the output to match zmprov -l gas -v format for backward compatibility.
-// This allows reusing existing parsing logic while eliminating subprocess overhead.
-func (g *Generator) getAllServersOutput() (string, error) {
-	// Check if native LDAP client is available
-	if g.LdapClient == nil || g.LdapClient.NativeClient == nil {
-		return "", fmt.Errorf("native LDAP client not initialized")
-	}
-
-	// Get all servers with attributes
-	serversMap, err := g.LdapClient.NativeClient.GetAllServersWithAttributes()
-	if err != nil {
-		return "", fmt.Errorf("failed to query LDAP servers: %w", err)
-	}
-
-	// Convert map structure to zmprov gas -v output format
-	// Format:
-	// # name server1.example.com
-	// zimbraServiceHostname: server1.example.com
-	// zimbraReverseProxyLookupTarget: TRUE
-	// ...
-	var builder strings.Builder
-
-	serverNames := make([]string, 0, len(serversMap))
-	for serverName := range serversMap {
-		serverNames = append(serverNames, serverName)
-	}
-
-	slices.Sort(serverNames)
-
-	for _, serverName := range serverNames {
-		attrs := serversMap[serverName]
-
-		builder.WriteString(serverNamePrefix)
-		builder.WriteString(serverName)
-		builder.WriteString("\n")
-
-		attrKeys := make([]string, 0, len(attrs))
-		for key := range attrs {
-			if key == "cn" {
-				continue
-			}
-
-			attrKeys = append(attrKeys, key)
-		}
-
-		slices.Sort(attrKeys)
-
-		for _, key := range attrKeys {
-			builder.WriteString(key)
-			builder.WriteString(": ")
-			builder.WriteString(attrs[key])
-			builder.WriteString("\n")
-		}
-
-		builder.WriteString("\n")
-	}
-
-	return builder.String(), nil
 }

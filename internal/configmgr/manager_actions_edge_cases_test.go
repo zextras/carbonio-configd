@@ -14,6 +14,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/mtaops"
 	"github.com/zextras/carbonio-configd/internal/state"
+	"github.com/zextras/carbonio-configd/internal/testutil"
 	"github.com/zextras/carbonio-configd/internal/transformer"
 )
 
@@ -110,7 +111,7 @@ func newTestCMWithExecutor(t *testing.T) (*ConfigManager, *mockMtaExecutor) {
 			Hostname: "testhost",
 		},
 		State:       st,
-		ServiceMgr:  newMockServiceManager(),
+		ServiceMgr:  &testutil.MockServiceManager{},
 		Cache:       cacheInstance,
 		mtaExecutor: exec,
 		mtaResolver: resolver,
@@ -381,7 +382,9 @@ func TestDoPostconf_MultipleEntries(t *testing.T) {
 	}
 }
 
-// TestDoPostconf_ExecutorError exercises the error-logging branch (no panic, continues).
+// TestDoPostconf_ExecutorError is a regression test: a failed postconf batch
+// must leave the pending directive intact (not cleared) so the next cycle
+// retries it, and the error must be returned rather than swallowed.
 func TestDoPostconf_ExecutorError(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: configmgr test may have retry delays")
@@ -390,8 +393,14 @@ func TestDoPostconf_ExecutorError(t *testing.T) {
 	exec.postconfErr = &testError{msg: "postconf command failed"}
 	cm.State.CurrentActions.Postconf["key"] = "value"
 
-	// Should not panic; error is logged
-	cm.doPostconf(context.Background())
+	err := cm.doPostconf(context.Background())
+
+	if err == nil {
+		t.Error("expected doPostconf to return the batch error")
+	}
+	if _, ok := cm.State.CurrentActions.Postconf["key"]; !ok {
+		t.Error("expected postconf state to be retained after a failed batch so the next cycle retries")
+	}
 }
 
 // TestDoPostconf_ResolverError exercises the resolveValueSpec error path (continue).
@@ -482,7 +491,9 @@ func TestDoPostconfd_MultipleEntries(t *testing.T) {
 	}
 }
 
-// TestDoPostconfd_ExecutorError exercises the executor error logging path.
+// TestDoPostconfd_ExecutorError is a regression test: a failed postconfd
+// batch must leave the pending directive intact (not cleared) so the next
+// cycle retries it, and the error must be returned rather than swallowed.
 func TestDoPostconfd_ExecutorError(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: configmgr test may have retry delays")
@@ -491,8 +502,14 @@ func TestDoPostconfd_ExecutorError(t *testing.T) {
 	exec.postconfdErr = &testError{msg: "postconfd failed"}
 	cm.State.CurrentActions.Postconfd["key"] = "val"
 
-	// Should not panic
-	cm.doPostconfd(context.Background())
+	err := cm.doPostconfd(context.Background())
+
+	if err == nil {
+		t.Error("expected doPostconfd to return the batch error")
+	}
+	if _, ok := cm.State.CurrentActions.Postconfd["key"]; !ok {
+		t.Error("expected postconfd state to be retained after a failed batch so the next cycle retries")
+	}
 }
 
 // TestDoPostconfd_CancelledContext exercises the ctx.Done() path inside loop.
@@ -830,19 +847,10 @@ func TestDoRestarts_WithAddRestartError(t *testing.T) {
 	ctx := context.Background()
 	cacheInstance := cache.New(ctx, false)
 
-	// Custom mock that returns error for AddRestart
-	type errServiceMgr struct {
-		mockServiceManager
-	}
-	mgr := &errServiceMgr{}
-	mgr.commands = make(map[string]bool)
-	mgr.runningServices = make(map[string]bool)
-	mgr.restartQueue = make([]string, 0)
-
 	cm := &ConfigManager{
 		mainConfig: &config.Config{BaseDir: "/tmp", Hostname: "testhost"},
 		State:      state.NewState(),
-		ServiceMgr: &mgr.mockServiceManager,
+		ServiceMgr: &testutil.MockServiceManager{},
 		Cache:      cacheInstance,
 	}
 	cm.State.CurrentActions.Restarts = map[string]int{"nginx": 1}
@@ -1084,21 +1092,6 @@ func TestDoConfigRewrites_WithPostconfAndLdap(t *testing.T) {
 
 // ---- DoRestarts extended tests (configLookup closure coverage) ----
 
-// errServiceManager is a mock that returns errors from AddRestart and ProcessRestarts.
-type errServiceManager struct {
-	mockServiceManager
-	addRestartErr     error
-	processRestartErr error
-}
-
-func (m *errServiceManager) AddRestart(_ context.Context, _ string) error {
-	return m.addRestartErr
-}
-
-func (m *errServiceManager) ProcessRestarts(_ context.Context, _ func(string) string) error {
-	return m.processRestartErr
-}
-
 // TestDoRestarts_AddRestartError exercises the AddRestart error logging branch.
 func TestDoRestarts_AddRestartError(t *testing.T) {
 	if testing.Short() {
@@ -1107,12 +1100,11 @@ func TestDoRestarts_AddRestartError(t *testing.T) {
 	ctx := context.Background()
 	cacheInstance := cache.New(ctx, false)
 
-	mgr := &errServiceManager{
-		addRestartErr: &testError{msg: "add restart failed"},
+	mgr := &testutil.MockServiceManager{
+		AddRestartFn: func(_ context.Context, _ string) error {
+			return &testError{msg: "add restart failed"}
+		},
 	}
-	mgr.commands = make(map[string]bool)
-	mgr.runningServices = make(map[string]bool)
-	mgr.restartQueue = make([]string, 0)
 
 	cm := &ConfigManager{
 		mainConfig: &config.Config{BaseDir: "/tmp", Hostname: "testhost"},
@@ -1134,12 +1126,11 @@ func TestDoRestarts_ProcessRestartsError(t *testing.T) {
 	ctx := context.Background()
 	cacheInstance := cache.New(ctx, false)
 
-	mgr := &errServiceManager{
-		processRestartErr: &testError{msg: "process restarts failed"},
+	mgr := &testutil.MockServiceManager{
+		ProcessRestartsFn: func(_ context.Context, _ func(string) string) error {
+			return &testError{msg: "process restarts failed"}
+		},
 	}
-	mgr.commands = make(map[string]bool)
-	mgr.runningServices = make(map[string]bool)
-	mgr.restartQueue = make([]string, 0)
 
 	cm := &ConfigManager{
 		mainConfig: &config.Config{BaseDir: "/tmp", Hostname: "testhost"},
@@ -1163,10 +1154,13 @@ func TestDoRestarts_ConfigLookup_ServiceEnabled(t *testing.T) {
 	ctx := context.Background()
 	cacheInstance := cache.New(ctx, false)
 
-	capturedMgr := &captureConfigLookupMgr{}
-	capturedMgr.commands = make(map[string]bool)
-	capturedMgr.runningServices = make(map[string]bool)
-	capturedMgr.restartQueue = make([]string, 0)
+	var capturedLookup func(string) string
+	capturedMgr := &testutil.MockServiceManager{
+		ProcessRestartsFn: func(_ context.Context, configLookup func(string) string) error {
+			capturedLookup = configLookup
+			return nil
+		},
+	}
 
 	cm := &ConfigManager{
 		mainConfig: &config.Config{BaseDir: "/tmp", Hostname: "testhost"},
@@ -1180,7 +1174,6 @@ func TestDoRestarts_ConfigLookup_ServiceEnabled(t *testing.T) {
 
 	cm.DoRestarts(ctx)
 
-	capturedLookup := capturedMgr.lastLookup
 	if capturedLookup == nil {
 		t.Fatal("expected ProcessRestarts to be called with a configLookup")
 	}
@@ -1204,19 +1197,8 @@ func TestDoRestarts_ConfigLookup_ServiceEnabled(t *testing.T) {
 	}
 }
 
-// captureConfigLookupMgr is a mock that captures the configLookup passed to ProcessRestarts.
-type captureConfigLookupMgr struct {
-	mockServiceManager
-	lastLookup func(string) string
-}
-
-func (m *captureConfigLookupMgr) ProcessRestarts(_ context.Context, configLookup func(string) string) error {
-	m.lastLookup = configLookup
-	return nil
-}
-
 // TestDoRestarts_ConfigLookup_ServiceEnabledPath exercises the configLookup closure
-// via a captureConfigLookupMgr. LookUpConfig for SERVICE always returns "TRUE"/"FALSE",
+// captured via ProcessRestartsFn. LookUpConfig for SERVICE always returns "TRUE"/"FALSE",
 // never "enabled", so the closure always returns "disabled". We verify the SERVICE_
 // key parsing and boundary cases are exercised.
 func TestDoRestarts_ConfigLookup_ServiceEnabledPath(t *testing.T) {
@@ -1226,10 +1208,13 @@ func TestDoRestarts_ConfigLookup_ServiceEnabledPath(t *testing.T) {
 	ctx := context.Background()
 	cacheInstance := cache.New(ctx, false)
 
-	captureMgr := &captureConfigLookupMgr{}
-	captureMgr.commands = make(map[string]bool)
-	captureMgr.runningServices = make(map[string]bool)
-	captureMgr.restartQueue = make([]string, 0)
+	var capturedLookup func(string) string
+	captureMgr := &testutil.MockServiceManager{
+		ProcessRestartsFn: func(_ context.Context, configLookup func(string) string) error {
+			capturedLookup = configLookup
+			return nil
+		},
+	}
 
 	cm := &ConfigManager{
 		mainConfig: &config.Config{BaseDir: "/tmp", Hostname: "testhost"},
@@ -1243,24 +1228,24 @@ func TestDoRestarts_ConfigLookup_ServiceEnabledPath(t *testing.T) {
 
 	cm.DoRestarts(ctx)
 
-	if captureMgr.lastLookup == nil {
+	if capturedLookup == nil {
 		t.Fatal("expected ProcessRestarts to be called with a configLookup")
 	}
 
 	// SERVICE_NGINX: exists in ServiceConfig → LookUpConfig returns "TRUE" → closure returns "enabled"
-	got := captureMgr.lastLookup("SERVICE_NGINX")
+	got := capturedLookup("SERVICE_NGINX")
 	if got != "enabled" {
 		t.Errorf("SERVICE_NGINX lookup: got %q, want %q", got, "enabled")
 	}
 
 	// Non-SERVICE_ prefix key — "disabled"
-	got2 := captureMgr.lastLookup("OTHER_KEY")
+	got2 := capturedLookup("OTHER_KEY")
 	if got2 != "disabled" {
 		t.Errorf("OTHER_KEY lookup: got %q, want %q", got2, "disabled")
 	}
 
 	// "SERVICE_" exactly 8 chars — len(key)==8 is NOT > 8, so returns "disabled"
-	got3 := captureMgr.lastLookup("SERVICE_")
+	got3 := capturedLookup("SERVICE_")
 	if got3 != "disabled" {
 		t.Errorf("SERVICE_ (empty suffix) lookup: got %q, want %q", got3, "disabled")
 	}
@@ -1277,10 +1262,11 @@ func TestProcessIsRunning_IsRunningError(t *testing.T) {
 	ctx := context.Background()
 	cacheInstance := cache.New(ctx, false)
 
-	errMgr := &isRunningErrMgr{}
-	errMgr.commands = make(map[string]bool)
-	errMgr.runningServices = make(map[string]bool)
-	errMgr.restartQueue = make([]string, 0)
+	errMgr := &testutil.MockServiceManager{
+		IsRunningFn: func(_ context.Context, _ string) (bool, error) {
+			return false, &testError{msg: "is-running check failed"}
+		},
+	}
 
 	cm := &ConfigManager{
 		mainConfig: &config.Config{BaseDir: "/tmp", Hostname: "testhost"},
@@ -1294,15 +1280,6 @@ func TestProcessIsRunning_IsRunningError(t *testing.T) {
 	if result {
 		t.Error("expected ProcessIsRunning to return false when IsRunning errors")
 	}
-}
-
-// isRunningErrMgr returns an error from IsRunning to exercise the WarnContext branch.
-type isRunningErrMgr struct {
-	mockServiceManager
-}
-
-func (m *isRunningErrMgr) IsRunning(_ context.Context, _ string) (bool, error) {
-	return false, &testError{msg: "is-running check failed"}
 }
 
 // ---- cleanupRewriteFiles additional paths ----
@@ -1753,10 +1730,13 @@ func TestDoRestarts_ConfigLookup_EnabledMatchPath(t *testing.T) {
 	ctx := context.Background()
 	cacheInstance := cache.New(ctx, false)
 
-	captureMgr := &captureConfigLookupMgr{}
-	captureMgr.commands = make(map[string]bool)
-	captureMgr.runningServices = make(map[string]bool)
-	captureMgr.restartQueue = make([]string, 0)
+	var capturedLookup func(string) string
+	captureMgr := &testutil.MockServiceManager{
+		ProcessRestartsFn: func(_ context.Context, configLookup func(string) string) error {
+			capturedLookup = configLookup
+			return nil
+		},
+	}
 
 	cm := &ConfigManager{
 		mainConfig: &config.Config{BaseDir: "/tmp", Hostname: "testhost"},
@@ -1769,18 +1749,18 @@ func TestDoRestarts_ConfigLookup_EnabledMatchPath(t *testing.T) {
 	cm.State.ServerConfig.ServiceConfig.Set("proxy", "enabled")
 	cm.DoRestarts(ctx)
 
-	if captureMgr.lastLookup == nil {
+	if capturedLookup == nil {
 		t.Fatal("expected ProcessRestarts to capture configLookup")
 	}
 
 	// SERVICE_PROXY: LookUpConfig("SERVICE","proxy") returns "enabled" → closure returns "enabled"
-	got := captureMgr.lastLookup("SERVICE_PROXY")
+	got := capturedLookup("SERVICE_PROXY")
 	if got != "enabled" {
 		t.Errorf("SERVICE_PROXY: got %q, want %q", got, "enabled")
 	}
 
 	// Key shorter than 8 chars → "disabled"
-	got2 := captureMgr.lastLookup("SVC")
+	got2 := capturedLookup("SVC")
 	if got2 != "disabled" {
 		t.Errorf("short key: got %q, want %q", got2, "disabled")
 	}

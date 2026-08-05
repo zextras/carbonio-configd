@@ -169,8 +169,7 @@ func (cm *ConfigManager) doRewrites(ctx context.Context) error {
 	}
 
 	for filePath, rewriteEntry := range rewrites {
-		select {
-		case <-ctx.Done():
+		if cancelled(ctx) {
 			logger.InfoContext(ctx, "File rewrites cancelled by shutdown signal")
 			wg.Wait()
 
@@ -179,7 +178,6 @@ func (cm *ConfigManager) doRewrites(ctx context.Context) error {
 			}
 
 			return nil
-		default:
 		}
 
 		fileCount++
@@ -238,7 +236,7 @@ func cleanupRewriteFiles(ctx context.Context, srcFile, tmpFile *os.File, tmpFile
 
 // isAlreadyClosedError checks if an error is due to an already closed file
 func isAlreadyClosedError(err error) bool {
-	return err != nil && (err.Error() == "file already closed" || strings.Contains(err.Error(), "already closed"))
+	return errors.Is(err, os.ErrClosed)
 }
 
 // rewriteTransform opens srcPath, applies transformer to every line, and writes

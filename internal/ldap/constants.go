@@ -4,9 +4,11 @@
 
 package ldap
 
+// LDAP attribute names shared across packages (schema names, never rename).
 const (
-	attrZimbraServiceEnabled         = "zimbraServiceEnabled"
-	attrZimbraDomainName             = "zimbraDomainName"
+	AttrZimbraServiceEnabled           = "zimbraServiceEnabled"
+	AttrZimbraReverseProxyLookupTarget = "zimbraReverseProxyLookupTarget"
+	attrZimbraDomainName               = "zimbraDomainName"
 	keyLDAPCommonLoglevel            = "ldap_common_loglevel"
 	keyLDAPCommonThreads             = "ldap_common_threads"
 	keyLDAPCommonToolthreads         = "ldap_common_toolthreads"

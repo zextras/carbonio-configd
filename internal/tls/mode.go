@@ -20,6 +20,8 @@ import (
 	"strings"
 
 	"github.com/go-ldap/ldap/v3"
+
+	carboldap "github.com/zextras/carbonio-configd/internal/ldap"
 )
 
 // LDAPClient is the subset of *internal/ldap.Client used by the mail-mode
@@ -104,12 +106,12 @@ func ServerBackendDN(hostname, baseDN string) string {
 func IsReverseProxyBackend(c LDAPClient, hostname string) (bool, error) {
 	dn := ServerBackendDN(hostname, zimbraBaseDN)
 
-	entry, err := c.GetEntry(dn, []string{"zimbraReverseProxyLookupTarget"})
+	entry, err := c.GetEntry(dn, []string{carboldap.AttrZimbraReverseProxyLookupTarget})
 	if err != nil {
 		return false, fmt.Errorf("lookup backend flag: %w", err)
 	}
 
-	return strings.EqualFold(entry.GetAttributeValue("zimbraReverseProxyLookupTarget"), "TRUE"), nil
+	return strings.EqualFold(entry.GetAttributeValue(carboldap.AttrZimbraReverseProxyLookupTarget), "TRUE"), nil
 }
 
 // EnumerateProxies returns the cn values of every server that has the proxy

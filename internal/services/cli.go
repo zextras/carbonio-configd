@@ -275,7 +275,14 @@ func ServiceRestart(ctx context.Context, name string) error {
 	return ServiceStart(ctx, name)
 }
 
-// ServiceReload sends a reload signal to a service.
+// ServiceReload sends a reload signal to a service. Bifurcated on
+// IsSystemdMode(), mirroring startService/stopService:
+//
+//   - strict systemd: try systemctl reload per unit; on failure fall back
+//     to stopService+startService (unchanged from before this fix).
+//   - legacy: systemctl is never invoked, even as a fallback. See
+//     reloadWithoutSystemd in cli_process.go for the native-reload /
+//     stop+start fallback logic.
 func ServiceReload(ctx context.Context, name string) error {
 	def := LookupService(name)
 	if def == nil {
@@ -286,6 +293,10 @@ func ServiceReload(ctx context.Context, name string) error {
 		logger.DebugContext(ctx, "Service is externally managed, not reloading", "service", name)
 
 		return nil
+	}
+
+	if !IsSystemdMode() {
+		return reloadWithoutSystemd(ctx, name, def)
 	}
 
 	for _, unit := range def.SystemdUnits {
@@ -408,11 +419,10 @@ func pidFromProcessName(processName string) int {
 		return 0
 	}
 
-	self := os.Getpid()
-	parent := os.Getppid()
+	isSelfOrParent := selfOrParentFilter()
 
 	for _, p := range pids {
-		if p != self && p != parent {
+		if !isSelfOrParent(p) {
 			return p
 		}
 	}

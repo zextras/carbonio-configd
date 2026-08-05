@@ -243,76 +243,45 @@ func (p *parser) parseRewrite(section *config.MtaConfigSection) error {
 	return nil
 }
 
-// parseVar parses a VAR directive.
-func (p *parser) parseVar(section *config.MtaConfigSection) error {
-	p.advance() // skip VAR
+// parseRequiredVarDirective parses a directive that declares a single
+// required variable name (VAR, LOCAL, MAPFILE, MAPLOCAL), recording it as
+// section.RequiredVars[name] = configType. errMsg is the "expected ... at
+// line %d" format string reported when the directive name is missing.
+func (p *parser) parseRequiredVarDirective(section *config.MtaConfigSection, configType, errMsg string) error {
+	p.advance() // skip directive keyword
 
 	if p.current.Type != TokenIdentifier {
-		return fmt.Errorf(errExpectedVarName, p.current.Line)
+		return fmt.Errorf(errMsg, p.current.Line)
 	}
 
 	varName := p.current.Literal
-	section.RequiredVars[varName] = ConfigTypeVAR
+	section.RequiredVars[varName] = configType
 
 	p.advance()
 
 	p.skipToNewline()
 
 	return nil
+}
+
+// parseVar parses a VAR directive.
+func (p *parser) parseVar(section *config.MtaConfigSection) error {
+	return p.parseRequiredVarDirective(section, ConfigTypeVAR, errExpectedVarName)
 }
 
 // parseLocal parses a LOCAL directive.
 func (p *parser) parseLocal(section *config.MtaConfigSection) error {
-	p.advance() // skip LOCAL
-
-	if p.current.Type != TokenIdentifier {
-		return fmt.Errorf("expected local variable name at line %d", p.current.Line)
-	}
-
-	varName := p.current.Literal
-	section.RequiredVars[varName] = ConfigTypeLOCAL
-
-	p.advance()
-
-	p.skipToNewline()
-
-	return nil
+	return p.parseRequiredVarDirective(section, ConfigTypeLOCAL, "expected local variable name at line %d")
 }
 
 // parseMapfile parses a MAPFILE directive.
 func (p *parser) parseMapfile(section *config.MtaConfigSection) error {
-	p.advance() // skip MAPFILE
-
-	if p.current.Type != TokenIdentifier {
-		return fmt.Errorf(errExpectedVarName, p.current.Line)
-	}
-
-	varName := p.current.Literal
-	section.RequiredVars[varName] = ConfigTypeMAPFILE
-
-	p.advance()
-
-	p.skipToNewline()
-
-	return nil
+	return p.parseRequiredVarDirective(section, ConfigTypeMAPFILE, errExpectedVarName)
 }
 
 // parseMaplocal parses a MAPLOCAL directive.
 func (p *parser) parseMaplocal(section *config.MtaConfigSection) error {
-	p.advance() // skip MAPLOCAL
-
-	if p.current.Type != TokenIdentifier {
-		return fmt.Errorf(errExpectedVarName, p.current.Line)
-	}
-
-	varName := p.current.Literal
-	section.RequiredVars[varName] = ConfigTypeMAPLOCAL
-
-	p.advance()
-
-	p.skipToNewline()
-
-	return nil
+	return p.parseRequiredVarDirective(section, ConfigTypeMAPLOCAL, errExpectedVarName)
 }
 
 // parsePostconf parses a POSTCONF directive.

@@ -12,14 +12,13 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"time"
 )
 
 const (
 	// CacheTTL defines the default time-to-live for cache entries in seconds.
 	CacheTTL = 300
 	// defaultBaseDir is the default base directory for Zextras installation.
-	defaultBaseDir = "/opt/zextras"
+	defaultBaseDir = ZextrasBase
 	// programName is the name of the configd program.
 	programName = "zmconfigd"
 )
@@ -105,14 +104,6 @@ type Conditional struct {
 type RewriteEntry struct {
 	Value string
 	Mode  string
-}
-
-// CachedData represents a cached data entry for API compatibility.
-type CachedData struct {
-	Data      any
-	Timestamp time.Time
-	Hash      string
-	TTL       int
 }
 
 // NewConfig initializes a new Config with default values.

@@ -52,15 +52,6 @@ func mailboxCustomStart(ctx context.Context, def *ServiceDef) error {
 			"path", mailboxdPath+"/work", "error", err)
 	}
 
-	logFile := logPath + "/zmmailboxd.out"
-
-	logFd, err := openLogFile(logFile)
-	if err != nil {
-		return err
-	}
-
-	defer func() { _ = logFd.Close() }()
-
 	// Pre-create gc.log with correct permissions (Java needs write access)
 	gcLog := logPath + "/gc.log"
 	if _, statErr := os.Stat(gcLog); os.IsNotExist(statErr) {
@@ -69,19 +60,8 @@ func mailboxCustomStart(ctx context.Context, def *ServiceDef) error {
 		}
 	}
 
-	cmd := exec.CommandContext(ctx, javaBin, args...)
-	cmd.Stdout = logFd
-	cmd.Stderr = logFd
-	cmd.SysProcAttr = detachedSysProcAttr()
-
-	logger.InfoContext(ctx, "Starting mailbox via Java launcher",
-		"java", javaBin, "heap", lc["mailboxd_java_heap_size"]+"m", "log", logFile)
-
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start mailbox: %w", err)
-	}
-
-	return nil
+	return startJavaDetached(ctx, "mailbox", javaBin, logPath+"/zmmailboxd.out", args,
+		"heap", lc["mailboxd_java_heap_size"]+"m")
 }
 
 // mailboxCustomStop terminates mailboxd and then the appserver mariadb in
@@ -104,6 +84,41 @@ func mailboxCustomStop(ctx context.Context, def *ServiceDef) error {
 			"error", err)
 
 		return err
+	}
+
+	return nil
+}
+
+// startJavaDetached builds and starts javaBin with args as a fully detached,
+// fire-and-forget child: stdout/stderr go to logFile, it gets its own
+// session via detachedSysProcAttr, and the process handle is released right
+// after Start. Shared by mailboxCustomStart and milterCustomStart, whose
+// Java-launch skeletons had drifted (milter released the handle, mailbox
+// did not) — Release is correct for both: neither caller ever calls
+// cmd.Wait() on the child, so nothing needs the handle once it's launched;
+// the process is reaped by init once configd's own process exits.
+func startJavaDetached(ctx context.Context, label, javaBin, logFile string, args []string, logFields ...any) error {
+	logFd, err := openLogFile(logFile)
+	if err != nil {
+		return err
+	}
+
+	defer func() { _ = logFd.Close() }()
+
+	cmd := exec.CommandContext(ctx, javaBin, args...)
+	cmd.Stdout = logFd
+	cmd.Stderr = logFd
+	cmd.SysProcAttr = detachedSysProcAttr()
+
+	fields := append([]any{"java", javaBin, "log", logFile}, logFields...)
+	logger.InfoContext(ctx, "Starting "+label+" via Java launcher", fields...)
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("failed to start %s: %w", label, err)
+	}
+
+	if err := cmd.Process.Release(); err != nil {
+		logger.WarnContext(ctx, "Failed to release "+label+" process handle", "error", err)
 	}
 
 	return nil

@@ -242,7 +242,7 @@ func TestGetAllDomainsWithAttributes_SearchError(t *testing.T) {
 func TestGetEnabledServices(t *testing.T) {
 	result := &ldap.SearchResult{Entries: []*ldap.Entry{
 		entryWithAttrs("cn=mail.example.com,cn=servers,cn=zimbra", map[string][]string{
-			attrZimbraServiceEnabled: {"proxy", "mta", "ldap"},
+			AttrZimbraServiceEnabled: {"proxy", "mta", "ldap"},
 		}),
 	}}
 	c, rec := newGetterTestClient(result, nil)
@@ -250,7 +250,7 @@ func TestGetEnabledServices(t *testing.T) {
 	services, err := c.GetEnabledServices("mail.example.com")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"proxy", "mta", "ldap"}, services)
-	assert.Equal(t, []string{attrZimbraServiceEnabled}, rec.attributes)
+	assert.Equal(t, []string{AttrZimbraServiceEnabled}, rec.attributes)
 }
 
 func TestGetEnabledServices_NotFound(t *testing.T) {
