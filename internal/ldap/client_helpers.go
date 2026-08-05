@@ -76,7 +76,7 @@ func (c *Client) QueryServers(ctx context.Context, serviceName string) ([]Server
 			continue
 		}
 
-		if !serverHasService(a[attrZimbraServiceEnabled], serviceName) {
+		if !serverHasService(a[AttrZimbraServiceEnabled], serviceName) {
 			continue
 		}
 

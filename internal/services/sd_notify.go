@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/sdnotify"
 )
 
 // notifySocketDir is the directory for sd_notify sockets. Overridden in
@@ -131,7 +132,7 @@ func awaitSDNotifyStopping(ctx context.Context, service string) {
 			continue
 		}
 
-		if strings.Contains(string(buf[:n]), "STOPPING=1") {
+		if strings.Contains(string(buf[:n]), sdnotify.Stopping) {
 			logger.InfoContext(ctx, "Graceful shutdown acknowledged by daemon", "service", service)
 
 			return
@@ -161,7 +162,7 @@ func waitForSDNotify(ctx context.Context, conn *net.UnixConn, service string, ex
 
 		n, _, err := conn.ReadFrom(buf)
 		if err == nil {
-			if strings.Contains(string(buf[:n]), "READY=1") {
+			if strings.Contains(string(buf[:n]), sdnotify.Ready) {
 				return nil
 			}
 

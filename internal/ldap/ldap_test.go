@@ -6,11 +6,15 @@ package ldap
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"github.com/zextras/carbonio-configd/internal/config"
-	errs "github.com/zextras/carbonio-configd/internal/errors"
 	"testing"
 	"time"
+
+	"github.com/go-ldap/ldap/v3"
+
+	"github.com/zextras/carbonio-configd/internal/config"
+	errs "github.com/zextras/carbonio-configd/internal/errors"
 )
 
 func TestNewLdap(t *testing.T) {
@@ -441,6 +445,28 @@ func TestLdap_IsRetryableError(t *testing.T) {
 		{
 			name:          "network_error_retryable",
 			err:           fmt.Errorf("connection refused"),
+			wantRetryable: true,
+		},
+		{
+			name:          "permanent_ldap_result_code_not_retryable",
+			err:           ldap.NewError(ldap.LDAPResultNoSuchObject, errors.New("not found")),
+			wantRetryable: false,
+		},
+		{
+			name:          "wrapped_permanent_ldap_error_not_retryable",
+			err: fmt.Errorf("modify %s on %s: %w", "olcLogLevel", "cn=config",
+				ldap.NewError(ldap.LDAPResultInvalidCredentials, errors.New("bad creds"))),
+			wantRetryable: false,
+		},
+		{
+			name:          "transient_ldap_result_code_retryable",
+			err:           ldap.NewError(ldap.LDAPResultUnavailable, errors.New("unavailable")),
+			wantRetryable: true,
+		},
+		{
+			name:          "wrapped_transient_ldap_error_retryable",
+			err: fmt.Errorf("operation failed after %d retries: %w", 3,
+				ldap.NewError(ldap.LDAPResultServerDown, errors.New("server down"))),
 			wantRetryable: true,
 		},
 	}

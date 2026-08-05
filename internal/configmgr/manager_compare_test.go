@@ -12,6 +12,7 @@ import (
 
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/testutil"
 )
 
 func TestMain(m *testing.M) {
@@ -276,10 +277,8 @@ func TestCompareKeys_ServiceEnabled(t *testing.T) {
 	cm.State.ServerConfig.ServiceConfig.Set("imapd", "TRUE")
 
 	// Ensure service manager has command for this service
-	mockServiceMgr := &mockServiceManager{
-		commands:        map[string]bool{"imapd": true},
-		runningServices: make(map[string]bool),
-		restartQueue:    make([]string, 0),
+	mockServiceMgr := &testutil.MockServiceManager{
+		HasCommandFn: func(service string) bool { return service == "imapd" },
 	}
 	cm.ServiceMgr = mockServiceMgr
 

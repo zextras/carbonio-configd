@@ -133,13 +133,10 @@ func TestTokenType_String(t *testing.T) {
 		{TokenFile, "FILE"},
 		{TokenIf, "IF"},
 		{TokenFi, "FI"},
-		{TokenLdap, "LDAP"},
 		{TokenProxygen, "PROXYGEN"},
-		{TokenNot, "NOT"},
 		{TokenIdentifier, "IDENTIFIER"},
 		{TokenString, "STRING"},
 		{TokenNewline, "NEWLINE"},
-		{TokenComment, "COMMENT"},
 		{TokenType(9999), "UNKNOWN"},
 	}
 

@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/logger"
 )
 
@@ -159,7 +160,7 @@ func writePostfixLDAPConfig(ctx context.Context, lc map[string]string) error {
 	bindPW := lc["ldap_postfix_password"]
 	startTLS := "no"
 
-	if isTruthy(lc["ldap_starttls_supported"]) {
+	if config.IsTruthy(lc["ldap_starttls_supported"]) {
 		startTLS = startTLSYes
 	}
 

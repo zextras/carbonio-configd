@@ -6,10 +6,12 @@ package main
 import (
 	"os"
 	"path/filepath"
+
+	"github.com/zextras/carbonio-configd/internal/config"
 )
 
 // defaultBaseDir is the on-disk root of a Zextras/Carbonio installation.
-const defaultBaseDir = "/opt/zextras"
+const defaultBaseDir = config.ZextrasBase
 
 // baseDir returns CARBONIO_BASE_DIR when set, otherwise defaultBaseDir.
 func baseDir() string {

@@ -9,15 +9,17 @@ import (
 	"fmt"
 	"os"
 	"os/user"
-	"path/filepath"
 	"strconv"
 	"syscall"
+
+	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/fileutil"
 )
 
 // SaveLocalConfig writes a LocalConfig struct to an XML file atomically.
 // It writes to a temp file first, then renames to avoid partial writes.
-func SaveLocalConfig(path string, config *LocalConfig) error {
-	data, err := xml.MarshalIndent(config, "", "    ")
+func SaveLocalConfig(path string, lc *LocalConfig) error {
+	data, err := xml.MarshalIndent(lc, "", "    ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal localconfig: %w", err)
 	}
@@ -33,16 +35,16 @@ func SaveLocalConfig(path string, config *LocalConfig) error {
 // concurrent write corruption.
 func SetKey(path, key, value string) error {
 	return withFileLock(path, func() error {
-		config, err := readLocalConfigXML(path)
+		lc, err := readLocalConfigXML(path)
 		if err != nil {
 			return err
 		}
 
 		found := false
 
-		for i := range config.Keys {
-			if config.Keys[i].Name == key {
-				config.Keys[i].Value = value
+		for i := range lc.Keys {
+			if lc.Keys[i].Name == key {
+				lc.Keys[i].Value = value
 				found = true
 
 				break
@@ -50,10 +52,10 @@ func SetKey(path, key, value string) error {
 		}
 
 		if !found {
-			config.Keys = append(config.Keys, Key{Name: key, Value: value})
+			lc.Keys = append(lc.Keys, Key{Name: key, Value: value})
 		}
 
-		return SaveLocalConfig(path, config)
+		return SaveLocalConfig(path, lc)
 	})
 }
 
@@ -62,15 +64,15 @@ func SetKey(path, key, value string) error {
 // Returns an error if the key is not found in the file.
 func RemoveKey(path, key string) error {
 	return withFileLock(path, func() error {
-		config, err := readLocalConfigXML(path)
+		lc, err := readLocalConfigXML(path)
 		if err != nil {
 			return err
 		}
 
 		found := false
 
-		for i := range config.Keys {
-			if config.Keys[i].Name != key {
+		for i := range lc.Keys {
+			if lc.Keys[i].Name != key {
 				continue
 			}
 
@@ -78,9 +80,9 @@ func RemoveKey(path, key string) error {
 
 			// If key has a default, set to empty instead of removing
 			if _, hasDefault := Defaults[key]; hasDefault {
-				config.Keys[i].Value = ""
+				lc.Keys[i].Value = ""
 			} else {
-				config.Keys = append(config.Keys[:i], config.Keys[i+1:]...)
+				lc.Keys = append(lc.Keys[:i], lc.Keys[i+1:]...)
 			}
 
 			break
@@ -90,7 +92,7 @@ func RemoveKey(path, key string) error {
 			return fmt.Errorf("key %s is not set", key)
 		}
 
-		return SaveLocalConfig(path, config)
+		return SaveLocalConfig(path, lc)
 	})
 }
 
@@ -102,60 +104,31 @@ func readLocalConfigXML(path string) (*LocalConfig, error) {
 		return nil, fmt.Errorf("failed to read localconfig file: %w", err)
 	}
 
-	var config LocalConfig
-	if err := xml.Unmarshal(data, &config); err != nil {
+	var lc LocalConfig
+	if err := xml.Unmarshal(data, &lc); err != nil {
 		return nil, fmt.Errorf("failed to parse localconfig XML: %w", err)
 	}
 
-	return &config, nil
+	return &lc, nil
 }
 
-// atomicWrite writes content to a temp file then renames it to the target path.
+// atomicWrite writes content to the target path via fileutil.AtomicWrite,
+// preserving the target's existing permissions, or the temp file's default
+// 0600 mode when path does not yet exist.
 // If running as root, ensures the file is owned by zextras:zextras.
 func atomicWrite(path string, content []byte) error {
-	dir := filepath.Dir(path)
-
-	tmp, err := os.CreateTemp(dir, ".localconfig-*.tmp")
-	if err != nil {
-		return fmt.Errorf("failed to create temp file: %w", err)
+	perm := os.FileMode(0o600)
+	if info, err := os.Stat(path); err == nil {
+		perm = info.Mode()
 	}
 
-	tmpPath := tmp.Name()
-
-	// Preserve original file permissions
-	if info, statErr := os.Stat(path); statErr == nil {
-		if chmodErr := tmp.Chmod(info.Mode()); chmodErr != nil {
-			_ = tmp.Close()
-			_ = os.Remove(tmpPath)
-
-			return fmt.Errorf("failed to set permissions: %w", chmodErr)
-		}
-	}
-
-	if _, err := tmp.Write(content); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpPath)
-
-		return fmt.Errorf("failed to write temp file: %w", err)
-	}
-
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpPath)
-
-		return fmt.Errorf("failed to close temp file: %w", err)
+	if err := fileutil.AtomicWrite(path, content, perm); err != nil {
+		return err
 	}
 
 	// If running as root, ensure file is owned by zextras
-	if err := ensureZextrasOwnership(tmpPath); err != nil {
-		_ = os.Remove(tmpPath)
-
+	if err := ensureZextrasOwnership(path); err != nil {
 		return fmt.Errorf("failed to set ownership: %w", err)
-	}
-
-	if err := os.Rename(tmpPath, path); err != nil {
-		_ = os.Remove(tmpPath)
-
-		return fmt.Errorf("failed to rename temp file: %w", err)
 	}
 
 	return nil
@@ -201,7 +174,7 @@ func ensureZextrasOwnership(path string) error {
 		return nil
 	}
 
-	zUser, err := user.Lookup("zextras")
+	zUser, err := user.Lookup(config.ZextrasUser)
 	if err != nil {
 		// zextras user not present (e.g. dev/CI environment) — skip chown.
 		return nil //nolint:nilerr

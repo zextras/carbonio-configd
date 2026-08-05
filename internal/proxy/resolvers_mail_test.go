@@ -88,8 +88,8 @@ func TestResolveIMAPId(t *testing.T) {
 		if !strings.Contains(str, "UNKNOWN") {
 			t.Errorf("expected UNKNOWN in result, got %q", str)
 		}
-		if !strings.Contains(str, "Zimbra") {
-			t.Errorf("expected Zimbra in result, got %q", str)
+		if !strings.Contains(str, "Carbonio") {
+			t.Errorf("expected Carbonio in result, got %q", str)
 		}
 	})
 

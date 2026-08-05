@@ -34,10 +34,7 @@ type ControlCmd struct {
 type ControlStartCmd struct{}
 
 func (c *ControlStartCmd) Run(parent *ControlCmd) error {
-	requireZextras()
-	initCLILogging()
-
-	ctx := context.Background()
+	ctx := cliPreamble()
 
 	if parent.Host != "" {
 		return services.RemoteHostStart(ctx, parent.Host, "all")
@@ -53,10 +50,7 @@ func (c *ControlStartCmd) Run(parent *ControlCmd) error {
 type ControlStopCmd struct{}
 
 func (c *ControlStopCmd) Run(parent *ControlCmd) error {
-	requireZextras()
-	initCLILogging()
-
-	ctx := context.Background()
+	ctx := cliPreamble()
 
 	if parent.Host != "" {
 		return services.RemoteHostStop(ctx, parent.Host, "all")
@@ -72,10 +66,7 @@ func (c *ControlStopCmd) Run(parent *ControlCmd) error {
 type ControlRestartCmd struct{}
 
 func (c *ControlRestartCmd) Run(parent *ControlCmd) error {
-	requireZextras()
-	initCLILogging()
-
-	ctx := context.Background()
+	ctx := cliPreamble()
 
 	if parent.Host != "" {
 		if err := services.RemoteHostStop(ctx, parent.Host, "all"); err != nil {
@@ -97,10 +88,7 @@ func (c *ControlRestartCmd) Run(parent *ControlCmd) error {
 type ControlStatusCmd struct{}
 
 func (c *ControlStatusCmd) Run(parent *ControlCmd) error {
-	requireZextras()
-	initCLILogging()
-
-	ctx := context.Background()
+	ctx := cliPreamble()
 
 	if parent.Host != "" {
 		_, err := services.RemoteHostStatus(ctx, parent.Host, "all")

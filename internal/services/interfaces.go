@@ -31,7 +31,7 @@ func (a ServiceAction) String() string {
 	case ActionRestart:
 		return "restart"
 	case ActionStop:
-		return "stop"
+		return actionStop
 	case ActionStart:
 		return actionStart
 	case ActionStatus:

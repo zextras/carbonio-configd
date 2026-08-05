@@ -6,8 +6,6 @@ package services
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"testing"
 )
 
@@ -99,27 +97,5 @@ func TestStopService_LegacyMode_BypassesSystemctl(t *testing.T) {
 
 	if !called {
 		t.Error("expected CustomStop to run in legacy mode; systemctl must not be invoked, fall-through must not exist")
-	}
-}
-
-// TestSignalViaPidfile_UnreadableFile verifies the "exists but unreadable" path.
-func TestSignalViaPidfile_UnreadableFile(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	if os.Getuid() == 0 {
-		t.Skip("cannot test unreadable file as root")
-	}
-
-	tmp := t.TempDir()
-	pidFile := filepath.Join(tmp, "unreadable.pid")
-	if err := os.WriteFile(pidFile, []byte("12345\n"), 0o000); err != nil {
-		t.Fatal(err)
-	}
-	defer os.Chmod(pidFile, 0o644) //nolint:errcheck
-
-	err := signalViaPidfile(context.Background(), pidFile, "testsvc", 0)
-	if err == nil {
-		t.Error("expected error for unreadable pidfile that exists")
 	}
 }

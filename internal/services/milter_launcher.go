@@ -7,10 +7,7 @@ package services
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
-
-	"github.com/zextras/carbonio-configd/internal/logger"
 )
 
 // milterCustomStart builds and executes the Java command for MilterServer.
@@ -27,33 +24,7 @@ func milterCustomStart(ctx context.Context, _ *ServiceDef) error {
 		return err
 	}
 
-	args := milterJavaArgs(lc)
-	logFile := logPath + "/milter.out"
-
-	logFd, err := openLogFile(logFile)
-	if err != nil {
-		return err
-	}
-
-	defer func() { _ = logFd.Close() }()
-
-	cmd := exec.CommandContext(ctx, javaBin, args...)
-	cmd.Stdout = logFd
-	cmd.Stderr = logFd
-	cmd.SysProcAttr = detachedSysProcAttr()
-
-	logger.InfoContext(ctx, "Starting milter via Java launcher",
-		"java", javaBin, "log", logFile)
-
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start milter: %w", err)
-	}
-
-	if err := cmd.Process.Release(); err != nil {
-		logger.WarnContext(ctx, "Failed to release milter process handle", "error", err)
-	}
-
-	return nil
+	return startJavaDetached(ctx, "milter", javaBin, logPath+"/milter.out", milterJavaArgs(lc))
 }
 
 // milterJavaArgs builds JVM arguments for MilterServer.

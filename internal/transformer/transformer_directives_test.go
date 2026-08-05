@@ -1149,3 +1149,77 @@ func TestProcessWrappingDirective_ContainsWithEmbeddedVar(t *testing.T) {
 		})
 	}
 }
+
+// TestProcessWrappingDirective_ExactWithEmbeddedVar exercises pre-substitution
+// of an embedded typed %%VAR:key%% variable inside a full-line %%exact …%%
+// directive. exact shares resolveSearchReplaceDirective with contains, so it
+// must receive the same pre-substitution before processWrappingDirective
+// hands the line to xformConfig — otherwise the raw %%VAR:key%% token would
+// be compared against the looked-up value verbatim instead of its value.
+func TestProcessWrappingDirective_ExactWithEmbeddedVar(t *testing.T) {
+	ctx := context.Background()
+	st := &state.State{}
+
+	tests := []struct {
+		name string
+		data map[string]map[string]string
+		want string
+	}{
+		{
+			name: "typed embedded var - exact word present",
+			data: map[string]map[string]string{
+				"VAR": {
+					"zimbraMailMode": "https",
+					"needle_key":     "https",
+				},
+			},
+			want: "FOUND\n",
+		},
+		{
+			name: "typed embedded var - exact word absent",
+			data: map[string]map[string]string{
+				"VAR": {
+					"zimbraMailMode": "http",
+					"needle_key":     "https",
+				},
+			},
+			want: "NOTFOUND\n",
+		},
+	}
+
+	const input = `%%exact VAR:zimbraMailMode %%VAR:needle_key%%^FOUND^NOTFOUND%%`
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tr := NewTransformer(testutil.NewMockConfigLookupWithData(tt.data), st)
+			got := tr.Transform(ctx, input)
+			if got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestProcessInlineDirectives_Explode exercises the inline (non-full-line)
+// %%explode …%% fragment dispatch. isKnownDirective must list "explode" so
+// processInlineDirectives recognizes and expands it via xformConfig instead
+// of leaving the raw %%explode …%% token in the output.
+func TestProcessInlineDirectives_Explode(t *testing.T) {
+	ctx := context.Background()
+	st := &state.State{}
+	data := map[string]map[string]string{
+		"VAR": {
+			"zimbraUpstreamServer": "server1",
+		},
+	}
+	tr := NewTransformer(testutil.NewMockConfigLookupWithData(data), st)
+
+	got := tr.Transform(ctx, "prefix: %%explode upstream VAR:zimbraUpstreamServer%% suffix")
+	want := "prefix: upstream server1 suffix\n"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	if strings.Contains(got, "%%") {
+		t.Errorf("got %q, expected no unexpanded %%%%…%%%% token", got)
+	}
+}

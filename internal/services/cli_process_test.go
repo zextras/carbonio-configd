@@ -241,52 +241,6 @@ func TestIsZombie_UnreadableStatus(t *testing.T) {
 	}
 }
 
-// TestIsOwnedByCurrentUser_OwnedByUs verifies processes owned by current UID return true.
-func TestIsOwnedByCurrentUser_OwnedByUs(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	tmpDir := t.TempDir()
-	uid := os.Getuid()
-	statusContent := fmt.Sprintf("Name:\ttest\nUid:\t%d\t%d\t%d\t%d\n", uid, uid, uid, uid)
-	statusFile := filepath.Join(tmpDir, "status")
-	if err := os.WriteFile(statusFile, []byte(statusContent), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	if !isOwnedByCurrentUser(tmpDir) {
-		t.Error("expected isOwnedByCurrentUser=true for process owned by current user")
-	}
-}
-
-// TestIsOwnedByCurrentUser_OwnedByOther verifies processes owned by another UID return false.
-func TestIsOwnedByCurrentUser_OwnedByOther(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	tmpDir := t.TempDir()
-	otherUID := os.Getuid() + 1
-	statusContent := fmt.Sprintf("Name:\ttest\nUid:\t%d\t%d\t%d\t%d\n", otherUID, otherUID, otherUID, otherUID)
-	statusFile := filepath.Join(tmpDir, "status")
-	if err := os.WriteFile(statusFile, []byte(statusContent), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	if isOwnedByCurrentUser(tmpDir) {
-		t.Error("expected isOwnedByCurrentUser=false for process owned by other user")
-	}
-}
-
-// TestIsOwnedByCurrentUser_UnreadableStatus verifies missing status file returns true (fail open).
-func TestIsOwnedByCurrentUser_UnreadableStatus(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	if !isOwnedByCurrentUser("/nonexistent-dir-xyz") {
-		t.Error("expected isOwnedByCurrentUser=true when status is unreadable (fail open)")
-	}
-}
-
 // TestIsRunningByPidFile_ValidRunningPid verifies a pidfile pointing to ourself returns true.
 func TestIsRunningByPidFile_ValidRunningPid(t *testing.T) {
 	if testing.Short() {
@@ -477,7 +431,7 @@ func TestScanProcessesByCmdline_SelfMatch(t *testing.T) {
 		}
 	}
 	if !found {
-		// Not fatal — we might be excluded by isOwnedByCurrentUser or other filters
+		// Not fatal — matches can be excluded by other scan heuristics
 		t.Logf("own pid %d not found among matches for %q (may be filtered)", self, needle)
 	}
 }
@@ -504,59 +458,6 @@ func TestIsZombie_NoStateLine(t *testing.T) {
 
 	if isZombie(pid) {
 		t.Error("expected isZombie=false when no State line present")
-	}
-}
-
-// TestIsOwnedByCurrentUser_EmptyUidField verifies empty Uid field falls through to true.
-func TestIsOwnedByCurrentUser_EmptyUidField(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	tmpDir := t.TempDir()
-	// Status with "Uid:" but no values after it
-	statusContent := "Name:\ttest\nUid:\n"
-	statusFile := filepath.Join(tmpDir, "status")
-	if err := os.WriteFile(statusFile, []byte(statusContent), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	// Should fall through to return true (assume owned)
-	if !isOwnedByCurrentUser(tmpDir) {
-		t.Error("expected isOwnedByCurrentUser=true when Uid field is empty")
-	}
-}
-
-// TestIsOwnedByCurrentUser_NonNumericUid verifies non-parseable UID falls through to true.
-func TestIsOwnedByCurrentUser_NonNumericUid(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	tmpDir := t.TempDir()
-	statusContent := "Name:\ttest\nUid:\tnotanumber\n"
-	statusFile := filepath.Join(tmpDir, "status")
-	if err := os.WriteFile(statusFile, []byte(statusContent), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	if !isOwnedByCurrentUser(tmpDir) {
-		t.Error("expected isOwnedByCurrentUser=true when Uid is non-numeric")
-	}
-}
-
-// TestIsOwnedByCurrentUser_NoUidLine verifies no Uid line falls through to true.
-func TestIsOwnedByCurrentUser_NoUidLine(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	tmpDir := t.TempDir()
-	statusContent := "Name:\ttest\nState:\tS (sleeping)\n"
-	statusFile := filepath.Join(tmpDir, "status")
-	if err := os.WriteFile(statusFile, []byte(statusContent), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	if !isOwnedByCurrentUser(tmpDir) {
-		t.Error("expected isOwnedByCurrentUser=true when no Uid line present")
 	}
 }
 

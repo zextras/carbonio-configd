@@ -26,6 +26,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/zextras/carbonio-configd/internal/logger"
 )
 
 // ErrAdvancedNotRunning reports that mailboxd is up but the Carbonio Advanced
@@ -52,6 +54,16 @@ const (
 
 	// defaultUsername is the default LDAP master account username.
 	defaultUsername = "zimbra"
+)
+
+// Retry tuning for transient HTTP failures (network errors, 5xx responses)
+// talking to the local admin endpoint. Mirrors the exponential-backoff
+// shape of ldap.Client.executeWithRetry; kept as local constants since this
+// client has no connection pool to size a config struct around.
+const (
+	maxHTTPRetries    = 3
+	httpRetryDelay    = 100 * time.Millisecond
+	maxHTTPRetryDelay = 2 * time.Second
 )
 
 // ModuleStatus is one row in the `core getAllServicesStatus` response.
@@ -109,21 +121,29 @@ func NewWithBaseURL(baseURL string, localCfg map[string]string) *Client {
 // authenticate performs a SOAP AdminAuthRequest and caches the returned token.
 // Callers must hold c.mu.
 func (c *Client) authenticate(ctx context.Context) error {
+	ctx = logger.ContextWithComponentOnce(ctx, "zxadmin")
+
 	if c.username == "" || c.password == "" {
+		logger.WarnContext(ctx, "zxadmin: missing LDAP master credentials in localconfig")
+
 		return fmt.Errorf("zxadmin: missing zimbra_ldap_user / zimbra_ldap_password in localconfig")
 	}
 
 	body := buildAuthEnvelope(c.username, c.password)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+soapPath, strings.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("zxadmin: build auth request: %w", err)
-	}
+	resp, err := c.doWithRetry(ctx, func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+soapPath, strings.NewReader(body))
+		if err != nil {
+			return nil, fmt.Errorf("zxadmin: build auth request: %w", err)
+		}
 
-	req.Header.Set("Content-Type", "text/xml; charset=UTF-8")
+		req.Header.Set("Content-Type", "text/xml; charset=UTF-8")
 
-	resp, err := c.httpClient.Do(req)
+		return req, nil
+	})
 	if err != nil {
+		logger.WarnContext(ctx, "zxadmin: auth request failed", "error", err)
+
 		return fmt.Errorf("zxadmin: auth request failed: %w", err)
 	}
 
@@ -131,15 +151,22 @@ func (c *Client) authenticate(ctx context.Context) error {
 
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
+		logger.WarnContext(ctx, "zxadmin: read auth response failed", "error", err)
+
 		return fmt.Errorf("zxadmin: read auth response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("zxadmin: auth failed: HTTP %d: %s", resp.StatusCode, truncate(string(raw), 256))
+		logger.WarnContext(ctx, "zxadmin: auth failed",
+			"status", resp.StatusCode, "body", truncate(string(raw)))
+
+		return fmt.Errorf("zxadmin: auth failed: HTTP %d: %s", resp.StatusCode, truncate(string(raw)))
 	}
 
 	token, lifetimeMs, err := parseAuthResponse(raw)
 	if err != nil {
+		logger.WarnContext(ctx, "zxadmin: parse auth response failed", "error", err)
+
 		return err
 	}
 
@@ -168,6 +195,8 @@ func (c *Client) ensureToken(ctx context.Context) error {
 // GetAllServicesStatus calls the `core getAllServicesStatus` action and
 // returns one entry per advanced module.
 func (c *Client) GetAllServicesStatus(ctx context.Context) ([]ModuleStatus, error) {
+	ctx = logger.ContextWithComponentOnce(ctx, "zxadmin")
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -182,24 +211,31 @@ func (c *Client) GetAllServicesStatus(ctx context.Context) ([]ModuleStatus, erro
 	q.Set("module", "ZxCore")
 	q.Set("action", "getAllServicesStatus")
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+statusPath+"?"+q.Encode(), http.NoBody)
-	if err != nil {
-		return nil, fmt.Errorf("zxadmin: build status request: %w", err)
-	}
+	statusURL := c.baseURL + statusPath + "?" + q.Encode()
+	token := c.token
 
-	// Defensive flags: the request goes over HTTPS to localhost:7071 and is
-	// never seen by a browser, so HttpOnly/SameSite are no-ops here, but
-	// setting them costs nothing and keeps gosec happy.
-	req.AddCookie(&http.Cookie{
-		Name:     authCookieName,
-		Value:    c.token,
-		Secure:   true,
-		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
+	resp, err := c.doWithRetry(ctx, func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, statusURL, http.NoBody)
+		if err != nil {
+			return nil, fmt.Errorf("zxadmin: build status request: %w", err)
+		}
+
+		// Defensive flags: the request goes over HTTPS to localhost:7071 and is
+		// never seen by a browser, so HttpOnly/SameSite are no-ops here, but
+		// setting them costs nothing and keeps gosec happy.
+		req.AddCookie(&http.Cookie{
+			Name:     authCookieName,
+			Value:    token,
+			Secure:   true,
+			HttpOnly: true,
+			SameSite: http.SameSiteStrictMode,
+		})
+
+		return req, nil
 	})
-
-	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		logger.WarnContext(ctx, "zxadmin: status request failed", "error", err)
+
 		return nil, fmt.Errorf("zxadmin: status request failed: %w", err)
 	}
 
@@ -216,20 +252,87 @@ func (c *Client) GetAllServicesStatus(ctx context.Context) ([]ModuleStatus, erro
 		c.token = ""
 		c.expiresAt = time.Time{}
 
+		logger.WarnContext(ctx, "zxadmin: status auth rejected, dropping cached token",
+			"status", resp.StatusCode)
+
 		return nil, fmt.Errorf("zxadmin: status auth rejected: HTTP %d", resp.StatusCode)
 	}
 
 	// 404 means the extension handler is absent — report it as "not running"
 	// instead of echoing mailboxd's HTML error page into `zmcontrol status`.
 	if resp.StatusCode == http.StatusNotFound {
+		logger.WarnContext(ctx, "zxadmin: advanced extension handler not registered (HTTP 404)")
+
 		return nil, ErrAdvancedNotRunning
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("zxadmin: status request failed: HTTP %d: %s", resp.StatusCode, truncate(string(raw), 256))
+		logger.WarnContext(ctx, "zxadmin: status request returned unexpected status",
+			"status", resp.StatusCode, "body", truncate(string(raw)))
+
+		return nil, fmt.Errorf("zxadmin: status request failed: HTTP %d: %s", resp.StatusCode, truncate(string(raw)))
 	}
 
 	return parseStatusResponse(raw)
+}
+
+// doWithRetry sends the request built by newReq, retrying on network errors
+// and 5xx responses with bounded exponential backoff (mirrors the shape of
+// ldap.Client.executeWithRetry). 401/403/404 and other 4xx responses are
+// never retried since they signal a request/auth problem a retry cannot
+// fix. newReq is invoked once per attempt because an *http.Request's body
+// cannot be replayed once sent. ctx cancellation is checked between
+// attempts so callers are never blocked past their deadline.
+func (c *Client) doWithRetry(ctx context.Context, newReq func() (*http.Request, error)) (*http.Response, error) {
+	logCtx := logger.ContextWithComponentOnce(ctx, "zxadmin")
+
+	delay := httpRetryDelay
+
+	var lastErr error
+
+	for attempt := 0; attempt <= maxHTTPRetries; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(delay):
+			}
+
+			delay *= 2
+			if delay > maxHTTPRetryDelay {
+				delay = maxHTTPRetryDelay
+			}
+		}
+
+		req, err := newReq()
+		if err != nil {
+			return nil, err
+		}
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			lastErr = err
+
+			logger.DebugContext(logCtx, "zxadmin: HTTP request failed, retrying",
+				"attempt", attempt+1, "max_attempts", maxHTTPRetries+1, "error", err)
+
+			continue
+		}
+
+		if resp.StatusCode >= http.StatusInternalServerError {
+			lastErr = fmt.Errorf("HTTP %d", resp.StatusCode)
+			_ = resp.Body.Close()
+
+			logger.DebugContext(logCtx, "zxadmin: HTTP server error, retrying",
+				"attempt", attempt+1, "max_attempts", maxHTTPRetries+1, "status", resp.StatusCode)
+
+			continue
+		}
+
+		return resp, nil
+	}
+
+	return nil, fmt.Errorf("zxadmin: request failed after %d attempts: %w", maxHTTPRetries+1, lastErr)
 }
 
 // --- SOAP envelope construction & parsing ---------------------------------
@@ -341,7 +444,7 @@ func parseStatusResponse(raw []byte) ([]ModuleStatus, error) {
 	// Fall back to bare object: {"core":{...},"auth":{...}}
 	var bare map[string]statusEntry
 	if err := json.Unmarshal(raw, &bare); err != nil {
-		return nil, fmt.Errorf("zxadmin: parse status response: %w (body=%s)", err, truncate(string(raw), 256))
+		return nil, fmt.Errorf("zxadmin: parse status response: %w (body=%s)", err, truncate(string(raw)))
 	}
 
 	if len(bare) == 0 {
@@ -388,10 +491,12 @@ func mapToModules(m map[string]statusEntry) []ModuleStatus {
 
 // --- helpers ---------------------------------------------------------------
 
-func truncate(s string, n int) string {
-	if len(s) <= n {
+const truncateLimit = 256
+
+func truncate(s string) string {
+	if len(s) <= truncateLimit {
 		return s
 	}
 
-	return s[:n] + "..."
+	return s[:truncateLimit] + "..."
 }

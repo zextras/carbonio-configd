@@ -11,6 +11,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/logger"
 )
 
@@ -212,6 +213,9 @@ func (g *Generator) resolvePOP3Capabilities(ctx context.Context) (any, error) {
 
 // resolveIMAPId constructs the IMAP ID extension value
 // Java equivalent constructs: "NAME" "Zimbra" "VERSION" "<version>" "RELEASE" "<release>"
+// The NAME field is rebranded to "Carbonio" to match the IMAP/POP3 greeting
+// banners (resolveIMAPGreeting/resolvePOP3Greeting); it is purely informational
+// and not part of any client protocol negotiation.
 // This matches the Java ProxyConfGen behavior where it reads from BuildInfo.
 //
 // The identifier is deterministic for equivalent inputs: the version is
@@ -243,7 +247,7 @@ func (g *Generator) resolveIMAPId(_ context.Context) (any, error) {
 
 	// Construct the IMAP ID string
 	//nolint:gocritic // sprintfQuotedString: We need literal quotes in the output, not Go-escaped quotes
-	imapID := fmt.Sprintf(`"NAME" "Zimbra" "VERSION" "%s" "RELEASE" "%s"`, version, release)
+	imapID := fmt.Sprintf(`"NAME" "Carbonio" "VERSION" "%s" "RELEASE" "%s"`, version, release)
 
 	return imapID, nil
 }
@@ -253,7 +257,7 @@ func (g *Generator) resolveGreeting(attribute, format string) (any, error) {
 	exposeVersion := false
 
 	if val, ok := g.getConfigValue(attribute, sourceGlobal); ok {
-		exposeVersion = isTruthy(val)
+		exposeVersion = config.IsTruthy(val)
 	}
 
 	if exposeVersion {

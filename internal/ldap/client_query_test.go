@@ -51,17 +51,17 @@ func TestQueryServers(t *testing.T) {
 			"cn":                     {"proxy1"},
 			"zimbraId":               {"id-1"},
 			"zimbraServiceHostname":  {"proxy1.example.com"},
-			attrZimbraServiceEnabled: {"proxy", "stats"},
+			AttrZimbraServiceEnabled: {"proxy", "stats"},
 		}),
 		entryWithAttrs("cn=mta1,cn=servers,cn=zimbra", map[string][]string{
 			"cn":                     {"mta1"},
 			"zimbraId":               {"id-2"},
 			"zimbraServiceHostname":  {"mta1.example.com"},
-			attrZimbraServiceEnabled: {"mta"},
+			AttrZimbraServiceEnabled: {"mta"},
 		}),
 		entryWithAttrs("cn=incomplete,cn=servers,cn=zimbra", map[string][]string{
 			"cn":                     {"incomplete"},
-			attrZimbraServiceEnabled: {"proxy"},
+			AttrZimbraServiceEnabled: {"proxy"},
 			// Missing zimbraId/zimbraServiceHostname: must be skipped.
 		}),
 	}}

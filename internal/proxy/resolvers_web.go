@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/logger"
 )
 
@@ -34,7 +35,7 @@ func (g *Generator) resolveStrictServerName(ctx context.Context) (any, error) {
 		logger.DebugContext(ctx, "Found strict server name attribute",
 			"value", val)
 
-		if isTruthy(val) {
+		if config.IsTruthy(val) {
 			logger.DebugContext(ctx, "Strict server name enabled")
 
 			return "", nil
@@ -58,7 +59,7 @@ func (g *Generator) resolveProxyHTTPCompression(ctx context.Context) (any, error
 	enabled := true // default
 
 	if val, ok := g.getConfigValue("zimbraHttpCompressionEnabled", sourceServer); ok {
-		enabled = isTruthy(val)
+		enabled = config.IsTruthy(val)
 	}
 
 	if !enabled {
@@ -331,11 +332,14 @@ func (g *Generator) resolveUpstreamFairShmSize(ctx context.Context) (any, error)
 	return fmt.Sprintf("upstream_fair_shm_size %dk;", size), nil
 }
 
-// resolveHTTPEnabled returns true unless zimbraReverseProxyMailMode is 'https'
-// Matches Java HttpEnablerVar logic
-func (g *Generator) resolveHTTPEnabled(ctx context.Context) (any, error) {
+// resolveMailModeEnabled reports whether a mail-mode-gated protocol is enabled:
+// false only when zimbraReverseProxyMailMode equals disabledWhenMode, true
+// otherwise (including when the attribute is unset). Shared by
+// resolveHTTPEnabled/resolveHTTPSEnabled, which differ only in which mail
+// mode disables them (Java HttpEnablerVar / HttpsEnablerVar).
+func (g *Generator) resolveMailModeEnabled(disabledWhenMode string) (any, error) {
 	if mailMode, ok := g.getConfigValue("zimbraReverseProxyMailMode", sourceGlobal); ok {
-		if strings.EqualFold(mailMode, "https") {
+		if strings.EqualFold(mailMode, disabledWhenMode) {
 			return false, nil
 		}
 	}
@@ -343,16 +347,16 @@ func (g *Generator) resolveHTTPEnabled(ctx context.Context) (any, error) {
 	return true, nil
 }
 
+// resolveHTTPEnabled returns true unless zimbraReverseProxyMailMode is 'https'
+// Matches Java HttpEnablerVar logic
+func (g *Generator) resolveHTTPEnabled(_ context.Context) (any, error) {
+	return g.resolveMailModeEnabled("https")
+}
+
 // resolveHTTPSEnabled returns true unless zimbraReverseProxyMailMode is 'http'
 // Matches Java HttpsEnablerVar logic
-func (g *Generator) resolveHTTPSEnabled(ctx context.Context) (any, error) {
-	if mailMode, ok := g.getConfigValue("zimbraReverseProxyMailMode", sourceGlobal); ok {
-		if strings.EqualFold(mailMode, "http") {
-			return false, nil
-		}
-	}
-
-	return true, nil
+func (g *Generator) resolveHTTPSEnabled(_ context.Context) (any, error) {
+	return g.resolveMailModeEnabled("http")
 }
 
 // disableForUpstream returns "#" (comment out) when spec yields no valid upstream

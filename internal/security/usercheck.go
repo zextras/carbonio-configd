@@ -11,10 +11,12 @@ import (
 	"fmt"
 	"os"
 	"os/user"
+
+	"github.com/zextras/carbonio-configd/internal/config"
 )
 
 // RequiredUser is the username that must be running configd
-const RequiredUser = "zextras"
+const RequiredUser = config.ZextrasUser
 
 // CheckUserPermissions verifies that configd is running strictly as the zextras user.
 // Root is not accepted. Returns an error for any other user.

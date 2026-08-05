@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/ldap"
 	"github.com/zextras/carbonio-configd/internal/logger"
 )
@@ -213,7 +214,7 @@ func (g *Generator) makeUpstreamTargetResolver(sslName, nonSSLName string) func(
 		sslToUpstream := true // default is true per Java code
 
 		if val, ok := g.getConfigValue("zimbraReverseProxySSLToUpstreamEnabled", sourceServer); ok {
-			sslToUpstream = isTruthy(val)
+			sslToUpstream = config.IsTruthy(val)
 		}
 
 		if sslToUpstream {

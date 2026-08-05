@@ -9,94 +9,115 @@ import (
 	"context"
 	"testing"
 
+	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/ldap"
 )
 
-// TestParseReverseProxyBackends tests parsing of zmprov gas output for reverse proxy backends
-func TestParseReverseProxyBackends(t *testing.T) {
+// TestBuildReverseProxyBackends tests filtering/building of reverse proxy
+// backends from a structured hostname->attrs map (as returned by
+// getServerAttrsByHostname).
+func TestBuildReverseProxyBackends(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    string
+		byHost   map[string]map[string]string
 		expected []UpstreamServer
 	}{
 		{
 			name: "single server with lookup target true",
-			input: `# name server1.example.com
-zimbraServiceHostname: server1.example.com
-zimbraReverseProxyLookupTarget: TRUE
-zimbraMailMode: http
-zimbraMailPort: 8080
-zimbraMailSSLPort: 8443`,
+			byHost: map[string]map[string]string{
+				"server1.example.com": {
+					zimbraServiceHostnameAttr:          "server1.example.com",
+					zimbraReverseProxyLookupTargetAttr: "TRUE",
+					zimbraMailModeAttr:                 "http",
+					zimbraMailPortAttr:                 "8080",
+					zimbraMailSSLPortAttr:               "8443",
+				},
+			},
 			expected: []UpstreamServer{
 				{Host: "server1.example.com", Port: 8080},
 			},
 		},
 		{
 			name: "server with lookup target false",
-			input: `# name server1.example.com
-zimbraServiceHostname: server1.example.com
-zimbraReverseProxyLookupTarget: FALSE
-zimbraMailMode: http
-zimbraMailPort: 8080`,
-			expected: []UpstreamServer{},
+			byHost: map[string]map[string]string{
+				"server1.example.com": {
+					zimbraServiceHostnameAttr:          "server1.example.com",
+					zimbraReverseProxyLookupTargetAttr: "FALSE",
+					zimbraMailModeAttr:                 "http",
+					zimbraMailPortAttr:                 "8080",
+				},
+			},
+			expected: nil,
 		},
 		{
 			name: "server with https mode uses SSL port",
-			input: `# name server1.example.com
-zimbraServiceHostname: server1.example.com
-zimbraReverseProxyLookupTarget: TRUE
-zimbraMailMode: https
-zimbraMailPort: 8080
-zimbraMailSSLPort: 8443`,
+			byHost: map[string]map[string]string{
+				"server1.example.com": {
+					zimbraServiceHostnameAttr:          "server1.example.com",
+					zimbraReverseProxyLookupTargetAttr: "TRUE",
+					zimbraMailModeAttr:                 "https",
+					zimbraMailPortAttr:                 "8080",
+					zimbraMailSSLPortAttr:               "8443",
+				},
+			},
 			expected: []UpstreamServer{
 				{Host: "server1.example.com", Port: 8443},
 			},
 		},
 		{
 			name: "server with mixed mode uses HTTP port",
-			input: `# name server1.example.com
-zimbraServiceHostname: server1.example.com
-zimbraReverseProxyLookupTarget: TRUE
-zimbraMailMode: mixed
-zimbraMailPort: 8080
-zimbraMailSSLPort: 8443`,
+			byHost: map[string]map[string]string{
+				"server1.example.com": {
+					zimbraServiceHostnameAttr:          "server1.example.com",
+					zimbraReverseProxyLookupTargetAttr: "TRUE",
+					zimbraMailModeAttr:                 "mixed",
+					zimbraMailPortAttr:                 "8080",
+					zimbraMailSSLPortAttr:               "8443",
+				},
+			},
 			expected: []UpstreamServer{
 				{Host: "server1.example.com", Port: 8080},
 			},
 		},
 		{
 			name: "server with both mode uses HTTP port",
-			input: `# name server1.example.com
-zimbraServiceHostname: server1.example.com
-zimbraReverseProxyLookupTarget: TRUE
-zimbraMailMode: both
-zimbraMailPort: 8080
-zimbraMailSSLPort: 8443`,
+			byHost: map[string]map[string]string{
+				"server1.example.com": {
+					zimbraServiceHostnameAttr:          "server1.example.com",
+					zimbraReverseProxyLookupTargetAttr: "TRUE",
+					zimbraMailModeAttr:                 "both",
+					zimbraMailPortAttr:                 "8080",
+					zimbraMailSSLPortAttr:               "8443",
+				},
+			},
 			expected: []UpstreamServer{
 				{Host: "server1.example.com", Port: 8080},
 			},
 		},
 		{
-			name: "multiple servers, mixed lookup targets",
-			input: `# name server1.example.com
-zimbraServiceHostname: server1.example.com
-zimbraReverseProxyLookupTarget: TRUE
-zimbraMailMode: http
-zimbraMailPort: 8080
-zimbraMailSSLPort: 8443
-
-# name server2.example.com
-zimbraServiceHostname: server2.example.com
-zimbraReverseProxyLookupTarget: FALSE
-zimbraMailMode: http
-zimbraMailPort: 8080
-
-# name server3.example.com
-zimbraServiceHostname: server3.example.com
-zimbraReverseProxyLookupTarget: TRUE
-zimbraMailMode: https
-zimbraMailPort: 80
-zimbraMailSSLPort: 443`,
+			name: "multiple servers, mixed lookup targets, sorted by hostname",
+			byHost: map[string]map[string]string{
+				"server1.example.com": {
+					zimbraServiceHostnameAttr:          "server1.example.com",
+					zimbraReverseProxyLookupTargetAttr: "TRUE",
+					zimbraMailModeAttr:                 "http",
+					zimbraMailPortAttr:                 "8080",
+					zimbraMailSSLPortAttr:               "8443",
+				},
+				"server2.example.com": {
+					zimbraServiceHostnameAttr:          "server2.example.com",
+					zimbraReverseProxyLookupTargetAttr: "FALSE",
+					zimbraMailModeAttr:                 "http",
+					zimbraMailPortAttr:                 "8080",
+				},
+				"server3.example.com": {
+					zimbraServiceHostnameAttr:          "server3.example.com",
+					zimbraReverseProxyLookupTargetAttr: "TRUE",
+					zimbraMailModeAttr:                 "https",
+					zimbraMailPortAttr:                 "80",
+					zimbraMailSSLPortAttr:               "443",
+				},
+			},
 			expected: []UpstreamServer{
 				{Host: "server1.example.com", Port: 8080},
 				{Host: "server3.example.com", Port: 443},
@@ -104,56 +125,61 @@ zimbraMailSSLPort: 443`,
 		},
 		{
 			name: "default ports when not specified",
-			input: `# name server1.example.com
-zimbraServiceHostname: server1.example.com
-zimbraReverseProxyLookupTarget: TRUE
-zimbraMailMode: http`,
+			byHost: map[string]map[string]string{
+				"server1.example.com": {
+					zimbraServiceHostnameAttr:          "server1.example.com",
+					zimbraReverseProxyLookupTargetAttr: "TRUE",
+					zimbraMailModeAttr:                 "http",
+				},
+			},
 			expected: []UpstreamServer{
 				{Host: "server1.example.com", Port: 80},
 			},
 		},
 		{
 			name: "default SSL port",
-			input: `# name server1.example.com
-zimbraServiceHostname: server1.example.com
-zimbraReverseProxyLookupTarget: TRUE
-zimbraMailMode: https`,
+			byHost: map[string]map[string]string{
+				"server1.example.com": {
+					zimbraServiceHostnameAttr:          "server1.example.com",
+					zimbraReverseProxyLookupTargetAttr: "TRUE",
+					zimbraMailModeAttr:                 "https",
+				},
+			},
 			expected: []UpstreamServer{
 				{Host: "server1.example.com", Port: 443},
 			},
 		},
 		{
 			name:     "no servers",
-			input:    "",
-			expected: []UpstreamServer{},
+			byHost:   map[string]map[string]string{},
+			expected: nil,
 		},
 		{
-			name: "server missing hostname",
-			input: `# name server1.example.com
-zimbraReverseProxyLookupTarget: TRUE
-zimbraMailMode: http
-zimbraMailPort: 8080`,
-			expected: []UpstreamServer{},
+			name: "server missing zimbraServiceHostname is excluded",
+			byHost: map[string]map[string]string{
+				"server1.example.com": {
+					zimbraReverseProxyLookupTargetAttr: "TRUE",
+					zimbraMailModeAttr:                 "http",
+					zimbraMailPortAttr:                 "8080",
+				},
+			},
+			expected: nil,
 		},
 	}
 
-	g := &Generator{}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := g.parseReverseProxyBackends(tt.input)
+			g := &Generator{}
+			result := buildReverseProxyBackends(tt.byHost, g.buildUpstreamServer)
 
 			if len(result) != len(tt.expected) {
-				t.Errorf("parseReverseProxyBackends() returned %d servers, expected %d",
-					len(result), len(tt.expected))
-				t.Logf("Got: %+v", result)
-				t.Logf("Expected: %+v", tt.expected)
-				return
+				t.Fatalf("buildReverseProxyBackends() returned %d servers, expected %d: got %+v, expected %+v",
+					len(result), len(tt.expected), result, tt.expected)
 			}
 
 			for i, server := range result {
 				if server.Host != tt.expected[i].Host || server.Port != tt.expected[i].Port {
-					t.Errorf("parseReverseProxyBackends() server[%d] = %+v, expected %+v",
+					t.Errorf("buildReverseProxyBackends() server[%d] = %+v, expected %+v",
 						i, server, tt.expected[i])
 				}
 			}
@@ -165,77 +191,50 @@ zimbraMailPort: 8080`,
 func TestBuildUpstreamServer(t *testing.T) {
 	tests := []struct {
 		name     string
-		data     serverData
+		hostname string
+		attrs    map[string]string
 		expected UpstreamServer
 	}{
 		{
-			name: "http mode uses mail port",
-			data: serverData{
-				hostname:    "server1.example.com",
-				mailMode:    "http",
-				mailPort:    8080,
-				mailSSLPort: 8443,
-			},
+			name:     "http mode uses mail port",
+			hostname: "server1.example.com",
+			attrs:    map[string]string{zimbraMailModeAttr: "http", zimbraMailPortAttr: "8080", zimbraMailSSLPortAttr: "8443"},
 			expected: UpstreamServer{Host: "server1.example.com", Port: 8080},
 		},
 		{
-			name: "https mode uses SSL port",
-			data: serverData{
-				hostname:    "server1.example.com",
-				mailMode:    "https",
-				mailPort:    8080,
-				mailSSLPort: 8443,
-			},
+			name:     "https mode uses SSL port",
+			hostname: "server1.example.com",
+			attrs:    map[string]string{zimbraMailModeAttr: "https", zimbraMailPortAttr: "8080", zimbraMailSSLPortAttr: "8443"},
 			expected: UpstreamServer{Host: "server1.example.com", Port: 8443},
 		},
 		{
-			name: "mixed mode uses mail port",
-			data: serverData{
-				hostname:    "server1.example.com",
-				mailMode:    "mixed",
-				mailPort:    8080,
-				mailSSLPort: 8443,
-			},
+			name:     "mixed mode uses mail port",
+			hostname: "server1.example.com",
+			attrs:    map[string]string{zimbraMailModeAttr: "mixed", zimbraMailPortAttr: "8080", zimbraMailSSLPortAttr: "8443"},
 			expected: UpstreamServer{Host: "server1.example.com", Port: 8080},
 		},
 		{
-			name: "both mode uses mail port",
-			data: serverData{
-				hostname:    "server1.example.com",
-				mailMode:    "both",
-				mailPort:    8080,
-				mailSSLPort: 8443,
-			},
+			name:     "both mode uses mail port",
+			hostname: "server1.example.com",
+			attrs:    map[string]string{zimbraMailModeAttr: "both", zimbraMailPortAttr: "8080", zimbraMailSSLPortAttr: "8443"},
 			expected: UpstreamServer{Host: "server1.example.com", Port: 8080},
 		},
 		{
-			name: "redirect mode uses SSL port",
-			data: serverData{
-				hostname:    "server1.example.com",
-				mailMode:    "redirect",
-				mailPort:    8080,
-				mailSSLPort: 8443,
-			},
+			name:     "redirect mode uses SSL port",
+			hostname: "server1.example.com",
+			attrs:    map[string]string{zimbraMailModeAttr: "redirect", zimbraMailPortAttr: "8080", zimbraMailSSLPortAttr: "8443"},
 			expected: UpstreamServer{Host: "server1.example.com", Port: 8443},
 		},
 		{
-			name: "unknown mode uses SSL port",
-			data: serverData{
-				hostname:    "server1.example.com",
-				mailMode:    "unknown",
-				mailPort:    8080,
-				mailSSLPort: 8443,
-			},
+			name:     "unknown mode uses SSL port",
+			hostname: "server1.example.com",
+			attrs:    map[string]string{zimbraMailModeAttr: "unknown", zimbraMailPortAttr: "8080", zimbraMailSSLPortAttr: "8443"},
 			expected: UpstreamServer{Host: "server1.example.com", Port: 8443},
 		},
 		{
-			name: "empty mode uses SSL port",
-			data: serverData{
-				hostname:    "server1.example.com",
-				mailMode:    "",
-				mailPort:    8080,
-				mailSSLPort: 8443,
-			},
+			name:     "empty mode uses SSL port",
+			hostname: "server1.example.com",
+			attrs:    map[string]string{zimbraMailModeAttr: "", zimbraMailPortAttr: "8080", zimbraMailSSLPortAttr: "8443"},
 			expected: UpstreamServer{Host: "server1.example.com", Port: 8443},
 		},
 	}
@@ -244,7 +243,7 @@ func TestBuildUpstreamServer(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := g.buildUpstreamServer(tt.data)
+			result := g.buildUpstreamServer(tt.hostname, tt.attrs)
 
 			if result.Host != tt.expected.Host || result.Port != tt.expected.Port {
 				t.Errorf("buildUpstreamServer() = %+v, expected %+v", result, tt.expected)
@@ -253,101 +252,145 @@ func TestBuildUpstreamServer(t *testing.T) {
 	}
 }
 
-// TestParseMemcachedServers tests parsing of memcached servers
-func TestParseMemcachedServers(t *testing.T) {
+// TestBuildUpstreamServerSSL tests buildUpstreamServerSSL always uses SSL port
+func TestBuildUpstreamServerSSL(t *testing.T) {
+	g := &Generator{}
+	attrs := map[string]string{
+		zimbraMailModeAttr:    "http", // even with http mode, SSL method uses SSL port
+		zimbraMailPortAttr:    "8080",
+		zimbraMailSSLPortAttr: "8443",
+	}
+	result := g.buildUpstreamServerSSL("server1.example.com", attrs)
+	if result.Port != 8443 {
+		t.Errorf("expected SSL port 8443, got %d", result.Port)
+	}
+	if result.Host != "server1.example.com" {
+		t.Errorf("expected server1.example.com, got %q", result.Host)
+	}
+}
+
+// TestBuildMemcachedServers tests filtering/building of memcached servers
+// from a structured hostname->attrs map.
+func TestBuildMemcachedServers(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    string
+		byHost   map[string]map[string]string
 		expected []MemcacheServer
 	}{
 		{
 			name: "single memcached server",
-			input: `# name server1.example.com
-zimbraServiceHostname: server1.example.com
-zimbraServiceEnabled: memcached
-zimbraMemcachedBindPort: 11211`,
+			byHost: map[string]map[string]string{
+				"server1.example.com": {
+					zimbraServiceHostnameAttr:   "server1.example.com",
+					zimbraServiceEnabledAttr:    "memcached",
+					zimbraMemcachedBindPortAttr: "11211",
+				},
+			},
 			expected: []MemcacheServer{
 				{Hostname: "server1.example.com", Port: 11211},
 			},
 		},
 		{
 			name: "server without memcached service",
-			input: `# name server1.example.com
-zimbraServiceHostname: server1.example.com
-zimbraServiceEnabled: mailbox
-zimbraMemcachedBindPort: 11211`,
-			expected: []MemcacheServer{},
+			byHost: map[string]map[string]string{
+				"server1.example.com": {
+					zimbraServiceHostnameAttr:   "server1.example.com",
+					zimbraServiceEnabledAttr:    "mailbox",
+					zimbraMemcachedBindPortAttr: "11211",
+				},
+			},
+			expected: nil,
 		},
 		{
-			name: "multiple servers, some with memcached",
-			input: `# name server1.example.com
-zimbraServiceHostname: server1.example.com
-zimbraServiceEnabled: memcached
-zimbraMemcachedBindPort: 11211
-
-# name server2.example.com
-zimbraServiceHostname: server2.example.com
-zimbraServiceEnabled: mailbox
-
-# name server3.example.com
-zimbraServiceHostname: server3.example.com
-zimbraServiceEnabled: memcached
-zimbraMemcachedBindPort: 11212`,
+			name: "multiple servers, some with memcached, sorted by hostname",
+			byHost: map[string]map[string]string{
+				"server1.example.com": {
+					zimbraServiceHostnameAttr:   "server1.example.com",
+					zimbraServiceEnabledAttr:    "memcached",
+					zimbraMemcachedBindPortAttr: "11211",
+				},
+				"server2.example.com": {
+					zimbraServiceHostnameAttr: "server2.example.com",
+					zimbraServiceEnabledAttr:  "mailbox",
+				},
+				"server3.example.com": {
+					zimbraServiceHostnameAttr:   "server3.example.com",
+					zimbraServiceEnabledAttr:    "memcached",
+					zimbraMemcachedBindPortAttr: "11212",
+				},
+			},
 			expected: []MemcacheServer{
 				{Hostname: "server1.example.com", Port: 11211},
 				{Hostname: "server3.example.com", Port: 11212},
 			},
 		},
 		{
+			name: "multi-valued zimbraServiceEnabled matches memcached regardless of position",
+			byHost: map[string]map[string]string{
+				"server1.example.com": {
+					zimbraServiceHostnameAttr:   "server1.example.com",
+					zimbraServiceEnabledAttr:    "mailbox\nmemcached",
+					zimbraMemcachedBindPortAttr: "11211",
+				},
+			},
+			expected: []MemcacheServer{
+				{Hostname: "server1.example.com", Port: 11211},
+			},
+		},
+		{
 			name: "custom port",
-			input: `# name server1.example.com
-zimbraServiceHostname: server1.example.com
-zimbraServiceEnabled: memcached
-zimbraMemcachedBindPort: 12345`,
+			byHost: map[string]map[string]string{
+				"server1.example.com": {
+					zimbraServiceHostnameAttr:   "server1.example.com",
+					zimbraServiceEnabledAttr:    "memcached",
+					zimbraMemcachedBindPortAttr: "12345",
+				},
+			},
 			expected: []MemcacheServer{
 				{Hostname: "server1.example.com", Port: 12345},
 			},
 		},
 		{
 			name: "default port when not specified",
-			input: `# name server1.example.com
-zimbraServiceHostname: server1.example.com
-zimbraServiceEnabled: memcached`,
+			byHost: map[string]map[string]string{
+				"server1.example.com": {
+					zimbraServiceHostnameAttr: "server1.example.com",
+					zimbraServiceEnabledAttr:  "memcached",
+				},
+			},
 			expected: []MemcacheServer{
 				{Hostname: "server1.example.com", Port: 11211},
 			},
 		},
 		{
 			name:     "no servers",
-			input:    "",
-			expected: []MemcacheServer{},
+			byHost:   map[string]map[string]string{},
+			expected: nil,
 		},
 		{
-			name: "server missing hostname",
-			input: `# name server1.example.com
-zimbraServiceEnabled: memcached
-zimbraMemcachedBindPort: 11211`,
-			expected: []MemcacheServer{},
+			name: "server missing zimbraServiceHostname is excluded",
+			byHost: map[string]map[string]string{
+				"server1.example.com": {
+					zimbraServiceEnabledAttr:    "memcached",
+					zimbraMemcachedBindPortAttr: "11211",
+				},
+			},
+			expected: nil,
 		},
 	}
 
-	g := &Generator{}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := g.parseMemcachedServers(tt.input)
+			result := buildMemcachedServers(tt.byHost)
 
 			if len(result) != len(tt.expected) {
-				t.Errorf("parseMemcachedServers() returned %d servers, expected %d",
-					len(result), len(tt.expected))
-				t.Logf("Got: %+v", result)
-				t.Logf("Expected: %+v", tt.expected)
-				return
+				t.Fatalf("buildMemcachedServers() returned %d servers, expected %d: got %+v, expected %+v",
+					len(result), len(tt.expected), result, tt.expected)
 			}
 
 			for i, server := range result {
 				if server.Hostname != tt.expected[i].Hostname || server.Port != tt.expected[i].Port {
-					t.Errorf("parseMemcachedServers() server[%d] = %+v, expected %+v",
+					t.Errorf("buildMemcachedServers() server[%d] = %+v, expected %+v",
 						i, server, tt.expected[i])
 				}
 			}
@@ -396,57 +439,6 @@ func TestFormatMemcacheServers(t *testing.T) {
 	}
 }
 
-// TestParseMultiValuedAttribute tests parsing of multi-valued LDAP attributes
-func TestParseMultiValuedAttribute(t *testing.T) {
-	t.Skip("Skipping test - parseMultiValuedAttribute is no longer available")
-}
-
-// TestParseServerDetails tests parsing of server hostname and port from zmprov output
-func TestParseServerDetails(t *testing.T) {
-	t.Skip("Skipping test - parseServerDetails is no longer available")
-}
-
-// TestParseReverseProxyBackendsSSL tests parseReverseProxyBackendsSSL always uses SSL port
-func TestParseReverseProxyBackendsSSL(t *testing.T) {
-	input := `# name server1.example.com
-zimbraServiceHostname: server1.example.com
-zimbraReverseProxyLookupTarget: TRUE
-zimbraMailMode: http
-zimbraMailPort: 8080
-zimbraMailSSLPort: 8443`
-
-	g := &Generator{}
-	result := g.parseReverseProxyBackendsSSL(input)
-
-	if len(result) != 1 {
-		t.Fatalf("expected 1 server, got %d", len(result))
-	}
-	if result[0].Port != 8443 {
-		t.Errorf("expected SSL port 8443, got %d", result[0].Port)
-	}
-	if result[0].Host != "server1.example.com" {
-		t.Errorf("expected server1.example.com, got %q", result[0].Host)
-	}
-}
-
-// TestBuildUpstreamServerSSL tests buildUpstreamServerSSL always uses SSL port
-func TestBuildUpstreamServerSSL(t *testing.T) {
-	g := &Generator{}
-	data := serverData{
-		hostname:    "server1.example.com",
-		mailMode:    "http", // even with http mode, SSL method uses SSL port
-		mailPort:    8080,
-		mailSSLPort: 8443,
-	}
-	result := g.buildUpstreamServerSSL(data)
-	if result.Port != 8443 {
-		t.Errorf("expected SSL port 8443, got %d", result.Port)
-	}
-	if result.Host != "server1.example.com" {
-		t.Errorf("expected server1.example.com, got %q", result.Host)
-	}
-}
-
 // TestGetAllReverseProxyBackendsByPopulatedCache tests the cache-hit path of getAllReverseProxyBackendsBy
 func TestGetAllReverseProxyBackendsByPopulatedCache(t *testing.T) {
 	ctx := context.Background()
@@ -489,44 +481,24 @@ func TestGetAllReverseProxyBackendsBySSLPopulatedCache(t *testing.T) {
 	}
 }
 
-// TestGetOrCacheServersOutputStoresInCache tests that getOrCacheServersOutput stores gasOutput in cache
-func TestGetOrCacheServersOutputStoresInCache(t *testing.T) {
-	gasOutput := "# name server1.example.com\nzimbraServiceHostname: server1.example.com\n"
-	// Pre-populate cache gasOutput to bypass getAllServersOutput
-	g := &Generator{
-		upstreamCache: &upstreamQueryCache{
-			gasOutput: gasOutput,
+// TestGetAllReverseProxyBackendsWithServerAttrsCache tests the cache-miss path
+// via getServerAttrsByHostname's structured cache (serverAttrsByHost pre-filled).
+func TestGetAllReverseProxyBackendsWithServerAttrsCache(t *testing.T) {
+	ctx := context.Background()
+	byHost := map[string]map[string]string{
+		"backend.example.com": {
+			zimbraServiceHostnameAttr:          "backend.example.com",
+			zimbraReverseProxyLookupTargetAttr: "TRUE",
+			zimbraMailModeAttr:                 "http",
+			zimbraMailPortAttr:                 "8080",
+			zimbraMailSSLPortAttr:               "8443",
 		},
 	}
 
-	got, err := g.getOrCacheServersOutput()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got != gasOutput {
-		t.Errorf("expected %q, got %q", gasOutput, got)
-	}
-	// Verify cache was not cleared
-	if g.upstreamCache.gasOutput != gasOutput {
-		t.Error("gasOutput should remain in cache")
-	}
-}
-
-// TestGetAllReverseProxyBackendsWithGasOutput tests cache-miss path via getOrCacheServersOutput (gasOutput pre-filled)
-func TestGetAllReverseProxyBackendsWithGasOutput(t *testing.T) {
-	ctx := context.Background()
-	gasOutput := `# name backend.example.com
-zimbraServiceHostname: backend.example.com
-zimbraReverseProxyLookupTarget: TRUE
-zimbraMailMode: http
-zimbraMailPort: 8080
-zimbraMailSSLPort: 8443
-`
-	// getAllReverseProxyBackendsBy calls getOrCacheServersOutput which checks gasOutput first
 	g := &Generator{
 		upstreamCache: &upstreamQueryCache{
-			populated: false,
-			gasOutput: gasOutput,
+			populated:         false,
+			serverAttrsByHost: byHost,
 		},
 	}
 
@@ -548,17 +520,19 @@ zimbraMailSSLPort: 8443
 // TestGetAllReverseProxyBackendsNoServersUseFallback tests fallback when no servers found
 func TestGetAllReverseProxyBackendsNoServersUseFallback(t *testing.T) {
 	ctx := context.Background()
-	// Gas output with no lookup targets → empty servers → fallback to localhost:8080
-	gasOutput := `# name backend.example.com
-zimbraServiceHostname: backend.example.com
-zimbraReverseProxyLookupTarget: FALSE
-zimbraMailMode: http
-zimbraMailPort: 8080
-`
+	// No lookup targets → empty servers → fallback to localhost:8080
+	byHost := map[string]map[string]string{
+		"backend.example.com": {
+			zimbraServiceHostnameAttr:          "backend.example.com",
+			zimbraReverseProxyLookupTargetAttr: "FALSE",
+			zimbraMailModeAttr:                 "http",
+			zimbraMailPortAttr:                 "8080",
+		},
+	}
 	g := &Generator{
 		upstreamCache: &upstreamQueryCache{
-			populated: false,
-			gasOutput: gasOutput,
+			populated:         false,
+			serverAttrsByHost: byHost,
 		},
 	}
 
@@ -572,64 +546,16 @@ zimbraMailPort: 8080
 	}
 }
 
-// TestGetAllServersOutputNilLdap tests getAllServersOutput when LdapClient is nil
-func TestGetAllServersOutputNilLdap(t *testing.T) {
-	g := &Generator{LdapClient: nil}
-	_, err := g.getAllServersOutput()
-	if err == nil {
-		t.Fatal("expected error when LdapClient is nil, got nil")
-	}
-}
-
-// TestGetAllServersOutputNilNativeClient tests getAllServersOutput when NativeClient is nil
-func TestGetAllServersOutputNilNativeClient(t *testing.T) {
+// TestGetAllReverseProxyBackendsByNilLdap tests the error path when the cache
+// is empty and no native LDAP client is available.
+func TestGetAllReverseProxyBackendsByNilLdap(t *testing.T) {
 	g := &Generator{
-		LdapClient: &ldap.Ldap{}, // NativeClient field is nil by default
-	}
-	_, err := g.getAllServersOutput()
-	if err == nil {
-		t.Fatal("expected error when NativeClient is nil, got nil")
-	}
-}
-
-// TestGetOrCacheServersOutputCacheHit tests the cache-hit path of getOrCacheServersOutput
-func TestGetOrCacheServersOutputCacheHit(t *testing.T) {
-	cached := "# name server1.example.com\nzimbraServiceHostname: server1.example.com\n"
-	g := &Generator{
-		upstreamCache: &upstreamQueryCache{
-			gasOutput: cached,
-		},
-	}
-	got, err := g.getOrCacheServersOutput()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got != cached {
-		t.Errorf("expected cached output, got %q", got)
-	}
-}
-
-// TestGetOrCacheServersOutputCacheMissNilLdap tests cache-miss path that falls through to getAllServersOutput error
-func TestGetOrCacheServersOutputCacheMissNilLdap(t *testing.T) {
-	g := &Generator{
-		upstreamCache: &upstreamQueryCache{gasOutput: ""},
+		upstreamCache: &upstreamQueryCache{populated: false},
 		LdapClient:    nil,
 	}
-	_, err := g.getOrCacheServersOutput()
+	_, err := g.getAllReverseProxyBackends(context.Background())
 	if err == nil {
 		t.Fatal("expected error when LDAP unavailable, got nil")
-	}
-}
-
-// TestGetOrCacheServersOutputNilCache tests getOrCacheServersOutput with nil upstreamCache and nil ldap
-func TestGetOrCacheServersOutputNilCacheNilLdap(t *testing.T) {
-	g := &Generator{
-		upstreamCache: nil,
-		LdapClient:    nil,
-	}
-	_, err := g.getOrCacheServersOutput()
-	if err == nil {
-		t.Fatal("expected error, got nil")
 	}
 }
 
@@ -649,6 +575,35 @@ func TestGetAllMemcachedServersCacheHit(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].Hostname != "mc.example.com" {
 		t.Errorf("unexpected result: %+v", got)
+	}
+}
+
+// TestGetAllMemcachedServersWithServerAttrsCache tests the cache-miss path via
+// getServerAttrsByHostname's structured cache (serverAttrsByHost pre-filled).
+func TestGetAllMemcachedServersWithServerAttrsCache(t *testing.T) {
+	ctx := context.Background()
+	byHost := map[string]map[string]string{
+		"mc.example.com": {
+			zimbraServiceHostnameAttr:   "mc.example.com",
+			zimbraServiceEnabledAttr:    "memcached",
+			zimbraMemcachedBindPortAttr: "11211",
+		},
+	}
+	g := &Generator{
+		upstreamCache: &upstreamQueryCache{
+			populated:         false,
+			serverAttrsByHost: byHost,
+		},
+	}
+	got, err := g.getAllMemcachedServers(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 || got[0].Hostname != "mc.example.com" || got[0].Port != 11211 {
+		t.Errorf("unexpected result: %+v", got)
+	}
+	if !g.upstreamCache.populated {
+		t.Error("cache should be populated after first query")
 	}
 }
 
@@ -678,346 +633,32 @@ func TestGetAllMemcachedServersNilCache(t *testing.T) {
 	}
 }
 
-// TestApplyServerAttr tests applyServerAttr helper function
-func TestApplyServerAttr(t *testing.T) {
-	tests := []struct {
-		name     string
-		key      string
-		value    string
-		initial  serverData
-		expected serverData
-	}{
-		{
-			name:    "sets hostname",
-			key:     "zimbraServiceHostname",
-			value:   "server1.example.com",
-			initial: serverData{},
-			expected: serverData{
-				hostname: "server1.example.com",
-			},
-		},
-		{
-			name:    "sets lookupTarget TRUE",
-			key:     "zimbraReverseProxyLookupTarget",
-			value:   "TRUE",
-			initial: serverData{},
-			expected: serverData{
-				lookupTarget: true,
-			},
-		},
-		{
-			name:    "sets lookupTarget FALSE",
-			key:     "zimbraReverseProxyLookupTarget",
-			value:   "FALSE",
-			initial: serverData{},
-			expected: serverData{
-				lookupTarget: false,
-			},
-		},
-		{
-			name:    "sets lookupTarget case-insensitive",
-			key:     "zimbraReverseProxyLookupTarget",
-			value:   "true",
-			initial: serverData{},
-			expected: serverData{
-				lookupTarget: true,
-			},
-		},
-		{
-			name:    "sets mailMode lowercase",
-			key:     "zimbraMailMode",
-			value:   "HTTPS",
-			initial: serverData{},
-			expected: serverData{
-				mailMode: "https",
-			},
-		},
-		{
-			name:    "sets mailPort",
-			key:     "zimbraMailPort",
-			value:   "8080",
-			initial: serverData{},
-			expected: serverData{
-				mailPort: 8080,
-			},
-		},
-		{
-			name:    "ignores invalid mailPort",
-			key:     "zimbraMailPort",
-			value:   "invalid",
-			initial: serverData{},
-			expected: serverData{
-				mailPort: 0,
-			},
-		},
-		{
-			name:    "sets mailSSLPort",
-			key:     "zimbraMailSSLPort",
-			value:   "8443",
-			initial: serverData{},
-			expected: serverData{
-				mailSSLPort: 8443,
-			},
-		},
-		{
-			name:  "ignores unknown key",
-			key:   "unknownKey",
-			value: "somevalue",
-			initial: serverData{
-				hostname: "existing.com",
-			},
-			expected: serverData{
-				hostname: "existing.com",
-			},
-		},
+// TestGetAllReverseProxyBackendsByNilLdapAndCache mirrors the memcached nil-cache
+// error path for getAllReverseProxyBackendsBy.
+func TestGetAllReverseProxyBackendsByNilLdapAndCache(t *testing.T) {
+	g := &Generator{
+		upstreamCache: nil,
+		LdapClient:    nil,
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cur := tt.initial
-			applyServerAttr(tt.key, tt.value, &cur)
-			if cur != tt.expected {
-				t.Errorf("applyServerAttr() = %+v, expected %+v", cur, tt.expected)
-			}
-		})
+	_, err := g.getAllReverseProxyBackends(context.Background())
+	if err == nil {
+		t.Fatal("expected error, got nil")
 	}
 }
 
-// TestAppendValidUpstream tests appendValidUpstream helper function
-func TestAppendValidUpstream(t *testing.T) {
-	tests := []struct {
-		name         string
-		cur          serverData
-		portSelector func(serverData) UpstreamServer
-		shouldAppend bool
-		expectedPort int
-	}{
-		{
-			name: "appends when hostname and lookupTarget set",
-			cur: serverData{
-				hostname:     "server1.example.com",
-				lookupTarget: true,
-			},
-			portSelector: func(s serverData) UpstreamServer {
-				return UpstreamServer{Host: s.hostname, Port: 8080}
-			},
-			shouldAppend: true,
-			expectedPort: 8080,
-		},
-		{
-			name: "skips when hostname empty",
-			cur: serverData{
-				hostname:     "",
-				lookupTarget: true,
-			},
-			portSelector: func(s serverData) UpstreamServer {
-				return UpstreamServer{Host: s.hostname, Port: 8080}
-			},
-			shouldAppend: false,
-		},
-		{
-			name: "skips when lookupTarget false",
-			cur: serverData{
-				hostname:     "server1.example.com",
-				lookupTarget: false,
-			},
-			portSelector: func(s serverData) UpstreamServer {
-				return UpstreamServer{Host: s.hostname, Port: 8080}
-			},
-			shouldAppend: false,
-		},
-		{
-			name: "skips when port selector returns 0 port",
-			cur: serverData{
-				hostname:     "server1.example.com",
-				lookupTarget: true,
-			},
-			portSelector: func(s serverData) UpstreamServer {
-				return UpstreamServer{Host: s.hostname, Port: 0}
-			},
-			shouldAppend: false,
-		},
-		{
-			name: "skips when port selector returns negative port",
-			cur: serverData{
-				hostname:     "server1.example.com",
-				lookupTarget: true,
-			},
-			portSelector: func(s serverData) UpstreamServer {
-				return UpstreamServer{Host: s.hostname, Port: -1}
-			},
-			shouldAppend: false,
-		},
+// TestGetAllReverseProxyBackendsByLDAPQueryError verifies that an LDAP query
+// failure (NativeClient set but unreachable) propagates as an error.
+func TestGetAllReverseProxyBackendsByLDAPQueryError(t *testing.T) {
+	l := ldap.NewLdap(context.Background(), &config.Config{})
+	l.NativeClient = new(ldap.Client) // zero-value: no URLs → query fails
+
+	g := &Generator{
+		upstreamCache: &upstreamQueryCache{populated: false},
+		LdapClient:    l,
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var servers []UpstreamServer
-			appendValidUpstream(&servers, tt.cur, tt.portSelector)
-
-			if tt.shouldAppend {
-				if len(servers) != 1 {
-					t.Errorf("expected 1 server appended, got %d", len(servers))
-				} else if servers[0].Port != tt.expectedPort {
-					t.Errorf("expected port %d, got %d", tt.expectedPort, servers[0].Port)
-				}
-			} else {
-				if len(servers) != 0 {
-					t.Errorf("expected no servers appended, got %d", len(servers))
-				}
-			}
-		})
-	}
-}
-
-// TestApplyMcAttr tests applyMcAttr helper function
-func TestApplyMcAttr(t *testing.T) {
-	tests := []struct {
-		name     string
-		key      string
-		value    string
-		initial  mcServerData
-		expected mcServerData
-	}{
-		{
-			name:    "sets hostname",
-			key:     "zimbraServiceHostname",
-			value:   "mc.example.com",
-			initial: mcServerData{},
-			expected: mcServerData{
-				hostname: "mc.example.com",
-			},
-		},
-		{
-			name:    "sets hasMemcached when value is memcached",
-			key:     "zimbraServiceEnabled",
-			value:   "memcached",
-			initial: mcServerData{},
-			expected: mcServerData{
-				hasMemcached: true,
-			},
-		},
-		{
-			name:    "does not set hasMemcached for other service",
-			key:     "zimbraServiceEnabled",
-			value:   "mailbox",
-			initial: mcServerData{},
-			expected: mcServerData{
-				hasMemcached: false,
-			},
-		},
-		{
-			name:    "sets memcachedPort",
-			key:     "zimbraMemcachedBindPort",
-			value:   "11211",
-			initial: mcServerData{},
-			expected: mcServerData{
-				memcachedPort: 11211,
-			},
-		},
-		{
-			name:    "ignores invalid memcachedPort",
-			key:     "zimbraMemcachedBindPort",
-			value:   "invalid",
-			initial: mcServerData{},
-			expected: mcServerData{
-				memcachedPort: 0,
-			},
-		},
-		{
-			name:  "ignores unknown key",
-			key:   "unknownKey",
-			value: "somevalue",
-			initial: mcServerData{
-				hostname: "existing.com",
-			},
-			expected: mcServerData{
-				hostname: "existing.com",
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cur := tt.initial
-			applyMcAttr(tt.key, tt.value, &cur)
-			if cur != tt.expected {
-				t.Errorf("applyMcAttr() = %+v, expected %+v", cur, tt.expected)
-			}
-		})
-	}
-}
-
-// TestAppendValidMcServer tests appendValidMcServer helper function
-func TestAppendValidMcServer(t *testing.T) {
-	tests := []struct {
-		name         string
-		cur          mcServerData
-		shouldAppend bool
-	}{
-		{
-			name: "appends when all conditions met",
-			cur: mcServerData{
-				hostname:      "mc.example.com",
-				hasMemcached:  true,
-				memcachedPort: 11211,
-			},
-			shouldAppend: true,
-		},
-		{
-			name: "skips when hostname empty",
-			cur: mcServerData{
-				hostname:      "",
-				hasMemcached:  true,
-				memcachedPort: 11211,
-			},
-			shouldAppend: false,
-		},
-		{
-			name: "skips when hasMemcached false",
-			cur: mcServerData{
-				hostname:      "mc.example.com",
-				hasMemcached:  false,
-				memcachedPort: 11211,
-			},
-			shouldAppend: false,
-		},
-		{
-			name: "skips when memcachedPort is 0",
-			cur: mcServerData{
-				hostname:      "mc.example.com",
-				hasMemcached:  true,
-				memcachedPort: 0,
-			},
-			shouldAppend: false,
-		},
-		{
-			name: "skips when memcachedPort is negative",
-			cur: mcServerData{
-				hostname:      "mc.example.com",
-				hasMemcached:  true,
-				memcachedPort: -1,
-			},
-			shouldAppend: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var servers []MemcacheServer
-			appendValidMcServer(&servers, tt.cur)
-
-			if tt.shouldAppend {
-				if len(servers) != 1 {
-					t.Errorf("expected 1 server appended, got %d", len(servers))
-				} else if servers[0].Hostname != tt.cur.hostname || servers[0].Port != tt.cur.memcachedPort {
-					t.Errorf("appended server mismatch: %+v", servers[0])
-				}
-			} else {
-				if len(servers) != 0 {
-					t.Errorf("expected no servers appended, got %d", len(servers))
-				}
-			}
-		})
+	_, err := g.getAllReverseProxyBackends(context.Background())
+	if err == nil {
+		t.Fatal("expected error when LDAP query fails, got nil")
 	}
 }

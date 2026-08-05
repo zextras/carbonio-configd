@@ -156,7 +156,7 @@ func isWrappingDirective(directiveContent string) bool {
 // knownDirectives lists every wrapping-directive keyword the transformer
 // understands. Declared at package scope so the backing array is allocated
 // once at init and every isKnownDirective call is a pure slice walk.
-var knownDirectives = []string{"binary", "truefalse", "range", "freq", "list", "contains", "exact"}
+var knownDirectives = []string{"binary", "truefalse", "range", "freq", "list", "contains", "exact", "explode"}
 
 // isKnownDirective checks if the directive name is a known directive type.
 func isKnownDirective(directiveName string) bool {
@@ -210,14 +210,16 @@ func (t *Transformer) processWrappingDirective(ctx context.Context, line string)
 		return line, false
 	}
 
-	// For %%contains...%% lines, pre-substitute any embedded variables before
-	// evaluating the directive, mirroring jylibs/state.py transform() which
-	// strips the outer %% and runs xformConfigVariable over the inner content of
-	// a %%contains...%% line prior to the contains evaluation. Legacy matched
-	// the bare %%key%% form (VAR then LOCAL fallback); the typed %%VAR:key%%
-	// form is a Go extension. Other wrapping directives are passed through
-	// unchanged (their handlers parse VAR:key themselves).
-	if strings.HasPrefix(innerContent, "contains ") {
+	// For %%contains...%%/%%exact...%% lines, pre-substitute any embedded
+	// variables before evaluating the directive, mirroring jylibs/state.py
+	// transform() which strips the outer %% and runs xformConfigVariable over
+	// the inner content of a %%contains...%% line prior to the contains
+	// evaluation. exact shares the same resolveSearchReplaceDirective grammar
+	// as contains, so it can equally embed variables. Legacy matched the bare
+	// %%key%% form (VAR then LOCAL fallback); the typed %%VAR:key%% form is a
+	// Go extension. Other wrapping directives are passed through unchanged
+	// (their handlers parse VAR:key themselves).
+	if strings.HasPrefix(innerContent, "contains ") || strings.HasPrefix(innerContent, "exact ") {
 		substituted := configVarRe.ReplaceAllStringFunc(innerContent, func(match string) string {
 			// Always embedded in surrounding directive text, so never allowed to
 			// introduce a newline. See keepOnOneLine.

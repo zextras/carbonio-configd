@@ -228,9 +228,6 @@ type upstreamQueryCache struct {
 	reverseProxyBackendsSSL []UpstreamServer
 	// memcachedServers caches getAllMemcachedServers() result
 	memcachedServers []MemcacheServer
-	// gasOutput stores the raw output from "zmprov gas -v" to avoid repeated calls
-	// This is populated once and reused for all attribute-based queries
-	gasOutput string
 	// serverAttrsByHost caches all servers indexed by zimbraServiceHostname with
 	// their full attribute maps, used by the Java-faithful upstream resolvers.
 	serverAttrsByHost map[string]map[string]string

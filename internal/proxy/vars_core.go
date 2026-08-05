@@ -4,6 +4,7 @@
 
 package proxy
 
+import "github.com/zextras/carbonio-configd/internal/config"
 const nginxConfPrefix = "nginx.conf"
 
 // registerCoreVariables registers core proxy configuration variables
@@ -58,11 +59,11 @@ func (g *Generator) registerCoreVariables() {
 		withValueType(ValueTypeString),
 		withDescription("Accept mutex for worker load balancing (on/off)"),
 	)
-	g.registerVar("main.logfile", "/opt/zextras/log/nginx.log",
+	g.registerVar("main.logfile", config.ZextrasBase+"/log/nginx.log",
 		withValueType(ValueTypeString),
 		withDescription("Path to NGINX error log file"),
 	)
-	g.registerVar("main.krb5keytab", "/opt/zextras/conf/krb5.keytab",
+	g.registerVar("main.krb5keytab", config.ZextrasBase+"/conf/krb5.keytab",
 		withAttribute("zimbraReverseProxyKrb5Keytab"),
 		withOverrideType(OverrideConfig),
 		withValueType(ValueTypeString),

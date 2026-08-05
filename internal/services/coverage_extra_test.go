@@ -35,13 +35,26 @@ func TestServiceReload_UnknownSvc(t *testing.T) {
 	}
 }
 
+// TestServiceReload_NoUnitsNoop verifies that a service with no systemd
+// units and no legacy launcher (no CustomStop/ProcessName) surfaces the
+// same "no ProcessName registered" error stopService already returns for
+// an undefined service. ServiceReload's legacy branch bifurcates like
+// startService/stopService and never gates on SystemdUnits, so an
+// undefined def fails in the stop+start fallback rather than silently
+// no-op'ing (the old code's incidental behavior, an artifact of only ever
+// looping over SystemdUnits).
 func TestServiceReload_NoUnitsNoop(t *testing.T) {
+	orig := isSystemdModeFn
+	defer func() { isSystemdModeFn = orig }()
+	isSystemdModeFn = func() bool { return false }
+
 	def := &ServiceDef{Name: "test-reload-empty", SystemdUnits: nil}
 	Registry["test-reload-empty"] = def
 	defer delete(Registry, "test-reload-empty")
 
-	if err := ServiceReload(context.Background(), "test-reload-empty"); err != nil {
-		t.Errorf("expected nil for service with no units, got %v", err)
+	err := ServiceReload(context.Background(), "test-reload-empty")
+	if err == nil || !strings.Contains(err.Error(), "no ProcessName") {
+		t.Errorf("expected legacy fallback stop error, got %v", err)
 	}
 }
 
@@ -193,19 +206,6 @@ func TestStopService_LegacyCustomStop(t *testing.T) {
 	err := stopService(context.Background(), "test-custom-stop", def)
 	if err != sentinel {
 		t.Errorf("expected sentinel from CustomStop, got %v", err)
-	}
-}
-
-func TestIsOwnedByCurrentUser_SelfProc(t *testing.T) {
-	if !isOwnedByCurrentUser("/proc/self") {
-		t.Error("expected /proc/self to be owned by current user")
-	}
-}
-
-func TestIsOwnedByCurrentUser_UnreadableDefaultsTrue(t *testing.T) {
-	// Nonexistent path means ReadFile errors; the function defaults to true.
-	if !isOwnedByCurrentUser(filepath.Join(t.TempDir(), "nope")) {
-		t.Error("expected true for unreadable proc dir")
 	}
 }
 

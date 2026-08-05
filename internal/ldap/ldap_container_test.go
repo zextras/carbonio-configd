@@ -11,6 +11,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/go-ldap/ldap/v3"
+
 	"github.com/zextras/carbonio-configd/internal/config"
 )
 
@@ -103,7 +105,7 @@ func TestContainer_Ldap_ModifyAttribute(t *testing.T) {
 	const dn = ldapCnConfig
 	const attr = "olcLogLevel"
 
-	before, err := client.getEntityConfig(dn, "config", dn)
+	before, err := client.getEntityConfig(dn, ldapFilterAllObjects, ldap.ScopeBaseObject, "config", dn)
 	if err != nil {
 		t.Fatalf("read before: %v", err)
 	}
@@ -113,7 +115,7 @@ func TestContainer_Ldap_ModifyAttribute(t *testing.T) {
 		t.Fatalf("Ldap.ModifyAttribute: %v", err)
 	}
 
-	after, err := client.getEntityConfig(dn, "config", dn)
+	after, err := client.getEntityConfig(dn, ldapFilterAllObjects, ldap.ScopeBaseObject, "config", dn)
 	if err != nil {
 		t.Fatalf("read after: %v", err)
 	}

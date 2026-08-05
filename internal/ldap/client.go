@@ -55,7 +55,7 @@ type Client struct {
 	// searchFn, when non-nil, replaces the network Search round-trip for the
 	// high-level getters. Production leaves it nil; tests inject a stub so
 	// GetGlobalConfig, GetDomain, etc. can be exercised without a live server
-	// (same spirit as the clientDial seam used by the failover tests).
+	// (same spirit as the defaultDial seam used by the failover tests).
 	searchFn func(baseDN, filter string, attributes []string, scope int) (*ldap.SearchResult, error)
 }
 
@@ -200,10 +200,11 @@ func (c *Client) returnConnection(conn *ldap.Conn) {
 }
 
 // connect establishes a connection to the LDAP server, walking the
-// configured URL list and using the first URL that completes both dial
-// and bind successfully. Per-URL failures are emitted at WARN so an
-// operator can pinpoint a misconfigured entry even when the overall
-// connection succeeds (CO-3565).
+// configured URL list and using the first URL that completes dial,
+// StartTLS (when applicable), and bind successfully. Per-URL failures are
+// emitted at WARN so an operator can pinpoint a misconfigured entry even
+// when the overall connection succeeds (CO-3565). Dialing shares the
+// defaultDial seam (urls.go) also used by DialFirstReachable.
 func (c *Client) connect() (*ldap.Conn, error) {
 	ctx := logger.ContextWithComponentOnce(context.Background(), "ldap")
 
@@ -223,38 +224,14 @@ func (c *Client) connect() (*ldap.Conn, error) {
 	return nil, fmt.Errorf("failed to connect to LDAP server: %w", agg)
 }
 
-// clientDial is the dialer used by dialAndBind. Production points it at
-// ldap.DialURL; tests override it with a stub that returns deterministic
-// errors so the failover loop in connect() can be exercised without a
-// running LDAP server.
-var clientDial = ldap.DialURL
-
-// dialAndBind performs the full dial+StartTLS+bind sequence for a single URL.
-// Returns a bound connection on success; on any failure it closes any partial
-// connection and returns the wrapped error.
+// dialAndBind performs the full dial+StartTLS+bind sequence for a single URL
+// using the shared defaultDial seam. Returns a bound connection on success;
+// on any failure it closes any partial connection and returns the wrapped
+// error so connect can fail over to the next URL.
 func (c *Client) dialAndBind(url string) (*ldap.Conn, error) {
-	var (
-		conn *ldap.Conn
-		err  error
-	)
-
 	dialer := ldap.DialWithDialer(&net.Dialer{Timeout: c.dialTimeout})
 
-	switch {
-	case strings.HasPrefix(url, "ldaps://"):
-		conn, err = clientDial(url, dialer, ldap.DialWithTLSConfig(c.tlsConfig))
-	case strings.HasPrefix(url, "ldapi://"):
-		// Unix-socket connection to the local slapd-config backend. No TLS and
-		// no StartTLS: the socket is already a trusted local channel gated by
-		// filesystem permissions. go-ldap dials the path component as a unix
-		// socket (e.g. ldapi:///run/carbonio/run/ldapi).
-		conn, err = clientDial(url, dialer)
-	case strings.HasPrefix(url, "ldap://"):
-		conn, err = clientDial(url, dialer)
-	default:
-		return nil, fmt.Errorf("unsupported LDAP URL scheme: %s", url)
-	}
-
+	conn, err := defaultDial(url, dialer, ldap.DialWithTLSConfig(c.tlsConfig))
 	if err != nil {
 		return nil, fmt.Errorf("dial: %w", err)
 	}
@@ -532,10 +509,12 @@ func (c *Client) ProbeDN(dn string) bool {
 	return err == nil
 }
 
-// getEntityConfig is a helper function to retrieve config for a specific entity by DN.
+// getEntityConfig is a helper function to retrieve config for a specific entity.
 // It eliminates duplicate code for GetServerConfig, GetDomain, etc.
-func (c *Client) getEntityConfig(dn, entityType, entityName string) (map[string]string, error) {
-	result, err := c.search(dn, ldapFilterAllObjects, []string{"*"}, ldap.ScopeBaseObject)
+func (c *Client) getEntityConfig(
+	dn, filter string, scope int, entityType, entityName string,
+) (map[string]string, error) {
+	result, err := c.search(dn, filter, []string{"*"}, scope)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get %s config for %s: %w", entityType, entityName, err)
 	}
@@ -549,8 +528,8 @@ func (c *Client) getEntityConfig(dn, entityType, entityName string) (map[string]
 
 // getEntityNames is a helper function to retrieve a list of entity names.
 // It eliminates duplicate code for GetAllServers, GetAllDomains, etc.
-func (c *Client) getEntityNames(dn, filter, attributeName, entityType string) ([]string, error) {
-	result, err := c.search(dn, filter, []string{attributeName}, ldap.ScopeSingleLevel)
+func (c *Client) getEntityNames(dn, filter string, scope int, attributeName, entityType string) ([]string, error) {
+	result, err := c.search(dn, filter, []string{attributeName}, scope)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get all %s: %w", entityType, err)
 	}
@@ -569,9 +548,9 @@ func (c *Client) getEntityNames(dn, filter, attributeName, entityType string) ([
 // getEntitiesWithAttributes is a helper function to retrieve entities with full attributes.
 // It eliminates duplicate code for GetAllServersWithAttributes, GetAllDomainsWithAttributes, etc.
 func (c *Client) getEntitiesWithAttributes(
-	dn, filter, keyAttribute, entityType string,
+	dn, filter string, scope int, keyAttribute, entityType string,
 ) (map[string]map[string]string, error) {
-	result, err := c.search(dn, filter, []string{"*"}, ldap.ScopeSingleLevel)
+	result, err := c.search(dn, filter, []string{"*"}, scope)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get all %s with attributes: %w", entityType, err)
 	}
@@ -608,21 +587,21 @@ func (c *Client) GetGlobalConfig() (map[string]string, error) {
 // Returns a map of attribute name to value, matching zmprov gs output format.
 func (c *Client) GetServerConfig(hostname string) (map[string]string, error) {
 	dn := fmt.Sprintf("cn=%s,cn=servers,%s", ldap.EscapeDN(hostname), c.baseDN)
-	return c.getEntityConfig(dn, "server", hostname)
+	return c.getEntityConfig(dn, ldapFilterAllObjects, ldap.ScopeBaseObject, "server", hostname)
 }
 
 // GetAllServers retrieves all servers from LDAP.
 // Returns a list of server hostnames, matching zmprov gas output format.
 func (c *Client) GetAllServers() ([]string, error) {
 	dn := fmt.Sprintf("cn=servers,%s", c.baseDN)
-	return c.getEntityNames(dn, "(objectClass=zimbraServer)", "cn", "servers")
+	return c.getEntityNames(dn, "(objectClass=zimbraServer)", ldap.ScopeSingleLevel, "cn", "servers")
 }
 
 // GetAllServersWithAttributes retrieves all servers with full attributes.
 // Returns a map of hostname to attributes, useful for zmprov gas -v equivalent.
 func (c *Client) GetAllServersWithAttributes() (map[string]map[string]string, error) {
 	dn := fmt.Sprintf("cn=servers,%s", c.baseDN)
-	return c.getEntitiesWithAttributes(dn, "(objectClass=zimbraServer)", "cn", "servers")
+	return c.getEntitiesWithAttributes(dn, "(objectClass=zimbraServer)", ldap.ScopeSingleLevel, "cn", "servers")
 }
 
 // GetAllDomains retrieves all domains from LDAP.
@@ -632,57 +611,23 @@ func (c *Client) GetAllServersWithAttributes() (map[string]map[string]string, er
 // (e.g. dc=example,dc=com), NOT under cn=domains,cn=zimbra. A subtree
 // search from the root DSE with an objectClass filter is required.
 func (c *Client) GetAllDomains() ([]string, error) {
-	result, err := c.search("", "(objectClass=zimbraDomain)", []string{attrZimbraDomainName}, ldap.ScopeWholeSubtree)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get all domains: %w", err)
-	}
-
-	domains := make([]string, 0, len(result.Entries))
-	for _, entry := range result.Entries {
-		name := entry.GetAttributeValue(attrZimbraDomainName)
-		if name != "" {
-			domains = append(domains, name)
-		}
-	}
-
-	return domains, nil
+	return c.getEntityNames("", "(objectClass=zimbraDomain)", ldap.ScopeWholeSubtree, attrZimbraDomainName, "domains")
 }
 
 // GetDomain retrieves configuration for a specific domain.
 // Returns a map of attribute name to value, matching zmprov gd output format.
 func (c *Client) GetDomain(domain string) (map[string]string, error) {
 	filter := fmt.Sprintf("(&(objectClass=zimbraDomain)(zimbraDomainName=%s))", ldap.EscapeFilter(domain))
-
-	result, err := c.search("", filter, []string{"*"}, ldap.ScopeWholeSubtree)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get domain config for %s: %w", domain, err)
-	}
-
-	if len(result.Entries) == 0 {
-		return nil, fmt.Errorf("domain not found: %s", domain)
-	}
-
-	return entryToMap(result.Entries[0]), nil
+	return c.getEntityConfig("", filter, ldap.ScopeWholeSubtree, "domain", domain)
 }
 
 // GetAllDomainsWithAttributes retrieves all domains with full attributes in a single LDAP query.
 // This is significantly faster than calling GetAllDomains() followed by GetDomain() for each domain.
 // Returns a map of domain name to attributes, useful for batch domain queries.
 func (c *Client) GetAllDomainsWithAttributes() (map[string]map[string]string, error) {
-	result, err := c.search("", "(objectClass=zimbraDomain)", []string{"*"}, ldap.ScopeWholeSubtree)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get all domains with attributes: %w", err)
-	}
-
-	domains := make(map[string]map[string]string, len(result.Entries))
-	for _, entry := range result.Entries {
-		name := entry.GetAttributeValue(attrZimbraDomainName)
-		if name != "" {
-			domains[name] = entryToMap(entry)
-		}
-	}
-
-	return domains, nil
+	return c.getEntitiesWithAttributes(
+		"", "(objectClass=zimbraDomain)", ldap.ScopeWholeSubtree, attrZimbraDomainName, "domains",
+	)
 }
 
 // GetEnabledServices returns the list of enabled services for a server hostname.
@@ -690,7 +635,7 @@ func (c *Client) GetAllDomainsWithAttributes() (map[string]map[string]string, er
 func (c *Client) GetEnabledServices(hostname string) ([]string, error) {
 	dn := fmt.Sprintf("cn=%s,cn=servers,%s", ldap.EscapeDN(hostname), c.baseDN)
 
-	result, err := c.search(dn, ldapFilterAllObjects, []string{attrZimbraServiceEnabled}, ldap.ScopeBaseObject)
+	result, err := c.search(dn, ldapFilterAllObjects, []string{AttrZimbraServiceEnabled}, ldap.ScopeBaseObject)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get enabled services for %s: %w", hostname, err)
 	}
@@ -699,7 +644,7 @@ func (c *Client) GetEnabledServices(hostname string) ([]string, error) {
 		return nil, fmt.Errorf("server not found: %s", hostname)
 	}
 
-	return result.Entries[0].GetAttributeValues(attrZimbraServiceEnabled), nil
+	return result.Entries[0].GetAttributeValues(AttrZimbraServiceEnabled), nil
 }
 
 // ModifyAttribute replaces an attribute value on an LDAP entry.

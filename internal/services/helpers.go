@@ -28,47 +28,6 @@ func openLogFile(path string) (*os.File, error) {
 	return fd, nil
 }
 
-// signalViaPidfile reads a pid from a file, sends the specified signal to the
-// process, and removes the pidfile on success. If the pidfile does not exist,
-// the service is considered already stopped and nil is returned.
-//
-//nolint:unparam // serviceName varies in real callers; tests happen to share one value
-func signalViaPidfile(ctx context.Context, pidFile, serviceName string, sig syscall.Signal) error {
-	//nolint:gosec // pidfile path is from internal service registry
-	data, err := os.ReadFile(pidFile)
-	if err != nil {
-		if os.IsNotExist(err) {
-			logger.InfoContext(ctx, "Service already stopped (no pidfile)", "service", serviceName, "pidfile", pidFile)
-
-			return nil
-		}
-
-		return fmt.Errorf("failed to read pidfile %s: %w", pidFile, err)
-	}
-
-	pidStr := strings.TrimSpace(string(data))
-
-	pid, err := strconv.Atoi(pidStr)
-	if err != nil {
-		return fmt.Errorf("invalid pid in %s: %s", pidFile, pidStr)
-	}
-
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return fmt.Errorf("failed to find process %d: %w", pid, err)
-	}
-
-	logger.InfoContext(ctx, "Sending signal to service via pidfile", "service", serviceName, "pid", pid, "signal", sig)
-
-	if err := proc.Signal(sig); err != nil {
-		return fmt.Errorf("failed to signal process %d: %w", pid, err)
-	}
-
-	_ = os.Remove(pidFile)
-
-	return nil
-}
-
 // gracefulStopViaPidfile stops a process cleanly: it sends SIGTERM, waits up to
 // timeout for the process to exit (polling with signal 0), and escalates to
 // SIGKILL only if the process is still alive at the deadline. The pidfile is
@@ -77,6 +36,15 @@ func signalViaPidfile(ctx context.Context, pidFile, serviceName string, sig sysc
 // A clean SIGTERM lets daemons like slapd close their backing store (LMDB)
 // properly, avoiding recovery work on the next start that can stall readiness.
 // If the pidfile is absent the service is considered already stopped.
+//
+// The initial SIGTERM and the SIGKILL escalation are intentionally NOT
+// hoisted to the shared signalPID helper (used by killProcess and
+// stopMysqldByPidFile): signalPID is silent/best-effort by design — its
+// targets already come from a fresh /proc scan, so a signal failure just
+// means the process raced away — whereas callers here (ldapCustomStop)
+// need genuine failures (e.g. EPERM signaling the wrong UID) surfaced as
+// an error rather than swallowed. Only the polling loop is shared, via
+// waitForProcessExit -> pollUntilExit (cli_process.go).
 func gracefulStopViaPidfile(ctx context.Context, pidFile, serviceName string, timeout time.Duration) error {
 	//nolint:gosec // pidfile path is from internal service registry
 	data, err := os.ReadFile(pidFile)
@@ -135,30 +103,8 @@ func gracefulStopViaPidfile(ctx context.Context, pidFile, serviceName string, ti
 
 // waitForProcessExit polls (signal 0) until pid is gone, ctx is cancelled, or
 // timeout elapses. Returns true if the process exited within the budget.
+// Thin wrapper around the shared pollUntilExit core (cli_process.go) at the
+// original 50ms cadence.
 func waitForProcessExit(ctx context.Context, pid int, timeout time.Duration) bool {
-	deadline := time.Now().Add(timeout)
-	ticker := time.NewTicker(50 * time.Millisecond)
-
-	defer ticker.Stop()
-
-	for {
-		if !processAlive(pid) {
-			return true
-		}
-
-		if time.Now().After(deadline) {
-			return false
-		}
-
-		select {
-		case <-ctx.Done():
-			return !processAlive(pid)
-		case <-ticker.C:
-		}
-	}
-}
-
-// isTruthy returns true for "TRUE" (case-insensitive) or "1".
-func isTruthy(val string) bool {
-	return strings.EqualFold(val, "TRUE") || val == "1"
+	return pollUntilExit(ctx, pid, timeout, 50*time.Millisecond)
 }

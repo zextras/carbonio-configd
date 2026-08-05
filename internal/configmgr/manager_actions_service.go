@@ -43,8 +43,8 @@ func (cm *ConfigManager) DoRestarts(ctx context.Context) {
 	configLookup := func(key string) string {
 		// Extract service name from SERVICE_<name> key format
 		// Key is expected in format "SERVICE_MTA", "SERVICE_PROXY", etc.
-		if len(key) > 8 && key[:8] == "SERVICE_" {
-			serviceName := strings.ToLower(key[8:])
+		if rest, ok := strings.CutPrefix(key, "SERVICE_"); ok && rest != "" {
+			serviceName := strings.ToLower(rest)
 
 			value, err := cm.LookUpConfig(ctx, "SERVICE", serviceName)
 			if err == nil && strings.EqualFold(value, constTRUE) {

@@ -6,23 +6,39 @@ package ldap
 
 import (
 	"errors"
+	"net"
 	"strings"
 	"testing"
 
 	"github.com/go-ldap/ldap/v3"
 )
 
-func withClientDial(t *testing.T, fn dialFn) {
+// ldapBindSuccessPacket is a hand-encoded LDAPMessage carrying a successful
+// (resultCode 0) BindResponse for messageID 1 — always the first message ID
+// issued by a freshly started *ldap.Conn. It lets a fake net.Conn answer a
+// real Conn.Bind() call without a live LDAP server.
+var ldapBindSuccessPacket = []byte{
+	0x30, 0x0c, // LDAPMessage SEQUENCE, len 12
+	0x02, 0x01, 0x01, // messageID INTEGER 1
+	0x61, 0x07, // [APPLICATION 1] BindResponse, len 7
+	0x02, 0x01, 0x00, // resultCode INTEGER 0 (success)
+	0x04, 0x00, // matchedDN OCTET STRING ""
+	0x04, 0x00, // diagnosticMessage OCTET STRING ""
+}
+
+// withDefaultDial stubs the DialFirstReachable dialer for the duration of a
+// test, restoring the production dialer on cleanup.
+func withDefaultDial(t *testing.T, fn dialFn) {
 	t.Helper()
 
-	prev := clientDial
-	t.Cleanup(func() { clientDial = prev })
+	prev := defaultDial
+	t.Cleanup(func() { defaultDial = prev })
 
-	clientDial = fn
+	defaultDial = fn
 }
 
 func TestClient_Connect_AggregatesPerURLFailure(t *testing.T) {
-	withClientDial(t, func(url string, _ ...ldap.DialOpt) (*ldap.Conn, error) {
+	withDefaultDial(t, func(url string, _ ...ldap.DialOpt) (*ldap.Conn, error) {
 		return nil, errors.New("dial " + url + " refused")
 	})
 
@@ -57,83 +73,57 @@ func TestClient_Connect_AggregatesPerURLFailure(t *testing.T) {
 	}
 }
 
-func TestClient_DialAndBind_UnsupportedScheme(t *testing.T) {
-	c := &Client{}
+// TestClient_Connect_FailsOverBindFailureToNextURL verifies that a URL which
+// dials successfully but fails bind (e.g. a broken cert or a server in
+// maintenance mode) does not abort connect(): the next URL is tried and, if
+// it binds successfully, connect() returns its connection.
+func TestClient_Connect_FailsOverBindFailureToNextURL(t *testing.T) {
+	// url1: the "server" end of the pipe closes immediately, so the real
+	// *ldap.Conn's Bind() write fails and connect() must fail over.
+	badClient, badServer := net.Pipe()
+	_ = badServer.Close()
 
-	_, err := c.dialAndBind("http://nope:80")
-	if err == nil {
-		t.Fatal("expected error for unsupported scheme")
-	}
+	// url2: the "server" end answers with a valid resultCode-0 BindResponse,
+	// so Bind() succeeds against a real *ldap.Conn.
+	goodClient, goodServer := net.Pipe()
 
-	if !strings.Contains(err.Error(), "unsupported LDAP URL scheme") {
-		t.Errorf("error = %q, want substring %q", err.Error(), "unsupported LDAP URL scheme")
-	}
-}
+	go func() {
+		buf := make([]byte, 4096)
+		_, _ = goodServer.Read(buf)
+		_, _ = goodServer.Write(ldapBindSuccessPacket)
+	}()
 
-func TestClient_DialAndBind_DialError(t *testing.T) {
-	withClientDial(t, func(_ string, _ ...ldap.DialOpt) (*ldap.Conn, error) {
-		return nil, errors.New("connection refused")
+	withDefaultDial(t, func(url string, _ ...ldap.DialOpt) (*ldap.Conn, error) {
+		switch url {
+		case "ldap://a:389":
+			conn := ldap.NewConn(badClient, false)
+			conn.Start()
+
+			return conn, nil
+		case "ldap://b:389":
+			conn := ldap.NewConn(goodClient, false)
+			conn.Start()
+
+			return conn, nil
+		default:
+			return nil, errors.New("unexpected url " + url)
+		}
 	})
 
-	c := &Client{}
-
-	_, err := c.dialAndBind("ldap://srv:389")
-	if err == nil {
-		t.Fatal("expected dial error")
+	c := &Client{
+		urls:     []string{"ldap://a:389", "ldap://b:389"},
+		bindDN:   "uid=zimbra,cn=admins,cn=zimbra",
+		password: "secret",
 	}
 
-	if !strings.Contains(err.Error(), "dial:") {
-		t.Errorf("error = %q, want substring %q", err.Error(), "dial:")
-	}
-}
-
-func TestClient_DialAndBind_LDAPSPath(t *testing.T) {
-	var got string
-
-	withClientDial(t, func(url string, _ ...ldap.DialOpt) (*ldap.Conn, error) {
-		got = url
-		return nil, errors.New("forced")
-	})
-
-	c := &Client{}
-	_, _ = c.dialAndBind("ldaps://srv:636")
-
-	if got != "ldaps://srv:636" {
-		t.Errorf("ldaps path did not reach dialer with expected URL: got %q", got)
-	}
-}
-
-// TestClient_DialAndBind_LDAPIPath verifies the ldapi:// unix-socket scheme is
-// accepted (not rejected as unsupported) and reaches the dialer with the socket
-// path intact, dialed without TLS options.
-func TestClient_DialAndBind_LDAPIPath(t *testing.T) {
-	var (
-		got     string
-		optsLen int
-	)
-
-	withClientDial(t, func(url string, opts ...ldap.DialOpt) (*ldap.Conn, error) {
-		got = url
-		optsLen = len(opts)
-
-		return nil, errors.New("forced")
-	})
-
-	c := &Client{}
-	_, err := c.dialAndBind("ldapi:///run/carbonio/run/ldapi")
-
-	// Must reach the dialer (forced error), not the unsupported-scheme branch.
-	if err == nil || strings.Contains(err.Error(), "unsupported LDAP URL scheme") {
-		t.Fatalf("ldapi scheme rejected: err=%v", err)
+	conn, err := c.connect()
+	if err != nil {
+		t.Fatalf("connect() did not fail over to the next URL: %v", err)
 	}
 
-	if got != "ldapi:///run/carbonio/run/ldapi" {
-		t.Errorf("ldapi path did not reach dialer with expected URL: got %q", got)
+	if conn == nil {
+		t.Fatal("expected a connection from the URL that bound successfully")
 	}
 
-	// ldapi is a trusted local socket: dialed with the base dialer opt only
-	// (no TLS opt). ldaps:// would add a second (TLS) opt.
-	if optsLen != 1 {
-		t.Errorf("ldapi dialed with %d opts, want 1 (dialer only, no TLS)", optsLen)
-	}
+	_ = conn.Close()
 }

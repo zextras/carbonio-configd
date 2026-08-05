@@ -12,11 +12,12 @@ import (
 	"os"
 	"strings"
 
+	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/intern"
 )
 
 // DefaultConfigPath is the standard location of localconfig.xml in Carbonio.
-const DefaultConfigPath = "/opt/zextras/conf/localconfig.xml"
+const DefaultConfigPath = config.ZextrasBase + "/conf/localconfig.xml"
 
 // LocalConfig represents the root of localconfig.xml.
 type LocalConfig struct {
@@ -47,15 +48,15 @@ func LoadLocalConfigFromFile(path string) (map[string]string, error) {
 	}
 
 	// Parse XML
-	var config LocalConfig
-	if err := xml.Unmarshal(data, &config); err != nil {
+	var lc LocalConfig
+	if err := xml.Unmarshal(data, &lc); err != nil {
 		return nil, fmt.Errorf("failed to parse localconfig XML: %w", err)
 	}
 
 	// Convert to map. Local-config keys are interned so every downstream map
 	// keyed on them shares the same backing storage across the process.
-	result := make(map[string]string, len(config.Keys))
-	for _, key := range config.Keys {
+	result := make(map[string]string, len(lc.Keys))
+	for _, key := range lc.Keys {
 		result[intern.Key(key.Name)] = strings.TrimSpace(key.Value)
 	}
 
@@ -71,25 +72,25 @@ func LoadResolvedConfig() (map[string]string, error) {
 // LoadResolvedConfigFromFile loads localconfig from a custom path, merges
 // defaults, and resolves ${variable} references.
 func LoadResolvedConfigFromFile(path string) (map[string]string, error) {
-	config, err := LoadLocalConfigFromFile(path)
+	resolved, err := LoadLocalConfigFromFile(path)
 	if err != nil {
 		return nil, err
 	}
 
-	MergeDefaults(config)
-	Interpolate(config)
+	MergeDefaults(resolved)
+	Interpolate(resolved)
 
-	return config, nil
+	return resolved, nil
 }
 
 // FormatAsKeyValue converts a map to key=value format matching zmlocalconfig -s output.
 // Useful for compatibility with existing code that parses zmlocalconfig output.
-func FormatAsKeyValue(config map[string]string) string {
+func FormatAsKeyValue(values map[string]string) string {
 	var builder strings.Builder
-	for key, value := range config {
+	for _, key := range sortedKeys(values) {
 		builder.WriteString(key)
 		builder.WriteString(" = ")
-		builder.WriteString(value)
+		builder.WriteString(values[key])
 		builder.WriteString("\n")
 	}
 

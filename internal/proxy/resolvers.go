@@ -95,9 +95,18 @@ func (g *Generator) getIPMode() string {
 	return ipModeBoth // Default to dual stack
 }
 
+// clientCertCAFilename is the nginx client CA certificate filename within ConfDir.
+const clientCertCAFilename = "nginx.client.ca.crt"
+
+// clientCertCAPath returns the full path to the client CA certificate file,
+// shared by resolveClientCertCADefault and resolveSSLClientCertCAEnabled.
+func (g *Generator) clientCertCAPath() string {
+	return g.ConfDir + "/" + clientCertCAFilename
+}
+
 // resolveClientCertCADefault returns the default client CA certificate path if it exists
 func (g *Generator) resolveClientCertCADefault(ctx context.Context) (any, error) {
-	caPath := g.ConfDir + "/nginx.client.ca.crt"
+	caPath := g.clientCertCAPath()
 	if _, err := os.Stat(caPath); err == nil {
 		return caPath, nil
 	}
@@ -188,7 +197,7 @@ func (g *Generator) resolveWebSSLDhparamEnabled(_ context.Context) (any, error) 
 // resolveSSLClientCertCAEnabled returns true when the client CA certificate file exists.
 // Mirrors legacy ssl.clientcertca.enabled (ProxyConfGen.java:2684-2713).
 func (g *Generator) resolveSSLClientCertCAEnabled(_ context.Context) (any, error) {
-	caPath := g.ConfDir + "/nginx.client.ca.crt"
+	caPath := g.clientCertCAPath()
 
 	info, err := os.Stat(caPath)
 	if err != nil {

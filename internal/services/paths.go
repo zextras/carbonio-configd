@@ -4,11 +4,14 @@
 
 package services
 
-import "github.com/zextras/carbonio-configd/internal/localconfig"
+import (
+	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/localconfig"
+)
 
 // basePath is the root directory for all Carbonio paths.
 // Defaults to /opt/zextras; overridable for testing.
-var basePath = "/opt/zextras"
+var basePath = config.ZextrasBase
 
 // loadConfig is the function used to load resolved localconfig values.
 // Defaults to localconfig.LoadResolvedConfig; overridable for testing.

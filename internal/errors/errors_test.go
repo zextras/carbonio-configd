@@ -112,58 +112,6 @@ func TestCacheError_Unwrap(t *testing.T) {
 	}
 }
 
-func TestCommandError_Error(t *testing.T) {
-	tests := []struct {
-		name     string
-		err      *CommandError
-		expected string
-	}{
-		{
-			name: "command with exit code",
-			err: &CommandError{
-				Op:   "execute",
-				Cmd:  "/opt/zextras/bin/postconf",
-				Exit: 127,
-				Err:  errors.New("command not found"),
-			},
-			expected: "command execute failed for '/opt/zextras/bin/postconf' (exit 127): command not found",
-		},
-		{
-			name: "command with zero exit code",
-			err: &CommandError{
-				Op:   "run",
-				Cmd:  "test",
-				Exit: 0,
-				Err:  errors.New("unexpected error"),
-			},
-			expected: "command run failed for 'test' (exit 0): unexpected error",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.err.Error(); got != tt.expected {
-				t.Errorf("Error() = %v, want %v", got, tt.expected)
-			}
-		})
-	}
-}
-
-func TestCommandError_Unwrap(t *testing.T) {
-	innerErr := errors.New("inner error")
-	err := &CommandError{
-		Op:   "execute",
-		Cmd:  "test",
-		Exit: 1,
-		Err:  innerErr,
-	}
-
-	unwrapped := err.Unwrap()
-	if unwrapped != innerErr {
-		t.Errorf("Unwrap() = %v, want %v", unwrapped, innerErr)
-	}
-}
-
 func TestWrapConfig(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -279,81 +227,10 @@ func TestWrapCache(t *testing.T) {
 	}
 }
 
-func TestWrapCommand(t *testing.T) {
-	tests := []struct {
-		name        string
-		op          string
-		cmd         string
-		exit        int
-		err         error
-		expectNil   bool
-		expectError string
-	}{
-		{
-			name:        "wrap command error",
-			op:          "execute",
-			cmd:         "/opt/zextras/bin/postconf",
-			exit:        127,
-			err:         errors.New("not found"),
-			expectNil:   false,
-			expectError: "command execute failed for '/opt/zextras/bin/postconf' (exit 127): not found",
-		},
-		{
-			name:      "nil error returns nil",
-			op:        "run",
-			cmd:       "test",
-			exit:      0,
-			err:       nil,
-			expectNil: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			wrapped := WrapCommand(tt.op, tt.cmd, tt.exit, tt.err)
-
-			if tt.expectNil {
-				if wrapped != nil {
-					t.Errorf("WrapCommand() = %v, want nil", wrapped)
-				}
-				return
-			}
-
-			if wrapped == nil {
-				t.Fatal("WrapCommand() returned nil, expected error")
-			}
-
-			if wrapped.Error() != tt.expectError {
-				t.Errorf("Error() = %v, want %v", wrapped.Error(), tt.expectError)
-			}
-
-			var cmdErr *CommandError
-			if !errors.As(wrapped, &cmdErr) {
-				t.Error("WrapCommand should return a *CommandError")
-			}
-
-			if cmdErr.Exit != tt.exit {
-				t.Errorf("Exit = %v, want %v", cmdErr.Exit, tt.exit)
-			}
-		})
-	}
-}
-
 func TestErrorConstants(t *testing.T) {
 	constants := map[string]string{
-		ErrNotFound:       "not found",
-		ErrInvalidInput:   "invalid input",
-		ErrPermission:     "permission denied",
-		ErrTimeout:        "operation timed out",
-		ErrUnavailable:    "service unavailable",
-		ErrInvalidConfig:  "invalid configuration",
-		ErrUnknownKey:     "unknown key",
-		ErrNotMaster:      "not a master",
-		ErrEmptyCommand:   "empty command string",
-		ErrCacheEntry:     "cache entry does not exist",
-		ErrFailedToFetch:  "failed to fetch fresh data",
-		ErrAllDisabled:    "all services detected disabled",
-		ErrLoadingTimeout: "configuration loading timed out",
+		ErrInvalidConfig: "invalid configuration",
+		ErrNotMaster:     "not a master",
 	}
 
 	for constant, expected := range constants {
@@ -479,10 +356,6 @@ func TestErrorTypes(t *testing.T) {
 
 	t.Run("CacheError implements error", func(t *testing.T) {
 		var _ error = &CacheError{}
-	})
-
-	t.Run("CommandError implements error", func(t *testing.T) {
-		var _ error = &CommandError{}
 	})
 }
 

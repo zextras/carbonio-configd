@@ -17,6 +17,7 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 
+	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/logger"
 )
 
@@ -147,8 +148,8 @@ func sshConnect(host string) (*ssh.Client, error) {
 			knownHostsPath, host, knownHostsPath, err)
 	}
 
-	config := &ssh.ClientConfig{
-		User: "zextras",
+	sshConfig := &ssh.ClientConfig{
+		User: config.ZextrasUser,
 		Auth: []ssh.AuthMethod{
 			ssh.PublicKeys(signer),
 		},
@@ -161,7 +162,7 @@ func sshConnect(host string) (*ssh.Client, error) {
 		host = net.JoinHostPort(host, "22")
 	}
 
-	client, err := ssh.Dial("tcp", host, config)
+	client, err := ssh.Dial("tcp", host, sshConfig)
 	if err != nil {
 		return nil, fmt.Errorf("SSH dial failed: %w", err)
 	}

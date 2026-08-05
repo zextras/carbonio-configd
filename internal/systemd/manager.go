@@ -10,11 +10,8 @@ package systemd
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"os"
 	"os/exec"
-	"strings"
 	"sync"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
@@ -52,30 +49,6 @@ var carbonioTargets = []string{
 // NewManager creates a new Systemd Manager.
 func NewManager() *Manager {
 	return &Manager{}
-}
-
-// IsActive checks if a systemd service is active.
-func (m *Manager) IsActive(ctx context.Context, service string) (bool, error) {
-	ctx = logger.ContextWithComponent(ctx, "systemd")
-	cmd := exec.CommandContext(ctx, "systemctl", "is-active", service) //nolint:gosec // fixed binary, unit from registry
-	output, err := cmd.Output()
-	outputStr := strings.TrimSpace(string(output))
-
-	if err != nil {
-		exitErr := &exec.ExitError{}
-		if errors.As(err, &exitErr) { // Exit code 3 means inactive
-			return false, nil
-		}
-
-		logger.ErrorContext(ctx, "Failed to check status of service",
-			"service", service,
-			"error", err,
-			"output", outputStr)
-
-		return false, fmt.Errorf("failed to check status of service %s: %w", service, err)
-	}
-
-	return outputStr == "active", nil
 }
 
 // IsEnabled checks if a systemd unit is enabled.

@@ -34,6 +34,16 @@ func normalizePostconfBool(valueSpec, resolved string) string {
 	}
 }
 
+// cancelled reports whether ctx has been cancelled, without blocking.
+func cancelled(ctx context.Context) bool {
+	select {
+	case <-ctx.Done():
+		return true
+	default:
+		return false
+	}
+}
+
 func (cm *ConfigManager) doPostconf(ctx context.Context) error {
 	if len(cm.State.CurrentActions.Postconf) == 0 {
 		return nil
@@ -47,9 +57,7 @@ func (cm *ConfigManager) doPostconf(ctx context.Context) error {
 	var errs []error
 
 	for key, valueSpec := range cm.State.CurrentActions.Postconf {
-		// Check for cancellation
-		select {
-		case <-ctx.Done():
+		if cancelled(ctx) {
 			logger.InfoContext(ctx, "Postconf operations cancelled by shutdown signal")
 
 			if len(errs) > 0 {
@@ -57,7 +65,6 @@ func (cm *ConfigManager) doPostconf(ctx context.Context) error {
 			}
 
 			return nil
-		default:
 		}
 
 		// Resolve the value
@@ -78,7 +85,9 @@ func (cm *ConfigManager) doPostconf(ctx context.Context) error {
 		})
 	}
 
-	// Execute all operations in a single batch
+	// Execute all operations in a single batch. Only clear pending postconf
+	// state on success; a failed batch leaves the directives intact so the
+	// next cycle retries them, mirroring doLdap's retry-on-failure semantics.
 	if len(ops) > 0 {
 		if err := cm.mtaExecutor.ExecutePostconfBatch(ctx, ops); err != nil {
 			logger.ErrorContext(ctx, "Failed to execute postconf batch",
@@ -87,10 +96,9 @@ func (cm *ConfigManager) doPostconf(ctx context.Context) error {
 		} else {
 			logger.DebugContext(ctx, "Successfully executed postconf batch",
 				"operation_count", len(ops))
+			cm.State.ClearPostconf()
 		}
 	}
-
-	cm.State.ClearPostconf()
 
 	if len(errs) > 0 {
 		return errors.Join(errs...)
@@ -110,13 +118,10 @@ func (cm *ConfigManager) doPostconfd(ctx context.Context) error {
 	ops := make([]mtaops.PostconfdOperation, 0, len(cm.State.CurrentActions.Postconfd))
 
 	for key := range cm.State.CurrentActions.Postconfd {
-		// Check for cancellation
-		select {
-		case <-ctx.Done():
+		if cancelled(ctx) {
 			logger.InfoContext(ctx, "Postconfd operations cancelled by shutdown signal")
 
 			return nil
-		default:
 		}
 
 		ops = append(ops, mtaops.PostconfdOperation{
@@ -124,21 +129,21 @@ func (cm *ConfigManager) doPostconfd(ctx context.Context) error {
 		})
 	}
 
-	// Execute all operations in a single batch
+	// Execute all operations in a single batch. Only clear pending postconfd
+	// state on success; a failed batch leaves the directives intact so the
+	// next cycle retries them, mirroring doLdap's retry-on-failure semantics.
 	if len(ops) > 0 {
 		if err := cm.mtaExecutor.ExecutePostconfdBatch(ctx, ops); err != nil {
 			logger.ErrorContext(ctx, "Failed to execute postconfd batch",
 				"error", err)
-			cm.State.ClearPostconfd()
 
 			return err
 		}
 
 		logger.DebugContext(ctx, "Successfully executed postconfd batch",
 			"operation_count", len(ops))
+		cm.State.ClearPostconfd()
 	}
-
-	cm.State.ClearPostconfd()
 
 	return nil
 }
@@ -155,9 +160,7 @@ func (cm *ConfigManager) doLdap(ctx context.Context) error {
 
 	// Resolve and execute each LDAP directive
 	for key, valueSpec := range cm.State.CurrentActions.Ldap {
-		// Check for cancellation
-		select {
-		case <-ctx.Done():
+		if cancelled(ctx) {
 			logger.InfoContext(ctx, "LDAP operations cancelled by shutdown signal")
 
 			if len(errs) > 0 {
@@ -165,7 +168,6 @@ func (cm *ConfigManager) doLdap(ctx context.Context) error {
 			}
 
 			return nil
-		default:
 		}
 
 		// Resolve the value
@@ -253,8 +255,7 @@ func (cm *ConfigManager) doMapfile(ctx context.Context) error {
 	var errs []error
 
 	for _, section := range cm.State.MtaConfig.Sections {
-		select {
-		case <-ctx.Done():
+		if cancelled(ctx) {
 			logger.InfoContext(ctx, "Mapfile operations cancelled by shutdown signal")
 
 			if len(errs) > 0 {
@@ -262,7 +263,6 @@ func (cm *ConfigManager) doMapfile(ctx context.Context) error {
 			}
 
 			return nil
-		default:
 		}
 
 		errs = append(errs, cm.doMapfileSection(ctx, section)...)

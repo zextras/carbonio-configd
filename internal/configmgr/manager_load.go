@@ -282,6 +282,27 @@ func loadConfigWithCache[T any](
 	return typed, nil
 }
 
+// executeLDAPCommand runs a registered LDAP command by name and validates the
+// result, consolidating the cmd-nil / rc!=0 / empty-output checks that
+// fetchGlobalConfig and fetchServerConfig used to duplicate.
+func (cm *ConfigManager) executeLDAPCommand(ctx context.Context, cmdName string, args ...string) (string, error) {
+	cmd := cm.CommandRegistry.Commands[cmdName]
+	if cmd == nil {
+		return "", fmt.Errorf("%s command not available (LDAP commands not registered)", cmdName)
+	}
+
+	rc, output, errMsg := cmd.Execute(ctx, args...)
+	if rc != 0 {
+		return "", fmt.Errorf("%s command failed with rc=%d: %s", cmdName, rc, errMsg)
+	}
+
+	if output == "" {
+		return "", fmt.Errorf("no data returned from %s", cmdName)
+	}
+
+	return output, nil
+}
+
 // processCommonSSLConfig applies the standard SSL post-processing (sort + XML)
 // to the three well-known SSL keys shared by global and server config.
 func processCommonSSLConfig(configData map[string]string) {

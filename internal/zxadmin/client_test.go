@@ -530,3 +530,73 @@ func TestMapToModules_Defaults(t *testing.T) {
 		t.Errorf("Running=%v, want true", mods[0].Running)
 	}
 }
+
+// --- Retry tests -------------------------------------------------------
+
+// TestGetAllServicesStatus_RetryOn5xxThenSuccess pins the bounded-retry
+// contract: a transient 5xx from the status endpoint is retried and a
+// later success is returned to the caller instead of the error.
+func TestGetAllServicesStatus_RetryOn5xxThenSuccess(t *testing.T) {
+	statusCalls := 0
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(soapPath, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(goodAuthResponse))
+	})
+	mux.HandleFunc(statusPath, func(w http.ResponseWriter, _ *http.Request) {
+		statusCalls++
+		if statusCalls < 3 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+
+			return
+		}
+		_, _ = w.Write([]byte(objectStatusResponse))
+	})
+
+	srv := httptest.NewTLSServer(mux)
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+
+	mods, err := c.GetAllServicesStatus(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error after retry: %v", err)
+	}
+
+	if len(mods) != 2 {
+		t.Fatalf("got %d modules, want 2", len(mods))
+	}
+
+	if statusCalls != 3 {
+		t.Errorf("statusCalls=%d, want 3 (2 transient failures + 1 success)", statusCalls)
+	}
+}
+
+// TestGetAllServicesStatus_NoRetryOn401 pins the bounded-retry contract from
+// the other side: a 401 is a request/auth problem, not a transient failure,
+// so it must be returned immediately without consuming a retry attempt.
+func TestGetAllServicesStatus_NoRetryOn401(t *testing.T) {
+	statusCalls := 0
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(soapPath, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(goodAuthResponse))
+	})
+	mux.HandleFunc(statusPath, func(w http.ResponseWriter, _ *http.Request) {
+		statusCalls++
+		w.WriteHeader(http.StatusUnauthorized)
+	})
+
+	srv := httptest.NewTLSServer(mux)
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+
+	if _, err := c.GetAllServicesStatus(context.Background()); err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+
+	if statusCalls != 1 {
+		t.Errorf("statusCalls=%d, want 1 (401 must not be retried)", statusCalls)
+	}
+}

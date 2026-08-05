@@ -72,20 +72,14 @@ const (
 	TokenIf
 	// TokenFi represents an FI directive.
 	TokenFi
-	// TokenLdap represents an LDAP directive.
-	TokenLdap
 	// TokenProxygen represents a PROXYGEN directive.
 	TokenProxygen
-	// TokenNot represents a NOT operator.
-	TokenNot
 	// TokenIdentifier represents an identifier token.
 	TokenIdentifier
 	// TokenString represents a string literal.
 	TokenString
 	// TokenNewline represents a newline character.
 	TokenNewline
-	// TokenComment represents a comment.
-	TokenComment
 )
 
 // Token represents a lexical token.
@@ -98,7 +92,7 @@ type Token struct {
 
 // tokenNames maps each TokenType iota to its string representation.
 // Array lookup is O(1) with no branches.
-var tokenNames = [TokenComment + 1]string{
+var tokenNames = [TokenNewline + 1]string{
 	TokenEOF:        "EOF",
 	TokenError:      "ERROR",
 	TokenSection:    ConfigTypeSECTION,
@@ -116,13 +110,10 @@ var tokenNames = [TokenComment + 1]string{
 	TokenFile:       ConfigTypeFILE,
 	TokenIf:         "IF",
 	TokenFi:         "FI",
-	TokenLdap:       "LDAP",
 	TokenProxygen:   ConfigTypePROXYGEN,
-	TokenNot:        "NOT",
 	TokenIdentifier: "IDENTIFIER",
 	TokenString:     "STRING",
 	TokenNewline:    "NEWLINE",
-	TokenComment:    "COMMENT",
 }
 
 // String returns a string representation of the token type.

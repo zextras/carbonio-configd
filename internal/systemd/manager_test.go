@@ -109,45 +109,6 @@ func TestIsSystemdEnabled_ChecksAllTargets(t *testing.T) {
 	}
 }
 
-// TestIsActive tests the IsActive method
-func TestIsActive(t *testing.T) {
-	if !commandExists("systemctl") {
-		t.Skip("systemctl not available")
-	}
-
-	m := NewManager()
-
-	tests := []struct {
-		name    string
-		service string
-		wantErr bool
-	}{
-		{
-			name:    "Check systemd service status",
-			service: "systemd-journald.service",
-			wantErr: false,
-		},
-		{
-			name:    "Check non-existent service",
-			service: "carbonio-nonexistent-service-12345.service",
-			wantErr: false, // Should return false, not error
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			active, err := m.IsActive(context.Background(), tt.service)
-
-			if (err != nil) != tt.wantErr {
-				t.Errorf("IsActive(%s) error = %v, wantErr %v", tt.service, err, tt.wantErr)
-				return
-			}
-
-			t.Logf("IsActive(%s) = %v, err = %v", tt.service, active, err)
-		})
-	}
-}
-
 // TestSystemdCommands tests basic systemd command execution
 // These tests are skipped by default as they require root privileges
 func TestSystemdCommands(t *testing.T) {
