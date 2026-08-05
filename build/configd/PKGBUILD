@@ -39,14 +39,12 @@ depends__rocky_9=(
 )
 source=(
   "${pkgname}-completion.bash"
-  "${pkgname}-legacy.service"
   "${pkgname}-wrappers-completion.bash"
   "${pkgname}.rules"
   "${pkgname}.service"
 )
 sha256sums=(
   'a16bbcc3f76bacb1d1d630c2163055b444f8154c3e2b98100c395758cf9cc6bb'
-  'd247f79bbbe9cc5b7c09aed0632780f8361c7cf69944cc8574408755b99936a9'
   '57fd0c840d4fcc30e900d44119b0b1d2e763ec14da0818f25661ee4464a0e521'
   '2852da97671727f9ddd10d07289f25976d4032364bae8912687186bc4ae3d4ad'
   '981128c070cefd8eab3b1ee2b8a91e44385c815e637c62ac6e1ed805f943d267'
@@ -73,11 +71,6 @@ _package_common() {
     "${pkgdir}/opt/zextras/common/share/bash-completion/completions/configd-wrappers"
 }
 
-_package_legacy() {
-  install -Dm644 "${srcdir}/${pkgname}-legacy.service" \
-    "${pkgdir}/lib/systemd/system/carbonio-configd.service"
-}
-
 _package_systemd() {
   install -Dm644 "${srcdir}/${pkgname}.service" \
     "${pkgdir}/lib/systemd/system/carbonio-configd.service"
@@ -101,7 +94,6 @@ package() {
 
 package__rocky_8() {
   _package_common
-  _package_legacy
 }
 
 package__rocky_9() {
@@ -111,7 +103,6 @@ package__rocky_9() {
 
 package__ubuntu_jammy() {
   _package_common
-  _package_legacy
 }
 
 package__ubuntu_noble() {
@@ -132,21 +123,7 @@ _kill_legacy_zmconfigd() {
   fi
 }
 
-postinst__apt() {
-  if [ -d /run/systemd/system ]; then
-    systemctl daemon-reload &>/dev/null || :
-    _kill_legacy_zmconfigd
-    if [ "$1" = "configure" ] && [ -z "$2" ]; then
-      # Fresh install: enable and start
-      systemctl enable --now carbonio-configd.service &>/dev/null || :
-    else
-      # Upgrade (Go→Go or Jython→Go): already enabled, restart to pick up new binary
-      systemctl restart carbonio-configd.service &>/dev/null || :
-    fi
-  fi
-}
-
-postinst__yum() {
+postinst__rocky_9() {
   if [ -d /run/systemd/system ]; then
     systemctl daemon-reload &>/dev/null || :
     _kill_legacy_zmconfigd
@@ -160,7 +137,27 @@ postinst__yum() {
   fi
 }
 
-prerm__apt() {
+postinst__ubuntu_noble() {
+  if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload &>/dev/null || :
+    _kill_legacy_zmconfigd
+    if [ "$1" = "configure" ] && [ -z "$2" ]; then
+      # Fresh install: enable and start
+      systemctl enable --now carbonio-configd.service &>/dev/null || :
+    else
+      # Upgrade (Go→Go or Jython→Go): already enabled, restart to pick up new binary
+      systemctl restart carbonio-configd.service &>/dev/null || :
+    fi
+  fi
+}
+
+postrm() {
+  if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload >/dev/null 2>&1 || :
+  fi
+}
+
+prerm__ubuntu_noble() {
   if [ -d /run/systemd/system ]; then
     case "$1" in
       remove)
@@ -173,18 +170,12 @@ prerm__apt() {
   fi
 }
 
-prerm__yum() {
+prerm__rocky_9() {
   if [ -d /run/systemd/system ]; then
     if [ $1 -eq 0 ]; then
       systemctl --no-reload disable --now carbonio-configd.service &>/dev/null || :
     else
       systemctl --no-reload stop carbonio-configd.service &>/dev/null || :
     fi
-  fi
-}
-
-postrm() {
-  if [ -d /run/systemd/system ]; then
-    systemctl daemon-reload >/dev/null 2>&1 || :
   fi
 }
