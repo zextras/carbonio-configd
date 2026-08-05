@@ -102,7 +102,7 @@ func ServiceStart(ctx context.Context, name string) error {
 		rewriteConfigs(ctx, def)
 	}
 
-	sm := newCLIServiceManager()
+	sm := NewServiceManager()
 
 	if err := runPreStartHooks(ctx, name, sm, def); err != nil {
 		return err
@@ -132,7 +132,7 @@ func ServiceStartSystemd(ctx context.Context, name string) error {
 		return fmt.Errorf(errUnknownService, name)
 	}
 
-	sm := newCLIServiceManager()
+	sm := NewServiceManager()
 
 	if err := runPreStartHooks(ctx, name, sm, def); err != nil {
 		return err
@@ -192,7 +192,7 @@ func ServiceStop(ctx context.Context, name string) error {
 		return fmt.Errorf(errUnknownService, name)
 	}
 
-	sm := newCLIServiceManager()
+	sm := NewServiceManager()
 
 	for _, hook := range def.PreStop {
 		if err := hook(ctx, sm); err != nil {
@@ -234,7 +234,7 @@ func ServiceStopSystemd(ctx context.Context, name string) error {
 		return fmt.Errorf(errUnknownService, name)
 	}
 
-	sm := newCLIServiceManager()
+	sm := NewServiceManager()
 
 	for _, hook := range def.PreStop {
 		if err := hook(ctx, sm); err != nil {
@@ -570,11 +570,4 @@ func Systemctl(ctx context.Context, action, unit string) error {
 	}
 
 	return nil
-}
-
-func newCLIServiceManager() *ServiceManager {
-	sm := NewServiceManager()
-	sm.SetUseSystemd(true)
-
-	return sm
 }

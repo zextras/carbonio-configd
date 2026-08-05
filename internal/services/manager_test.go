@@ -20,14 +20,6 @@ func TestNewServiceManager(t *testing.T) {
 		t.Fatal("NewServiceManager() returned nil")
 	}
 
-	if sm.CommandMap == nil {
-		t.Error("CommandMap is nil")
-	}
-
-	if sm.SystemdMap == nil {
-		t.Error("SystemdMap is nil")
-	}
-
 	if sm.RestartQueue == nil {
 		t.Error("RestartQueue is nil")
 	}
@@ -40,74 +32,8 @@ func TestNewServiceManager(t *testing.T) {
 		t.Errorf("MaxFailedRestarts = %d, want 3", sm.MaxFailedRestarts)
 	}
 
-	if sm.UseSystemd {
-		t.Error("UseSystemd should default to false")
-	}
-}
-
-// TestGetDefaultCommandMap verifies service command mappings.
-func TestGetDefaultCommandMap(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	cmdMap := getDefaultCommandMap()
-
-	tests := []struct {
-		service string
-		want    string
-	}{
-		{"proxy", "/opt/zextras/bin/zmproxyctl"},
-		{"mta", "/opt/zextras/bin/zmmtactl"},
-		{"mailbox", "/opt/zextras/bin/zmstorectl"},
-		{"ldap", "/opt/zextras/bin/ldap"},
-		{"amavis", "/opt/zextras/bin/zmamavisdctl"},
-		{"antivirus", "/opt/zextras/bin/zmclamdctl"},
-		{"opendkim", "/opt/zextras/bin/zmopendkimctl"},
-		{"cbpolicyd", "/opt/zextras/bin/zmcbpolicydctl"},
-	}
-
-	for _, tt := range tests {
-		got, exists := cmdMap[tt.service]
-		if !exists {
-			t.Errorf("Service %s not found in command map", tt.service)
-			continue
-		}
-		if got != tt.want {
-			t.Errorf("CommandMap[%s] = %s, want %s", tt.service, got, tt.want)
-		}
-	}
-}
-
-// TestGetDefaultSystemdMap verifies systemd unit mappings.
-func TestGetDefaultSystemdMap(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	systemdMap := getDefaultSystemdMap()
-
-	tests := []struct {
-		service string
-		want    string
-	}{
-		{"proxy", "carbonio-nginx.service"},
-		{"mta", "carbonio-postfix.service"},
-		{"mailbox", "carbonio-appserver.service"},
-		{"ldap", "carbonio-openldap.service"},
-		{"amavis", "carbonio-mailthreat.service"},
-		{"antivirus", "carbonio-antivirus.service"},
-		{"opendkim", "carbonio-opendkim.service"},
-		{"cbpolicyd", "carbonio-policyd.service"},
-	}
-
-	for _, tt := range tests {
-		got, exists := systemdMap[tt.service]
-		if !exists {
-			t.Errorf("Service %s not found in systemd map", tt.service)
-			continue
-		}
-		if got != tt.want {
-			t.Errorf("SystemdMap[%s] = %s, want %s", tt.service, got, tt.want)
-		}
+	if sm.DisableRestarts {
+		t.Error("DisableRestarts should default to false")
 	}
 }
 
@@ -334,45 +260,6 @@ func TestControlProcessUndefinedService(t *testing.T) {
 	}
 }
 
-// TestControlProcess_MTARestartConvertsToReload verifies the special case where
-// MTA restart is converted to reload for graceful handling.
-func TestControlProcess_MTARestartConvertsToReload(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	t.Skip("Skipping flaky test that times out waiting for systemctl")
-	sm := NewServiceManager()
-
-	// Test with UseSystemd = false (will fail because binary doesn't exist)
-	// but verifies the logic path is executed
-	sm.UseSystemd = false
-	err := sm.ControlProcess(context.Background(), "mta", ActionRestart)
-
-	// We expect an error because the binary doesn't exist in test environment,
-	// but the important thing is that the function executed the conversion logic.
-	// The error should be from executeCommand, not from validation.
-	if err == nil {
-		t.Log("Note: ControlProcess succeeded (binary may exist in environment)")
-	}
-
-	// Test with UseSystemd = true
-	sm.UseSystemd = true
-	err = sm.ControlProcess(context.Background(), "mta", ActionRestart)
-
-	// Again, we expect an error because systemctl/fallback binaries don't exist,
-	// but the conversion logic should have been executed.
-	if err == nil {
-		t.Log("Note: ControlProcess succeeded (systemctl may exist in environment)")
-	}
-
-	// Test that other services don't get converted
-	err = sm.ControlProcess(context.Background(), "proxy", ActionRestart)
-	// Will also fail due to missing binary, but tests the path
-	if err == nil {
-		t.Log("Note: ControlProcess succeeded (proxy binary may exist)")
-	}
-}
-
 // TestServiceActionString verifies ServiceAction.String() method.
 func TestServiceActionString(t *testing.T) {
 	if testing.Short() {
@@ -392,42 +279,6 @@ func TestServiceActionString(t *testing.T) {
 		got := tt.action.String()
 		if got != tt.want {
 			t.Errorf("ServiceAction(%d).String() = %s, want %s", tt.action, got, tt.want)
-		}
-	}
-}
-
-// TestMTARestartBecomesReload verifies MTA special case.
-// Note: This test only verifies the logic, not actual command execution.
-func TestMTARestartBecomesReload(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	sm := NewServiceManager()
-
-	// We can't easily test the actual command execution without mocking exec.Command,
-	// but we can verify the logic is in place by checking the implementation.
-	// For now, this is a placeholder for integration testing.
-
-	// Verify MTA command exists
-	if _, exists := sm.CommandMap["mta"]; !exists {
-		t.Error("MTA command not defined in CommandMap")
-	}
-}
-
-// TestSystemdServiceMapping verifies systemd mode service mapping.
-func TestSystemdServiceMapping(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	sm := NewServiceManager()
-	sm.UseSystemd = true
-
-	// Verify all services in CommandMap have corresponding systemd mappings (if applicable)
-	criticalServices := []string{"proxy", "mta", "mailbox", "ldap", "amavis"}
-
-	for _, service := range criticalServices {
-		if _, exists := sm.SystemdMap[service]; !exists {
-			t.Errorf("Critical service %s missing systemd mapping", service)
 		}
 	}
 }
@@ -556,7 +407,7 @@ func TestProcessRestarts_MultipleServicesOneSucceeds(t *testing.T) {
 	}
 }
 
-// TestIsRunningUsesControlProcess verifies IsRunning delegates to ControlProcess.
+// TestIsRunningUsesControlProcess verifies IsRunning reports false for an unresolvable service.
 func TestIsRunningUsesControlProcess(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
@@ -836,41 +687,5 @@ func TestHasCommand(t *testing.T) {
 				t.Errorf("HasCommand(%q) = %v, want %v", tt.service, got, tt.want)
 			}
 		})
-	}
-}
-
-// TestCommandMapClamd verifies that the clamd alias is mapped
-// to the correct command in the CommandMap.
-func TestCommandMapClamd(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	sm := NewServiceManager()
-
-	expected := binPath + "/zmclamdctl"
-	got, exists := sm.CommandMap["clamd"]
-	if !exists {
-		t.Error("clamd not found in CommandMap")
-	}
-	if got != expected {
-		t.Errorf("CommandMap[clamd] = %q, want %q", got, expected)
-	}
-}
-
-// TestSystemdMapClamd verifies that the clamd alias is mapped
-// to the correct systemd unit in the SystemdMap.
-func TestSystemdMapClamd(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	sm := NewServiceManager()
-
-	expected := "carbonio-antivirus.service"
-	got, exists := sm.SystemdMap["clamd"]
-	if !exists {
-		t.Error("clamd not found in SystemdMap")
-	}
-	if got != expected {
-		t.Errorf("SystemdMap[clamd] = %q, want %q", got, expected)
 	}
 }

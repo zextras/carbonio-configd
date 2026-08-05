@@ -28,7 +28,8 @@ Inside `RunMainLoop` before the first iteration:
 
 - `configmgr.NewConfigManager` and `services.NewServiceManager` are constructed.
 - `systemd.NewManager().IsSystemdEnabled` checks whether Carbonio systemd targets exist;
-  sets `ServiceManager.UseSystemd` accordingly.
+  the service manager itself gates on this internally via `services.IsSystemdMode()` — there
+  is no longer a per-instance mode flag to set.
 - A watchdog goroutine is started.
 - Signal handlers are registered (SIGTERM/SIGINT → cancel context; SIGHUP → reload channel).
 - The systemd watchdog keep-alive goroutine is started when `WATCHDOG_USEC` is set, pinging

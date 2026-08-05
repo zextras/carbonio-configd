@@ -33,70 +33,68 @@ change can trigger restarts.
 
 ## Service control priority
 
-Source: `internal/services/manager.go` (`executeSystemdCommand`, `ControlProcess`)
+Source: `internal/services/cli.go` (`ServiceStart`, `ServiceStop`, `ServiceReload`, `ServiceStatus`),
+`internal/services/registry.go` (`ServiceDef`, `Registry`)
 
-When a systemd environment is detected (Carbonio systemd targets present), the service
-manager sets `UseSystemd = true` and uses a two-tier control path:
+`services.ServiceManager.ControlProcess` (`internal/services/manager.go`) is a thin
+dispatcher: it delegates every action to the same Registry-backed lifecycle functions the
+CLI uses (`ServiceStart`/`ServiceStop`/`ServiceRestart`/`ServiceStatus`). There is a single
+control path, not a per-instance flag — each of those functions bifurcates internally on
+`IsSystemdMode()`:
 
-1. **systemctl** (preferred) — invoked directly; the polkit policy installed at
-   `build/configd/` grants the `zextras` user permission to manage `carbonio-*` units
-   without sudo.
-2. **`zm*ctl` fallback** — if `systemctl` fails, the corresponding script under
-   `/opt/zextras/bin/` is tried.
+1. **strict systemd** (`IsSystemdMode() == true`, i.e. a Carbonio systemd target is
+   enabled) — every start/stop/status goes through `systemctl` against the units listed in
+   `ServiceDef.SystemdUnits`. No direct binary spawn, no fallback script.
+2. **pure legacy** (`IsSystemdMode() == false`) — direct binary execution
+   (`ServiceDef.CustomStart`/`CustomStop`, then `BinaryPath`/`ProcessName`). `systemctl` is
+   never invoked. There is no `zm*ctl` fallback: services whose legacy launch is too dynamic
+   for a static `BinaryPath` (mailbox, stats, mta, ldap, milter, antispam, ...) get a native
+   `CustomStart`/`CustomStop` implementation in the corresponding `*_launcher.go` file instead
+   of shelling out to the old `/opt/zextras/bin/zm*ctl` scripts.
 
-When systemd is not detected (`UseSystemd = false`), only the `zm*ctl` scripts are used.
+**Service name → systemd unit(s)** (`ServiceDef.SystemdUnits`, used when `IsSystemdMode()`):
 
-**Service name → control script mapping** (used when `UseSystemd = false` or as fallback):
-
-| Service name | Script |
-|---|---|
-| `amavis` | `zmamavisdctl` |
-| `antispam` | `zmantispamctl` |
-| `antivirus` | `zmclamdctl` |
-| `cbpolicyd` | `zmcbpolicydctl` |
-| `ldap` | `ldap` |
-| `mailbox` | `zmstorectl` |
-| `mailboxd` | `zmmailboxdctl` |
-| `memcached` | `zmmemcachedctl` |
-| `mta` | `zmmtactl` |
-| `opendkim` | `zmopendkimctl` |
-| `proxy` | `zmproxyctl` |
-| `sasl` | `zmsaslauthdctl` |
-| `stats` | `zmstatctl` |
-
-**Service name → systemd unit mapping** (used when `UseSystemd = true`):
-
-| Service name | Unit |
+| Service name | Unit(s) |
 |---|---|
 | `amavis` | `carbonio-mailthreat.service` |
 | `antispam` | `carbonio-antispam.service` |
 | `antivirus` | `carbonio-antivirus.service` |
 | `cbpolicyd` | `carbonio-policyd.service` |
 | `ldap` | `carbonio-openldap.service` |
-| `mailbox` | `carbonio-appserver.service` |
+| `mailbox` | `carbonio-appserver-db.service`, `carbonio-appserver.service` |
 | `memcached` | `carbonio-memcached.service` |
 | `milter` | `carbonio-milter.service` |
 | `mta` | `carbonio-postfix.service` |
 | `opendkim` | `carbonio-opendkim.service` |
 | `proxy` | `carbonio-nginx.service` |
-| `sasl` | `carbonio-saslauthd.service` |
+| `saslauthd` | `carbonio-saslauthd.service` |
 | `stats` | `carbonio-stats.service` |
+
+Alternative names — including LDAP `zimbraServiceEnabled` values (`directory-server`,
+`service`, `zmconfigd`) and legacy CLI aliases (`clamd`, `mailboxd`, `directory`,
+`config-service`) — resolve to these canonical entries through the single
+`services.ServiceAliases` table (`registry.go`), consumed by `LookupService` and, for the
+LDAP-facing names, by `services.MapLDAPServiceToRegistry` (`discovery.go`).
 
 ## MTA: restart converted to reload
 
-Source: `internal/services/manager.go` (`ControlProcess`)
+Source: `internal/services/cli.go` (`ServiceRestart`)
 
-Any restart request for the `mta` service is silently converted to a `reload` action:
+Any restart request for the `mta` service is converted to a reload:
 
 ```go
-if service == serviceMTA && action == ActionRestart {
-    actionStr = actionReload
+if name == serviceMTA {
+    ...
+    return ServiceReload(ctx, name)
 }
 ```
 
-This triggers a Postfix graceful reload (`postfix reload`) rather than a full stop/start,
-which preserves in-flight mail delivery. Hard restarts of Postfix are never performed by
-configd.
+This triggers a Postfix graceful reload (`postfix reload` in legacy mode, `systemctl
+reload` in strict-systemd mode) rather than a full stop/start, preserving in-flight mail
+delivery. In strict-systemd mode, a reload failure (e.g. the unit was inactive) falls back
+to a full stop+start so a dead MTA still ends up running; in legacy mode the native
+`postfix reload` has no such fallback by design — see `ServiceReload` and
+`reloadWithoutSystemd` (`cli_process.go`).
 
 ## Dependency cascading
 

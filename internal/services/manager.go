@@ -7,7 +7,6 @@ package services
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"sort"
 	"strings"
 
@@ -16,16 +15,14 @@ import (
 	"github.com/zextras/carbonio-configd/internal/logger"
 )
 
-// ServiceManager implements the Manager interface for service control operations.
+// ServiceManager implements the Manager interface for service control
+// operations. ControlProcess and IsRunning delegate entirely to the
+// Registry-backed lifecycle in cli.go (ServiceStart/ServiceStop/
+// ServiceRestart/ServiceStatus) — the same control path the CLI uses,
+// bifurcated internally on IsSystemdMode(). ServiceManager itself only owns
+// the restart-queue bookkeeping consumed by watchdog and configmgr's
+// restart cascade.
 type ServiceManager struct {
-	// CommandMap maps service names to their control commands (zm*ctl scripts)
-	CommandMap map[string]string
-	// UseSystemd indicates whether to use systemd for service control
-	// When true: Priority 1: systemctl, Priority 2: zm*ctl fallback
-	// When false: Only zm*ctl scripts are used
-	UseSystemd bool
-	// SystemdMap maps service names to systemd unit names
-	SystemdMap map[string]string
 	// RestartQueue holds services pending restart
 	RestartQueue map[string]bool
 	// MaxFailedRestarts is the maximum number of retry attempts for a failed restart
@@ -41,56 +38,11 @@ type ServiceManager struct {
 // NewServiceManager creates a new ServiceManager instance.
 func NewServiceManager() *ServiceManager {
 	return &ServiceManager{
-		CommandMap:        getDefaultCommandMap(),
-		UseSystemd:        false, // Default to traditional commands (ctls)
-		SystemdMap:        getDefaultSystemdMap(),
 		RestartQueue:      make(map[string]bool),
 		MaxFailedRestarts: 3,
 		StartOrder:        getDefaultStartOrder(),
 		Dependencies:      make(map[string][]string),
 		DisableRestarts:   false, // Default: restarts enabled
-	}
-}
-
-// getDefaultCommandMap returns the default service command mappings.
-// All paths use basePath as prefix so they can be overridden in tests.
-func getDefaultCommandMap() map[string]string {
-	return map[string]string{
-		svcAmavis:    binPath + "/zmamavisdctl",
-		svcAntispam:  binPath + "/zmantispamctl",
-		svcAntivirus: binPath + "/zmclamdctl",
-		svcCbpolicyd: binPath + "/zmcbpolicydctl",
-		svcClamd:     binPath + "/zmclamdctl",
-		svcLdap:      binPath + "/ldap",
-		svcMailbox:   binPath + "/zmstorectl",
-		svcMailboxd:  binPath + "/zmmailboxdctl",
-		svcMemcached: binPath + "/zmmemcachedctl",
-		serviceMTA:   binPath + "/zmmtactl",
-		svcOpendkim:  binPath + "/zmopendkimctl",
-		svcProxy:     binPath + "/zmproxyctl",
-		svcSasl:      binPath + "/zmsaslauthdctl",
-		svcService:   binPath + "/zmmailboxdctl",
-		svcStats:     binPath + "/zmstatctl",
-	}
-}
-
-// getDefaultSystemdMap returns the default systemd unit name mappings.
-func getDefaultSystemdMap() map[string]string {
-	return map[string]string{
-		svcAmavis:    unitMailthreat, // Mail Threat = amavis equivalent
-		svcAntispam:  "carbonio-antispam.service",
-		svcAntivirus: unitAntivirus,
-		svcCbpolicyd: unitPolicyd,
-		svcClamd:     unitAntivirus,
-		svcLdap:      unitOpenldap,
-		svcMailbox:   unitAppserver, // Carbonio Appserver = mailbox service
-		svcMemcached: "carbonio-memcached.service",
-		svcMilter:    "carbonio-milter.service",
-		serviceMTA:   unitPostfix,
-		svcOpendkim:  unitOpendkim,
-		svcProxy:     unitNginx,
-		svcSasl:      "carbonio-saslauthd.service",
-		svcStats:     "carbonio-stats.service",
 	}
 }
 
@@ -132,122 +84,42 @@ const (
 	serviceStatusEnabled = "enabled"
 )
 
-// ControlProcess performs an action on a service.
+// ControlProcess performs an action on a service by delegating to the
+// Registry-backed lifecycle functions in cli.go — the single control path
+// also used by the CLI. The MTA restart→reload conversion and the
+// systemd/legacy bifurcation both live there (ServiceRestart, IsSystemdMode).
 func (sm *ServiceManager) ControlProcess(ctx context.Context, service string, action ServiceAction) error {
 	ctx = logger.ContextWithComponentOnce(ctx, "services")
 	service = strings.ToLower(service)
 
-	// Validate action
-	if action < ActionRestart || action > ActionStatus {
-		return fmt.Errorf("invalid action %d for service %s", action, service)
-	}
+	switch action {
+	case ActionStart:
+		return ServiceStart(ctx, service)
+	case ActionStop:
+		return ServiceStop(ctx, service)
+	case ActionRestart:
+		return ServiceRestart(ctx, service)
+	case ActionStatus:
+		running, err := ServiceStatus(ctx, service)
+		if err != nil {
+			return err
+		}
 
-	// Check if service command is defined
-	cmd, exists := sm.CommandMap[service]
-	if !exists {
-		return fmt.Errorf("command not defined for service %s", service)
-	}
-
-	actionStr := action.String()
-
-	// Special case: MTA restart should be converted to reload for graceful handling
-	if service == serviceMTA && action == ActionRestart {
-		actionStr = actionReload
-	}
-
-	logger.DebugContext(ctx, "CONTROL service",
-		"service", service,
-		"command", cmd,
-		"action", actionStr)
-
-	// Execute the command
-	if sm.UseSystemd {
-		return sm.executeSystemdCommand(ctx, service, actionStr)
-	}
-
-	return sm.executeCommand(ctx, cmd, actionStr)
-}
-
-// executeSystemdCommand executes service control using the following priority:
-// 1. systemctl (preferred - uses polkit permissions for zextras user)
-// 2. zm*ctl scripts (traditional Carbonio fallback)
-//
-// With polkit policy in place, zextras user can execute systemctl commands directly,
-// making this the preferred method in systemd-enabled environments.
-func (sm *ServiceManager) executeSystemdCommand(ctx context.Context, service, action string) error {
-	unitName, exists := sm.SystemdMap[service]
-	if !exists {
-		return fmt.Errorf("systemd unit not defined for service %s", service)
-	}
-
-	// Priority 1: Try systemctl first (works with polkit policy for zextras user)
-	logger.DebugContext(ctx, "Attempting systemctl",
-		"action", action,
-		"service", service)
-
-	args := []string{action, unitName}
-	cmd := exec.CommandContext(ctx, "systemctl", args...)
-
-	output, err := cmd.CombinedOutput()
-	if err == nil {
-		logger.DebugContext(ctx, "Systemctl succeeded",
-			"action", action,
-			"unit", unitName)
+		if !running {
+			return fmt.Errorf("service %s is not running", service)
+		}
 
 		return nil
+	default:
+		return fmt.Errorf("invalid action %d for service %s", action, service)
 	}
-
-	// systemctl failed, log and try fallback
-	logger.WarnContext(ctx, "Systemctl failed, trying zm*ctl fallback",
-		"action", action,
-		"unit", unitName,
-		"error", err,
-		"output", string(output))
-
-	// Priority 2: Try zm*ctl scripts as fallback
-	zmCmd, exists := sm.CommandMap[service]
-	if exists {
-		logger.DebugContext(ctx, "Falling back to zm*ctl script",
-			"service", service,
-			"command", zmCmd,
-			"action", action)
-
-		return sm.executeCommand(ctx, zmCmd, action)
-	}
-
-	// No fallback available
-	return fmt.Errorf("systemctl failed and no zm*ctl fallback available for service %s: %w", service, err)
-}
-
-// executeCommand executes a traditional service control command.
-func (sm *ServiceManager) executeCommand(ctx context.Context, cmdPath, action string) error {
-	args := []string{action}
-	cmd := exec.CommandContext(ctx, cmdPath, args...)
-
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		logger.ErrorContext(ctx, "command failed",
-			"command", cmdPath,
-			"action", action,
-			"error", err,
-			"output", string(output))
-
-		return fmt.Errorf("zimbra command %s %s failed: %w", cmdPath, action, err)
-	}
-
-	logger.DebugContext(ctx, "command succeeded",
-		"command", cmdPath,
-		"action", action)
-
-	return nil
 }
 
 // IsRunning checks if a service is currently running.
 func (sm *ServiceManager) IsRunning(ctx context.Context, service string) (bool, error) {
 	ctx = logger.ContextWithComponentOnce(ctx, "services")
-	err := sm.ControlProcess(ctx, service, ActionStatus)
 
-	return err == nil, nil
+	return ServiceStatus(ctx, strings.ToLower(service))
 }
 
 // AddRestart queues a service for restart.
@@ -414,17 +286,12 @@ func (sm *ServiceManager) GetPendingRestarts() []string {
 	return services
 }
 
-// HasCommand checks if a service has a control command defined.
+// HasCommand reports whether a service is known to the Registry (i.e. can
+// be resolved via LookupService). Retained on the Manager interface for
+// configmgr's first-run tracking; "command" no longer means a legacy
+// zm*ctl path — there isn't one anymore.
 func (sm *ServiceManager) HasCommand(service string) bool {
-	service = strings.ToLower(service)
-	_, exists := sm.CommandMap[service]
-
-	return exists
-}
-
-// SetUseSystemd enables or disables systemctl for service control.
-func (sm *ServiceManager) SetUseSystemd(enabled bool) {
-	sm.UseSystemd = enabled
+	return LookupService(strings.ToLower(service)) != nil
 }
 
 // SetDependencies sets the dependency map for service restart cascading.

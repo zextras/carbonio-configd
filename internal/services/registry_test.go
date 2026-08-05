@@ -175,19 +175,28 @@ func TestRegistryDisplayNames_AllLowercase(t *testing.T) {
 	}
 }
 
-func TestRegistryCoversAllSystemdMap(t *testing.T) {
+// TestLookupService_ZmconfigdAlias verifies that "zmconfigd" — the LDAP
+// zimbraServiceEnabled value discovery.go sees on the wire — resolves via
+// ServiceAliases to the same *ServiceDef as the canonical "configd" entry.
+// Regression guard for the drift where discovery.go's now-deleted private
+// alias map handled "zmconfigd" but ServiceAliases (and thus LookupService)
+// did not.
+func TestLookupService_ZmconfigdAlias(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	systemdMap := getDefaultSystemdMap()
-	for name := range systemdMap {
-		if LookupService(name) == nil {
-			// Some systemdMap entries like "mailboxd" and "service" are aliases
-			// Only check core service names
-			if name != "mailboxd" && name != "service" {
-				t.Logf("Note: systemdMap entry %q not in registry (may be alias)", name)
-			}
-		}
+	def := LookupService("zmconfigd")
+	if def == nil {
+		t.Fatal("expected zmconfigd alias to resolve to a service definition")
+	}
+
+	configdDef := LookupService(svcConfigd)
+	if configdDef == nil {
+		t.Fatal("configd not found")
+	}
+
+	if def != configdDef {
+		t.Error("zmconfigd alias does not resolve to the same configd definition")
 	}
 }
 

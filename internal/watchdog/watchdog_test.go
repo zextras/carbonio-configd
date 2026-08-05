@@ -120,8 +120,6 @@ func (m *MockServiceManager) HasCommand(service string) bool {
 	return true
 }
 
-func (m *MockServiceManager) SetUseSystemd(_ bool) {}
-
 // Thread-safe helper methods for test access.
 
 func (m *MockServiceManager) setRunning(service string, running bool) {
