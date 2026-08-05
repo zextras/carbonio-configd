@@ -251,6 +251,21 @@ func TestRegistryAntivirusLegacyFields(t *testing.T) {
 	}
 }
 
+// TestRegistryOpendkimRunsAsZextras guards the launch user in opendkim's
+// BinaryArgs. Carbonio has no zimbra account, so `-u zimbra` made opendkim
+// exit 65 before signaling READY=1 and legacy-mode starts always failed.
+func TestRegistryOpendkimRunsAsZextras(t *testing.T) {
+	def := LookupService(svcOpendkim)
+	if def == nil {
+		t.Fatal("opendkim not found")
+	}
+
+	want := []string{"-f", "-x", confPath + "/opendkim.conf", "-u", "zextras"}
+	if !slices.Equal(def.BinaryArgs, want) {
+		t.Errorf("BinaryArgs = %q, want %q", def.BinaryArgs, want)
+	}
+}
+
 // TestLookupService_ClamdAlias verifies that the "clamd" alias
 // resolves to the antivirus service definition.
 func TestLookupService_ClamdAlias(t *testing.T) {
