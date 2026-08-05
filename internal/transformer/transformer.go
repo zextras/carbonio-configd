@@ -100,16 +100,39 @@ func (t *Transformer) Transform(ctx context.Context, line string) string {
 
 	// Apply %%VAR:key%%, %%LOCAL:key%%, %%SERVICE:key%% substitutions
 	// Must happen before xformConfig to handle these patterns correctly
+	src := line
 	line = configVarRe.ReplaceAllStringFunc(line, func(match string) string {
-		return t.xformConfigVariable(ctx, match)
+		return keepOnOneLine(src, match, t.xformConfigVariable(ctx, match))
 	})
 
 	// Apply %%config_variable%% substitutions (for complex directives)
+	src = line
 	line = plainVarRe.ReplaceAllStringFunc(line, func(match string) string {
-		return t.xformConfig(ctx, match)
+		return keepOnOneLine(src, match, t.xformConfig(ctx, match))
 	})
 
 	return line + "\n" // Add newline back as it was removed for processing
+}
+
+// keepOnOneLine collapses the newlines that join a multi-valued LDAP attribute
+// (see ldap.Client: multi-valued attributes are newline-joined) into spaces when
+// the substituted directive is only part of a line. Emitting the newlines there
+// would split the directive across two lines and corrupt the generated file —
+// e.g. "mech_list: %%zimbraMtaSaslSmtpdMechList%%" in conf/sasl2/smtpd.conf.in
+// became "mech_list: LOGIN\nPLAIN", which made smtpd fail SASL initialization.
+// The legacy Jython implementation could not hit this: jylibs/serverconfig.py
+// built its config with a dict comprehension over the zmprov output, so repeated
+// attributes collapsed to a single value.
+//
+// A directive occupying the whole line keeps its newlines, because some keys are
+// deliberately newline-joined to render multi-line blocks — zimbraMtaMyNetworksPerLine
+// and the *XML variants built in configmgr.
+func keepOnOneLine(line, match, value string) string {
+	if strings.TrimSpace(line) == match {
+		return value
+	}
+
+	return strings.ReplaceAll(value, "\n", " ")
 }
 
 // isPrefixDirective checks if the directive content is a prefix directive (comment/uncomment).
@@ -194,7 +217,9 @@ func (t *Transformer) processWrappingDirective(ctx context.Context, line string)
 	// directives are passed through unchanged (their handlers parse VAR:key).
 	if strings.HasPrefix(innerContent, "contains ") {
 		substituted := configVarRe.ReplaceAllStringFunc(innerContent, func(match string) string {
-			return t.xformConfigVariable(ctx, match)
+			// Always embedded in surrounding directive text, so never allowed to
+			// introduce a newline. See keepOnOneLine.
+			return strings.ReplaceAll(t.xformConfigVariable(ctx, match), "\n", " ")
 		})
 		line = "%%" + substituted + "%%"
 	}
