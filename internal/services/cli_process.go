@@ -36,6 +36,12 @@ var procFSRoot = "/proc/"
 //   - legacy: direct binary spawn (CustomStart hook, then BinaryPath).
 //     systemctl is never invoked.
 func startService(ctx context.Context, name string, def *ServiceDef) error {
+	if def.ExternallyManaged {
+		logger.DebugContext(ctx, "Service is externally managed, not starting", "service", name)
+
+		return nil
+	}
+
 	if !IsSystemdMode() {
 		return startWithoutSystemd(ctx, name, def)
 	}
@@ -88,6 +94,12 @@ func startWithoutSystemd(ctx context.Context, name string, def *ServiceDef) erro
 // workers run outside any systemd cgroup (e.g. spawned by statsCustomStart
 // directly into /init.scope in container installs).
 func stopService(ctx context.Context, name string, def *ServiceDef) error {
+	if def.ExternallyManaged {
+		logger.DebugContext(ctx, "Service is externally managed, not stopping", "service", name)
+
+		return nil
+	}
+
 	if !IsSystemdMode() {
 		return stopWithoutSystemd(ctx, name, def)
 	}

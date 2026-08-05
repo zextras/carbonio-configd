@@ -531,63 +531,42 @@ func TestMtaCustomStop_SuccessPath(t *testing.T) {
 	}
 }
 
-// TestServiceDiscoverCustomStart_MissingBinary verifies error when binary doesn't exist.
-func TestServiceDiscoverCustomStart_MissingBinary(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	def := &ServiceDef{
-		Name:       "service-discover",
-		BinaryPath: "/nonexistent/service-discovered",
-	}
-
-	err := serviceDiscoverCustomStart(context.Background(), def)
-	if err == nil {
-		t.Error("expected error when service-discover binary is missing")
-	}
-}
-
-// TestServiceDiscoverCustomStart_WithFakeBinary verifies the agent/server role selection.
-func TestServiceDiscoverCustomStart_WithFakeBinary(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	tmp := t.TempDir()
-	fakeBin := filepath.Join(tmp, "service-discovered")
-	if err := os.WriteFile(fakeBin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
+// TestServiceDiscoverIsExternallyManaged asserts configd only observes
+// service-discover: it owns service-discover.service (running
+// /usr/bin/service-discoverd), so start/stop/reload must be no-ops in every
+// mode — matching legacy control.pl, which skipped it in doStartup and only
+// ran `systemctl is-active service-discover.service` for status.
+func TestServiceDiscoverIsExternallyManaged(t *testing.T) {
+	def := LookupService(svcServiceDiscover)
+	if def == nil {
+		t.Fatal("service-discover not found")
 	}
 
-	def := &ServiceDef{
-		Name:       "service-discover",
-		BinaryPath: fakeBin,
+	if !def.ExternallyManaged {
+		t.Error("ExternallyManaged = false, want true")
 	}
 
-	err := serviceDiscoverCustomStart(context.Background(), def)
-	if err != nil {
-		t.Errorf("serviceDiscoverCustomStart returned unexpected error: %v", err)
-	}
-}
-
-// TestServiceDiscoverCustomStart_Release verifies the happy path including Release().
-func TestServiceDiscoverCustomStart_Release(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	tmp := t.TempDir()
-	fakeBin := filepath.Join(tmp, "service-discovered")
-	if err := os.WriteFile(fakeBin, []byte("#!/bin/sh\nsleep 0\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
+	if !def.UseSystemdForStatus {
+		t.Error("UseSystemdForStatus = false, want true")
 	}
 
-	def := &ServiceDef{
-		Name:       "service-discover",
-		BinaryPath: fakeBin,
+	if def.BinaryPath != "" || def.CustomStart != nil || def.CustomStop != nil {
+		t.Errorf("service-discover must have no launcher: BinaryPath=%q CustomStart=%v CustomStop=%v",
+			def.BinaryPath, def.CustomStart != nil, def.CustomStop != nil)
 	}
 
-	err := serviceDiscoverCustomStart(context.Background(), def)
-	if err != nil {
-		t.Errorf("serviceDiscoverCustomStart returned error: %v", err)
+	ctx := context.Background()
+
+	if err := startService(ctx, svcServiceDiscover, def); err != nil {
+		t.Errorf("startService = %v, want nil no-op", err)
+	}
+
+	if err := stopService(ctx, svcServiceDiscover, def); err != nil {
+		t.Errorf("stopService = %v, want nil no-op", err)
+	}
+
+	if err := ServiceReload(ctx, svcServiceDiscover); err != nil {
+		t.Errorf("ServiceReload = %v, want nil no-op", err)
 	}
 }
 

@@ -12,8 +12,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-
-	"github.com/zextras/carbonio-configd/internal/logger"
 )
 
 // Hook is a function that runs before/after service actions.
@@ -82,6 +80,15 @@ type ServiceDef struct {
 	// service-discover that are always managed by their systemd unit regardless
 	// of the Carbonio orchestration mode.
 	UseSystemdForStatus bool
+	// ExternallyManaged marks services whose lifecycle configd only observes.
+	// Start, stop, restart and reload are no-ops in every mode; status still
+	// reports the service. service-discover is the only such service: it owns
+	// its own systemd unit (service-discover.service runs
+	// /usr/bin/service-discoverd as the service-discover user, enabled at
+	// boot), and legacy zmcontrol never touched it either — control.pl skips
+	// it in doStartup, omits it from %allservices/%stoporder, and only ever
+	// runs `systemctl is-active service-discover.service` for status.
+	ExternallyManaged bool
 }
 
 var (
@@ -101,42 +108,6 @@ var ServiceAliases = map[string]string{
 	groupDirectoryServer: svcLdap,
 	"directory":          svcLdap,
 	"config-service":     svcConfigd,
-}
-
-// serviceDiscoverCustomStart starts service-discovered in the correct role:
-// "server" on LDAP nodes, "agent" on non-LDAP nodes. Mirrors the two separate
-// systemd units (build/server/ vs build/agent/) from the service-discover repo.
-func serviceDiscoverCustomStart(ctx context.Context, def *ServiceDef) error {
-	role := "agent"
-	if IsLDAPLocal() {
-		role = "server"
-	}
-
-	logger.InfoContext(ctx, "Starting service-discover", "role", role)
-
-	// service-discovered (consul) manages its own logging internally.
-	// Redirect stdout/stderr to /dev/null — no configd-managed log file needed.
-	devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
-	if err != nil {
-		return fmt.Errorf("failed to open /dev/null: %w", err)
-	}
-
-	defer func() { _ = devNull.Close() }()
-
-	cmd := exec.CommandContext(ctx, def.BinaryPath, role) //nolint:gosec // fixed internal path
-	cmd.Stdout = devNull
-	cmd.Stderr = devNull
-	cmd.SysProcAttr = detachedSysProcAttr()
-
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start service-discover (%s): %w", role, err)
-	}
-
-	if err := cmd.Process.Release(); err != nil {
-		logger.WarnContext(ctx, "Failed to release service-discover handle", "error", err)
-	}
-
-	return nil
 }
 
 // cbpolicydInitDB initializes the cbpolicyd sqlite database if it doesn't exist.
@@ -360,10 +331,8 @@ var Registry = map[string]*ServiceDef{
 		Name:                svcServiceDiscover,
 		DisplayName:         "service discover",
 		SystemdUnits:        []string{"service-discover.service"},
-		BinaryPath:          "/usr/bin/service-discover",
-		Detached:            true,
 		ProcessName:         svcServiceDiscover,
-		CustomStart:         serviceDiscoverCustomStart,
+		ExternallyManaged:   true,
 		UseSystemdForStatus: true,
 	},
 }

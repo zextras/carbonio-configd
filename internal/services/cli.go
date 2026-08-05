@@ -282,6 +282,12 @@ func ServiceReload(ctx context.Context, name string) error {
 		return fmt.Errorf(errUnknownService, name)
 	}
 
+	if def.ExternallyManaged {
+		logger.DebugContext(ctx, "Service is externally managed, not reloading", "service", name)
+
+		return nil
+	}
+
 	for _, unit := range def.SystemdUnits {
 		logger.InfoContext(ctx, "Reloading service", "service", def.Name, "unit", unit)
 
