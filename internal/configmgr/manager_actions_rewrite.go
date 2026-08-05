@@ -362,8 +362,14 @@ func (cm *ConfigManager) processRewrite(ctx context.Context, filePath string, re
 func (cm *ConfigManager) resolveValueSpec(ctx context.Context, key, valueSpec string) (string, error) {
 	valueType, valueKey := parseValueSpec(valueSpec)
 
-	if valueType == configTypeLITERAL {
+	switch valueType {
+	case configTypeLITERAL:
 		return valueKey, nil
+	case configTypeFILE:
+		// FILE values are config fragments containing %%...%% directives; they
+		// must be expanded by the transformer before reaching postconf, exactly
+		// as the legacy Jython zmconfigd did in jylibs/state.py getFileConfig().
+		return cm.lookupFileKey(ctx, valueKey)
 	}
 
 	resolvedValue, err := cm.mtaResolver.ResolveValue(ctx, valueType, valueKey, cm.State)

@@ -306,3 +306,72 @@ func TestRewriteTransform_NonexistentSource(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "open source file")
 }
+
+
+// TestResolveValueSpec_FILE is the CO-4096 regression suite: FILE fragments must be
+// transformer-expanded before reaching postconf. Before the fix, FILE was delegated
+// to mtaops.ResolveValue which returned the raw path as a literal, so %%...%% directives
+// appeared verbatim in main.cf and postfix refused to start.
+func TestResolveValueSpec_FILE(t *testing.T) {
+	ctx := context.Background()
+
+	// smtpd_sender_login_maps.cf fixture content from CO-4096 batch context
+	const senderLoginMapsContent = "" +
+		"%%contains VAR:zimbraMtaSmtpdSenderLoginMaps lmdb:/opt/zextras/conf/slm-exceptions-db%%\n" +
+		"%%contains VAR:zimbraMtaSmtpdSenderLoginMaps proxy:ldap:/opt/zextras/conf/ldap-slm.cf%%\n"
+
+	setup := func(t *testing.T, fragName, fragContent string) (*ConfigManager, func(string, string) (string, error)) {
+		t.Helper()
+		tmpDir := t.TempDir()
+		fragDir := filepath.Join(tmpDir, "conf", "zmconfigd")
+		require.NoError(t, os.MkdirAll(fragDir, 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(fragDir, fragName), []byte(fragContent), 0644))
+		st := state.NewState()
+		cfg := &config.Config{BaseDir: tmpDir}
+		cm := NewConfigManager(ctx, cfg, st, nil, cache.New(ctx, false))
+		resolve := func(key, valueSpec string) (string, error) {
+			return cm.resolveValueSpec(ctx, key, valueSpec)
+		}
+		return cm, resolve
+	}
+
+	t.Run("contains directives fully expanded - regression guard no %%", func(t *testing.T) {
+		cm, resolve := setup(t, "smtpd_sender_login_maps.cf", senderLoginMapsContent)
+		// Seed the lookup value so both %%contains%% lines hit.
+		cm.State.GlobalConfig.Data.Set("zimbraMtaSmtpdSenderLoginMaps",
+			"lmdb:/opt/zextras/conf/slm-exceptions-db proxy:ldap:/opt/zextras/conf/ldap-slm.cf")
+
+		result, err := resolve("smtpd_sender_login_maps", "FILE zmconfigd/smtpd_sender_login_maps.cf")
+		require.NoError(t, err)
+
+		// Primary regression guard: no unexpanded directive markers must survive.
+		require.NotContains(t, result, "%%",
+			"FILE fragment must be fully expanded before reaching postconf (CO-4096 regression)")
+		// Both lines hit → comma-space-joined concrete values.
+		require.Equal(t,
+			"lmdb:/opt/zextras/conf/slm-exceptions-db, proxy:ldap:/opt/zextras/conf/ldap-slm.cf",
+			result)
+	})
+
+	t.Run("bare variable expanded", func(t *testing.T) {
+		const contentFilterContent = "smtp-amavis:[%%zimbraLocalBindAddress%%]:10024\n"
+		cm, resolve := setup(t, "postfix_content_filter.cf", contentFilterContent)
+		cm.State.GlobalConfig.Data.Set("zimbraLocalBindAddress", "127.0.0.1")
+
+		result, err := resolve("content_filter", "FILE zmconfigd/postfix_content_filter.cf")
+		require.NoError(t, err)
+		require.Equal(t, "smtp-amavis:[127.0.0.1]:10024", result)
+		require.NotContains(t, result, "%%")
+	})
+
+	t.Run("contains miss - empty lines dropped from join", func(t *testing.T) {
+		cm, resolve := setup(t, "smtpd_sender_login_maps.cf", senderLoginMapsContent)
+		// VAR value does not contain either search string → both lines resolve to "".
+		cm.State.GlobalConfig.Data.Set("zimbraMtaSmtpdSenderLoginMaps", "ldap:/some/other/map")
+
+		result, err := resolve("smtpd_sender_login_maps", "FILE zmconfigd/smtpd_sender_login_maps.cf")
+		require.NoError(t, err)
+		// Legacy behaviour: empty expanded lines are dropped; joined result must be empty.
+		require.Empty(t, result, "contains-miss lines must be dropped, not joined as empty entries")
+	})
+}

@@ -27,8 +27,9 @@ func NewResolver(baseDir string) OperationResolver {
 	}
 }
 
-// ResolveValue resolves a value based on type (VAR, LOCAL, FILE, MAPLOCAL, or literal).
-// This mirrors the lookUpConfig logic from carbonio-jython/jylibs/state.py.
+// ResolveValue resolves a value based on type (VAR, LOCAL, MAPLOCAL, or literal).
+// FILE is deliberately absent: FILE values are config templates that must be run
+// through the transformer, so they are resolved by configmgr.lookupFileKey.
 func (r *resolver) ResolveValue(ctx context.Context, valueType, key string, st *state.State) (string, error) {
 	ctx = logger.ContextWithComponentOnce(ctx, "mtaops")
 	logger.DebugContext(ctx, "Resolving value",
@@ -40,8 +41,6 @@ func (r *resolver) ResolveValue(ctx context.Context, valueType, key string, st *
 		return r.resolveVAR(ctx, key, st)
 	case configTypeLOCAL:
 		return r.resolveLOCAL(ctx, key, st)
-	case "FILE":
-		return r.resolveFILE(ctx, key)
 	case "MAPLOCAL":
 		return r.resolveMAPLOCAL(ctx, key)
 	default:
@@ -75,34 +74,6 @@ func (r *resolver) resolveLOCAL(ctx context.Context, key string, st *state.State
 	}
 
 	return strings.TrimSpace(value), nil
-}
-
-func (r *resolver) resolveFILE(ctx context.Context, key string) (string, error) {
-	filePath := filepath.Join(r.baseDir, "conf", key)
-
-	//nolint:gosec // G304: File path constructed from trusted baseDir and config keys
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		logger.WarnContext(ctx, "FILE failed to read",
-			"key", key, "file_path", filePath, "error", err)
-
-		return "", nil
-	}
-
-	lines := strings.Split(string(data), "\n")
-	cleanLines := make([]string, 0, len(lines))
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			cleanLines = append(cleanLines, line)
-		}
-	}
-
-	value := strings.Join(cleanLines, ", ")
-	logger.DebugContext(ctx, "FILE resolved", "key", key, "value", value)
-
-	return value, nil
 }
 
 func (r *resolver) resolveMAPLOCAL(ctx context.Context, key string) (string, error) {
