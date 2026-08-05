@@ -98,13 +98,19 @@ var (
 	clamdDirPath      = dataPath + "/clamav/db"
 )
 
-// ServiceAliases maps alternative service names to their canonical Registry key.
-// These names are accepted by LookupService but do NOT appear in Registry or
-// AllServiceNames — they are resolution aliases only.
+// ServiceAliases is the single canonical table of alternative service names
+// — both legacy CLI aliases ("clamd", "mailboxd", "directory",
+// "config-service") and LDAP zimbraServiceEnabled values ("directory-server",
+// "service", "zmconfigd") — mapped to their canonical Registry key. Resolved
+// by LookupService (start/stop/restart/status/reload, network protocol,
+// watchdog) and, via MapLDAPServiceToRegistry, by discovery.go's LDAP
+// service list. These names are accepted as input but do NOT appear in
+// Registry or AllServiceNames — they are resolution aliases only.
 var ServiceAliases = map[string]string{
 	svcClamd:             svcAntivirus,
 	svcMailboxd:          svcMailbox,
 	svcService:           svcMailbox,
+	svcZmconfigd:         svcConfigd,
 	groupDirectoryServer: svcLdap,
 	"directory":          svcLdap,
 	"config-service":     svcConfigd,

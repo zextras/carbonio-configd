@@ -6,6 +6,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"net"
 	"os"
 	"os/exec"
@@ -61,114 +62,6 @@ func TestAddRestartLogged_LabelDiffersFromService(t *testing.T) {
 }
 
 // ============================================================
-// manager.go — executeCommand
-// ============================================================
-
-// TestExecuteCommand_Success verifies executeCommand returns nil for a command that exits 0.
-func TestExecuteCommand_Success(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	sm := NewServiceManager()
-	err := sm.executeCommand(context.Background(), "true", "")
-	if err != nil {
-		t.Errorf("executeCommand(true) returned error: %v", err)
-	}
-}
-
-// TestExecuteCommand_Failure verifies executeCommand returns an error for a non-zero exit.
-func TestExecuteCommand_Failure(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	sm := NewServiceManager()
-	err := sm.executeCommand(context.Background(), "false", "start")
-	if err == nil {
-		t.Error("expected error for command that exits non-zero")
-	}
-}
-
-// TestExecuteCommand_MissingBinary verifies executeCommand returns an error for missing binary.
-func TestExecuteCommand_MissingBinary(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	sm := NewServiceManager()
-	err := sm.executeCommand(context.Background(), "/nonexistent/binary/xyz", "start")
-	if err == nil {
-		t.Error("expected error for missing binary")
-	}
-}
-
-// ============================================================
-// manager.go — executeSystemdCommand
-// ============================================================
-
-// TestExecuteSystemdCommand_UnknownService verifies error when service has no systemd unit.
-func TestExecuteSystemdCommand_UnknownService(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	sm := NewServiceManager()
-	err := sm.executeSystemdCommand(context.Background(), "nonexistent", "status")
-	if err == nil {
-		t.Error("expected error for service with no systemd unit")
-	}
-}
-
-// TestExecuteSystemdCommand_KnownServiceSystemctlFails verifies fallback to zm*ctl.
-func TestExecuteSystemdCommand_KnownServiceSystemctlFails(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	sm := NewServiceManager()
-	err := sm.executeSystemdCommand(context.Background(), "proxy", "status")
-	_ = err
-}
-
-// TestExecuteSystemdCommand_NoFallbackAvailable verifies error when systemctl fails
-// and there is no zm*ctl entry.
-func TestExecuteSystemdCommand_NoFallbackAvailable(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	sm := NewServiceManager()
-	sm.SystemdMap["testonly"] = "carbonio-testonly.service"
-
-	err := sm.executeSystemdCommand(context.Background(), "testonly", "status")
-	if err == nil {
-		t.Error("expected error when systemctl fails and no zm*ctl fallback")
-	}
-}
-
-// TestExecuteSystemdCommand_SystemctlSucceeds verifies the early-return when
-// systemctl exits 0.
-func TestExecuteSystemdCommand_SystemctlSucceeds(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	tmp := t.TempDir()
-	fakeSystemctl := filepath.Join(tmp, "systemctl")
-
-	if err := os.WriteFile(fakeSystemctl, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	oldPath := os.Getenv("PATH")
-	t.Setenv("PATH", tmp+":"+oldPath)
-
-	sm := NewServiceManager()
-	if _, ok := sm.SystemdMap["proxy"]; !ok {
-		t.Skip("proxy not in SystemdMap, skipping test")
-	}
-
-	err := sm.executeSystemdCommand(context.Background(), "proxy", "status")
-	if err != nil {
-		t.Errorf("expected nil error when fake systemctl exits 0, got: %v", err)
-	}
-}
-
-// ============================================================
 // manager.go — attemptServiceRestart
 // ============================================================
 
@@ -178,9 +71,18 @@ func TestAttemptServiceRestart_SuccessWithDependencies(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	sm := NewServiceManager()
+	orig := isSystemdModeFn
+	defer func() { isSystemdModeFn = orig }()
+	isSystemdModeFn = func() bool { return false }
 
-	sm.CommandMap["testservice"] = "true"
+	Registry["testservice"] = &ServiceDef{
+		Name:        "testservice",
+		CustomStart: func(_ context.Context, _ *ServiceDef) error { return nil },
+		CustomStop:  func(_ context.Context, _ *ServiceDef) error { return nil },
+	}
+	defer delete(Registry, "testservice")
+
+	sm := NewServiceManager()
 	sm.RestartQueue["testservice"] = true
 
 	sm.SetDependencies(context.Background(), map[string][]string{
@@ -209,8 +111,18 @@ func TestAttemptServiceRestart_SuccessNilConfigLookup(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
+	orig := isSystemdModeFn
+	defer func() { isSystemdModeFn = orig }()
+	isSystemdModeFn = func() bool { return false }
+
+	Registry["testservice"] = &ServiceDef{
+		Name:        "testservice",
+		CustomStart: func(_ context.Context, _ *ServiceDef) error { return nil },
+		CustomStop:  func(_ context.Context, _ *ServiceDef) error { return nil },
+	}
+	defer delete(Registry, "testservice")
+
 	sm := NewServiceManager()
-	sm.CommandMap["testservice"] = "true"
 	sm.RestartQueue["testservice"] = true
 
 	failedRestarts := make(map[string]int)
@@ -230,9 +142,19 @@ func TestAttemptServiceRestart_FailBelowMax(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
+	orig := isSystemdModeFn
+	defer func() { isSystemdModeFn = orig }()
+	isSystemdModeFn = func() bool { return false }
+
+	Registry["testservice"] = &ServiceDef{
+		Name:        "testservice",
+		CustomStart: func(_ context.Context, _ *ServiceDef) error { return errors.New("start failed intentionally") },
+		CustomStop:  func(_ context.Context, _ *ServiceDef) error { return nil },
+	}
+	defer delete(Registry, "testservice")
+
 	sm := NewServiceManager()
 	sm.MaxFailedRestarts = 3
-	sm.CommandMap["testservice"] = "false"
 	sm.RestartQueue["testservice"] = true
 
 	failedRestarts := make(map[string]int)
@@ -255,9 +177,19 @@ func TestAttemptServiceRestart_FailAtMax(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
+	orig := isSystemdModeFn
+	defer func() { isSystemdModeFn = orig }()
+	isSystemdModeFn = func() bool { return false }
+
+	Registry["testservice"] = &ServiceDef{
+		Name:        "testservice",
+		CustomStart: func(_ context.Context, _ *ServiceDef) error { return errors.New("start failed intentionally") },
+		CustomStop:  func(_ context.Context, _ *ServiceDef) error { return nil },
+	}
+	defer delete(Registry, "testservice")
+
 	sm := NewServiceManager()
 	sm.MaxFailedRestarts = 3
-	sm.CommandMap["testservice"] = "false"
 	sm.RestartQueue["testservice"] = true
 
 	failedRestarts := map[string]int{"testservice": 2}
@@ -282,9 +214,20 @@ func TestProcessRestartRound_AllSucceed(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
+	orig := isSystemdModeFn
+	defer func() { isSystemdModeFn = orig }()
+	isSystemdModeFn = func() bool { return false }
+
+	succeed := &ServiceDef{
+		CustomStart: func(_ context.Context, _ *ServiceDef) error { return nil },
+		CustomStop:  func(_ context.Context, _ *ServiceDef) error { return nil },
+	}
+	Registry["svc1"] = succeed
+	Registry["svc2"] = succeed
+	defer delete(Registry, "svc1")
+	defer delete(Registry, "svc2")
+
 	sm := NewServiceManager()
-	sm.CommandMap["svc1"] = "true"
-	sm.CommandMap["svc2"] = "true"
 	sm.RestartQueue["svc1"] = true
 	sm.RestartQueue["svc2"] = true
 
@@ -301,13 +244,13 @@ func TestProcessRestartRound_AllSucceed(t *testing.T) {
 }
 
 // TestProcessRestartRound_AlreadyProcessed verifies that a service already in
-// processedThisRound is skipped.
+// processedThisRound is skipped (attemptServiceRestart is never invoked, so no
+// Registry entry is needed for "svc1").
 func TestProcessRestartRound_AlreadyProcessed(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	sm := NewServiceManager()
-	sm.CommandMap["svc1"] = "true"
 	sm.RestartQueue["svc1"] = true
 
 	failedRestarts := make(map[string]int)
@@ -347,9 +290,20 @@ func TestProcessRestarts_ServiceSucceedsEventually(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
+	orig := isSystemdModeFn
+	defer func() { isSystemdModeFn = orig }()
+	isSystemdModeFn = func() bool { return false }
+
+	succeed := &ServiceDef{
+		CustomStart: func(_ context.Context, _ *ServiceDef) error { return nil },
+		CustomStop:  func(_ context.Context, _ *ServiceDef) error { return nil },
+	}
+	Registry["svc1"] = succeed
+	Registry["svc2"] = succeed
+	defer delete(Registry, "svc1")
+	defer delete(Registry, "svc2")
+
 	sm := NewServiceManager()
-	sm.CommandMap["svc1"] = "true"
-	sm.CommandMap["svc2"] = "true"
 	sm.RestartQueue["svc1"] = true
 	sm.RestartQueue["svc2"] = true
 
@@ -367,9 +321,18 @@ func TestProcessRestarts_NoProgressBreaksLoop(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
+	orig := isSystemdModeFn
+	defer func() { isSystemdModeFn = orig }()
+	isSystemdModeFn = func() bool { return false }
+
+	Registry["svc1"] = &ServiceDef{
+		CustomStart: func(_ context.Context, _ *ServiceDef) error { return errors.New("start failed intentionally") },
+		CustomStop:  func(_ context.Context, _ *ServiceDef) error { return nil },
+	}
+	defer delete(Registry, "svc1")
+
 	sm := NewServiceManager()
 	sm.MaxFailedRestarts = 5
-	sm.CommandMap["svc1"] = "false"
 	sm.RestartQueue["svc1"] = true
 
 	err := sm.ProcessRestarts(context.Background(), nil)
@@ -382,75 +345,8 @@ func TestProcessRestarts_NoProgressBreaksLoop(t *testing.T) {
 }
 
 // ============================================================
-// manager.go — ControlProcess (UseSystemd=true branch)
+// manager.go — milterEnabled (from manager_additional_test.go)
 // ============================================================
-
-// TestControlProcess_UseSystemd verifies that when UseSystemd=true, ControlProcess
-// delegates to executeSystemdCommand.
-func TestControlProcess_UseSystemd(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	sm := NewServiceManager()
-	sm.UseSystemd = true
-
-	err := sm.ControlProcess(context.Background(), "proxy", ActionStatus)
-	_ = err
-}
-
-// TestControlProcess_UseSystemd_InvalidAction verifies the invalid-action guard.
-func TestControlProcess_UseSystemd_InvalidAction(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	sm := NewServiceManager()
-	sm.UseSystemd = true
-
-	err := sm.ControlProcess(context.Background(), "proxy", ServiceAction(999))
-	if err == nil {
-		t.Error("expected error for invalid action")
-	}
-}
-
-// TestControlProcess_UseSystemd_UnknownService verifies that even with UseSystemd=true,
-// an unknown service returns an error.
-func TestControlProcess_UseSystemd_UnknownService(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	sm := NewServiceManager()
-	sm.UseSystemd = true
-
-	err := sm.ControlProcess(context.Background(), "nonexistent-service-xyz", ActionStatus)
-	if err == nil {
-		t.Error("expected error for service with no systemd mapping")
-	}
-}
-
-// ============================================================
-// manager.go — SetUseSystemd, milterEnabled (from manager_additional_test.go)
-// ============================================================
-
-// TestSetUseSystemd verifies SetUseSystemd toggles UseSystemd correctly.
-func TestSetUseSystemd(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	sm := NewServiceManager()
-	if sm.UseSystemd {
-		t.Fatal("expected UseSystemd false by default")
-	}
-
-	sm.SetUseSystemd(true)
-	if !sm.UseSystemd {
-		t.Fatal("expected UseSystemd true after enabling")
-	}
-
-	sm.SetUseSystemd(false)
-	if sm.UseSystemd {
-		t.Fatal("expected UseSystemd false after disabling")
-	}
-}
 
 // TestMilterEnabled verifies milterEnabled reads the options file correctly.
 func TestMilterEnabled(t *testing.T) {

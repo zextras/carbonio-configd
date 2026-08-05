@@ -72,25 +72,6 @@ func TestIsDepEnabled_EnableCheckFalse(t *testing.T) {
 	}
 }
 
-// TestNewCLIServiceManager verifies the CLI service manager is configured for systemd.
-func TestNewCLIServiceManager(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	sm := newCLIServiceManager()
-	if sm == nil {
-		t.Fatal("newCLIServiceManager() returned nil")
-	}
-
-	if !sm.UseSystemd {
-		t.Error("expected UseSystemd=true in CLI service manager")
-	}
-
-	if sm.CommandMap == nil {
-		t.Error("CommandMap should not be nil")
-	}
-}
-
 // TestServiceStart_UnknownService verifies error for unknown service.
 func TestServiceStart_UnknownService(t *testing.T) {
 	if testing.Short() {

@@ -18,16 +18,15 @@ var _ services.Manager = (*MockServiceManager)(nil)
 // Override individual methods by setting the corresponding function field.
 // Unset fields fall back to harmless zero-value returns.
 type MockServiceManager struct {
-	ControlProcessFn       func(ctx context.Context, service string, action services.ServiceAction) error
-	IsRunningFn            func(ctx context.Context, service string) (bool, error)
-	AddRestartFn           func(ctx context.Context, service string) error
-	ProcessRestartsFn      func(ctx context.Context, configLookup func(string) string) error
-	ClearRestartsFn        func(ctx context.Context)
-	GetPendingRestartsFn   func() []string
-	SetDependenciesFn      func(ctx context.Context, deps map[string][]string)
+	ControlProcessFn        func(ctx context.Context, service string, action services.ServiceAction) error
+	IsRunningFn             func(ctx context.Context, service string) (bool, error)
+	AddRestartFn            func(ctx context.Context, service string) error
+	ProcessRestartsFn       func(ctx context.Context, configLookup func(string) string) error
+	ClearRestartsFn         func(ctx context.Context)
+	GetPendingRestartsFn    func() []string
+	SetDependenciesFn       func(ctx context.Context, deps map[string][]string)
 	AddDependencyRestartsFn func(ctx context.Context, sectionName string, configLookup func(string) string)
-	HasCommandFn           func(service string) bool
-	SetUseSystemdFn        func(enabled bool)
+	HasCommandFn            func(service string) bool
 }
 
 // ControlProcess delegates to ControlProcessFn or returns nil.
@@ -105,11 +104,4 @@ func (m *MockServiceManager) HasCommand(service string) bool {
 	}
 
 	return false
-}
-
-// SetUseSystemd delegates to SetUseSystemdFn or does nothing.
-func (m *MockServiceManager) SetUseSystemd(enabled bool) {
-	if m.SetUseSystemdFn != nil {
-		m.SetUseSystemdFn(enabled)
-	}
 }

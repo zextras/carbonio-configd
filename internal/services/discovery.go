@@ -21,8 +21,8 @@ var cacheFile = logPath + "/.zmcontrol.cache"
 // legacyServiceNames are service names from LDAP that should be ignored.
 // These are zimbraServiceEnabled values, not OS users.
 var legacyServiceNames = map[string]bool{
-	"zimlet":      true,
-	"zimbraAdmin": true,
+	"zimlet":          true,
+	"zimbraAdmin":     true,
 	ldapServiceZimbra: true,
 }
 
@@ -122,17 +122,15 @@ func IsLDAPLocal() bool {
 	return strings.Contains(ldapURL, hostname)
 }
 
-// MapLDAPServiceToRegistry maps LDAP service names to registry names.
-// LDAP uses names like "directory-server", "service"; registry uses "ldap", "mailbox".
+// MapLDAPServiceToRegistry maps an LDAP zimbraServiceEnabled value to its
+// canonical Registry key by resolving it through the shared ServiceAliases
+// table (registry.go) — the same aliasing LookupService uses. Falls back to
+// ldapName unchanged when no alias applies (e.g. it's already a canonical
+// registry name, or an LDAP-only name with no service-side control
+// equivalent).
 func MapLDAPServiceToRegistry(ldapName string) string {
-	mapping := map[string]string{
-		groupDirectoryServer: svcLdap,
-		svcService:           svcMailbox,
-		svcZmconfigd:         svcConfigd,
-	}
-
-	if mapped, ok := mapping[ldapName]; ok {
-		return mapped
+	if canonical, ok := ServiceAliases[ldapName]; ok {
+		return canonical
 	}
 
 	return ldapName

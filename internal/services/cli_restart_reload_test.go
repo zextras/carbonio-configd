@@ -9,6 +9,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -208,5 +209,73 @@ func TestServiceReload_Legacy_Fallback_IgnoresSystemdUnits(t *testing.T) {
 
 	if len(order) != 2 || order[0] != "stop" || order[1] != "start" {
 		t.Errorf("expected [stop start] via legacy fallback, got %v", order)
+	}
+}
+
+// TestProcessRestarts_DeadServiceInvokesStart is the watchdog-recovery
+// regression guard: ServiceManager.ProcessRestarts (fed by watchdog's
+// AddRestart on a service found not running) must end with the service
+// started, not merely "reloaded" or left dead. ServiceRestart's stop+start
+// fallback (cli.go) runs unconditionally for non-MTA services — even when
+// the stop half fails because there was nothing to stop — so a dead
+// service's restart always reaches the start path.
+func TestProcessRestarts_DeadServiceInvokesStart(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: may invoke real system commands")
+	}
+	orig := isSystemdModeFn
+	defer func() { isSystemdModeFn = orig }()
+	isSystemdModeFn = func() bool { return false }
+
+	tmp := t.TempDir()
+	pidFile := filepath.Join(tmp, "dead-svc.pid")
+	started := false
+
+	Registry["watchdog-dead-svc"] = &ServiceDef{
+		Name:    "watchdog-dead-svc",
+		PidFile: pidFile,
+		CustomStart: func(_ context.Context, _ *ServiceDef) error {
+			started = true
+
+			return os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0o600)
+		},
+		CustomStop: func(_ context.Context, _ *ServiceDef) error {
+			return os.Remove(pidFile) // fails: nothing to stop, service is dead
+		},
+	}
+	defer delete(Registry, "watchdog-dead-svc")
+
+	sm := NewServiceManager()
+
+	// Precondition: the service is dead (no pidfile yet).
+	running, err := sm.IsRunning(context.Background(), "watchdog-dead-svc")
+	if err != nil || running {
+		t.Fatalf("precondition failed: expected dead service, running=%v err=%v", running, err)
+	}
+
+	// Mirror watchdog.restartDownService: AddRestart then ProcessRestarts.
+	if err := sm.AddRestart(context.Background(), "watchdog-dead-svc"); err != nil {
+		t.Fatalf("AddRestart failed: %v", err)
+	}
+
+	if err := sm.ProcessRestarts(context.Background(), nil); err != nil {
+		t.Fatalf("ProcessRestarts returned error: %v", err)
+	}
+
+	if !started {
+		t.Error("expected the start path (CustomStart) to be invoked for a dead service")
+	}
+
+	running, err = sm.IsRunning(context.Background(), "watchdog-dead-svc")
+	if err != nil {
+		t.Fatalf("IsRunning after restart returned error: %v", err)
+	}
+
+	if !running {
+		t.Error("expected the service to be running after ProcessRestarts recovered a dead service")
+	}
+
+	if sm.RestartQueue["watchdog-dead-svc"] {
+		t.Error("expected service to be removed from the restart queue after a successful restart")
 	}
 }

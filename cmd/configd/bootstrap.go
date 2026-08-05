@@ -65,16 +65,10 @@ func bootstrapDependencies(
 		logger.InfoContext(ctx, "Detected systemd-enabled environment",
 			"use_systemctl", true,
 			"fallback", "zm*ctl")
-
-		serviceManager.UseSystemd = true
-
-		configManager.ServiceMgr.SetUseSystemd(true)
 	} else {
 		logger.InfoContext(ctx, "Detected traditional environment",
 			"use_systemctl", false,
 			"scripts_only", "zm*ctl")
-
-		serviceManager.UseSystemd = false
 	}
 
 	serviceManager.DisableRestarts = args.DisableRestarts

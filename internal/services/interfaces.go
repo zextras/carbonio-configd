@@ -75,7 +75,4 @@ type Manager interface {
 
 	// HasCommand checks if a service has a control command defined.
 	HasCommand(service string) bool
-
-	// SetUseSystemd enables or disables systemctl for service control.
-	SetUseSystemd(enabled bool)
 }
