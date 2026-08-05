@@ -211,6 +211,69 @@ func TestTransformPlainVariableSubstitution(t *testing.T) {
 	}
 }
 
+// TestTransformMultiValueStaysOnOneLine covers CO-4100: multi-valued LDAP
+// attributes are newline-joined by ldap.Client, and emitting those newlines in
+// the middle of a line splits the directive. The real-world break was
+// "mech_list: %%zimbraMtaSaslSmtpdMechList%%" rendering as "mech_list: LOGIN\nPLAIN",
+// which made postfix smtpd fail SASL initialization. A directive that occupies the
+// whole line must keep its newlines, because zimbraMtaMyNetworksPerLine and the
+// *XML keys are newline-joined on purpose to render multi-line blocks.
+func TestTransformMultiValueStaysOnOneLine(t *testing.T) {
+	ctx := context.Background()
+	mockLookup := testutil.NewMockConfigLookupWithData(map[string]map[string]string{
+		"VAR": {
+			"zimbraMtaSaslSmtpdMechList": "LOGIN\nPLAIN",
+			"zimbraMtaMyNetworksPerLine": "127.0.0.0/8\n10.0.0.0/8",
+			"zimbraServiceEnabled":       "mta\nmailbox",
+		},
+		"LOCAL": {},
+	})
+
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "bare multi-value inline is flattened to spaces",
+			input:    "mech_list: %%zimbraMtaSaslSmtpdMechList%%",
+			expected: "mech_list: LOGIN PLAIN\n",
+		},
+		{
+			name:     "typed multi-value inline is flattened to spaces",
+			input:    "mech_list: %%VAR:zimbraMtaSaslSmtpdMechList%%",
+			expected: "mech_list: LOGIN PLAIN\n",
+		},
+		{
+			name:     "whole-line directive keeps its newlines",
+			input:    "%%zimbraMtaMyNetworksPerLine%%",
+			expected: "127.0.0.0/8\n10.0.0.0/8\n",
+		},
+		{
+			name:     "indented whole-line directive keeps its newlines",
+			input:    "\t%%VAR:zimbraMtaMyNetworksPerLine%%",
+			expected: "\t127.0.0.0/8\n10.0.0.0/8\n",
+		},
+		{
+			name:     "multi-value embedded in contains directive is flattened",
+			input:    "%%contains VAR:zimbraServiceEnabled mta^enabled %%VAR:zimbraMtaSaslSmtpdMechList%%^disabled%%",
+			expected: "enabled LOGIN PLAIN\n",
+		},
+	}
+
+	st := &state.State{}
+	transformer := NewTransformer(mockLookup, st)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := transformer.Transform(ctx, tt.input)
+			if result != tt.expected {
+				t.Errorf("Transform() = %q, want %q", result, tt.expected)
+			}
+		})
+	}
+}
+
 func TestLocalConfigSPLITFunction(t *testing.T) {
 	ctx := context.Background()
 	st := &state.State{}
