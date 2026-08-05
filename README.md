@@ -92,6 +92,10 @@ systemctl status carbonio-configd.service
 systemctl reload carbonio-configd.service   # SIGHUP — re-evaluate configs
 ```
 
+The unit is shipped only on distributions with a systemd-orchestrated Carbonio
+(ubuntu-noble, rocky-9). On ubuntu-jammy and rocky-8 the package installs no
+unit: the daemon runs in legacy mode, started by `zmcontrol`.
+
 ### Client mode (trigger config rewrite)
 
 `configd rewrite <section>...` sends a REWRITE command to the already-running daemon

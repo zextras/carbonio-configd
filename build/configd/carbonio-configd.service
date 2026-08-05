@@ -15,6 +15,7 @@ Wants=network-online.target
 Type=notify
 User=zextras
 EnvironmentFile=-/opt/zextras/data/systemd.env
+ExecStartPre=/opt/zextras/bin/systemd-envscript
 ExecStartPre=/bin/bash -c 'for i in $(seq 1 30); do nc -z $ldap_domain $ldap_port && exit 0; sleep 2; done; echo "LDAP not reachable after 60s"; exit 1'
 ExecStart=/opt/zextras/bin/configd
 ExecReload=/bin/kill -HUP $MAINPID
