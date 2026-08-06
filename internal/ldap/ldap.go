@@ -21,6 +21,9 @@ import (
 	"github.com/zextras/carbonio-configd/internal/logger"
 )
 
+// errConfigClientNotInitialized guards LDAP write paths called before Connect.
+var errConfigClientNotInitialized = errors.New("config client not initialized")
+
 // AttributeModifier is the narrow LDAP write surface that mtaops needs.
 // It is satisfied by *Ldap, which applies keymap resolution, attribute
 // transforms, and retry semantics. Kept as an interface so callers (notably
@@ -193,7 +196,7 @@ func (l *Ldap) ModifyAttribute(ctx context.Context, key, value string) error {
 	// data-suffix NativeClient (uid=zimbra) — it has no cn=config access and
 	// would fail every attempt with LDAP code 50.
 	if l.ConfigClient == nil {
-		return errs.WrapConfig("modify", key, errors.New("config client not initialized"))
+		return errs.WrapConfig("modify", key, errConfigClientNotInitialized)
 	}
 
 	// Execute LDAP modification with retry logic.
@@ -327,7 +330,7 @@ func (l *Ldap) ModifyAttributeBatch(ctx context.Context, changes map[string]stri
 	// otherwise sleep/backoff per DN for an unrecoverable condition). Writes
 	// must use the cn=config client (ldapi), never the data-suffix client.
 	if l.ConfigClient == nil {
-		return errs.WrapConfig("batch modify", "", errors.New("config client not initialized"))
+		return errs.WrapConfig("batch modify", "", errConfigClientNotInitialized)
 	}
 
 	// Group changes by DN
@@ -382,7 +385,7 @@ func (l *Ldap) executeBatchModifyInternal(ctx context.Context, dn string, attrs 
 		"attribute_count", len(attrs))
 
 	if l.ConfigClient == nil {
-		return errs.WrapConfig("batch modify", dn, errors.New("config client not initialized"))
+		return errs.WrapConfig("batch modify", dn, errConfigClientNotInitialized)
 	}
 
 	for attr, val := range attrs {
