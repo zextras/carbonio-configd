@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 library(
-    identifier: 'jenkins-lib-common@v4.6.0',
+    identifier: 'jenkins-lib-common@v4.7.0',
     retriever: modernSCM([
         $class: 'GitSCMSource',
         credentialsId: 'jenkins-integration-with-github-account',
@@ -99,10 +99,9 @@ pipeline {
                 buildStage([
                     architecture: 'aarch64',
                     buildDirs: ['build'],
-                    distros: ['ubuntu'],
+                    distros: ['ubuntu-jammy'],
                     prepare: true,
                     prepareFlags: ' -g ',
-                    ubuntuSinglePkg: true,
                 ])
             }
         }
@@ -120,8 +119,7 @@ pipeline {
                 )
                 uploadStage(
                     architecture: 'aarch64',
-                    distros: ['ubuntu'],
-                    ubuntuSinglePkg: true,
+                    distros: ['ubuntu-jammy'],
                     yapPath: 'build/yap.json',
                 )
             }
