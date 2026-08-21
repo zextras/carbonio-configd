@@ -218,8 +218,7 @@ func (c *Command) runBinaryWithContext(ctx context.Context, args []string) (exit
 	output = string(outputBytes)
 
 	if cmdErr != nil {
-		var exitErr *exec.ExitError
-		if stderrors.As(cmdErr, &exitErr) {
+		if exitErr, ok := stderrors.AsType[*exec.ExitError](cmdErr); ok {
 			exitCode = exitErr.ExitCode()
 		} else {
 			exitCode = 1
