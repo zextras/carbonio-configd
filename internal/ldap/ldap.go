@@ -472,12 +472,11 @@ func isRetryableError(err error) bool {
 	// whatever the native client (client.go) produced, so the underlying
 	// *ldap.Error result code — already classified once by
 	// Client.executeWithRetry/isLDAPErrorRetryable — is still reachable via
-	// errors.As through the %w chain. Reuse that classification instead of
+	// errors.AsType through the %w chain. Reuse that classification instead of
 	// defaulting to retryable, or permanent LDAP failures (no such object,
 	// bad DN, bad credentials, ...) get retried a second time here after
 	// the native client already gave up on them.
-	var ldapErr *ldap.Error
-	if errors.As(err, &ldapErr) {
+	if _, ok := errors.AsType[*ldap.Error](err); ok {
 		return isLDAPErrorRetryable(err)
 	}
 
