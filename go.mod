@@ -2,7 +2,7 @@ module github.com/zextras/carbonio-configd
 
 go 1.26.0
 
-toolchain go1.26.5
+toolchain go1.27.1
 
 require (
 	github.com/alecthomas/kong v1.16.1
