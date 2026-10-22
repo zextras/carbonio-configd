@@ -7,7 +7,7 @@ toolchain go1.27.1
 require (
 	github.com/alecthomas/kong v1.16.1
 	github.com/docker/go-units v0.5.0
-	github.com/go-ldap/ldap/v3 v3.4.14
+	github.com/go-ldap/ldap/v3 v3.4.15
 	github.com/google/uuid v1.6.0
 	github.com/moby/moby/api v1.56.0
 	github.com/stretchr/testify v1.12.1
