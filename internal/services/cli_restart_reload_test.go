@@ -9,6 +9,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -128,6 +129,64 @@ func TestServiceReload_NoSystemdUnits(t *testing.T) {
 	}
 }
 
+// stubMTADeps replaces the saslauthd and milter registry entries with
+// recorders and returns the recorded "<service> <action>" calls.
+func stubMTADeps(t *testing.T, saslEnabled, milterEnabled bool) *[]string {
+	t.Helper()
+
+	calls := &[]string{}
+
+	record := func(action string) func(context.Context, *ServiceDef) error {
+		return func(_ context.Context, def *ServiceDef) error {
+			*calls = append(*calls, def.Name+" "+action)
+
+			return nil
+		}
+	}
+
+	for name, enabled := range map[string]bool{svcSaslauthd: saslEnabled, svcMilter: milterEnabled} {
+		saved := Registry[name]
+		t.Cleanup(func() { Registry[name] = saved })
+
+		Registry[name] = &ServiceDef{
+			Name:        name,
+			CustomStart: record("start"),
+			CustomStop:  record("stop"),
+			EnableCheck: func(context.Context) bool { return enabled },
+		}
+	}
+
+	return calls
+}
+
+// TestServiceReload_Legacy_MTA_RestartsEnabledDeps pins legacy zmmtactl
+// reload: saslauthd (and milter when enabled) are stopped and started before
+// postfix reload; a disabled milter is left alone.
+func TestServiceReload_Legacy_MTA_RestartsEnabledDeps(t *testing.T) {
+	orig := isSystemdModeFn
+	defer func() { isSystemdModeFn = orig }()
+	isSystemdModeFn = func() bool { return false }
+
+	calls := stubMTADeps(t, true, false)
+
+	tmp := t.TempDir()
+	oldSudo := sudoBin
+	sudoBin = filepath.Join(tmp, "sudo")
+	if err := os.WriteFile(sudoBin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { sudoBin = oldSudo }()
+
+	if err := ServiceReload(context.Background(), "mta"); err != nil {
+		t.Fatalf("ServiceReload(mta): %v", err)
+	}
+
+	want := []string{svcSaslauthd + " stop", svcSaslauthd + " start"}
+	if !slices.Equal(*calls, want) {
+		t.Errorf("dependency calls = %q, want %q", *calls, want)
+	}
+}
+
 // TestServiceReload_Legacy_MTA_NativeReload is the regression guard for the
 // cli.go:279 bug: ServiceReload used to try Systemctl("reload") in every
 // mode, and its only fallback was a hard stopService+startService — for MTA
@@ -139,6 +198,8 @@ func TestServiceReload_Legacy_MTA_NativeReload(t *testing.T) {
 	orig := isSystemdModeFn
 	defer func() { isSystemdModeFn = orig }()
 	isSystemdModeFn = func() bool { return false }
+
+	stubMTADeps(t, false, false)
 
 	tmp := t.TempDir()
 	callLog := filepath.Join(tmp, "calls.log")

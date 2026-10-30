@@ -164,6 +164,20 @@ func stopWithoutSystemd(ctx context.Context, name string, def *ServiceDef) error
 // never systemctl.
 func reloadWithoutSystemd(ctx context.Context, name string, def *ServiceDef) error {
 	if name == serviceMTA {
+		// Legacy zmmtactl reload runs "reload" on each START_SCRIPTS entry:
+		// zmmilterctl and zmsaslauthdctl implement reload as stop+start, then
+		// postfix reload (carbonio-core 4.6.7 src/bin/mtactl.sh).
+		for _, dep := range def.Dependencies {
+			if !isDepEnabled(ctx, dep) {
+				continue
+			}
+
+			if err := ServiceRestart(ctx, dep); err != nil {
+				logger.WarnContext(ctx, "Dependency restart failed during MTA reload",
+					"dependency", dep, "error", err)
+			}
+		}
+
 		logger.InfoContext(ctx, "Reloading service via postfix reload (legacy mode)", "service", name)
 
 		return sudoRun(ctx, postfixBin, actionReload)
