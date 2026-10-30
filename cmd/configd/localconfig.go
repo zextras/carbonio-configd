@@ -8,6 +8,7 @@ import (
 	"context"
 	"os"
 
+	"github.com/zextras/carbonio-configd/internal/cli/cliutil"
 	lccli "github.com/zextras/carbonio-configd/internal/cli/localconfig"
 )
 
@@ -38,14 +39,8 @@ type LocalconfigCmd struct {
 
 // Run executes the localconfig subcommand; a failure exits the process with
 // the status chosen by the CLI.
-//
-//nolint:unparam // Kong interface requires error return
 func (c *LocalconfigCmd) Run() error {
-	if code := lccli.Run(context.Background(), os.Stdout, os.Stderr, c.options(os.Args)); code != 0 {
-		os.Exit(code)
-	}
-
-	return nil
+	return exitWith(lccli.Run(context.Background(), os.Stdout, os.Stderr, c.options(os.Args)))
 }
 
 func (c *LocalconfigCmd) options(args []string) *lccli.Options {
@@ -69,7 +64,7 @@ func (c *LocalconfigCmd) options(args []string) *lccli.Options {
 		All:           c.All,
 		Reload:        c.Reload,
 		Keys:          keys,
-		DefaultPath:   basePath("conf", "localconfig.xml"),
+		DefaultPath:   cliutil.BasePath("conf", "localconfig.xml"),
 		Args:          args,
 	}
 }

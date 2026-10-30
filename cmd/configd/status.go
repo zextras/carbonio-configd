@@ -6,9 +6,9 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"os"
 
-	"github.com/zextras/carbonio-configd/internal/services"
+	"github.com/zextras/carbonio-configd/internal/cli/status"
 )
 
 // StatusCmd handles the "configd status [name]" subcommand.
@@ -18,34 +18,5 @@ type StatusCmd struct {
 
 // Run executes the status subcommand.
 func (c *StatusCmd) Run() error {
-	initCLILogging()
-
-	ctx := context.Background()
-
-	// Single service detail mode — same output as `configd service status`.
-	if c.Name != "" {
-		return printServiceStatus(ctx, c.Name)
-	}
-
-	// System-wide summary
-	cliHeader()
-
-	allRunning := true
-
-	infos := services.ServiceListStatus(ctx)
-	for _, info := range infos {
-		cliStatus(info.DisplayName, info.Running, "")
-
-		if !info.Running {
-			allRunning = false
-		}
-	}
-
-	checkAdvancedStatus(ctx)
-
-	if !allRunning {
-		return fmt.Errorf("some services are not running")
-	}
-
-	return nil
+	return exitWith(status.Run(context.Background(), os.Stdout, os.Stderr, &status.Options{Name: c.Name}))
 }

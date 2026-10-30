@@ -8,18 +8,6 @@ import (
 	"testing"
 )
 
-func TestInitComponents(t *testing.T) {
-	if _, ok := initComponents["mta"]; !ok {
-		t.Error("expected mta component to be defined")
-	}
-	if _, ok := initComponents["proxy"]; !ok {
-		t.Error("expected proxy component to be defined")
-	}
-	if desc := initComponents["mta"]; desc == "" {
-		t.Error("expected mta to have a description")
-	}
-}
-
 func TestInitCmd_Structure(t *testing.T) {
 	cmd := &InitCmd{
 		Component: "mta",
@@ -61,23 +49,4 @@ func TestFormatVersion(t *testing.T) {
 	if len(version) < 7 {
 		t.Errorf("expected version string to contain 'configd', got %s", version)
 	}
-}
-
-func TestConfigsExist_UnknownComponent(t *testing.T) {
-	// Unknown component should always return false
-	if configsExist("unknown_component") {
-		t.Error("expected configsExist to return false for unknown component")
-	}
-}
-
-func TestConfigsExist_MTA_NoFile(t *testing.T) {
-	// /opt/zextras/common/conf/postfix/main.cf almost certainly doesn't exist in test env
-	result := configsExist(componentMTA)
-	// We just verify it doesn't panic; on a dev machine it may or may not exist
-	_ = result
-}
-
-func TestConfigsExist_Proxy_NoFile(t *testing.T) {
-	result := configsExist(componentProxy)
-	_ = result
 }

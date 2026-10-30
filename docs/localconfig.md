@@ -42,7 +42,7 @@ To add or change a default, edit the `lcDefaults` map in
 
 ## CLI behavior (legacy `LocalConfigCLI` parity)
 
-Source: `cmd/configd/localconfig*.go`. Reference: carbonio-mailbox `4.36.6`
+Source: `internal/cli/localconfig` (flag mapping in `cmd/configd/localconfig.go`). Reference: carbonio-mailbox `4.36.6`
 `LocalConfigCLI.java`, `LocalConfig.java`, `ConfigWriter.java`.
 
 - Dispatch order, like legacy: `-i`, `--all` (no config needed), then the config file is loaded,

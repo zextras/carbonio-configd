@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-only
 
-package main
+package cliutil
 
 import (
 	"strings"
@@ -10,7 +10,7 @@ import (
 )
 
 func TestOpenWriteLDAPClient_NoURLs(t *testing.T) {
-	_, err := openWriteLDAPClient(map[string]string{})
+	_, err := OpenWriteLDAPClient(map[string]string{})
 	if err == nil {
 		t.Fatal("expected error when both ldap_master_url and ldap_url are empty")
 	}
@@ -21,7 +21,7 @@ func TestOpenWriteLDAPClient_NoURLs(t *testing.T) {
 }
 
 func TestOpenWriteLDAPClient_WhitespaceOnly(t *testing.T) {
-	_, err := openWriteLDAPClient(map[string]string{
+	_, err := OpenWriteLDAPClient(map[string]string{
 		"ldap_master_url": "   ",
 		"ldap_url":        "\t\n",
 	})
@@ -31,7 +31,7 @@ func TestOpenWriteLDAPClient_WhitespaceOnly(t *testing.T) {
 }
 
 func TestOpenWriteLDAPClient_FallsBackToLdapURL(t *testing.T) {
-	client, err := openWriteLDAPClient(map[string]string{
+	client, err := OpenWriteLDAPClient(map[string]string{
 		"ldap_url":             "ldap://srv1:389 ldap://srv2:389",
 		"zimbra_ldap_userdn":   "uid=zimbra,cn=admins,cn=zimbra",
 		"zimbra_ldap_password": "secret",
@@ -48,7 +48,7 @@ func TestOpenWriteLDAPClient_FallsBackToLdapURL(t *testing.T) {
 }
 
 func TestOpenWriteLDAPClient_MasterURLPreferredOverLdapURL(t *testing.T) {
-	client, err := openWriteLDAPClient(map[string]string{
+	client, err := OpenWriteLDAPClient(map[string]string{
 		"ldap_master_url":      "ldap://master:389",
 		"ldap_url":             "ldap://replica:389",
 		"zimbra_ldap_userdn":   "uid=zimbra,cn=admins,cn=zimbra",

@@ -6,6 +6,7 @@ package security
 
 import (
 	"errors"
+	"io"
 	"os/user"
 	"testing"
 
@@ -45,10 +46,10 @@ func TestCheckUserPermissions_LookupFailure(t *testing.T) {
 
 func TestMustCheckUserPermissions_Success(t *testing.T) {
 	withStubbedUser(t, &user.User{Username: RequiredUser}, nil)
-	assert.NoError(t, MustCheckUserPermissions())
+	assert.NoError(t, MustCheckUserPermissions(io.Discard))
 }
 
 func TestMustCheckUserPermissions_Failure(t *testing.T) {
 	withStubbedUser(t, &user.User{Username: "nobody"}, nil)
-	assert.Error(t, MustCheckUserPermissions())
+	assert.Error(t, MustCheckUserPermissions(io.Discard))
 }

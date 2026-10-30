@@ -25,8 +25,10 @@ Manages service configurations by monitoring LDAP for changes, generating config
 ## Project Structure
 
 ```
-cmd/configd/         Main entry point and daemon loop
+cmd/configd/         Main entry point, Kong flag structs and daemon loop
 internal/
+  cli/               One package per subcommand: Run(ctx, stdout, stderr, opts) int
+                     (cliutil = shared console/logging/permission helpers)
   cache/             In-memory config cache (intra-loop dedup)
   commands/          External command wrappers
   config/            Application configuration and types

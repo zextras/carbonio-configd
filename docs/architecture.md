@@ -10,7 +10,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 Source: `cmd/configd/cli.go` (`DaemonCmd.Run`), `cmd/configd/configd.go`, `cmd/configd/mainloop.go`
 
-1. **User check** — `security.MustCheckUserPermissions()` enforces that the process runs as
+1. **User check** — `security.MustCheckUserPermissions(stderr)` enforces that the process runs as
    `zextras`. Root is rejected.
 2. **Logging init** — structured logger configured from `CONFIGD_LOG_FORMAT` and
    `CONFIGD_LOG_LEVEL` environment variables (defaults: text, info).
