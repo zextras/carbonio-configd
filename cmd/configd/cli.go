@@ -12,6 +12,7 @@ import (
 	"github.com/alecthomas/kong"
 	"github.com/willabides/kongplete"
 	"github.com/zextras/carbonio-configd/internal/cli/cliutil"
+	"github.com/zextras/carbonio-configd/internal/cli/plancmd"
 	"github.com/zextras/carbonio-configd/internal/cli/rewrite"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/sdnotify"
@@ -34,6 +35,7 @@ type CLI struct {
 	Proxy       ProxyCmd                     `cmd:"" help:"Proxy protocol management"`
 	TLS         TLSCmd                       `cmd:"" name:"tls" help:"Manage Carbonio mail mode (legacy zmtlsctl)"`
 	Rewrite     RewriteCmd                   `cmd:"" help:"Force configuration rewrite"`
+	Plan        PlanCmd                      `cmd:"" help:"Show what a rewrite would change, without changing anything"`
 	Release     ReleaseCmd                   `cmd:"" help:"Show Carbonio release and package versions"`
 	Completion  kongplete.InstallCompletions `cmd:"" help:"Install shell completions"`
 	Daemon      DaemonCmd                    `cmd:"" default:"1" hidden:""`
@@ -91,6 +93,22 @@ func (c *RewriteCmd) Run(_ *CLI, env sys.System) error {
 	return exitWith(rewrite.Run(context.Background(), os.Stdout, os.Stderr, &rewrite.Options{
 		Configs:    c.ConfigNames,
 		Standalone: standaloneRewrite(env, false),
+	}))
+}
+
+// PlanCmd shows what a forced rewrite would change on this host.
+type PlanCmd struct {
+	Sections []string `arg:"" optional:"" help:"Sections to plan (default: all)"`
+	JSON     bool     `name:"json" help:"Print the plan as JSON"`
+}
+
+// Run executes the plan command. The exit status is 0 when nothing would
+// change, 1 when a rewrite would change something and 2 on error.
+func (c *PlanCmd) Run(_ *CLI, env sys.System) error {
+	return exitWith(plancmd.Run(context.Background(), os.Stdout, os.Stderr, &plancmd.Options{
+		Sections: c.Sections,
+		JSON:     c.JSON,
+		Planner:  planOnHost(env),
 	}))
 }
 
