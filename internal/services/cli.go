@@ -345,18 +345,7 @@ func ServiceStatus(ctx context.Context, name string) (bool, error) {
 	}
 
 	if IsSystemdMode() || def.UseSystemdForStatus {
-		for _, unit := range def.SystemdUnits {
-			if err := Systemctl(ctx, "is-active", unit); err != nil {
-				var exitErr *exec.ExitError
-				if errors.As(err, &exitErr) || errors.Is(err, ErrSystemdNotBooted) {
-					return false, nil // non-zero exit: unit inactive/failed/unknown
-				}
-
-				return false, fmt.Errorf("systemctl is-active %s: %w", unit, err)
-			}
-		}
-
-		return true, nil
+		return systemdUnitsActive(ctx, def.SystemdUnits)
 	}
 
 	// PidFile may be unreadable (e.g. postfix master.pid is root:root 0600)
@@ -372,6 +361,24 @@ func ServiceStatus(ctx context.Context, name string) (bool, error) {
 	}
 
 	return false, nil
+}
+
+// systemdUnitsActive reports whether every unit is active. A non-zero
+// systemctl exit (unit inactive/failed/unknown) or an unbooted systemd is a
+// "not running" answer; only a failure to run systemctl is an error.
+func systemdUnitsActive(ctx context.Context, units []string) (bool, error) {
+	for _, unit := range units {
+		if err := Systemctl(ctx, "is-active", unit); err != nil {
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) || errors.Is(err, ErrSystemdNotBooted) {
+				return false, nil
+			}
+
+			return false, fmt.Errorf("systemctl is-active %s: %w", unit, err)
+		}
+	}
+
+	return true, nil
 }
 
 // RunningPID returns the primary PID of a running service, or 0 when the

@@ -70,20 +70,8 @@ func CopyFile(ctx context.Context, src, dst string) error {
 	committed := false
 
 	defer func() {
-		if committed {
-			return
-		}
-
-		if cerr := destFile.Close(); cerr != nil && !errors.Is(cerr, os.ErrClosed) {
-			logger.WarnContext(ctx, "Failed to close dest file",
-				"path", tmpPath,
-				"error", cerr)
-		}
-
-		if rerr := os.Remove(tmpPath); rerr != nil && !os.IsNotExist(rerr) {
-			logger.WarnContext(ctx, "Failed to remove temp file",
-				"path", tmpPath,
-				"error", rerr)
+		if !committed {
+			discardTemp(ctx, destFile, tmpPath)
 		}
 	}()
 
@@ -113,6 +101,21 @@ func CopyFile(ctx context.Context, src, dst string) error {
 	committed = true
 
 	return nil
+}
+
+// discardTemp closes and removes an uncommitted temp file, logging failures.
+func discardTemp(ctx context.Context, f *os.File, path string) {
+	if cerr := f.Close(); cerr != nil && !errors.Is(cerr, os.ErrClosed) {
+		logger.WarnContext(ctx, "Failed to close dest file",
+			"path", path,
+			"error", cerr)
+	}
+
+	if rerr := os.Remove(path); rerr != nil && !os.IsNotExist(rerr) {
+		logger.WarnContext(ctx, "Failed to remove temp file",
+			"path", path,
+			"error", rerr)
+	}
 }
 
 // createExclusiveTemp creates a new file next to dst with O_EXCL (so it can
