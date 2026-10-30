@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
 	"slices"
 	"strings"
 
@@ -210,16 +211,9 @@ func (cm *ConfigManager) mapfileDrift(m plan.Mapfile) string {
 // rewriteDrift renders the template of r in memory and describes how the
 // target file differs from it ("" when content and mode already match).
 func (cm *ConfigManager) rewriteDrift(ctx context.Context, r *plan.Rewrite) (string, error) {
-	var out strings.Builder
-
-	srcPath := cm.mainConfig.BaseDir + "/" + r.Source
 	destPath := cm.mainConfig.BaseDir + "/" + r.Target
 
-	if _, err := cm.rewriteTransform(ctx, srcPath, &out); err != nil {
-		return "", fmt.Errorf("render %s: %w", r.Source, err)
-	}
-
-	mode, err := rewriteFileMode(r.Mode)
+	rendered, mode, err := cm.RenderRewrite(ctx, r)
 	if err != nil {
 		return "", err
 	}
@@ -235,13 +229,35 @@ func (cm *ConfigManager) rewriteDrift(ctx context.Context, r *plan.Rewrite) (str
 	}
 
 	switch {
-	case string(have) != out.String():
+	case !bytes.Equal(have, rendered):
 		return destPath + " content differs from the rendered template", nil
 	case info.Mode().Perm() != mode.Perm():
 		return fmt.Sprintf("%s mode %04o would become %04o", destPath, info.Mode().Perm(), mode.Perm()), nil
 	}
 
 	return "", nil
+}
+
+// RenderRewrite renders the template of r in memory, exactly as the executor
+// would write it, and returns the content and the file mode of the target. It
+// reads the template and the lookups only: nothing is written.
+func (cm *ConfigManager) RenderRewrite(
+	ctx context.Context, r *plan.Rewrite,
+) (content []byte, mode os.FileMode, err error) {
+	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
+
+	mode, err = rewriteFileMode(r.Mode)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	var out strings.Builder
+
+	if _, err = cm.rewriteTransform(ctx, cm.mainConfig.BaseDir+"/"+r.Source, &out); err != nil {
+		return nil, 0, fmt.Errorf("render %s: %w", r.Source, err)
+	}
+
+	return []byte(out.String()), mode, nil
 }
 
 // postconfDrift compares the effective value of the postfix parameter with the

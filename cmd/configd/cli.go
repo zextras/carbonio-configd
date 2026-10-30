@@ -36,6 +36,7 @@ type CLI struct {
 	TLS         TLSCmd                       `cmd:"" name:"tls" help:"Manage Carbonio mail mode (legacy zmtlsctl)"`
 	Rewrite     RewriteCmd                   `cmd:"" help:"Force configuration rewrite"`
 	Plan        PlanCmd                      `cmd:"" help:"Show what a rewrite would change, without changing anything"`
+	Shadow      ShadowCmd                    `cmd:"" help:"Run the cycle next to a real configd, without side effects"`
 	Release     ReleaseCmd                   `cmd:"" help:"Show Carbonio release and package versions"`
 	Completion  kongplete.InstallCompletions `cmd:"" help:"Install shell completions"`
 	Daemon      DaemonCmd                    `cmd:"" default:"1" hidden:""`
