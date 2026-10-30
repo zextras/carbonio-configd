@@ -173,7 +173,7 @@ configd localconfig -p
 Flags:
 
 ```
--m mode          Output mode: plain, shell, export, nokey, xml
+-m mode          Output mode: plain (default), shell, export, nokey, xml
 -k key           Key to retrieve (repeatable; omit for all keys)
 -q               Quiet mode (suppress warnings)
 -c path          Path to localconfig.xml (default: /opt/zextras/conf/localconfig.xml)
@@ -181,12 +181,32 @@ Flags:
 -d               Show default values instead of current
 -n               Show only keys changed from defaults
 -x               Expand variables (accepted for compatibility, always on)
--e               Edit: set key=value pairs
--u               Unset (remove) keys
+-e               Edit: set key=value pairs (all keys are validated first, then saved once)
+-u               Unset (remove) keys (all-or-nothing, like -e)
 -r               Set key to random password (use with -e)
 -f, --force      Allow editing protected keys (same as legacy zmlocalconfig -f)
 -p               Print config file path and exit
+-i, --info       Show documentation for the keys listed in [args] (all supported keys if none)
+--all            Like -i, including keys not marked as supported
+-l, --reload     Ask mailboxd (admin SOAP ReloadLocalConfigRequest) to reload its local config
 ```
+
+Every flag also has its legacy long name (`--config`, `--path`, `--default`, `--changed`,
+`--show`, `--format`, `--edit`, `--random`, `--unset`, `--force`, `--expand`, `--quiet`, `--info`,
+`--all`, `--reload`); the longer names `--config-path`, `--show-path`, `--show-defaults`,
+`--show-changed`, `--show-passwords` and `--mode` keep working.
+
+Option combinations follow the legacy `LocalConfigCLI.checkCompatibleOptions`; anything else
+fails with `option 'X' can not be used with option 'Y'` (or `invalid option 'X'`):
+
+| Main option | Also allowed |
+|---|---|
+| `-i`, `--all` | `-q` |
+| `-e` | `-q -f -r -c` |
+| `-u` | `-q -f -c` |
+| `-p` | `-q -c` |
+| `-n`, `-d`, none (print) | `-q -s -c -m -x` |
+| `-l` | not checked |
 
 ## systemd Integration
 

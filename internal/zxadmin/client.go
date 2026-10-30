@@ -220,16 +220,7 @@ func (c *Client) GetAllServicesStatus(ctx context.Context) ([]ModuleStatus, erro
 			return nil, fmt.Errorf("zxadmin: build status request: %w", err)
 		}
 
-		// Defensive flags: the request goes over HTTPS to localhost:7071 and is
-		// never seen by a browser, so HttpOnly/SameSite are no-ops here, but
-		// setting them costs nothing and keeps gosec happy.
-		req.AddCookie(&http.Cookie{
-			Name:     authCookieName,
-			Value:    token,
-			Secure:   true,
-			HttpOnly: true,
-			SameSite: http.SameSiteStrictMode,
-		})
+		req.AddCookie(authCookie(token))
 
 		return req, nil
 	})
@@ -274,6 +265,20 @@ func (c *Client) GetAllServicesStatus(ctx context.Context) ([]ModuleStatus, erro
 	}
 
 	return parseStatusResponse(raw)
+}
+
+// authCookie returns the admin auth-token cookie for token. The request goes
+// over HTTPS to localhost:7071 and is never seen by a browser, so
+// HttpOnly/SameSite are no-ops here, but setting them costs nothing and keeps
+// gosec happy.
+func authCookie(token string) *http.Cookie {
+	return &http.Cookie{
+		Name:     authCookieName,
+		Value:    token,
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	}
 }
 
 // doWithRetry sends the request built by newReq, retrying on network errors

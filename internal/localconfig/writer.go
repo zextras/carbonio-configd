@@ -6,9 +6,12 @@ package localconfig
 
 import (
 	"encoding/xml"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/user"
+	"slices"
 	"strconv"
 	"syscall"
 
@@ -30,70 +33,88 @@ func SaveLocalConfig(path string, lc *LocalConfig) error {
 	return atomicWrite(path, content)
 }
 
-// SetKey reads localconfig.xml, sets the given key to value, and writes back.
-// If the key doesn't exist, it is appended. File locking is used to prevent
-// concurrent write corruption.
-func SetKey(path, key, value string) error {
+// SetKeys reads localconfig.xml, applies every pair in order (a later pair
+// overrides an earlier one with the same name; unknown names are appended), and
+// writes the file once, so a batch is all-or-nothing like legacy
+// LocalConfig.set(...) x N followed by a single save(). A missing file is
+// created (legacy starts from an empty config). File locking is used to
+// prevent concurrent write corruption.
+func SetKeys(path string, pairs []Key) error {
 	return withFileLock(path, func() error {
-		lc, err := readLocalConfigXML(path)
+		lc, err := readOrEmptyLocalConfig(path)
 		if err != nil {
 			return err
 		}
 
-		found := false
-
-		for i := range lc.Keys {
-			if lc.Keys[i].Name == key {
-				lc.Keys[i].Value = value
-				found = true
-
-				break
-			}
-		}
-
-		if !found {
-			lc.Keys = append(lc.Keys, Key{Name: key, Value: value})
+		for _, pair := range pairs {
+			setKey(lc, pair)
 		}
 
 		return SaveLocalConfig(path, lc)
 	})
 }
 
-// RemoveKey reads localconfig.xml and removes the given key.
-// If the key has a compiled-in default, its value is set to empty string instead.
-// Returns an error if the key is not found in the file.
-func RemoveKey(path, key string) error {
+// readOrEmptyLocalConfig is readLocalConfigXML, except that a missing file is an
+// empty config.
+func readOrEmptyLocalConfig(path string) (*LocalConfig, error) {
+	lc, err := readLocalConfigXML(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return &LocalConfig{}, nil
+	}
+
+	return lc, err
+}
+
+// setKey sets pair.Name to pair.Value in lc, appending the key when absent.
+func setKey(lc *LocalConfig, pair Key) {
+	for i := range lc.Keys {
+		if lc.Keys[i].Name == pair.Name {
+			lc.Keys[i].Value = pair.Value
+
+			return
+		}
+	}
+
+	lc.Keys = append(lc.Keys, pair)
+}
+
+// KeyNotSetError reports a key that is neither configured in localconfig.xml nor
+// a known key with a compiled-in default (legacy LocalConfig.isSet is false).
+type KeyNotSetError struct{ Key string }
+
+func (e *KeyNotSetError) Error() string { return "key " + e.Key + " is not set" }
+
+// RemoveKeys removes every named key from localconfig.xml and writes the file
+// once. Like legacy LocalConfig.remove, the entry is dropped from the file, so a
+// known key falls back to its compiled-in default; a known key that is not in
+// the file is a no-op (legacy isSet is true for known keys). A key that is
+// neither configured nor known yields a *KeyNotSetError and nothing is written
+// (legacy does all removals in memory before the single save). A missing file
+// counts as an empty config and is created.
+func RemoveKeys(path string, keys []string) error {
 	return withFileLock(path, func() error {
-		lc, err := readLocalConfigXML(path)
+		lc, err := readOrEmptyLocalConfig(path)
 		if err != nil {
 			return err
 		}
 
-		found := false
-
-		for i := range lc.Keys {
-			if lc.Keys[i].Name != key {
-				continue
+		for _, key := range keys {
+			if !removeKey(lc, key) && !IsKnownKey(key) {
+				return &KeyNotSetError{Key: key}
 			}
-
-			found = true
-
-			// If key has a default, set to empty instead of removing
-			if _, hasDefault := Defaults[key]; hasDefault {
-				lc.Keys[i].Value = ""
-			} else {
-				lc.Keys = append(lc.Keys[:i], lc.Keys[i+1:]...)
-			}
-
-			break
-		}
-
-		if !found {
-			return fmt.Errorf("key %s is not set", key)
 		}
 
 		return SaveLocalConfig(path, lc)
 	})
+}
+
+// removeKey drops key from lc and reports whether it was present.
+func removeKey(lc *LocalConfig, key string) bool {
+	before := len(lc.Keys)
+
+	lc.Keys = slices.DeleteFunc(lc.Keys, func(k Key) bool { return k.Name == key })
+
+	return len(lc.Keys) != before
 }
 
 // readLocalConfigXML reads and parses localconfig.xml preserving the full struct.
@@ -146,8 +167,9 @@ func withFileLock(path string, fn func() error) error {
 	}
 
 	defer func() {
+		// The lock file is intentionally never unlinked: removing it would let
+		// two processes hold the "exclusive" lock on different inodes.
 		_ = lockFile.Close()
-		_ = os.Remove(lockPath)
 	}()
 
 	// If running as root, ensure lock file is owned by zextras

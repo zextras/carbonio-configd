@@ -5,6 +5,7 @@
 package localconfig
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
@@ -29,10 +30,20 @@ func createTestConfig(t *testing.T) string {
 	return path
 }
 
+// setOne sets a single key through the batch API.
+func setOne(path, key, value string) error {
+	return SetKeys(path, []Key{{Name: key, Value: value}})
+}
+
+// removeOne removes a single key through the batch API.
+func removeOne(path, key string) error {
+	return RemoveKeys(path, []string{key})
+}
+
 func TestSetKey_NewKey(t *testing.T) {
 	path := createTestConfig(t)
 
-	err := SetKey(path, "new_key", "new_value")
+	err := setOne(path, "new_key", "new_value")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -50,7 +61,7 @@ func TestSetKey_NewKey(t *testing.T) {
 func TestSetKey_OverwriteExisting(t *testing.T) {
 	path := createTestConfig(t)
 
-	err := SetKey(path, "smtp_port", "587")
+	err := setOne(path, "smtp_port", "587")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -68,7 +79,7 @@ func TestSetKey_OverwriteExisting(t *testing.T) {
 func TestSetKey_PreservesOtherKeys(t *testing.T) {
 	path := createTestConfig(t)
 
-	err := SetKey(path, "smtp_port", "587")
+	err := setOne(path, "smtp_port", "587")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -86,7 +97,7 @@ func TestSetKey_PreservesOtherKeys(t *testing.T) {
 func TestRemoveKey_Existing(t *testing.T) {
 	path := createTestConfig(t)
 
-	err := RemoveKey(path, "smtp_port")
+	err := removeOne(path, "smtp_port")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -104,24 +115,23 @@ func TestRemoveKey_Existing(t *testing.T) {
 func TestRemoveKey_Nonexistent(t *testing.T) {
 	path := createTestConfig(t)
 
-	err := RemoveKey(path, "nonexistent")
-	if err == nil {
-		t.Error("expected error for nonexistent key")
+	err := removeOne(path, "nonexistent")
+
+	var notSet *KeyNotSetError
+	if !errors.As(err, &notSet) || notSet.Key != "nonexistent" {
+		t.Errorf("expected KeyNotSetError for nonexistent, got %v", err)
 	}
 }
 
 func TestRemoveKey_WithDefault(t *testing.T) {
 	path := createTestConfig(t)
 
-	// Set a key that has a compiled-in default
-	err := SetKey(path, "zimbra_home", "/custom/path")
-	if err != nil {
+	if err := setOne(path, "zimbra_home", "/custom/path"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Removing should set to empty, not delete
-	err = RemoveKey(path, "zimbra_home")
-	if err != nil {
+	// Legacy LocalConfig.remove drops the entry; it never writes "".
+	if err := removeOne(path, "zimbra_home"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -130,20 +140,34 @@ func TestRemoveKey_WithDefault(t *testing.T) {
 		t.Fatalf("failed to reload: %v", err)
 	}
 
-	val, ok := config["zimbra_home"]
-	if !ok {
-		t.Error("expected zimbra_home to still exist (has default)")
+	if val, ok := config["zimbra_home"]; ok {
+		t.Errorf("expected zimbra_home to be dropped from the file, got %q", val)
+	}
+}
+
+// A known key that is not in the file is "set" for legacy isSet(): removing it
+// is a successful no-op and nothing like an empty value is written.
+func TestRemoveKey_KnownButUnset(t *testing.T) {
+	path := createTestConfig(t)
+
+	if err := removeOne(path, "zimbra_java_home"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if val != "" {
-		t.Errorf("expected empty value, got %q", val)
+	config, err := LoadLocalConfigFromFile(path)
+	if err != nil {
+		t.Fatalf("failed to reload: %v", err)
+	}
+
+	if val, ok := config["zimbra_java_home"]; ok {
+		t.Errorf("known key must not be written, got %q", val)
 	}
 }
 
 func TestSetKey_EmptyValue(t *testing.T) {
 	path := createTestConfig(t)
 
-	err := SetKey(path, "smtp_port", "")
+	err := setOne(path, "smtp_port", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -163,7 +187,7 @@ func TestSetKey_SpecialCharacters(t *testing.T) {
 
 	value := `it's a "test" with <xml> & special chars`
 
-	err := SetKey(path, "special", value)
+	err := setOne(path, "special", value)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -192,7 +216,7 @@ func TestSetKey_ConcurrentWrites(t *testing.T) {
 			key := "concurrent_key"
 			value := string(rune('A' + idx))
 
-			_ = SetKey(path, key, value)
+			_ = setOne(path, key, value)
 		}(i)
 	}
 
@@ -235,7 +259,7 @@ func TestSaveLocalConfig_AtomicWrite(t *testing.T) {
 }
 
 func TestSetKey_FileNotFound(t *testing.T) {
-	err := SetKey("/nonexistent/path/localconfig.xml", "key", "value")
+	err := setOne("/nonexistent/path/localconfig.xml", "key", "value")
 	if err == nil {
 		t.Error("expected error for nonexistent file")
 	}
@@ -243,15 +267,39 @@ func TestSetKey_FileNotFound(t *testing.T) {
 
 // --- readLocalConfigXML ---
 
-func TestReadLocalConfigXML_FileNotFound(t *testing.T) {
-	// The parent dir must exist so withFileLock can create its lock file,
-	// but the config file itself must be absent so readLocalConfigXML errors.
-	dir := t.TempDir()
-	path := filepath.Join(dir, "localconfig.xml")
+// Legacy starts from an empty config when the file is missing, and -e then
+// creates it.
+func TestSetKeys_MissingFileIsCreated(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "localconfig.xml")
 
-	err := SetKey(path, "k", "v")
-	if err == nil {
-		t.Error("expected error for missing config file")
+	if err := setOne(path, "k", "v"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	config, err := LoadLocalConfigFromFile(path)
+	if err != nil {
+		t.Fatalf("failed to reload: %v", err)
+	}
+
+	if config["k"] != "v" {
+		t.Errorf("expected k=v in created file, got %v", config)
+	}
+}
+
+func TestRemoveKeys_MissingFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "localconfig.xml")
+
+	var notSet *KeyNotSetError
+	if err := removeOne(path, "nope"); !errors.As(err, &notSet) {
+		t.Fatalf("unknown key on a missing file must be 'not set', got %v", err)
+	}
+
+	if _, err := os.Stat(path); err == nil {
+		t.Error("a failed unset must not create the file")
+	}
+
+	if err := removeOne(path, "zimbra_java_home"); err != nil {
+		t.Fatalf("known key must be a no-op, got %v", err)
 	}
 }
 
@@ -263,7 +311,7 @@ func TestReadLocalConfigXML_InvalidXML(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := SetKey(path, "k", "v")
+	err := setOne(path, "k", "v")
 	if err == nil {
 		t.Error("expected error for invalid XML")
 	}
@@ -277,7 +325,7 @@ func TestRemoveKey_InvalidXML(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := RemoveKey(path, "k")
+	err := removeOne(path, "k")
 	if err == nil {
 		t.Error("expected error for invalid XML")
 	}
@@ -361,6 +409,18 @@ func TestAtomicWrite_PreservesPermissions(t *testing.T) {
 	}
 }
 
+func TestWithFileLock_KeepsLockFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "localconfig.xml")
+
+	if err := withFileLock(path, func() error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(path + ".lock"); err != nil {
+		t.Errorf("lock file must persist after unlock: %v", err)
+	}
+}
+
 // --- withFileLock ---
 
 func TestWithFileLock_OpenError(t *testing.T) {
@@ -391,5 +451,64 @@ func TestEnsureZextrasOwnership_NonRoot(t *testing.T) {
 	// Non-root: function must return nil immediately without touching the file.
 	if err := ensureZextrasOwnership(path); err != nil {
 		t.Errorf("unexpected error for non-root user: %v", err)
+	}
+}
+
+// --- batch semantics (legacy: mutate in memory, save once) ---
+
+func TestSetKeys_AppliesAllInOrder(t *testing.T) {
+	path := createTestConfig(t)
+
+	err := SetKeys(path, []Key{
+		{Name: "smtp_port", Value: "587"},
+		{Name: "added", Value: "one"},
+		{Name: "added", Value: "two"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	config, err := LoadLocalConfigFromFile(path)
+	if err != nil {
+		t.Fatalf("failed to reload: %v", err)
+	}
+
+	if config["smtp_port"] != "587" || config["added"] != "two" {
+		t.Errorf("unexpected config after batch set: %v", config)
+	}
+}
+
+func TestRemoveKeys_AllOrNothing(t *testing.T) {
+	path := createTestConfig(t)
+
+	err := RemoveKeys(path, []string{"smtp_port", "nonexistent"})
+	if err == nil || err.Error() != "key nonexistent is not set" {
+		t.Fatalf("expected 'key nonexistent is not set', got %v", err)
+	}
+
+	config, err := LoadLocalConfigFromFile(path)
+	if err != nil {
+		t.Fatalf("failed to reload: %v", err)
+	}
+
+	if config["smtp_port"] != "25" {
+		t.Errorf("smtp_port must survive a failed batch, got %q", config["smtp_port"])
+	}
+}
+
+func TestRemoveKeys_RemovesAll(t *testing.T) {
+	path := createTestConfig(t)
+
+	if err := RemoveKeys(path, []string{"smtp_port", "zimbra_home"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	config, err := LoadLocalConfigFromFile(path)
+	if err != nil {
+		t.Fatalf("failed to reload: %v", err)
+	}
+
+	if _, ok := config["smtp_port"]; ok {
+		t.Error("expected smtp_port to be removed")
 	}
 }

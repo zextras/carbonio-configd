@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -598,5 +599,83 @@ func TestGetAllServicesStatus_NoRetryOn401(t *testing.T) {
 
 	if statusCalls != 1 {
 		t.Errorf("statusCalls=%d, want 1 (401 must not be retried)", statusCalls)
+	}
+}
+
+func TestReloadLocalConfig_SendsReloadRequestWithToken(t *testing.T) {
+	var gotBody, gotCookie string
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(soapPath, func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(raw), "AuthRequest") {
+			_, _ = w.Write([]byte(goodAuthResponse))
+
+			return
+		}
+
+		gotBody = string(raw)
+
+		if ck, err := r.Cookie(authCookieName); err == nil {
+			gotCookie = ck.Value
+		}
+
+		_, _ = w.Write([]byte(`<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">` +
+			`<soap:Body><ReloadLocalConfigResponse xmlns="urn:zimbraAdmin"/></soap:Body></soap:Envelope>`))
+	})
+
+	srv := httptest.NewTLSServer(mux)
+	defer srv.Close()
+
+	if err := newTestClient(t, srv).ReloadLocalConfig(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(gotBody, `<ReloadLocalConfigRequest xmlns="urn:zimbraAdmin"`) {
+		t.Errorf("body is not a ReloadLocalConfigRequest: %q", gotBody)
+	}
+
+	if gotCookie != "fake-token-xyz" {
+		t.Errorf("auth cookie = %q, want fake-token-xyz", gotCookie)
+	}
+}
+
+func TestReloadLocalConfig_AuthRejectedDropsToken(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc(soapPath, func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(raw), "AuthRequest") {
+			_, _ = w.Write([]byte(goodAuthResponse))
+
+			return
+		}
+
+		w.WriteHeader(http.StatusUnauthorized)
+	})
+
+	srv := httptest.NewTLSServer(mux)
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+
+	if err := c.ReloadLocalConfig(context.Background()); err == nil {
+		t.Fatal("expected error on HTTP 401")
+	}
+
+	if c.token != "" {
+		t.Error("token must be dropped after the server rejected it")
+	}
+}
+
+func TestReloadLocalConfig_ServerRefusedConnection(t *testing.T) {
+	srv := httptest.NewTLSServer(http.NewServeMux())
+	url := srv.URL
+	srv.Close()
+
+	c := NewWithBaseURL(url, map[string]string{"zimbra_ldap_password": "secret"})
+
+	err := c.ReloadLocalConfig(context.Background())
+	if !errors.Is(err, syscall.ECONNREFUSED) {
+		t.Fatalf("error must unwrap to ECONNREFUSED, got %v", err)
 	}
 }
