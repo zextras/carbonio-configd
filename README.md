@@ -176,7 +176,7 @@ Flags:
 -m mode          Output mode: plain, shell, export, nokey, xml
 -k key           Key to retrieve (repeatable; omit for all keys)
 -q               Quiet mode (suppress warnings)
--f path          Path to localconfig.xml (default: /opt/zextras/conf/localconfig.xml)
+-c path          Path to localconfig.xml (default: /opt/zextras/conf/localconfig.xml)
 -s               Show password values (default: masked)
 -d               Show default values instead of current
 -n               Show only keys changed from defaults
@@ -184,7 +184,7 @@ Flags:
 -e               Edit: set key=value pairs
 -u               Unset (remove) keys
 -r               Set key to random password (use with -e)
--force           Allow editing dangerous keys
+-f, --force      Allow editing protected keys (same as legacy zmlocalconfig -f)
 -p               Print config file path and exit
 ```
 

@@ -113,17 +113,16 @@ type localconfigOpts struct {
 	keys          []string
 }
 
-// dangerousKeys lists keys that require -force to edit.
+// dangerousKeys lists keys that require -force to edit. It mirrors the keys
+// marked .protect() in the legacy LC.java (KnownKey.needForceToEdit), so
+// scripts that edit other keys without -f keep working.
 var dangerousKeys = map[string]bool{
-	lcKeyZimbraLDAPPassword:                true,
-	lcKeyLDAPRootPassword:                  true,
-	"zimbra_mysql_password":                true,
-	"mysql_root_password":                  true,
-	lcKeyZimbraLDAPUserDN:                  true,
-	lcKeyLDAPURL:                           true,
-	lcKeyLDAPMasterURL:                     true,
-	lcKeyZimbraServerHostname:              true,
-	"zimbra_require_interprocess_security": true,
+	"zimbra_home":           true,
+	"zimbra_mysql_password": true,
+	lcKeyZimbraLDAPPassword: true,
+	lcKeyLDAPRootPassword:   true,
+	"mysql_root_password":   true,
+	"zimbra_vami_password":  true,
 }
 
 func handleEdit(opts *localconfigOpts) {
