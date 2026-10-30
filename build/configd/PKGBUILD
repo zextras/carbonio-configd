@@ -14,13 +14,6 @@ url="https://github.com/zextras"
 section="mail"
 priority="optional"
 options=('!strip')
-# UPX is x86_64-only: host-side tool; aarch64 cross-builds get upx:arm64.
-makedepends_x86_64=(
-  'upx'
-)
-makedepends_x86_64__apt=(
-  'upx-ucl'
-)
 depends__apt=(
   "libsystemd0"
   "polkitd"
@@ -93,11 +86,6 @@ build() {
   cd "${repodir}"
   CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
     -o "${srcdir}/configd" ./cmd/configd/
-
-  # UPX (~70% smaller) only on x86_64; skip on aarch64 cross-build.
-  if [ "${CARCH}" = "x86_64" ]; then
-    upx "${srcdir}/configd"
-  fi
 }
 
 package() {
