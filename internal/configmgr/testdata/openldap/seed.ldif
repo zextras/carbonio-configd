@@ -1,0 +1,75 @@
+# SPDX-FileCopyrightText: 2026 Zextras <https://www.zextras.com>
+#
+# SPDX-License-Identifier: AGPL-3.0-only
+#
+# Sanitized Carbonio directory for the configd integration tests: the data
+# subtree, the global config, one server that overrides some inherited
+# attributes and one that overrides none, and two domains. Hostnames, ids and
+# values are synthetic.
+dn: cn=zimbra
+objectClass: organizationalRole
+cn: zimbra
+
+dn: cn=admins,cn=zimbra
+objectClass: organizationalRole
+cn: admins
+
+dn: cn=servers,cn=zimbra
+objectClass: organizationalRole
+cn: servers
+
+dn: cn=config,cn=zimbra
+objectClass: organizationalRole
+objectClass: zimbraGlobalConfig
+cn: config
+zimbraLDAPSchemaVersion: 1
+zimbraMailMode: https
+zimbraMailSSLPort: 443
+zimbraMilterBindPort: 7026
+zimbraMilterServerEnabled: TRUE
+zimbraMtaMaxMessageSize: 10240000
+zimbraMtaMyNetworks: 127.0.0.0/8 [::1]/128
+zimbraMtaRestriction: reject_non_fqdn_sender
+zimbraMtaRestriction: reject_unknown_client_hostname
+zimbraSSLExcludeCipherSuites: TLS_RSA_WITH_AES_128_CBC_SHA
+zimbraSSLExcludeCipherSuites: SSL_RSA_WITH_RC4_128_MD5
+
+dn: cn=mail.test.example,cn=servers,cn=zimbra
+objectClass: zimbraServer
+cn: mail.test.example
+zimbraId: 11111111-2222-3333-4444-555555555555
+zimbraServiceHostname: mail.test.example
+zimbraServiceEnabled: mailbox
+zimbraServiceEnabled: mta
+zimbraServiceEnabled: proxy
+zimbraServiceEnabled: ldap
+zimbraMilterServerEnabled: FALSE
+zimbraReverseProxyLookupTarget: TRUE
+
+dn: cn=other.test.example,cn=servers,cn=zimbra
+objectClass: zimbraServer
+cn: other.test.example
+zimbraId: 66666666-7777-8888-9999-000000000000
+zimbraServiceHostname: other.test.example
+zimbraServiceEnabled: mailbox
+
+dn: dc=test.example
+objectClass: dcObject
+objectClass: organization
+objectClass: zimbraDomain
+dc: test.example
+o: test.example
+zimbraId: aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
+zimbraDomainName: test.example
+zimbraDomainType: local
+zimbraVirtualHostname: mail.test.example
+
+dn: dc=alias.example
+objectClass: dcObject
+objectClass: organization
+objectClass: zimbraDomain
+dc: alias.example
+o: alias.example
+zimbraId: ffffffff-eeee-dddd-cccc-bbbbbbbbbbbb
+zimbraDomainName: alias.example
+zimbraDomainType: alias
