@@ -7,6 +7,8 @@ package commands
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -215,4 +217,50 @@ func TestLDAPCommands_NilClient(t *testing.T) {
 
 	_, err = e.garpb(ctx)
 	assert.ErrorContains(t, err, errLDAPNotInitialized)
+}
+
+// TestServerListCommands_StableOrder checks that garpu, garpb and gamau return
+// the same server order (by server name, as legacy getAllServers) on every
+// call. Go map iteration is random: an unstable order makes configd see a
+// "Variable changed" and restart proxy/mta/sasl with no real change.
+func TestServerListCommands_StableOrder(t *testing.T) {
+	servers := map[string]map[string]string{}
+	for _, n := range []string{"srv4", "srv1", "srv5", "srv3", "srv2"} {
+		servers[n] = map[string]string{
+			"zimbraServiceHostname":          n + ".example.com",
+			"zimbraReverseProxyLookupTarget": "TRUE",
+			"zimbraMtaAuthTarget":            "TRUE",
+			"zimbraMailMode":                 "http",
+			"zimbraMailPort":                 "8080",
+		}
+	}
+
+	e := &CommandExecutor{ldapClient: &stubProvisioningLDAP{allServers: servers}}
+	hosts := []string{"srv1", "srv2", "srv3", "srv4", "srv5"}
+
+	join := func(format string) string {
+		parts := make([]string, len(hosts))
+		for i, h := range hosts {
+			parts[i] = fmt.Sprintf(format, h+".example.com")
+		}
+
+		return strings.Join(parts, " ")
+	}
+
+	for name, tc := range map[string]struct {
+		run  func(context.Context, ...string) (string, error)
+		want string
+	}{
+		"garpu": {e.garpu, join("%s:7072/service/extension/nginx-lookup")},
+		"garpb": {e.garpb, join("%s:8080")},
+		"gamau": {e.gamau, join("https://%s:7073/service/admin/soap/")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			for range 50 {
+				out, err := tc.run(context.Background())
+				require.NoError(t, err)
+				require.Equal(t, tc.want, out)
+			}
+		})
+	}
 }

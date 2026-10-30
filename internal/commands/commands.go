@@ -12,8 +12,11 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"iter"
+	"maps"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 
@@ -337,6 +340,20 @@ func getlocal(ctx context.Context, args ...string) (string, error) {
 	return output, nil
 }
 
+// sortedServers yields server attribute maps ordered by server name (cn).
+// Go map iteration order is random; without a stable order the joined server
+// lists change between cycles and trigger spurious rewrites and restarts.
+// Legacy LdapProvisioning.getAllServers sorts by name as well.
+func sortedServers(servers map[string]map[string]string) iter.Seq2[string, map[string]string] {
+	return func(yield func(string, map[string]string) bool) {
+		for _, name := range slices.Sorted(maps.Keys(servers)) {
+			if !yield(name, servers[name]) {
+				return
+			}
+		}
+	}
+}
+
 // getAllServersWithAttribute is a generic helper function that queries all servers
 // with a specific attribute set to TRUE and builds URLs using the provided format.
 func (e *CommandExecutor) getAllServersWithAttribute(
@@ -359,7 +376,7 @@ func (e *CommandExecutor) getAllServersWithAttribute(
 	var urls []string
 
 	// Iterate through servers and check for the attribute
-	for _, serverAttrs := range servers {
+	for _, serverAttrs := range sortedServers(servers) {
 		// Get hostname
 		hostname, ok := serverAttrs[zimbraServiceHostname]
 		if !ok || hostname == "" {
@@ -398,7 +415,7 @@ func (e *CommandExecutor) gamau(ctx context.Context, args ...string) (string, er
 
 	var urls []string
 
-	for _, attrs := range servers {
+	for _, attrs := range sortedServers(servers) {
 		hostname := attrs[zimbraServiceHostname]
 		if hostname == "" {
 			continue
@@ -485,7 +502,7 @@ func (e *CommandExecutor) garpb(ctx context.Context, args ...string) (string, er
 
 	var backends []string
 
-	for _, serverAttrs := range servers {
+	for _, serverAttrs := range sortedServers(servers) {
 		if url, ok := buildBackendURL(serverAttrs); ok {
 			backends = append(backends, url)
 		}
