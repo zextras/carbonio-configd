@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"os"
 	"os/exec"
 	"strings"
@@ -243,22 +244,85 @@ func TestEnsureZextrasPerlEnv_PerlNotAvailable(t *testing.T) {
 	}
 }
 
-func TestHandleForcedConfigs_NoForcedConfigs(t *testing.T) {
-	os.Setenv("CONFIGD_LOG_FORMAT", "text")
-	os.Setenv("CONFIGD_LOG_LEVEL", "error")
-	defer os.Unsetenv("CONFIGD_LOG_FORMAT")
-	defer os.Unsetenv("CONFIGD_LOG_LEVEL")
-
-	initializeLogging()
-
-	_, appState, _ := initializeConfig()
-
-	args := &Args{}
-	if args.HasForcedConfigs() {
-		t.Error("expected no forced configs")
+// TestRewriteViaDaemon covers the legacy configrewrite contract: a reachable
+// daemon gets the REWRITE request and nothing runs in-process; an unreachable
+// or failing daemon falls back to a standalone rewrite whose exit code is
+// returned, instead of failing the caller (zmtlsctl, zmproxyctl, rewrite).
+func TestRewriteViaDaemon(t *testing.T) {
+	tests := []struct {
+		name           string
+		reply          string // "" = no listener on the port
+		wantStandalone bool
+		wantCode       int
+	}{
+		{name: "daemon accepts", reply: "SUCCESS REWRITE\n", wantStandalone: false, wantCode: 0},
+		{name: "daemon not running", reply: "", wantStandalone: true, wantCode: 3},
+		{name: "daemon answers error", reply: "ERROR busy\n", wantStandalone: true, wantCode: 3},
 	}
 
-	handleForcedConfigs(context.Background(), args, appState)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			port := fakeDaemon(t, tt.reply)
+
+			var gotArgs *Args
+
+			standalone := func(_ context.Context, a *Args) int {
+				gotArgs = a
+
+				return 3
+			}
+
+			args := &Args{ForcedConfigs: []string{"proxy", "mta"}}
+			code := rewriteViaDaemon(context.Background(), args, port, ipModeIPv4, standalone)
+
+			if code != tt.wantCode {
+				t.Errorf("exit code = %d, want %d", code, tt.wantCode)
+			}
+
+			if (gotArgs != nil) != tt.wantStandalone {
+				t.Fatalf("standalone ran = %v, want %v", gotArgs != nil, tt.wantStandalone)
+			}
+
+			if gotArgs != nil && strings.Join(gotArgs.ForcedConfigs, " ") != "proxy mta" {
+				t.Errorf("standalone configs = %v, want [proxy mta]", gotArgs.ForcedConfigs)
+			}
+		})
+	}
+}
+
+// fakeDaemon returns a port where one connection is answered with reply, or a
+// port with nothing listening when reply is empty.
+func fakeDaemon(t *testing.T, reply string) int {
+	t.Helper()
+
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	port := ln.Addr().(*net.TCPAddr).Port
+
+	if reply == "" {
+		_ = ln.Close()
+
+		return port
+	}
+
+	t.Cleanup(func() { _ = ln.Close() })
+
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		buf := make([]byte, 256)
+		_, _ = conn.Read(buf)
+		_, _ = conn.Write([]byte(reply))
+	}()
+
+	return port
 }
 
 func TestSetupProfilingAndTracing_TracingEnabled(t *testing.T) {

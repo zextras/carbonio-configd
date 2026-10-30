@@ -81,20 +81,15 @@ type RewriteCmd struct {
 
 // Run executes the rewrite command.
 //
-//nolint:unparam // Kong interface requires error return; handleForcedConfigs calls os.Exit
+//nolint:unparam // Kong interface requires error return; failures exit with their code
 func (c *RewriteCmd) Run(_ *CLI) error {
 	requireZextras()
 
 	ctx := initializeLogging()
-	ctx = logger.ContextWithComponent(ctx, "main")
 
-	_, appState, _ := initializeConfig()
-
-	args := &Args{
-		ForcedConfigs: c.ConfigNames,
+	if code := forcedRewrite(ctx, &Args{ForcedConfigs: c.ConfigNames}, runStandaloneRewrite); code != 0 {
+		os.Exit(code)
 	}
-
-	handleForcedConfigs(ctx, args, appState)
 
 	return nil
 }

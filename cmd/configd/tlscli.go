@@ -70,9 +70,7 @@ func (c *TLSCmd) Run(cli *CLI) error {
 		}
 	}
 
-	// Step 3: rewrite affected configs in-process (same path as `configd rewrite`).
-	_, appState, _ := initializeConfig()
-
+	// Step 3: rewrite affected configs (same path as `configd rewrite`).
 	args := &Args{
 		DisableRestarts: cli.DisableRestarts,
 		ForcedConfigs:   rewriteConfigs,
@@ -81,7 +79,9 @@ func (c *TLSCmd) Run(cli *CLI) error {
 	// Legacy tlsctl.sh prints this fixed text (no newline) before "done.".
 	fmt.Print("Rewriting config files for cyrus-sasl, webxml, mailboxd, service, zimbraUI, and zimbraAdmin...")
 
-	handleForcedConfigs(ctx, args, appState)
+	if code := forcedRewrite(ctx, args, runStandaloneRewrite); code != 0 {
+		os.Exit(code)
+	}
 
 	fmt.Println("done.")
 
