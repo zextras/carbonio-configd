@@ -12,18 +12,22 @@ func (g *Generator) registerMemcacheVariables() {
 		withDescription("List of memcache servers"),
 		withCustomResolver(g.resolveMemcacheServers),
 	)
-	g.registerVar("memcache.timeout", "3000",
-		withAttribute("zimbraMemcachedClientTimeoutMillis"),
-		withValueType(ValueTypeInteger),
+	g.registerVar("memcache.timeout", "3000ms",
+		withAttribute("zimbraReverseProxyCacheFetchTimeout"),
+		withValueType(ValueTypeTime),
 		withOverrideType(OverrideConfig),
-		withDescription("Timeout for memcache connections (in milliseconds, no unit suffix)"),
+		withDescription("Time given to a cache-fetch operation to complete"),
 	)
 	g.registerVar("memcache.reconnect", "60000ms",
+		withAttribute("zimbraReverseProxyCacheReconnectInterval"),
 		withValueType(ValueTypeTime),
+		withOverrideType(OverrideConfig),
 		withDescription("Memcache server reconnect interval"),
 	)
 	g.registerVar("memcache.ttl", "3600000ms",
+		withAttribute("zimbraReverseProxyCacheEntryTTL"),
 		withValueType(ValueTypeTime),
+		withOverrideType(OverrideConfig),
 		withDescription("Memcache entry time-to-live"),
 	)
 	g.registerVar("memcache.servers", []string{},

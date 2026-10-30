@@ -54,11 +54,11 @@ func (g *Generator) registerWebPortVariables() {
 	)
 
 	// web.admin.port - Admin console HTTP port
-	g.registerVar("web.admin.port", 7071,
-		withAttribute("zimbraAdminPort"),
+	g.registerVar("web.admin.port", 9071,
+		withAttribute("zimbraAdminProxyPort"),
 		withValueType(ValueTypeInteger),
-		withOverrideType(OverrideConfig),
-		withDescription("Admin console HTTP port"),
+		withOverrideType(OverrideServer),
+		withDescription("Admin console proxy port"),
 	)
 
 	// web.admin.uiport - Admin UI port
@@ -70,11 +70,11 @@ func (g *Generator) registerWebPortVariables() {
 	)
 
 	// web.admin.uport - Admin console upstream port
-	g.registerVar("web.admin.uport", 9071,
-		withAttribute("zimbraAdminProxyPort"),
+	g.registerVar("web.admin.uport", 7071,
+		withAttribute("zimbraAdminPort"),
 		withValueType(ValueTypeInteger),
-		withOverrideType(OverrideConfig),
-		withDescription("Admin console upstream proxy port"),
+		withOverrideType(OverrideServer),
+		withDescription("Admin console upstream port"),
 	)
 
 	// web.carbonio.admin.port - Carbonio Admin UI proxy port
@@ -91,7 +91,7 @@ func (g *Generator) registerWebUpstreamNameVariables() {
 	// web.mailmode - Reverse proxy mail mode (https|redirect|both)
 	g.registerVar("web.mailmode", "https",
 		withAttribute("zimbraReverseProxyMailMode"),
-		withOverrideType(OverrideConfig),
+		withOverrideType(OverrideServer),
 		withValueType(ValueTypeString),
 		withDescription("Reverse Proxy Mail Mode - can be https|redirect|both"),
 	)
@@ -360,7 +360,7 @@ func (g *Generator) registerWebMiscVariables() {
 	g.registerVar("web.enabled", false,
 		withAttribute("zimbraReverseProxyHttpEnabled"),
 		withValueType(ValueTypeEnabler),
-		withOverrideType(OverrideConfig),
+		withOverrideType(OverrideServer),
 		withDescription("Indicates whether HTTP/HTTPS web proxy is enabled"),
 	)
 
@@ -384,7 +384,7 @@ func (g *Generator) registerWebMiscVariables() {
 	g.registerVar("web.admin.default.enabled", false,
 		withAttribute("zimbraReverseProxyAdminEnabled"),
 		withValueType(ValueTypeEnabler),
-		withOverrideType(OverrideConfig),
+		withOverrideType(OverrideServer),
 		withDescription("Indicates whether admin console proxy is enabled"),
 	)
 

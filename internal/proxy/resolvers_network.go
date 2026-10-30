@@ -164,7 +164,7 @@ func (g *Generator) resolveLookupTargetAvailable(ctx context.Context) (any, erro
 // resolveWebUpstreamTargetAvailable returns "true" if web upstream targets exist
 // Checks if there are any mailbox servers with HTTP service enabled
 func (g *Generator) resolveWebUpstreamTargetAvailable(ctx context.Context) (any, error) {
-	servers, err := g.getAllReverseProxyBackends(ctx)
+	servers, err := g.reverseProxyBackendsRaw(ctx, false)
 	if err != nil {
 		// If we can't get backends, assume none are available (fail safe)
 		// We return nil error because this is a variable resolution, not a fatal error

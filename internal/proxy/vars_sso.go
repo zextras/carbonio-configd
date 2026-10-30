@@ -30,8 +30,8 @@ func (g *Generator) registerSSOVariables() {
 		withOverrideType(OverrideConfig),
 		withDescription("Enable certificate-based authentication for SSO on default virtual host"),
 	)
-	g.registerVar("web.sso.certauth.port", 9443,
-		withAttribute("zimbraMailProxyPort"),
+	g.registerVar("web.sso.certauth.port", 0,
+		withAttribute("zimbraMailSSLProxyClientCertPort"),
 		withValueType(ValueTypeInteger),
 		withOverrideType(OverrideServer),
 		withDescription("Port for SSO certificate authentication"),

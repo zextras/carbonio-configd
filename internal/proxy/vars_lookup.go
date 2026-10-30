@@ -40,17 +40,19 @@ func (g *Generator) registerLookupVariables() {
 	g.registerVar("zmlookup.timeout", "15000ms",
 		withAttribute("zimbraReverseProxyRouteLookupTimeout"),
 		withValueType(ValueTypeTime),
-		withOverrideType(OverrideConfig),
+		withOverrideType(OverrideServer),
 		withDescription("Timeout for route lookup operations"),
 	)
 	g.registerVar("zmlookup.retryinterval", "60000ms",
+		withAttribute("zimbraReverseProxyRouteLookupTimeoutCache"),
 		withValueType(ValueTypeTime),
+		withOverrideType(OverrideServer),
 		withDescription("Interval to retry failed lookup handlers"),
 	)
 	g.registerVar("zmlookup.caching", true,
 		withAttribute("zimbraReverseProxyZmlookupCachingEnabled"),
 		withValueType(ValueTypeBoolean),
-		withOverrideType(OverrideConfig),
+		withOverrideType(OverrideServer),
 		withDescription("Enable lookup result caching"),
 	)
 	g.registerVar("zmlookup.dpasswd", "",

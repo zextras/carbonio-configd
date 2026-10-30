@@ -97,7 +97,7 @@ func (tp *TemplateProcessor) LoadTemplate(ctx context.Context, name string) (*Te
 	// Convert to string once — strings.Split and the Content field would
 	// otherwise each copy the full buffer, doubling peak allocations.
 	contentStr := string(content)
-	lines := strings.Split(contentStr, "\n")
+	lines := splitTemplateLines(contentStr)
 
 	logger.DebugContext(ctx, "Loaded template",
 		"name", name,
@@ -110,6 +110,18 @@ func (tp *TemplateProcessor) LoadTemplate(ctx context.Context, name string) (*Te
 		Content: contentStr,
 		Lines:   lines,
 	}, nil
+}
+
+// splitTemplateLines splits template content into lines the way Java's
+// BufferedReader.readLine does: a trailing newline terminates the last line
+// instead of starting an empty one, so the output (each line plus "\n") is not
+// padded with an extra blank line.
+func splitTemplateLines(content string) []string {
+	if content == "" {
+		return nil
+	}
+
+	return strings.Split(strings.TrimSuffix(content, "\n"), "\n")
 }
 
 // ProcessTemplate processes a template with variable substitution

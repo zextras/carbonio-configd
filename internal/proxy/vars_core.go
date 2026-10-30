@@ -45,7 +45,7 @@ func (g *Generator) registerCoreVariables() {
 	g.registerVar("main.workers", 4,
 		withAttribute("zimbraReverseProxyWorkerProcesses"),
 		withValueType(ValueTypeInteger),
-		withOverrideType(OverrideConfig),
+		withOverrideType(OverrideServer),
 		withDescription("Number of NGINX worker processes"),
 	)
 	g.registerVar("main.connections", 10240,
@@ -56,7 +56,7 @@ func (g *Generator) registerCoreVariables() {
 	)
 	g.registerVar("main.accept_mutex", "on",
 		withAttribute("zimbraReverseProxyAcceptMutex"),
-		withOverrideType(OverrideConfig),
+		withOverrideType(OverrideServer),
 		withValueType(ValueTypeString),
 		withDescription("Accept mutex for worker load balancing (on/off)"),
 	)

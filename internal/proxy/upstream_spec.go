@@ -123,7 +123,7 @@ func (g *Generator) upstreamDirectives(
 
 		port := g.resolveServerPort(c.attrs, spec.fixedPort, portAttr)
 
-		d := generateServerDirective(c.hostname, c.attrs, port)
+		d := g.generateServerDirective(c.hostname, c.attrs, port)
 		if d != "" {
 			directives = append(directives, d)
 		}
@@ -237,6 +237,11 @@ func selectByServices(byHost map[string]map[string]string, services []string) ma
 // getServerAttrsByHostname returns all servers indexed by zimbraServiceHostname,
 // with their full attribute maps. Result is cached on the upstream cache.
 func (g *Generator) getServerAttrsByHostname(ctx context.Context) (map[string]map[string]string, error) {
+	if g.upstreamCache != nil {
+		g.upstreamCache.attrsMu.Lock()
+		defer g.upstreamCache.attrsMu.Unlock()
+	}
+
 	if g.upstreamCache != nil && g.upstreamCache.serverAttrsByHost != nil {
 		return g.upstreamCache.serverAttrsByHost, nil
 	}
@@ -351,19 +356,37 @@ func isValidUpstream(attrs map[string]string) bool {
 
 // generateServerDirective mirrors ProxyConfVar.generateServerDirective. It
 // returns "hostname:port fail_timeout=Ns[ max_fails=M]" or "" if no valid port.
-func generateServerDirective(hostname string, attrs map[string]string, port int) string {
+// Like Java Server.getIntAttr, the timeout and max-fails fall back to the global
+// config value when the server entry does not set them.
+func (g *Generator) generateServerDirective(hostname string, attrs map[string]string, port int) string {
 	if port <= 0 {
 		return ""
 	}
 
-	timeout := atoiOr(attrs[attrMailProxyReconnectTimeout], defaultReconnectTimeout)
-	maxFails := atoiOr(attrs[attrMailProxyMaxFails], defaultMaxFails)
+	timeout := atoiOr(g.serverAttrOrGlobal(attrs, attrMailProxyReconnectTimeout), defaultReconnectTimeout)
+	maxFails := atoiOr(g.serverAttrOrGlobal(attrs, attrMailProxyMaxFails), defaultMaxFails)
 
 	if maxFails != defaultMaxFails {
 		return fmt.Sprintf("%s:%d fail_timeout=%ds max_fails=%d", hostname, port, timeout, maxFails)
 	}
 
 	return fmt.Sprintf("%s:%d fail_timeout=%ds", hostname, port, timeout)
+}
+
+// serverAttrOrGlobal returns attr from the server entry, falling back to the
+// global config (Zimbra Server attributes inherit global config values).
+func (g *Generator) serverAttrOrGlobal(attrs map[string]string, attr string) string {
+	if v := attrs[attr]; v != "" {
+		return v
+	}
+
+	if g.GlobalConfig != nil {
+		if v, ok := g.GlobalConfig.Data.Get(attr); ok {
+			return v
+		}
+	}
+
+	return ""
 }
 
 // formatServersVar mirrors Java ServersVar.format: first directive has no

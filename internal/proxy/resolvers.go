@@ -59,7 +59,7 @@ const (
 	ipModeBoth         = "both"
 	staticLoginPath    = "/static/login/"
 	nginxReturn200     = "return 200"
-	nginxReturn307Path = "return 307 /static/login/"
+	nginxReturn303Path = "return 303 /static/login/"
 	nginxOff           = "off"
 	sslDHParamKey      = "ssl_dhparam"
 	sslDHParamPath     = "/opt/zextras/conf/dhparam.pem"
@@ -104,16 +104,6 @@ func (g *Generator) clientCertCAPath() string {
 	return g.ConfDir + "/" + clientCertCAFilename
 }
 
-// resolveClientCertCADefault returns the default client CA certificate path if it exists
-func (g *Generator) resolveClientCertCADefault(ctx context.Context) (any, error) {
-	caPath := g.clientCertCAPath()
-	if _, err := os.Stat(caPath); err == nil {
-		return caPath, nil
-	}
-
-	return ":empty:", nil // Special value indicating file doesn't exist
-}
-
 // resolveDHParamEnabled returns the keyword if DH parameters file exists
 func (g *Generator) resolveDHParamEnabled(ctx context.Context) (any, error) {
 	dhPath := g.ConfDir + "/dhparam.pem"
@@ -156,7 +146,7 @@ func (g *Generator) resolveMailWhitelistIPs(_ context.Context) (any, error) {
 // resolveWebAvailable returns true when at least one webclient upstream server is configured.
 // Mirrors legacy ZMWebAvailableVar (ProxyConfGen.java:1702).
 func (g *Generator) resolveWebAvailable(ctx context.Context) (any, error) {
-	servers, err := g.getAllReverseProxyBackends(ctx)
+	servers, err := g.reverseProxyBackendsRaw(ctx, false)
 	if err != nil {
 		logger.WarnContext(ctx, resolverQueryFailed, "error", err)
 		return false, nil //nolint:nilerr // test environments without zmprov return empty

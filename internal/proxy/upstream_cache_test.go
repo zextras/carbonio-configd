@@ -30,7 +30,7 @@ func TestUpstreamCacheInitialization(t *testing.T) {
 		t.Fatal("Expected upstream cache to be initialized, got nil")
 	}
 
-	if gen.upstreamCache.populated {
+	if gen.upstreamCache.backendsPopulated {
 		t.Error("Expected cache to be unpopulated initially")
 	}
 }

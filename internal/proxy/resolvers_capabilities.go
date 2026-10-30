@@ -8,7 +8,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"os"
 	"strings"
 
 	"github.com/zextras/carbonio-configd/internal/config"
@@ -36,11 +35,13 @@ const (
 var defaultPOP3Capabilities = []string{pop3ExpireCapability, imapCapTOP, imapCapUIDL, imapCapUSER, "XOIP"}
 
 // compressionMIMETypes is the shared list of MIME types for gzip and brotli compression.
+// The trailing blank line mirrors the legacy installed ProxyCompressionServerVar output.
 const compressionMIMETypes = `        application/atom+xml
         application/geo+json
         application/javascript
         application/x-javascript
         application/json
+        application/graphql-response+json
         application/ld+json
         application/manifest+json
         application/rdf+xml
@@ -56,6 +57,7 @@ const compressionMIMETypes = `        application/atom+xml
         text/javascript
         text/plain
         text/xml;
+
 `
 
 // resolveLookupHandlers constructs the nginx zm_lookup_handlers value as a
@@ -137,7 +139,7 @@ func (g *Generator) resolveIMAPCapabilities(ctx context.Context) (any, error) {
 	}
 
 	// Try to read from GlobalConfig (multi-valued attribute)
-	if val, ok := g.getConfigValue("zimbraReverseProxyImapEnabledCapability", sourceGlobal); ok {
+	if val, ok := g.getConfigValue("zimbraReverseProxyImapEnabledCapability", sourceServer, sourceGlobal); ok {
 		// Parse comma-separated, space-separated, or newline-separated values
 		val = normalizeMultiValue(val)
 
@@ -193,7 +195,7 @@ func formatPOP3Capabilities(val any) (string, error) {
 // Default: [pop3ExpireCapability, "TOP", "UIDL", "USER", "XOIP"]
 func (g *Generator) resolvePOP3Capabilities(ctx context.Context) (any, error) {
 	// Try to read from GlobalConfig (multi-valued attribute)
-	val, ok := g.getConfigValue("zimbraReverseProxyPop3EnabledCapability", sourceGlobal)
+	val, ok := g.getConfigValue("zimbraReverseProxyPop3EnabledCapability", sourceServer, sourceGlobal)
 	if !ok {
 		// Return default capabilities (matching Java ProxyConfGen)
 		return defaultPOP3Capabilities, nil
@@ -219,57 +221,28 @@ func (g *Generator) resolvePOP3Capabilities(ctx context.Context) (any, error) {
 	return defaultPOP3Capabilities, nil
 }
 
-// resolveIMAPId constructs the IMAP ID extension value
-// Java equivalent constructs: "NAME" "Zimbra" "VERSION" "<version>" "RELEASE" "<release>"
-// The NAME field is rebranded to "Carbonio" to match the IMAP/POP3 greeting
-// banners (resolveIMAPGreeting/resolvePOP3Greeting); it is purely informational
-// and not part of any client protocol negotiation.
-// This matches the Java ProxyConfGen behavior where it reads from BuildInfo.
-//
-// The identifier is deterministic for equivalent inputs: the version is
-// derived solely from the LocalConfig-supplied values (the zimbra_home
-// .version file and zimbra_buildnum). When no build number is available the
-// version is left as-is instead of being stamped with the current date, so
-// repeated invocations produce identical output and avoid noisy reloads.
+// resolveIMAPId constructs the IMAP ID extension value, matching the legacy
+// mail.imapid default: "NAME" "Zimbra" "VERSION" "<BuildInfo.VERSION>" "RELEASE"
+// "<BuildInfo.RELEASE>" (ProxyConfGen.java mail.imapid). The values come from the
+// buildInfo.properties resource of mailbox.jar (see buildInfo).
 func (g *Generator) resolveIMAPId(_ context.Context) (any, error) {
-	// Try to read version from LocalConfig or default location
-	version := "UNKNOWN"
-	release := "carbonio"
+	version, release := g.buildInfo()
 
-	// Read version from /opt/zextras/.version if available
-	if basePath, ok := g.getConfigValue("zimbra_home", sourceLocal); ok {
-		versionFile := basePath + "/.version"
-		//nolint:gosec // G304: File path comes from trusted zimbra_home configuration
-		if data, err := os.ReadFile(versionFile); err == nil {
-			version = strings.TrimSpace(string(data))
-		}
-	}
-
-	// Try to get build info from LocalConfig if available
-	if buildNo, ok := g.getConfigValue("zimbra_buildnum", sourceLocal); ok {
-		// Only append if not already present
-		if !strings.Contains(version, "_") {
-			version = version + "_ZEXTRAS_" + buildNo
-		}
-	}
-
-	// Construct the IMAP ID string
 	//nolint:gocritic // sprintfQuotedString: We need literal quotes in the output, not Go-escaped quotes
-	imapID := fmt.Sprintf(`"NAME" "Carbonio" "VERSION" "%s" "RELEASE" "%s"`, version, release)
-
-	return imapID, nil
+	return fmt.Sprintf(`"NAME" "Zimbra" "VERSION" "%s" "RELEASE" "%s"`, version, release), nil
 }
 
 // resolveGreeting returns a protocol greeting banner with version if the given attribute is enabled.
 func (g *Generator) resolveGreeting(attribute, format string) (any, error) {
 	exposeVersion := false
 
-	if val, ok := g.getConfigValue(attribute, sourceGlobal); ok {
+	if val, ok := g.getConfigValue(attribute, sourceServer, sourceGlobal); ok {
 		exposeVersion = config.IsTruthy(val)
 	}
 
 	if exposeVersion {
-		version := g.GetCarboVersion()
+		version, _ := g.buildInfo()
+
 		return fmt.Sprintf(format, version), nil
 	}
 
@@ -280,12 +253,12 @@ func (g *Generator) resolveGreeting(attribute, format string) (any, error) {
 func (g *Generator) resolveIMAPGreeting(_ context.Context) (any, error) {
 	return g.resolveGreeting(
 		"zimbraReverseProxyImapExposeVersionOnBanner",
-		"* OK Carbonio %s IMAP4 ready")
+		"* OK Zimbra %s IMAP4 ready")
 }
 
 // resolvePOP3Greeting returns POP3 greeting banner with version if enabled
 func (g *Generator) resolvePOP3Greeting(_ context.Context) (any, error) {
 	return g.resolveGreeting(
 		"zimbraReverseProxyPop3ExposeVersionOnBanner",
-		"+OK Carbonio %s POP3 ready")
+		"+OK Zimbra %s POP3 ready")
 }

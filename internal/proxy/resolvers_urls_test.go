@@ -64,10 +64,10 @@ func TestMakeLogoutRedirectResolver(t *testing.T) {
 		expected   string
 	}{
 		{
-			name:       "returns return 307 path when key not in config",
+			name:       "returns return 303 path when key not in config",
 			configKey:  "zimbraWebClientLogoutURL",
 			globalData: configtest.NewConfigMapFrom(map[string]string{}),
-			expected:   nginxReturn307Path,
+			expected:   nginxReturn303Path,
 		},
 		{
 			name:      "returns return 200 when key is set in config",
@@ -133,4 +133,19 @@ func TestResolveErrorPages(t *testing.T) {
 			t.Errorf("expected err param in result, got %q", str)
 		}
 	})
+}
+
+// TestCompressionMIMETypes_LegacyShape pins the legacy installed
+// ProxyCompressionServerVar output: graphql-response+json after application/json
+// and a blank line terminating each type list.
+func TestCompressionMIMETypes_LegacyShape(t *testing.T) {
+	t.Parallel()
+
+	if !strings.Contains(compressionMIMETypes, "application/json\n        application/graphql-response+json\n") {
+		t.Error("missing application/graphql-response+json after application/json")
+	}
+
+	if !strings.HasSuffix(compressionMIMETypes, "text/xml;\n\n") {
+		t.Errorf("type list must end with a blank line, got %q", compressionMIMETypes[len(compressionMIMETypes)-20:])
+	}
 }

@@ -161,9 +161,15 @@ func (tp *TemplateProcessor) processEnablerLine(
 	lines := strings.Split(processedRest, "\n")
 	for i, l := range lines {
 		trimmed := strings.TrimLeft(l, " \t")
-		if trimmed == "" {
+
+		switch {
+		case trimmed == "":
 			lines[i] = l // preserve blank lines as-is
-		} else {
+		case i == 0:
+			// Legacy StringUtil.fillTemplate substitutes the enabler with "#" in
+			// place, so whitespace following the enabler is preserved verbatim.
+			lines[i] = indent + "#" + strings.TrimPrefix(l, indent)
+		default:
 			lines[i] = indent + "#" + trimmed
 		}
 	}

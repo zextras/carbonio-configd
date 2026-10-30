@@ -19,10 +19,10 @@ func (g *Generator) registerSSLVariables() {
 		withValueType(ValueTypeString),
 		withDescription("Default SSL private key path"),
 	)
-	g.registerVar("ssl.clientcertca.default", g.ConfDir+"/nginx.client.ca.crt",
+	g.registerVar("ssl.clientcertca.default", g.clientCertCAPath(),
+		withAttribute("zimbraReverseProxyClientCertCA"),
 		withOverrideType(OverrideCustom),
-		withDescription("Default client CA certificate path"),
-		withCustomResolver(g.resolveClientCertCADefault),
+		withDescription("Default client CA certificate path (always the path, whether or not the file exists)"),
 	)
 	g.registerVar("ssl.dhparam.enabled", "",
 		withValueType(ValueTypeEnabler),
@@ -92,7 +92,7 @@ func (g *Generator) registerSSLVariables() {
 	)
 	g.registerVar("ssl.clientcertmode.default", "off",
 		withAttribute("zimbraReverseProxyClientCertMode"),
-		withOverrideType(OverrideConfig),
+		withOverrideType(OverrideServer),
 		withValueType(ValueTypeString),
 		withDescription("Client certificate mode for default vhost (off/on/optional/optional_no_ca)"),
 	)
@@ -103,9 +103,9 @@ func (g *Generator) registerSSLVariables() {
 		withDescription("Maximum depth for SSL certificate verification chain"),
 	)
 	g.registerVar("ssl.clientcertdepth.default", 10,
-		withAttribute("zimbraReverseProxySSLVerifyDepth"),
+		withAttribute("zimbraReverseProxyClientCertDepth"),
 		withValueType(ValueTypeInteger),
-		withOverrideType(OverrideConfig),
+		withOverrideType(OverrideNone),
 		withDescription("Maximum depth for SSL certificate verification chain for default vhost"),
 	)
 	g.registerVar("ssl.clientcertca.enabled", false,

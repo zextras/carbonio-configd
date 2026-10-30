@@ -97,7 +97,7 @@ func TestGenerateServerDirective(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := generateServerDirective(tc.host, tc.attrs, tc.port)
+			got := (&Generator{}).generateServerDirective(tc.host, tc.attrs, tc.port)
 			if got != tc.want {
 				t.Errorf("generateServerDirective = %q, want %q", got, tc.want)
 			}
@@ -415,5 +415,26 @@ func TestUpstreamHasServers_LDAPError(t *testing.T) {
 	spec := &upstreamSpec{services: []string{"mailbox"}, fixedPort: 8080}
 	if g.upstreamHasServers(context.Background(), spec) {
 		t.Error("expected false when LDAP query fails, got true")
+	}
+}
+
+// TestGenerateServerDirective_GlobalFallback verifies that fail_timeout and
+// max_fails inherit the global config value when the server entry omits them
+// (Java Server.getIntAttr semantics), instead of the hard-coded defaults.
+func TestGenerateServerDirective_GlobalFallback(t *testing.T) {
+	t.Parallel()
+
+	g := &Generator{GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMap()}}
+	g.GlobalConfig.Data.Set(attrMailProxyReconnectTimeout, "10")
+	g.GlobalConfig.Data.Set(attrMailProxyMaxFails, "2")
+
+	got := g.generateServerDirective("srv1", map[string]string{}, 8080)
+	if want := "srv1:8080 fail_timeout=10s max_fails=2"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+
+	got = g.generateServerDirective("srv1", map[string]string{attrMailProxyReconnectTimeout: "30"}, 8080)
+	if want := "srv1:8080 fail_timeout=30s max_fails=2"; got != want {
+		t.Errorf("got %q, want %q", got, want)
 	}
 }

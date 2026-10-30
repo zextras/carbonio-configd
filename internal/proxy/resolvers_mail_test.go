@@ -6,8 +6,10 @@
 package proxy
 
 import (
+	"archive/zip"
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -28,7 +30,7 @@ func TestResolveGreeting(t *testing.T) {
 			name:        "returns empty when attribute not set",
 			globalData:  configtest.NewConfigMapFrom(map[string]string{}),
 			attribute:   "zimbraReverseProxyImapExposeVersionOnBanner",
-			format:      "* OK Carbonio %s IMAP4 ready",
+			format:      "* OK Zimbra %s IMAP4 ready",
 			expectEmpty: true,
 		},
 		{
@@ -37,7 +39,7 @@ func TestResolveGreeting(t *testing.T) {
 				"zimbraReverseProxyImapExposeVersionOnBanner": "FALSE",
 			}),
 			attribute:   "zimbraReverseProxyImapExposeVersionOnBanner",
-			format:      "* OK Carbonio %s IMAP4 ready",
+			format:      "* OK Zimbra %s IMAP4 ready",
 			expectEmpty: true,
 		},
 		{
@@ -46,7 +48,7 @@ func TestResolveGreeting(t *testing.T) {
 				"zimbraReverseProxyImapExposeVersionOnBanner": "TRUE",
 			}),
 			attribute:   "zimbraReverseProxyImapExposeVersionOnBanner",
-			format:      "* OK Carbonio %s IMAP4 ready",
+			format:      "* OK Zimbra %s IMAP4 ready",
 			expectEmpty: false,
 		},
 	}
@@ -68,93 +70,79 @@ func TestResolveGreeting(t *testing.T) {
 			if tt.expectEmpty && str != "" {
 				t.Errorf("expected empty string, got %q", str)
 			}
-			if !tt.expectEmpty && !strings.Contains(str, "Carbonio") {
-				t.Errorf("expected Carbonio in greeting, got %q", str)
+			if !tt.expectEmpty && !strings.Contains(str, "Zimbra") {
+				t.Errorf("expected Zimbra in greeting, got %q", str)
 			}
 		})
 	}
 }
 
-// TestResolveIMAPId tests resolveIMAPId branches
-func TestResolveIMAPId(t *testing.T) {
-	t.Run("returns UNKNOWN version when no local config", func(t *testing.T) {
-		g := &Generator{
-			LocalConfig: &config.LocalConfig{Data: configtest.NewConfigMapFrom(map[string]string{})},
-		}
-		result, err := g.resolveIMAPId(context.Background())
-		if err != nil {
-			t.Fatalf("resolveIMAPId failed: %v", err)
-		}
-		str := result.(string)
-		if !strings.Contains(str, "UNKNOWN") {
-			t.Errorf("expected UNKNOWN in result, got %q", str)
-		}
-		if !strings.Contains(str, "Carbonio") {
-			t.Errorf("expected Carbonio in result, got %q", str)
-		}
-	})
+// writeBuildInfoJar creates <base>/mailbox/jars/mailbox.jar holding the given
+// buildInfo.properties content, mirroring the layout the legacy BuildInfo reads.
+func writeBuildInfoJar(t *testing.T, base, props string) {
+	t.Helper()
 
-	t.Run("appends build number when configured and version has no underscore", func(t *testing.T) {
-		g := &Generator{
-			LocalConfig: &config.LocalConfig{Data: configtest.NewConfigMapFrom(map[string]string{
-				"zimbra_buildnum": "12345",
-			})},
-		}
-		result, err := g.resolveIMAPId(context.Background())
-		if err != nil {
-			t.Fatalf("resolveIMAPId failed: %v", err)
-		}
-		str := result.(string)
-		if !strings.Contains(str, "ZEXTRAS_12345") {
-			t.Errorf("expected build number in result, got %q", str)
-		}
-	})
-}
-
-// TestResolveIMAPIdWithVersion tests resolveIMAPId when zimbra_home points to a real file
-func TestResolveIMAPIdWithVersion(t *testing.T) {
-	dir := t.TempDir()
-	versionContent := "25.3.0"
-	if err := os.WriteFile(dir+"/.version", []byte(versionContent+"\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
+	dir := filepath.Join(base, "mailbox", "jars")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
 	}
 
-	t.Run("version file read and used", func(t *testing.T) {
-		g := &Generator{
-			LocalConfig: &config.LocalConfig{
-				Data: configtest.NewConfigMapFrom(map[string]string{"zimbra_home": dir}),
-			},
-		}
+	f, err := os.Create(filepath.Join(dir, "mailbox.jar"))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	zw := zip.NewWriter(f)
+
+	w, err := zw.Create("com/zimbra/cs/util/buildInfo.properties")
+	if err != nil {
+		t.Fatalf("zip Create: %v", err)
+	}
+
+	if _, err := w.Write([]byte(props)); err != nil {
+		t.Fatalf("zip Write: %v", err)
+	}
+
+	if err := zw.Close(); err != nil {
+		t.Fatalf("zip Close: %v", err)
+	}
+
+	if err := f.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}
+
+// TestResolveIMAPId verifies the IMAP ID value matches the legacy mail.imapid default:
+// "Zimbra" plus BuildInfo.VERSION/RELEASE read from mailbox.jar's buildInfo.properties.
+func TestResolveIMAPId(t *testing.T) {
+	t.Run("reads VERSION and RELEASE from mailbox.jar", func(t *testing.T) {
+		dir := t.TempDir()
+		writeBuildInfoJar(t, dir, "MAJORVERSION=4\nVERSION=4.38.10_ZEXTRAS_202610\nRELEASE=carbonio\nDATE=202610\n")
+
+		g := &Generator{WorkingDir: dir}
+
 		result, err := g.resolveIMAPId(context.Background())
 		if err != nil {
-			t.Fatalf("resolveIMAPId: %v", err)
+			t.Fatalf("resolveIMAPId failed: %v", err)
 		}
-		str := result.(string)
-		if !strings.Contains(str, versionContent) {
-			t.Errorf("expected version %q in result, got %q", versionContent, str)
+
+		want := `"NAME" "Zimbra" "VERSION" "4.38.10_ZEXTRAS_202610" "RELEASE" "carbonio"`
+		if result != want {
+			t.Errorf("got %q, want %q", result, want)
 		}
 	})
 
-	t.Run("version already has underscore, buildnum not appended", func(t *testing.T) {
-		if err := os.WriteFile(dir+"/.version", []byte("25.3.0_ZEXTRAS_99999\n"), 0o644); err != nil {
-			t.Fatalf("WriteFile: %v", err)
-		}
-		g := &Generator{
-			LocalConfig: &config.LocalConfig{
-				Data: configtest.NewConfigMapFrom(map[string]string{
-					"zimbra_home":     dir,
-					"zimbra_buildnum": "11111",
-				}),
-			},
-		}
+	t.Run("unknown when mailbox.jar is missing", func(t *testing.T) {
+		g := &Generator{WorkingDir: t.TempDir()}
+
 		result, err := g.resolveIMAPId(context.Background())
 		if err != nil {
-			t.Fatalf("resolveIMAPId: %v", err)
+			t.Fatalf("resolveIMAPId failed: %v", err)
 		}
-		str := result.(string)
-		// build number should NOT be appended again
-		if strings.Contains(str, "11111") {
-			t.Errorf("build number was appended to version that already had underscore: %q", str)
+
+		want := `"NAME" "Zimbra" "VERSION" "unknown" "RELEASE" "unknown"`
+		if result != want {
+			t.Errorf("got %q, want %q", result, want)
 		}
 	})
 }
