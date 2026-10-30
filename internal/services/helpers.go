@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -28,24 +29,25 @@ func openLogFile(path string) (*os.File, error) {
 	return fd, nil
 }
 
-// gracefulStopViaPidfile stops a process cleanly: it sends SIGTERM, waits up to
-// timeout for the process to exit (polling with signal 0), and escalates to
-// SIGKILL only if the process is still alive at the deadline. The pidfile is
-// removed once the process is gone.
+// gracefulStopViaPidfile stops a service cleanly: it sends SIGTERM to the
+// process named by pidFile, waits up to timeout for it to exit (polling with
+// signal 0), and escalates to SIGKILL only if it is still alive at the
+// deadline. The pidfile is removed once the process is gone.
 //
 // A clean SIGTERM lets daemons like slapd close their backing store (LMDB)
 // properly, avoiding recovery work on the next start that can stall readiness.
 // If the pidfile is absent the service is considered already stopped.
 //
-// The initial SIGTERM and the SIGKILL escalation are intentionally NOT
-// hoisted to the shared signalPID helper (used by killProcess and
-// stopMysqldByPidFile): signalPID is silent/best-effort by design — its
-// targets already come from a fresh /proc scan, so a signal failure just
-// means the process raced away — whereas callers here (ldapCustomStop)
-// need genuine failures (e.g. EPERM signaling the wrong UID) surfaced as
-// an error rather than swallowed. Only the polling loop is shared, via
-// waitForProcessExit -> pollUntilExit (cli_process.go).
-func gracefulStopViaPidfile(ctx context.Context, pidFile, serviceName string, timeout time.Duration) error {
+// processName is the service's identity (ServiceDef.ProcessName, see
+// procident.go). The pidfile PID is signaled only when it is alive AND of that
+// identity, so a stale pidfile whose PID was recycled by an unrelated process
+// never gets that process killed. A stale pidfile is removed; if the service
+// is nevertheless running (its pidfile lost or overwritten), the processes
+// found by identity are stopped the same graceful way. An empty processName
+// means no identity is declared and the pidfile PID is trusted when alive.
+func gracefulStopViaPidfile(
+	ctx context.Context, pidFile, serviceName, processName string, timeout time.Duration,
+) error {
 	//nolint:gosec // pidfile path is from internal service registry
 	data, err := os.ReadFile(pidFile)
 	if err != nil {
@@ -63,6 +65,56 @@ func gracefulStopViaPidfile(ctx context.Context, pidFile, serviceName string, ti
 		return fmt.Errorf("invalid pid in %s: %s", pidFile, strings.TrimSpace(string(data)))
 	}
 
+	pids := []int{pid}
+
+	if !pidBelongsTo(ctx, pid, processName) {
+		logger.InfoContext(ctx, "Pidfile does not name a running process of this service, treating it as stale",
+			"service", serviceName, "pidfile", pidFile, "pid", pid)
+
+		pids = pidsByIdentity(processName)
+	}
+
+	var stopErr error
+
+	for _, p := range pids {
+		stopErr = errors.Join(stopErr, gracefulStopPID(ctx, p, serviceName, timeout))
+	}
+
+	if stopErr != nil {
+		return stopErr
+	}
+
+	_ = os.Remove(pidFile)
+
+	return nil
+}
+
+// pidsByIdentity lists the live processes of the given identity from a fresh
+// /proc listing, excluding the current process and its parent. A scan failure
+// yields none: the caller already has nothing better to act on.
+func pidsByIdentity(name string) []int {
+	pids, err := scanProcesses(name)
+	if err != nil {
+		return nil
+	}
+
+	isSelfOrParent := selfOrParentFilter()
+
+	return slices.DeleteFunc(pids, isSelfOrParent)
+}
+
+// gracefulStopPID is the SIGTERM → bounded wait → SIGKILL sequence for one PID.
+// An already-gone process counts as stopped.
+//
+// The initial SIGTERM and the SIGKILL escalation are intentionally NOT
+// hoisted to the shared signalPID helper (used by killProcess and
+// stopMysqldByPidFile): signalPID is silent/best-effort by design — its
+// targets already come from a fresh /proc scan, so a signal failure just
+// means the process raced away — whereas callers here need genuine failures
+// (e.g. EPERM signaling the wrong UID) surfaced as an error rather than
+// swallowed. Only the polling loop is shared, via waitForProcessExit ->
+// pollUntilExit (cli_process.go).
+func gracefulStopPID(ctx context.Context, pid int, serviceName string, timeout time.Duration) error {
 	proc, err := os.FindProcess(pid)
 	if err != nil {
 		return fmt.Errorf("failed to find process %d: %w", pid, err)
@@ -73,8 +125,6 @@ func gracefulStopViaPidfile(ctx context.Context, pidFile, serviceName string, ti
 	if err := proc.Signal(syscall.SIGTERM); err != nil {
 		// ESRCH: process already gone — treat as stopped.
 		if errors.Is(err, os.ErrProcessDone) || errors.Is(err, syscall.ESRCH) {
-			_ = os.Remove(pidFile)
-
 			return nil
 		}
 
@@ -82,8 +132,6 @@ func gracefulStopViaPidfile(ctx context.Context, pidFile, serviceName string, ti
 	}
 
 	if waitForProcessExit(ctx, pid, timeout) {
-		_ = os.Remove(pidFile)
-
 		return nil
 	}
 
@@ -95,8 +143,6 @@ func gracefulStopViaPidfile(ctx context.Context, pidFile, serviceName string, ti
 		!errors.Is(err, os.ErrProcessDone) && !errors.Is(err, syscall.ESRCH) {
 		return fmt.Errorf("failed to SIGKILL process %d: %w", pid, err)
 	}
-
-	_ = os.Remove(pidFile)
 
 	return nil
 }

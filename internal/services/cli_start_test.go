@@ -346,7 +346,7 @@ func TestPidFromProcessName_AllSelfOrParent(t *testing.T) {
 	// After filtering self and parent, the result must be 0 (no "other" match).
 	// If another test process with the same binary is running, the test may
 	// non-deterministically find it; accept either outcome to avoid flakiness.
-	result := pidFromProcessName(os.Args[0])
+	result := pidFromProcessName(context.Background(), os.Args[0])
 	// result is either 0 (no other instance) or a valid PID (another test binary)
 	_ = result // just ensure no panic
 }

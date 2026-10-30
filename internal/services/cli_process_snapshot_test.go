@@ -47,21 +47,21 @@ func fakeProcFS(t *testing.T) (root string, add func(pid int, cmdline, comm stri
 	return root, add
 }
 
-func TestScanProcessesByCmdline_UsesProcFSRoot(t *testing.T) {
+func TestScanProcesses_UsesProcFSRoot(t *testing.T) {
 	_, add := fakeProcFS(t)
 	add(4001, "/opt/zextras/common/sbin/opendkim\x00-x\x00/etc/opendkim.conf\x00", "opendkim", false)
 	add(4002, "/usr/sbin/other\x00", "other", false)
 
-	pids, err := scanProcessesByCmdline("opendkim")
+	pids, err := scanProcesses("opendkim")
 	require.NoError(t, err)
 	assert.Equal(t, []int{4001}, pids)
 }
 
-func TestScanProcessesByCmdline_MissingRootErrors(t *testing.T) {
+func TestScanProcesses_MissingRootErrors(t *testing.T) {
 	root, _ := fakeProcFS(t)
 	require.NoError(t, os.Remove(root))
 
-	_, err := scanProcessesByCmdline("anything")
+	_, err := scanProcesses("anything")
 	require.Error(t, err)
 }
 
@@ -81,7 +81,7 @@ func TestProcessSnapshot_MatchesLikeFreshScan(t *testing.T) {
 
 	for _, needle := range needles {
 		t.Run(needle, func(t *testing.T) {
-			want, err := scanProcessesByCmdline(needle)
+			want, err := scanProcesses(needle)
 			require.NoError(t, err)
 
 			got, err := snap.scan(needle)
@@ -102,18 +102,18 @@ func TestIsProcessRunning_SnapshotReusedAcrossProbes(t *testing.T) {
 	add(6001, "/usr/bin/memcached\x00", "memcached", false)
 
 	ctx := WithProcessSnapshot(context.Background())
-	assert.True(t, isProcessRunning(ctx, "memcached"))
+	assert.True(t, pidFromProcessName(ctx, "memcached") > 0)
 
 	// The snapshot is frozen: a process appearing or vanishing afterwards is
 	// only seen by a fresh scan.
 	add(6002, "/usr/sbin/opendkim\x00", "opendkim", false)
 	require.NoError(t, os.RemoveAll(filepath.Join(root, "6001")))
 
-	assert.True(t, isProcessRunning(ctx, "memcached"), "snapshot must not be re-read")
-	assert.False(t, isProcessRunning(ctx, "opendkim"), "snapshot must not be re-read")
+	assert.True(t, pidFromProcessName(ctx, "memcached") > 0, "snapshot must not be re-read")
+	assert.Zero(t, pidFromProcessName(ctx, "opendkim"), "snapshot must not be re-read")
 
-	assert.False(t, isProcessRunning(context.Background(), "memcached"), "plain ctx takes a fresh listing")
-	assert.True(t, isProcessRunning(context.Background(), "opendkim"), "plain ctx takes a fresh listing")
+	assert.Zero(t, pidFromProcessName(context.Background(), "memcached"), "plain ctx takes a fresh listing")
+	assert.True(t, pidFromProcessName(context.Background(), "opendkim") > 0, "plain ctx takes a fresh listing")
 }
 
 func TestWithProcessSnapshot_Idempotent(t *testing.T) {
@@ -126,22 +126,22 @@ func TestIsProcessRunning_ExcludesSelfWithSnapshot(t *testing.T) {
 	add(os.Getpid(), "configd\x00status\x00", "configd", false)
 
 	ctx := WithProcessSnapshot(context.Background())
-	assert.False(t, isProcessRunning(ctx, "configd"))
-	assert.Equal(t, 0, pidFromProcessName("configd"))
+	assert.Equal(t, 0, pidFromProcessName(ctx, "configd"))
+	assert.Equal(t, 0, pidFromProcessName(context.Background(), "configd"))
 }
 
 // TestKillProcess_IgnoresSnapshot pins that signaling always sees live state:
-// scanProcessesByCmdline (used by killProcess) never consults a snapshot.
+// scanProcesses (used by killProcess) never consults a snapshot.
 func TestKillProcess_IgnoresSnapshot(t *testing.T) {
 	root, add := fakeProcFS(t)
 	add(7001, "/usr/bin/target\x00", "target", false)
 
 	ctx := WithProcessSnapshot(context.Background())
-	require.True(t, isProcessRunning(ctx, "target"))
+	require.True(t, pidFromProcessName(ctx, "target") > 0)
 
 	require.NoError(t, os.RemoveAll(filepath.Join(root, "7001")))
 
-	pids, err := scanProcessesByCmdline("target")
+	pids, err := scanProcesses("target")
 	require.NoError(t, err)
 	assert.Empty(t, pids)
 }
@@ -175,7 +175,7 @@ func BenchmarkServiceProbesAgainstProc(b *testing.B) {
 	b.Run("fresh-per-probe", func(b *testing.B) {
 		for b.Loop() {
 			for _, n := range needles {
-				isProcessRunning(context.Background(), n)
+				_ = pidFromProcessName(context.Background(), n)
 			}
 		}
 	})
@@ -184,7 +184,7 @@ func BenchmarkServiceProbesAgainstProc(b *testing.B) {
 		for b.Loop() {
 			ctx := WithProcessSnapshot(context.Background())
 			for _, n := range needles {
-				isProcessRunning(ctx, n)
+				_ = pidFromProcessName(ctx, n)
 			}
 		}
 	})

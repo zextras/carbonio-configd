@@ -72,17 +72,11 @@ const ldapReadyTimeout = 30 * time.Second
 // ldapProbeInterval is the poll cadence for the readiness probe.
 const ldapProbeInterval = 250 * time.Millisecond
 
-// ldapStopTimeout bounds the graceful SIGTERM wait before escalating to SIGKILL.
-// slapd must flush and cleanly close its LMDB backing store within this window;
-// an unclean kill can force LMDB recovery on the next start and stall readiness.
+// ldapStopTimeout is ServiceDef.GracefulStop for slapd: the SIGTERM wait before
+// escalating to SIGKILL. slapd must flush and cleanly close its LMDB backing
+// store within this window; a hard SIGKILL skips the clean shutdown and can
+// leave the next start doing recovery work that exceeds the readiness wait.
 const ldapStopTimeout = 10 * time.Second
-
-// ldapCustomStop stops slapd gracefully (SIGTERM, bounded wait, SIGKILL
-// fallback) so LMDB closes cleanly. A hard SIGKILL skips the clean shutdown and
-// can leave the next start doing recovery work that exceeds the readiness wait.
-func ldapCustomStop(ctx context.Context, def *ServiceDef) error {
-	return gracefulStopViaPidfile(ctx, pidDir+"/slapd.pid", "LDAP server", ldapStopTimeout)
-}
 
 // buildLDAPBindURL constructs the LDAP bind URL from localconfig.
 // Matches the old shell script logic: prefer ldap_bind_url, fall back to

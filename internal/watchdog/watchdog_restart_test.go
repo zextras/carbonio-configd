@@ -88,7 +88,7 @@ func TestCheckOneService_ProbeFailureIsWarn(t *testing.T) {
 	wd.AddService(ctx, "amavis")
 	wd.SetServiceEnabled(ctx, "amavis", true)
 
-	wd.checkOneService(ctx, "amavis", map[string]bool{})
+	wd.checkOneService(ctx, ctx, "amavis", map[string]bool{})
 
 	out := buf.String()
 	if !strings.Contains(out, "level=WARN") || !strings.Contains(out, "Failed to check service") {

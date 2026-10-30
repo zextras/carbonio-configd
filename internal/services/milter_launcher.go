@@ -10,6 +10,13 @@ import (
 	"strings"
 )
 
+// milterMainClass is the JVM main class of the milter: the last argument
+// milterJavaArgs hands to java, and the identity (ServiceDef.ProcessName)
+// under which the running JVM is recognised — legacy zmmilterctl's
+// `pgrep -f '/opt/zextras/.*/java.*milter.MilterServer'`, as an exact argv
+// token.
+const milterMainClass = "com.zimbra.cs.milter.MilterServer"
+
 // milterCustomStart builds and executes the Java command for MilterServer.
 // Reuses mailboxJavaBinary for Java path discovery. The milter is a lightweight
 // Java process sharing the mailbox classpath but running a different main class.
@@ -54,6 +61,6 @@ func milterJavaArgs(lc map[string]string) []string {
 		"-classpath", mailboxPath+"/jars/*:"+confPath,
 		"-Dlog4j.configurationFile=file:"+log4jFile,
 		"-Dzimbra.config="+confPath+"/localconfig.xml",
-		"com.zimbra.cs.milter.MilterServer",
+		milterMainClass,
 	)
 }

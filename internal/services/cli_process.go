@@ -13,7 +13,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -25,10 +24,6 @@ import (
 // flush state (mailboxd's JVM shutdown hook needs ~30 s); short enough that
 // zmcontrol stop still completes in a reasonable time.
 const killProcessTimeout = 30 * time.Second
-
-// procFSRoot is the path prefix for Linux process entries in /proc.
-// Declared as var so tests can override it with a temporary directory.
-var procFSRoot = "/proc/"
 
 // startService starts a service. Bifurcated on IsSystemdMode():
 //
@@ -119,7 +114,9 @@ func stopService(ctx context.Context, name string, def *ServiceDef) error {
 }
 
 // stopWithoutSystemd is the fast-path stop for non-systemd hosts.
-// Precedence: CustomStop hook (fully custom shutdown) > ProcessName pkill.
+// Precedence: CustomStop hook (fully custom shutdown) > GracefulStop
+// (SIGTERM the identity-validated pidfile process, bounded wait, SIGKILL) >
+// ProcessName pkill.
 //
 // For services with UseSDNotify, an sd_notify shutdown observer is started
 // in parallel with killProcess: it listens on the persistent NOTIFY_SOCKET
@@ -134,6 +131,10 @@ func stopWithoutSystemd(ctx context.Context, name string, def *ServiceDef) error
 			"service", name)
 
 		return def.CustomStop(ctx, def)
+	}
+
+	if def.GracefulStop > 0 && def.PidFile != "" {
+		return gracefulStopViaPidfile(ctx, def.PidFile, name, def.ProcessName, def.GracefulStop)
 	}
 
 	if def.ProcessName == "" {
@@ -196,7 +197,7 @@ func reloadWithoutSystemd(ctx context.Context, name string, def *ServiceDef) err
 // current process or its parent, computed once so scanning many candidate
 // pids doesn't re-syscall Getpid/Getppid per candidate. Shared by every
 // /proc scan that must not match the CLI's own invocation:
-// pidFromProcessName (cli.go), isProcessRunning, and killProcess.
+// pidFromProcessName, pidsByIdentity, and killProcess.
 func selfOrParentFilter() func(pid int) bool {
 	self, parent := os.Getpid(), os.Getppid()
 
@@ -311,10 +312,11 @@ func startDetached(_ context.Context, name string, def *ServiceDef) error {
 	return nil
 }
 
-// killProcess terminates every process whose cmdline contains processName.
-// Two-phase shutdown: SIGTERM to all, wait up to killProcessTimeout for each
-// to exit, then SIGKILL survivors. Self and parent PIDs are excluded so we
-// never SIGTERM our own CLI invocation.
+// killProcess terminates every process of the identity processName (exe/argv
+// match, see procident.go — never a cmdline substring), always resolved from a
+// fresh /proc listing. Two-phase shutdown: SIGTERM to all, wait up to
+// killProcessTimeout for each to exit, then SIGKILL survivors. Self and parent
+// PIDs are excluded so we never SIGTERM our own CLI invocation.
 //
 // Without the wait-then-SIGKILL phase, `zmcontrol stop` returns "Done (1ms)"
 // the instant SIGTERM is dispatched, even when the target ignores/slow-handles
@@ -327,7 +329,7 @@ func killProcess(ctx context.Context, processName string) error {
 // killProcessWithGrace is killProcess with an explicit SIGTERM→SIGKILL grace
 // period, so tests can shorten it without mutating package state.
 func killProcessWithGrace(ctx context.Context, processName string, grace time.Duration) error {
-	pids, err := scanProcessesByCmdline(processName)
+	pids, err := scanProcesses(processName)
 	if err != nil {
 		return fmt.Errorf("scan processes for %s: %w", processName, err)
 	}
@@ -491,237 +493,4 @@ func killByPIDWithGroupAndSudo(ctx context.Context, pid int) bool {
 	}
 
 	return !processAlive(pid)
-}
-
-// procEntry is the match-relevant view of one /proc/<pid> entry: the cmdline
-// with NULs turned into spaces and the comm short name (read only when the
-// cmdline is empty, the only case in which comm is consulted).
-type procEntry struct {
-	cmdline string
-	comm    string
-	pid     int
-}
-
-// readProcEntry reads the /proc entry e. It reports false for non-numeric
-// names and non-directories. Ownership is intentionally NOT checked: services
-// we register legitimately run as root (postfix master, sudo-spawned
-// zmstat-fd) and must be visible to status. Cross-UID signaling is handled by
-// the caller via sudo fallback in killByPIDWithGroupAndSudo.
-func readProcEntry(e os.DirEntry) (procEntry, bool) {
-	if !e.IsDir() {
-		return procEntry{}, false
-	}
-
-	pid, convErr := strconv.Atoi(e.Name())
-	if convErr != nil {
-		return procEntry{}, false
-	}
-
-	procDir := procFSRoot + e.Name()
-	pe := procEntry{pid: pid}
-
-	data, readErr := os.ReadFile(procDir + "/cmdline") //nolint:gosec // path is /proc/<pid>/cmdline, not user-controlled
-	if readErr == nil && len(data) > 0 {
-		for i, c := range data {
-			if c == 0 {
-				data[i] = ' '
-			}
-		}
-
-		pe.cmdline = string(data)
-
-		return pe, true
-	}
-
-	comm, readErr := os.ReadFile(procDir + "/comm") //nolint:gosec // path is /proc/<pid>/comm, not user-controlled
-	if readErr == nil {
-		pe.comm = strings.TrimSpace(string(comm))
-	}
-
-	return pe, true
-}
-
-// matches reports whether the entry's cmdline or comm identifies needle.
-//
-// Primary: cmdline. When it is readable and non-empty the verdict is
-// authoritative — a negative match must NOT fall through to comm, because
-// the 15-char comm truncation (TASK_COMM_LEN-1) collides unrelated
-// processes. Example: service-discover-wrapper.sh has comm="service-discove"
-// which is a prefix of the service-discover daemon binary name
-// "service-discovered"; matching either direction against comm would falsely
-// identify wrapper sidecars as the real daemon.
-//
-// Fallback: cmdline unreadable or empty (some kernel threads, or daemons that
-// zero their argv after fork). Only an *exact* comm match counts — substring
-// semantics are unsafe because of the 15-char truncation.
-func (p procEntry) matches(needle string) bool {
-	if p.cmdline != "" {
-		return strings.Contains(p.cmdline, needle)
-	}
-
-	return p.comm != "" && p.comm == needle
-}
-
-// procSnapshot is a point-in-time listing of procFSRoot, read once and
-// matched against any number of needles. A status listing or watchdog tick
-// probes N services; without a snapshot each probe would re-walk /proc and
-// re-read every cmdline. The listing is loaded lazily on first scan (batches
-// whose services all resolve through pidfiles never touch /proc) and is safe
-// for concurrent use.
-//
-// Snapshots are for read-only status probes. Anything that signals a process
-// must use scanProcessesByCmdline, which always takes a fresh listing.
-type procSnapshot struct {
-	err     error
-	entries []procEntry
-	once    sync.Once
-}
-
-func (s *procSnapshot) load() {
-	s.once.Do(func() {
-		dirents, err := os.ReadDir(procFSRoot)
-		if err != nil {
-			s.err = fmt.Errorf("read %s: %w", procFSRoot, err)
-
-			return
-		}
-
-		s.entries = make([]procEntry, 0, len(dirents))
-
-		for _, e := range dirents {
-			if pe, ok := readProcEntry(e); ok {
-				s.entries = append(s.entries, pe)
-			}
-		}
-	})
-}
-
-// scan returns the PIDs of live (non-zombie) processes matching needle.
-// Zombies have already exited and cannot be signaled — never reported. The
-// zombie check runs only for needle matches, against the current state.
-func (s *procSnapshot) scan(needle string) ([]int, error) {
-	s.load()
-
-	if s.err != nil {
-		return nil, s.err
-	}
-
-	var pids []int
-
-	for i := range s.entries {
-		if s.entries[i].matches(needle) && !isZombie(s.entries[i].pid) {
-			pids = append(pids, s.entries[i].pid)
-		}
-	}
-
-	return pids, nil
-}
-
-type procSnapshotKey struct{}
-
-// WithProcessSnapshot returns a context carrying a process snapshot that
-// every legacy-mode ServiceStatus probe made with it shares, so a batch of
-// probes (zmcontrol status, a watchdog tick) walks /proc once instead of once
-// per service. The snapshot is taken lazily on the first ProcessName probe
-// and never refreshed: derive the context per batch, not per daemon lifetime.
-// A context that already carries one is returned unchanged.
-func WithProcessSnapshot(ctx context.Context) context.Context {
-	if _, ok := ctx.Value(procSnapshotKey{}).(*procSnapshot); ok {
-		return ctx
-	}
-
-	return context.WithValue(ctx, procSnapshotKey{}, &procSnapshot{})
-}
-
-// scanProcessesByCmdline walks /proc/<pid> looking for processes whose command
-// line or short name contains the given substring. Returns the matching PIDs.
-// It always reads /proc afresh, which is what kill paths need.
-//
-// Primary match: /proc/<pid>/cmdline (NUL-delimited, replaced with spaces).
-// Fallback: /proc/<pid>/comm (15-char short name). The fallback is needed for
-// daemons like nginx that replace their argv after forking, leaving cmdline
-// empty while comm still contains the binary name.
-func scanProcessesByCmdline(needle string) ([]int, error) {
-	return (&procSnapshot{}).scan(needle)
-}
-
-// scanProcessesForStatus is scanProcessesByCmdline for read-only status
-// probes: it matches against the snapshot carried by ctx
-// (WithProcessSnapshot) when there is one, else against a fresh listing.
-func scanProcessesForStatus(ctx context.Context, needle string) ([]int, error) {
-	if s, ok := ctx.Value(procSnapshotKey{}).(*procSnapshot); ok {
-		return s.scan(needle)
-	}
-
-	return scanProcessesByCmdline(needle)
-}
-
-// isRunningByPidFile reads a PID from the given file and checks if
-// /proc/<pid> exists. Returns (running, ok) where ok=false means the file
-// could not be read (permission denied, missing, empty) — caller should
-// fall through to an alternative detection method.
-func isRunningByPidFile(pidFile string) (running bool, ok bool) {
-	data, err := os.ReadFile(pidFile) //nolint:gosec // path from internal registry
-	if err != nil {
-		return false, false // unreadable — caller should fall through
-	}
-
-	// Read only the first line — some services (stats) write multiple PIDs
-	// (one per collector). The first is the primary/orchestrator process.
-	pidStr, _, _ := strings.Cut(strings.TrimSpace(string(data)), "\n")
-	pidStr = strings.TrimSpace(pidStr)
-
-	if pidStr == "" {
-		return false, false // empty file — fall through
-	}
-
-	pid, err := strconv.Atoi(pidStr)
-	if err != nil || pid <= 0 {
-		return false, false // corrupt — fall through
-	}
-
-	return processAlive(pid), true
-}
-
-// isZombie reports whether a process is in the zombie state (Z).
-// Zombies have already exited — they appear in /proc until their parent reaps
-// them, but they are not running. Returns false if /proc/<pid>/status is
-// unreadable (caller assumes the process is alive in that case).
-func isZombie(pid int) bool {
-	data, err := os.ReadFile(procFSRoot + strconv.Itoa(pid) + "/status") //nolint:gosec // path is /proc/<pid>/status
-	if err != nil {
-		return false
-	}
-
-	for line := range strings.SplitSeq(string(data), "\n") {
-		if state, ok := strings.CutPrefix(line, "State:"); ok {
-			return strings.Contains(state, "Z")
-		}
-	}
-
-	return false
-}
-
-// isProcessRunning checks if a process with the given name is running.
-// It reports whether any *other* process has a command line that contains
-// processName. The current PID and its parent are excluded so a
-// `configd control status` invocation does not self-match its own ProcessName.
-// Implemented directly against /proc to avoid forking pgrep. It matches
-// against the process snapshot carried by ctx (WithProcessSnapshot) when
-// present, so batched probes share one /proc walk.
-func isProcessRunning(ctx context.Context, processName string) bool {
-	pids, err := scanProcessesForStatus(ctx, processName)
-	if err != nil || len(pids) == 0 {
-		return false
-	}
-
-	isSelfOrParent := selfOrParentFilter()
-
-	for _, pid := range pids {
-		if !isSelfOrParent(pid) {
-			return true
-		}
-	}
-
-	return false
 }

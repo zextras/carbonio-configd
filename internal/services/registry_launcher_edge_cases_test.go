@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 // ============================================================
@@ -597,15 +599,17 @@ func TestLdapCustomStart_LocalconfigError(t *testing.T) {
 	_ = err
 }
 
-// TestLdapCustomStop_NoPidFile verifies ldapCustomStop returns nil when slapd.pid absent.
-func TestLdapCustomStop_NoPidFile(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	err := ldapCustomStop(context.Background(), nil)
-	if err != nil {
-		t.Errorf("ldapCustomStop returned unexpected error: %v", err)
-	}
+// TestLdapStop_DeclarativeNoPidFile verifies the LDAP stop is pure registry
+// data (GracefulStop, no CustomStop) and that it returns nil when slapd.pid is
+// absent: the service is already stopped.
+func TestLdapStop_DeclarativeNoPidFile(t *testing.T) {
+	def := *Registry[svcLdap]
+	require.Nil(t, def.CustomStop, "ldap stop must be declarative")
+	require.Equal(t, ldapStopTimeout, def.GracefulStop)
+
+	def.PidFile = filepath.Join(t.TempDir(), "slapd.pid")
+
+	require.NoError(t, stopWithoutSystemd(context.Background(), svcLdap, &def))
 }
 
 // ============================================================

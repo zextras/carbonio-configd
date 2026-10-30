@@ -56,7 +56,7 @@ func TestServiceStatus_IgnoresProcessesMentioningTheName(t *testing.T) {
 				t.Skipf("%s pid file reports a live process on this host", tc.service)
 			}
 
-			if isProcessRunning(context.Background(), def.ProcessName) {
+			if pidFromProcessName(context.Background(), def.ProcessName) > 0 {
 				t.Skipf("%s is really running on this host", tc.service)
 			}
 

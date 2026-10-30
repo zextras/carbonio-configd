@@ -46,10 +46,17 @@ func captureStdout(t *testing.T, fn func()) string {
 	return buf.String()
 }
 
-// livePidFileDef returns a def whose PidFile points at the test process, so
-// the legacy detail path resolves a real PID and a real /proc start time.
+// livePidFileDef returns a def whose PidFile points at the test process and
+// whose ProcessName is the test binary, so the legacy detail path resolves a
+// real PID (the pidfile PID is believed only when its binary matches the
+// identity) and a real /proc start time.
 func livePidFileDef(t *testing.T) *services.ServiceDef {
 	t.Helper()
+
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	pidFile := filepath.Join(t.TempDir(), "live.pid")
 	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o600); err != nil {
@@ -60,7 +67,7 @@ func livePidFileDef(t *testing.T) *services.ServiceDef {
 		Name:        "test",
 		DisplayName: "test",
 		PidFile:     pidFile,
-		ProcessName: "nonexistent-for-test-xyz",
+		ProcessName: self,
 	}
 }
 

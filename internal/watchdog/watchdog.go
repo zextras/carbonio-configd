@@ -248,10 +248,16 @@ func (w *Watchdog) checkServices(ctx context.Context) {
 
 	logger.DebugContext(ctx, "Checking service health")
 
-	observed := w.logServiceStatusChanges(ctx)
+	// Every status probe of this tick shares one process-table snapshot, so all
+	// restart decisions come from the same view and /proc is walked once.
+	// Restarts (which re-check status before starting) keep the caller's ctx
+	// and see live process state.
+	probeCtx := services.WithProcessSnapshot(ctx)
+
+	observed := w.logServiceStatusChanges(probeCtx)
 
 	for _, service := range w.getTrackedServices() {
-		w.checkOneService(ctx, service, observed)
+		w.checkOneService(ctx, probeCtx, service, observed)
 	}
 }
 
@@ -265,6 +271,7 @@ func (w *Watchdog) checkServices(ctx context.Context) {
 // iterates curServices(): probing e.g. antivirus on a node without it is
 // useless work. The returned map holds each probed service's running state so
 // checkOneService can reuse it instead of probing again in the same cycle.
+// ctx is the tick's probe context (services.WithProcessSnapshot).
 func (w *Watchdog) logServiceStatusChanges(ctx context.Context) map[string]bool {
 	w.mu.Lock()
 
@@ -283,17 +290,12 @@ func (w *Watchdog) logServiceStatusChanges(ctx context.Context) map[string]bool 
 
 	observed := make(map[string]bool, len(monitored))
 
-	// All probes of this tick share one /proc walk. The snapshot context is
-	// scoped to the probe loop: restarts (which re-check status before
-	// starting) must keep the caller's ctx and see live process state.
-	probeCtx := services.WithProcessSnapshot(ctx)
-
 	for _, service := range monitored {
 		if !w.isEnabledOnNode(service) {
 			continue
 		}
 
-		running, err := w.serviceManager.IsRunning(probeCtx, service)
+		running, err := w.serviceManager.IsRunning(ctx, service)
 		if err != nil {
 			// Don't record a status when the probe itself failed.
 			continue
@@ -337,8 +339,10 @@ func (w *Watchdog) isEnabledOnNode(service string) bool {
 
 // checkOneService verifies a single service and queues a restart when it is not running.
 // observed holds running states already probed in this cycle; a missing entry
-// triggers a fresh probe.
-func (w *Watchdog) checkOneService(ctx context.Context, service string, observed map[string]bool) {
+// triggers a probe through probeCtx, the tick's snapshot context, so it
+// answers from the same process-table view as the rest of the cycle; ctx is
+// the caller's live context, used for restarts.
+func (w *Watchdog) checkOneService(ctx, probeCtx context.Context, service string, observed map[string]bool) {
 	if !w.IsServiceEnabled(service) {
 		logger.DebugContext(ctx, "Skipping disabled service", "service", service)
 
@@ -355,7 +359,7 @@ func (w *Watchdog) checkOneService(ctx context.Context, service string, observed
 	if !probed {
 		var err error
 
-		isRunning, err = w.serviceManager.IsRunning(ctx, service)
+		isRunning, err = w.serviceManager.IsRunning(probeCtx, service)
 		if err != nil {
 			logger.WarnContext(ctx, "Failed to check service", "service", service, "error", err)
 

@@ -78,7 +78,7 @@ func TestGracefulStopViaPidfile_NoPidfile(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	err := gracefulStopViaPidfile(context.Background(), "/nonexistent/x.pid", "svc", time.Second)
+	err := gracefulStopViaPidfile(context.Background(), "/nonexistent/x.pid", "svc", "", time.Second)
 	if err != nil {
 		t.Errorf("missing pidfile should be treated as stopped, got: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestGracefulStopViaPidfile_InvalidPid(t *testing.T) {
 	if err := os.WriteFile(pidFile, []byte("notapid\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := gracefulStopViaPidfile(context.Background(), pidFile, "svc", time.Second); err == nil {
+	if err := gracefulStopViaPidfile(context.Background(), pidFile, "svc", "", time.Second); err == nil {
 		t.Error("expected error for non-numeric pid")
 	}
 }
@@ -119,7 +119,7 @@ func TestGracefulStopViaPidfile_TermExits(t *testing.T) {
 	go func() { _, _ = cmd.Process.Wait() }()
 
 	start := time.Now()
-	if err := gracefulStopViaPidfile(context.Background(), pidFile, "svc", 5*time.Second); err != nil {
+	if err := gracefulStopViaPidfile(context.Background(), pidFile, "svc", "", 5*time.Second); err != nil {
 		t.Fatalf("graceful stop: %v", err)
 	}
 
@@ -185,7 +185,7 @@ func TestGracefulStopViaPidfile_SigTermEsrch(t *testing.T) {
 	if err := os.WriteFile(pidFile, []byte("2147483647\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err := gracefulStopViaPidfile(context.Background(), pidFile, "svc", time.Second)
+	err := gracefulStopViaPidfile(context.Background(), pidFile, "svc", "", time.Second)
 	if err != nil {
 		t.Errorf("expected nil for non-existent pid, got: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestGracefulStopViaPidfile_KillEscalation(t *testing.T) {
 	}
 
 	// Very short timeout so SIGKILL escalation is triggered quickly.
-	err := gracefulStopViaPidfile(context.Background(), pidFile, "svc", 100*time.Millisecond)
+	err := gracefulStopViaPidfile(context.Background(), pidFile, "svc", "", 100*time.Millisecond)
 	if err != nil {
 		t.Fatalf("expected nil after SIGKILL escalation, got: %v", err)
 	}
