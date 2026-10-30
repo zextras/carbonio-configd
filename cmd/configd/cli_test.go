@@ -7,8 +7,11 @@ package main
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/zextras/carbonio-configd/internal/localconfig"
 )
 
 func TestInitComponents(t *testing.T) {
@@ -37,27 +40,55 @@ func TestInitCmd_Structure(t *testing.T) {
 	}
 }
 
-func TestDangerousKeys(t *testing.T) {
-	dangerous := []string{
+func TestDangerousKeys_MatchLegacyProtectedKeys(t *testing.T) {
+	// Keys marked .protect() in legacy LC.java: editing requires -f.
+	for _, key := range []string{
+		"zimbra_home",
+		"zimbra_mysql_password",
 		"zimbra_ldap_password",
 		"ldap_root_password",
-		"zimbra_mysql_password",
 		"mysql_root_password",
-		"zimbra_ldap_userdn",
-		"ldap_url",
-		"ldap_master_url",
-		"zimbra_server_hostname",
-		"zimbra_require_interprocess_security",
-	}
-
-	for _, key := range dangerous {
+		"zimbra_vami_password",
+	} {
 		if !dangerousKeys[key] {
-			t.Errorf("expected %s to be marked as dangerous", key)
+			t.Errorf("%s: legacy requires -f, want dangerous", key)
 		}
 	}
 
-	if dangerousKeys["safe_key"] {
-		t.Error("expected safe_key to not be dangerous")
+	// Editable without -f in legacy; carbonio-install-ansible sets ldap_url
+	// with a plain "zmlocalconfig -e".
+	for _, key := range []string{
+		"ldap_url",
+		"ldap_master_url",
+		"zimbra_server_hostname",
+		"zimbra_ldap_userdn",
+		"zimbra_require_interprocess_security",
+	} {
+		if dangerousKeys[key] {
+			t.Errorf("%s: legacy allows editing without -f, want not dangerous", key)
+		}
+	}
+}
+
+func TestHandleEdit_LDAPURLWithoutForce(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "localconfig.xml")
+	if err := os.WriteFile(path, []byte(`<?xml version="1.0" encoding="UTF-8"?>
+<localconfig>
+    <key name="ldap_url"><value>ldap://old:389</value></key>
+</localconfig>`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	want := "ldap://replica:389 ldap://master:389"
+	handleEdit(&localconfigOpts{configPath: path, keys: []string{"ldap_url=" + want}})
+
+	cfg, err := localconfig.LoadLocalConfigFromFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := cfg["ldap_url"]; got != want {
+		t.Errorf("ldap_url = %q, want %q", got, want)
 	}
 }
 
