@@ -32,7 +32,7 @@ func TestCheckUserPermissions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := CheckUserPermissions()
+			err := CheckUserPermissions(OSUser)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("CheckUserPermissions() error = %v, wantErr %v", err, tt.wantErr)
 				t.Logf("Current user: %s, Required user: %s", currentUser.Username, RequiredUser)
@@ -54,7 +54,7 @@ func TestCheckUserPermissions_ErrorMessages(t *testing.T) {
 
 	// Test when not running as required user
 	if currentUser.Username != RequiredUser {
-		err := CheckUserPermissions()
+		err := CheckUserPermissions(OSUser)
 		if err == nil {
 			t.Error("CheckUserPermissions() should return error when not running as required user")
 		}
@@ -80,7 +80,7 @@ func TestMustCheckUserPermissions(t *testing.T) {
 	}
 
 	// Call MustCheckUserPermissions
-	err = MustCheckUserPermissions(&stderr)
+	err = MustCheckUserPermissions(OSUser, &stderr)
 	stderrOutput := stderr.String()
 
 	// Verify behavior based on current user
@@ -123,7 +123,7 @@ func TestMustCheckUserPermissions_StderrFormat(t *testing.T) {
 
 	var stderr bytes.Buffer
 
-	_ = MustCheckUserPermissions(&stderr)
+	_ = MustCheckUserPermissions(OSUser, &stderr)
 	stderrOutput := stderr.String()
 
 	// Verify stderr contains the expected message

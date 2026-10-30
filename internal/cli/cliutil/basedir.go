@@ -42,5 +42,5 @@ func BasePath(elem ...string) string {
 // the start of any command that must not be run by arbitrary users (daemon,
 // service control, rewrite, proxy write, init).
 func RequireZextras(stderr io.Writer) bool {
-	return security.MustCheckUserPermissions(stderr) == nil
+	return security.MustCheckUserPermissions(security.OSUser, stderr) == nil
 }
