@@ -18,7 +18,9 @@ import (
 
 // transformMultiLine is a helper function that transforms multi-line input
 // by processing each line through the transformer
-func transformMultiLine(transformer *Transformer, input string) string {
+func transformMultiLine(t *testing.T, transformer *Transformer, input string) string {
+	t.Helper()
+
 	var result strings.Builder
 	scanner := bufio.NewScanner(strings.NewReader(input))
 
@@ -83,7 +85,7 @@ permit
 	st := &state.State{}
 	transformer := NewTransformer(mock, st)
 
-	output := transformMultiLine(transformer, input)
+	output := transformMultiLine(t, transformer, input)
 
 	// Verify expected lines are present
 	expectedLines := []string{
@@ -178,7 +180,7 @@ $enable_dkim_verification = %%binary VAR:zimbraAmavisEnableDKIMVerification%%;
 	st := &state.State{}
 	transformer := NewTransformer(mock, st)
 
-	output := transformMultiLine(transformer, input)
+	output := transformMultiLine(t, transformer, input)
 
 	// Verify expected transformations
 	expectedLines := []string{
@@ -239,7 +241,7 @@ set $mynetworks "%%list VAR:zimbraMtaMyNetworks ,%%";
 	st := &state.State{}
 	transformer := NewTransformer(mock, st)
 
-	output := transformMultiLine(transformer, input)
+	output := transformMultiLine(t, transformer, input)
 
 	// Verify expected transformations
 	expectedLines := []string{
@@ -303,7 +305,7 @@ func TestNestedDirectivesIntegration(t *testing.T) {
 	st := &state.State{}
 	transformer := NewTransformer(mock, st)
 
-	output := transformMultiLine(transformer, input)
+	output := transformMultiLine(t, transformer, input)
 
 	// Verify expected transformations
 	expectedLines := []string{
@@ -373,7 +375,7 @@ set $trusted_nets "%%list VAR:zimbraMtaMyNetworks ,%%";
 	st := &state.State{}
 	transformer := NewTransformer(mock, st)
 
-	output := transformMultiLine(transformer, input)
+	output := transformMultiLine(t, transformer, input)
 
 	// Verify all expected transformations
 	expectedLines := []string{
@@ -453,7 +455,7 @@ server {
 	st := &state.State{}
 	transformer := NewTransformer(mock, st)
 
-	output := transformMultiLine(transformer, input)
+	output := transformMultiLine(t, transformer, input)
 
 	// Verify structure is preserved
 	if !strings.Contains(output, "listen 8080;") {
