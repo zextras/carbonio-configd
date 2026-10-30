@@ -33,8 +33,8 @@ func TestAddRestartLogged_Deduplication(t *testing.T) {
 		t.Skip("slow: may invoke real system commands")
 	}
 	sm := NewServiceManager(ctl)
-	sm.addRestartLogged(context.Background(), "mta", "mta-label")
-	sm.addRestartLogged(context.Background(), "mta", "mta-label")
+	sm.addRestartLogged(context.Background(), "mta", "r", "mta-label")
+	sm.addRestartLogged(context.Background(), "mta", "r", "mta-label")
 	if len(sm.RestartQueue) != 1 {
 		t.Errorf("expected 1 entry after duplicate addRestartLogged, got %d", len(sm.RestartQueue))
 	}
@@ -50,9 +50,9 @@ func TestAddRestartLogged_MultipleDifferentServices(t *testing.T) {
 		t.Skip("slow: may invoke real system commands")
 	}
 	sm := NewServiceManager(ctl)
-	sm.addRestartLogged(context.Background(), "mta", "mta")
-	sm.addRestartLogged(context.Background(), "proxy", "proxy")
-	sm.addRestartLogged(context.Background(), "mailbox", "mailbox")
+	sm.addRestartLogged(context.Background(), "mta", "r", "mta")
+	sm.addRestartLogged(context.Background(), "proxy", "r", "proxy")
+	sm.addRestartLogged(context.Background(), "mailbox", "r", "mailbox")
 
 	if len(sm.RestartQueue) != 3 {
 		t.Errorf("expected 3 queued services, got %d", len(sm.RestartQueue))
@@ -70,7 +70,7 @@ func TestAddRestartLogged_LabelDiffersFromService(t *testing.T) {
 		t.Skip("slow: may invoke real system commands")
 	}
 	sm := NewServiceManager(ctl)
-	sm.addRestartLogged(context.Background(), "mta", "mta-display-label")
+	sm.addRestartLogged(context.Background(), "mta", "r", "mta-display-label")
 
 	if !sm.RestartQueue["mta"] {
 		t.Error("expected 'mta' queued when logLabel differs from service name")
