@@ -10,6 +10,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
@@ -628,5 +629,74 @@ func TestExecutePostconfBatch_AllKeysInvalidRunsNothing(t *testing.T) {
 	err := ex.ExecutePostconfBatch(context.Background(), []PostconfOperation{{Key: "-X", Value: "v"}})
 	if err != nil {
 		t.Errorf("expected nil when every key is skipped, got %v", err)
+	}
+}
+
+func TestExecuteMapfile_NewFileHonoursUmask(t *testing.T) {
+	old := syscall.Umask(0o027)
+	defer syscall.Umask(old)
+
+	tmpDir := t.TempDir()
+	ex := NewExecutor(tmpDir, &mockLdapManager{}).(*executor)
+	path := filepath.Join(tmpDir, "dhparam.pem")
+	ex.mappedFiles["k"] = path
+
+	op := MapfileOperation{Key: "k", Base64Data: base64.StdEncoding.EncodeToString([]byte("dh"))}
+	if err := ex.ExecuteMapfile(context.Background(), op); err != nil {
+		t.Fatal(err)
+	}
+
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if fi.Mode().Perm() != 0o640 {
+		t.Errorf("new MAPFILE mode = %o, want 640 (legacy open(w) under umask 027)", fi.Mode().Perm())
+	}
+}
+
+func TestExecuteMapfile_ExistingFileKeepsMode(t *testing.T) {
+	tmpDir := t.TempDir()
+	ex := NewExecutor(tmpDir, &mockLdapManager{}).(*executor)
+	path := filepath.Join(tmpDir, "dhparam.pem")
+
+	if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Chmod(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ex.mappedFiles["k"] = path
+
+	op := MapfileOperation{Key: "k", Base64Data: base64.StdEncoding.EncodeToString([]byte("new"))}
+	if err := ex.ExecuteMapfile(context.Background(), op); err != nil {
+		t.Fatal(err)
+	}
+
+	fi, _ := os.Stat(path)
+	if fi.Mode().Perm() != 0o600 {
+		t.Errorf("existing MAPFILE mode = %o, want 600 preserved", fi.Mode().Perm())
+	}
+
+	if b, _ := os.ReadFile(path); string(b) != "new" {
+		t.Errorf("content = %q", b)
+	}
+
+	// Atomic write: temp + rename replaces the inode instead of truncating it.
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if os.SameFile(before, after) {
+		t.Error("MAPFILE was rewritten in place (same inode); want atomic temp+rename")
 	}
 }
