@@ -64,13 +64,10 @@ func (cm *ConfigManager) loadServerConfigWithRetry(ctx context.Context, maxRetri
 // fetchServerConfig fetches fresh server config from LDAP (cache miss path)
 func (cm *ConfigManager) fetchServerConfig(ctx context.Context, maxRetries int) (*ServerConfigData, error) {
 	return retryWithBackoff(ctx, "ServerConfig", maxRetries, func() (*ServerConfigData, error) {
-		output, err := cm.executeLDAPCommand(ctx, "gs", cm.mainConfig.Hostname)
+		configDataMap, err := cm.fetchServerAttrs(ctx)
 		if err != nil {
 			return nil, err
 		}
-
-		// Parse LDAP attribute output (key: value format)
-		configDataMap := parseLDAPCommandOutput(output)
 
 		configData := &ServerConfigData{
 			Data:          configDataMap,

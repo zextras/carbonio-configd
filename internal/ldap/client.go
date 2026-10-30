@@ -762,22 +762,3 @@ func entryToMap(entry *ldap.Entry) map[string]string {
 
 	return result
 }
-
-// FormatAsZmprovOutput formats a config map as zmprov-style output.
-// Each line is "key: value" to match zmprov output format.
-func FormatAsZmprovOutput(config map[string]string) string {
-	var builder strings.Builder
-
-	for key, value := range config {
-		// Handle multi-line values
-		lines := strings.SplitSeq(value, "\n")
-		for line := range lines {
-			builder.WriteString(key)
-			builder.WriteString(": ")
-			builder.WriteString(line)
-			builder.WriteString("\n")
-		}
-	}
-
-	return builder.String()
-}

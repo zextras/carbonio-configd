@@ -264,15 +264,12 @@ func (c *Command) String() string {
 
 // --- Dummy functions for provisioning commands (to be replaced with actual LDAP/API calls) ---
 
-func (e *CommandExecutor) getserver(ctx context.Context, args ...string) (string, error) {
-	if len(args) == 0 {
-		return "", fmt.Errorf("hostname required for getserver")
-	}
-
-	hostname := args[0]
-
+// ServerAttrs returns the server's LDAP attributes (with global defaults
+// inherited, as zmprov gs does) for hostname. Multi-valued attributes are
+// joined with newlines.
+func (e *CommandExecutor) ServerAttrs(ctx context.Context, hostname string) (map[string]string, error) {
 	if err := e.requireLDAP(); err != nil {
-		return "", err
+		return nil, err
 	}
 
 	logger.DebugContext(ctx, "Using native LDAP client for server query",
@@ -280,71 +277,34 @@ func (e *CommandExecutor) getserver(ctx context.Context, args ...string) (string
 
 	serverAttrs, err := e.ldapClient.GetServerConfig(hostname)
 	if err != nil {
-		return "", fmt.Errorf("native LDAP query failed for server %s: %w", hostname, err)
+		return nil, fmt.Errorf("native LDAP query failed for server %s: %w", hostname, err)
 	}
 
-	// Convert to zmprov format
-	output := ldap.FormatAsZmprovOutput(serverAttrs)
 	logger.DebugContext(ctx, "Native LDAP query successful",
 		"hostname", hostname,
 		"attr_count", len(serverAttrs))
 
-	return output, nil
+	return serverAttrs, nil
 }
 
-// getserverenabled retrieves enabled services for a server using the native LDAP client.
-func (e *CommandExecutor) getserverenabled(ctx context.Context, args ...string) (string, error) {
-	if len(args) == 0 {
-		return "", fmt.Errorf("hostname required for getserverenabled")
-	}
-
-	hostname := args[0]
-
+// GlobalAttrs returns the global configuration (cn=config,cn=zimbra) LDAP
+// attributes. Multi-valued attributes are joined with newlines.
+func (e *CommandExecutor) GlobalAttrs(ctx context.Context) (map[string]string, error) {
 	if err := e.requireLDAP(); err != nil {
-		return "", err
-	}
-
-	logger.DebugContext(ctx, "Using native LDAP client for server enabled services query",
-		"hostname", hostname)
-
-	serverAttrs, err := e.ldapClient.GetServerConfig(hostname)
-	if err != nil {
-		return "", fmt.Errorf("native LDAP query failed for server %s: %w", hostname, err)
-	}
-
-	// Extract only zimbraServiceEnabled attribute
-	if services, ok := serverAttrs[ldap.AttrZimbraServiceEnabled]; ok {
-		logger.DebugContext(ctx, "Native LDAP query successful - found enabled services",
-			"hostname", hostname,
-			"services", services)
-
-		return ldap.AttrZimbraServiceEnabled + ": " + services + "\n", nil
-	}
-
-	logger.DebugContext(ctx, "No enabled services found for server",
-		"hostname", hostname)
-
-	return "", nil
-}
-
-func (e *CommandExecutor) getglobal(ctx context.Context, args ...string) (string, error) {
-	if err := e.requireLDAP(); err != nil {
-		return "", err
+		return nil, err
 	}
 
 	logger.DebugContext(ctx, "Using native LDAP client for global config query")
 
 	globalAttrs, err := e.ldapClient.GetGlobalConfig()
 	if err != nil {
-		return "", fmt.Errorf("native LDAP query failed for global config: %w", err)
+		return nil, fmt.Errorf("native LDAP query failed for global config: %w", err)
 	}
 
-	// Convert to zmprov format
-	output := ldap.FormatAsZmprovOutput(globalAttrs)
 	logger.DebugContext(ctx, "Native LDAP query successful",
 		"attr_count", len(globalAttrs))
 
-	return output, nil
+	return globalAttrs, nil
 }
 
 func getlocal(ctx context.Context, args ...string) (string, error) {
@@ -664,6 +624,10 @@ func makePostconfExec(postconfSpec string) func(ctx context.Context, args ...str
 type Registry struct {
 	Exe      map[string]string
 	Commands map[string]*Command
+	// ServerAttrs and GlobalAttrs return typed LDAP attributes straight from
+	// the native client; nil until RegisterLDAPCommands is called.
+	ServerAttrs func(ctx context.Context, hostname string) (map[string]string, error)
+	GlobalAttrs func(ctx context.Context) (map[string]string, error)
 }
 
 // NewRegistry creates a new Registry with executable paths and commands initialized
@@ -733,12 +697,11 @@ func (r *Registry) RegisterLDAPCommands(e *CommandExecutor) {
 		r.Commands = make(map[string]*Command)
 	}
 
-	r.Commands[cmdGACF] = NewCommand("Global system configuration", cmdGACF, e.getglobal)
+	r.ServerAttrs = e.ServerAttrs
+	r.GlobalAttrs = e.GlobalAttrs
 	r.Commands[cmdGAMAU] = NewCommand("All MTA Authentication Target URLs", "getAllMtaAuthURLs", e.gamau)
 	r.Commands[cmdGARPB] = NewCommand("All Reverse Proxy Backends", "getAllReverseProxyBackends", e.garpb)
 	r.Commands[cmdGARPU] = NewCommand("All Reverse Proxy URLs", "getAllReverseProxyURLs", e.garpu)
-	r.Commands[cmdGS] = NewCommand("Configuration for server", cmdGS, e.getserver)
-	r.Commands[cmdGSEnabled] = NewCommand("Enabled Services for host", cmdGSEnabled, e.getserverenabled)
 }
 
 // ResetProvisioning clears cached provisioning data for the specified type.

@@ -5,7 +5,6 @@
 package configmgr
 
 import (
-	"bufio"
 	"cmp"
 	"context"
 	"fmt"
@@ -313,25 +312,42 @@ func loadConfigWithCache[T any](
 	return typed, nil
 }
 
-// executeLDAPCommand runs a registered LDAP command by name and validates the
-// result, consolidating the cmd-nil / rc!=0 / empty-output checks that
-// fetchGlobalConfig and fetchServerConfig used to duplicate.
-func (cm *ConfigManager) executeLDAPCommand(ctx context.Context, cmdName string, args ...string) (string, error) {
-	cmd := cm.CommandRegistry.Commands[cmdName]
-	if cmd == nil {
-		return "", fmt.Errorf("%s command not available (LDAP commands not registered)", cmdName)
+// fetchServerAttrs returns the server's LDAP attributes via the registry,
+// failing like the former gs command did when none are available.
+func (cm *ConfigManager) fetchServerAttrs(ctx context.Context) (map[string]string, error) {
+	if cm.CommandRegistry.ServerAttrs == nil {
+		return nil, fmt.Errorf("gs command not available (LDAP commands not registered)")
 	}
 
-	rc, output, errMsg := cmd.Execute(ctx, args...)
-	if rc != 0 {
-		return "", fmt.Errorf("%s command failed with rc=%d: %s", cmdName, rc, errMsg)
+	attrs, err := cm.CommandRegistry.ServerAttrs(ctx, cm.mainConfig.Hostname)
+	if err != nil {
+		return nil, err
 	}
 
-	if output == "" {
-		return "", fmt.Errorf("no data returned from %s", cmdName)
+	if len(attrs) == 0 {
+		return nil, fmt.Errorf("no data returned from gs")
 	}
 
-	return output, nil
+	return normalizeLDAPAttrs(attrs), nil
+}
+
+// fetchGlobalAttrs returns the global LDAP attributes via the registry,
+// failing like the former gacf command did when none are available.
+func (cm *ConfigManager) fetchGlobalAttrs(ctx context.Context) (map[string]string, error) {
+	if cm.CommandRegistry.GlobalAttrs == nil {
+		return nil, fmt.Errorf("gacf command not available (LDAP commands not registered)")
+	}
+
+	attrs, err := cm.CommandRegistry.GlobalAttrs(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(attrs) == 0 {
+		return nil, fmt.Errorf("no data returned from gacf")
+	}
+
+	return normalizeLDAPAttrs(attrs), nil
 }
 
 // processCommonSSLConfig applies the standard SSL post-processing (sort + XML)
@@ -369,43 +385,26 @@ func processSortedSSLConfigForTarget(configData map[string]string, key string) {
 	}
 }
 
-// parseLDAPCommandOutput parses the output of zmprov commands (key: value format)
-// Handles multi-value attributes by concatenating with newlines.
-// Handles base64-encoded values (key:: base64value) by preserving the base64 string.
-func parseLDAPCommandOutput(output string) map[string]string {
-	configData := make(map[string]string)
-	scanner := bufio.NewScanner(strings.NewReader(output))
+// normalizeLDAPAttrs returns a fresh config map from LDAP attributes
+// (multi-valued attributes already joined with newlines). Each value line is
+// trimmed of surrounding whitespace, matching the zmprov-text round trip this
+// replaces, and attribute names are interned.
+func normalizeLDAPAttrs(attrs map[string]string) map[string]string {
+	configData := make(map[string]string, len(attrs))
 
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		// LDAP output format: "key: value" or "key:: base64value".
-		// The separator is the first colon; values may contain colons
-		// (URLs, IPv6 addresses such as [::1]/128), so "::" only marks
-		// base64 when it immediately follows the attribute name.
-		rawKey, rest, found := strings.Cut(line, ":")
-		if !found {
-			continue
-		}
-
-		key := intern.Attr(strings.TrimSpace(rawKey))
-
-		if b64, isB64 := strings.CutPrefix(rest, ":"); isB64 {
-			// Store base64-encoded value as-is (will be decoded by executor)
-			configData[key] = strings.TrimSpace(b64)
+	for key, value := range attrs {
+		if !strings.Contains(value, "\n") {
+			configData[intern.Attr(strings.TrimSpace(key))] = strings.TrimSpace(value)
 
 			continue
 		}
 
-		value := strings.TrimSpace(rest)
-		// Handle multi-value attributes by concatenating with newlines
-		if existingValue, exists := configData[key]; exists {
-			configData[key] = existingValue + "\n" + value
-		} else {
-			configData[key] = value
+		lines := strings.Split(value, "\n")
+		for i, line := range lines {
+			lines[i] = strings.TrimSpace(line)
 		}
+
+		configData[intern.Attr(strings.TrimSpace(key))] = strings.Join(lines, "\n")
 	}
 
 	return configData

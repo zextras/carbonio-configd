@@ -39,7 +39,11 @@ func TestLoaders_CancelledMidLoadDoNotPublish(t *testing.T) {
 			name:   "global",
 			target: func(cm *ConfigManager) *config.ConfigMap { return cm.State.GlobalConfig.Data },
 			setup: func(cm *ConfigManager, cancel context.CancelFunc) {
-				cancelDuringCommand(cm, cancel, "gacf", "zimbraFoo: new\n")
+				cm.CommandRegistry.GlobalAttrs = func(context.Context) (map[string]string, error) {
+					cancel()
+
+					return map[string]string{"zimbraFoo": "new"}, nil
+				}
 			},
 			load: func(cm *ConfigManager, ctx context.Context) error { return cm.loadGlobalConfigWithRetry(ctx, 1) },
 		},
@@ -47,7 +51,11 @@ func TestLoaders_CancelledMidLoadDoNotPublish(t *testing.T) {
 			name:   "server",
 			target: func(cm *ConfigManager) *config.ConfigMap { return cm.State.ServerConfig.Data },
 			setup: func(cm *ConfigManager, cancel context.CancelFunc) {
-				cancelDuringCommand(cm, cancel, "gs", "zimbraFoo: new\nzimbraServiceEnabled: mta\n")
+				cm.CommandRegistry.ServerAttrs = func(context.Context, string) (map[string]string, error) {
+					cancel()
+
+					return map[string]string{"zimbraFoo": "new", "zimbraServiceEnabled": "mta"}, nil
+				}
 			},
 			load: func(cm *ConfigManager, ctx context.Context) error { return cm.loadServerConfigWithRetry(ctx, 1) },
 		},

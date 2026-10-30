@@ -206,13 +206,10 @@ func (cm *ConfigManager) cachedGlobalConfig(ctx context.Context, maxRetries int)
 // fetchGlobalConfig fetches fresh global config from LDAP (cache miss path)
 func (cm *ConfigManager) fetchGlobalConfig(ctx context.Context, maxRetries int) (map[string]string, error) {
 	return retryWithBackoff(ctx, "GlobalConfig", maxRetries, func() (map[string]string, error) {
-		output, err := cm.executeLDAPCommand(ctx, "gacf")
+		configData, err := cm.fetchGlobalAttrs(ctx)
 		if err != nil {
 			return nil, err
 		}
-
-		// Parse LDAP attribute output (key: value format)
-		configData := parseLDAPCommandOutput(output)
 
 		// Post-processing: Set zimbraQuarantineBannedItems based on conditions
 		if configData["zimbraMtaBlockedExtensionWarnRecipient"] == constTRUE &&

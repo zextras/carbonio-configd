@@ -170,72 +170,6 @@ func TestEntryToMap(t *testing.T) {
 	}
 }
 
-func TestFormatAsZmprovOutput(t *testing.T) {
-	tests := []struct {
-		name   string
-		config map[string]string
-		want   []string // Expected lines in output
-	}{
-		{
-			name: "single values",
-			config: map[string]string{
-				"cn":           "test",
-				"zimbraIPMode": "ipv4",
-			},
-			want: []string{
-				"cn: test",
-				"zimbraIPMode: ipv4",
-			},
-		},
-		{
-			name: "multi-line value",
-			config: map[string]string{
-				"zimbraServiceEnabled": "mailbox\nmta\nldap",
-			},
-			want: []string{
-				"zimbraServiceEnabled: mailbox",
-				"zimbraServiceEnabled: mta",
-				"zimbraServiceEnabled: ldap",
-			},
-		},
-		{
-			name:   "empty config",
-			config: map[string]string{},
-			want:   []string{},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := FormatAsZmprovOutput(tt.config)
-
-			// Verify all expected lines are present
-			for _, expectedLine := range tt.want {
-				if !containsLine(got, expectedLine) {
-					t.Errorf("FormatAsZmprovOutput() missing line %q\nGot:\n%s", expectedLine, got)
-				}
-			}
-		})
-	}
-}
-
-func TestFormatAsZmprovOutput_EmptyValue(t *testing.T) {
-	config := map[string]string{
-		"key1": "",
-		"key2": "value",
-	}
-
-	output := FormatAsZmprovOutput(config)
-
-	// Empty value should still produce a line
-	if !containsLine(output, "key1: ") {
-		t.Errorf("Expected 'key1: ' in output, got:\n%s", output)
-	}
-	if !containsLine(output, "key2: value") {
-		t.Errorf("Expected 'key2: value' in output, got:\n%s", output)
-	}
-}
-
 func TestClient_Close(t *testing.T) {
 	client, err := NewClient(&ClientConfig{
 		URL:      "ldap://localhost:389",
@@ -257,38 +191,6 @@ func TestClient_Close(t *testing.T) {
 	if err != nil {
 		t.Errorf("Close() second call error = %v", err)
 	}
-}
-
-func containsLine(output, line string) bool {
-	lines := splitLines(output)
-	for _, l := range lines {
-		if l == line {
-			return true
-		}
-	}
-	return false
-}
-
-func splitLines(s string) []string {
-	if s == "" {
-		return []string{}
-	}
-
-	var lines []string
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			lines = append(lines, s[start:i])
-			start = i + 1
-		}
-	}
-
-	// Add last line if not empty
-	if start < len(s) {
-		lines = append(lines, s[start:])
-	}
-
-	return lines
 }
 
 // TestServerConfigDNEscaping tests that GetServerConfig constructs properly escaped DNs.
@@ -438,21 +340,6 @@ func BenchmarkEntryToMap(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = entryToMap(entry)
-	}
-}
-
-func BenchmarkFormatAsZmprovOutput(b *testing.B) {
-	config := map[string]string{
-		"cn":                    "test",
-		"zimbraServiceHostname": "test.example.com",
-		"zimbraServiceEnabled":  "mailbox\nmta\nldap",
-		"zimbraIPMode":          "ipv4",
-		"objectClass":           "zimbraServer",
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_ = FormatAsZmprovOutput(config)
 	}
 }
 

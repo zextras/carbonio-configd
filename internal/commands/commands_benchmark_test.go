@@ -12,7 +12,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/ldap"
 )
 
-// BenchmarkGetServer benchmarks the native LDAP getserver function.
+// BenchmarkGetServer benchmarks the native LDAP ServerAttrs function.
 func BenchmarkGetServer(b *testing.B) {
 	// Setup: Create a mock LDAP client for benchmarking
 	// In real usage, this would connect to actual LDAP server
@@ -33,11 +33,11 @@ func BenchmarkGetServer(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = executor.getserver(context.Background(), "localhost")
+		_, _ = executor.ServerAttrs(context.Background(), "localhost")
 	}
 }
 
-// BenchmarkGetGlobal benchmarks the native LDAP getglobal function.
+// BenchmarkGetGlobal benchmarks the native LDAP GlobalAttrs function.
 func BenchmarkGetGlobal(b *testing.B) {
 	client, err := ldap.NewClient(&ldap.ClientConfig{
 		URL:      "ldap://localhost:389",
@@ -56,7 +56,7 @@ func BenchmarkGetGlobal(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = executor.getglobal(context.Background())
+		_, _ = executor.GlobalAttrs(context.Background())
 	}
 }
 

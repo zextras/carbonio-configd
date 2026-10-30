@@ -257,27 +257,6 @@ func TestDummyFunctions(t *testing.T) {
 		contains string
 	}{
 		{
-			name:     "getserver - no args",
-			fn:       executor.getserver,
-			args:     []string{},
-			wantErr:  true, // Should error without hostname
-			contains: "hostname required",
-		},
-		{
-			name:     "getserver - with hostname",
-			fn:       executor.getserver,
-			args:     []string{"localhost"},
-			wantErr:  true, // Will fail since LDAP client is nil
-			contains: "",
-		},
-		{
-			name:     "getglobal",
-			fn:       executor.getglobal,
-			args:     []string{},
-			wantErr:  true, // Will fail since LDAP client is nil
-			contains: "",
-		},
-		{
 			name:     "getlocal",
 			fn:       getlocal,
 			args:     []string{},
@@ -521,44 +500,6 @@ func TestProxygen_ArgumentParsing(t *testing.T) {
 	}
 }
 
-// TestGetserver_ErrorCases tests getserver error handling
-func TestGetserver_ErrorCases(t *testing.T) {
-	executor := NewCommandExecutor(nil)
-
-	tests := []struct {
-		name    string
-		args    []string
-		wantErr bool
-		errMsg  string
-	}{
-		{
-			name:    "no hostname provided",
-			args:    []string{},
-			wantErr: true,
-			errMsg:  "hostname required",
-		},
-		{
-			name:    "native LDAP client not initialized",
-			args:    []string{"mail.example.com"},
-			wantErr: true,
-			errMsg:  "native LDAP client not initialized",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := executor.getserver(context.Background(), tt.args...)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("getserver() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if tt.wantErr && err != nil && !strings.Contains(err.Error(), tt.errMsg) {
-				t.Errorf("getserver() error = %v, want error containing %v", err, tt.errMsg)
-			}
-		})
-	}
-}
-
 // TestRunBinaryWithContext tests the runBinaryWithContext method directly.
 func TestRunBinaryWithContext(t *testing.T) {
 	tests := []struct {
@@ -637,56 +578,6 @@ func TestExecuteWithContext_BinaryPath(t *testing.T) {
 	}
 	if errStr != "OK" {
 		t.Errorf("ExecuteWithContext() error = %q, want 'OK'", errStr)
-	}
-}
-
-// TestGetserverenabled_ErrorCases tests getserverenabled error paths.
-func TestGetserverenabled_ErrorCases(t *testing.T) {
-	executor := NewCommandExecutor(nil)
-
-	tests := []struct {
-		name    string
-		args    []string
-		wantErr bool
-		errMsg  string
-	}{
-		{
-			name:    "no hostname provided",
-			args:    []string{},
-			wantErr: true,
-			errMsg:  "hostname required for getserverenabled",
-		},
-		{
-			name:    "nil LDAP client",
-			args:    []string{"mail.example.com"},
-			wantErr: true,
-			errMsg:  errLDAPNotInitialized,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := executor.getserverenabled(context.Background(), tt.args...)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("getserverenabled() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if tt.wantErr && err != nil && !strings.Contains(err.Error(), tt.errMsg) {
-				t.Errorf("getserverenabled() error = %v, want to contain %q", err, tt.errMsg)
-			}
-		})
-	}
-}
-
-// TestGetglobal_NilLDAP tests getglobal with nil LDAP client.
-func TestGetglobal_NilLDAP(t *testing.T) {
-	executor := NewCommandExecutor(nil)
-	_, err := executor.getglobal(context.Background())
-	if err == nil {
-		t.Fatal("getglobal() expected error with nil LDAP client, got nil")
-	}
-	if !strings.Contains(err.Error(), errLDAPNotInitialized) {
-		t.Errorf("getglobal() error = %v, want to contain %q", err, errLDAPNotInitialized)
 	}
 }
 
@@ -1041,7 +932,7 @@ func TestRegisterLDAPCommands(t *testing.T) {
 	e := &CommandExecutor{}
 	r.RegisterLDAPCommands(e)
 
-	wantCommands := []string{cmdGACF, cmdGAMAU, cmdGARPB, cmdGARPU, cmdGS, cmdGSEnabled}
+	wantCommands := []string{cmdGAMAU, cmdGARPB, cmdGARPU}
 	for _, name := range wantCommands {
 		cmd, ok := r.Commands[name]
 		if !ok {
@@ -1055,6 +946,10 @@ func TestRegisterLDAPCommands(t *testing.T) {
 		if cmd.Func == nil {
 			t.Errorf("command %q has nil Func", name)
 		}
+	}
+
+	if r.ServerAttrs == nil || r.GlobalAttrs == nil {
+		t.Error("typed LDAP attribute loaders not wired")
 	}
 
 	if len(r.Commands) != len(wantCommands) {

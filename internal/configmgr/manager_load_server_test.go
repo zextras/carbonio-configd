@@ -8,7 +8,6 @@ import (
 	"context"
 	"fmt"
 	"github.com/zextras/carbonio-configd/internal/commands"
-	"github.com/zextras/carbonio-configd/internal/ldap"
 	"strings"
 	"testing"
 )
@@ -28,16 +27,12 @@ zimbraMtaMyNetworks: 127.0.0.0/8 10.0.0.0/8
 zimbraSSLExcludeCipherSuites: ECDHE-RSA-DES-CBC3-SHA ECDHE-ECDSA-DES-CBC3-SHA
 zimbraMtaHeaderChecks: pcre:/opt/zextras/conf/postfix_header_checks`
 
-	cm.CommandRegistry.Commands["gs"] = commands.NewCommand(
-		"Get server test",
-		"gs",
-		func(_ context.Context, args ...string) (string, error) {
-			if len(args) == 0 || args[0] != "testhost" {
-				return "", fmt.Errorf("expected hostname argument")
-			}
-			return mockOutput, nil
-		},
-	)
+	cm.CommandRegistry.ServerAttrs = func(_ context.Context, host string) (map[string]string, error) {
+		if host != "testhost" {
+			return nil, fmt.Errorf("expected hostname argument")
+		}
+		return attrs(mockOutput), nil
+	}
 
 	err := cm.loadServerConfigWithRetry(context.Background(), 3)
 	if err != nil {
@@ -123,14 +118,10 @@ func TestLoadServerConfigWithRetry_CommandFails(t *testing.T) {
 	cm := newTestConfigManager(t)
 
 	attempts := 0
-	cm.CommandRegistry.Commands["gs"] = commands.NewCommand(
-		"Get server test",
-		"gs",
-		func(_ context.Context, args ...string) (string, error) {
-			attempts++
-			return "", fmt.Errorf("command failed")
-		},
-	)
+	cm.CommandRegistry.ServerAttrs = func(_ context.Context, host string) (map[string]string, error) {
+		attempts++
+		return nil, fmt.Errorf("command failed")
+	}
 
 	err := cm.loadServerConfigWithRetry(context.Background(), 3)
 	if err == nil {
@@ -142,7 +133,7 @@ func TestLoadServerConfigWithRetry_CommandFails(t *testing.T) {
 	}
 }
 
-// TestLoadServerConfigWithRetry_EmptyOutput tests behavior with empty output
+// TestLoadServerConfigWithRetry_EmptyOutput tests behavior with blank values
 func TestLoadServerConfigWithRetry_EmptyOutput(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: has retry delays")
@@ -150,17 +141,13 @@ func TestLoadServerConfigWithRetry_EmptyOutput(t *testing.T) {
 
 	cm := newTestConfigManager(t)
 
-	cm.CommandRegistry.Commands["gs"] = commands.NewCommand(
-		"Get server test",
-		"gs",
-		func(_ context.Context, args ...string) (string, error) {
-			return "   \n   \n   ", nil
-		},
-	)
+	cm.CommandRegistry.ServerAttrs = func(_ context.Context, host string) (map[string]string, error) {
+		return map[string]string{"zimbraFoo": "   "}, nil
+	}
 
 	err := cm.loadServerConfigWithRetry(context.Background(), 2)
 	if err != nil {
-		t.Fatalf("Expected no error with whitespace output, got: %v", err)
+		t.Fatalf("Expected no error with blank values, got: %v", err)
 	}
 
 	// Verify the data map exists but is empty (or has only post-processed defaults)
@@ -181,13 +168,9 @@ func TestLoadServerConfigWithRetry_NoCache(t *testing.T) {
 	mockOutput := `zimbraServiceEnabled: mailbox
 zimbraMailboxdSSLProtocols: TLSv1.3`
 
-	cm.CommandRegistry.Commands["gs"] = commands.NewCommand(
-		"Get server test",
-		"gs",
-		func(_ context.Context, args ...string) (string, error) {
-			return mockOutput, nil
-		},
-	)
+	cm.CommandRegistry.ServerAttrs = func(_ context.Context, host string) (map[string]string, error) {
+		return attrs(mockOutput), nil
+	}
 
 	err := cm.loadServerConfigWithRetry(context.Background(), 3)
 	if err != nil {
@@ -212,13 +195,9 @@ func TestLoadServerConfigWithRetry_ServiceMapping(t *testing.T) {
 	// Test mailbox -> mailboxd mapping and mta -> sasl mapping
 	mockOutput := `zimbraServiceEnabled: mailbox mta ldap`
 
-	cm.CommandRegistry.Commands["gs"] = commands.NewCommand(
-		"Get server test",
-		"gs",
-		func(_ context.Context, args ...string) (string, error) {
-			return mockOutput, nil
-		},
-	)
+	cm.CommandRegistry.ServerAttrs = func(_ context.Context, host string) (map[string]string, error) {
+		return attrs(mockOutput), nil
+	}
 
 	err := cm.loadServerConfigWithRetry(context.Background(), 3)
 	if err != nil {
@@ -249,7 +228,7 @@ func TestLoadServerConfigWithRetry_ServiceMapping(t *testing.T) {
 
 // TestLoadServerConfigWithRetry_IPv6RoundTrip feeds gs with the native LDAP
 // client's serialization and checks values containing "::" survive the
-// map -> text -> map round trip, including derived keys and VAR lookups.
+// typed attribute map load, including derived keys and VAR lookups.
 func TestLoadServerConfigWithRetry_IPv6RoundTrip(t *testing.T) {
 	cm := newTestConfigManager(t)
 
@@ -259,10 +238,9 @@ func TestLoadServerConfigWithRetry_IPv6RoundTrip(t *testing.T) {
 		"zimbraServiceEnabled":   "mta\namavis",
 	}
 
-	cm.CommandRegistry.Commands["gs"] = commands.NewCommand("Get server test", "gs",
-		func(_ context.Context, _ ...string) (string, error) {
-			return ldap.FormatAsZmprovOutput(serverAttrs), nil
-		})
+	cm.CommandRegistry.ServerAttrs = func(context.Context, string) (map[string]string, error) {
+		return serverAttrs, nil
+	}
 
 	if err := cm.loadServerConfigWithRetry(context.Background(), 1); err != nil {
 		t.Fatalf("loadServerConfigWithRetry: %v", err)
@@ -306,11 +284,10 @@ func TestLookUpConfigVar_ServerOverridesGlobal(t *testing.T) {
 func TestLoadServerConfig_MilterFromInheritedGS(t *testing.T) {
 	cm := newTestConfigManager(t)
 
-	cm.CommandRegistry.Commands["gs"] = commands.NewCommand("gs", "gs",
-		func(_ context.Context, _ ...string) (string, error) {
-			return "zimbraServiceEnabled: mta\nzimbraIPMode: ipv4\n" +
-				"zimbraMilterServerEnabled: TRUE\nzimbraMilterBindPort: 7026", nil
-		})
+	cm.CommandRegistry.ServerAttrs = func(context.Context, string) (map[string]string, error) {
+		return attrs("zimbraServiceEnabled: mta\nzimbraIPMode: ipv4\n" +
+			"zimbraMilterServerEnabled: TRUE\nzimbraMilterBindPort: 7026"), nil
+	}
 
 	if err := cm.loadServerConfigWithRetry(context.Background(), 1); err != nil {
 		t.Fatalf("loadServerConfigWithRetry: %v", err)

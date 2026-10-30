@@ -62,15 +62,19 @@ func TestRegistry_RegisterLDAPCommands(t *testing.T) {
 	executor := NewCommandExecutor(nil)
 
 	// Before registering, LDAP commands should not be present
-	if _, ok := registry.Commands["gacf"]; ok {
-		t.Error("gacf should not be in registry before RegisterLDAPCommands")
+	if _, ok := registry.Commands["garpu"]; ok {
+		t.Error("garpu should not be in registry before RegisterLDAPCommands")
+	}
+
+	if registry.ServerAttrs != nil || registry.GlobalAttrs != nil {
+		t.Error("typed LDAP loaders should be unset before RegisterLDAPCommands")
 	}
 
 	// Register LDAP commands
 	registry.RegisterLDAPCommands(executor)
 
 	// After registering, LDAP commands should be present
-	expectedLDAPCommands := []string{"gacf", "gamau", "garpb", "garpu", "gs", "gs:enabled"}
+	expectedLDAPCommands := []string{"gamau", "garpb", "garpu"}
 	for _, cmd := range expectedLDAPCommands {
 		if _, ok := registry.Commands[cmd]; !ok {
 			t.Errorf("registry.Commands missing LDAP command: %s", cmd)
@@ -89,12 +93,12 @@ func TestRegistry_MultipleInstances(t *testing.T) {
 	registry1.RegisterLDAPCommands(executor)
 
 	// registry2 should not have LDAP commands
-	if _, ok := registry2.Commands["gacf"]; ok {
-		t.Error("registry2 should not have gacf after registering only in registry1")
+	if _, ok := registry2.Commands["garpu"]; ok {
+		t.Error("registry2 should not have garpu after registering only in registry1")
 	}
 
 	// registry1 should have LDAP commands
-	if _, ok := registry1.Commands["gacf"]; !ok {
-		t.Error("registry1 should have gacf after RegisterLDAPCommands")
+	if _, ok := registry1.Commands["garpu"]; !ok {
+		t.Error("registry1 should have garpu after RegisterLDAPCommands")
 	}
 }
