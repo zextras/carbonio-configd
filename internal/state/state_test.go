@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/config/configtest"
-	"os"
+	"github.com/zextras/carbonio-configd/internal/sys/systest"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -56,17 +56,18 @@ func TestComputeStringMD5(t *testing.T) {
 
 // TestComputeFileMD5 verifies MD5 computation for files
 func TestComputeFileMD5(t *testing.T) {
+	t.Parallel()
+
 	// Create temporary test file
-	tmpDir := t.TempDir()
+	f := systest.New()
+	tmpDir := "/etc/zextras"
 	testFile := filepath.Join(tmpDir, "test.conf")
 
 	content := "test configuration content\n"
-	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
-		t.Fatalf("Failed to create test file: %v", err)
-	}
+	f.FS.Put(testFile, []byte(content), 0o644)
 
 	// Compute MD5
-	md5hash, err := ComputeFileMD5(context.Background(), testFile)
+	md5hash, err := ComputeFileMD5(context.Background(), f.FS, testFile)
 	if err != nil {
 		t.Fatalf("ComputeFileMD5() error = %v", err)
 	}
@@ -77,7 +78,7 @@ func TestComputeFileMD5(t *testing.T) {
 	}
 
 	// Compute again - should be identical
-	md5hash2, err := ComputeFileMD5(context.Background(), testFile)
+	md5hash2, err := ComputeFileMD5(context.Background(), f.FS, testFile)
 	if err != nil {
 		t.Fatalf("ComputeFileMD5() second call error = %v", err)
 	}
@@ -88,11 +89,9 @@ func TestComputeFileMD5(t *testing.T) {
 
 	// Modify file and verify hash changes
 	newContent := "modified configuration content\n"
-	if err := os.WriteFile(testFile, []byte(newContent), 0644); err != nil {
-		t.Fatalf("Failed to modify test file: %v", err)
-	}
+	f.FS.Put(testFile, []byte(newContent), 0o644)
 
-	md5hash3, err := ComputeFileMD5(context.Background(), testFile)
+	md5hash3, err := ComputeFileMD5(context.Background(), f.FS, testFile)
 	if err != nil {
 		t.Fatalf("ComputeFileMD5() after modification error = %v", err)
 	}
@@ -104,7 +103,10 @@ func TestComputeFileMD5(t *testing.T) {
 
 // TestComputeFileMD5_NonExistent verifies error handling for non-existent files
 func TestComputeFileMD5_NonExistent(t *testing.T) {
-	_, err := ComputeFileMD5(context.Background(), "/nonexistent/file/path")
+	t.Parallel()
+
+	f := systest.New()
+	_, err := ComputeFileMD5(context.Background(), f.FS, "/nonexistent/file/path")
 	if err == nil {
 		t.Error("ComputeFileMD5() should return error for non-existent file")
 	}
@@ -141,59 +143,61 @@ func TestState_FileMD5Cache(t *testing.T) {
 
 // TestState_FileHasChanged tests file change detection logic
 func TestState_FileHasChanged(t *testing.T) {
-	tmpDir := t.TempDir()
+	t.Parallel()
+
+	f := systest.New()
+	tmpDir := "/etc/zextras"
 	testFile := filepath.Join(tmpDir, "test.conf")
 
 	// Create initial file
 	content := "initial content\n"
-	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
-		t.Fatalf("Failed to create test file: %v", err)
-	}
+	f.FS.Put(testFile, []byte(content), 0o644)
 
 	s := NewState()
 
 	// Test 1: No cached MD5 - should be considered changed
-	if !s.FileHasChanged(context.Background(), testFile) {
+	if !s.FileHasChanged(context.Background(), f.FS, testFile) {
 		t.Error("FileHasChanged() with no cached MD5 should return true")
 	}
 
 	// Test 2: Cache the MD5
-	if err := s.UpdateFileMD5(context.Background(), testFile); err != nil {
+	if err := s.UpdateFileMD5(context.Background(), f.FS, testFile); err != nil {
 		t.Fatalf("UpdateFileMD5() error = %v", err)
 	}
 
 	// Test 3: File unchanged - should not be changed
-	if s.FileHasChanged(context.Background(), testFile) {
+	if s.FileHasChanged(context.Background(), f.FS, testFile) {
 		t.Error("FileHasChanged() with matching MD5 should return false")
 	}
 
 	// Test 4: Modify file - should be changed
 	newContent := "modified content\n"
-	if err := os.WriteFile(testFile, []byte(newContent), 0644); err != nil {
-		t.Fatalf("Failed to modify test file: %v", err)
-	}
+	f.FS.Put(testFile, []byte(newContent), 0o644)
 
-	if !s.FileHasChanged(context.Background(), testFile) {
+	if !s.FileHasChanged(context.Background(), f.FS, testFile) {
 		t.Error("FileHasChanged() after modification should return true")
 	}
 
 	// Test 5: Update cache again
-	if err := s.UpdateFileMD5(context.Background(), testFile); err != nil {
+	if err := s.UpdateFileMD5(context.Background(), f.FS, testFile); err != nil {
 		t.Fatalf("UpdateFileMD5() error = %v", err)
 	}
 
 	// Test 6: File should not be changed after cache update
-	if s.FileHasChanged(context.Background(), testFile) {
+	if s.FileHasChanged(context.Background(), f.FS, testFile) {
 		t.Error("FileHasChanged() after cache update should return false")
 	}
 }
 
 // TestState_FileHasChanged_NonExistent tests behavior with non-existent files
 func TestState_FileHasChanged_NonExistent(t *testing.T) {
+	t.Parallel()
+
+	f := systest.New()
 	s := NewState()
 
 	// Non-existent file should be considered changed
-	if !s.FileHasChanged(context.Background(), "/nonexistent/file") {
+	if !s.FileHasChanged(context.Background(), f.FS, "/nonexistent/file") {
 		t.Error("FileHasChanged() for non-existent file should return true")
 	}
 }
@@ -417,9 +421,12 @@ func TestState_IsTrueValue(t *testing.T) {
 
 // TestState_UpdateFileMD5_Error tests error handling in UpdateFileMD5
 func TestState_UpdateFileMD5_Error(t *testing.T) {
+	t.Parallel()
+
+	f := systest.New()
 	s := NewState()
 
-	err := s.UpdateFileMD5(context.Background(), "/nonexistent/file")
+	err := s.UpdateFileMD5(context.Background(), f.FS, "/nonexistent/file")
 	if err == nil {
 		t.Error("UpdateFileMD5() should return error for non-existent file")
 	}
@@ -1385,13 +1392,14 @@ func TestState_CompileDependencyRestarts_LookupError(t *testing.T) {
 
 // TestState_MultipleOperations tests realistic state management workflow
 func TestState_MultipleOperations(t *testing.T) {
-	tmpDir := t.TempDir()
+	t.Parallel()
+
+	f := systest.New()
+	tmpDir := "/etc/zextras"
 	configFile := filepath.Join(tmpDir, "postfix_main.cf")
 
 	// Create initial config file
-	if err := os.WriteFile(configFile, []byte("mynetworks = 127.0.0.0/8\n"), 0644); err != nil {
-		t.Fatalf("Failed to create config file: %v", err)
-	}
+	f.FS.Put(configFile, []byte("mynetworks = 127.0.0.0/8\n"), 0o644)
 
 	s := NewState()
 
@@ -1399,17 +1407,17 @@ func TestState_MultipleOperations(t *testing.T) {
 	s.FirstRun = false
 
 	// First run: file is new
-	if !s.FileHasChanged(context.Background(), configFile) {
+	if !s.FileHasChanged(context.Background(), f.FS, configFile) {
 		t.Error("New file should be detected as changed")
 	}
 
 	// Update cache
-	if err := s.UpdateFileMD5(context.Background(), configFile); err != nil {
+	if err := s.UpdateFileMD5(context.Background(), f.FS, configFile); err != nil {
 		t.Fatalf("UpdateFileMD5 failed: %v", err)
 	}
 
 	// File should not be changed now
-	if s.FileHasChanged(context.Background(), configFile) {
+	if s.FileHasChanged(context.Background(), f.FS, configFile) {
 		t.Error("File should not be changed after cache update")
 	}
 
@@ -1449,12 +1457,10 @@ func TestState_MultipleOperations(t *testing.T) {
 	}
 
 	// Modify file
-	if err := os.WriteFile(configFile, []byte("mynetworks = 127.0.0.0/8, 10.0.0.0/8\n"), 0644); err != nil {
-		t.Fatalf("Failed to modify config file: %v", err)
-	}
+	f.FS.Put(configFile, []byte("mynetworks = 127.0.0.0/8, 10.0.0.0/8\n"), 0o644)
 
 	// Should detect change
-	if !s.FileHasChanged(context.Background(), configFile) {
+	if !s.FileHasChanged(context.Background(), f.FS, configFile) {
 		t.Error("Modified file should be detected as changed")
 	}
 

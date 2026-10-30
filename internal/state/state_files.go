@@ -9,10 +9,10 @@ import (
 	"crypto/md5" //nolint:gosec // MD5 used for non-cryptographic checksumming only
 	"encoding/hex"
 	"io"
-	"os"
 
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // MAPPEDFILES mirrors the MAPPEDFILES in jylibs/state.py
@@ -24,10 +24,10 @@ var MAPPEDFILES = map[string]string{
 
 // ComputeFileMD5 computes the MD5 hash of a file's contents.
 // Returns the hex-encoded MD5 hash string or an error if file cannot be read.
-func ComputeFileMD5(ctx context.Context, filepath string) (string, error) {
+func ComputeFileMD5(ctx context.Context, fsys sys.FS, filepath string) (string, error) {
 	ctx = logger.ContextWithComponentOnce(ctx, "state")
 	//nolint:gosec // G304: File path comes from trusted configuration
-	file, err := os.Open(filepath)
+	file, err := fsys.Open(filepath)
 	if err != nil {
 		return "", err
 	}
@@ -77,11 +77,11 @@ func (s *State) SetFileMD5(filepath, md5hash string) {
 // FileHasChanged checks if a file's current MD5 differs from cached MD5.
 // If no cached MD5 exists, returns true (file is considered new/changed).
 // If file doesn't exist or can't be read, returns true (triggering rewrite).
-func (s *State) FileHasChanged(ctx context.Context, filepath string) bool {
+func (s *State) FileHasChanged(ctx context.Context, fsys sys.FS, filepath string) bool {
 	ctx = logger.ContextWithComponentOnce(ctx, "state")
 	cachedMD5 := s.GetFileMD5(filepath)
 
-	currentMD5, err := ComputeFileMD5(ctx, filepath)
+	currentMD5, err := ComputeFileMD5(ctx, fsys, filepath)
 	if err != nil {
 		// File doesn't exist or can't be read - consider it changed
 		logger.DebugContext(ctx, "File cannot be read, treating as changed",
@@ -112,10 +112,10 @@ func (s *State) FileHasChanged(ctx context.Context, filepath string) bool {
 
 // UpdateFileMD5 recomputes and updates the cached MD5 for a file.
 // Returns error if file cannot be read.
-func (s *State) UpdateFileMD5(ctx context.Context, filepath string) error {
+func (s *State) UpdateFileMD5(ctx context.Context, fsys sys.FS, filepath string) error {
 	ctx = logger.ContextWithComponentOnce(ctx, "state")
 
-	md5hash, err := ComputeFileMD5(ctx, filepath)
+	md5hash, err := ComputeFileMD5(ctx, fsys, filepath)
 	if err != nil {
 		return err
 	}
