@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/metrics"
 	"github.com/zextras/carbonio-configd/internal/services"
 	"github.com/zextras/carbonio-configd/internal/state"
 	"github.com/zextras/carbonio-configd/internal/sys"
@@ -67,6 +68,9 @@ type Watchdog struct {
 
 	// snapshots scopes a process-table snapshot to each tick; nil probes live.
 	snapshots SnapshotProvider
+
+	// metrics counts watchdog restarts; nil records nothing.
+	metrics *metrics.Registry
 }
 
 const (
@@ -151,6 +155,12 @@ func NewWatchdog(cfg Config) *Watchdog {
 		clock:          cfg.Clock,
 		snapshots:      cfg.Snapshots,
 	}
+}
+
+// SetMetrics makes the watchdog count the restarts it attempts in reg. Call it
+// before Start; nil (the default) records nothing.
+func (w *Watchdog) SetMetrics(reg *metrics.Registry) {
+	w.metrics = reg
 }
 
 // Start begins the watchdog monitoring loop.
@@ -414,16 +424,19 @@ func (w *Watchdog) restartDownService(ctx context.Context, service string) {
 
 	if err := w.serviceManager.AddRestart(ctx, service); err != nil {
 		logger.ErrorContext(ctx, "Failed to queue restart", "service", service, "error", err)
+		w.metrics.WatchdogRestart(service, false)
 
 		return
 	}
 
 	if err := w.serviceManager.ProcessRestarts(ctx, w.configLookup); err != nil {
 		logger.ErrorContext(ctx, "Failed to restart service", "service", service, "error", err)
+		w.metrics.WatchdogRestart(service, false)
 
 		return
 	}
 
+	w.metrics.WatchdogRestart(service, true)
 	logger.InfoContext(ctx, "Successfully restarted service", "service", service)
 	w.AddService(ctx, service)
 }

@@ -182,6 +182,63 @@ Load ─► Snapshot ─► Observe ─► Plan ─► Execute ─► ApplyResta
 When every service looks disabled `Compute` returns `plan.ErrAllServicesDisabled`; nothing is
 consumed, the previous snapshot stays the baseline and the requested sections stay queued.
 
+## Observability
+
+### Log redaction (always on)
+
+`logger.InitStructuredLogging` wraps the text/JSON handler in a redacting handler
+(`internal/logger/redact_handler.go`), so no call site can leak a secret. Before a record
+reaches the output:
+
+- an attribute whose **key** names a secret (`redact.IsSecretKey`: `password`, `passwd`,
+  `passphrase`, `secret`, `token`, `credential`, `privatekey`/`private_key`, `apikey`, and the
+  suffixes `_key`, `_pass`, `_pw`; e.g. `ldap_amavis_password`, `zimbraSSLPrivateKey`,
+  `userPassword`, `zimbraAuthTokenKey`) has its value replaced by `[REDACTED]`;
+- a value attribute (`value`, `previous_value`, `current_value`, `old`, `new`, `have`, `want`,
+  ...) logged next to a key attribute (`key`, `attr`, `attribute`, `variable`, ...) that names a
+  secret is replaced too (`"key", "ldap_root_password", "value", x`);
+- PEM private key blocks (`-----BEGIN [... ]PRIVATE KEY-----` up to the END line, or to the end
+  of the text when it is truncated) are replaced by `[REDACTED]` wherever they appear: string
+  attributes, `error` attributes and the message. Certificates are not touched.
+
+Empty values stay visible (an unset key is useful to see) and records without a secret are
+forwarded unchanged, so ordinary log output is byte-identical. Only string and `any`/error
+attributes are inspected; numbers, booleans, durations and times cannot carry a credential.
+The per-call `redact.ForLog` calls remain: they also protect loggers injected with
+`logger.ContextWithLogger` (which bypass the default handler) and the non-log output of
+`configd plan`, so they are not removable duplicates.
+
+### Metrics (opt-in)
+
+`internal/metrics` keeps counters and gauges in memory (no network listener) and renders them
+in the Prometheus text format. Nothing is written unless localconfig
+`zmconfigd_metrics_textfile` names a path; the registry is then written atomically
+(`sys.FS.WriteFileAtomic`, mode `0644`) at the end of every cycle, and also after a failed load
+or plan so the failure counters are exported. Point it at a `*.prom` file in the
+node_exporter textfile collector directory (`--collector.textfile.directory`).
+
+| Metric | Type | Labels | Meaning |
+|---|---|---|---|
+| `configd_cycle_duration_seconds` | gauge | | Duration of the last completed cycle |
+| `configd_cycle_phase_duration_seconds` | gauge | `phase` (`load`, `parse`, `build_deps`, `plan`, `execute`, `restarts`) | Duration of each phase of the last cycle |
+| `configd_cycles_total` | counter | | Completed cycles since process start |
+| `configd_last_cycle_timestamp_seconds` | gauge | | Unix time the last cycle completed |
+| `configd_plan_actions` | gauge | `kind` (`mapfile`, `rewrite`, `postconf`, `postconfd`, `ldap`, `proxygen`, `restart`) | Plan size of the last cycle |
+| `configd_plan_actions_total` | counter | `kind` | Actions planned since process start |
+| `configd_restart_requests_total` | counter | `service`, `reason` (plan reason kind) | Restarts the restart policy queued; a restart with several reasons counts once under each |
+| `configd_watchdog_restarts_total` | counter | `service`, `result` (`success`, `failure`) | Restarts attempted by the watchdog |
+| `configd_load_failures_total` | counter | `source` (`lc`, `gc`, `mc`, `sc`, `timeout`, `mta_config`) | Failed configuration loads |
+
+Output is sorted (metrics, then label sets) with one `# HELP` and `# TYPE` line per metric, so
+equal state renders to identical bytes. Counters reset when the process restarts, as
+Prometheus expects. A failed write logs a `WARN` (`Failed to write metrics textfile`) and never
+affects the cycle.
+
+`zmconfigd_cycle_summary=TRUE` additionally logs one structured INFO line per cycle,
+`Cycle summary`, with `cycle`, `first_run`, `duration_seconds`, per-phase `*_seconds` and the
+plan size by kind (`mapfiles`, `rewrites`, `postconf`, `postconfd`, `ldap`, `proxygen`,
+`restarts`). It is off by default because it adds a line to the log.
+
 ## Package map
 
 | Package | Role |
@@ -194,3 +251,5 @@ consumed, the previous snapshot stays the baseline and the requested sections st
 | `internal/services` | Service registry and manager (start order, retries, MTA reload) |
 | `internal/cli/plancmd` | `configd plan` command |
 | `internal/sys` | Side-effect boundary (exec, fs, proc, clock) |
+| `internal/metrics` | In-memory counters/gauges and the Prometheus textfile renderer/writer |
+| `internal/redact` | Secret-key and PEM detection used by the redacting log handler and plan rendering |

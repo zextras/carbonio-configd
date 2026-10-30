@@ -51,6 +51,8 @@ one of them, and so is:
 | Key | Default | Effect |
 |---|---|---|
 | `zmconfigd_restart_debounce_seconds` | `0` (off) | When > 0, service restarts are coalesced across cycles: each new request for a service restarts its quiet window, and the service is restarted once no request arrived for that many seconds (trailing edge). The state is kept in memory only and is lost when configd restarts. With `0`, every restart is queued in the cycle it appears in. See [restart-behavior.md](restart-behavior.md). |
+| `zmconfigd_metrics_textfile` | empty (off) | When set to a path, the operational metrics (cycle and phase durations, plan size by kind, restarts by service and reason, watchdog restarts, load failures) are written there every cycle in the Prometheus text format, atomically, for the node_exporter textfile collector (the file name must end in `.prom`). No network listener is opened. Empty writes nothing. See [architecture.md](architecture.md#metrics-opt-in). |
+| `zmconfigd_cycle_summary` | `FALSE` (off) | `TRUE` logs one extra structured INFO line, `Cycle summary`, at the end of every cycle (durations and plan size by kind). Off by default so the log output is unchanged. |
 
 ## CLI behavior (legacy `LocalConfigCLI` parity)
 

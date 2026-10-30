@@ -193,10 +193,10 @@ func (cm *ConfigManager) LoadAllConfigsWithRetry(ctx context.Context, maxRetries
 	threadWaitTime := parseLDAPReadTimeout(cm.State.Snapshot().LocalMap())
 
 	loadFuncs := []loadFunc{
-		{"lc", cm.LoadLocalConfig},  // Thread name matches Python
-		{"gc", cm.LoadGlobalConfig}, // Thread name matches Python
-		{"mc", cm.LoadMiscConfig},   // Thread name matches Python
-		{"sc", cm.LoadServerConfig}, // Thread name matches Python
+		cm.countFailures("lc", cm.LoadLocalConfig),  // Thread name matches Python
+		cm.countFailures("gc", cm.LoadGlobalConfig), // Thread name matches Python
+		cm.countFailures("mc", cm.LoadMiscConfig),   // Thread name matches Python
+		cm.countFailures("sc", cm.LoadServerConfig), // Thread name matches Python
 	}
 
 	var lastErr error
@@ -222,6 +222,10 @@ func (cm *ConfigManager) LoadAllConfigsWithRetry(ctx context.Context, maxRetries
 			return ctxErr
 		}
 
+		if timedOut {
+			cm.metrics.LoadFailed("timeout")
+		}
+
 		cm.State.UpdateSnapshot(stage.apply)
 
 		shouldRetry, err := evaluateLoadResult(timedOut, errors, attempt, maxRetries, threadWaitTime)
@@ -237,6 +241,19 @@ func (cm *ConfigManager) LoadAllConfigsWithRetry(ctx context.Context, maxRetries
 	}
 
 	return lastErr
+}
+
+// countFailures wraps a loader so that a failure (other than the shutdown
+// cancelling it) is counted in the metrics under the loader's name.
+func (cm *ConfigManager) countFailures(name string, fn func(context.Context) error) loadFunc {
+	return loadFunc{name: name, fn: func(ctx context.Context) error {
+		err := fn(ctx)
+		if err != nil && ctx.Err() == nil {
+			cm.metrics.LoadFailed(name)
+		}
+
+		return err
+	}}
 }
 
 func parseLDAPReadTimeout(localConfigData map[string]string) time.Duration {

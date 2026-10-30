@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/zextras/carbonio-configd/internal/metrics"
 	"github.com/zextras/carbonio-configd/internal/plan"
 	"github.com/zextras/carbonio-configd/internal/restart"
 	"github.com/zextras/carbonio-configd/internal/sys/systest"
@@ -325,4 +326,57 @@ func TestApply_Debounce(t *testing.T) {
 		h.policy.Apply(t.Context(), &plan.Plan{}, settings)
 		assert.Len(t, h.queued, 1, "still pending, fires once restarts are enabled again")
 	})
+}
+
+func TestApply_MetricsCountQueuedRestartsByReasonKind(t *testing.T) {
+	t.Parallel()
+
+	h := newHarness()
+	reg := metrics.New()
+	h.policy.WithMetrics(reg)
+	h.addErr["proxy"] = errors.New("refused")
+
+	pl := &plan.Plan{Restarts: []plan.Restart{
+		req("mta", enabledReason("mta"), plan.Reason{Kind: plan.ReasonVarChanged}),
+		req("proxy", plan.Reason{Kind: plan.ReasonRetry}),
+	}}
+
+	h.policy.Apply(t.Context(), pl, restart.Settings{Enabled: true})
+
+	out := string(reg.Render())
+	assert.Contains(t, out, `configd_restart_requests_total{reason="service-enabled",service="mta"} 1`)
+	assert.Contains(t, out, `configd_restart_requests_total{reason="var-changed",service="mta"} 1`)
+	assert.NotContains(t, out, `service="proxy"`, "a restart the manager refused is not counted")
+}
+
+func TestApply_MetricsDisabledRestartsNotCounted(t *testing.T) {
+	t.Parallel()
+
+	h := newHarness()
+	reg := metrics.New()
+	h.policy.WithMetrics(reg)
+
+	h.policy.Apply(t.Context(), &plan.Plan{Restarts: []plan.Restart{req("mta", enabledReason("mta"))}},
+		restart.Settings{Enabled: false})
+
+	assert.Empty(t, reg.Render())
+}
+
+func TestApply_MetricsDebouncedCountedWhenQueued(t *testing.T) {
+	t.Parallel()
+
+	h := newHarness()
+	reg := metrics.New()
+	h.policy.WithMetrics(reg)
+
+	settings := restart.Settings{Enabled: true, Debounce: debounce}
+	pl := &plan.Plan{Restarts: []plan.Restart{req("mta", enabledReason("mta"))}}
+
+	h.policy.Apply(t.Context(), pl, settings)
+	assert.Empty(t, reg.Render(), "still inside the quiet window")
+
+	h.clock.Advance(debounce)
+	h.policy.Apply(t.Context(), &plan.Plan{}, settings)
+
+	assert.Contains(t, string(reg.Render()), `configd_restart_requests_total{reason="service-enabled",service="mta"} 1`)
 }

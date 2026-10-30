@@ -136,7 +136,8 @@ func InitStructuredLogging(cfg *Config) {
 		handler = slog.NewTextHandler(cfg.Output, handlerOpts)
 	}
 
-	newLogger := slog.New(handler)
+	// Redaction lives at the handler level so no call site can leak a secret.
+	newLogger := slog.New(newRedactHandler(handler))
 	defaultLogger.Store(newLogger)
 	slog.SetDefault(newLogger)
 

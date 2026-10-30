@@ -147,6 +147,7 @@ func runLoadAndParse(
 	if err = configManager.ParseMtaConfig(ctx, mainCfg.ConfigFile); err != nil {
 		if ctx.Err() == nil {
 			logger.ErrorContext(ctx, "Failed to parse MTA config (sleeping 60s)", "error", err)
+			configManager.Metrics().LoadFailed("mta_config")
 		}
 
 		return loadDur, time.Since(t), err
@@ -383,6 +384,7 @@ func runLoopIteration(ctx context.Context, deps *daemonLoopDeps, st *loopIterSta
 
 	loadDur, parseDur, err := runLoadAndParse(ctx, deps.configManager, deps.cfg)
 	if err != nil {
+		exportMetrics(ctx, deps)
 		SleepWithContext(ctx, deps.env.Clock, 60*time.Second, deps.reloadChan)
 
 		return iterContinue
@@ -403,6 +405,8 @@ func runLoopIteration(ctx context.Context, deps *daemonLoopDeps, st *loopIterSta
 		deps.serviceManager, deps.wd, deps.reloadChan,
 	)
 	if skipIter {
+		exportMetrics(ctx, deps)
+
 		return iterContinue
 	}
 
@@ -421,6 +425,7 @@ func runLoopIteration(ctx context.Context, deps *daemonLoopDeps, st *loopIterSta
 		parse:    parseDur,
 		config:   timings,
 		restarts: restartsDur,
+		plan:     pl,
 	})
 }
 
@@ -488,6 +493,7 @@ type loopPhaseDurations struct {
 	parse    time.Duration
 	config   phaseTimings
 	restarts time.Duration
+	plan     *plan.Plan
 }
 
 // finalizeIteration commits post-rewrite bookkeeping: first-run flag,
@@ -518,6 +524,8 @@ func finalizeIteration(
 		"rewrites_seconds", dur.config.rewrites.Seconds(),
 		"restarts_seconds", dur.restarts.Seconds())
 	logger.InfoContext(ctx, "Loop completed", "total_duration_seconds", lt.Seconds())
+
+	observeCycle(ctx, deps, st.loopCount, dur, lt)
 
 	if deps.args.Once {
 		logger.InfoContext(ctx, "Single-run mode: Exiting after one loop completion",

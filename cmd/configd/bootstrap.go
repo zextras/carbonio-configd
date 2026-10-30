@@ -97,6 +97,8 @@ func bootstrapDependencies(
 		},
 	})
 
+	wd.SetMetrics(configManager.Metrics())
+
 	return configManager, serviceManager, wd
 }
 

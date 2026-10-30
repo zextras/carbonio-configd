@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/metrics"
 	"github.com/zextras/carbonio-configd/internal/services"
 	"github.com/zextras/carbonio-configd/internal/state"
 )
@@ -203,5 +204,34 @@ func TestWatchdog_StartStopRepeats(t *testing.T) {
 	for range 3 {
 		wd.Start(context.Background())
 		wd.Stop(context.Background())
+	}
+}
+
+// TestRestartDownService_CountsRestartsInMetrics verifies the watchdog counts
+// every restart attempt by service and result.
+func TestRestartDownService_CountsRestartsInMetrics(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	reg := metrics.New()
+
+	ok := NewWatchdog(Config{ServiceManager: NewMockServiceManager(), State: state.NewState()})
+	ok.SetMetrics(reg)
+	ok.restartDownService(ctx, "antivirus")
+
+	failing := NewMockServiceManager()
+	failing.processRestartsFunc = func(func(string) string) error { return errors.New("boom") }
+
+	bad := NewWatchdog(Config{ServiceManager: failing, State: state.NewState()})
+	bad.SetMetrics(reg)
+	bad.restartDownService(ctx, "amavis")
+
+	out := string(reg.Render())
+	if !strings.Contains(out, `configd_watchdog_restarts_total{result="success",service="antivirus"} 1`) {
+		t.Errorf("missing success counter:\n%s", out)
+	}
+
+	if !strings.Contains(out, `configd_watchdog_restarts_total{result="failure",service="amavis"} 1`) {
+		t.Errorf("missing failure counter:\n%s", out)
 	}
 }

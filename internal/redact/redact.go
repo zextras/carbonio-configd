@@ -5,7 +5,10 @@
 // Package redact hides secret configuration values from log output.
 package redact
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 // Placeholder replaces the value of a secret configuration key in log output.
 const Placeholder = "[REDACTED]"
@@ -60,4 +63,58 @@ func ForLog(key, value string) string {
 	}
 
 	return Placeholder
+}
+
+// pemMarker is the cheap substring every PEM private key block contains; it
+// gates the regular expression so ordinary log text costs one Contains call.
+const pemMarker = "PRIVATE KEY-----"
+
+// pemPrivateKey matches a PEM private key block ("BEGIN PRIVATE KEY",
+// "BEGIN RSA PRIVATE KEY", "BEGIN ENCRYPTED PRIVATE KEY", ...). A block whose
+// END line is missing (truncated text) is redacted up to the end of the string.
+var pemPrivateKey = regexp.MustCompile(
+	`-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----(?s:.*?)(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|\z)`)
+
+// Text returns s with every PEM private key block replaced by Placeholder and
+// reports whether anything was replaced. Text without a private key is
+// returned unchanged without allocating.
+func Text(s string) (string, bool) {
+	if !strings.Contains(s, pemMarker) {
+		return s, false
+	}
+
+	out := pemPrivateKey.ReplaceAllLiteralString(s, Placeholder)
+
+	return out, out != s
+}
+
+// valueAttrNames are the log attribute names that carry the value of the
+// configuration key named by a sibling "key" attribute.
+var valueAttrNames = map[string]struct{}{
+	"value": {}, "old": {}, "new": {}, "have": {}, "want": {}, "previous": {}, "current": {},
+}
+
+// IsValueAttr reports whether a log attribute name denotes the value of a
+// configuration key logged next to a key-name attribute ("value",
+// "previous_value", "current_value", ...).
+func IsValueAttr(name string) bool {
+	if _, ok := valueAttrNames[name]; ok {
+		return true
+	}
+
+	return strings.HasSuffix(name, "_value")
+}
+
+// keyAttrNames are the log attribute names that carry a configuration key
+// name; when the name is a secret key, sibling value attributes are redacted.
+var keyAttrNames = map[string]struct{}{
+	"key": {}, "attr": {}, "attribute": {}, "variable": {}, "var": {}, "lc_key": {}, "param": {}, "setting": {},
+}
+
+// IsKeyAttr reports whether a log attribute name denotes a configuration key
+// name (as opposed to a value).
+func IsKeyAttr(name string) bool {
+	_, ok := keyAttrNames[name]
+
+	return ok
 }

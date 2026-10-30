@@ -22,6 +22,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/ldap"
 	"github.com/zextras/carbonio-configd/internal/localconfig"
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/metrics"
 	"github.com/zextras/carbonio-configd/internal/mtaops"
 	"github.com/zextras/carbonio-configd/internal/plan"
 	"github.com/zextras/carbonio-configd/internal/redact"
@@ -85,6 +86,7 @@ type ConfigManager struct {
 	mtaExecutor             mtaops.Executor
 	mtaResolver             mtaops.OperationResolver
 	policy                  *restart.Policy
+	metrics                 *metrics.Registry // operational counters; exported only when configured
 
 	// The fields below belong to the (sequential) main loop: the plan of a
 	// cycle is a function of prev (the snapshot the last plan was computed
@@ -126,9 +128,17 @@ func NewConfigManager(ctx context.Context, mainCfg *config.Config,
 	cm.mtaExecutor = mtaops.NewExecutor(mainCfg.BaseDir, ldapClient, env)
 	cm.mtaResolver = mtaops.NewResolver(mainCfg.BaseDir, env)
 	cm.initNativeLdapClient(ctx)
-	cm.policy = restart.New(cm.ServiceMgr, env.Clock)
+	cm.metrics = metrics.New()
+	cm.policy = restart.New(cm.ServiceMgr, env.Clock).WithMetrics(cm.metrics)
 
 	return cm
+}
+
+// Metrics returns the registry the manager and the components it built record
+// into (restarts, load failures); the main loop adds the cycle metrics and
+// exports it.
+func (cm *ConfigManager) Metrics() *metrics.Registry {
+	return cm.metrics
 }
 
 // initNativeLdapClient initializes the native LDAP client from localconfig.

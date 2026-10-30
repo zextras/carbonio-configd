@@ -39,7 +39,14 @@ type Config struct {
 	// RestartDebounce is zmconfigd_restart_debounce_seconds: when > 0 a service
 	// restart is only issued once its requests have been quiet for that many
 	// seconds. 0 (the default) restarts in the cycle the change is detected.
-	RestartDebounce  int
+	RestartDebounce int
+	// MetricsTextfile is zmconfigd_metrics_textfile: when set, the operational
+	// metrics are written there every cycle in the Prometheus text format
+	// (node_exporter textfile collector). Empty (the default) writes nothing.
+	MetricsTextfile string
+	// CycleSummary is zmconfigd_cycle_summary=TRUE: log one structured
+	// "Cycle summary" INFO line per cycle. Off by default.
+	CycleSummary     bool
 	Watchdog         bool
 	WdList           []string
 	LogLevel         int
@@ -206,6 +213,8 @@ func (c *Config) SetVals(localConfig *LocalConfig) {
 	localBoolNotFalse(data, "zmconfigd_watchdog", &c.Watchdog)
 	localBoolNotFalse(data, "zmconfigd_enable_config_restarts", &c.RestartConfig)
 	localInt(data, "zmconfigd_restart_debounce_seconds", &c.RestartDebounce)
+	localStr(data, "zmconfigd_metrics_textfile", &c.MetricsTextfile)
+	localBoolTrue(data, "zmconfigd_cycle_summary", &c.CycleSummary)
 
 	if v, ok := data.Get("zmconfigd_watchdog_services"); ok {
 		c.WdList = strings.Fields(v)

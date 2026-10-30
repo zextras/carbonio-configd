@@ -180,6 +180,32 @@ func TestConfig_SetVals(t *testing.T) {
 			},
 		},
 		{
+			name: "observability opt-ins",
+			localConfig: &LocalConfig{
+				Data: testConfigMap(map[string]string{
+					"zmconfigd_metrics_textfile": "/var/lib/node_exporter/configd.prom",
+					"zmconfigd_cycle_summary":    "true",
+				}),
+			},
+			validate: func(t *testing.T, cfg *Config) {
+				if cfg.MetricsTextfile != "/var/lib/node_exporter/configd.prom" {
+					t.Errorf("MetricsTextfile = %q", cfg.MetricsTextfile)
+				}
+				if !cfg.CycleSummary {
+					t.Error("CycleSummary should be true")
+				}
+			},
+		},
+		{
+			name:        "observability off by default",
+			localConfig: &LocalConfig{Data: testConfigMap(map[string]string{})},
+			validate: func(t *testing.T, cfg *Config) {
+				if cfg.MetricsTextfile != "" || cfg.CycleSummary {
+					t.Errorf("observability must be off by default: %q %v", cfg.MetricsTextfile, cfg.CycleSummary)
+				}
+			},
+		},
+		{
 			name: "set configd intervals",
 			localConfig: &LocalConfig{
 				Data: testConfigMap(map[string]string{

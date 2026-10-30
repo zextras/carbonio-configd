@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/metrics"
 	"github.com/zextras/carbonio-configd/internal/plan"
 	"github.com/zextras/carbonio-configd/internal/services"
 	"github.com/zextras/carbonio-configd/internal/sys"
@@ -49,6 +50,7 @@ type Settings struct {
 // pendingRestart is a debounced restart request.
 type pendingRestart struct {
 	reasons     []string
+	kinds       []string
 	lastRequest time.Time
 }
 
@@ -61,11 +63,20 @@ type Policy struct {
 	mgr     services.Manager
 	clock   sys.Clock
 	pending map[string]*pendingRestart
+	metrics *metrics.Registry
 }
 
 // New returns a Policy that queues restarts on mgr and reads time from clock.
 func New(mgr services.Manager, clock sys.Clock) *Policy {
 	return &Policy{mgr: mgr, clock: clock, pending: make(map[string]*pendingRestart)}
+}
+
+// WithMetrics makes the policy count the restarts it queues in reg (nil: off)
+// and returns the policy.
+func (p *Policy) WithMetrics(reg *metrics.Registry) *Policy {
+	p.metrics = reg
+
+	return p
 }
 
 // Apply runs the restart policy for one cycle and returns the plan restarts
@@ -111,7 +122,11 @@ func (p *Policy) queue(ctx context.Context, restarts []plan.Restart) []plan.Rest
 				"error", err)
 
 			carry = append(carry, e)
+
+			continue
 		}
+
+		p.metrics.RestartRequested(e.Service, reasonKinds(e.Reasons))
 	}
 
 	return carry
@@ -130,6 +145,12 @@ func (p *Policy) record(restarts []plan.Restart, now time.Time) {
 		for _, reason := range plan.Strings(e.Reasons) {
 			if !slices.Contains(r.reasons, reason) {
 				r.reasons = append(r.reasons, reason)
+			}
+		}
+
+		for _, kind := range reasonKinds(e.Reasons) {
+			if !slices.Contains(r.kinds, kind) {
+				r.kinds = append(r.kinds, kind)
 			}
 		}
 
@@ -162,8 +183,25 @@ func (p *Policy) flush(ctx context.Context, due func(*pendingRestart) bool) {
 			continue
 		}
 
+		p.metrics.RestartRequested(name, r.kinds)
 		delete(p.pending, name)
 	}
+}
+
+// reasonKinds returns the distinct kinds of reasons, sorted.
+func reasonKinds(reasons []plan.Reason) []string {
+	kinds := make([]string, 0, len(reasons))
+
+	for i := range reasons {
+		kind := string(reasons[i].Kind)
+		if !slices.Contains(kinds, kind) {
+			kinds = append(kinds, kind)
+		}
+	}
+
+	slices.Sort(kinds)
+
+	return kinds
 }
 
 // process runs the manager's queue once. The cascade asks "SERVICE_<NAME>"
