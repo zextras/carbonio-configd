@@ -9,12 +9,28 @@ import (
 	"strings"
 
 	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/logger"
 )
 
 // parseConditional parses a top-level if/fi block and appends it to the section.
 func (p *parser) parseConditional(section *config.MtaConfigSection) error {
-	cond, err := p.parseConditionalBlock()
+	condType, condKey, negated, err := p.parseConditionalHeader()
 	if err != nil {
+		return err
+	}
+
+	cond := config.Conditional{
+		Type:         condType,
+		Key:          condKey,
+		Negated:      negated,
+		Postconf:     make(map[string]string),
+		Postconfd:    make(map[string]string),
+		RequiredVars: make(map[string]string),
+	}
+
+	p.skipToNewline()
+
+	if err := p.parseConditionalBody(&cond); err != nil {
 		return err
 	}
 
@@ -23,100 +39,81 @@ func (p *parser) parseConditional(section *config.MtaConfigSection) error {
 	return nil
 }
 
-// parseNestedConditional parses a nested if/fi block and appends it to the parent conditional.
-func (p *parser) parseNestedConditional(parent *config.Conditional) error {
-	cond, err := p.parseConditionalBlock()
-	if err != nil {
-		return err
-	}
-
-	parent.Nested = append(parent.Nested, cond)
-
-	return nil
-}
-
-// parseConditionalBlock parses a complete IF ... FI block (header + body) and
-// returns the populated Conditional. It is the single source of truth for
-// conditional parsing and is used by both top-level and nested callers.
-func (p *parser) parseConditionalBlock() (config.Conditional, error) {
-	condType, condKey, negated, err := p.parseConditionalHeader()
-	if err != nil {
-		return config.Conditional{}, err
-	}
-
-	cond := config.Conditional{
-		Type:      condType,
-		Key:       condKey,
-		Negated:   negated,
-		Postconf:  make(map[string]string),
-		Postconfd: make(map[string]string),
-		Ldap:      make(map[string]string),
-		Nested:    []config.Conditional{},
-	}
-
-	p.skipToNewline()
-
-	if err := p.parseConditionalBody(&cond); err != nil {
-		return cond, err
-	}
-
-	return cond, nil
-}
-
-// parseConditionalBody advances through tokens until the matching FI token,
-// dispatching each token type to the appropriate handler.
+// parseConditionalBody mirrors the legacy `while not re.match(r"fi", line)`
+// loop of jylibs/mtaconfig.py: only POSTCONF, POSTCONFD (VAR|LOCAL|FILE
+// lookups, no MAPLOCAL) and VAR/LOCAL lines are honoured; every other line,
+// including a nested if header, is logged and ignored, and the block ends at
+// the FIRST fi. Nesting is therefore not supported: the body of an inner if is
+// folded into the outer block and the outer fi is left over at section level.
 func (p *parser) parseConditionalBody(cond *config.Conditional) error {
-	depth := 1
+	for {
+		switch p.current.Type {
+		case TokenNewline:
+			p.advance()
+		case TokenFi:
+			p.skipToNewline()
 
-	for !p.isAtEnd() && depth > 0 {
-		done, err := p.parseConditionalToken(cond, &depth)
+			return nil
+		case TokenEOF, TokenError, TokenSection:
+			// Legacy runs off the end of the file (IndexError).
+			return fmt.Errorf("unterminated if block %s %s: missing fi before line %d", cond.Type, cond.Key, p.current.Line)
+		default:
+			if err := p.parseConditionalLine(cond); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+// parseConditionalLine handles one body line of a conditional.
+func (p *parser) parseConditionalLine(cond *config.Conditional) error {
+	switch p.current.Type {
+	case TokenPostconf:
+		key, value, lk, err := p.parsePostconfLine(ConfigTypePOSTCONF, false)
 		if err != nil {
 			return err
 		}
 
-		if done {
-			break
+		cond.Postconf[key] = value
+		lk.register(cond.RequiredVars)
+	case TokenPostconfd:
+		key, _, lk, err := p.parsePostconfLine(ConfigTypePOSTCONFD, false)
+		if err != nil {
+			return err
 		}
+
+		cond.Postconfd[key] = ""
+		lk.register(cond.RequiredVars)
+	case TokenVar, TokenLocal:
+		return p.parseConditionalRequiredVar(cond)
+	default:
+		logger.WarnContext(p.ctx, "Ignoring unsupported directive inside if block",
+			"directive", p.current.Literal, "line", p.current.Line)
 	}
+
+	p.skipToNewline()
 
 	return nil
 }
 
-// parseConditionalToken processes the current token inside a conditional body.
-// It returns (true, nil) when the matching FI has been consumed, (false, nil) to
-// continue, or (false, err) on a parse error.
-func (p *parser) parseConditionalToken(cond *config.Conditional, depth *int) (done bool, err error) {
-	switch p.current.Type {
-	case TokenIf:
-		return false, p.parseNestedConditional(cond)
-
-	case TokenFi:
-		*depth--
-		if *depth == 0 {
-			p.advance()
-			return true, nil
-		}
-
-		p.advance()
-
-	case TokenPostconf:
-		return false, p.parseConditionalPostconf(cond)
-
-	case TokenPostconfd:
-		return false, p.parseConditionalPostconfd(cond)
-
-	case TokenIdentifier:
-		if strings.EqualFold(p.current.Literal, "LDAP") {
-			return false, p.parseConditionalLdap(cond)
-		}
-
-		p.advance()
-
-	default:
-		p.advance()
+// parseConditionalRequiredVar parses a VAR/LOCAL line inside a conditional.
+func (p *parser) parseConditionalRequiredVar(cond *config.Conditional) error {
+	cfgType := ConfigTypeVAR
+	if p.current.Type == TokenLocal {
+		cfgType = ConfigTypeLOCAL
 	}
 
-	return false, nil
+	line := p.current.Line
+
+	p.advance()
+
+	if p.current.Type != TokenIdentifier {
+		return fmt.Errorf("expected variable name after %s at line %d", cfgType, line)
+	}
+
+	cond.RequiredVars[p.current.Literal] = cfgType
+
+	return nil
 }
 
 // parseConditionalHeader parses the "IF SERVICE|VAR [!]key" header and
@@ -148,62 +145,6 @@ func (p *parser) parseConditionalHeader() (condType, condKey string, negated boo
 	p.advance()
 
 	return condType, condKey, negated, nil
-}
-
-// parseConditionalPostconf parses a POSTCONF directive within a conditional.
-func (p *parser) parseConditionalPostconf(cond *config.Conditional) error {
-	p.advance() // skip POSTCONF
-
-	// Get key
-	if p.current.Type != TokenIdentifier {
-		return fmt.Errorf("expected POSTCONF key at line %d", p.current.Line)
-	}
-
-	key := p.current.Literal
-	p.advance()
-
-	// Get value
-	value := p.parseValue()
-	cond.Postconf[key] = value
-
-	p.skipToNewline()
-
-	return nil
-}
-
-// parseConditionalPostconfd parses a POSTCONFD directive within a conditional.
-func (p *parser) parseConditionalPostconfd(cond *config.Conditional) error {
-	p.advance() // skip POSTCONFD
-
-	// Get key
-	if p.current.Type != TokenIdentifier {
-		return fmt.Errorf("expected POSTCONFD key at line %d", p.current.Line)
-	}
-
-	key := p.current.Literal
-	p.advance()
-
-	// Get value
-	value := p.parseValue()
-	cond.Postconfd[key] = value
-
-	p.skipToNewline()
-
-	return nil
-}
-
-// parseConditionalLdap parses an LDAP directive within a conditional.
-func (p *parser) parseConditionalLdap(cond *config.Conditional) error {
-	key, value, ok, err := p.parseLdapDirective()
-	if err != nil {
-		return err
-	}
-
-	if ok {
-		cond.Ldap[key] = value
-	}
-
-	return nil
 }
 
 // Helper methods

@@ -10,6 +10,8 @@ package transformer
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"regexp"
 	"slices"
 	"strings"
@@ -27,6 +29,13 @@ type Transformer struct {
 	ConfigLookup lookup.ConfigLookup
 	State        *state.State
 }
+
+// ErrTransform marks a line the legacy jylibs/state.py transform() cannot render:
+// the Jython code raises (int() of None or garbage, a failed
+// `[(a, b)] = re.findall(...)` unpack, an out-of-range fields[n], None.split())
+// and rewriteConfig abandons the whole file without touching its target.
+// Callers must discard any output produced for the file so far.
+var ErrTransform = errors.New("transform failed")
 
 const (
 	// configTypeVAR is the VAR config type for variable substitution.
@@ -69,39 +78,50 @@ func NewTransformer(cl lookup.ConfigLookup, st *state.State) *Transformer {
 }
 
 // Transform applies variable substitutions and conditional processing to a line.
-func (t *Transformer) Transform(ctx context.Context, line string) string {
+//
+// It returns an error wrapping ErrTransform where legacy transform() raises
+// (see handlers). The first failing directive stops the line, as a raise aborts
+// the surrounding re.sub; the caller must discard the whole file being rendered.
+func (t *Transformer) Transform(ctx context.Context, line string) (string, error) {
 	ctx = logger.ContextWithComponentOnce(ctx, "transformer")
 	// jylibs/state.py transform(): a line with fewer than two '@' and fewer than
 	// two '%' cannot hold a @@key@@ or %%key%% marker and is returned untouched,
 	// including its trailing whitespace and the missing newline of a last line.
 	if strings.Count(line, "@") < 2 && strings.Count(line, "%") < 2 {
-		return line
+		return line, nil
 	}
 
 	// Apply @@localconfig_key@@ substitutions
-	line = localConfigRe.ReplaceAllStringFunc(line, func(match string) string {
+	line, err := replaceAll(localConfigRe, line, func(match string) (string, error) {
 		return t.xformLocalConfig(ctx, match)
 	})
+	if err != nil {
+		return "", err
+	}
 
 	// Trim trailing whitespace before processing %% directives (Python's rstrip()).
 	line = strings.TrimRight(line, pyWhitespace)
 
 	// Handle PREFIX directives like %%comment VAR:key%%rest_of_line
 	// These directives appear at the start of a line and affect the rest of the line
-	if processedLine, handled := t.processPrefixDirective(ctx, line); handled {
-		line = processedLine
-		// Continue processing - don't return early to handle VAR/LOCAL substitutions
+	line, err = t.processPrefixDirective(ctx, line)
+	if err != nil {
+		return "", err
 	}
 
 	// Handle WRAPPING directives - lines that start and end with %%
 	// Only for wrapping directives (contains, exact, list, binary, truefalse, etc.)
-	if result, handled := t.processWrappingDirective(ctx, line); handled {
-		return result // Return immediately for wrapping directives
+	result, handled, err := t.processWrappingDirective(ctx, line)
+	if handled || err != nil {
+		return result, err // Return immediately for wrapping directives
 	}
 
 	// Process inline directives within the line
 	// Pattern: "text = %%directive args%%" -> "text = result"
-	line = t.processInlineDirectives(ctx, line)
+	line, err = t.processInlineDirectives(ctx, line)
+	if err != nil {
+		return "", err
+	}
 
 	// Apply %%VAR:key%%, %%LOCAL:key%%, %%SERVICE:key%% substitutions
 	// Must happen before xformConfig to handle these patterns correctly
@@ -112,11 +132,41 @@ func (t *Transformer) Transform(ctx context.Context, line string) string {
 
 	// Apply %%config_variable%% substitutions (for complex directives)
 	src = line
-	line = plainVarRe.ReplaceAllStringFunc(line, func(match string) string {
-		return keepOnOneLine(src, match, t.xformConfig(ctx, match))
+
+	line, err = replaceAll(plainVarRe, line, func(match string) (string, error) {
+		value, err := t.xformConfig(ctx, match)
+
+		return keepOnOneLine(src, match, value), err
+	})
+	if err != nil {
+		return "", err
+	}
+
+	return line + "\n", nil // Add newline back as it was removed for processing
+}
+
+// replaceAll is ReplaceAllStringFunc for callbacks that can fail. The first
+// error stops evaluation of the remaining matches, like a Jython raise inside
+// re.sub; the returned text is then meaningless.
+func replaceAll(re *regexp.Regexp, src string, fn func(match string) (string, error)) (string, error) {
+	var firstErr error
+
+	out := re.ReplaceAllStringFunc(src, func(match string) string {
+		if firstErr != nil {
+			return match
+		}
+
+		replaced, err := fn(match)
+		if err != nil {
+			firstErr = err
+
+			return match
+		}
+
+		return replaced
 	})
 
-	return line + "\n" // Add newline back as it was removed for processing
+	return out, firstErr
 }
 
 // keepOnOneLine collapses the newlines that join a multi-valued LDAP attribute
@@ -169,7 +219,8 @@ func isKnownDirective(directiveName string) bool {
 }
 
 // processPrefixDirective handles prefix directives like %%comment VAR:key%%rest_of_line.
-func (t *Transformer) processPrefixDirective(ctx context.Context, line string) (string, bool) {
+// A line that does not start with one is returned unchanged.
+func (t *Transformer) processPrefixDirective(ctx context.Context, line string) (string, error) {
 	// Strip leading whitespace — %%comment/%%uncomment directives in config
 	// templates (e.g. amavisd.conf.in) are often indented. Preserve the
 	// original indentation so the output aligns with the rest of the file.
@@ -177,13 +228,13 @@ func (t *Transformer) processPrefixDirective(ctx context.Context, line string) (
 	indent := line[:len(line)-len(trimmed)]
 
 	if !strings.HasPrefix(trimmed, "%%") {
-		return line, false
+		return line, nil
 	}
 
 	// Find the closing %% of the directive
 	endIdx := strings.Index(trimmed[2:], "%%")
 	if endIdx == -1 {
-		return line, false
+		return line, nil
 	}
 
 	endIdx += 2 // Adjust for the offset
@@ -192,27 +243,35 @@ func (t *Transformer) processPrefixDirective(ctx context.Context, line string) (
 
 	// Check if this is a known prefix directive
 	if !isPrefixDirective(directiveContent) {
-		return line, false
+		return line, nil
 	}
 
 	// Process the directive and prepend its result to the rest of the line
-	directiveResult := t.xformConfig(ctx, "%%"+directiveContent+"%%")
+	directiveResult, err := t.xformConfig(ctx, "%%"+directiveContent+"%%")
+	if err != nil {
+		return "", err
+	}
+
 	// Remove the newline that xformConfig adds since we're prepending to a line
 	directiveResult = strings.TrimSuffix(directiveResult, "\n")
 
-	return indent + directiveResult + restOfLine, true
+	return indent + directiveResult + restOfLine, nil
 }
 
 // processWrappingDirective handles wrapping directives like %%list VAR:key separator%%.
-func (t *Transformer) processWrappingDirective(ctx context.Context, line string) (string, bool) {
+// handled reports whether line was such a directive (the result is final then).
+func (t *Transformer) processWrappingDirective(
+	ctx context.Context,
+	line string,
+) (result string, handled bool, err error) {
 	if !strings.HasPrefix(line, "%%") || !strings.HasSuffix(line, "%%") || strings.Count(line, "%") < 4 {
-		return line, false
+		return line, false, nil
 	}
 
 	// Check if this is a wrapping directive vs other patterns
 	innerContent := strings.TrimPrefix(strings.TrimSuffix(line, "%%"), "%%")
 	if !isWrappingDirective(innerContent) {
-		return line, false
+		return line, false, nil
 	}
 
 	// For %%contains...%%/%%exact...%% lines, pre-substitute any embedded
@@ -230,26 +289,35 @@ func (t *Transformer) processWrappingDirective(ctx context.Context, line string)
 			// introduce a newline. See keepOnOneLine.
 			return strings.ReplaceAll(t.xformConfigVariable(ctx, match), "\n", " ")
 		})
-		substituted = plainVarRe.ReplaceAllStringFunc(substituted, func(match string) string {
+
+		substituted, err = replaceAll(plainVarRe, substituted, func(match string) (string, error) {
 			return t.xformConfig(ctx, match)
 		})
+		if err != nil {
+			return "", true, err
+		}
+
 		line = "%%" + substituted + "%%"
 	}
 
 	// This is a directive line - process it directly without VAR substitution
 	// The directive handlers will parse VAR:key patterns themselves
-	result := t.xformConfig(ctx, line)
+	value, err := t.xformConfig(ctx, line)
+	if err != nil {
+		return "", true, err
+	}
+
 	// xformConfig returns the value without newline
-	return result + "\n", true
+	return value + "\n", true, nil
 }
 
 // processInlineDirectives handles inline directives within a line like "text = %%directive%%".
-func (t *Transformer) processInlineDirectives(ctx context.Context, line string) string {
+func (t *Transformer) processInlineDirectives(ctx context.Context, line string) (string, error) {
 	if !strings.Contains(line, "%%") || strings.Count(line, "%") < 4 {
-		return line
+		return line, nil
 	}
 
-	return inlineDirectRe.ReplaceAllStringFunc(line, func(match string) string {
+	return replaceAll(inlineDirectRe, line, func(match string) (string, error) {
 		innerContent := strings.Trim(match, "%")
 		// Check if this looks like a directive (has a space and known directive name)
 		parts := strings.SplitN(innerContent, " ", 2)
@@ -261,12 +329,17 @@ func (t *Transformer) processInlineDirectives(ctx context.Context, line string) 
 			}
 		}
 		// Not a directive - return as-is for later processing
-		return match
+		return match, nil
 	})
 }
 
 // xformLocalConfig handles @@localconfig_key@@ substitutions.
-func (t *Transformer) xformLocalConfig(ctx context.Context, match string) string {
+//
+// Legacy xformLocalConfig raises (AttributeError/IndexError, aborting the
+// rewrite) when SPLIT or PERDITION_LDAP_SPLIT is applied to a key missing from
+// localconfig (None) and PERDITION_LDAP_SPLIT also on an empty value
+// (val.split()[0]). A plain @@key@@ of a missing key renders empty.
+func (t *Transformer) xformLocalConfig(ctx context.Context, match string) (string, error) {
 	// jylibs/state.py xformLocalConfig: "FUNC key" is split on the first space
 	// only; without a space the whole text is the key.
 	lookupKey := strings.Trim(match, "@")
@@ -278,11 +351,15 @@ func (t *Transformer) xformLocalConfig(ctx context.Context, match string) string
 
 	val, err := t.ConfigLookup.LookUpConfig(ctx, "LOCAL", lookupKey)
 	if err != nil {
+		if funcName == "SPLIT" || funcName == "PERDITION_LDAP_SPLIT" {
+			return "", fmt.Errorf("%w: @@%s %s@@: key is not set in localconfig", ErrTransform, funcName, lookupKey)
+		}
+
 		logger.WarnContext(ctx, "Could not look up local config key",
 			"key", lookupKey,
 			"error", err)
 
-		return "" // Return empty string if not found
+		return "", nil // Return empty string if not found
 	}
 
 	switch funcName {
@@ -292,17 +369,14 @@ func (t *Transformer) xformLocalConfig(ctx context.Context, match string) string
 		// strings.Fields which splits on all whitespace.
 		before, _, _ := strings.Cut(val, " ")
 
-		return before
+		return before, nil
 	case "PERDITION_LDAP_SPLIT":
 		// Legacy: ' '.join((val.split()[0], ' '.join(re.findall(ldapURLRe, val)))):
 		// the first word, a space, then the host of every ldap URL, with the space
-		// kept when no URL matches. An empty value makes val.split()[0] raise
-		// IndexError in Jython and abort the whole rewrite; here it renders empty.
+		// kept when no URL matches.
 		first := strings.Fields(val)
 		if len(first) == 0 {
-			logger.WarnContext(ctx, "PERDITION_LDAP_SPLIT on empty local config value", "key", lookupKey)
-
-			return ""
+			return "", fmt.Errorf("%w: @@PERDITION_LDAP_SPLIT %s@@: empty value", ErrTransform, lookupKey)
 		}
 
 		hostnames := make([]string, 0, 4)
@@ -311,9 +385,9 @@ func (t *Transformer) xformLocalConfig(ctx context.Context, match string) string
 			hostnames = append(hostnames, m[1])
 		}
 
-		return first[0] + " " + strings.Join(hostnames, " ")
+		return first[0] + " " + strings.Join(hostnames, " "), nil
 	default:
-		return val
+		return val, nil
 	}
 }
 
@@ -354,11 +428,11 @@ func (t *Transformer) xformConfigVariable(ctx context.Context, match string) str
 }
 
 // xformConfig handles complex %% directives like comment, binary, range, etc.
-// It dispatches to specialized handler methods based on the directive type.
-func (t *Transformer) xformConfig(ctx context.Context, match string) string {
+// It dispatches to specialized handler methods based on the directive prefix,
+// matching legacy re.match(r"<name>", sr) (a prefix, not a word match).
+func (t *Transformer) xformConfig(ctx context.Context, match string) (string, error) {
 	sr := strings.Trim(match, "%")
 
-	// Dispatch to appropriate handler based on directive prefix
 	switch {
 	case strings.HasPrefix(sr, "comment"):
 		return t.handleCommentDirective(ctx, sr)
@@ -381,6 +455,6 @@ func (t *Transformer) xformConfig(ctx context.Context, match string) string {
 	case strings.HasPrefix(sr, "explode"):
 		return t.handleExplodeDirective(ctx, sr)
 	default:
-		return t.handleDefaultLookup(ctx, sr)
+		return t.handleDefaultLookup(ctx, sr), nil
 	}
 }

@@ -62,7 +62,7 @@ func TestTransformVarSubstitution(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := transformer.Transform(ctx, tt.input)
+			result := mustTransform(t, transformer, ctx, tt.input)
 			if result != tt.expected {
 				t.Errorf("Transform() = %q, want %q", result, tt.expected)
 			}
@@ -100,7 +100,7 @@ func TestTransformLocalConfigSubstitution(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := transformer.Transform(ctx, tt.input)
+			result := mustTransform(t, transformer, ctx, tt.input)
 			if result != tt.expected {
 				t.Errorf("Transform() = %q, want %q", result, tt.expected)
 			}
@@ -156,7 +156,7 @@ func TestTransformEdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := transformer.Transform(ctx, tt.input)
+			result := mustTransform(t, transformer, ctx, tt.input)
 			if result != tt.expected {
 				t.Errorf("Transform() = %q, want %q", result, tt.expected)
 			}
@@ -203,7 +203,7 @@ func TestTransformPlainVariableSubstitution(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := transformer.Transform(ctx, tt.input)
+			result := mustTransform(t, transformer, ctx, tt.input)
 			if result != tt.expected {
 				t.Errorf("Transform() = %q, want %q", result, tt.expected)
 			}
@@ -266,7 +266,7 @@ func TestTransformMultiValueStaysOnOneLine(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := transformer.Transform(ctx, tt.input)
+			result := mustTransform(t, transformer, ctx, tt.input)
 			if result != tt.expected {
 				t.Errorf("Transform() = %q, want %q", result, tt.expected)
 			}
@@ -317,7 +317,7 @@ func TestLocalConfigSPLITFunction(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := transformer.Transform(ctx, tt.input)
+			result := mustTransform(t, transformer, ctx, tt.input)
 			if result != tt.expected {
 				t.Errorf("Expected %q, got %q", tt.expected, result)
 			}
@@ -384,7 +384,7 @@ func TestSpecialCharactersInValues(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := transformer.Transform(ctx, tt.input)
+			result := mustTransform(t, transformer, ctx, tt.input)
 			if result != tt.expected {
 				t.Errorf("Expected %q, got %q", tt.expected, result)
 			}
@@ -429,16 +429,11 @@ func TestNumericBoundaryValues(t *testing.T) {
 			input:    "%%range VAR:negative 0 100%%",
 			expected: "-50.0\n", // Negative values are passed through the formula
 		},
-		{
-			name:     "Range with decimal fails Atoi",
-			input:    "%%range VAR:decimal 0 100%%",
-			expected: "\n", // Decimal values fail integer conversion
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := transformer.Transform(ctx, tt.input)
+			result := mustTransform(t, transformer, ctx, tt.input)
 			if result != tt.expected {
 				t.Errorf("Expected %q, got %q", tt.expected, result)
 			}
@@ -456,7 +451,7 @@ func TestXformLocalConfig_PerditionLdapSplit_NoURLs(t *testing.T) {
 	})
 	tr := NewTransformer(mock, nil)
 
-	got := tr.Transform(ctx, "@@PERDITION_LDAP_SPLIT plain_server@@")
+	got := mustTransform(t, tr, ctx, "@@PERDITION_LDAP_SPLIT plain_server@@")
 	want := "mailhost.example.com\n"
 	if got != want {
 		t.Errorf("PERDITION_LDAP_SPLIT no urls: got %q, want %q", got, want)

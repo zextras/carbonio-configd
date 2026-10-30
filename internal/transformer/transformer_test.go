@@ -59,7 +59,7 @@ func TestTransformComplexScenarios(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := transformer.Transform(ctx, tt.input)
+			result := mustTransform(t, transformer, ctx, tt.input)
 			if result != tt.expected {
 				t.Errorf("Transform() = %q, want %q", result, tt.expected)
 			}
@@ -106,7 +106,7 @@ func TestMultipleDirectivesInOneLine(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := transformer.Transform(ctx, tt.input)
+			result := mustTransform(t, transformer, ctx, tt.input)
 			if result != tt.expected {
 				t.Errorf("Expected %q, got %q", tt.expected, result)
 			}
@@ -125,7 +125,7 @@ func BenchmarkTransform_SimpleVarSubstitution(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = transformer.Transform(ctx, line)
+		_, _ = transformer.Transform(ctx, line)
 	}
 }
 
@@ -138,7 +138,7 @@ func BenchmarkTransform_LocalConfigSubstitution(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = transformer.Transform(ctx, line)
+		_, _ = transformer.Transform(ctx, line)
 	}
 }
 
@@ -151,7 +151,7 @@ func BenchmarkTransform_CommentDirective(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = transformer.Transform(ctx, line)
+		_, _ = transformer.Transform(ctx, line)
 	}
 }
 
@@ -164,7 +164,7 @@ func BenchmarkTransform_BinaryDirective(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = transformer.Transform(ctx, line)
+		_, _ = transformer.Transform(ctx, line)
 	}
 }
 
@@ -177,7 +177,7 @@ func BenchmarkTransform_ListDirective(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = transformer.Transform(ctx, line)
+		_, _ = transformer.Transform(ctx, line)
 	}
 }
 
@@ -190,7 +190,7 @@ func BenchmarkTransform_ContainsDirective(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = transformer.Transform(ctx, line)
+		_, _ = transformer.Transform(ctx, line)
 	}
 }
 
@@ -203,7 +203,7 @@ func BenchmarkTransform_ComplexLine(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = transformer.Transform(ctx, line)
+		_, _ = transformer.Transform(ctx, line)
 	}
 }
 
@@ -216,7 +216,7 @@ func BenchmarkTransform_NoSubstitution(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = transformer.Transform(ctx, line)
+		_, _ = transformer.Transform(ctx, line)
 	}
 }
 
@@ -229,7 +229,7 @@ func BenchmarkXformConfig_Comment(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = transformer.xformConfig(ctx, match)
+		_, _ = transformer.xformConfig(ctx, match)
 	}
 }
 
@@ -242,7 +242,7 @@ func BenchmarkXformConfig_Binary(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = transformer.xformConfig(ctx, match)
+		_, _ = transformer.xformConfig(ctx, match)
 	}
 }
 
@@ -255,6 +255,6 @@ func BenchmarkXformConfig_List(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = transformer.xformConfig(ctx, match)
+		_, _ = transformer.xformConfig(ctx, match)
 	}
 }

@@ -88,16 +88,18 @@ type MtaConfigSection struct {
 	Conditionals []Conditional // if/fi blocks
 }
 
-// Conditional represents an if/fi block with its condition and nested directives.
+// Conditional represents an if/fi block with its condition and directives.
+// Like legacy, only POSTCONF, POSTCONFD, VAR and LOCAL lines are kept.
 type Conditional struct {
 	Type      string // "SERVICE", "VAR"
 	Key       string // service name or variable name
 	Negated   bool   // true if condition is negated (!)
 	Postconf  map[string]string
 	Postconfd map[string]string
-	Ldap      map[string]string
-	Restarts  map[string]bool
-	Nested    []Conditional // for nested conditionals
+	// RequiredVars are the lookups (name -> VAR|LOCAL|FILE|...) the block's
+	// VAR/LOCAL lines and POSTCONF/POSTCONFD values depend on; legacy registers
+	// them on the section only when the condition holds at load time.
+	RequiredVars map[string]string
 }
 
 // RewriteEntry holds the value and mode for a rewrite rule.

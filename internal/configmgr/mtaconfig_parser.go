@@ -7,6 +7,7 @@ package configmgr
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 
 	"github.com/zextras/carbonio-configd/internal/config"
@@ -63,12 +64,12 @@ func (cm *ConfigManager) ParseMtaConfig(ctx context.Context, configFile string) 
 	return nil
 }
 
-// registerConditionalRequiredVars adds the lookups named by POSTCONF values of
-// the if-blocks that hold on this node to the section's required vars. Legacy
-// evaluates each if at load time and only a true branch runs requiredvars(), so
-// a variable used solely by a false branch must not mark the section changed
-// (that would restart services for no effective change). Nested blocks count
-// only when every enclosing block holds.
+// registerConditionalRequiredVars adds the required vars (VAR/LOCAL lines and
+// POSTCONF/POSTCONFD lookups) of the if-blocks that hold on this node to the
+// section's required vars. Legacy evaluates each if at load time and only a
+// true branch runs requiredvars(), so a variable used solely by a false branch
+// must not mark the section changed (that would restart services for no
+// effective change).
 func (cm *ConfigManager) registerConditionalRequiredVars(
 	ctx context.Context,
 	section *config.MtaConfigSection,
@@ -82,13 +83,7 @@ func (cm *ConfigManager) registerConditionalRequiredVars(
 			continue
 		}
 
-		for _, value := range cond.Postconf {
-			if name, cfgType, ok := parser.PostconfRequiredVar(value, true); ok {
-				section.RequiredVars[name] = cfgType
-			}
-		}
-
-		cm.registerConditionalRequiredVars(ctx, section, cond.Nested)
+		maps.Copy(section.RequiredVars, cond.RequiredVars)
 	}
 }
 

@@ -13,6 +13,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestParseMtaConfig_ValidFile tests parsing a valid zmconfigd.cf file
@@ -192,11 +195,9 @@ func TestParseMtaConfig_WithConditionals(t *testing.T) {
 	}
 }
 
-// TestParseMtaConfig_WithNestedConditionals tests parsing nested if blocks
+// TestParseMtaConfig_WithNestedConditionals checks legacy's lack of nesting: the
+// inner if header is ignored and its body folded into the outer block.
 func TestParseMtaConfig_WithNestedConditionals(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	tempDir := t.TempDir()
 	configFile := filepath.Join(tempDir, "zmconfigd.cf")
 
@@ -210,32 +211,18 @@ func TestParseMtaConfig_WithNestedConditionals(t *testing.T) {
 	fi
 `
 
-	err := os.WriteFile(configFile, []byte(content), 0644)
-	if err != nil {
-		t.Fatalf("Failed to create test config file: %v", err)
-	}
+	require.NoError(t, os.WriteFile(configFile, []byte(content), 0644))
 
 	cm := setupTestConfigManagerForParser(tempDir, "proxy")
+	require.NoError(t, cm.ParseMtaConfig(context.Background(), configFile))
 
-	err = cm.ParseMtaConfig(context.Background(), configFile)
-	if err != nil {
-		t.Fatalf("Expected no error, got: %v", err)
-	}
+	section := cm.State.MtaConfig.Sections["proxy"]
+	require.Len(t, section.Conditionals, 1)
 
-	section, ok := cm.State.MtaConfig.Sections["proxy"]
-	if !ok {
-		t.Fatal("Expected proxy section to be parsed")
-	}
-
-	if len(section.Conditionals) == 0 {
-		t.Fatal("Expected conditionals to be parsed")
-	}
-
-	// Check outer conditional has nested conditional
-	outerCond := section.Conditionals[0]
-	if len(outerCond.Nested) == 0 {
-		t.Error("Expected outer conditional to have nested conditionals")
-	}
+	outer := section.Conditionals[0]
+	assert.Equal(t, "zimbraReverseProxyMailEnabled", outer.Key)
+	assert.Equal(t, map[string]string{"imap_enabled": "yes"}, outer.Postconf)
+	assert.Equal(t, map[string]string{"zimbraReverseProxyImapEnabled": "VAR"}, outer.RequiredVars)
 }
 
 // TestParseMtaConfig_LDAPLookup tests LDAP directive with lookup

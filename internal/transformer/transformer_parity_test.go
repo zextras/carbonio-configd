@@ -66,7 +66,7 @@ func TestTransform_GuardNeedsTwoMarkers(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			if got := tr.Transform(context.Background(), tt.input); got != tt.want {
+			if got := mustTransform(t, tr, context.Background(), tt.input); got != tt.want {
 				t.Errorf("Transform(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
@@ -77,27 +77,9 @@ func TestTransform_GuardNeedsTwoMarkers(t *testing.T) {
 func TestTransform_RstripFormFeedAndVerticalTab(t *testing.T) {
 	t.Parallel()
 
-	got := newParityTransformer().Transform(context.Background(), "%%VAR:plainlist%% x\v\f \n")
+	got := mustTransform(t, newParityTransformer(), context.Background(), "%%VAR:plainlist%% x\v\f \n")
 	if want := "alpha beta x\n"; got != want {
 		t.Errorf("got %q, want %q", got, want)
-	}
-}
-
-// xformLocalConfig: `val.split()[0]` raises IndexError on an empty value in
-// Jython (the rewrite aborts). configd must not panic; the value renders empty.
-func TestXformLocalConfig_EmptyValueDoesNotPanic(t *testing.T) {
-	t.Parallel()
-
-	tr := newParityTransformer()
-
-	for _, input := range []string{
-		"x=@@PERDITION_LDAP_SPLIT empty@@;",
-		"x=@@PERDITION_LDAP_SPLIT blank@@;",
-		"x=@@SPLIT empty@@;",
-	} {
-		if got, want := tr.Transform(context.Background(), input), "x=;\n"; got != want {
-			t.Errorf("Transform(%q) = %q, want %q", input, got, want)
-		}
 	}
 }
 
@@ -116,7 +98,7 @@ func TestXformLocalConfig_PerditionKeepsSeparatorSpace(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		if got := tr.Transform(context.Background(), tt.input); got != tt.want {
+		if got := mustTransform(t, tr, context.Background(), tt.input); got != tt.want {
 			t.Errorf("Transform(%q) = %q, want %q", tt.input, got, tt.want)
 		}
 	}
@@ -141,7 +123,7 @@ func TestRangeDirective_PythonFloatString(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		if got := tr.Transform(context.Background(), tt.input); got != tt.want {
+		if got := mustTransform(t, tr, context.Background(), tt.input); got != tt.want {
 			t.Errorf("Transform(%q) = %q, want %q", tt.input, got, tt.want)
 		}
 	}
@@ -195,7 +177,7 @@ func TestFreqDirective_IntegerDivision(t *testing.T) {
 
 	for _, tt := range tests {
 		in := "Checks %%freq VAR:" + tt.key + " " + tt.total + "%%"
-		if got, want := tr.Transform(context.Background(), in), "Checks "+tt.want+"\n"; got != want {
+		if got, want := mustTransform(t, tr, context.Background(), in), "Checks "+tt.want+"\n"; got != want {
 			t.Errorf("Transform(%q) = %q, want %q", in, got, want)
 		}
 	}
@@ -217,7 +199,7 @@ func TestExplodeDirective_LegacyRegexBase(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		if got := tr.Transform(context.Background(), tt.input); got != tt.want {
+		if got := mustTransform(t, tr, context.Background(), tt.input); got != tt.want {
 			t.Errorf("Transform(%q) = %q, want %q", tt.input, got, tt.want)
 		}
 	}
@@ -247,7 +229,7 @@ func TestContainsExact_StripAndEmptyReplacement(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			if got := tr.Transform(context.Background(), tt.input); got != tt.want {
+			if got := mustTransform(t, tr, context.Background(), tt.input); got != tt.want {
 				t.Errorf("Transform(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
@@ -274,7 +256,7 @@ func TestBinaryTrueFalse_NegatedKey(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		if got := tr.Transform(context.Background(), tt.input); got != tt.want {
+		if got := mustTransform(t, tr, context.Background(), tt.input); got != tt.want {
 			t.Errorf("Transform(%q) = %q, want %q", tt.input, got, tt.want)
 		}
 	}

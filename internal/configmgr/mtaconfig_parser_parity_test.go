@@ -13,6 +13,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/zextras/carbonio-configd/internal/config"
 )
 
 func parseCfForParity(t *testing.T, content string, enabledServices ...string) *ConfigManager {
@@ -161,13 +163,14 @@ func TestParseMtaConfig_ConditionalPostconfRequiredVarsOnlyWhenTrue(t *testing.T
 		POSTCONF f LOCAL notSvcLocal
 	fi
 	if VAR flagOn
-		POSTCONF g VAR outerVar
-		if VAR flagOff
-			POSTCONF h VAR innerOffVar
-		fi
-		if VAR !flagOff
-			POSTCONF i VAR innerOnVar
-		fi
+		VAR plainOnVar
+		LOCAL plainOnLocal
+		POSTCONFD g LOCAL deleteLocal
+	fi
+	if VAR flagOff
+		VAR plainOffVar
+		LOCAL plainOffLocal
+		POSTCONFD h LOCAL offDeleteLocal
 	fi
 `
 
@@ -187,7 +190,42 @@ func TestParseMtaConfig_ConditionalPostconfRequiredVarsOnlyWhenTrue(t *testing.T
 		"onVar":            "VAR",
 		"zmconfigd/neg.cf": "FILE",
 		"svcLocal":         "LOCAL",
-		"outerVar":         "VAR",
-		"innerOnVar":       "VAR",
+		"plainOnVar":       "VAR",
+		"plainOnLocal":     "LOCAL",
+		"deleteLocal":      "LOCAL",
 	}, cm.State.MtaConfig.Sections["mta"].RequiredVars)
+}
+
+// Legacy ends an if block at the first fi and has no nesting: the inner header
+// is ignored and its body belongs to the outer block, so its lookups count
+// exactly when the OUTER condition holds, whatever the inner condition says.
+func TestParseMtaConfig_NestedConditionalFollowsOuterCondition(t *testing.T) {
+	t.Parallel()
+
+	const cf = `SECTION mta
+	if VAR flagOn
+		POSTCONF g VAR outerVar
+		if VAR flagOff
+			POSTCONF h VAR innerVar
+		fi
+	fi
+	if VAR flagOff
+		POSTCONF i VAR offOuterVar
+		if VAR flagOn
+			POSTCONF j VAR offInnerVar
+		fi
+	fi
+`
+
+	cm := parseCfForParity(t, cf, "mta")
+	cm.State.GlobalConfig.Data.Set("flagOn", "TRUE")
+	cm.State.GlobalConfig.Data.Set("flagOff", "FALSE")
+
+	section := cm.State.MtaConfig.Sections["mta"]
+	require.Len(t, section.Conditionals, 2)
+
+	got := map[string]string{}
+	cm.registerConditionalRequiredVars(context.Background(), &config.MtaConfigSection{RequiredVars: got}, section.Conditionals)
+
+	assert.Equal(t, map[string]string{"outerVar": "VAR", "innerVar": "VAR"}, got)
 }

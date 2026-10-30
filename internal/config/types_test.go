@@ -368,42 +368,20 @@ func TestMtaConfigSection(t *testing.T) {
 
 func TestConditional(t *testing.T) {
 	cond := Conditional{
-		Type:      "SERVICE",
-		Key:       "ldap",
-		Negated:   false,
-		Postconf:  make(map[string]string),
-		Postconfd: make(map[string]string),
-		Ldap:      make(map[string]string),
-		Restarts:  make(map[string]bool),
-		Nested:    []Conditional{},
+		Type:         "SERVICE",
+		Key:          "ldap",
+		Negated:      true,
+		Postconf:     map[string]string{"a": "VAR:x"},
+		Postconfd:    map[string]string{"b": ""},
+		RequiredVars: map[string]string{"x": "VAR"},
 	}
 
-	if cond.Type != "SERVICE" {
-		t.Errorf("Type = %v, want SERVICE", cond.Type)
+	if cond.Type != "SERVICE" || cond.Key != "ldap" || !cond.Negated {
+		t.Errorf("unexpected header: %+v", cond)
 	}
 
-	if cond.Key != "ldap" {
-		t.Errorf("Key = %v, want ldap", cond.Key)
-	}
-
-	if cond.Negated {
-		t.Error("Negated should be false")
-	}
-
-	// Test nested conditional
-	nested := Conditional{
-		Type:    "VAR",
-		Key:     "ssl_enabled",
-		Negated: true,
-	}
-	cond.Nested = append(cond.Nested, nested)
-
-	if len(cond.Nested) != 1 {
-		t.Errorf("Nested length = %v, want 1", len(cond.Nested))
-	}
-
-	if !cond.Nested[0].Negated {
-		t.Error("Nested conditional should be negated")
+	if cond.RequiredVars["x"] != "VAR" {
+		t.Errorf("RequiredVars[x] = %q, want VAR", cond.RequiredVars["x"])
 	}
 }
 

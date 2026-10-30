@@ -22,7 +22,8 @@ func (cm *ConfigManager) CompareKeys(ctx context.Context) error {
 	return cm.comparator.CompareKeys(ctx)
 }
 
-// processConditionals recursively evaluates and processes conditional blocks.
+// processConditionals evaluates conditional blocks and applies the POSTCONF and
+// POSTCONFD directives of those that hold (the only ones legacy honours).
 func (cm *ConfigManager) processConditionals(ctx context.Context, conditionals []config.Conditional) {
 	for _, cond := range conditionals {
 		// Evaluate the conditional
@@ -60,15 +61,6 @@ func (cm *ConfigManager) processConditionals(ctx context.Context, conditionals [
 
 		for postconfdKey, postconfdVal := range cond.Postconfd {
 			cm.State.CurPostconfd(ctx, postconfdKey, postconfdVal)
-		}
-
-		for ldapKey, ldapVal := range cond.Ldap {
-			cm.State.CurLdap(ctx, ldapKey, ldapVal)
-		}
-
-		// Process nested conditionals recursively
-		if len(cond.Nested) > 0 {
-			cm.processConditionals(ctx, cond.Nested)
 		}
 	}
 }

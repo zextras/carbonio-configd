@@ -6,6 +6,7 @@ package transformer
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -91,10 +92,19 @@ func FuzzTransform(f *testing.F) {
 	tr := NewTransformer(newFuzzLookup(), &state.State{})
 
 	f.Fuzz(func(t *testing.T, line string) {
-		out := tr.Transform(ctx, line)
+		out, err := tr.Transform(ctx, line)
 
-		if again := tr.Transform(ctx, line); again != out {
-			t.Fatalf("non-deterministic Transform(%q): %q vs %q", line, out, again)
+		if again, errAgain := tr.Transform(ctx, line); again != out || (err == nil) != (errAgain == nil) {
+			t.Fatalf("non-deterministic Transform(%q): %q, %v vs %q, %v", line, out, err, again, errAgain)
+		}
+
+		// A raising directive aborts the file; there is no output to validate.
+		if err != nil {
+			if !errors.Is(err, ErrTransform) {
+				t.Fatalf("Transform(%q) error does not wrap ErrTransform: %v", line, err)
+			}
+
+			return
 		}
 
 		if !strings.ContainsAny(line, "@%") && out != line {

@@ -24,7 +24,7 @@ func transformMultiLine(transformer *Transformer, input string) string {
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		transformed := transformer.Transform(context.Background(), line)
+		transformed := mustTransform(t, transformer, context.Background(), line)
 		result.WriteString(transformed)
 		// Add newline if not already present (for lines without special chars)
 		if !strings.HasSuffix(transformed, "\n") {

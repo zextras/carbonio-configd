@@ -269,7 +269,14 @@ func (cm *ConfigManager) lookupFileKey(ctx context.Context, key string) (string,
 	var filteredLines []string
 
 	for line := range strings.SplitSeq(string(contentBytes), "\n") {
-		if t := strings.TrimSpace(cm.Transformer.Transform(ctx, line)); t != "" {
+		// Legacy lookUpConfig has no try/except around transform(): a raise
+		// propagates to the caller before the value is cached.
+		transformed, err := cm.Transformer.Transform(ctx, line)
+		if err != nil {
+			return "", fmt.Errorf("transform %s: %w", filePath, err)
+		}
+
+		if t := strings.TrimSpace(transformed); t != "" {
 			filteredLines = append(filteredLines, t)
 		}
 	}

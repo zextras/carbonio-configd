@@ -54,7 +54,11 @@ func (r *Rewriter) scanAndWrite(ctx context.Context, sourceFile, tmpFile *os.Fil
 	writer := bufio.NewWriter(tmpFile)
 
 	for scanner.Scan() {
-		transformed := r.Transformer.Transform(ctx, scanner.Text())
+		transformed, err := r.Transformer.Transform(ctx, scanner.Text())
+		if err != nil {
+			return fmt.Errorf("failed to transform line: %w", err)
+		}
+
 		if !strings.HasSuffix(transformed, "\n") {
 			transformed += "\n"
 		}
@@ -218,7 +222,12 @@ func (r *Rewriter) RewriteReader(ctx context.Context, reader io.Reader, writer i
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		transformed := r.Transformer.Transform(ctx, line)
+
+		transformed, err := r.Transformer.Transform(ctx, line)
+		if err != nil {
+			return fmt.Errorf("failed to transform line: %w", err)
+		}
+
 		// Ensure newline is always added (Transform may or may not add it depending on content)
 		if !strings.HasSuffix(transformed, "\n") {
 			transformed += "\n"
