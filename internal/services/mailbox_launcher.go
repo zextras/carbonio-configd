@@ -158,6 +158,7 @@ func withoutPreviewArgs(opts []string) []string {
 		if o == "--enable-preview" || strings.HasPrefix(o, "--enable-native-access=") {
 			continue
 		}
+
 		out = append(out, o)
 	}
 
