@@ -77,10 +77,43 @@ func (cm *ConfigManager) fetchServerConfig(ctx context.Context, maxRetries int) 
 			ServiceConfig: make(map[string]string),
 		}
 
+		cm.inheritGlobalMilterConfig(ctx, configData.Data)
 		cm.postProcessServerConfig(configData)
 
 		return configData, nil
 	})
+}
+
+// serverInheritedMilterAttrs are the serverInherited attributes (attrs.xml)
+// that the milter post-processing reads from the server entry. `zmprov -l gs`
+// (legacy ServerConfig.load) returns the server's value or else the global
+// config default, whereas the native LDAP server entry carries only its own.
+var serverInheritedMilterAttrs = []string{
+	"zimbraMilterServerEnabled",
+	"zimbraMilterBindPort",
+	"zimbraMilterBindAddress",
+}
+
+// inheritGlobalMilterConfig fills the milter attributes the server entry does
+// not set from the global config, as zmprov gs does. Without it the milter is
+// seen as disabled and zimbraMtaSmtpdMilters is wrongly emptied.
+func (cm *ConfigManager) inheritGlobalMilterConfig(ctx context.Context, data map[string]string) {
+	global, err := cm.cachedGlobalConfig(ctx, 1)
+	if err != nil {
+		logger.WarnContext(ctx, "Global config unavailable for server attribute inheritance", "error", err)
+
+		return
+	}
+
+	for _, attr := range serverInheritedMilterAttrs {
+		if _, ok := data[attr]; ok {
+			continue
+		}
+
+		if v, ok := global[attr]; ok {
+			data[attr] = v
+		}
+	}
 }
 
 // postProcessServerConfig applies all post-processing transformations to server
