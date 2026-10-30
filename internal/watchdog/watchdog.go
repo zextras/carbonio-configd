@@ -257,10 +257,10 @@ func (w *Watchdog) checkServices(ctx context.Context) {
 
 	logger.DebugContext(ctx, "Checking service health")
 
-	w.logServiceStatusChanges(ctx)
+	observed := w.logServiceStatusChanges(ctx)
 
 	for _, service := range w.getTrackedServices() {
-		w.checkOneService(ctx, service)
+		w.checkOneService(ctx, service, observed)
 	}
 }
 
@@ -269,7 +269,12 @@ func (w *Watchdog) checkServices(ctx context.Context) {
 // "Service status change" log in jylibs configd.py watchdog(). It is purely
 // observational: it never queues restarts. prevServices is seeded on the first
 // observation so only genuine transitions (not the initial reading) are logged.
-func (w *Watchdog) logServiceStatusChanges(ctx context.Context) {
+//
+// Only monitored services enabled on this node are probed, as legacy configd
+// iterates curServices(): probing e.g. antivirus on a node without it is
+// useless work. The returned map holds each probed service's running state so
+// checkOneService can reuse it instead of probing again in the same cycle.
+func (w *Watchdog) logServiceStatusChanges(ctx context.Context) map[string]bool {
 	w.mu.Lock()
 
 	monitored := make([]string, 0, len(w.ServiceEnabled))
@@ -285,12 +290,20 @@ func (w *Watchdog) logServiceStatusChanges(ctx context.Context) {
 		hostname = w.configLookup("zimbra_server_hostname")
 	}
 
+	observed := make(map[string]bool, len(monitored))
+
 	for _, service := range monitored {
+		if !w.isEnabledOnNode(service) {
+			continue
+		}
+
 		running, err := w.serviceManager.IsRunning(ctx, service)
 		if err != nil {
 			// Don't record a status when the probe itself failed.
 			continue
 		}
+
+		observed[service] = running
 
 		curStatus := "stopped"
 		if running {
@@ -310,10 +323,26 @@ func (w *Watchdog) logServiceStatusChanges(ctx context.Context) {
 				"to", curStatus)
 		}
 	}
+
+	return observed
+}
+
+// isEnabledOnNode reports whether service is in this node's
+// zimbraServiceEnabled (ServerConfig.ServiceConfig).
+func (w *Watchdog) isEnabledOnNode(service string) bool {
+	if w.state == nil || w.state.ServerConfig == nil {
+		return false
+	}
+
+	_, ok := w.state.ServerConfig.ServiceConfig.Get(service)
+
+	return ok
 }
 
 // checkOneService verifies a single service and queues a restart when it is not running.
-func (w *Watchdog) checkOneService(ctx context.Context, service string) {
+// observed holds running states already probed in this cycle; a missing entry
+// triggers a fresh probe.
+func (w *Watchdog) checkOneService(ctx context.Context, service string, observed map[string]bool) {
 	if !w.IsServiceEnabled(service) {
 		logger.DebugContext(ctx, "Skipping disabled service", "service", service)
 
@@ -326,11 +355,16 @@ func (w *Watchdog) checkOneService(ctx context.Context, service string) {
 		return
 	}
 
-	isRunning, err := w.serviceManager.IsRunning(ctx, service)
-	if err != nil {
-		logger.ErrorContext(ctx, "Failed to check service", "service", service, "error", err)
+	isRunning, probed := observed[service]
+	if !probed {
+		var err error
 
-		return
+		isRunning, err = w.serviceManager.IsRunning(ctx, service)
+		if err != nil {
+			logger.ErrorContext(ctx, "Failed to check service", "service", service, "error", err)
+
+			return
+		}
 	}
 
 	if isRunning {

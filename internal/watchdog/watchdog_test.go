@@ -22,6 +22,7 @@ type MockServiceManager struct {
 	runningServices     map[string]bool
 	restartQueue        map[string]bool
 	restartCalled       map[string]int
+	probes              map[string]int
 	isRunningError      error
 	addRestartError     error
 	processRestartsFunc func(func(string) string) error
@@ -32,6 +33,7 @@ func NewMockServiceManager() *MockServiceManager {
 		runningServices: make(map[string]bool),
 		restartQueue:    make(map[string]bool),
 		restartCalled:   make(map[string]int),
+		probes:          make(map[string]int),
 	}
 }
 
@@ -56,6 +58,11 @@ func (m *MockServiceManager) ControlProcess(_ context.Context, service string, a
 func (m *MockServiceManager) IsRunning(_ context.Context, service string) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	if m.probes == nil {
+		m.probes = make(map[string]int)
+	}
+	m.probes[service]++
 
 	if m.isRunningError != nil {
 		return false, m.isRunningError
@@ -141,6 +148,13 @@ func (m *MockServiceManager) getRestartCount(service string) int {
 	defer m.mu.Unlock()
 
 	return m.restartCalled[service]
+}
+
+func (m *MockServiceManager) getProbeCount(service string) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return m.probes[service]
 }
 
 func (m *MockServiceManager) setIsRunningError(err error) {
@@ -1029,7 +1043,7 @@ func TestCheckOneService_ServiceNotTracked(t *testing.T) {
 	wd.SetServiceEnabled(context.Background(), "mta", true)
 	mockSM.setRunning("mta", false)
 
-	wd.checkOneService(context.Background(), "mta")
+	wd.checkOneService(context.Background(), "mta", nil)
 
 	if mockSM.getRestartCount("mta") > 0 {
 		t.Errorf("checkOneService should skip untracked service, got %d restart(s)", mockSM.getRestartCount("mta"))
@@ -1072,4 +1086,63 @@ func TestWatchdog_StopDuringRestart(t *testing.T) {
 	}
 
 	// Test passes if we don't deadlock or panic
+}
+
+// newEnabledWatchdog returns a running-state watchdog monitoring antivirus
+// (the default zmconfigd_watchdog_services) on a node whose
+// zimbraServiceEnabled is nodeServices.
+func newEnabledWatchdog(t *testing.T, mockSM *MockServiceManager, nodeServices ...string) *Watchdog {
+	t.Helper()
+
+	st := state.NewState()
+	for _, s := range nodeServices {
+		st.ServerConfig.ServiceConfig.Set(s, "zimbraServiceEnabled")
+	}
+
+	wd := NewWatchdog(Config{ServiceManager: mockSM, State: st, CheckInterval: time.Hour})
+	wd.enabled = true
+	wd.UpdateServiceList(context.Background(), []string{"antivirus"})
+
+	return wd
+}
+
+// A watchdog-listed service not enabled on the node (antivirus on a
+// directory/appserver node) must not be probed, as in legacy configd.
+func TestCheckServices_SkipsServiceNotEnabledOnNode(t *testing.T) {
+	mockSM := NewMockServiceManager()
+	wd := newEnabledWatchdog(t, mockSM, "ldap", "mailbox")
+
+	wd.checkServices(context.Background())
+
+	if n := mockSM.getProbeCount("antivirus"); n != 0 {
+		t.Errorf("antivirus not enabled on node: want 0 probes, got %d", n)
+	}
+}
+
+// A watchdog-listed service enabled and tracked on the node is probed once
+// per cycle; a stopped one is still restarted from that single probe.
+func TestCheckServices_ProbesEnabledServiceOncePerCycle(t *testing.T) {
+	for _, running := range []bool{true, false} {
+		t.Run(fmt.Sprintf("running=%v", running), func(t *testing.T) {
+			mockSM := NewMockServiceManager()
+			wd := newEnabledWatchdog(t, mockSM, "antivirus", "mta")
+			wd.AddService(context.Background(), "antivirus")
+			mockSM.setRunning("antivirus", running)
+
+			wd.checkServices(context.Background())
+
+			if n := mockSM.getProbeCount("antivirus"); n != 1 {
+				t.Errorf("want 1 probe per cycle, got %d", n)
+			}
+
+			wantRestarts := 0
+			if !running {
+				wantRestarts = 1
+			}
+
+			if n := mockSM.getRestartCount("antivirus"); n != wantRestarts {
+				t.Errorf("want %d restarts, got %d", wantRestarts, n)
+			}
+		})
+	}
 }
