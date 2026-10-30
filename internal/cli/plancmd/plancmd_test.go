@@ -100,7 +100,7 @@ func TestExecute(t *testing.T) {
 
 				for _, key := range []string{
 					"first_run", "sections", "heal", "mapfiles", "rewrites",
-					"postconf", "postconfd", "ldap", "restarts", "cascade",
+					"postconf", "postconfd", "ldap", "restarts",
 				} {
 					assert.Contains(t, decoded, key)
 				}

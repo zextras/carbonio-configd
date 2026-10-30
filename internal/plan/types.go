@@ -54,19 +54,12 @@ type Plan struct {
 	Proxygen *Proxygen `json:"proxygen,omitempty"`
 	// Restarts are the services to restart (or stop/start) directly.
 	Restarts []Restart `json:"restarts"`
-	// Cascade predicts the services the restart policy will additionally
-	// restart through DEPENDS after the direct restarts succeed. It is
-	// informational: the policy re-derives it at run time.
-	Cascade []Cascade `json:"cascade"`
-
-	// Dependencies maps a service to the services restarted after it
-	// (configd.cf DEPENDS). Consumed by the restart policy.
-	Dependencies map[string][]string `json:"-"`
 	// Tracked is the service tracking map after this cycle (service ->
 	// "running"/"stopped"); the caller feeds it to the next Compute.
 	Tracked map[string]string `json:"-"`
 	// Enabled is the sorted list of enabled services of the current
-	// snapshot, used by the restart policy to decide cascade restarts.
+	// snapshot, used by the restart policy to answer the service manager's
+	// "is this service enabled" lookups.
 	Enabled []string `json:"-"`
 }
 
@@ -137,13 +130,6 @@ type Restart struct {
 	Action   Action   `json:"action"`
 	Sections []string `json:"sections,omitempty"`
 	Reasons  []Reason `json:"reasons"`
-}
-
-// Cascade is a predicted dependency restart: Service restarts because Via did.
-type Cascade struct {
-	Service string   `json:"service"`
-	Via     string   `json:"via"`
-	Reasons []Reason `json:"reasons"`
 }
 
 // Carry holds the actions of a previous Execute that did not complete. The

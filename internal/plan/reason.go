@@ -31,7 +31,9 @@ const (
 	ReasonServiceEnabled ReasonKind = "service-enabled"
 	// ReasonServiceDisabled: a tracked service is no longer enabled on this node.
 	ReasonServiceDisabled ReasonKind = "service-disabled"
-	// ReasonDependency: a service restarts because a service it depends on does.
+	// ReasonDependency: a service restarts because a service it depends on
+	// does. Raised by the service manager's DEPENDS cascade (watchdog restarts);
+	// config-driven restarts do not cascade, as in the legacy zmconfigd.
 	ReasonDependency ReasonKind = "dependency"
 	// ReasonRetry: the previous attempt of this action did not complete.
 	ReasonRetry ReasonKind = "retry"

@@ -116,7 +116,6 @@ func TestCompute_NoChangeIsEmpty(t *testing.T) {
 	assert.True(t, p.IsEmpty())
 	assert.Empty(t, p.Sections)
 	assert.Empty(t, p.Restarts)
-	assert.Empty(t, p.Cascade)
 }
 
 func TestCompute_SingleVarChange(t *testing.T) {
@@ -157,11 +156,6 @@ func TestCompute_SingleVarChange(t *testing.T) {
 		require.Len(t, reasons, 1)
 		assert.Equal(t, want, reasons[0].String())
 	}
-
-	// DEPENDS: restarting mta cascades to amavis, which is always queued.
-	require.Len(t, p.Cascade, 1)
-	assert.Equal(t, "amavis", p.Cascade[0].Service)
-	assert.Equal(t, "mta", p.Cascade[0].Via)
 }
 
 func TestCompute_VarChangedFromUnsetAndToUnset(t *testing.T) {
@@ -308,7 +302,10 @@ func TestCompute_DisabledSectionServiceIsSkipped(t *testing.T) {
 	assert.Nil(t, p.Proxygen)
 }
 
-func TestCompute_DependencyCascade(t *testing.T) {
+// TestCompute_DependsDoesNotCascade pins the legacy semantics: DEPENDS only
+// matters after a stop/start, so a variable change restarts exactly the
+// services named by the changed section, once each, and nothing else.
+func TestCompute_DependsDoesNotCascade(t *testing.T) {
 	t.Parallel()
 
 	conf := &config.MtaConfig{Sections: map[string]*config.MtaConfigSection{
@@ -331,25 +328,7 @@ func TestCompute_DependencyCascade(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, map[string]Action{"antivirus": ActionRestart}, restartNames(&p))
-	require.Len(t, p.Cascade, 1)
-	assert.Equal(t, Cascade{
-		Service: "amavis", Via: "antivirus",
-		Reasons: []Reason{{Kind: ReasonDependency, Service: "antivirus"}},
-	}, p.Cascade[0])
-
-	// opendkim -> mta (enabled) -> amavis (always): a two-level cascade.
-	conf.Sections["opendkim"].RequiredVars = map[string]string{"zimbraOd": "VAR"}
-	p, err = Compute(Input{
-		Prev:    snap(services, map[string]string{"zimbraOd": "1"}),
-		Cur:     snap(services, map[string]string{"zimbraOd": "2"}),
-		Conf:    conf,
-		Tracked: tracked,
-	})
-	require.NoError(t, err)
-	require.Len(t, p.Cascade, 2)
-	assert.Equal(t, "mta", p.Cascade[0].Service)
-	assert.Equal(t, "amavis", p.Cascade[1].Service)
-	assert.Equal(t, "mta", p.Cascade[1].Via)
+	assert.Len(t, p.Restarts, 1)
 }
 
 func TestCompute_DisabledServiceIsNotRestarted(t *testing.T) {

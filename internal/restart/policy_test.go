@@ -33,7 +33,6 @@ type harness struct {
 	queued   []queued
 	process  int
 	lookup   func(string) string
-	deps     map[string][]string
 	depsSet  int
 	addErr   map[string]error
 	procErr  error
@@ -62,10 +61,8 @@ func newHarness() *harness {
 
 			return h.procErr
 		},
-		SetDependenciesFn: func(_ context.Context, deps map[string][]string) {
+		SetDependenciesFn: func(_ context.Context, _ map[string][]string) {
 			h.depsSet++
-			h.deps = deps
-			h.callList = append(h.callList, "deps")
 		},
 	}
 	h.policy = restart.New(mgr, h.clock)
@@ -86,8 +83,7 @@ func TestApply_Disabled(t *testing.T) {
 
 	h := newHarness()
 	pl := &plan.Plan{
-		Restarts:     []plan.Restart{req("mta", enabledReason("mta"))},
-		Dependencies: map[string][]string{"ldap": {"mta"}},
+		Restarts: []plan.Restart{req("mta", enabledReason("mta"))},
 	}
 
 	carry := h.policy.Apply(t.Context(), pl, restart.Settings{Enabled: false})
@@ -95,8 +91,6 @@ func TestApply_Disabled(t *testing.T) {
 	assert.Equal(t, pl.Restarts, carry)
 	assert.Empty(t, h.queued)
 	assert.Zero(t, h.process)
-	assert.Equal(t, 1, h.depsSet, "dependencies are refreshed even when restarts are off")
-	assert.Equal(t, pl.Dependencies, h.deps)
 }
 
 func TestApply_EnabledQueuesWithReasons(t *testing.T) {
@@ -118,7 +112,7 @@ func TestApply_EnabledQueuesWithReasons(t *testing.T) {
 		{"mta", []string{"service mta was enabled"}},
 		{"proxy", []string{"retry: previous attempt did not complete"}},
 	}, h.queued)
-	assert.Equal(t, []string{"deps", "add:mta", "add:proxy", "process"}, h.callList)
+	assert.Equal(t, []string{"add:mta", "add:proxy", "process"}, h.callList)
 	require.Equal(t, 1, h.process)
 }
 
@@ -180,17 +174,20 @@ func TestApply_ProcessErrorDoesNotCarry(t *testing.T) {
 	assert.Equal(t, 1, h.process)
 }
 
-func TestApply_EmptyPlanStillSetsDependencies(t *testing.T) {
+// TestApply_NeverSetsDependencies pins the legacy semantics: a config-driven
+// restart does not cascade through DEPENDS (zmconfigd only does so after a
+// stop/start), so the policy must leave the manager's dependency map alone.
+func TestApply_NeverSetsDependencies(t *testing.T) {
 	t.Parallel()
 
 	h := newHarness()
-	deps := map[string][]string{"ldap": {"mta"}}
 
-	carry := h.policy.Apply(t.Context(), &plan.Plan{Dependencies: deps}, restart.Settings{Enabled: true})
+	carry := h.policy.Apply(t.Context(), &plan.Plan{
+		Restarts: []plan.Restart{req("amavis", enabledReason("amavis"))},
+	}, restart.Settings{Enabled: true})
 
 	assert.Empty(t, carry)
-	assert.Equal(t, deps, h.deps)
-	assert.Equal(t, 1, h.depsSet)
+	assert.Zero(t, h.depsSet)
 	assert.Equal(t, 1, h.process, "an empty plan still drains what the manager already holds")
 }
 

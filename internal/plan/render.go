@@ -101,11 +101,6 @@ func (p *Plan) WriteText(w io.Writer) error {
 		tw.item(string(r.Action), r.Service, r.Reasons)
 	}
 
-	for i := range red.Cascade {
-		c := &red.Cascade[i]
-		tw.item("restart", c.Service+" (predicted cascade)", c.Reasons)
-	}
-
 	return tw.err
 }
 

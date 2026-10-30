@@ -68,7 +68,7 @@ Each iteration runs the following phases in order:
 | Load configs | `configManager.LoadAllConfigs` | Four concurrent goroutines; see Config loading pipeline below |
 | Start listener | `network.NewThreadedStreamServer` | First run only; skipped in `--once` mode |
 | Parse MTA config | `configManager.ParseMtaConfig` | Reads `conf/zmconfigd.cf` |
-| Build dependencies | `buildServiceDependencies` | Extracts DEPENDS entries from MTA sections; they travel in the plan |
+| Build dependencies | `buildServiceDependencies` | Extracts DEPENDS entries from MTA sections for the watchdog's service manager (config-driven restarts do not cascade, see restart-behavior.md) |
 | Snapshot + Observe | `configManager.Plan` (first half) | Freezes the loaded configs into an immutable `snapshot.Snapshot`, resolves every lookup `configd.cf` requires and publishes the result |
 | Plan | `plan.Compute` (via `configManager.Plan`) | Pure, deterministic: previous snapshot vs. current snapshot gives a `plan.Plan` whose every entry carries its reasons |
 | Execute | `configManager.Execute` | Mapfiles first (self-heal included), then proxygen, rewrites, postconf, postconfd and LDAP concurrently |
@@ -133,8 +133,10 @@ The implementation uses a two-stage timeout matching the original Python behavio
 first timeout fires, the loop waits another full interval before giving up. If all four
 goroutines finish before the timeout, the loop continues immediately.
 
-The loaders fill `state.State`; once all four complete, the configs are frozen into a
-`snapshot.Snapshot` (see below). The MTA config (`ParseMtaConfig`) is loaded after all four
+Each loader stages its own part (local, global, misc, server + services); when the attempt
+ends, the parts that were delivered replace the published ones in a single new
+`snapshot.Snapshot` (see below). A loader that failed leaves its part at the previous value,
+like the legacy zmconfigd, and `LoadAllConfigs` still returns the error so the cycle is skipped. The MTA config (`ParseMtaConfig`) is loaded after all four
 complete, because it reads from `conf/zmconfigd.cf` which may depend on the outputs of the
 loaders above.
 
@@ -159,10 +161,10 @@ Load ─► Snapshot ─► Observe ─► Plan ─► Execute ─► ApplyResta
    snapshot, which is published.
 4. **Plan** (`internal/plan`) — `plan.Compute(plan.Input{Prev, Cur, Conf, Forced, Requested,
    FirstRun, Tracked, Carry})` returns a `plan.Plan` with `Sections`, `Heal`, `Mapfiles`,
-   `Rewrites`, `Postconf`, `Postconfd`, `Ldap`, `Proxygen`, `Restarts`, `Cascade`,
-   `Dependencies`, `Tracked` and `Enabled`. Compute performs no I/O and mutates nothing, so
+   `Rewrites`, `Postconf`, `Postconfd`, `Ldap`, `Proxygen`, `Restarts`,
+   `Tracked` and `Enabled`. Compute performs no I/O and mutates nothing, so
    equal inputs give equal plans. Every entry carries `Reasons` (`first-run`, `forced`,
-   `requested`, `var-changed`, `service-enabled`, `service-disabled`, `dependency`, `retry`,
+   `requested`, `var-changed`, `service-enabled`, `service-disabled`, `retry`,
    `mapfile-sync`, and for `configd plan` `evaluated` and `drift`). Reasons are redacted for
    secret keys and truncated, so they are safe to log and print. The same function backs
    `configd plan`, which only adds the observed host state (`plan.Input.Host`).
@@ -172,8 +174,8 @@ Load ─► Snapshot ─► Observe ─► Plan ─► Execute ─► ApplyResta
    An action that fails is kept in the carry and re-enters the next plan with a `retry`
    reason, so failures are retried until they succeed.
 6. **ApplyRestarts** (`internal/restart`) — `ConfigManager.ApplyRestarts` hands the plan's
-   restarts to `restart.Policy.Apply`, which publishes the DEPENDS graph, queues the
-   restarts, applies the dependency cascade, the enabled-only rule, the
+   restarts to `restart.Policy.Apply`, which queues the
+   restarts (without a DEPENDS cascade, as in the legacy zmconfigd), applies the enabled-only rule, the
    `zmconfigd_enable_config_restarts` switch, the failed-restart limit and the optional
    debounce. Restarts it does not consume are carried to the next cycle.
 
@@ -188,7 +190,7 @@ consumed, the previous snapshot stays the baseline and the requested sections st
 | `internal/state` | Process state; holds the current snapshot behind an `atomic.Pointer` plus first-run, forced and requested bookkeeping |
 | `internal/plan` | Pure `Compute`, plan types, reasons, text/JSON rendering |
 | `internal/configmgr` | Loaders, `Observe`, `Plan`, `Execute`, `ApplyRestarts`, `PlanHost` (host observation for `configd plan`) |
-| `internal/restart` | Restart policy: cascade, enabled-only, debounce, max failed restarts |
+| `internal/restart` | Restart policy: enabled-only, debounce, max failed restarts |
 | `internal/services` | Service registry and manager (start order, retries, MTA reload) |
 | `internal/cli/plancmd` | `configd plan` command |
 | `internal/sys` | Side-effect boundary (exec, fs, proc, clock) |

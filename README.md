@@ -143,7 +143,7 @@ Limitations:
 ### Flags
 
 ```
---disable-restarts   Dry-run mode (no service restarts, including dependency cascades)
+--disable-restarts   Dry-run mode (no service restarts)
 --help, -h           Show help message
 ```
 

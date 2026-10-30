@@ -55,7 +55,7 @@ Every plan restart carries the reasons that caused it, and so does every other p
 | `requested` | section named by a REWRITE command |
 | `var-changed` | a variable the section requires changed (`old->new`; secret values redacted, long values truncated) |
 | `service-enabled` / `service-disabled` | the service changed state on this node |
-| `dependency` | rendered as `dependency of <name>`, where `<name>` is the `DEPENDS` key that restarted: the service restarts only because a service it depends on does |
+| `dependency` | rendered as `dependency of <name>`: the service manager restarted it because `<name>` was restarted through `DEPENDS` (watchdog restarts only, see Dependency cascading) |
 | `retry` | the previous attempt did not complete |
 | `mapfile-sync` | a mapped file is re-synced every cycle |
 
@@ -77,8 +77,8 @@ the merged reasons.
 Source: `internal/restart/policy.go` (`Policy.Apply`)
 
 `ConfigManager.ApplyRestarts` runs `restart.Policy.Apply` once per cycle, even when the plan
-has no restarts, because it also publishes the DEPENDS graph and flushes due debounced
-requests.
+has no restarts, because it also flushes due debounced requests and lets the service
+manager drain what it already holds.
 
 | Setting | Effect |
 |---|---|
@@ -87,12 +87,15 @@ requests.
 | `MaxFailedRestarts` (service manager, `3`) | Retry limit, see Dependency cascading |
 | `--disable-restarts` | Dry-run: the service manager skips every restart |
 
-**Deliberate correction.** Config-driven restarts now get the DEPENDS cascade and honour
-`--disable-restarts`. Previously the config manager used a separate service manager that
-never received the dependencies and never received `--disable-restarts`: a config change
-restarted only the services named in the section and `--disable-restarts` did not stop them.
-Both the daemon and the restart policy now use the single service manager that
-`buildServiceDependencies` fills and `SetDisableRestarts` configures.
+**Config-driven restarts do not cascade.** The legacy zmconfigd queues the `DEPENDS` of a
+service only after a successful stop or start, never after a restart, and a config change
+restarts exactly the services of the changed sections, once each. The config manager's
+service manager therefore never receives the `DEPENDS` map (only the watchdog's does), so a
+config change restarts the services named by `RESTART` and nothing else.
+
+**Deliberate correction.** `--disable-restarts` now also reaches the config manager's service
+manager (`SetDisableRestarts`); previously only the watchdog honoured it and a config change
+still restarted services.
 
 ## Service control priority
 
@@ -179,9 +182,10 @@ Source: `internal/services/manager.go` (`AddDependencyRestarts`, `ProcessRestart
 After a service restarts successfully, the service manager checks whether that service has
 any dependents registered in the `Dependencies` map. Dependents come from `DEPENDS` entries
 in `zmconfigd.cf` sections, loaded by `buildServiceDependencies` at the start of each loop and
-passed along in `plan.Plan.Dependencies`. A dependent restarted this way is queued with the
-reason `dependency of <service>`; `configd plan` shows the predicted cascade as
-`restart <service> (predicted cascade)`.
+set on the watchdog's service manager only. A dependent restarted this way is queued with the
+reason `dependency of <service>`. Restarts derived from a config change (`ConfigManager`)
+use a separate service manager without dependencies and never cascade, as in the legacy
+zmconfigd; `configd plan` therefore lists exactly the services the sections name.
 
 For each dependent service:
 

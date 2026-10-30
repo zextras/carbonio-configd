@@ -75,9 +75,6 @@ func New(mgr services.Manager, clock sys.Clock) *Policy {
 func (p *Policy) Apply(ctx context.Context, pl *plan.Plan, s Settings) []plan.Restart {
 	ctx = logger.ContextWithComponentOnce(ctx, "restart")
 
-	// The cascade must always use the current configd.cf DEPENDS.
-	p.mgr.SetDependencies(ctx, pl.Dependencies)
-
 	if !s.Enabled {
 		return pl.Restarts
 	}

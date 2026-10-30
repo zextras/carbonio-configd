@@ -798,9 +798,6 @@ func (b *builder) finish() Plan {
 		p.Proxygen = &pg
 	}
 
-	p.Dependencies = b.dependencies()
-	p.Cascade = predictCascade(p.Restarts, p.Dependencies, b.cur)
-
 	return p
 }
 
@@ -835,62 +832,6 @@ func collectSorted[K comparable, V any](m map[K]*V, dst []V, compare func(a, b *
 	}
 
 	return dst
-}
-
-// dependencies builds the DEPENDS map: restarting a section's service also
-// restarts the services it lists.
-func (b *builder) dependencies() map[string][]string {
-	deps := map[string][]string{}
-
-	if b.in.Conf == nil {
-		return deps
-	}
-
-	for name, sec := range b.in.Conf.Sections {
-		if sec != nil && len(sec.Depends) > 0 {
-			deps[name] = slices.Sorted(maps.Keys(sec.Depends))
-		}
-	}
-
-	return deps
-}
-
-// predictCascade lists the services the restart policy will additionally
-// restart through DEPENDS. "amavis" is always included, any other dependency
-// only when enabled on the node (legacy special case).
-func predictCascade(restarts []Restart, deps map[string][]string, cur *snapshot.Snapshot) []Cascade {
-	out := []Cascade{}
-	seen := map[string]bool{}
-	queue := make([]string, 0, len(restarts))
-
-	for _, r := range restarts {
-		seen[r.Service] = true
-
-		queue = append(queue, r.Service)
-	}
-
-	for len(queue) > 0 {
-		svc := queue[0]
-		queue = queue[1:]
-
-		for _, dep := range deps[svc] {
-			dep = strings.ToLower(dep)
-			if seen[dep] || (dep != "amavis" && !cur.ServiceEnabled(dep)) {
-				continue
-			}
-
-			seen[dep] = true
-
-			out = append(out, Cascade{
-				Service: dep, Via: svc,
-				Reasons: []Reason{{Kind: ReasonDependency, Service: svc}},
-			})
-
-			queue = append(queue, dep)
-		}
-	}
-
-	return out
 }
 
 func appendUnique(list []string, s string) []string {
