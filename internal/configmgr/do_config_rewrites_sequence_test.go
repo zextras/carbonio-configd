@@ -16,6 +16,7 @@ import (
 
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/mtaops"
+	"github.com/zextras/carbonio-configd/internal/restart"
 	"github.com/zextras/carbonio-configd/internal/state"
 	"github.com/zextras/carbonio-configd/internal/sys/systest"
 	"github.com/zextras/carbonio-configd/internal/testutil"
@@ -45,11 +46,11 @@ func subsequence(ops []string, substr string) []string {
 	return out
 }
 
-// TestDoConfigRewrites_SideEffectSequence drives one whole rewrite cycle (a
+// TestDoConfigRewrites_SideEffectSequence drives one whole cycle (Plan, Execute, ApplyRestarts) (a
 // mapped file, a file rewrite, postconf, postconfd and an LDAP write) against
 // the fake host and pins every side effect configd performs, in order.
 //
-// DoConfigRewrites writes mapped files first and serially; afterwards the
+// Execute writes mapped files first and serially; afterwards the
 // rewrite, postconf, postconfd and LDAP steps run concurrently, so their
 // relative interleaving is not defined. The test therefore pins the exact
 // serial prefix, then the exact order within each concurrent step.
@@ -58,23 +59,22 @@ func TestDoConfigRewrites_SideEffectSequence(t *testing.T) {
 
 	const base = "/opt/zextras"
 
-	ctx := context.Background()
 	fakes := systest.New()
 	fakes.Proc.UmaskValue = 0o027
 	fakes.FS.PutDir(base+"/conf", 0o750)
 	fakes.FS.Put(base+"/conf/main.cf.in", []byte("alpha = 1\nbeta = 2\n"), 0o644)
 
 	st := state.NewState()
-	st.GlobalConfig.Data.Set("zimbraSSLDHParam", base64.StdEncoding.EncodeToString([]byte("dh params")))
-	st.MtaConfig.Sections["mta"] = &config.MtaConfigSection{
-		Name:         "mta",
-		Changed:      true,
-		RequiredVars: map[string]string{"zimbraSSLDHParam": configTypeMAPFILE},
-	}
-	st.CurrentActions.Rewrites["conf/main.cf.in"] = config.RewriteEntry{Value: "conf/main.cf", Mode: "0640"}
-	st.SetPostconf(ctx, "myhostname", "mail.example.com")
-	st.SetPostconfd(ctx, "smtpd_banner", "")
-	st.CurLdap(ctx, "zimbraMtaMyNetworks", "127.0.0.0/8")
+	st.SetMtaConfig(&config.MtaConfig{Sections: map[string]*config.MtaConfigSection{
+		"mta": {
+			Name:         "mta",
+			RequiredVars: map[string]string{"zimbraSSLDHParam": configTypeMAPFILE},
+			Rewrites:     map[string]config.RewriteEntry{"conf/main.cf.in": {Value: "conf/main.cf", Mode: "0640"}},
+			Postconf:     map[string]string{"myhostname": "mail.example.com"},
+			Postconfd:    map[string]string{"smtpd_banner": ""},
+			Ldap:         map[string]string{"zimbraMtaMyNetworks": "127.0.0.0/8"},
+		},
+	}})
 
 	env := fakes.System()
 	cm := &ConfigManager{
@@ -85,9 +85,16 @@ func TestDoConfigRewrites_SideEffectSequence(t *testing.T) {
 		mtaExecutor: mtaops.NewExecutor(base, ldapRecorder{fakes.Rec}, env),
 		mtaResolver: mtaops.NewResolver(base, env),
 	}
-	cm.Transformer = transformer.NewTransformer(cm, st)
+	cm.Transformer = transformer.NewTransformer(cm)
+	cm.policy = restart.New(cm.ServiceMgr, env.Clock)
 
-	require.NoError(t, cm.DoConfigRewrites(ctx))
+	setServer(cm, nil, map[string]string{"mta": "zimbraServiceEnabled"})
+	setGlobal(cm, map[string]string{
+		"zimbraSSLDHParam": base64.StdEncoding.EncodeToString([]byte("dh params")),
+	})
+
+	pl := mustCycle(t, cm)
+	require.Len(t, pl.Sections, 1)
 
 	ops := fakes.Rec.Strings()
 	require.Len(t, ops, 7, "unexpected side effects:\n%s", strings.Join(ops, "\n"))
@@ -122,8 +129,10 @@ func TestDoConfigRewrites_SideEffectSequence(t *testing.T) {
 	assert.Equal(t, os.FileMode(0o640), mode.Perm())
 	assert.False(t, fakes.FS.Exists(tmp), "temp file must be gone after the rename")
 
-	assert.Empty(t, st.CurrentActions.Rewrites, "done rewrite is dropped from the pending set")
-	assert.Empty(t, st.CurrentActions.Postconf)
-	assert.Empty(t, st.CurrentActions.Postconfd)
-	assert.Empty(t, st.CurrentActions.Ldap)
+	// A done cycle leaves nothing to retry: the next one plans nothing.
+	st.SetFirstRun(false)
+
+	next := mustCycle(t, cm)
+	assert.True(t, next.IsEmpty(), "done actions must not be planned again")
+	assert.Len(t, fakes.Rec.Strings(), 7, "second cycle must not touch the host")
 }

@@ -9,11 +9,15 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"sync"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/zextras/carbonio-configd/internal/cache"
 	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/plan"
+	"github.com/zextras/carbonio-configd/internal/restart"
 	"github.com/zextras/carbonio-configd/internal/state"
 	"github.com/zextras/carbonio-configd/internal/testutil"
 	"github.com/zextras/carbonio-configd/internal/transformer"
@@ -55,8 +59,14 @@ func TestSectionEnabledOnNode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := sectionEnabledOnNode(tt.section, tt.services); got != tt.want {
-				t.Errorf("sectionEnabledOnNode(%q, %v) = %v, want %v",
+			enabled := func(service string) bool {
+				_, ok := tt.services[service]
+
+				return ok
+			}
+
+			if got := plan.SectionEnabled(tt.section, enabled); got != tt.want {
+				t.Errorf("SectionEnabled(%q, %v) = %v, want %v",
 					tt.section, tt.services, got, tt.want)
 			}
 		})
@@ -64,8 +74,8 @@ func TestSectionEnabledOnNode(t *testing.T) {
 }
 
 // newTestTransformer creates a transformer for testing that returns lines unchanged
-func newTestTransformer(cm *ConfigManager, st *state.State) *transformer.Transformer {
-	return transformer.NewTransformer(cm, st)
+func newTestTransformer(cm *ConfigManager) *transformer.Transformer {
+	return transformer.NewTransformer(cm)
 }
 
 // TestProcessIsRunning tests the ProcessIsRunning method
@@ -331,95 +341,81 @@ func TestParseValueSpec(t *testing.T) {
 	}
 }
 
-// TestDoRestarts tests the DoRestarts method
-func TestDoRestarts(t *testing.T) {
+// newApplyRestartsCM returns a ConfigManager wired for ApplyRestarts: a restart
+// policy on a mock service manager that records the queued restarts.
+func newApplyRestartsCM(t *testing.T, restartsEnabled bool) (*ConfigManager, *[]string) {
+	t.Helper()
+
+	var queued []string
+
+	mockSvcMgr := &testutil.MockServiceManager{
+		AddRestartWithReasonsFn: func(_ context.Context, service string, _ []string) error {
+			queued = append(queued, service)
+
+			return nil
+		},
+		GetPendingRestartsFn: func() []string { return queued },
+	}
+
+	cm := &ConfigManager{
+		env: hostEnv(),
+		mainConfig: &config.Config{
+			BaseDir:       "/tmp",
+			Hostname:      "testhost",
+			RestartConfig: restartsEnabled,
+		},
+		State:      state.NewState(),
+		ServiceMgr: mockSvcMgr,
+		Cache:      cache.New(context.Background(), false),
+	}
+	cm.policy = restart.New(cm.ServiceMgr, cm.env.Clock)
+
+	return cm, &queued
+}
+
+// TestApplyRestarts tests that the plan's restarts reach the service manager.
+func TestApplyRestarts(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
 	ctx := context.Background()
-	cacheInstance := cache.New(ctx, false)
 
-	t.Run("restart services from state", func(t *testing.T) {
-		var restartQueue []string
-		mockSvcMgr := &testutil.MockServiceManager{
-			AddRestartFn: func(_ context.Context, service string) error {
-				restartQueue = append(restartQueue, service)
-				return nil
-			},
-			GetPendingRestartsFn: func() []string { return restartQueue },
-		}
+	t.Run("restart services from plan", func(t *testing.T) {
+		cm, queued := newApplyRestartsCM(t, true)
 
-		cm := &ConfigManager{
-			env: hostEnv(),
-			mainConfig: &config.Config{
-				BaseDir:  "/tmp",
-				Hostname: "testhost",
-			},
-			State:      state.NewState(),
-			ServiceMgr: mockSvcMgr,
-			Cache:      cacheInstance,
-		}
+		pl := &plan.Plan{Restarts: []plan.Restart{
+			{Service: "nginx", Action: plan.ActionRestart},
+			{Service: "mta", Action: plan.ActionRestart},
+		}}
 
-		// Add services to restart queue in state
-		cm.State.CurrentActions.Restarts = map[string]int{
-			"nginx": 1,
-			"mta":   1,
-		}
+		cm.ApplyRestarts(ctx, pl)
 
-		// Execute restarts
-		cm.DoRestarts(ctx)
-
-		// Verify services were added to restart queue
-		pendingRestarts := mockSvcMgr.GetPendingRestarts()
-		if len(pendingRestarts) != 2 {
-			t.Errorf("Expected 2 services in restart queue, got %d", len(pendingRestarts))
-		}
-
-		// Check that both services are in the queue
-		hasNginx := false
-		hasMta := false
-		for _, service := range pendingRestarts {
-			if service == "nginx" {
-				hasNginx = true
-			}
-			if service == "mta" {
-				hasMta = true
-			}
-		}
-
-		if !hasNginx {
-			t.Error("Expected nginx in restart queue")
-		}
-		if !hasMta {
-			t.Error("Expected mta in restart queue")
-		}
+		pending := cm.ServiceMgr.GetPendingRestarts()
+		assert.ElementsMatch(t, []string{"nginx", "mta"}, pending)
+		assert.ElementsMatch(t, []string{"nginx", "mta"}, *queued)
+		assert.Empty(t, cm.carry.Restarts, "queued restarts must not be carried")
 	})
 
 	t.Run("no restarts needed", func(t *testing.T) {
-		mockSvcMgr := &testutil.MockServiceManager{}
+		cm, queued := newApplyRestartsCM(t, true)
 
-		cm := &ConfigManager{
-			env: hostEnv(),
-			mainConfig: &config.Config{
-				BaseDir:  "/tmp",
-				Hostname: "testhost",
-			},
-			State:      state.NewState(),
-			ServiceMgr: mockSvcMgr,
-			Cache:      cacheInstance,
-		}
+		cm.ApplyRestarts(ctx, &plan.Plan{})
 
-		// No services in restart queue
-		cm.State.CurrentActions.Restarts = map[string]int{}
+		assert.Empty(t, cm.ServiceMgr.GetPendingRestarts())
+		assert.Empty(t, *queued)
+		assert.Empty(t, cm.carry.Restarts)
+	})
 
-		// Execute restarts
-		cm.DoRestarts(ctx)
+	t.Run("restarts disabled are carried", func(t *testing.T) {
+		cm, queued := newApplyRestartsCM(t, false)
 
-		// Verify no services were added to restart queue
-		pendingRestarts := mockSvcMgr.GetPendingRestarts()
-		if len(pendingRestarts) != 0 {
-			t.Errorf("Expected 0 services in restart queue, got %d", len(pendingRestarts))
-		}
+		pl := &plan.Plan{Restarts: []plan.Restart{{Service: "nginx", Action: plan.ActionRestart}}}
+
+		cm.ApplyRestarts(ctx, pl)
+
+		assert.Empty(t, *queued, "no restart may be queued when restarts are disabled")
+		require.Len(t, cm.carry.Restarts, 1)
+		assert.Equal(t, "nginx", cm.carry.Restarts[0].Service)
 	})
 }
 
@@ -564,223 +560,267 @@ func TestCleanupRewriteFiles(t *testing.T) {
 	})
 }
 
-// TestCompileActions tests the CompileActions method
-func TestCompileActions(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
-	ctx := context.Background()
-	cacheInstance := cache.New(ctx, false)
-
-	t.Run("compile with first run", func(t *testing.T) {
-		mockSvcMgr := &testutil.MockServiceManager{}
-
-		cm := &ConfigManager{
-			env: hostEnv(),
-			mainConfig: &config.Config{
-				BaseDir:  "/tmp",
-				Hostname: "testhost",
-			},
-			State:      state.NewState(),
-			ServiceMgr: mockSvcMgr,
-			Cache:      cacheInstance,
-		}
-
-		// Set first run
-		cm.State.FirstRun = true
-		// Enable the section's service on this node so it is not gated out.
-		cm.State.ServerConfig.ServiceConfig.Set("testservice", "TRUE")
-
-		// Add a section to MtaConfig
-		section := &config.MtaConfigSection{
-			Name:         "testservice",
-			Depends:      make(map[string]bool),
-			Rewrites:     make(map[string]config.RewriteEntry),
-			Restarts:     make(map[string]bool),
-			RequiredVars: make(map[string]string),
-			Postconf:     make(map[string]string),
-			Postconfd:    make(map[string]string),
-			Ldap:         make(map[string]string),
-			Conditionals: make([]config.Conditional, 0),
-			Changed:      true,
-		}
-
-		// Add a rewrite entry
-		section.Rewrites["conf/test.conf.in"] = config.RewriteEntry{
-			Value: "conf/test.conf",
-			Mode:  "0644",
-		}
-
-		cm.State.MtaConfig.Sections["testservice"] = section
-
-		// Compile actions
-		cm.CompileActions(context.Background())
-
-		// Verify rewrites were added
-		if len(cm.State.CurrentActions.Rewrites) == 0 {
-			t.Error("Expected rewrites to be compiled")
-		}
-	})
-
-	t.Run("compile with forced config", func(t *testing.T) {
-		mockSvcMgr := &testutil.MockServiceManager{}
-
-		cm := &ConfigManager{
-			env: hostEnv(),
-			mainConfig: &config.Config{
-				BaseDir:  "/tmp",
-				Hostname: "testhost",
-			},
-			State:      state.NewState(),
-			ServiceMgr: mockSvcMgr,
-			Cache:      cacheInstance,
-		}
-
-		// Set forced config
-		cm.State.ForcedConfig = map[string]string{
-			"proxy": "forced",
-		}
-		// Enable proxy on this node so the section is not gated out.
-		cm.State.ServerConfig.ServiceConfig.Set("proxy", "TRUE")
-
-		// Add a section
-		section := &config.MtaConfigSection{
-			Name:         "proxy",
-			Depends:      make(map[string]bool),
-			Rewrites:     make(map[string]config.RewriteEntry),
-			Restarts:     make(map[string]bool),
-			RequiredVars: make(map[string]string),
-			Postconf:     make(map[string]string),
-			Postconfd:    make(map[string]string),
-			Ldap:         make(map[string]string),
-			Conditionals: make([]config.Conditional, 0),
-			Changed:      false, // Not changed, but forced
-		}
-
-		section.Rewrites["conf/proxy.conf.in"] = config.RewriteEntry{
-			Value: "conf/proxy.conf",
-			Mode:  "0644",
-		}
-
-		cm.State.MtaConfig.Sections["proxy"] = section
-
-		// Compile actions
-		cm.CompileActions(context.Background())
-
-		// Verify rewrites were added
-		if len(cm.State.CurrentActions.Rewrites) == 0 {
-			t.Error("Expected rewrites to be compiled for forced config")
-		}
-	})
-
-	t.Run("skip unchanged sections", func(t *testing.T) {
-		mockSvcMgr := &testutil.MockServiceManager{}
-
-		cm := &ConfigManager{
-			env: hostEnv(),
-			mainConfig: &config.Config{
-				BaseDir:  "/tmp",
-				Hostname: "testhost",
-			},
-			State:      state.NewState(),
-			ServiceMgr: mockSvcMgr,
-			Cache:      cacheInstance,
-		}
-
-		// Not first run, no forced config
-		cm.State.FirstRun = false
-		cm.State.ForcedConfig = make(map[string]string)
-		cm.State.RequestedConfig = make(map[string]string)
-
-		// Add an unchanged section
-		section := &config.MtaConfigSection{
-			Name:         "unchanged",
-			Depends:      make(map[string]bool),
-			Rewrites:     make(map[string]config.RewriteEntry),
-			Restarts:     make(map[string]bool),
-			RequiredVars: make(map[string]string),
-			Postconf:     make(map[string]string),
-			Postconfd:    make(map[string]string),
-			Ldap:         make(map[string]string),
-			Conditionals: make([]config.Conditional, 0),
-			Changed:      false, // Not changed
-		}
-
-		section.Rewrites["conf/unchanged.conf.in"] = config.RewriteEntry{
-			Value: "conf/unchanged.conf",
-			Mode:  "0644",
-		}
-
-		cm.State.MtaConfig.Sections["unchanged"] = section
-
-		// Compile actions
-		cm.CompileActions(context.Background())
-
-		// Verify no rewrites were added (section was skipped)
-		if len(cm.State.CurrentActions.Rewrites) != 0 {
-			t.Error("Expected no rewrites for unchanged section")
-		}
-	})
-}
-
-// TestCompileActions_ForcedSectionRestartsAreSectionScoped is a regression
-// test for a bug where forcing ANY section suppressed restart compilation
-// cycle-wide (checking len(forcedConfig) > 0 instead of forcedConfig[sn]).
-// Only the forced section's own restart must be skipped; a sibling section
-// whose variables changed must still get its restart compiled.
-func TestCompileActions_ForcedSectionRestartsAreSectionScoped(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
-	ctx := context.Background()
-	cacheInstance := cache.New(ctx, false)
+// newPlanTestCM returns a ConfigManager that can Plan (and ApplyRestarts) over
+// a hand-built configd.cf kept in State.MtaConfig.
+func newPlanTestCM(t *testing.T) *ConfigManager {
+	t.Helper()
 
 	cm := &ConfigManager{
 		env: hostEnv(),
 		mainConfig: &config.Config{
-			BaseDir:  "/tmp",
+			BaseDir:  t.TempDir(),
 			Hostname: "testhost",
 		},
 		State:      state.NewState(),
 		ServiceMgr: &testutil.MockServiceManager{},
-		Cache:      cacheInstance,
+		Cache:      cache.New(context.Background(), false),
+	}
+	cm.policy = restart.New(cm.ServiceMgr, cm.env.Clock)
+
+	return cm
+}
+
+// planTestSection returns an empty section with every map allocated.
+func planTestSection(name string) *config.MtaConfigSection {
+	return &config.MtaConfigSection{
+		Name:         name,
+		Depends:      make(map[string]bool),
+		Rewrites:     make(map[string]config.RewriteEntry),
+		Restarts:     make(map[string]bool),
+		RequiredVars: make(map[string]string),
+		Postconf:     make(map[string]string),
+		Postconfd:    make(map[string]string),
+		Ldap:         make(map[string]string),
+		Conditionals: make([]config.Conditional, 0),
+	}
+}
+
+// addPlanSection registers sec in the parsed configd.cf of cm.
+func addPlanSection(cm *ConfigManager, sec *config.MtaConfigSection) {
+	cm.State.MtaConfig.Sections[sec.Name] = sec
+}
+
+// enableServices marks the services enabled on the node and as running in the
+// previous cycle's tracking, so that only the section-derived actions show up
+// in the plan (no start/stop for a status change).
+func enableServices(cm *ConfigManager, names ...string) {
+	services := make(map[string]string, len(names))
+	tracked := make(map[string]string, len(names))
+
+	for _, n := range names {
+		services[n] = "zimbraServiceEnabled"
+		tracked[n] = "running"
 	}
 
-	cm.State.FirstRun = false
-	// Section "svca" is forced but not itself Changed.
-	cm.State.ForcedConfig = map[string]string{"svca": "forced"}
-	cm.State.RequestedConfig = make(map[string]string)
+	setServer(cm, map[string]string{}, services)
 
-	// Enable both sections' services on this node so neither is gated out.
-	cm.State.ServerConfig.ServiceConfig.Set("svca", "TRUE")
-	cm.State.ServerConfig.ServiceConfig.Set("svcb", "TRUE")
+	cm.tracked = tracked
+}
 
-	newSection := func(name string, changed bool) *config.MtaConfigSection {
-		return &config.MtaConfigSection{
-			Name:         name,
-			Depends:      make(map[string]bool),
-			Rewrites:     make(map[string]config.RewriteEntry),
-			Restarts:     map[string]bool{name + "restart": true},
-			RequiredVars: make(map[string]string),
-			Postconf:     make(map[string]string),
-			Postconfd:    make(map[string]string),
-			Ldap:         make(map[string]string),
-			Conditionals: make([]config.Conditional, 0),
-			Changed:      changed,
+// markChanged makes sec depend on a global variable that goes from undefined
+// (no previous cycle) to defined, so the section counts as changed on a
+// cycle that is not the first run.
+func markChanged(cm *ConfigManager, sec *config.MtaConfigSection) {
+	sec.RequiredVars["zimbraTestTrigger"] = "VAR"
+
+	setGlobal(cm, map[string]string{"zimbraTestTrigger": "1"})
+}
+
+// findRestart returns the restart entry of service in pl.
+func findRestart(pl *plan.Plan, service string) (plan.Restart, bool) {
+	for _, r := range pl.Restarts {
+		if r.Service == service {
+			return r, true
 		}
 	}
 
-	cm.State.MtaConfig.Sections["svca"] = newSection("svca", false)
-	cm.State.MtaConfig.Sections["svcb"] = newSection("svcb", true)
+	return plan.Restart{}, false
+}
 
-	cm.CompileActions(ctx)
+func rewriteSources(pl *plan.Plan) []string {
+	out := make([]string, 0, len(pl.Rewrites))
+	for _, r := range pl.Rewrites {
+		out = append(out, r.Source)
+	}
 
-	if _, ok := cm.State.CurrentActions.Restarts["svcarestart"]; ok {
-		t.Error("expected forced section svca's restart NOT to be compiled")
+	return out
+}
+
+// TestPlan_SectionSelection tests which sections a cycle processes.
+func TestPlan_SectionSelection(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: configmgr test may have retry delays")
 	}
-	if _, ok := cm.State.CurrentActions.Restarts["svcbrestart"]; !ok {
-		t.Error("expected changed sibling section svcb's restart to be compiled")
+	ctx := context.Background()
+
+	t.Run("plan with first run", func(t *testing.T) {
+		cm := newPlanTestCM(t)
+		cm.State.SetFirstRun(true)
+		// Enable the section's service on this node so it is not gated out.
+		enableServices(cm, "testservice")
+
+		section := planTestSection("testservice")
+		section.Rewrites["conf/test.conf.in"] = config.RewriteEntry{Value: "conf/test.conf", Mode: "0644"}
+		addPlanSection(cm, section)
+
+		pl, err := cm.Plan(ctx)
+		require.NoError(t, err)
+
+		require.Len(t, pl.Rewrites, 1, "expected the rewrite to be planned")
+		assert.Equal(t, "conf/test.conf.in", pl.Rewrites[0].Source)
+		assert.Equal(t, "conf/test.conf", pl.Rewrites[0].Target)
+		assert.Equal(t, "0644", pl.Rewrites[0].Mode)
+		assert.True(t, pl.FirstRun)
+	})
+
+	t.Run("plan with forced config", func(t *testing.T) {
+		cm := newPlanTestCM(t)
+		cm.State.SetFirstRun(false)
+		cm.State.SetForcedConfig(ctx, "proxy")
+		// Enable proxy on this node so the section is not gated out.
+		enableServices(cm, "proxy")
+
+		section := planTestSection("proxy") // not changed, but forced
+		section.Rewrites["conf/proxy.conf.in"] = config.RewriteEntry{Value: "conf/proxy.conf", Mode: "0644"}
+		addPlanSection(cm, section)
+
+		pl, err := cm.Plan(ctx)
+		require.NoError(t, err)
+
+		require.Len(t, pl.Rewrites, 1, "expected the rewrite to be planned for a forced section")
+		assert.Equal(t, "conf/proxy.conf.in", pl.Rewrites[0].Source)
+		assert.Equal(t, plan.ReasonForced, pl.Rewrites[0].Reasons[0].Kind)
+	})
+
+	t.Run("plan with requested config", func(t *testing.T) {
+		cm := newPlanTestCM(t)
+		cm.State.SetFirstRun(false)
+		cm.State.AddRequestedConfigs(ctx, []string{"proxy"})
+		enableServices(cm, "proxy")
+
+		section := planTestSection("proxy")
+		section.Rewrites["conf/proxy.conf.in"] = config.RewriteEntry{Value: "conf/proxy.conf", Mode: "0644"}
+		addPlanSection(cm, section)
+
+		pl, err := cm.Plan(ctx)
+		require.NoError(t, err)
+
+		require.Len(t, pl.Rewrites, 1, "expected the rewrite to be planned for a requested section")
+		assert.Equal(t, plan.ReasonRequested, pl.Rewrites[0].Reasons[0].Kind)
+		assert.Empty(t, cm.State.TakeRequestedConfigs(), "a successful plan consumes the requests")
+	})
+
+	t.Run("plan with changed section", func(t *testing.T) {
+		cm := newPlanTestCM(t)
+		cm.State.SetFirstRun(false)
+		enableServices(cm, "changed")
+
+		section := planTestSection("changed")
+		section.Rewrites["conf/changed.conf.in"] = config.RewriteEntry{Value: "conf/changed.conf", Mode: "0644"}
+		markChanged(cm, section)
+		addPlanSection(cm, section)
+
+		pl, err := cm.Plan(ctx)
+		require.NoError(t, err)
+
+		assert.Equal(t, []string{"conf/changed.conf.in"}, rewriteSources(pl))
+		assert.Equal(t, plan.ReasonVarChanged, pl.Rewrites[0].Reasons[0].Kind)
+	})
+
+	t.Run("skip unchanged sections", func(t *testing.T) {
+		cm := newPlanTestCM(t)
+		cm.State.SetFirstRun(false)
+		enableServices(cm, "unchanged")
+
+		section := planTestSection("unchanged") // not changed
+		section.Rewrites["conf/unchanged.conf.in"] = config.RewriteEntry{Value: "conf/unchanged.conf", Mode: "0644"}
+		addPlanSection(cm, section)
+
+		pl, err := cm.Plan(ctx)
+		require.NoError(t, err)
+
+		assert.Empty(t, pl.Rewrites, "expected no rewrites for unchanged section")
+	})
+
+	t.Run("skip sections whose service is disabled on the node", func(t *testing.T) {
+		cm := newPlanTestCM(t)
+		cm.State.SetFirstRun(true)
+		enableServices(cm, "mailbox")
+
+		section := planTestSection("proxy")
+		section.Rewrites["conf/proxy.conf.in"] = config.RewriteEntry{Value: "conf/proxy.conf", Mode: "0644"}
+		addPlanSection(cm, section)
+
+		pl, err := cm.Plan(ctx)
+		require.NoError(t, err)
+
+		assert.Empty(t, pl.Rewrites, "proxy is not enabled on this node")
+		assert.Empty(t, pl.Sections)
+	})
+}
+
+// TestPlan_ForcedSectionRestartsAreSectionScoped is a regression test for a
+// bug where forcing ANY section suppressed restart planning cycle-wide. The
+// restart skip for forced/requested sections is section-scoped: a requested
+// section's own restart is skipped, while a sibling section whose variables
+// changed still gets its restart planned.
+func TestPlan_ForcedSectionRestartsAreSectionScoped(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: configmgr test may have retry delays")
 	}
+	ctx := context.Background()
+
+	newSection := func(name string) *config.MtaConfigSection {
+		s := planTestSection(name)
+		s.Restarts = map[string]bool{name + "restart": true}
+
+		return s
+	}
+
+	t.Run("requested section skips its restart, changed sibling keeps it", func(t *testing.T) {
+		cm := newPlanTestCM(t)
+		cm.State.SetFirstRun(false)
+		cm.State.AddRequestedConfigs(ctx, []string{"svca"})
+		enableServices(cm, "svca", "svcb")
+
+		svcb := newSection("svcb")
+		markChanged(cm, svcb)
+
+		addPlanSection(cm, newSection("svca"))
+		addPlanSection(cm, svcb)
+
+		pl, err := cm.Plan(ctx)
+		require.NoError(t, err)
+
+		_, ok := findRestart(pl, "svcarestart")
+		assert.False(t, ok, "expected requested section svca's restart NOT to be planned")
+
+		_, ok = findRestart(pl, "svcbrestart")
+		assert.True(t, ok, "expected changed sibling section svcb's restart to be planned")
+	})
+
+	t.Run("forced section skips its restart and only forced sections are compared", func(t *testing.T) {
+		cm := newPlanTestCM(t)
+		cm.State.SetFirstRun(false)
+		cm.State.SetForcedConfig(ctx, "svca")
+		enableServices(cm, "svca", "svcb")
+
+		svcb := newSection("svcb")
+		markChanged(cm, svcb)
+
+		addPlanSection(cm, newSection("svca"))
+		addPlanSection(cm, svcb)
+
+		pl, err := cm.Plan(ctx)
+		require.NoError(t, err)
+
+		_, ok := findRestart(pl, "svcarestart")
+		assert.False(t, ok, "expected forced section svca's restart NOT to be planned")
+
+		// Legacy semantics: with forced sections only those are compared.
+		_, ok = findRestart(pl, "svcbrestart")
+		assert.False(t, ok, "section svcb is outside the forced scope")
+	})
 }
 
 // TestLookUpConfig tests the LookUpConfig method
@@ -804,7 +844,7 @@ func TestLookUpConfig(t *testing.T) {
 		}
 
 		// Add to GlobalConfig
-		cm.State.GlobalConfig.Data.Set("testKey", "testValue")
+		setGlobal(cm, map[string]string{"testKey": "testValue"})
 
 		value, err := cm.LookUpConfig(ctx, "VAR", "testKey")
 		if err != nil {
@@ -827,7 +867,7 @@ func TestLookUpConfig(t *testing.T) {
 		}
 
 		// Add to MiscConfig (not in GlobalConfig)
-		cm.State.MiscConfig.Data.Set("miscKey", "miscValue")
+		setMisc(cm, map[string]string{"miscKey": "miscValue"})
 
 		value, err := cm.LookUpConfig(ctx, "VAR", "miscKey")
 		if err != nil {
@@ -850,7 +890,7 @@ func TestLookUpConfig(t *testing.T) {
 		}
 
 		// Add to ServerConfig (not in Global or Misc)
-		cm.State.ServerConfig.Data.Set("serverKey", "serverValue")
+		setServer(cm, map[string]string{"serverKey": "serverValue"}, map[string]string{})
 
 		value, err := cm.LookUpConfig(ctx, "VAR", "serverKey")
 		if err != nil {
@@ -873,7 +913,7 @@ func TestLookUpConfig(t *testing.T) {
 		}
 
 		// Add to LocalConfig
-		cm.State.LocalConfig.Data.Set("localKey", "localValue")
+		setLocal(cm, map[string]string{"localKey": "localValue"})
 
 		value, err := cm.LookUpConfig(ctx, "LOCAL", "localKey")
 		if err != nil {
@@ -896,7 +936,7 @@ func TestLookUpConfig(t *testing.T) {
 		}
 
 		// Add to ServiceConfig
-		cm.State.ServerConfig.ServiceConfig.Set("nginx", "TRUE")
+		setServer(cm, map[string]string{}, map[string]string{"nginx": "zimbraServiceEnabled"})
 
 		value, err := cm.LookUpConfig(ctx, "SERVICE", "nginx")
 		if err != nil {
@@ -986,7 +1026,7 @@ func TestLookUpConfig(t *testing.T) {
 			Cache: cacheInstance,
 		}
 		// Create a simple transformer with nil ConfigLookup (not used in this test)
-		cm.Transformer = newTestTransformer(cm, stateInstance)
+		cm.Transformer = newTestTransformer(cm)
 
 		value, err := cm.LookUpConfig(ctx, "FILE", "test.txt")
 		if err != nil {
@@ -1017,7 +1057,7 @@ func TestLookUpConfig(t *testing.T) {
 			State: stateInstance,
 			Cache: cacheInstance,
 		}
-		cm.Transformer = newTestTransformer(cm, stateInstance)
+		cm.Transformer = newTestTransformer(cm)
 
 		// Pre-populate cache
 		cm.State.FileCache["cached.txt"] = "cached content"
@@ -1042,7 +1082,7 @@ func TestLookUpConfig(t *testing.T) {
 			State: stateInstance,
 			Cache: cacheInstance,
 		}
-		cm.Transformer = newTestTransformer(cm, stateInstance)
+		cm.Transformer = newTestTransformer(cm)
 
 		_, err := cm.LookUpConfig(ctx, "FILE", "nonexistent.txt")
 		if err == nil {
@@ -1179,579 +1219,364 @@ func TestLookUpConfig(t *testing.T) {
 	})
 }
 
-// TestCompileSectionActions tests the compileSectionActions method
-func TestCompileSectionActions(t *testing.T) {
+// TestPlan_SectionActions tests the actions Plan derives from a section.
+func TestPlan_SectionActions(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
 	ctx := context.Background()
-	cacheInstance := cache.New(ctx, false)
 
-	t.Run("compile rewrites", func(t *testing.T) {
-		cm := &ConfigManager{
-			env: hostEnv(),
-			mainConfig: &config.Config{
-				BaseDir:  "/tmp",
-				Hostname: "testhost",
-			},
-			State:      state.NewState(),
-			ServiceMgr: &testutil.MockServiceManager{},
-			Cache:      cacheInstance,
-		}
+	t.Run("plan rewrites", func(t *testing.T) {
+		cm := newPlanTestCM(t)
+		enableServices(cm, "testservice")
 
-		section := &config.MtaConfigSection{
-			Name: "testservice",
-			Rewrites: map[string]config.RewriteEntry{
-				"file1": {Value: "/path/to/file1"},
-				"file2": {Value: "/path/to/file2"},
-			},
+		section := planTestSection("testservice")
+		section.Rewrites = map[string]config.RewriteEntry{
+			"file1": {Value: "/path/to/file1"},
+			"file2": {Value: "/path/to/file2"},
 		}
+		addPlanSection(cm, section)
 
-		cm.compileSectionActions(ctx, "testservice", section, nil, cm.State.ForcedConfig, cm.State.FirstRun, cm.State.ServerConfig.ServiceConfig.Snapshot())
+		pl, err := cm.Plan(ctx)
+		require.NoError(t, err)
 
-		// Check that rewrites were added to state
-		if len(cm.State.CurrentActions.Rewrites) != 2 {
-			t.Errorf("Expected 2 rewrites, got %d", len(cm.State.CurrentActions.Rewrites))
-		}
-		if _, ok := cm.State.CurrentActions.Rewrites["file1"]; !ok {
-			t.Error("Expected file1 in rewrites")
-		}
-		if _, ok := cm.State.CurrentActions.Rewrites["file2"]; !ok {
-			t.Error("Expected file2 in rewrites")
-		}
+		assert.Equal(t, []string{"file1", "file2"}, rewriteSources(pl))
+		assert.Equal(t, "/path/to/file1", pl.Rewrites[0].Target)
+		assert.Equal(t, "/path/to/file2", pl.Rewrites[1].Target)
 	})
 
-	t.Run("compile postconf and postconfd", func(t *testing.T) {
-		cm := &ConfigManager{
-			env: hostEnv(),
-			mainConfig: &config.Config{
-				BaseDir:  "/tmp",
-				Hostname: "testhost",
-			},
-			State:      state.NewState(),
-			ServiceMgr: &testutil.MockServiceManager{},
-			Cache:      cacheInstance,
-		}
+	t.Run("plan postconf and postconfd", func(t *testing.T) {
+		cm := newPlanTestCM(t)
+		enableServices(cm, "mta")
 
-		section := &config.MtaConfigSection{
-			Name: "mta",
-			Postconf: map[string]string{
-				"myhostname":    "mail.example.com",
-				"mydestination": "localhost",
-			},
-			Postconfd: map[string]string{
-				"milter_default_action": "accept",
-			},
+		section := planTestSection("mta")
+		section.Postconf = map[string]string{
+			"myhostname":    "mail.example.com",
+			"mydestination": "localhost",
 		}
+		section.Postconfd = map[string]string{"milter_default_action": "accept"}
+		addPlanSection(cm, section)
 
-		cm.compileSectionActions(ctx, "mta", section, nil, cm.State.ForcedConfig, cm.State.FirstRun, cm.State.ServerConfig.ServiceConfig.Snapshot())
+		pl, err := cm.Plan(ctx)
+		require.NoError(t, err)
 
-		// Check postconf
-		if len(cm.State.CurrentActions.Postconf) != 2 {
-			t.Errorf("Expected 2 postconf entries, got %d", len(cm.State.CurrentActions.Postconf))
+		require.Len(t, pl.Postconf, 2)
+		values := map[string]string{}
+		for _, p := range pl.Postconf {
+			values[p.Key] = p.Value
 		}
-		if cm.State.CurrentActions.Postconf["myhostname"] != "mail.example.com" {
-			t.Error("Expected myhostname in postconf")
-		}
+		assert.Equal(t, "mail.example.com", values["myhostname"])
+		assert.Equal(t, "localhost", values["mydestination"])
 
-		// Check postconfd
-		if len(cm.State.CurrentActions.Postconfd) != 1 {
-			t.Errorf("Expected 1 postconfd entry, got %d", len(cm.State.CurrentActions.Postconfd))
-		}
-		if cm.State.CurrentActions.Postconfd["milter_default_action"] != "accept" {
-			t.Error("Expected milter_default_action in postconfd")
-		}
+		require.Len(t, pl.Postconfd, 1)
+		assert.Equal(t, "milter_default_action", pl.Postconfd[0].Key)
+		assert.Equal(t, "accept", pl.Postconfd[0].Value)
 	})
 
-	t.Run("compile proxygen directive", func(t *testing.T) {
-		cm := &ConfigManager{
-			env: hostEnv(),
-			mainConfig: &config.Config{
-				BaseDir:  "/tmp",
-				Hostname: "testhost",
-			},
-			State:      state.NewState(),
-			ServiceMgr: &testutil.MockServiceManager{},
-			Cache:      cacheInstance,
-		}
+	t.Run("plan proxygen directive", func(t *testing.T) {
+		cm := newPlanTestCM(t)
+		enableServices(cm, "proxy")
 
-		section := &config.MtaConfigSection{
-			Name:     "proxy",
-			Proxygen: true,
-		}
+		section := planTestSection("proxy")
+		section.Proxygen = true
+		addPlanSection(cm, section)
 
-		cm.compileSectionActions(ctx, "proxy", section, nil, cm.State.ForcedConfig, cm.State.FirstRun, cm.State.ServerConfig.ServiceConfig.Snapshot())
+		pl, err := cm.Plan(ctx)
+		require.NoError(t, err)
 
-		// Check that proxygen was set
-		if !cm.State.CurrentActions.Proxygen {
-			t.Error("Expected Proxygen to be true")
-		}
+		require.NotNil(t, pl.Proxygen, "expected proxygen to be planned")
+		assert.Equal(t, []string{"proxy"}, pl.Proxygen.Sections)
 	})
 
-	t.Run("compile ldap entries", func(t *testing.T) {
-		cm := &ConfigManager{
-			env: hostEnv(),
-			mainConfig: &config.Config{
-				BaseDir:  "/tmp",
-				Hostname: "testhost",
-			},
-			State:      state.NewState(),
-			ServiceMgr: &testutil.MockServiceManager{},
-			Cache:      cacheInstance,
-		}
+	t.Run("plan ldap entries", func(t *testing.T) {
+		cm := newPlanTestCM(t)
+		enableServices(cm, "ldap")
 
-		section := &config.MtaConfigSection{
-			Name: "ldap",
-			Ldap: map[string]string{
-				"ldap_uri":  "ldap://localhost",
-				"ldap_base": "dc=example,dc=com",
-			},
+		section := planTestSection("ldap")
+		section.Ldap = map[string]string{
+			"ldap_uri":  "ldap://localhost",
+			"ldap_base": "dc=example,dc=com",
 		}
+		addPlanSection(cm, section)
 
-		cm.compileSectionActions(ctx, "ldap", section, nil, cm.State.ForcedConfig, cm.State.FirstRun, cm.State.ServerConfig.ServiceConfig.Snapshot())
+		pl, err := cm.Plan(ctx)
+		require.NoError(t, err)
 
-		// Check ldap entries
-		if len(cm.State.CurrentActions.Ldap) != 2 {
-			t.Errorf("Expected 2 ldap entries, got %d", len(cm.State.CurrentActions.Ldap))
+		require.Len(t, pl.Ldap, 2)
+		values := map[string]string{}
+		for _, l := range pl.Ldap {
+			values[l.Key] = l.Value
 		}
-		if cm.State.CurrentActions.Ldap["ldap_uri"] != "ldap://localhost" {
-			t.Error("Expected ldap_uri in ldap")
-		}
+		assert.Equal(t, "ldap://localhost", values["ldap_uri"])
+		assert.Equal(t, "dc=example,dc=com", values["ldap_base"])
 	})
 
 	t.Run("skip restarts on first run", func(t *testing.T) {
-		cm := &ConfigManager{
-			env: hostEnv(),
-			mainConfig: &config.Config{
-				BaseDir:  "/tmp",
-				Hostname: "testhost",
-			},
-			State:      state.NewState(),
-			ServiceMgr: &testutil.MockServiceManager{},
-			Cache:      cacheInstance,
-		}
-		cm.State.FirstRun = true
+		cm := newPlanTestCM(t)
+		cm.State.SetFirstRun(true)
+		enableServices(cm, "mta")
 
-		section := &config.MtaConfigSection{
-			Name:     "mta",
-			Restarts: map[string]bool{"mta": true},
-		}
+		section := planTestSection("mta")
+		section.Restarts = map[string]bool{"mta": true}
+		addPlanSection(cm, section)
 
-		// Set up service as enabled
-		cm.State.ServerConfig.ServiceConfig.Set("mta", "TRUE")
+		pl, err := cm.Plan(ctx)
+		require.NoError(t, err)
 
-		cm.compileSectionActions(ctx, "mta", section, nil, cm.State.ForcedConfig, cm.State.FirstRun, cm.State.ServerConfig.ServiceConfig.Snapshot())
-
-		// Check that no restarts were added
-		if len(cm.State.CurrentActions.Restarts) != 0 {
-			t.Errorf("Expected 0 restarts on first run, got %d", len(cm.State.CurrentActions.Restarts))
-		}
+		assert.Empty(t, pl.Restarts, "expected 0 restarts on first run")
 	})
 
 	t.Run("skip restarts with forced config", func(t *testing.T) {
-		cm := &ConfigManager{
-			env: hostEnv(),
-			mainConfig: &config.Config{
-				BaseDir:  "/tmp",
-				Hostname: "testhost",
-			},
-			State:      state.NewState(),
-			ServiceMgr: &testutil.MockServiceManager{},
-			Cache:      cacheInstance,
-		}
-		cm.State.FirstRun = false
-		cm.State.ForcedConfig["mta"] = "1"
+		cm := newPlanTestCM(t)
+		cm.State.SetFirstRun(false)
+		cm.State.SetForcedConfig(ctx, "mta")
+		enableServices(cm, "mta")
 
-		section := &config.MtaConfigSection{
-			Name:     "mta",
-			Restarts: map[string]bool{"mta": true},
-		}
+		section := planTestSection("mta")
+		section.Restarts = map[string]bool{"mta": true}
+		addPlanSection(cm, section)
 
-		cm.State.ServerConfig.ServiceConfig.Set("mta", "TRUE")
+		pl, err := cm.Plan(ctx)
+		require.NoError(t, err)
 
-		cm.compileSectionActions(ctx, "mta", section, nil, cm.State.ForcedConfig, cm.State.FirstRun, cm.State.ServerConfig.ServiceConfig.Snapshot())
-
-		// Check that no restarts were added
-		if len(cm.State.CurrentActions.Restarts) != 0 {
-			t.Errorf("Expected 0 restarts with forced config, got %d", len(cm.State.CurrentActions.Restarts))
-		}
+		assert.Empty(t, pl.Restarts, "expected 0 restarts with forced config")
 	})
 
 	t.Run("skip restarts with requested config", func(t *testing.T) {
-		cm := &ConfigManager{
-			env: hostEnv(),
-			mainConfig: &config.Config{
-				BaseDir:  "/tmp",
-				Hostname: "testhost",
-			},
-			State:      state.NewState(),
-			ServiceMgr: &testutil.MockServiceManager{},
-			Cache:      cacheInstance,
-		}
-		cm.State.FirstRun = false
-		cm.State.RequestedConfig["mta"] = "1"
+		cm := newPlanTestCM(t)
+		cm.State.SetFirstRun(false)
+		cm.State.AddRequestedConfigs(ctx, []string{"mta"})
+		enableServices(cm, "mta")
 
-		section := &config.MtaConfigSection{
-			Name:     "mta",
-			Restarts: map[string]bool{"mta": true},
-		}
+		section := planTestSection("mta")
+		section.Restarts = map[string]bool{"mta": true}
+		addPlanSection(cm, section)
 
-		cm.State.ServerConfig.ServiceConfig.Set("mta", "TRUE")
+		pl, err := cm.Plan(ctx)
+		require.NoError(t, err)
 
-		cm.compileSectionActions(ctx, "mta", section, cm.State.RequestedConfig, cm.State.ForcedConfig, cm.State.FirstRun, cm.State.ServerConfig.ServiceConfig.Snapshot())
-
-		if len(cm.State.CurrentActions.Restarts) != 0 {
-			t.Errorf("Expected 0 restarts with requested config, got %d", len(cm.State.CurrentActions.Restarts))
-		}
+		assert.Empty(t, pl.Restarts, "expected 0 restarts with requested config")
 	})
 
 	t.Run("add restart for enabled service", func(t *testing.T) {
-		cm := &ConfigManager{
-			env: hostEnv(),
-			mainConfig: &config.Config{
-				BaseDir:  "/tmp",
-				Hostname: "testhost",
-			},
-			State:      state.NewState(),
-			ServiceMgr: &testutil.MockServiceManager{},
-			Cache:      cacheInstance,
-		}
-		cm.State.FirstRun = false
+		cm := newPlanTestCM(t)
+		cm.State.SetFirstRun(false)
+		enableServices(cm, "mta")
 
-		section := &config.MtaConfigSection{
-			Name:     "mta",
-			Restarts: map[string]bool{"mta": true},
-		}
+		section := planTestSection("mta")
+		section.Restarts = map[string]bool{"mta": true}
+		markChanged(cm, section)
+		addPlanSection(cm, section)
 
-		cm.State.ServerConfig.ServiceConfig.Set("mta", "TRUE")
+		pl, err := cm.Plan(ctx)
+		require.NoError(t, err)
 
-		cm.compileSectionActions(ctx, "mta", section, nil, cm.State.ForcedConfig, cm.State.FirstRun, cm.State.ServerConfig.ServiceConfig.Snapshot())
-
-		// Check that restart was added with value -1
-		if len(cm.State.CurrentActions.Restarts) != 1 {
-			t.Errorf("Expected 1 restart, got %d", len(cm.State.CurrentActions.Restarts))
-		}
-		if cm.State.CurrentActions.Restarts["mta"] != -1 {
-			t.Errorf("Expected restart value -1, got %d", cm.State.CurrentActions.Restarts["mta"])
-		}
+		require.Len(t, pl.Restarts, 1)
+		assert.Equal(t, "mta", pl.Restarts[0].Service)
+		assert.Equal(t, plan.ActionRestart, pl.Restarts[0].Action)
 	})
 
 	t.Run("add stop for disabled service", func(t *testing.T) {
-		cm := &ConfigManager{
-			env: hostEnv(),
-			mainConfig: &config.Config{
-				BaseDir:  "/tmp",
-				Hostname: "testhost",
-			},
-			State:      state.NewState(),
-			ServiceMgr: &testutil.MockServiceManager{},
-			Cache:      cacheInstance,
-		}
-		cm.State.FirstRun = false
+		cm := newPlanTestCM(t)
+		cm.State.SetFirstRun(false)
+		// The section itself must be enabled to be processed; the service it
+		// restarts (mta) is not enabled, so it is stopped. A section named
+		// after a disabled service is gated out before restarts are planned.
+		enableServices(cm, "svca")
 
-		section := &config.MtaConfigSection{
-			Name:     "mta",
-			Restarts: map[string]bool{"mta": true},
-		}
+		section := planTestSection("svca")
+		section.Restarts = map[string]bool{"mta": true}
+		markChanged(cm, section)
+		addPlanSection(cm, section)
 
-		// Don't add mta to ServiceConfig - absence means disabled
+		pl, err := cm.Plan(ctx)
+		require.NoError(t, err)
 
-		cm.compileSectionActions(ctx, "mta", section, nil, cm.State.ForcedConfig, cm.State.FirstRun, cm.State.ServerConfig.ServiceConfig.Snapshot())
-
-		// Check that stop was added with value 0
-		if len(cm.State.CurrentActions.Restarts) != 1 {
-			t.Errorf("Expected 1 stop action, got %d", len(cm.State.CurrentActions.Restarts))
-		}
-		if cm.State.CurrentActions.Restarts["mta"] != 0 {
-			t.Errorf("Expected stop value 0, got %d", cm.State.CurrentActions.Restarts["mta"])
-		}
+		require.Len(t, pl.Restarts, 1)
+		assert.Equal(t, "mta", pl.Restarts[0].Service)
+		assert.Equal(t, plan.ActionStop, pl.Restarts[0].Action)
 	})
 
 	t.Run("add opendkim restart when mta is enabled", func(t *testing.T) {
-		cm := &ConfigManager{
-			env: hostEnv(),
-			mainConfig: &config.Config{
-				BaseDir:  "/tmp",
-				Hostname: "testhost",
-			},
-			State:      state.NewState(),
-			ServiceMgr: &testutil.MockServiceManager{},
-			Cache:      cacheInstance,
-		}
-		cm.State.FirstRun = false
+		cm := newPlanTestCM(t)
+		cm.State.SetFirstRun(false)
+		// opendkim is not explicitly enabled, but mta is.
+		enableServices(cm, "mta")
 
-		section := &config.MtaConfigSection{
-			Name:     "mta",
-			Restarts: map[string]bool{"opendkim": true},
-		}
+		section := planTestSection("mta")
+		section.Restarts = map[string]bool{"opendkim": true}
+		markChanged(cm, section)
+		addPlanSection(cm, section)
 
-		// opendkim is not explicitly enabled, but mta is
-		cm.State.ServerConfig.ServiceConfig.Set("mta", "TRUE")
+		pl, err := cm.Plan(ctx)
+		require.NoError(t, err)
 
-		cm.compileSectionActions(ctx, "mta", section, nil, cm.State.ForcedConfig, cm.State.FirstRun, cm.State.ServerConfig.ServiceConfig.Snapshot())
-
-		// Check that opendkim restart was added
-		if len(cm.State.CurrentActions.Restarts) != 1 {
-			t.Errorf("Expected 1 restart for opendkim, got %d", len(cm.State.CurrentActions.Restarts))
-		}
-		if cm.State.CurrentActions.Restarts["opendkim"] != -1 {
-			t.Errorf("Expected opendkim restart value -1, got %d", cm.State.CurrentActions.Restarts["opendkim"])
-		}
+		require.Len(t, pl.Restarts, 1)
+		assert.Equal(t, "opendkim", pl.Restarts[0].Service)
+		assert.Equal(t, plan.ActionRestart, pl.Restarts[0].Action)
 	})
 
-	t.Run("compile conditionals", func(t *testing.T) {
-		cm := &ConfigManager{
-			env: hostEnv(),
-			mainConfig: &config.Config{
-				BaseDir:  "/tmp",
-				Hostname: "testhost",
-			},
-			State:      state.NewState(),
-			ServiceMgr: &testutil.MockServiceManager{},
-			Cache:      cacheInstance,
-		}
+	t.Run("plan conditionals", func(t *testing.T) {
+		cm := newPlanTestCM(t)
+		enableServices(cm, "mta")
 
-		cm.comparator = NewComparator(cm, cm.State, cm.ServiceMgr)
+		// A condition that evaluates to true.
+		setLocal(cm, map[string]string{"zimbraServiceEnabled": "TRUE"})
 
-		// Set up a condition that will evaluate to true
-		cm.State.LocalConfig.Data.Set("zimbraServiceEnabled", "TRUE")
-
-		section := &config.MtaConfigSection{
-			Name: "mta",
-			Conditionals: []config.Conditional{
-				{
-					Type:    "LOCAL",
-					Key:     "zimbraServiceEnabled",
-					Negated: false,
-					Postconf: map[string]string{
-						"conditional_setting": "value",
-					},
+		section := planTestSection("mta")
+		section.Conditionals = []config.Conditional{
+			{
+				Type:    "LOCAL",
+				Key:     "zimbraServiceEnabled",
+				Negated: false,
+				Postconf: map[string]string{
+					"conditional_setting": "value",
 				},
 			},
 		}
+		addPlanSection(cm, section)
 
-		cm.compileSectionActions(ctx, "mta", section, nil, cm.State.ForcedConfig, cm.State.FirstRun, cm.State.ServerConfig.ServiceConfig.Snapshot())
+		pl, err := cm.Plan(ctx)
+		require.NoError(t, err)
 
-		// Check that conditional postconf was added
-		if cm.State.CurrentActions.Postconf["conditional_setting"] != "value" {
-			t.Error("Expected conditional_setting in postconf")
-		}
+		require.Len(t, pl.Postconf, 1)
+		assert.Equal(t, "conditional_setting", pl.Postconf[0].Key)
+		assert.Equal(t, "value", pl.Postconf[0].Value)
 	})
 
-	t.Run("compile multiple directives together", func(t *testing.T) {
-		cm := &ConfigManager{
-			env: hostEnv(),
-			mainConfig: &config.Config{
-				BaseDir:  "/tmp",
-				Hostname: "testhost",
-			},
-			State:      state.NewState(),
-			ServiceMgr: &testutil.MockServiceManager{},
-			Cache:      cacheInstance,
-		}
-		cm.State.FirstRun = false
-		cm.State.ServerConfig.ServiceConfig.Set("mta", "TRUE")
-		cm.State.ServerConfig.ServiceConfig.Set("nginx", "TRUE")
+	t.Run("plan multiple directives together", func(t *testing.T) {
+		cm := newPlanTestCM(t)
+		cm.State.SetFirstRun(false)
+		enableServices(cm, "mta", "nginx")
 
-		section := &config.MtaConfigSection{
-			Name: "mta",
-			Rewrites: map[string]config.RewriteEntry{
-				"main.cf": {Value: "/opt/zextras/conf/main.cf"},
-			},
-			Postconf: map[string]string{
-				"myhostname": "mail.example.com",
-			},
-			Postconfd: map[string]string{
-				"milter_action": "accept",
-			},
-			Ldap: map[string]string{
-				"ldap_uri": "ldap://localhost",
-			},
-			Proxygen: true,
-			Restarts: map[string]bool{
-				"mta":   true,
-				"nginx": true,
-			},
+		section := planTestSection("mta")
+		section.Rewrites = map[string]config.RewriteEntry{
+			"main.cf": {Value: "/opt/zextras/conf/main.cf"},
 		}
+		section.Postconf = map[string]string{"myhostname": "mail.example.com"}
+		section.Postconfd = map[string]string{"milter_action": "accept"}
+		section.Ldap = map[string]string{"ldap_uri": "ldap://localhost"}
+		section.Proxygen = true
+		section.Restarts = map[string]bool{"mta": true, "nginx": true}
+		markChanged(cm, section)
+		addPlanSection(cm, section)
 
-		cm.compileSectionActions(ctx, "mta", section, nil, cm.State.ForcedConfig, cm.State.FirstRun, cm.State.ServerConfig.ServiceConfig.Snapshot())
+		pl, err := cm.Plan(ctx)
+		require.NoError(t, err)
 
-		// Check all directives were processed
-		if len(cm.State.CurrentActions.Rewrites) != 1 {
-			t.Errorf("Expected 1 rewrite, got %d", len(cm.State.CurrentActions.Rewrites))
-		}
-		if len(cm.State.CurrentActions.Postconf) != 1 {
-			t.Errorf("Expected 1 postconf, got %d", len(cm.State.CurrentActions.Postconf))
-		}
-		if len(cm.State.CurrentActions.Postconfd) != 1 {
-			t.Errorf("Expected 1 postconfd, got %d", len(cm.State.CurrentActions.Postconfd))
-		}
-		if len(cm.State.CurrentActions.Ldap) != 1 {
-			t.Errorf("Expected 1 ldap, got %d", len(cm.State.CurrentActions.Ldap))
-		}
-		if !cm.State.CurrentActions.Proxygen {
-			t.Error("Expected Proxygen to be true")
-		}
-		if len(cm.State.CurrentActions.Restarts) != 2 {
-			t.Errorf("Expected 2 restarts, got %d", len(cm.State.CurrentActions.Restarts))
-		}
+		assert.Len(t, pl.Rewrites, 1)
+		assert.Len(t, pl.Postconf, 1)
+		assert.Len(t, pl.Postconfd, 1)
+		assert.Len(t, pl.Ldap, 1)
+		assert.NotNil(t, pl.Proxygen, "expected proxygen to be planned")
+		assert.Len(t, pl.Restarts, 2)
 	})
 }
 
-// TestCompileActions_ConcurrentWithDelRewrite verifies that CompileActions
-// and doRewrites/processRewrite (which calls DelRewrite) can run concurrently
-// without data races. This test should be run with -race to detect races.
-func TestCompileActions_ConcurrentWithDelRewrite(t *testing.T) {
+// TestPlan_ErrAllServicesDisabledKeepsRequests verifies the guard: when every
+// tracked service looks disabled the cycle is aborted and the requested
+// sections stay queued for the next attempt.
+func TestPlan_ErrAllServicesDisabledKeepsRequests(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
 	ctx := context.Background()
-	cacheInstance := cache.New(ctx, false)
 
-	cm := &ConfigManager{
-		env: hostEnv(),
-		mainConfig: &config.Config{
-			BaseDir:  t.TempDir(),
-			Hostname: "testhost",
-		},
-		State:      state.NewState(),
-		ServiceMgr: &testutil.MockServiceManager{},
-		Cache:      cacheInstance,
-	}
+	cm := newPlanTestCM(t)
+	cm.State.SetFirstRun(false)
+	cm.State.AddRequestedConfigs(ctx, []string{"mta"})
+	setServer(cm, map[string]string{}, map[string]string{})
+	cm.tracked = map[string]string{"mta": "running", "proxy": "running"}
 
-	// Set up MtaConfig with multiple sections and rewrites
-	for i := 0; i < 5; i++ {
-		sn := fmt.Sprintf("service%d", i)
-		section := &config.MtaConfigSection{
-			Name:         sn,
-			Depends:      make(map[string]bool),
-			Rewrites:     make(map[string]config.RewriteEntry),
-			Restarts:     make(map[string]bool),
-			RequiredVars: make(map[string]string),
-			Postconf:     make(map[string]string),
-			Postconfd:    make(map[string]string),
-			Ldap:         make(map[string]string),
-			Conditionals: make([]config.Conditional, 0),
-			Changed:      true,
-		}
-		for j := 0; j < 3; j++ {
-			key := fmt.Sprintf("conf/%s_%d.conf.in", sn, j)
-			section.Rewrites[key] = config.RewriteEntry{
-				Value: fmt.Sprintf("conf/%s_%d.conf", sn, j),
-				Mode:  "0644",
-			}
-		}
-		cm.State.MtaConfig.Sections[sn] = section
-	}
-	cm.State.FirstRun = true
+	_, err := cm.Plan(ctx)
+	require.ErrorIs(t, err, plan.ErrAllServicesDisabled)
 
-	// Run CompileActions and concurrent DelRewrite calls in parallel.
-	// With the snapshot fix, CompileActions iterates a local copy of Sections
-	// and doRewrites iterates a local copy of Rewrites, so DelRewrite on the
-	// original map should not cause a race.
-	const iterations = 100
-	var wg sync.WaitGroup
-
-	for i := 0; i < iterations; i++ {
-		wg.Add(2)
-
-		go func() {
-			defer wg.Done()
-			cm.CompileActions(ctx)
-		}()
-
-		go func() {
-			defer wg.Done()
-			keys := cm.State.GetCurrentRewriteKeys()
-			for _, key := range keys {
-				cm.State.DelRewrite(key)
-			}
-		}()
-	}
-
-	wg.Wait()
-	// If we get here without a race detector failure, the snapshot fix works
+	assert.Equal(t, []string{"mta"}, cm.State.TakeRequestedConfigs())
 }
 
-// TestDoConfigRewrites_ErrorCollection verifies that DoConfigRewrites
-// collects all errors via errors.Join instead of returning only the first.
-func TestDoConfigRewrites_ErrorCollection(t *testing.T) {
+// TestExecute_ErrorCollection verifies that Execute lets every step finish and
+// reports the failure of the ones that failed, without deadlocking.
+func TestExecute_ErrorCollection(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
 	ctx := context.Background()
-	cacheInstance := cache.New(ctx, false)
 
-	cm := &ConfigManager{
-		env: hostEnv(),
-		mainConfig: &config.Config{
-			BaseDir:  t.TempDir(),
-			Hostname: "testhost",
-		},
-		State:      state.NewState(),
-		ServiceMgr: &testutil.MockServiceManager{},
-		Cache:      cacheInstance,
-	}
+	cm := newPlanTestCM(t)
 
-	// Set up Proxygen to trigger the proxygen goroutine which will fail
-	// (no proxy config loaded, so RunProxygenWithConfigs will error)
-	cm.State.CurrentActions.Proxygen = true
+	// Proxygen is planned and will fail (no proxy config loaded, so
+	// RunProxygenWithConfigs will error).
+	pl := &plan.Plan{Proxygen: &plan.Proxygen{Sections: []string{"proxy"}}}
 
-	err := cm.DoConfigRewrites(ctx)
+	err := cm.Execute(ctx, pl)
 
-	// Proxygen should fail since there's no proxy config loaded
+	// The key thing is that we don't deadlock and all goroutines complete even
+	// when errors occur; a failed proxygen must be retried by the next plan.
 	if err != nil {
-		// Verify that the error is present — the key thing is we don't deadlock
-		// and all goroutines complete even when errors occur
-		t.Logf("DoConfigRewrites returned error as expected: %v", err)
+		t.Logf("Execute returned error as expected: %v", err)
+		assert.NotNil(t, cm.carry.Proxygen, "a failed proxygen must be carried to the next cycle")
 	}
-	// The test primarily verifies no deadlock occurs with the buffer fix
 }
 
-// TestDoConfigRewrites_ErrorSurfacing verifies that errors from rewrite operations
-// are properly surfaced through DoConfigRewrites
-func TestDoConfigRewrites_ErrorSurfacing(t *testing.T) {
+// TestExecute_ErrorSurfacing verifies that errors from rewrite operations are
+// surfaced through Execute and the failed rewrite is carried for a retry.
+func TestExecute_ErrorSurfacing(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
 	ctx := context.Background()
-	cacheInstance := cache.New(ctx, false)
-	tmpDir := t.TempDir()
 
-	cm := &ConfigManager{
-		env: hostEnv(),
-		mainConfig: &config.Config{
-			BaseDir:  tmpDir,
-			Hostname: "testhost",
-		},
-		State:      state.NewState(),
-		ServiceMgr: &testutil.MockServiceManager{},
-		Cache:      cacheInstance,
-	}
+	cm := newPlanTestCM(t)
 
 	// Create a transformer for testing
-	cm.Transformer = newTestTransformer(cm, cm.State)
+	cm.Transformer = newTestTransformer(cm)
 
-	// Add a rewrite that will fail because the source file doesn't exist
-	cm.State.CurrentActions.Rewrites = map[string]config.RewriteEntry{
-		"nonexistent.conf": {
-			Value: "output.conf",
-			Mode:  "0644",
-		},
+	// A rewrite that will fail because the source file doesn't exist.
+	pl := &plan.Plan{Rewrites: []plan.Rewrite{{
+		Source: "nonexistent.conf",
+		Target: "output.conf",
+		Mode:   "0644",
+	}}}
+
+	err := cm.Execute(ctx, pl)
+
+	require.Error(t, err, "expected Execute to return an error for nonexistent source file")
+	t.Logf("Execute correctly returned error: %v", err)
+
+	errStr := err.Error()
+	if !strings.Contains(errStr, "nonexistent.conf") && !strings.Contains(errStr, "no such file") {
+		t.Logf("Error message may not contain expected details: %s", errStr)
 	}
 
-	// Call DoConfigRewrites and expect an error
-	err := cm.DoConfigRewrites(ctx)
+	require.Len(t, cm.carry.Rewrites, 1, "a failed rewrite must be carried to the next cycle")
+	assert.Equal(t, "nonexistent.conf", cm.carry.Rewrites[0].Source)
+}
 
-	// Verify that an error was returned
-	if err == nil {
-		t.Error("Expected DoConfigRewrites to return an error for nonexistent source file")
-	} else {
-		t.Logf("DoConfigRewrites correctly returned error: %v", err)
-		// Verify the error message contains relevant information
-		errStr := err.Error()
-		if !strings.Contains(errStr, "nonexistent.conf") && !strings.Contains(errStr, "no such file") {
-			t.Logf("Error message may not contain expected details: %s", errStr)
-		}
+// TestPlan_RewriteRetriedUntilSuccess verifies the carry loop end to end: a
+// rewrite that failed in one cycle is planned again (as a retry) in the next
+// one even though no variable changed.
+func TestPlan_RewriteRetriedUntilSuccess(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: configmgr test may have retry delays")
 	}
+
+	cm := newPlanTestCM(t)
+	cm.Transformer = newTestTransformer(cm)
+	cm.State.SetFirstRun(true)
+	enableServices(cm, "testservice")
+
+	section := planTestSection("testservice")
+	section.Rewrites["missing.conf.in"] = config.RewriteEntry{Value: "conf/missing.conf", Mode: "0644"}
+	addPlanSection(cm, section)
+
+	pl, err := runCycle(t, cm)
+	require.Error(t, err, "the template does not exist")
+	require.Len(t, pl.Rewrites, 1)
+
+	cm.State.SetFirstRun(false)
+
+	pl2, err := cm.Plan(context.Background())
+	require.NoError(t, err)
+	require.Len(t, pl2.Rewrites, 1, fmt.Sprintf("failed rewrite must be retried, got %v", pl2.Rewrites))
+	assert.Equal(t, "missing.conf.in", pl2.Rewrites[0].Source)
 }

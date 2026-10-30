@@ -15,6 +15,9 @@ import (
 	"github.com/zextras/carbonio-configd/internal/cache"
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/mtaops"
+	"github.com/zextras/carbonio-configd/internal/plan"
+	"github.com/zextras/carbonio-configd/internal/restart"
+	"github.com/zextras/carbonio-configd/internal/snapshot"
 	"github.com/zextras/carbonio-configd/internal/state"
 	"github.com/zextras/carbonio-configd/internal/testutil"
 	"github.com/zextras/carbonio-configd/internal/transformer"
@@ -57,6 +60,10 @@ type mockMtaExecutor struct {
 	mapfileErr   error
 }
 
+func (m *mockMtaExecutor) ReadPostconf(_ context.Context, _ string, _ bool) (string, bool, error) {
+	return "", false, nil
+}
+
 func (m *mockMtaExecutor) ExecutePostconf(_ context.Context, op mtaops.PostconfOperation) error {
 	m.postconfOps = append(m.postconfOps, op)
 	return m.postconfErr
@@ -93,7 +100,7 @@ type mockMtaResolver struct {
 	err    error
 }
 
-func (r *mockMtaResolver) ResolveValue(_ context.Context, _, key string, _ *state.State) (string, error) {
+func (r *mockMtaResolver) ResolveValue(_ context.Context, _, key string, _ *snapshot.Snapshot) (string, error) {
 	if r.err != nil {
 		return "", r.err
 	}
@@ -113,6 +120,7 @@ func newTestCMWithExecutor(t *testing.T) (*ConfigManager, *mockMtaExecutor) {
 	st := state.NewState()
 	exec := &mockMtaExecutor{}
 	resolver := &mockMtaResolver{}
+	svcMgr := &testutil.MockServiceManager{}
 	cm := &ConfigManager{
 		env: hostEnv(),
 		mainConfig: &config.Config{
@@ -120,12 +128,13 @@ func newTestCMWithExecutor(t *testing.T) (*ConfigManager, *mockMtaExecutor) {
 			Hostname: "testhost",
 		},
 		State:       st,
-		ServiceMgr:  &testutil.MockServiceManager{},
+		ServiceMgr:  svcMgr,
 		Cache:       cacheInstance,
 		mtaExecutor: exec,
 		mtaResolver: resolver,
 	}
-	cm.Transformer = transformer.NewTransformer(cm, st)
+	cm.policy = restart.New(cm.ServiceMgr, cm.env.Clock)
+	cm.Transformer = transformer.NewTransformer(cm)
 	return cm, exec
 }
 
@@ -138,8 +147,10 @@ func TestDoRewrites_EmptyRewrites(t *testing.T) {
 	}
 	cm, _ := newTestCMWithExecutor(t)
 	// No rewrites added — must be a no-op.
-	cm.doRewrites(context.Background())
-	// If we reach here without panic/deadlock the test passes.
+	pending, err := cm.doRewrites(context.Background(), nil)
+	if err != nil || len(pending) != 0 {
+		t.Errorf("expected no pending and no error, got %v, %v", pending, err)
+	}
 }
 
 // TestDoRewrites_SingleFile exercises the happy path: source file exists,
@@ -158,10 +169,10 @@ func TestDoRewrites_SingleFile(t *testing.T) {
 		t.Fatalf("create source file: %v", err)
 	}
 
-	entry := config.RewriteEntry{Value: destRelPath, Mode: ""}
-	cm.State.CurrentActions.Rewrites[srcRelPath] = entry
-
-	cm.doRewrites(context.Background())
+	pending, err := cm.doRewrites(context.Background(), []plan.Rewrite{{Source: srcRelPath, Target: destRelPath}})
+	if err != nil || len(pending) != 0 {
+		t.Errorf("expected success, got pending=%v err=%v", pending, err)
+	}
 
 	// Destination file should exist
 	if _, err := os.Stat(baseDir + "/" + destRelPath); err != nil {
@@ -183,10 +194,10 @@ func TestDoRewrites_ExplicitMode(t *testing.T) {
 		t.Fatalf("create source file: %v", err)
 	}
 
-	entry := config.RewriteEntry{Value: destRelPath, Mode: "0600"}
-	cm.State.CurrentActions.Rewrites[srcRelPath] = entry
-
-	cm.doRewrites(context.Background())
+	if _, err := cm.doRewrites(context.Background(),
+		[]plan.Rewrite{{Source: srcRelPath, Target: destRelPath, Mode: "0600"}}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	info, err := os.Stat(baseDir + "/" + destRelPath)
 	if err != nil {
@@ -198,7 +209,8 @@ func TestDoRewrites_ExplicitMode(t *testing.T) {
 	}
 }
 
-// TestDoRewrites_InvalidMode exercises the invalid mode error branch.
+// TestDoRewrites_InvalidMode exercises the invalid mode error branch: the
+// rewrite fails, is reported and stays pending for the next cycle.
 func TestDoRewrites_InvalidMode(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: configmgr test may have retry delays")
@@ -213,11 +225,16 @@ func TestDoRewrites_InvalidMode(t *testing.T) {
 	}
 
 	// "notanumber" is not a valid octal string — ParseInt will fail
-	entry := config.RewriteEntry{Value: destRelPath, Mode: "notanumber"}
-	cm.State.CurrentActions.Rewrites[srcRelPath] = entry
+	entry := plan.Rewrite{Source: srcRelPath, Target: destRelPath, Mode: "notanumber"}
 
-	// Should not panic — the function just logs the error and returns
-	cm.doRewrites(context.Background())
+	// Should not panic — the failure is returned and the entry stays pending
+	pending, err := cm.doRewrites(context.Background(), []plan.Rewrite{entry})
+	if err == nil {
+		t.Error("expected an error for an invalid mode")
+	}
+	if len(pending) != 1 || pending[0].Source != srcRelPath {
+		t.Errorf("expected the failed rewrite to stay pending, got %v", pending)
+	}
 }
 
 // TestDoRewrites_MissingSourceFile exercises the os.Open error branch.
@@ -227,11 +244,12 @@ func TestDoRewrites_MissingSourceFile(t *testing.T) {
 	}
 	cm, _ := newTestCMWithExecutor(t)
 
-	entry := config.RewriteEntry{Value: "out.cf", Mode: ""}
-	cm.State.CurrentActions.Rewrites["nonexistent.cf.in"] = entry
-
 	// Should not panic
-	cm.doRewrites(context.Background())
+	pending, err := cm.doRewrites(context.Background(),
+		[]plan.Rewrite{{Source: "nonexistent.cf.in", Target: "out.cf"}})
+	if err == nil || len(pending) != 1 {
+		t.Errorf("expected error and one pending rewrite, got %v, %v", pending, err)
+	}
 }
 
 // TestDoRewrites_MultipleFiles exercises the semaphore / WaitGroup path with
@@ -244,16 +262,20 @@ func TestDoRewrites_MultipleFiles(t *testing.T) {
 	baseDir := cm.mainConfig.BaseDir
 
 	// Create 6 source files (more than the semaphore size of 4)
+	var entries []plan.Rewrite
 	for i := 0; i < 6; i++ {
 		src := baseDir + "/" + string(rune('a'+i)) + ".in"
 		if err := os.WriteFile(src, []byte("content\n"), 0o644); err != nil {
 			t.Fatalf("create src: %v", err)
 		}
-		cm.State.CurrentActions.Rewrites[string(rune('a'+i))+".in"] =
-			config.RewriteEntry{Value: string(rune('a'+i)) + ".out", Mode: ""}
+		entries = append(entries, plan.Rewrite{
+			Source: string(rune('a'+i)) + ".in", Target: string(rune('a'+i)) + ".out",
+		})
 	}
 
-	cm.doRewrites(context.Background())
+	if _, err := cm.doRewrites(context.Background(), entries); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	// All destination files should exist
 	for i := 0; i < 6; i++ {
@@ -264,7 +286,8 @@ func TestDoRewrites_MultipleFiles(t *testing.T) {
 	}
 }
 
-// TestDoRewrites_CancelledContext exercises the ctx.Done() early-exit path.
+// TestDoRewrites_CancelledContext exercises the ctx.Done() early-exit path:
+// nothing runs and every rewrite stays pending.
 func TestDoRewrites_CancelledContext(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: configmgr test may have retry delays")
@@ -273,30 +296,36 @@ func TestDoRewrites_CancelledContext(t *testing.T) {
 	baseDir := cm.mainConfig.BaseDir
 
 	// Set up many rewrites so the loop actually checks ctx.Done()
+	var entries []plan.Rewrite
 	for i := 0; i < 10; i++ {
 		src := baseDir + "/" + string(rune('a'+i)) + ".in"
 		_ = os.WriteFile(src, []byte("content\n"), 0o644)
-		cm.State.CurrentActions.Rewrites[string(rune('a'+i))+".in"] =
-			config.RewriteEntry{Value: string(rune('a'+i)) + ".out", Mode: ""}
+		entries = append(entries, plan.Rewrite{
+			Source: string(rune('a'+i)) + ".in", Target: string(rune('a'+i)) + ".out",
+		})
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately
 
 	// Should not panic or deadlock
-	cm.doRewrites(ctx)
+	pending, _ := cm.doRewrites(ctx, entries)
+	if len(pending) != len(entries) {
+		t.Errorf("expected all %d rewrites pending, got %d", len(entries), len(pending))
+	}
 }
 
 // ---- doPostconf tests ----
 
-// TestDoPostconf_Empty exercises the early-return path (empty map).
+// TestDoPostconf_Empty exercises the early-return path (no entries).
 func TestDoPostconf_Empty(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
 	cm, exec := newTestCMWithExecutor(t)
-	// Postconf is empty by default
-	cm.doPostconf(context.Background())
+	if _, err := cm.doPostconf(context.Background(), nil); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
 	if len(exec.postconfOps) != 0 {
 		t.Errorf("expected 0 postconf ops, got %d", len(exec.postconfOps))
 	}
@@ -308,9 +337,8 @@ func TestDoPostconf_SingleLiteral(t *testing.T) {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
 	cm, exec := newTestCMWithExecutor(t)
-	cm.State.CurrentActions.Postconf["myhostname"] = "mail.example.com"
 
-	cm.doPostconf(context.Background())
+	_, _ = cm.doPostconf(context.Background(), []plan.Postconf{{Key: "myhostname", Value: "mail.example.com"}})
 
 	if len(exec.postconfOps) != 1 {
 		t.Fatalf("expected 1 postconf op, got %d", len(exec.postconfOps))
@@ -326,7 +354,7 @@ func TestDoPostconf_SingleLiteral(t *testing.T) {
 // TestDoPostconf_BooleanNormalization verifies that POSTCONF values resolved
 // from a typed lookup (VAR/LOCAL/FILE/MAPLOCAL) are normalized to Postfix
 // booleans (TRUE->yes, FALSE->no), while literal values pass through unchanged.
-// This mirrors the legacy Jython zmconfigd (jylibs/mtaconfig.py).
+// This mirrors the legacy zmconfigd (jylibs/mtaconfig.py).
 func TestDoPostconf_BooleanNormalization(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: configmgr test may have retry delays")
@@ -356,9 +384,7 @@ func TestDoPostconf_BooleanNormalization(t *testing.T) {
 				cm.mtaResolver.(*mockMtaResolver).values = map[string]string{valueKey: tt.resolved}
 			}
 
-			cm.State.CurrentActions.Postconf["param"] = tt.valueSpec
-
-			cm.doPostconf(context.Background())
+			_, _ = cm.doPostconf(context.Background(), []plan.Postconf{{Key: "param", Value: tt.valueSpec}})
 
 			if len(exec.postconfOps) != 1 {
 				t.Fatalf("expected 1 postconf op, got %d", len(exec.postconfOps))
@@ -376,39 +402,39 @@ func TestDoPostconf_MultipleEntries(t *testing.T) {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
 	cm, exec := newTestCMWithExecutor(t)
-	cm.State.CurrentActions.Postconf["myhostname"] = "mail.example.com"
-	cm.State.CurrentActions.Postconf["mydestination"] = "localhost"
-	cm.State.CurrentActions.Postconf["myorigin"] = "example.com"
 
-	cm.doPostconf(context.Background())
+	pending, _ := cm.doPostconf(context.Background(), []plan.Postconf{
+		{Key: "myhostname", Value: "mail.example.com"},
+		{Key: "mydestination", Value: "localhost"},
+		{Key: "myorigin", Value: "example.com"},
+	})
 
 	if len(exec.postconfOps) != 3 {
 		t.Errorf("expected 3 postconf ops, got %d", len(exec.postconfOps))
 	}
-	// State should be cleared after execution
-	if len(cm.State.CurrentActions.Postconf) != 0 {
-		t.Errorf("expected postconf cleared, got %d entries", len(cm.State.CurrentActions.Postconf))
+	// Nothing stays pending after a clean pass
+	if len(pending) != 0 {
+		t.Errorf("expected nothing pending, got %d entries", len(pending))
 	}
 }
 
 // TestDoPostconf_ExecutorError is a regression test: a failed postconf batch
-// must leave the pending directive intact (not cleared) so the next cycle
-// retries it, and the error must be returned rather than swallowed.
+// must leave the directive pending so the next cycle retries it, and the
+// error must be returned rather than swallowed.
 func TestDoPostconf_ExecutorError(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
 	cm, exec := newTestCMWithExecutor(t)
 	exec.postconfErr = &testError{msg: "postconf command failed"}
-	cm.State.CurrentActions.Postconf["key"] = "value"
 
-	err := cm.doPostconf(context.Background())
+	pending, err := cm.doPostconf(context.Background(), []plan.Postconf{{Key: "key", Value: "value"}})
 
 	if err == nil {
 		t.Error("expected doPostconf to return the batch error")
 	}
-	if _, ok := cm.State.CurrentActions.Postconf["key"]; !ok {
-		t.Error("expected postconf state to be retained after a failed batch so the next cycle retries")
+	if len(pending) != 1 || pending[0].Key != "key" {
+		t.Error("expected postconf to stay pending after a failed batch so the next cycle retries")
 	}
 }
 
@@ -420,14 +446,16 @@ func TestDoPostconf_ResolverError(t *testing.T) {
 	cm, exec := newTestCMWithExecutor(t)
 	// Override resolver to return an error
 	cm.mtaResolver = &mockMtaResolver{err: &testError{msg: "resolver failed"}}
-	// Use VAR type so it goes through the resolver
-	cm.State.CurrentActions.Postconf["somekey"] = "VAR:some_key"
 
-	cm.doPostconf(context.Background())
+	// Use VAR type so it goes through the resolver
+	pending, err := cm.doPostconf(context.Background(), []plan.Postconf{{Key: "somekey", Value: "VAR:some_key"}})
 
 	// No ops should be batched because resolver failed for all entries
 	if len(exec.postconfOps) != 0 {
 		t.Errorf("expected 0 ops when resolver fails, got %d", len(exec.postconfOps))
+	}
+	if err == nil || len(pending) != 1 {
+		t.Errorf("expected the resolver error and one pending entry, got %v, %v", pending, err)
 	}
 }
 
@@ -436,16 +464,20 @@ func TestDoPostconf_CancelledContext(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
-	cm, _ := newTestCMWithExecutor(t)
+	cm, exec := newTestCMWithExecutor(t)
+	var entries []plan.Postconf
 	for i := 0; i < 5; i++ {
-		cm.State.CurrentActions.Postconf[string(rune('a'+i))] = "val"
+		entries = append(entries, plan.Postconf{Key: string(rune('a' + i)), Value: "val"})
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	// Should not panic
-	cm.doPostconf(ctx)
+	// Should not panic; nothing is applied and everything stays pending
+	pending, _ := cm.doPostconf(ctx, entries)
+	if len(exec.postconfOps) != 0 || len(pending) != len(entries) {
+		t.Errorf("expected no ops and all pending, got %d ops, %d pending", len(exec.postconfOps), len(pending))
+	}
 }
 
 // ---- doPostconfd tests ----
@@ -456,7 +488,7 @@ func TestDoPostconfd_Empty(t *testing.T) {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
 	cm, exec := newTestCMWithExecutor(t)
-	cm.doPostconfd(context.Background())
+	_, _ = cm.doPostconfd(context.Background(), nil)
 	if len(exec.postconfdOps) != 0 {
 		t.Errorf("expected 0 postconfd ops, got %d", len(exec.postconfdOps))
 	}
@@ -468,9 +500,9 @@ func TestDoPostconfd_SingleEntry(t *testing.T) {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
 	cm, exec := newTestCMWithExecutor(t)
-	cm.State.CurrentActions.Postconfd["milter_default_action"] = "accept"
 
-	cm.doPostconfd(context.Background())
+	pending, _ := cm.doPostconfd(context.Background(),
+		[]plan.Postconfd{{Key: "milter_default_action", Value: "accept"}})
 
 	if len(exec.postconfdOps) != 1 {
 		t.Fatalf("expected 1 postconfd op, got %d", len(exec.postconfdOps))
@@ -478,9 +510,9 @@ func TestDoPostconfd_SingleEntry(t *testing.T) {
 	if exec.postconfdOps[0].Key != "milter_default_action" {
 		t.Errorf("expected key 'milter_default_action', got %q", exec.postconfdOps[0].Key)
 	}
-	// State should be cleared
-	if len(cm.State.CurrentActions.Postconfd) != 0 {
-		t.Errorf("expected postconfd cleared after execution")
+	// Nothing stays pending
+	if len(pending) != 0 {
+		t.Errorf("expected nothing pending after execution")
 	}
 }
 
@@ -490,10 +522,11 @@ func TestDoPostconfd_MultipleEntries(t *testing.T) {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
 	cm, exec := newTestCMWithExecutor(t)
-	cm.State.CurrentActions.Postconfd["key1"] = "v1"
-	cm.State.CurrentActions.Postconfd["key2"] = "v2"
 
-	cm.doPostconfd(context.Background())
+	_, _ = cm.doPostconfd(context.Background(), []plan.Postconfd{
+		{Key: "key1", Value: "v1"},
+		{Key: "key2", Value: "v2"},
+	})
 
 	if len(exec.postconfdOps) != 2 {
 		t.Errorf("expected 2 postconfd ops, got %d", len(exec.postconfdOps))
@@ -501,23 +534,22 @@ func TestDoPostconfd_MultipleEntries(t *testing.T) {
 }
 
 // TestDoPostconfd_ExecutorError is a regression test: a failed postconfd
-// batch must leave the pending directive intact (not cleared) so the next
-// cycle retries it, and the error must be returned rather than swallowed.
+// batch must leave the directive pending so the next cycle retries it, and
+// the error must be returned rather than swallowed.
 func TestDoPostconfd_ExecutorError(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
 	cm, exec := newTestCMWithExecutor(t)
 	exec.postconfdErr = &testError{msg: "postconfd failed"}
-	cm.State.CurrentActions.Postconfd["key"] = "val"
 
-	err := cm.doPostconfd(context.Background())
+	pending, err := cm.doPostconfd(context.Background(), []plan.Postconfd{{Key: "key", Value: "val"}})
 
 	if err == nil {
 		t.Error("expected doPostconfd to return the batch error")
 	}
-	if _, ok := cm.State.CurrentActions.Postconfd["key"]; !ok {
-		t.Error("expected postconfd state to be retained after a failed batch so the next cycle retries")
+	if len(pending) != 1 || pending[0].Key != "key" {
+		t.Error("expected postconfd to stay pending after a failed batch so the next cycle retries")
 	}
 }
 
@@ -526,24 +558,28 @@ func TestDoPostconfd_CancelledContext(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
-	cm, _ := newTestCMWithExecutor(t)
+	cm, exec := newTestCMWithExecutor(t)
+	var entries []plan.Postconfd
 	for i := 0; i < 5; i++ {
-		cm.State.CurrentActions.Postconfd[string(rune('a'+i))] = "val"
+		entries = append(entries, plan.Postconfd{Key: string(rune('a' + i)), Value: "val"})
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	cm.doPostconfd(ctx)
+	pending, _ := cm.doPostconfd(ctx, entries)
+	if len(exec.postconfdOps) != 0 || len(pending) != len(entries) {
+		t.Errorf("expected no ops and all pending, got %d ops, %d pending", len(exec.postconfdOps), len(pending))
+	}
 }
 
 // ---- doLdap tests ----
 
-// TestDoLdap_Empty exercises the early-return path (empty map).
+// TestDoLdap_Empty exercises the early-return path (no entries).
 func TestDoLdap_Empty(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
 	cm, exec := newTestCMWithExecutor(t)
-	cm.doLdap(context.Background())
+	_, _ = cm.doLdap(context.Background(), nil)
 	if len(exec.ldapOps) != 0 {
 		t.Errorf("expected 0 ldap ops, got %d", len(exec.ldapOps))
 	}
@@ -555,9 +591,8 @@ func TestDoLdap_SingleLiteralEntry(t *testing.T) {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
 	cm, exec := newTestCMWithExecutor(t)
-	cm.State.CurrentActions.Ldap["ldap_uri"] = "ldap://localhost"
 
-	cm.doLdap(context.Background())
+	_, _ = cm.doLdap(context.Background(), []plan.Ldap{{Key: "ldap_uri", Value: "ldap://localhost"}})
 
 	if len(exec.ldapOps) != 1 {
 		t.Fatalf("expected 1 ldap op, got %d", len(exec.ldapOps))
@@ -576,11 +611,12 @@ func TestDoLdap_MultipleEntries(t *testing.T) {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
 	cm, exec := newTestCMWithExecutor(t)
-	cm.State.CurrentActions.Ldap["key1"] = "val1"
-	cm.State.CurrentActions.Ldap["key2"] = "val2"
-	cm.State.CurrentActions.Ldap["key3"] = "val3"
 
-	cm.doLdap(context.Background())
+	_, _ = cm.doLdap(context.Background(), []plan.Ldap{
+		{Key: "key1", Value: "val1"},
+		{Key: "key2", Value: "val2"},
+		{Key: "key3", Value: "val3"},
+	})
 
 	if len(exec.ldapOps) != 3 {
 		t.Errorf("expected 3 ldap ops, got %d", len(exec.ldapOps))
@@ -588,20 +624,19 @@ func TestDoLdap_MultipleEntries(t *testing.T) {
 }
 
 // TestDoLdap_ExecutorError exercises the ExecuteLdapWrite error path
-// (key should NOT be removed from state on failure).
+// (the entry must stay pending on failure).
 func TestDoLdap_ExecutorError(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
 	cm, exec := newTestCMWithExecutor(t)
 	exec.ldapErr = &testError{msg: "ldap write failed"}
-	cm.State.CurrentActions.Ldap["ldap_uri"] = "ldap://localhost"
 
-	cm.doLdap(context.Background())
+	pending, err := cm.doLdap(context.Background(), []plan.Ldap{{Key: "ldap_uri", Value: "ldap://localhost"}})
 
-	// Key should still be in state since write failed
-	if _, ok := cm.State.CurrentActions.Ldap["ldap_uri"]; !ok {
-		t.Error("expected key to remain in state after failed ldap write")
+	// Entry should still be pending since write failed
+	if err == nil || len(pending) != 1 || pending[0].Key != "ldap_uri" {
+		t.Errorf("expected entry to remain pending after failed ldap write, got %v, %v", pending, err)
 	}
 }
 
@@ -613,13 +648,15 @@ func TestDoLdap_ResolverError(t *testing.T) {
 	cm, exec := newTestCMWithExecutor(t)
 	// Override resolver to return an error
 	cm.mtaResolver = &mockMtaResolver{err: &testError{msg: "resolver failed"}}
-	cm.State.CurrentActions.Ldap["somekey"] = "VAR:some_key"
 
-	cm.doLdap(context.Background())
+	pending, err := cm.doLdap(context.Background(), []plan.Ldap{{Key: "somekey", Value: "VAR:some_key"}})
 
 	// No ldap ops should be executed
 	if len(exec.ldapOps) != 0 {
 		t.Errorf("expected 0 ldap ops when resolver fails, got %d", len(exec.ldapOps))
+	}
+	if err == nil || len(pending) != 1 {
+		t.Errorf("expected the resolver error and one pending entry, got %v, %v", pending, err)
 	}
 }
 
@@ -628,88 +665,65 @@ func TestDoLdap_CancelledContext(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
-	cm, _ := newTestCMWithExecutor(t)
+	cm, exec := newTestCMWithExecutor(t)
+	var entries []plan.Ldap
 	for i := 0; i < 5; i++ {
-		cm.State.CurrentActions.Ldap[string(rune('a'+i))] = "val"
+		entries = append(entries, plan.Ldap{Key: string(rune('a' + i)), Value: "val"})
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	cm.doLdap(ctx)
+	pending, _ := cm.doLdap(ctx, entries)
+	if len(exec.ldapOps) != 0 || len(pending) != len(entries) {
+		t.Errorf("expected no ops and all pending, got %d ops, %d pending", len(exec.ldapOps), len(pending))
+	}
 }
 
-// TestDoLdap_SuccessfulWriteDeletesKey exercises the DelLdap path.
-func TestDoLdap_SuccessfulWriteDeletesKey(t *testing.T) {
+// TestDoLdap_SuccessfulWriteLeavesNothingPending checks that a successful
+// write is not retried.
+func TestDoLdap_SuccessfulWriteLeavesNothingPending(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
 	cm, _ := newTestCMWithExecutor(t)
-	cm.State.CurrentActions.Ldap["ldap_uri"] = "ldap://localhost"
 
-	cm.doLdap(context.Background())
+	pending, err := cm.doLdap(context.Background(), []plan.Ldap{{Key: "ldap_uri", Value: "ldap://localhost"}})
 
-	// Key should be deleted from state after successful write
-	if _, ok := cm.State.CurrentActions.Ldap["ldap_uri"]; ok {
-		t.Error("expected key to be deleted from state after successful ldap write")
+	if err != nil || len(pending) != 0 {
+		t.Errorf("expected nothing pending after successful ldap write, got %v, %v", pending, err)
 	}
 }
 
 // ---- doMapfile tests ----
+//
+// Which sections contribute mapfile entries (changed vs unchanged vs first
+// run, MAP* vs other var types) is decided by plan.Compute and covered by
+// TestCompute_MapfileOpsAndHeal in internal/plan; doMapfile only executes the
+// entries it is given.
 
-// TestDoMapfile_NoSections exercises the loop body not executing (no sections).
-func TestDoMapfile_NoSections(t *testing.T) {
+// TestDoMapfile_NoEntries exercises the empty plan.
+func TestDoMapfile_NoEntries(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
 	cm, exec := newTestCMWithExecutor(t)
-	// MtaConfig.Sections is empty by default
-	cm.doMapfile(context.Background())
+	if err := cm.doMapfile(context.Background(), nil); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
 	if len(exec.mapfileOps) != 0 {
 		t.Errorf("expected 0 mapfile ops, got %d", len(exec.mapfileOps))
 	}
 }
 
-// TestDoMapfile_SectionNotChanged_NotFirstRun exercises the "skip unchanged" branch.
-func TestDoMapfile_SectionNotChanged_NotFirstRun(t *testing.T) {
+// TestDoMapfile_MAPFILE exercises the MAPFILE path.
+func TestDoMapfile_MAPFILE(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
 	cm, exec := newTestCMWithExecutor(t)
-	cm.State.FirstRun = false
 
-	section := &config.MtaConfigSection{
-		Name:    "mta",
-		Changed: false,
-		RequiredVars: map[string]string{
-			"someVar": configTypeMAPFILE,
-		},
+	if err := cm.doMapfile(context.Background(), []plan.Mapfile{{Key: "myVar", Sections: []string{"mta"}}}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	cm.State.MtaConfig.Sections["mta"] = section
-
-	cm.doMapfile(context.Background())
-
-	if len(exec.mapfileOps) != 0 {
-		t.Errorf("expected 0 mapfile ops for unchanged section, got %d", len(exec.mapfileOps))
-	}
-}
-
-// TestDoMapfile_SectionChanged_MAPFILE exercises the MAPFILE path.
-func TestDoMapfile_SectionChanged_MAPFILE(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
-	cm, exec := newTestCMWithExecutor(t)
-	cm.State.FirstRun = false
-
-	section := &config.MtaConfigSection{
-		Name:    "mta",
-		Changed: true,
-		RequiredVars: map[string]string{
-			"myVar": configTypeMAPFILE,
-		},
-	}
-	cm.State.MtaConfig.Sections["mta"] = section
-
-	cm.doMapfile(context.Background())
 
 	if len(exec.mapfileOps) != 1 {
 		t.Fatalf("expected 1 mapfile op, got %d", len(exec.mapfileOps))
@@ -722,24 +736,17 @@ func TestDoMapfile_SectionChanged_MAPFILE(t *testing.T) {
 	}
 }
 
-// TestDoMapfile_SectionChanged_MAPLOCAL exercises the MAPLOCAL (isLocal=true) path.
-func TestDoMapfile_SectionChanged_MAPLOCAL(t *testing.T) {
+// TestDoMapfile_MAPLOCAL exercises the MAPLOCAL (isLocal=true) path.
+func TestDoMapfile_MAPLOCAL(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
 	cm, exec := newTestCMWithExecutor(t)
-	cm.State.FirstRun = false
 
-	section := &config.MtaConfigSection{
-		Name:    "proxy",
-		Changed: true,
-		RequiredVars: map[string]string{
-			"localVar": configTypeMAPLOCAL,
-		},
+	if err := cm.doMapfile(context.Background(),
+		[]plan.Mapfile{{Key: "localVar", Local: true, Sections: []string{"proxy"}}}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	cm.State.MtaConfig.Sections["proxy"] = section
-
-	cm.doMapfile(context.Background())
 
 	if len(exec.mapfileOps) != 1 {
 		t.Fatalf("expected 1 mapfile op, got %d", len(exec.mapfileOps))
@@ -749,77 +756,22 @@ func TestDoMapfile_SectionChanged_MAPLOCAL(t *testing.T) {
 	}
 }
 
-// TestDoMapfile_FirstRun_SectionNotChanged exercises first-run override of Changed.
-func TestDoMapfile_FirstRun_SectionNotChanged(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
-	cm, exec := newTestCMWithExecutor(t)
-	cm.State.FirstRun = true
-
-	section := &config.MtaConfigSection{
-		Name:    "mta",
-		Changed: false, // NOT changed, but FirstRun overrides
-		RequiredVars: map[string]string{
-			"someVar": configTypeMAPFILE,
-		},
-	}
-	cm.State.MtaConfig.Sections["mta"] = section
-
-	cm.doMapfile(context.Background())
-
-	// FirstRun should process all sections regardless of Changed
-	if len(exec.mapfileOps) != 1 {
-		t.Errorf("expected 1 mapfile op on first run, got %d", len(exec.mapfileOps))
-	}
-}
-
-// TestDoMapfile_SkipsNonMapfileVars exercises the var-type filter (skip non-MAP* types).
-func TestDoMapfile_SkipsNonMapfileVars(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
-	cm, exec := newTestCMWithExecutor(t)
-	cm.State.FirstRun = false
-
-	section := &config.MtaConfigSection{
-		Name:    "mta",
-		Changed: true,
-		RequiredVars: map[string]string{
-			"varA": "VAR",
-			"varB": "LOCAL",
-			"varC": configTypeMAPFILE, // only this one should trigger
-		},
-	}
-	cm.State.MtaConfig.Sections["mta"] = section
-
-	cm.doMapfile(context.Background())
-
-	if len(exec.mapfileOps) != 1 {
-		t.Errorf("expected 1 mapfile op (only MAP* types), got %d", len(exec.mapfileOps))
-	}
-}
-
-// TestDoMapfile_ExecutorError exercises the error logging path (no panic).
+// TestDoMapfile_ExecutorError checks that a failing executor is reported and
+// does not stop the remaining entries.
 func TestDoMapfile_ExecutorError(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
 	cm, exec := newTestCMWithExecutor(t)
 	exec.mapfileErr = &testError{msg: "mapfile failed"}
-	cm.State.FirstRun = false
 
-	section := &config.MtaConfigSection{
-		Name:    "mta",
-		Changed: true,
-		RequiredVars: map[string]string{
-			"myVar": configTypeMAPFILE,
-		},
+	err := cm.doMapfile(context.Background(), []plan.Mapfile{{Key: "a"}, {Key: "b"}})
+	if err == nil {
+		t.Error("expected the executor error to be returned")
 	}
-	cm.State.MtaConfig.Sections["mta"] = section
-
-	// Should not panic
-	cm.doMapfile(context.Background())
+	if len(exec.mapfileOps) != 2 {
+		t.Errorf("expected both entries to be attempted, got %d", len(exec.mapfileOps))
+	}
 }
 
 // TestDoMapfile_CancelledContext exercises the ctx.Done() check.
@@ -827,45 +779,177 @@ func TestDoMapfile_CancelledContext(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
-	cm, _ := newTestCMWithExecutor(t)
-	cm.State.FirstRun = false
+	cm, exec := newTestCMWithExecutor(t)
 
+	var entries []plan.Mapfile
 	for i := 0; i < 5; i++ {
-		section := &config.MtaConfigSection{
-			Name:    string(rune('a' + i)),
-			Changed: true,
-			RequiredVars: map[string]string{
-				"var": configTypeMAPFILE,
-			},
-		}
-		cm.State.MtaConfig.Sections[string(rune('a'+i))] = section
+		entries = append(entries, plan.Mapfile{Key: string(rune('a' + i))})
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	cm.doMapfile(ctx)
+	_ = cm.doMapfile(ctx, entries)
+	if len(exec.mapfileOps) != 0 {
+		t.Errorf("expected no mapfile ops after cancellation, got %d", len(exec.mapfileOps))
+	}
 }
 
-// ---- DoRestarts extended tests ----
+// ---- ApplyRestarts tests ----
 
-// TestDoRestarts_WithAddRestartError exercises the AddRestart error path.
-func TestDoRestarts_WithAddRestartError(t *testing.T) {
+// newRestartTestCM returns a ConfigManager with restarts enabled that queues
+// restarts on mgr through the restart policy.
+func newRestartTestCM(mgr *testutil.MockServiceManager) *ConfigManager {
+	cm := &ConfigManager{
+		env:        hostEnv(),
+		mainConfig: &config.Config{BaseDir: "/tmp", Hostname: "testhost", RestartConfig: true},
+		State:      state.NewState(),
+		ServiceMgr: mgr,
+		Cache:      cache.New(context.Background(), false),
+	}
+	cm.policy = restart.New(cm.ServiceMgr, cm.env.Clock)
+
+	return cm
+}
+
+// TestApplyRestarts_QueuesPlanRestarts checks that every restart of the plan is
+// queued on the service manager with its reasons and then processed.
+func TestApplyRestarts_QueuesPlanRestarts(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
-	ctx := context.Background()
-	cacheInstance := cache.New(ctx, false)
 
-	cm := &ConfigManager{
-		env:        hostEnv(),
-		mainConfig: &config.Config{BaseDir: "/tmp", Hostname: "testhost"},
-		State:      state.NewState(),
-		ServiceMgr: &testutil.MockServiceManager{},
-		Cache:      cacheInstance,
+	var (
+		queued    = map[string][]string{}
+		processed int
+	)
+
+	mgr := &testutil.MockServiceManager{
+		AddRestartWithReasonsFn: func(_ context.Context, svc string, reasons []string) error {
+			queued[svc] = reasons
+			return nil
+		},
+		ProcessRestartsFn: func(_ context.Context, _ func(string) string) error {
+			processed++
+			return nil
+		},
 	}
-	cm.State.CurrentActions.Restarts = map[string]int{"nginx": 1}
-	// DoRestarts should handle AddRestart error (logged, no panic)
-	cm.DoRestarts(ctx)
+	cm := newRestartTestCM(mgr)
+
+	pl := &plan.Plan{Restarts: []plan.Restart{{
+		Service: "nginx", Action: plan.ActionRestart,
+		Reasons: []plan.Reason{{Kind: plan.ReasonForced, Section: "proxy"}},
+	}}}
+	cm.ApplyRestarts(context.Background(), pl)
+
+	if _, ok := queued["nginx"]; !ok || len(queued["nginx"]) == 0 {
+		t.Errorf("expected nginx queued with reasons, got %v", queued)
+	}
+	if processed != 1 {
+		t.Errorf("expected ProcessRestarts to run once, ran %d", processed)
+	}
+	if len(cm.carry.Restarts) != 0 {
+		t.Errorf("expected nothing carried, got %v", cm.carry.Restarts)
+	}
+}
+
+// TestApplyRestarts_AddRestartError exercises the queue error path: the
+// failed restart is carried into the next cycle and nothing panics.
+func TestApplyRestarts_AddRestartError(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: configmgr test may have retry delays")
+	}
+
+	mgr := &testutil.MockServiceManager{
+		AddRestartWithReasonsFn: func(_ context.Context, _ string, _ []string) error {
+			return &testError{msg: "add restart failed"}
+		},
+	}
+	cm := newRestartTestCM(mgr)
+
+	cm.ApplyRestarts(context.Background(), &plan.Plan{
+		Restarts: []plan.Restart{{Service: "nginx", Action: plan.ActionRestart}},
+	})
+
+	if len(cm.carry.Restarts) != 1 || cm.carry.Restarts[0].Service != "nginx" {
+		t.Errorf("expected the refused restart to be carried, got %v", cm.carry.Restarts)
+	}
+}
+
+// TestApplyRestarts_ProcessRestartsError exercises the ProcessRestarts error
+// logging branch (no panic).
+func TestApplyRestarts_ProcessRestartsError(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: configmgr test may have retry delays")
+	}
+
+	mgr := &testutil.MockServiceManager{
+		ProcessRestartsFn: func(_ context.Context, _ func(string) string) error {
+			return &testError{msg: "process restarts failed"}
+		},
+	}
+	cm := newRestartTestCM(mgr)
+
+	cm.ApplyRestarts(context.Background(), &plan.Plan{})
+}
+
+// captureRestartLookup applies an empty plan whose snapshot enables the given
+// services and returns the configLookup handed to ProcessRestarts.
+func captureRestartLookup(t *testing.T, enabled ...string) func(string) string {
+	t.Helper()
+
+	var captured func(string) string
+
+	mgr := &testutil.MockServiceManager{
+		ProcessRestartsFn: func(_ context.Context, configLookup func(string) string) error {
+			captured = configLookup
+			return nil
+		},
+	}
+	cm := newRestartTestCM(mgr)
+
+	cm.ApplyRestarts(context.Background(), &plan.Plan{Enabled: enabled})
+
+	if captured == nil {
+		t.Fatal("expected ProcessRestarts to be called with a configLookup")
+	}
+
+	return captured
+}
+
+// TestApplyRestarts_ConfigLookup_ServiceEnabled exercises the SERVICE_ lookup
+// of the cascade: services enabled in the plan answer "enabled", every other
+// key "disabled".
+func TestApplyRestarts_ConfigLookup_ServiceEnabled(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: configmgr test may have retry delays")
+	}
+
+	lookup := captureRestartLookup(t, "mta", "nginx")
+
+	if got := lookup("SERVICE_MTA"); got != "enabled" {
+		t.Errorf("expected 'enabled' for SERVICE_MTA (service enabled), got %q", got)
+	}
+	if got := lookup("SERVICE_NGINX"); got != "enabled" {
+		t.Errorf("SERVICE_NGINX lookup: got %q, want %q", got, "enabled")
+	}
+
+	// Non-SERVICE_ prefix — "disabled"
+	if got := lookup("SHORT"); got != "disabled" {
+		t.Errorf("expected 'disabled' for short key, got %q", got)
+	}
+	if got := lookup("OTHER_KEY"); got != "disabled" {
+		t.Errorf("OTHER_KEY lookup: got %q, want %q", got, "disabled")
+	}
+
+	// SERVICE_ key of a service that is not enabled — "disabled"
+	if got := lookup("SERVICE_PROXY"); got != "disabled" {
+		t.Errorf("expected 'disabled' for disabled service, got %q", got)
+	}
+
+	// "SERVICE_" without a service name — "disabled"
+	if got := lookup("SERVICE_"); got != "disabled" {
+		t.Errorf("SERVICE_ (empty suffix) lookup: got %q, want %q", got, "disabled")
+	}
 }
 
 // ---- cleanupRewriteFiles extended tests ----
@@ -908,18 +992,18 @@ func TestParseLocalConfigOutput_ValidInput(t *testing.T) {
 	cm := newTestConfigManager(t)
 
 	output := "key1 = value1\nkey2 = value2\nkey3 = value with spaces"
-	err := cm.parseLocalConfigOutput(context.Background(), output)
+	data, err := cm.parseLocalConfigOutput(context.Background(), output)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cm.State.LocalConfig.Data.GetOr("key1", "") != "value1" {
-		t.Errorf("expected key1=value1, got %q", cm.State.LocalConfig.Data.GetOr("key1", ""))
+	if data["key1"] != "value1" {
+		t.Errorf("expected key1=value1, got %q", data["key1"])
 	}
-	if cm.State.LocalConfig.Data.GetOr("key2", "") != "value2" {
-		t.Errorf("expected key2=value2, got %q", cm.State.LocalConfig.Data.GetOr("key2", ""))
+	if data["key2"] != "value2" {
+		t.Errorf("expected key2=value2, got %q", data["key2"])
 	}
-	if cm.State.LocalConfig.Data.GetOr("key3", "") != "value with spaces" {
-		t.Errorf("expected 'value with spaces', got %q", cm.State.LocalConfig.Data.GetOr("key3", ""))
+	if data["key3"] != "value with spaces" {
+		t.Errorf("expected 'value with spaces', got %q", data["key3"])
 	}
 }
 
@@ -932,7 +1016,7 @@ func TestParseLocalConfigOutput_EmptyOutput(t *testing.T) {
 
 	// Only whitespace — TrimSpace then Split gives [""] — len==1 non-empty slice but
 	// no parseable pairs, so the map stays empty; this should NOT error.
-	err := cm.parseLocalConfigOutput(context.Background(), "   ")
+	_, err := cm.parseLocalConfigOutput(context.Background(), "   ")
 	// The function only errors if lines length is 0, which won't happen after split.
 	// This just verifies no panic and returns a valid (possibly empty) state.
 	_ = err
@@ -947,17 +1031,17 @@ func TestParseLocalConfigOutput_MalformedLines(t *testing.T) {
 
 	// Mix of valid and malformed lines
 	output := "valid = value\nmalformed_no_equals\nanother = good"
-	err := cm.parseLocalConfigOutput(context.Background(), output)
+	data, err := cm.parseLocalConfigOutput(context.Background(), output)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cm.State.LocalConfig.Data.GetOr("valid", "") != "value" {
-		t.Errorf("expected valid=value, got %q", cm.State.LocalConfig.Data.GetOr("valid", ""))
+	if data["valid"] != "value" {
+		t.Errorf("expected valid=value, got %q", data["valid"])
 	}
-	if cm.State.LocalConfig.Data.GetOr("another", "") != "good" {
-		t.Errorf("expected another=good, got %q", cm.State.LocalConfig.Data.GetOr("another", ""))
+	if data["another"] != "good" {
+		t.Errorf("expected another=good, got %q", data["another"])
 	}
-	if _, ok := cm.State.LocalConfig.Data.Get("malformed_no_equals"); ok {
+	if _, ok := data["malformed_no_equals"]; ok {
 		t.Error("malformed line should not be in data map")
 	}
 }
@@ -1064,31 +1148,32 @@ func TestRunProxygenWithConfigs_LoadConfigurationError(t *testing.T) {
 	// Main goal: no panic, error is returned (not deadlock)
 }
 
-// ---- DoConfigRewrites integration tests ----
+// ---- Execute integration tests ----
 
-// TestDoConfigRewrites_AllEmpty exercises DoConfigRewrites when all actions are empty.
-func TestDoConfigRewrites_AllEmpty(t *testing.T) {
+// TestExecute_AllEmpty exercises Execute when the plan has no actions.
+func TestExecute_AllEmpty(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
 	cm, _ := newTestCMWithExecutor(t)
-	// All action maps are empty — all goroutines return immediately.
-	err := cm.DoConfigRewrites(context.Background())
+	// All plan slices are empty — all goroutines return immediately.
+	err := cm.Execute(context.Background(), &plan.Plan{})
 	if err != nil {
 		t.Errorf("expected no error, got %v", err)
 	}
 }
 
-// TestDoConfigRewrites_WithPostconfAndLdap exercises concurrent execution with real operations.
-func TestDoConfigRewrites_WithPostconfAndLdap(t *testing.T) {
+// TestExecute_WithPostconfAndLdap exercises concurrent execution with real operations.
+func TestExecute_WithPostconfAndLdap(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
 	cm, exec := newTestCMWithExecutor(t)
-	cm.State.CurrentActions.Postconf["myhostname"] = "mail.example.com"
-	cm.State.CurrentActions.Ldap["ldap_uri"] = "ldap://localhost"
 
-	err := cm.DoConfigRewrites(context.Background())
+	err := cm.Execute(context.Background(), &plan.Plan{
+		Postconf: []plan.Postconf{{Key: "myhostname", Value: "mail.example.com"}},
+		Ldap:     []plan.Ldap{{Key: "ldap_uri", Value: "ldap://localhost"}},
+	})
 	if err != nil {
 		t.Errorf("expected no error, got %v", err)
 	}
@@ -1124,24 +1209,22 @@ func (o *orderingExecutor) ExecutePostconfBatch(ctx context.Context, ops []mtaop
 	return o.mockMtaExecutor.ExecutePostconfBatch(ctx, ops)
 }
 
-// TestDoConfigRewrites_MapfilesBeforeOtherSteps pins the legacy order: mapped
+// TestExecute_MapfilesBeforeOtherSteps pins the legacy order: mapped
 // files (dhparam.pem) are written before any other step runs, because proxygen
 // and rewrites read them; legacy writes them while compiling actions.
-func TestDoConfigRewrites_MapfilesBeforeOtherSteps(t *testing.T) {
+func TestExecute_MapfilesBeforeOtherSteps(t *testing.T) {
 	cm, _ := newTestCMWithExecutor(t)
 	exec := &orderingExecutor{postconfStarted: make(chan struct{})}
 	cm.mtaExecutor = exec
-	cm.State.FirstRun = false
-	cm.State.GlobalConfig.Data.Set(dhParamKey, "ZGF0YQ==")
-	cm.State.MtaConfig.Sections["mta"] = &config.MtaConfigSection{
-		Name:         "mta",
-		Changed:      true,
-		RequiredVars: map[string]string{dhParamKey: configTypeMAPFILE},
-	}
-	cm.State.CurrentActions.Postconf["myhostname"] = "mail.example.com"
+	setGlobal(cm, map[string]string{dhParamKey: "ZGF0YQ=="})
 
-	if err := cm.DoConfigRewrites(context.Background()); err != nil {
-		t.Fatalf("DoConfigRewrites: %v", err)
+	pl := &plan.Plan{
+		Mapfiles: []plan.Mapfile{{Key: dhParamKey, Sections: []string{"mta"}}},
+		Postconf: []plan.Postconf{{Key: "myhostname", Value: "mail.example.com"}},
+	}
+
+	if err := cm.Execute(context.Background(), pl); err != nil {
+		t.Fatalf("Execute: %v", err)
 	}
 
 	if len(exec.mapfileOps) != 1 || len(exec.postconfOps) != 1 {
@@ -1150,171 +1233,6 @@ func TestDoConfigRewrites_MapfilesBeforeOtherSteps(t *testing.T) {
 
 	if exec.overlapped.Load() {
 		t.Error("postconf started before the mapped file was written")
-	}
-}
-
-// ---- DoRestarts extended tests (configLookup closure coverage) ----
-
-// TestDoRestarts_AddRestartError exercises the AddRestart error logging branch.
-func TestDoRestarts_AddRestartError(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
-	ctx := context.Background()
-	cacheInstance := cache.New(ctx, false)
-
-	mgr := &testutil.MockServiceManager{
-		AddRestartFn: func(_ context.Context, _ string) error {
-			return &testError{msg: "add restart failed"}
-		},
-	}
-
-	cm := &ConfigManager{
-		env:        hostEnv(),
-		mainConfig: &config.Config{BaseDir: "/tmp", Hostname: "testhost"},
-		State:      state.NewState(),
-		ServiceMgr: mgr,
-		Cache:      cacheInstance,
-	}
-	cm.State.CurrentActions.Restarts = map[string]int{"nginx": 1}
-
-	// Should not panic — error is logged with WarnContext
-	cm.DoRestarts(ctx)
-}
-
-// TestDoRestarts_ProcessRestartsError exercises the ProcessRestarts error logging branch.
-func TestDoRestarts_ProcessRestartsError(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
-	ctx := context.Background()
-	cacheInstance := cache.New(ctx, false)
-
-	mgr := &testutil.MockServiceManager{
-		ProcessRestartsFn: func(_ context.Context, _ func(string) string) error {
-			return &testError{msg: "process restarts failed"}
-		},
-	}
-
-	cm := &ConfigManager{
-		env:        hostEnv(),
-		mainConfig: &config.Config{BaseDir: "/tmp", Hostname: "testhost"},
-		State:      state.NewState(),
-		ServiceMgr: mgr,
-		Cache:      cacheInstance,
-	}
-
-	// Should not panic — error is logged with ErrorContext
-	cm.DoRestarts(ctx)
-}
-
-// TestDoRestarts_ConfigLookup_ServiceEnabled exercises the SERVICE_ lookup path
-// inside the configLookup closure. LookUpConfig for SERVICE returns "TRUE"/"FALSE",
-// not "enabled", so the closure always returns "disabled" — but the code path
-// for the SERVICE_ key parsing (len>8, lowercase) is still exercised.
-func TestDoRestarts_ConfigLookup_ServiceEnabled(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
-	ctx := context.Background()
-	cacheInstance := cache.New(ctx, false)
-
-	var capturedLookup func(string) string
-	capturedMgr := &testutil.MockServiceManager{
-		ProcessRestartsFn: func(_ context.Context, configLookup func(string) string) error {
-			capturedLookup = configLookup
-			return nil
-		},
-	}
-
-	cm := &ConfigManager{
-		env:        hostEnv(),
-		mainConfig: &config.Config{BaseDir: "/tmp", Hostname: "testhost"},
-		State:      state.NewState(),
-		ServiceMgr: capturedMgr,
-		Cache:      cacheInstance,
-	}
-
-	// Put "mta" into ServiceConfig — LookUpConfig("SERVICE","mta") will return "TRUE"
-	cm.State.ServerConfig.ServiceConfig.Set("mta", "zimbraServiceEnabled")
-
-	cm.DoRestarts(ctx)
-
-	if capturedLookup == nil {
-		t.Fatal("expected ProcessRestarts to be called with a configLookup")
-	}
-
-	// SERVICE_MTA: service exists → LookUpConfig returns "TRUE" → closure returns "enabled"
-	result := capturedLookup("SERVICE_MTA")
-	if result != "enabled" {
-		t.Errorf("expected 'enabled' for SERVICE_MTA (service registered), got %q", result)
-	}
-
-	// Non-SERVICE_ prefix — length ≤ 8 → "disabled"
-	result2 := capturedLookup("SHORT")
-	if result2 != "disabled" {
-		t.Errorf("expected 'disabled' for short key, got %q", result2)
-	}
-
-	// SERVICE_ key with no service — "disabled"
-	result3 := capturedLookup("SERVICE_PROXY")
-	if result3 != "disabled" {
-		t.Errorf("expected 'disabled' for disabled service, got %q", result3)
-	}
-}
-
-// TestDoRestarts_ConfigLookup_ServiceEnabledPath exercises the configLookup closure
-// captured via ProcessRestartsFn. LookUpConfig for SERVICE always returns "TRUE"/"FALSE",
-// never "enabled", so the closure always returns "disabled". We verify the SERVICE_
-// key parsing and boundary cases are exercised.
-func TestDoRestarts_ConfigLookup_ServiceEnabledPath(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
-	ctx := context.Background()
-	cacheInstance := cache.New(ctx, false)
-
-	var capturedLookup func(string) string
-	captureMgr := &testutil.MockServiceManager{
-		ProcessRestartsFn: func(_ context.Context, configLookup func(string) string) error {
-			capturedLookup = configLookup
-			return nil
-		},
-	}
-
-	cm := &ConfigManager{
-		env:        hostEnv(),
-		mainConfig: &config.Config{BaseDir: "/tmp", Hostname: "testhost"},
-		State:      state.NewState(),
-		ServiceMgr: captureMgr,
-		Cache:      cacheInstance,
-	}
-
-	// "nginx" in ServiceConfig — LookUpConfig returns "TRUE" not "enabled"
-	cm.State.ServerConfig.ServiceConfig.Set("nginx", "zimbraServiceEnabled")
-
-	cm.DoRestarts(ctx)
-
-	if capturedLookup == nil {
-		t.Fatal("expected ProcessRestarts to be called with a configLookup")
-	}
-
-	// SERVICE_NGINX: exists in ServiceConfig → LookUpConfig returns "TRUE" → closure returns "enabled"
-	got := capturedLookup("SERVICE_NGINX")
-	if got != "enabled" {
-		t.Errorf("SERVICE_NGINX lookup: got %q, want %q", got, "enabled")
-	}
-
-	// Non-SERVICE_ prefix key — "disabled"
-	got2 := capturedLookup("OTHER_KEY")
-	if got2 != "disabled" {
-		t.Errorf("OTHER_KEY lookup: got %q, want %q", got2, "disabled")
-	}
-
-	// "SERVICE_" exactly 8 chars — len(key)==8 is NOT > 8, so returns "disabled"
-	got3 := capturedLookup("SERVICE_")
-	if got3 != "disabled" {
-		t.Errorf("SERVICE_ (empty suffix) lookup: got %q, want %q", got3, "disabled")
 	}
 }
 
@@ -1392,7 +1310,9 @@ func TestProcessRewrite_SuccessfulRename(t *testing.T) {
 	}
 
 	entry := config.RewriteEntry{Value: destRelPath, Mode: ""}
-	cm.processRewrite(context.Background(), srcRelPath, entry)
+	if err := cm.processRewrite(context.Background(), srcRelPath, entry); err != nil {
+		t.Fatalf("processRewrite: %v", err)
+	}
 
 	// Destination file should exist
 	destContent, err := os.ReadFile(baseDir + "/" + destRelPath)
@@ -1405,10 +1325,6 @@ func TestProcessRewrite_SuccessfulRename(t *testing.T) {
 	// Legacy state.py:775 default mode is 0440.
 	if fi, err := os.Stat(baseDir + "/" + destRelPath); err != nil || fi.Mode().Perm() != 0o440 {
 		t.Errorf("default rewrite mode = %v (err %v), want 0440", fi.Mode().Perm(), err)
-	}
-	// Rewrite should have called DelRewrite
-	if _, ok := cm.State.CurrentActions.Rewrites[srcRelPath]; ok {
-		t.Error("expected srcRelPath to be removed from rewrites after processRewrite")
 	}
 }
 
@@ -1427,8 +1343,10 @@ func TestProcessRewrite_InvalidMode(t *testing.T) {
 	}
 
 	entry := config.RewriteEntry{Value: destRelPath, Mode: "INVALID"}
-	// Should not panic — logs error and returns
-	cm.processRewrite(context.Background(), srcRelPath, entry)
+	// Should not panic — the error is returned
+	if err := cm.processRewrite(context.Background(), srcRelPath, entry); err == nil {
+		t.Error("expected an error for an invalid mode")
+	}
 
 	// Destination should NOT exist (function returned early)
 	if _, err := os.Stat(baseDir + "/" + destRelPath); err == nil {
@@ -1445,7 +1363,9 @@ func TestProcessRewrite_MissingSourceFile(t *testing.T) {
 
 	entry := config.RewriteEntry{Value: "out.cf", Mode: ""}
 	// Should not panic
-	cm.processRewrite(context.Background(), "nonexistent_source.cf.in", entry)
+	if err := cm.processRewrite(context.Background(), "nonexistent_source.cf.in", entry); err == nil {
+		t.Error("expected an error for a missing source file")
+	}
 }
 
 // TestProcessRewrite_ExplicitMode verifies the 0600 mode is applied correctly.
@@ -1463,7 +1383,9 @@ func TestProcessRewrite_ExplicitMode(t *testing.T) {
 	}
 
 	entry := config.RewriteEntry{Value: destRelPath, Mode: "0600"}
-	cm.processRewrite(context.Background(), srcRelPath, entry)
+	if err := cm.processRewrite(context.Background(), srcRelPath, entry); err != nil {
+		t.Fatalf("processRewrite: %v", err)
+	}
 
 	info, err := os.Stat(baseDir + "/" + destRelPath)
 	if err != nil {
@@ -1528,7 +1450,7 @@ func TestLoadAllConfigsWithRetry_LdapReadTimeoutParsing(t *testing.T) {
 	}
 	cm := newTestConfigManager(t)
 	// Set a valid ldap_read_timeout so the Atoi branch is taken
-	cm.State.LocalConfig.Data.Set("ldap_read_timeout", "30000") // Pre-cache local config so it doesn't fail on XML load
+	setLocal(cm, map[string]string{"ldap_read_timeout": "30000"}) // Pre-cache local config so it doesn't fail on XML load
 	cm.cachedLocalConfigOutput = "ldap_read_timeout = 30000\nkey = val"
 
 	err := cm.LoadAllConfigsWithRetry(context.Background(), 1)
@@ -1582,7 +1504,9 @@ func TestProcessRewrite_CopyFallback_SameFS(t *testing.T) {
 	}
 
 	entry := config.RewriteEntry{Value: destRelPath, Mode: "0644"}
-	cm.processRewrite(context.Background(), srcRelPath, entry)
+	if err := cm.processRewrite(context.Background(), srcRelPath, entry); err != nil {
+		t.Fatalf("processRewrite: %v", err)
+	}
 
 	// Destination must exist regardless of rename vs copy path
 	dest, err := os.ReadFile(baseDir + "/" + destRelPath)
@@ -1610,7 +1534,9 @@ func TestProcessRewrite_EmptySourceFile(t *testing.T) {
 	}
 
 	entry := config.RewriteEntry{Value: destRelPath, Mode: ""}
-	cm.processRewrite(context.Background(), srcRelPath, entry)
+	if err := cm.processRewrite(context.Background(), srcRelPath, entry); err != nil {
+		t.Fatalf("processRewrite: %v", err)
+	}
 
 	if _, err := os.Stat(baseDir + "/" + destRelPath); err != nil {
 		t.Errorf("expected destination file to exist even for empty source: %v", err)
@@ -1633,7 +1559,9 @@ func TestProcessRewrite_ModeLoggedOnSuccess(t *testing.T) {
 
 	// Mode "0755" exercises the non-empty mode branch in the final log statement
 	entry := config.RewriteEntry{Value: destRelPath, Mode: "0755"}
-	cm.processRewrite(context.Background(), srcRelPath, entry)
+	if err := cm.processRewrite(context.Background(), srcRelPath, entry); err != nil {
+		t.Fatalf("processRewrite: %v", err)
+	}
 
 	info, err := os.Stat(baseDir + "/" + destRelPath)
 	if err != nil {
@@ -1644,25 +1572,18 @@ func TestProcessRewrite_ModeLoggedOnSuccess(t *testing.T) {
 	}
 }
 
-// TestProcessRewrite_DelRewriteNotCalledOnError verifies that on error (missing source),
-// DelRewrite is NOT called — so the rewrite remains in state for the next cycle.
-func TestProcessRewrite_DelRewriteNotCalledOnError(t *testing.T) {
+// TestProcessRewrite_ErrorReturned verifies that a missing source is reported
+// to the caller, which keeps the rewrite pending for the next cycle (see
+// TestDoRewrites_MissingSourceFile).
+func TestProcessRewrite_ErrorReturned(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
 	cm, _ := newTestCMWithExecutor(t)
 
-	// Pre-populate the rewrites map so we can check it after
-	cm.State.CurrentActions.Rewrites["missing.cf.in"] = config.RewriteEntry{Value: "out.cf"}
-
 	entry := config.RewriteEntry{Value: "out.cf", Mode: ""}
-	cm.processRewrite(context.Background(), "missing.cf.in", entry)
-
-	// The rewrite entry should remain since processRewrite returned early on error
-	// (DelRewrite is only called on success at the very end)
-	if _, ok := cm.State.CurrentActions.Rewrites["missing.cf.in"]; !ok {
-		// DelRewrite was called — this is also acceptable if the impl was changed
-		t.Logf("note: missing source causes DelRewrite to be called (early-return before success path)")
+	if err := cm.processRewrite(context.Background(), "missing.cf.in", entry); err == nil {
+		t.Error("expected an error for a missing source file")
 	}
 }
 
@@ -1780,61 +1701,12 @@ func TestRunProxygenWithConfigs_WithPopulatedState(t *testing.T) {
 	cm, _ := newTestCMWithExecutor(t)
 
 	// Populate some state to exercise the parameter-passing code paths
-	cm.State.LocalConfig.Data.Set("key", "val")
-	cm.State.GlobalConfig.Data.Set("globalKey", "globalVal")
-	cm.State.ServerConfig.Data.Set("serverKey", "serverVal")
+	setLocal(cm, map[string]string{"key": "val"})
+	setGlobal(cm, map[string]string{"globalKey": "globalVal"})
+	setServer(cm, map[string]string{"serverKey": "serverVal"}, nil)
 	err := cm.RunProxygenWithConfigs(context.Background())
 	// Expect error (no real proxy config), but no panic
 	if err == nil {
 		t.Log("RunProxygenWithConfigs unexpectedly succeeded")
-	}
-}
-
-// ---- DoRestarts with SERVICE_ enabled path ----
-
-// TestDoRestarts_ConfigLookup_ServiceEnabledReturns verifies that when LookUpConfig
-// returns "enabled" for a SERVICE_ key, the configLookup closure returns "enabled".
-// We patch ServerConfig to return "enabled" (which matches the "enabled" check).
-func TestDoRestarts_ConfigLookup_EnabledMatchPath(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
-	ctx := context.Background()
-	cacheInstance := cache.New(ctx, false)
-
-	var capturedLookup func(string) string
-	captureMgr := &testutil.MockServiceManager{
-		ProcessRestartsFn: func(_ context.Context, configLookup func(string) string) error {
-			capturedLookup = configLookup
-			return nil
-		},
-	}
-
-	cm := &ConfigManager{
-		env:        hostEnv(),
-		mainConfig: &config.Config{BaseDir: "/tmp", Hostname: "testhost"},
-		State:      state.NewState(),
-		ServiceMgr: captureMgr,
-		Cache:      cacheInstance,
-	}
-
-	// Set "enabled" (the exact value the closure checks) for service "proxy"
-	cm.State.ServerConfig.ServiceConfig.Set("proxy", "enabled")
-	cm.DoRestarts(ctx)
-
-	if capturedLookup == nil {
-		t.Fatal("expected ProcessRestarts to capture configLookup")
-	}
-
-	// SERVICE_PROXY: LookUpConfig("SERVICE","proxy") returns "enabled" → closure returns "enabled"
-	got := capturedLookup("SERVICE_PROXY")
-	if got != "enabled" {
-		t.Errorf("SERVICE_PROXY: got %q, want %q", got, "enabled")
-	}
-
-	// Key shorter than 8 chars → "disabled"
-	got2 := capturedLookup("SVC")
-	if got2 != "disabled" {
-		t.Errorf("short key: got %q, want %q", got2, "disabled")
 	}
 }

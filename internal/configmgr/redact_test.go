@@ -17,6 +17,7 @@ import (
 
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/plan"
 	"github.com/zextras/carbonio-configd/internal/redact"
 )
 
@@ -28,7 +29,7 @@ func captureLogCtx(buf *bytes.Buffer) context.Context {
 }
 
 // configmgrLogLines keeps only the log lines emitted by the configmgr component.
-// internal/state logs lastVal values at DEBUG on its own and is outside the
+// other components log values at DEBUG on their own and are outside the
 // scope of these assertions.
 func configmgrLogLines(out string) string {
 	var kept []string
@@ -42,34 +43,38 @@ func configmgrLogLines(out string) string {
 	return strings.Join(kept, "\n")
 }
 
-// TestComparator_CompareKeys_SecretValueNotLogged verifies a changed password key
-// is reported by name only, while a normal key still logs both values.
-func TestComparator_CompareKeys_SecretValueNotLogged(t *testing.T) {
+// TestPlan_SecretValueNotLogged verifies a changed password key is reported by
+// name only, while a normal key still logs both values.
+func TestPlan_SecretValueNotLogged(t *testing.T) {
 	const (
 		oldSecret = "old-hunter2-secret"
 		newSecret = "new-hunter2-secret"
 	)
 
-	c, st := newComparatorWithLookup(
-		map[string]map[string]string{
-			"LOCAL": {"ldap_amavis_password": newSecret},
-			"VAR":   {"zimbraImapBindPort": "7143"},
-		},
-		nil,
-	)
-	st.FirstRun = false
-	st.MtaConfig.Sections["amavis"] = &config.MtaConfigSection{
+	cm, _ := newTestCMWithExecutor(t)
+	cm.State.MtaConfig.Sections["amavis"] = &config.MtaConfigSection{
 		Name:         "amavis",
 		RequiredVars: map[string]string{"ldap_amavis_password": "LOCAL", "zimbraImapBindPort": "VAR"},
 	}
 
+	setServer(cm, nil, map[string]string{"mta": "zimbraServiceEnabled"}) // gates the amavis section
+
 	var buf bytes.Buffer
 
 	ctx := captureLogCtx(&buf)
-	st.LastVal(ctx, "amavis", "LOCAL", "ldap_amavis_password", oldSecret)
-	st.LastVal(ctx, "amavis", "VAR", "zimbraImapBindPort", "143")
 
-	require.NoError(t, c.CompareKeys(ctx))
+	setLocal(cm, map[string]string{"ldap_amavis_password": oldSecret})
+	setGlobal(cm, map[string]string{"zimbraImapBindPort": "143"})
+
+	_, err := cm.Plan(ctx) // baseline
+	require.NoError(t, err)
+
+	cm.State.SetFirstRun(false)
+	setLocal(cm, map[string]string{"ldap_amavis_password": newSecret})
+	setGlobal(cm, map[string]string{"zimbraImapBindPort": "7143"})
+
+	_, err = cm.Plan(ctx)
+	require.NoError(t, err)
 
 	out := configmgrLogLines(buf.String())
 	assert.NotContains(t, out, oldSecret)
@@ -80,24 +85,33 @@ func TestComparator_CompareKeys_SecretValueNotLogged(t *testing.T) {
 	assert.Contains(t, out, "current_value=7143", "non-secret values stay visible")
 }
 
-// TestComparator_CompareKeys_SecretBecameUndefinedNotLogged covers the
-// "changed to undefined" INFO line.
-func TestComparator_CompareKeys_SecretBecameUndefinedNotLogged(t *testing.T) {
+// TestPlan_SecretBecameUndefinedNotLogged covers the "changed to undefined"
+// INFO line.
+func TestPlan_SecretBecameUndefinedNotLogged(t *testing.T) {
 	const oldSecret = "old-hunter2-secret"
 
-	c, st := newComparatorWithLookup(map[string]map[string]string{}, nil)
-	st.FirstRun = false
-	st.MtaConfig.Sections["amavis"] = &config.MtaConfigSection{
+	cm, _ := newTestCMWithExecutor(t)
+	cm.State.MtaConfig.Sections["amavis"] = &config.MtaConfigSection{
 		Name:         "amavis",
 		RequiredVars: map[string]string{"ldap_amavis_password": "LOCAL"},
 	}
 
+	setServer(cm, nil, map[string]string{"mta": "zimbraServiceEnabled"}) // gates the amavis section
+
 	var buf bytes.Buffer
 
 	ctx := captureLogCtx(&buf)
-	st.LastVal(ctx, "amavis", "LOCAL", "ldap_amavis_password", oldSecret)
 
-	require.NoError(t, c.CompareKeys(ctx))
+	setLocal(cm, map[string]string{"ldap_amavis_password": oldSecret})
+
+	_, err := cm.Plan(ctx) // baseline
+	require.NoError(t, err)
+
+	cm.State.SetFirstRun(false)
+	setLocal(cm, map[string]string{})
+
+	_, err = cm.Plan(ctx)
+	require.NoError(t, err)
 
 	out := configmgrLogLines(buf.String())
 	assert.Contains(t, out, "Variable changed to undefined")
@@ -121,13 +135,15 @@ func TestDoLdap_SecretValueNotLogged(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cm, exec := newTestCMWithExecutor(t)
 			exec.ldapErr = tt.execErr
-			cm.State.CurrentActions.Ldap["ldap_root_password"] = secret
-			cm.State.CurrentActions.Ldap["ldap_uri"] = "ldap://localhost"
+			entries := []plan.Ldap{
+				{Key: "ldap_root_password", Value: secret},
+				{Key: "ldap_uri", Value: "ldap://localhost"},
+			}
 
 			var buf bytes.Buffer
 
 			ctx := captureLogCtx(&buf)
-			_ = cm.doLdap(ctx)
+			_, _ = cm.doLdap(ctx, entries)
 
 			require.Len(t, exec.ldapOps, 2, "both writes must still be attempted")
 
@@ -145,8 +161,10 @@ func TestLookUpConfig_SecretValueNotLogged(t *testing.T) {
 	const secret = "local-hunter2-secret"
 
 	cm, _ := newTestCMWithExecutor(t)
-	cm.State.LocalConfig.Data.Set("mailboxd_keystore_password", secret)
-	cm.State.LocalConfig.Data.Set("ldap_master_url", "ldap://master:389")
+	setLocal(cm, map[string]string{
+		"mailboxd_keystore_password": secret,
+		"ldap_master_url":            "ldap://master:389",
+	})
 
 	var buf bytes.Buffer
 

@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/plan"
 	"github.com/zextras/carbonio-configd/internal/transformer"
 )
 
@@ -37,12 +37,14 @@ func TestDoRewrites_TransformErrorAbortsOnlyThatFile(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(baseDir, name), []byte(content), 0o644))
 	}
 
-	cm.State.GetLocalConfig().Data.Set("set_key", "head tail")
+	setLocal(cm, map[string]string{"set_key": "head tail"})
 
-	cm.State.CurrentActions.Rewrites["bad.in"] = config.RewriteEntry{Value: "bad.out"}
-	cm.State.CurrentActions.Rewrites["good.in"] = config.RewriteEntry{Value: "good.out"}
+	entries := []plan.Rewrite{
+		{Source: "bad.in", Target: "bad.out"},
+		{Source: "good.in", Target: "good.out"},
+	}
 
-	err := cm.doRewrites(context.Background())
+	pending, err := cm.doRewrites(context.Background(), entries)
 	require.ErrorIs(t, err, transformer.ErrTransform)
 
 	bad, readErr := os.ReadFile(filepath.Join(baseDir, "bad.out"))
@@ -53,8 +55,8 @@ func TestDoRewrites_TransformErrorAbortsOnlyThatFile(t *testing.T) {
 	require.NoError(t, readErr)
 	assert.Equal(t, "ok=head\n", string(good), "the other rewrites of the cycle still run")
 
-	assert.Contains(t, cm.State.CurrentActions.Rewrites, "bad.in", "the failed rewrite stays pending for the next cycle")
-	assert.NotContains(t, cm.State.CurrentActions.Rewrites, "good.in")
+	require.Len(t, pending, 1, "only the failed rewrite stays pending for the next cycle")
+	assert.Equal(t, "bad.in", pending[0].Source)
 
 	leftovers, readErr := os.ReadDir(tmpDir)
 	require.NoError(t, readErr)
@@ -78,7 +80,7 @@ func TestLookupFileKey_TransformErrorIsNotCached(t *testing.T) {
 	assert.False(t, cached, "a failed transform must not be cached")
 
 	require.NoError(t, os.WriteFile(path, []byte("a=@@SPLIT set_key@@\n"), 0o644))
-	cm.State.GetLocalConfig().Data.Set("set_key", "head tail")
+	setLocal(cm, map[string]string{"set_key": "head tail"})
 
 	got, err := cm.lookupFileKey(context.Background(), "frag.cf")
 	require.NoError(t, err)

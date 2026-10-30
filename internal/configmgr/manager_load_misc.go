@@ -64,7 +64,7 @@ func (cm *ConfigManager) LoadMiscConfig(ctx context.Context) error {
 		return fmt.Errorf("misc config load cancelled before publish: %w", err)
 	}
 
-	cm.State.MiscConfig.Data.Replace(published)
+	cm.sink(ctx).setMisc(published)
 
 	dt := time.Since(t1)
 	logger.DebugContext(ctx, "Miscconfig loaded",
@@ -187,7 +187,7 @@ func (cm *ConfigManager) loadGlobalConfigWithRetry(ctx context.Context, maxRetri
 		return fmt.Errorf("global config load cancelled before publish: %w", err)
 	}
 
-	cm.State.GlobalConfig.Data.Replace(configData)
+	cm.sink(ctx).setGlobal(configData)
 
 	dt := time.Since(t1)
 	logger.DebugContext(ctx, "GlobalConfig loaded",

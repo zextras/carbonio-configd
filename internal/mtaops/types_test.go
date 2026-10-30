@@ -8,7 +8,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/zextras/carbonio-configd/internal/state"
+	"github.com/zextras/carbonio-configd/internal/snapshot"
 	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
 
@@ -264,7 +264,9 @@ func TestInterfaces(t *testing.T) {
 // testResolver is a mock OperationResolver for interface verification
 type testResolver struct{}
 
-func (r *testResolver) ResolveValue(ctx context.Context, valueType, key string, state *state.State) (string, error) {
+func (r *testResolver) ResolveValue(
+	ctx context.Context, valueType, key string, snap *snapshot.Snapshot,
+) (string, error) {
 	return "", nil
 }
 

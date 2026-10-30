@@ -18,7 +18,6 @@ import (
 
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/lookup"
-	"github.com/zextras/carbonio-configd/internal/state"
 )
 
 // Transformer holds the necessary dependencies for transforming lines.
@@ -27,7 +26,6 @@ import (
 // Transformer is allocation-free.
 type Transformer struct {
 	ConfigLookup lookup.ConfigLookup
-	State        *state.State
 }
 
 // ErrTransform marks a line the legacy jylibs/state.py transform() cannot render:
@@ -70,10 +68,9 @@ var (
 )
 
 // NewTransformer creates a new Transformer instance.
-func NewTransformer(cl lookup.ConfigLookup, st *state.State) *Transformer {
+func NewTransformer(cl lookup.ConfigLookup) *Transformer {
 	return &Transformer{
 		ConfigLookup: cl,
-		State:        st,
 	}
 }
 

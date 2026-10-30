@@ -77,6 +77,7 @@ func bootstrapDependencies(
 	}
 
 	serviceManager.DisableRestarts = args.DisableRestarts
+	configManager.SetDisableRestarts(args.DisableRestarts)
 
 	watchdogInterval := time.Duration(mainCfg.WatchdogInterval) * time.Second
 	if watchdogInterval == 0 {
@@ -90,11 +91,9 @@ func bootstrapDependencies(
 		Clock:          env.Clock,
 		Snapshots:      controller,
 		ConfigLookup: func(key string) string {
-			if val, exists := appState.GetLocalConfig().Data.Get(key); exists {
-				return val
-			}
+			val, _ := appState.Snapshot().Local(key)
 
-			return ""
+			return val
 		},
 	})
 

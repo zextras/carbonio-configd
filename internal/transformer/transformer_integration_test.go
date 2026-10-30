@@ -12,7 +12,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zextras/carbonio-configd/internal/state"
 	"github.com/zextras/carbonio-configd/internal/testutil"
 )
 
@@ -82,8 +81,7 @@ permit
 		},
 	})
 
-	st := &state.State{}
-	transformer := NewTransformer(mock, st)
+	transformer := NewTransformer(mock)
 
 	output := transformMultiLine(t, transformer, input)
 
@@ -177,8 +175,7 @@ $enable_dkim_verification = %%binary VAR:zimbraAmavisEnableDKIMVerification%%;
 		},
 	})
 
-	st := &state.State{}
-	transformer := NewTransformer(mock, st)
+	transformer := NewTransformer(mock)
 
 	output := transformMultiLine(t, transformer, input)
 
@@ -238,8 +235,7 @@ set $mynetworks "%%list VAR:zimbraMtaMyNetworks ,%%";
 		},
 	})
 
-	st := &state.State{}
-	transformer := NewTransformer(mock, st)
+	transformer := NewTransformer(mock)
 
 	output := transformMultiLine(t, transformer, input)
 
@@ -302,8 +298,7 @@ func TestNestedDirectivesIntegration(t *testing.T) {
 		},
 	})
 
-	st := &state.State{}
-	transformer := NewTransformer(mock, st)
+	transformer := NewTransformer(mock)
 
 	output := transformMultiLine(t, transformer, input)
 
@@ -372,8 +367,7 @@ set $trusted_nets "%%list VAR:zimbraMtaMyNetworks ,%%";
 		},
 	})
 
-	st := &state.State{}
-	transformer := NewTransformer(mock, st)
+	transformer := NewTransformer(mock)
 
 	output := transformMultiLine(t, transformer, input)
 
@@ -452,8 +446,7 @@ server {
 		},
 	})
 
-	st := &state.State{}
-	transformer := NewTransformer(mock, st)
+	transformer := NewTransformer(mock)
 
 	output := transformMultiLine(t, transformer, input)
 

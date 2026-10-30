@@ -10,7 +10,6 @@ import (
 	"encoding/hex"
 	"io"
 
-	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
@@ -127,51 +126,6 @@ func (s *State) UpdateFileMD5(ctx context.Context, fsys sys.FS, filepath string)
 		"md5", md5hash)
 
 	return nil
-}
-
-// ShouldRewriteSection determines if a section should be rewritten based on:
-// 1. FirstRun flag (always rewrite on first run)
-// 2. Section.changed flag (configuration variables changed)
-// 3. ForcedConfig map (section explicitly forced via command-line or network)
-// 4. RequestedConfig map (section explicitly requested via network command)
-func (s *State) ShouldRewriteSection(ctx context.Context, sectionName string, section *config.MtaConfigSection) bool {
-	ctx = logger.ContextWithComponentOnce(ctx, "state")
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.FirstRun {
-		logger.DebugContext(ctx, "Section rewrite required (first run)",
-			"section", sectionName)
-
-		return true
-	}
-
-	if section != nil && section.Changed {
-		logger.DebugContext(ctx, "Section rewrite required (configuration changed)",
-			"section", sectionName)
-
-		return true
-	}
-
-	if _, forced := s.ForcedConfig[sectionName]; forced {
-		logger.DebugContext(ctx, "Section rewrite required (forced)",
-			"section", sectionName)
-
-		return true
-	}
-
-	if _, requested := s.RequestedConfig[sectionName]; requested {
-		logger.DebugContext(ctx, "Section rewrite required (requested)",
-			"section", sectionName)
-
-		return true
-	}
-
-	logger.DebugContext(ctx, "Section no rewrite needed",
-		"section", sectionName)
-
-	return false
 }
 
 // LookupFile returns the cached content for a FILE type lookup key.

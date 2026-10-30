@@ -12,7 +12,6 @@ import (
 	"testing"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
-	"github.com/zextras/carbonio-configd/internal/state"
 	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
 
@@ -62,7 +61,7 @@ func FuzzRewriteReader(f *testing.F) {
 	}
 
 	ctx := logger.ContextWithLogger(context.Background(), slog.New(slog.DiscardHandler))
-	rw := NewRewriter("/opt/zextras", newMockLookup(), &state.State{}, systest.New().System())
+	rw := NewRewriter("/opt/zextras", newMockLookup(), systest.New().System())
 
 	f.Fuzz(func(t *testing.T, input string) {
 		if len(input) >= scannerMaxToken {

@@ -79,14 +79,15 @@ func TestConfigManager_BasicIntegration(t *testing.T) {
 	// Test configuration changes
 	t.Run("ConfigChanges", func(t *testing.T) {
 		// Simulate a configuration change
-		err := cm.CompareKeys(context.Background())
+		pl, err := cm.Plan(context.Background())
 		if err != nil {
-			t.Errorf("CompareKeys failed: %v", err)
+			t.Errorf("Plan failed: %v", err)
+			return
 		}
 
 		// Check if changes were detected
-		if len(cm.State.ChangedKeys) > 0 {
-			t.Logf("Detected configuration changes in %d sections", len(cm.State.ChangedKeys))
+		if len(pl.Sections) > 0 {
+			t.Logf("Detected configuration changes in %d sections", len(pl.Sections))
 		}
 	})
 

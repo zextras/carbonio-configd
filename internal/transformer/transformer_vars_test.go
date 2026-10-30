@@ -8,7 +8,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/zextras/carbonio-configd/internal/state"
 	"github.com/zextras/carbonio-configd/internal/testutil"
 )
 
@@ -56,9 +55,8 @@ func TestTransformVarSubstitution(t *testing.T) {
 		},
 	}
 
-	st := &state.State{}
 	mockLookup := newMockLookup()
-	transformer := NewTransformer(mockLookup, st)
+	transformer := NewTransformer(mockLookup)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -94,9 +92,8 @@ func TestTransformLocalConfigSubstitution(t *testing.T) {
 		},
 	}
 
-	st := &state.State{}
 	mockLookup := newMockLookup()
-	transformer := NewTransformer(mockLookup, st)
+	transformer := NewTransformer(mockLookup)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -151,8 +148,7 @@ func TestTransformEdgeCases(t *testing.T) {
 		},
 	}
 
-	st := &state.State{}
-	transformer := NewTransformer(mockLookup, st)
+	transformer := NewTransformer(mockLookup)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -198,8 +194,7 @@ func TestTransformPlainVariableSubstitution(t *testing.T) {
 		},
 	}
 
-	st := &state.State{}
-	transformer := NewTransformer(mockLookup, st)
+	transformer := NewTransformer(mockLookup)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -261,8 +256,7 @@ func TestTransformMultiValueStaysOnOneLine(t *testing.T) {
 		},
 	}
 
-	st := &state.State{}
-	transformer := NewTransformer(mockLookup, st)
+	transformer := NewTransformer(mockLookup)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -276,7 +270,6 @@ func TestTransformMultiValueStaysOnOneLine(t *testing.T) {
 
 func TestLocalConfigSPLITFunction(t *testing.T) {
 	ctx := context.Background()
-	st := &state.State{}
 
 	mock := testutil.NewMockConfigLookupWithData(map[string]map[string]string{
 		"LOCAL": {
@@ -286,7 +279,7 @@ func TestLocalConfigSPLITFunction(t *testing.T) {
 		},
 	})
 
-	transformer := NewTransformer(mock, st)
+	transformer := NewTransformer(mock)
 
 	tests := []struct {
 		name     string
@@ -330,7 +323,6 @@ func TestLocalConfigSPLITFunction(t *testing.T) {
 // TestSpecialCharactersInValues tests handling of special characters
 func TestSpecialCharactersInValues(t *testing.T) {
 	ctx := context.Background()
-	st := &state.State{}
 
 	mock := testutil.NewMockConfigLookupWithData(map[string]map[string]string{
 		"VAR": {
@@ -343,7 +335,7 @@ func TestSpecialCharactersInValues(t *testing.T) {
 		},
 	})
 
-	transformer := NewTransformer(mock, st)
+	transformer := NewTransformer(mock)
 
 	tests := []struct {
 		name     string
@@ -395,7 +387,6 @@ func TestSpecialCharactersInValues(t *testing.T) {
 // TestNumericBoundaryValues tests edge cases for numeric operations
 func TestNumericBoundaryValues(t *testing.T) {
 	ctx := context.Background()
-	st := &state.State{}
 
 	mock := testutil.NewMockConfigLookupWithData(map[string]map[string]string{
 		"VAR": {
@@ -407,7 +398,7 @@ func TestNumericBoundaryValues(t *testing.T) {
 		},
 	})
 
-	transformer := NewTransformer(mock, st)
+	transformer := NewTransformer(mock)
 
 	tests := []struct {
 		name     string
@@ -449,7 +440,7 @@ func TestXformLocalConfig_PerditionLdapSplit_NoURLs(t *testing.T) {
 			"plain_server": "mailhost.example.com",
 		},
 	})
-	tr := NewTransformer(mock, nil)
+	tr := NewTransformer(mock)
 
 	got := mustTransform(t, tr, ctx, "@@PERDITION_LDAP_SPLIT plain_server@@")
 	want := "mailhost.example.com\n"
@@ -462,7 +453,7 @@ func TestXformLocalConfig_PerditionLdapSplit_NoURLs(t *testing.T) {
 // because the regex only matches valid types. We call the method directly.
 func TestXformConfigVariable_InvalidFormat(t *testing.T) {
 	ctx := context.Background()
-	tr := NewTransformer(newMockLookup(), nil)
+	tr := NewTransformer(newMockLookup())
 
 	got := tr.xformConfigVariable(ctx, "%%NOCODON%%")
 	if got != "" {
@@ -472,7 +463,7 @@ func TestXformConfigVariable_InvalidFormat(t *testing.T) {
 
 func TestXformConfigVariable_InvalidCfgType(t *testing.T) {
 	ctx := context.Background()
-	tr := NewTransformer(newMockLookup(), nil)
+	tr := NewTransformer(newMockLookup())
 
 	got := tr.xformConfigVariable(ctx, "%%BOGUS:somekey%%")
 	if got != "" {
@@ -482,7 +473,7 @@ func TestXformConfigVariable_InvalidCfgType(t *testing.T) {
 
 func TestXformConfigVariable_LookupError(t *testing.T) {
 	ctx := context.Background()
-	tr := NewTransformer(&errorConfigLookup{}, nil)
+	tr := NewTransformer(&errorConfigLookup{})
 
 	got := tr.xformConfigVariable(ctx, "%%VAR:missingkey%%")
 	if got != "" {
@@ -494,7 +485,7 @@ func TestXformConfigVariable_LookupError(t *testing.T) {
 // false, and true behind a "!" key (checkConditional negation).
 func TestLookupTruth_LookupError(t *testing.T) {
 	ctx := context.Background()
-	tr := NewTransformer(&errorConfigLookup{}, nil)
+	tr := NewTransformer(&errorConfigLookup{})
 
 	if tr.lookupTruth(ctx, "VAR", "missingkey") {
 		t.Error("missing key must be false")

@@ -214,6 +214,94 @@ func (e *executor) ExecutePostconfdBatch(ctx context.Context, ops []PostconfdOpe
 	return nil
 }
 
+// ReadPostconf reads one Postfix parameter without modifying anything.
+//
+// With explicitOnly false it runs `postconf -h <key>` and returns the effective
+// value (defaults included); set is always true on success. With explicitOnly
+// true it runs `postconf -n <key>` (no -h, so an explicitly-empty parameter is
+// told apart from an unset one) and returns set=false when main.cf does not
+// define the key. A non-zero exit (unknown parameter, ...) is an error.
+func (e *executor) ReadPostconf(
+	ctx context.Context, key string, explicitOnly bool,
+) (value string, set bool, err error) {
+	ctx = logger.ContextWithComponentOnce(ctx, "mtaops")
+
+	if !postconfKeyRe.MatchString(key) {
+		return "", false, fmt.Errorf("%w: %q", ErrInvalidPostconfKey, key)
+	}
+
+	if !explicitOnly {
+		out, runErr := sys.Output(ctx, e.env.Exec, e.postconfPath, "-h", key)
+		if runErr != nil {
+			return "", false, fmt.Errorf("postconf -h %s failed: %w", key, runErr)
+		}
+
+		return unwrapPostconfValue(strings.Split(string(out), "\n")), true, nil
+	}
+
+	out, runErr := sys.Output(ctx, e.env.Exec, e.postconfPath, "-n", key)
+	if runErr != nil {
+		return "", false, fmt.Errorf("postconf -n %s failed: %w", key, runErr)
+	}
+
+	value, set = parsePostconfEntry(string(out), key)
+
+	return value, set, nil
+}
+
+// parsePostconfEntry extracts the value of key from `postconf -n key` output
+// ("key = value", long values wrapped onto indented continuation lines). set is
+// false when no line defines key.
+func parsePostconfEntry(out, key string) (string, bool) {
+	lines := strings.Split(out, "\n")
+
+	for i, line := range lines {
+		rest, found := strings.CutPrefix(line, key)
+		if !found {
+			continue
+		}
+
+		rest = strings.TrimLeft(rest, " \t")
+
+		rest, found = strings.CutPrefix(rest, "=")
+		if !found {
+			continue
+		}
+
+		first := strings.TrimLeft(rest, " \t")
+
+		return unwrapPostconfValue(append([]string{first}, continuationLines(lines[i+1:])...)), true
+	}
+
+	return "", false
+}
+
+// continuationLines returns the leading run of indented lines, which postconf
+// uses to wrap long values.
+func continuationLines(lines []string) []string {
+	n := 0
+
+	for n < len(lines) && lines[n] != "" && (lines[n][0] == ' ' || lines[n][0] == '\t') {
+		n++
+	}
+
+	return lines[:n]
+}
+
+// unwrapPostconfValue joins a value postconf wrapped over several lines (the
+// continuation lines are indented) back into a single trimmed string.
+func unwrapPostconfValue(lines []string) string {
+	parts := make([]string, 0, len(lines))
+
+	for _, line := range lines {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			parts = append(parts, trimmed)
+		}
+	}
+
+	return strings.Join(parts, " ")
+}
+
 // handleEmptyMapfileData mirrors jylibs/state.py:408-410: when the MAPFILE VAR
 // is empty, an existing mapped file is removed so a cleared value (e.g.
 // zimbraSSLDHParam -> conf/dhparam.pem) does not leave a stale file behind. A

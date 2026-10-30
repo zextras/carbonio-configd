@@ -9,6 +9,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/cache"
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/ldap"
+	"github.com/zextras/carbonio-configd/internal/snapshot"
 	"github.com/zextras/carbonio-configd/internal/state"
 	"os"
 	"path/filepath"
@@ -247,10 +248,12 @@ func TestParseMtaConfig_LDAPLookup(t *testing.T) {
 
 	cm := setupTestConfigManagerForParser(tempDir)
 	// Enable mta on this node so the section is not gated out at parse time.
-	cm.State.ServerConfig.ServiceConfig.Set("mta", "TRUE")
+	setServer(cm, nil, map[string]string{"mta": "zimbraServiceEnabled"})
 	// Set up config values for lookup
-	cm.State.LocalConfig.Data.Set("ldap_url", "ldap://localhost:389")
-	cm.State.LocalConfig.Data.Set("zimbra_server_hostname", "mail.example.com")
+	setLocal(cm, map[string]string{
+		"ldap_url":               "ldap://localhost:389",
+		"zimbra_server_hostname": "mail.example.com",
+	})
 
 	err = cm.ParseMtaConfig(context.Background(), configFile)
 	if err != nil {
@@ -299,7 +302,7 @@ func TestParseMtaConfig_LDAPLookupFailure(t *testing.T) {
 
 	cm := setupTestConfigManagerForParser(tempDir)
 	// Enable mta on this node so the section is not gated out at parse time.
-	cm.State.ServerConfig.ServiceConfig.Set("mta", "TRUE")
+	setServer(cm, nil, map[string]string{"mta": "zimbraServiceEnabled"})
 
 	err = cm.ParseMtaConfig(context.Background(), configFile)
 	if err != nil {
@@ -528,7 +531,7 @@ func TestParseMtaConfig_AllDirectiveTypes(t *testing.T) {
 	}
 
 	cm := setupTestConfigManagerForParser(tempDir, "comprehensive")
-	cm.State.LocalConfig.Data.Set("ldap_url", "ldap://localhost")
+	setLocal(cm, map[string]string{"ldap_url": "ldap://localhost"})
 
 	err = cm.ParseMtaConfig(context.Background(), configFile)
 	if err != nil {
@@ -571,9 +574,12 @@ func setupTestConfigManagerForParser(baseDir string, enabledServices ...string) 
 	st := state.NewState()
 	st.FirstRun = true
 
+	services := make(map[string]string, len(enabledServices))
 	for _, svc := range enabledServices {
-		st.ServerConfig.ServiceConfig.Set(svc, "TRUE")
+		services[svc] = "zimbraServiceEnabled"
 	}
+
+	st.UpdateSnapshot(func(s *snapshot.Snapshot) *snapshot.Snapshot { return s.WithServer(nil, services) })
 
 	cfg := &config.Config{
 		BaseDir:    baseDir,

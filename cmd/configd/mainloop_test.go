@@ -127,6 +127,7 @@ func TestBuildServiceDependencies_EmptySections(t *testing.T) {
 func TestUpdateWatchdogServices_EmptyList(t *testing.T) {
 	ctx := context.Background()
 	appState := state.NewState()
+	tracked := map[string]string{}
 	mainCfg, _ := config.NewConfig()
 	mainCfg.WdList = []string{}
 
@@ -139,12 +140,13 @@ func TestUpdateWatchdogServices_EmptyList(t *testing.T) {
 	})
 
 	// Must not panic; defaults to ["antivirus"]
-	updateWatchdogServices(ctx, wd, appState, mainCfg)
+	updateWatchdogServices(ctx, wd, tracked, mainCfg)
 }
 
 func TestUpdateWatchdogServices_WithList(t *testing.T) {
 	ctx := context.Background()
 	appState := state.NewState()
+	tracked := map[string]string{}
 	mainCfg, _ := config.NewConfig()
 	mainCfg.WdList = []string{"antivirus", "mta"}
 
@@ -156,7 +158,7 @@ func TestUpdateWatchdogServices_WithList(t *testing.T) {
 		ConfigLookup:   func(_ string) string { return "" },
 	})
 
-	updateWatchdogServices(ctx, wd, appState, mainCfg)
+	updateWatchdogServices(ctx, wd, tracked, mainCfg)
 }
 
 func TestUpdateWatchdogServices_ServiceInWatchdogList(t *testing.T) {
@@ -165,8 +167,8 @@ func TestUpdateWatchdogServices_ServiceInWatchdogList(t *testing.T) {
 	mainCfg, _ := config.NewConfig()
 	mainCfg.WdList = []string{"antivirus"}
 
-	// Add a service to CurrentActions so we exercise the slices.Contains path
-	appState.CurrentActions.Services["antivirus"] = "running"
+	// Add a service to the plan's tracked set so we exercise the slices.Contains path
+	tracked := map[string]string{"antivirus": "running"}
 
 	wd := watchdog.NewWatchdog(watchdog.Config{
 		CheckInterval:  0,
@@ -176,7 +178,11 @@ func TestUpdateWatchdogServices_ServiceInWatchdogList(t *testing.T) {
 		ConfigLookup:   func(_ string) string { return "" },
 	})
 
-	updateWatchdogServices(ctx, wd, appState, mainCfg)
+	updateWatchdogServices(ctx, wd, tracked, mainCfg)
+
+	if !wd.IsServiceTracked("antivirus") {
+		t.Error("expected antivirus, present in plan.Tracked and the watchdog list, to be tracked")
+	}
 }
 
 func TestMainLoopActionTrigger_TriggerRewrite_ChannelBlocked(t *testing.T) {

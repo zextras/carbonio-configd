@@ -23,8 +23,11 @@ import (
 	"github.com/zextras/carbonio-configd/internal/localconfig"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/mtaops"
+	"github.com/zextras/carbonio-configd/internal/plan"
 	"github.com/zextras/carbonio-configd/internal/redact"
+	"github.com/zextras/carbonio-configd/internal/restart"
 	"github.com/zextras/carbonio-configd/internal/services"
+	"github.com/zextras/carbonio-configd/internal/snapshot"
 	"github.com/zextras/carbonio-configd/internal/state"
 	"github.com/zextras/carbonio-configd/internal/sys"
 	"github.com/zextras/carbonio-configd/internal/transformer"
@@ -81,8 +84,16 @@ type ConfigManager struct {
 	cachedLocalConfigMu     sync.RWMutex       // Protects cachedLocalConfigOutput
 	mtaExecutor             mtaops.Executor
 	mtaResolver             mtaops.OperationResolver
-	comparator              *Comparator
-	env                     sys.System // host boundary: filesystem, process execution, clock
+	policy                  *restart.Policy
+
+	// The fields below belong to the (sequential) main loop: the plan of a
+	// cycle is a function of prev (the snapshot the last plan was computed
+	// from), tracked (the service tracking map) and carry (the actions the
+	// last execution did not complete).
+	prev    *snapshot.Snapshot
+	tracked map[string]string
+	carry   plan.Carry
+	env     sys.System // host boundary: filesystem, process execution, clock
 
 	// loadLocalConfigForLDAP is the localconfig loader used by initNativeLdapClient;
 	// tests inject deterministic maps so the URL-validation branches run without disk.
@@ -111,11 +122,11 @@ func NewConfigManager(ctx context.Context, mainCfg *config.Config,
 		loadLocalConfigForLDAP:  localconfig.LoadLocalConfig,
 		loadResolvedLocalConfig: localconfig.LoadResolvedConfig,
 	}
-	cm.Transformer = transformer.NewTransformer(cm, appState)
+	cm.Transformer = transformer.NewTransformer(cm)
 	cm.mtaExecutor = mtaops.NewExecutor(mainCfg.BaseDir, ldapClient, env)
 	cm.mtaResolver = mtaops.NewResolver(mainCfg.BaseDir, env)
 	cm.initNativeLdapClient(ctx)
-	cm.comparator = NewComparator(cm, appState, cm.ServiceMgr)
+	cm.policy = restart.New(cm.ServiceMgr, env.Clock)
 
 	return cm
 }
@@ -241,25 +252,6 @@ func (cm *ConfigManager) initConfigLdapClient(ctx context.Context, localCfg map[
 		"bind_dn", ldap.ConfigBackendDN)
 }
 
-// lookupVarKey checks ServerConfig → MiscConfig → GlobalConfig for key.
-// A value stored on the server entry overrides the global one, matching the
-// legacy configd (state.py assigns global, misc, server; the last one wins).
-func (cm *ConfigManager) lookupVarKey(key string) (string, bool) {
-	if val, ok := cm.State.GetServerConfig().Data.Get(key); ok {
-		return val, true
-	}
-
-	if val, ok := cm.State.GetMiscConfig().Data.Get(key); ok {
-		return val, true
-	}
-
-	if val, ok := cm.State.GetGlobalConfig().Data.Get(key); ok {
-		return val, true
-	}
-
-	return "", false
-}
-
 // lookupFileKey returns the value for key from the file cache or disk.
 func (cm *ConfigManager) lookupFileKey(ctx context.Context, key string) (string, error) {
 	if val, ok := cm.State.LookupFile(key); ok {
@@ -342,9 +334,11 @@ func (cm *ConfigManager) LookUpConfig(ctx context.Context, cfgType, key string) 
 
 	switch cfgType {
 	case configTypeVAR:
-		value, found = cm.lookupVarKey(key)
+		// Server overrides misc overrides global, matching the legacy
+		// configd (state.py assigns global, misc, server; the last one wins).
+		value, found = cm.State.Snapshot().Var(key)
 	case configTypeLOCAL:
-		value, found = cm.State.GetLocalConfig().Data.Get(key)
+		value, found = cm.State.Snapshot().Local(key)
 	case configTypeFILE:
 		value, err = cm.lookupFileKey(ctx, key)
 		if err != nil {
@@ -360,13 +354,7 @@ func (cm *ConfigManager) LookUpConfig(ctx context.Context, cfgType, key string) 
 
 		found = true
 	case configTypeSERVICE:
-		if _, ok := cm.State.GetServerConfig().ServiceConfig.Get(key); ok {
-			value = constTRUE
-		} else {
-			value = constFALSE
-		}
-
-		found = true
+		value, found = cm.State.Snapshot().Value(configTypeSERVICE, key)
 	default:
 		logger.WarnContext(ctx, "Unknown config type", "config_type", cfgType, "key", key)
 
@@ -420,9 +408,4 @@ func (cm *ConfigManager) ClearLocalConfigCache(ctx context.Context) {
 
 		cm.cachedLocalConfigOutput = ""
 	}
-}
-
-// Comparator returns the embedded Comparator instance.
-func (cm *ConfigManager) Comparator() *Comparator {
-	return cm.comparator
 }

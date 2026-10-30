@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
-	"github.com/zextras/carbonio-configd/internal/state"
+	"github.com/zextras/carbonio-configd/internal/snapshot"
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
@@ -33,7 +33,9 @@ func NewResolver(baseDir string, env sys.System) OperationResolver {
 // ResolveValue resolves a value based on type (VAR, LOCAL, MAPLOCAL, or literal).
 // FILE is deliberately absent: FILE values are config templates that must be run
 // through the transformer, so they are resolved by configmgr.lookupFileKey.
-func (r *resolver) ResolveValue(ctx context.Context, valueType, key string, st *state.State) (string, error) {
+func (r *resolver) ResolveValue(
+	ctx context.Context, valueType, key string, snap *snapshot.Snapshot,
+) (string, error) {
 	ctx = logger.ContextWithComponentOnce(ctx, "mtaops")
 	logger.DebugContext(ctx, "Resolving value",
 		"type", valueType,
@@ -41,9 +43,9 @@ func (r *resolver) ResolveValue(ctx context.Context, valueType, key string, st *
 
 	switch valueType {
 	case configTypeVAR:
-		return r.resolveVAR(ctx, key, st)
+		return r.resolveVAR(ctx, key, snap)
 	case configTypeLOCAL:
-		return r.resolveLOCAL(ctx, key, st)
+		return r.resolveLOCAL(ctx, key, snap)
 	case "MAPLOCAL":
 		return r.resolveMAPLOCAL(ctx, key)
 	default:
@@ -53,10 +55,10 @@ func (r *resolver) ResolveValue(ctx context.Context, valueType, key string, st *
 	}
 }
 
-func (r *resolver) resolveVAR(ctx context.Context, key string, st *state.State) (string, error) {
-	value, _ := st.GlobalConfig.Data.Get(key)
+func (r *resolver) resolveVAR(ctx context.Context, key string, snap *snapshot.Snapshot) (string, error) {
+	value, _ := snap.Global(key)
 	if value == "" {
-		value, _ = st.ServerConfig.Data.Get(key)
+		value, _ = snap.Server(key)
 	}
 
 	if value == "" {
@@ -68,8 +70,8 @@ func (r *resolver) resolveVAR(ctx context.Context, key string, st *state.State) 
 	return strings.TrimSpace(value), nil
 }
 
-func (r *resolver) resolveLOCAL(ctx context.Context, key string, st *state.State) (string, error) {
-	value, _ := st.LocalConfig.Data.Get(key)
+func (r *resolver) resolveLOCAL(ctx context.Context, key string, snap *snapshot.Snapshot) (string, error) {
+	value, _ := snap.Local(key)
 	if value == "" {
 		logger.DebugContext(ctx, "LOCAL not found in local config", "key", key)
 
@@ -112,7 +114,7 @@ func (r *resolver) resolveMAPLOCAL(ctx context.Context, key string) (string, err
 //
 //nolint:lll // Function signature naturally exceeds line limit
 func (r *resolver) ResolvePostconfDirective(
-	ctx context.Context, key, valueType, valueKey string, st *state.State) (PostconfOperation, error) {
+	ctx context.Context, key, valueType, valueKey string, snap *snapshot.Snapshot) (PostconfOperation, error) {
 	ctx = logger.ContextWithComponentOnce(ctx, "mtaops")
 	op := PostconfOperation{Key: key}
 
@@ -123,7 +125,7 @@ func (r *resolver) ResolvePostconfDirective(
 	}
 
 	// Resolve the value
-	value, err := r.ResolveValue(ctx, valueType, valueKey, st)
+	value, err := r.ResolveValue(ctx, valueType, valueKey, snap)
 	if err != nil {
 		return op, fmt.Errorf("failed to resolve POSTCONF %s: %w", key, err)
 	}
@@ -151,13 +153,13 @@ func (r *resolver) ResolvePostconfdDirective(key string) PostconfdOperation {
 // Format: "LDAP key TYPE value"
 // Example: "LDAP keyLDAPDBMaxsize LOCAL keyLDAPDBMaxsize"
 func (r *resolver) ResolveLdapDirective(
-	ctx context.Context, key, valueType, valueKey string, st *state.State,
+	ctx context.Context, key, valueType, valueKey string, snap *snapshot.Snapshot,
 ) (LdapOperation, error) {
 	ctx = logger.ContextWithComponentOnce(ctx, "mtaops")
 	op := LdapOperation{Key: key}
 
 	// Resolve the value
-	value, err := r.ResolveValue(ctx, valueType, valueKey, st)
+	value, err := r.ResolveValue(ctx, valueType, valueKey, snap)
 	if err != nil {
 		return op, fmt.Errorf("failed to resolve LDAP %s: %w", key, err)
 	}
@@ -169,7 +171,9 @@ func (r *resolver) ResolveLdapDirective(
 
 // ResolveMapfileDirective resolves a MAPFILE directive.
 // Format: "MAPFILE key" or "MAPLOCAL key"
-func (r *resolver) ResolveMapfileDirective(key string, isLocal bool, st *state.State) (MapfileOperation, error) {
+func (r *resolver) ResolveMapfileDirective(
+	key string, isLocal bool, snap *snapshot.Snapshot,
+) (MapfileOperation, error) {
 	op := MapfileOperation{
 		Key:     key,
 		IsLocal: isLocal,
@@ -187,7 +191,7 @@ func (r *resolver) ResolveMapfileDirective(key string, isLocal bool, st *state.S
 
 	if !isLocal {
 		// MAPFILE: Read base64-encoded data from LDAP
-		base64Data, _ := st.GlobalConfig.Data.Get(key)
+		base64Data, _ := snap.Global(key)
 		op.Base64Data = base64Data
 	}
 

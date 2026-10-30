@@ -9,7 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -18,39 +18,9 @@ import (
 
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/plan"
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
-
-// DoConfigRewrites executes configuration rewrites, postconf, postconfd, and LDAP changes.
-func (cm *ConfigManager) DoConfigRewrites(ctx context.Context) error {
-	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
-	logger.DebugContext(ctx, "Executing config rewrites")
-
-	var wg sync.WaitGroup
-
-	errChan := make(chan error, 6) // Buffer matches step count to prevent blocking
-
-	// Mapped files first: legacy writes them while compiling actions
-	// (state.py lookUpConfig MAPFILE), before any rewrite, and the other steps
-	// read them: proxygen enables ssl_dhparam only if dhparam.pem exists.
-	if err := cm.doMapfile(ctx); err != nil {
-		errChan <- err
-	}
-
-	// Proxygen takes longest, so launch it first.
-	cm.runStep(ctx, &wg, errChan, func(ctx context.Context) error {
-		return cm.runProxygen(ctx)
-	})
-	cm.runStep(ctx, &wg, errChan, cm.doRewrites)
-	cm.runStep(ctx, &wg, errChan, cm.doPostconf)
-	cm.runStep(ctx, &wg, errChan, cm.doPostconfd)
-	cm.runStep(ctx, &wg, errChan, cm.doLdap)
-
-	wg.Wait()
-	close(errChan)
-
-	return cm.joinRewriteErrors(ctx, errChan)
-}
 
 // runStep launches step in a goroutine and forwards any error to errChan.
 func (cm *ConfigManager) runStep(
@@ -64,25 +34,6 @@ func (cm *ConfigManager) runStep(
 			errChan <- err
 		}
 	})
-}
-
-// runProxygen runs proxygen when requested, clearing the pending flag on success.
-func (cm *ConfigManager) runProxygen(ctx context.Context) error {
-	if !cm.State.CurrentActions.Proxygen {
-		return nil
-	}
-
-	logger.DebugContext(ctx, "Running proxygen")
-
-	// Use the new method that passes loaded configs.
-	if err := cm.RunProxygenWithConfigs(ctx); err != nil {
-		return fmt.Errorf("proxygen failed: %w", err)
-	}
-
-	logger.DebugContext(ctx, "Proxygen executed successfully")
-	cm.State.Proxygen(false)
-
-	return nil
 }
 
 // joinRewriteErrors drains errChan, logs each error, and joins them into one.
@@ -137,18 +88,16 @@ func (cm *ConfigManager) rewriteWorker(
 	return err
 }
 
-func (cm *ConfigManager) doRewrites(ctx context.Context) error {
-	if len(cm.State.CurrentActions.Rewrites) == 0 {
-		return nil
+// doRewrites renders the template files of the plan with a bounded worker pool
+// and returns the ones that did not complete (failed, or not started because
+// ctx was cancelled), which the next cycle retries.
+func (cm *ConfigManager) doRewrites(ctx context.Context, entries []plan.Rewrite) ([]plan.Rewrite, error) {
+	if len(entries) == 0 {
+		return nil, nil
 	}
 
-	// Snapshot rewrites to avoid concurrent map read/write with DelRewrite
-	// called from processRewrite goroutines.
-	rewrites := make(map[string]config.RewriteEntry, len(cm.State.CurrentActions.Rewrites))
-	maps.Copy(rewrites, cm.State.CurrentActions.Rewrites)
-
 	startTime := time.Now()
-	totalFiles := len(rewrites)
+	totalFiles := len(entries)
 	logger.DebugContext(ctx, "Starting configuration file rewrites",
 		"total_files", totalFiles)
 
@@ -157,37 +106,31 @@ func (cm *ConfigManager) doRewrites(ctx context.Context) error {
 	semaphore := make(chan struct{}, maxConcurrent)
 
 	var (
-		wg        sync.WaitGroup
-		errMu     sync.Mutex
-		errs      []error
-		fileCount int
+		wg   sync.WaitGroup
+		mu   sync.Mutex
+		errs []error
+		done = make(map[string]bool, totalFiles)
 	)
 
-	collectErr := func(err error) {
-		if err == nil {
+	record := func(source string, err error) {
+		mu.Lock()
+		defer mu.Unlock()
+
+		if err != nil {
+			errs = append(errs, err)
+
 			return
 		}
 
-		errMu.Lock()
-
-		errs = append(errs, err)
-		errMu.Unlock()
+		done[source] = true
 	}
 
-	for filePath, rewriteEntry := range rewrites {
+	for i, entry := range entries {
 		if cancelled(ctx) {
 			logger.InfoContext(ctx, "File rewrites cancelled by shutdown signal")
-			wg.Wait()
 
-			if len(errs) > 0 {
-				return errors.Join(errs...)
-			}
-
-			return nil
+			break
 		}
-
-		fileCount++
-		fp, re, num := filePath, rewriteEntry, fileCount
 
 		wg.Add(1)
 
@@ -197,7 +140,8 @@ func (cm *ConfigManager) doRewrites(ctx context.Context) error {
 			defer wg.Done()
 			defer func() { <-semaphore }()
 
-			collectErr(cm.rewriteWorker(ctx, fp, re, num, totalFiles))
+			re := config.RewriteEntry{Value: entry.Target, Mode: entry.Mode}
+			record(entry.Source, cm.rewriteWorker(ctx, entry.Source, re, i+1, totalFiles))
 		}()
 	}
 
@@ -206,11 +150,15 @@ func (cm *ConfigManager) doRewrites(ctx context.Context) error {
 	logger.DebugContext(ctx, "All configuration file rewrites completed",
 		"duration_seconds", time.Since(startTime).Seconds())
 
-	if len(errs) > 0 {
-		return errors.Join(errs...)
+	var pending []plan.Rewrite
+
+	for _, entry := range entries {
+		if !done[entry.Source] {
+			pending = append(pending, entry)
+		}
 	}
 
-	return nil
+	return pending, errors.Join(errs...)
 }
 
 // cleanupRewriteFiles cleans up temporary and source files
@@ -246,8 +194,8 @@ func isAlreadyClosedError(err error) bool {
 }
 
 // rewriteTransform opens srcPath, applies transformer to every line, and writes
-// the result to tmpFile. It owns the srcFile lifecycle.
-func (cm *ConfigManager) rewriteTransform(ctx context.Context, srcPath string, tmpFile sys.File) (int, error) {
+// the result to out. It owns the srcFile lifecycle.
+func (cm *ConfigManager) rewriteTransform(ctx context.Context, srcPath string, out io.StringWriter) (int, error) {
 	srcFile, err := cm.env.FS.Open(srcPath)
 	if err != nil {
 		return 0, fmt.Errorf("open source file %s: %w", srcPath, err)
@@ -276,7 +224,7 @@ func (cm *ConfigManager) rewriteTransform(ctx context.Context, srcPath string, t
 			transformed += "\n"
 		}
 
-		if _, err := tmpFile.WriteString(transformed); err != nil {
+		if _, err := out.WriteString(transformed); err != nil {
 			return lineCount, fmt.Errorf("write to temp file: %w", err)
 		}
 	}
@@ -288,20 +236,28 @@ func (cm *ConfigManager) rewriteTransform(ctx context.Context, srcPath string, t
 	return lineCount, nil
 }
 
+// rewriteFileMode parses the octal mode of a REWRITE directive; legacy
+// state.py:775 defaults to 0440.
+func rewriteFileMode(modeStr string) (os.FileMode, error) {
+	if modeStr == "" {
+		return 0o440, nil
+	}
+
+	modeInt, err := strconv.ParseInt(modeStr, 8, 32)
+	if err != nil {
+		return 0, fmt.Errorf("invalid file mode %s: %w", modeStr, err)
+	}
+
+	//nolint:gosec // G115: modeInt is validated by ParseInt with base 8 and 32-bit size
+	return os.FileMode(modeInt), nil
+}
+
 // rewriteAtomicCommit sets permissions on tmpFileName and atomically replaces
 // destPath, falling back to copy+delete when rename crosses filesystems.
 func (cm *ConfigManager) rewriteAtomicCommit(ctx context.Context, tmpFileName, destPath, modeStr string) error {
-	// Legacy state.py:775 defaults to 0440.
-	var fileMode os.FileMode = 0o440
-
-	if modeStr != "" {
-		modeInt, err := strconv.ParseInt(modeStr, 8, 32)
-		if err != nil {
-			return fmt.Errorf("invalid file mode %s: %w", modeStr, err)
-		}
-
-		//nolint:gosec // G115: modeInt is validated by ParseInt with base 8 and 32-bit size
-		fileMode = os.FileMode(modeInt)
+	fileMode, err := rewriteFileMode(modeStr)
+	if err != nil {
+		return err
 	}
 
 	if err := cm.env.FS.Chmod(tmpFileName, fileMode); err != nil {
@@ -367,7 +323,6 @@ func (cm *ConfigManager) processRewrite(ctx context.Context, filePath string, re
 
 	logger.DebugContext(ctx, "File rewrite completed",
 		"dest_path", destPath, "mode", modeStr, "lines_processed", lineCount)
-	cm.State.DelRewrite(filePath)
 
 	return nil
 }
@@ -387,7 +342,7 @@ func (cm *ConfigManager) resolveValueSpec(ctx context.Context, key, valueSpec st
 		return cm.lookupFileKey(ctx, valueKey)
 	}
 
-	resolvedValue, err := cm.mtaResolver.ResolveValue(ctx, valueType, valueKey, cm.State)
+	resolvedValue, err := cm.mtaResolver.ResolveValue(ctx, valueType, valueKey, cm.State.Snapshot())
 	if err != nil {
 		return "", fmt.Errorf("failed to resolve value for key %s: %w", key, err)
 	}

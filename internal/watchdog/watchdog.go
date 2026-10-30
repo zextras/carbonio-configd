@@ -355,15 +355,13 @@ func (w *Watchdog) logServiceStatusChanges(ctx context.Context) map[string]bool 
 }
 
 // isEnabledOnNode reports whether service is in this node's
-// zimbraServiceEnabled (ServerConfig.ServiceConfig).
+// zimbraServiceEnabled, read lock-free from the latest published snapshot.
 func (w *Watchdog) isEnabledOnNode(service string) bool {
-	if w.state == nil || w.state.ServerConfig == nil {
+	if w.state == nil {
 		return false
 	}
 
-	_, ok := w.state.ServerConfig.ServiceConfig.Get(service)
-
-	return ok
+	return w.state.Snapshot().ServiceEnabled(service)
 }
 
 // checkOneService verifies a single service and queues a restart when it is not running.

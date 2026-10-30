@@ -169,6 +169,17 @@ func TestConfig_SetVals(t *testing.T) {
 			},
 		},
 		{
+			name: "restart debounce",
+			localConfig: &LocalConfig{
+				Data: testConfigMap(map[string]string{"zmconfigd_restart_debounce_seconds": "30"}),
+			},
+			validate: func(t *testing.T, cfg *Config) {
+				if cfg.RestartDebounce != 30 {
+					t.Errorf("RestartDebounce = %v, want 30", cfg.RestartDebounce)
+				}
+			},
+		},
+		{
 			name: "set configd intervals",
 			localConfig: &LocalConfig{
 				Data: testConfigMap(map[string]string{
@@ -338,7 +349,6 @@ func TestCacheTTLConstant(t *testing.T) {
 func TestMtaConfigSection(t *testing.T) {
 	section := &MtaConfigSection{
 		Name:         "test-section",
-		Changed:      false,
 		Depends:      make(map[string]bool),
 		Rewrites:     make(map[string]RewriteEntry),
 		Restarts:     make(map[string]bool),
@@ -352,10 +362,6 @@ func TestMtaConfigSection(t *testing.T) {
 
 	if section.Name != "test-section" {
 		t.Errorf("Name = %v, want test-section", section.Name)
-	}
-
-	if section.Changed {
-		t.Error("Changed should be false")
 	}
 
 	if section.Proxygen {
@@ -466,8 +472,7 @@ func TestMtaConfig(t *testing.T) {
 	}
 
 	section := &MtaConfigSection{
-		Name:    "main",
-		Changed: false,
+		Name: "main",
 	}
 
 	mc.Sections["main"] = section

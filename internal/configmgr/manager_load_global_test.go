@@ -175,15 +175,15 @@ zimbraMailboxdSSLProtocols: TLSv1.2 TLSv1.3`
 	}
 
 	// Verify data was loaded
-	if cm.State.GlobalConfig.Data.GetOr("zimbraMtaBlockedExtensionWarnRecipient", "") != "TRUE" {
+	if valueOrEmpty(cm.State.Snapshot().Global("zimbraMtaBlockedExtensionWarnRecipient")) != "TRUE" {
 		t.Errorf("Expected zimbraMtaBlockedExtensionWarnRecipient to be TRUE, got: %s",
-			cm.State.GlobalConfig.Data.GetOr("zimbraMtaBlockedExtensionWarnRecipient", ""))
+			valueOrEmpty(cm.State.Snapshot().Global("zimbraMtaBlockedExtensionWarnRecipient")))
 	}
 
 	// Verify zimbraQuarantineBannedItems was set based on conditions
-	if cm.State.GlobalConfig.Data.GetOr("zimbraQuarantineBannedItems", "") != "TRUE" {
+	if valueOrEmpty(cm.State.Snapshot().Global("zimbraQuarantineBannedItems")) != "TRUE" {
 		t.Errorf("Expected zimbraQuarantineBannedItems to be TRUE, got: %s",
-			cm.State.GlobalConfig.Data.GetOr("zimbraQuarantineBannedItems", ""))
+			valueOrEmpty(cm.State.Snapshot().Global("zimbraQuarantineBannedItems")))
 	}
 }
 
@@ -208,9 +208,9 @@ func TestLoadGlobalConfigWithRetry_NoCache(t *testing.T) {
 	}
 
 	// Verify data was loaded even without cache
-	if cm.State.GlobalConfig.Data.GetOr("zimbraMtaBlockedExtensionWarnRecipient", "") != "FALSE" {
+	if valueOrEmpty(cm.State.Snapshot().Global("zimbraMtaBlockedExtensionWarnRecipient")) != "FALSE" {
 		t.Errorf("Expected zimbraMtaBlockedExtensionWarnRecipient to be FALSE, got: %s",
-			cm.State.GlobalConfig.Data.GetOr("zimbraMtaBlockedExtensionWarnRecipient", ""))
+			valueOrEmpty(cm.State.Snapshot().Global("zimbraMtaBlockedExtensionWarnRecipient")))
 	}
 }
 

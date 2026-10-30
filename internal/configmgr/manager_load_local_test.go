@@ -29,19 +29,19 @@ func TestLoadLocalConfigWithRetry_Success(t *testing.T) {
 	}
 
 	// Verify data was parsed
-	if cm.State.LocalConfig.Data.GetOr("ldap_url", "") != "ldap://localhost:389" {
+	if valueOrEmpty(cm.State.Snapshot().Local("ldap_url")) != "ldap://localhost:389" {
 		t.Errorf("Expected ldap_url to be 'ldap://localhost:389', got: %s",
-			cm.State.LocalConfig.Data.GetOr("ldap_url", ""))
+			valueOrEmpty(cm.State.Snapshot().Local("ldap_url")))
 	}
 
 	// Verify default port was set
-	if cm.State.LocalConfig.Data.GetOr("zmconfigd_listen_port", "") != "7171" {
+	if valueOrEmpty(cm.State.Snapshot().Local("zmconfigd_listen_port")) != "7171" {
 		t.Errorf("Expected default zmconfigd_listen_port '7171', got: %s",
-			cm.State.LocalConfig.Data.GetOr("zmconfigd_listen_port", ""))
+			valueOrEmpty(cm.State.Snapshot().Local("zmconfigd_listen_port")))
 	}
 
 	// Verify OpenDKIM URIs were generated
-	if _, ok := cm.State.LocalConfig.Data.Get("opendkim_signingtable_uri"); !ok {
+	if _, ok := cm.State.Snapshot().Local("opendkim_signingtable_uri"); !ok {
 		t.Error("Expected opendkim_signingtable_uri to be generated")
 	}
 }
@@ -104,14 +104,14 @@ func TestLoadLocalConfigWithRetry_EmptyOutput(t *testing.T) {
 	}
 
 	// Verify default port was still set
-	if cm.State.LocalConfig.Data.GetOr("zmconfigd_listen_port", "") != "7171" {
+	if valueOrEmpty(cm.State.Snapshot().Local("zmconfigd_listen_port")) != "7171" {
 		t.Errorf("Expected default zmconfigd_listen_port '7171', got: %s",
-			cm.State.LocalConfig.Data.GetOr("zmconfigd_listen_port", ""))
+			valueOrEmpty(cm.State.Snapshot().Local("zmconfigd_listen_port")))
 	}
 
 	// Verify the data map exists but is mostly empty (except defaults)
-	if cm.State.LocalConfig.Data.Len() > 1 {
-		t.Errorf("Expected only default values, got %d entries", cm.State.LocalConfig.Data.Len())
+	if len(cm.State.Snapshot().LocalMap()) > 1 {
+		t.Errorf("Expected only default values, got %d entries", len(cm.State.Snapshot().LocalMap()))
 	}
 }
 
@@ -133,8 +133,8 @@ func TestLoadLocalConfigWithRetry_CachedOutput(t *testing.T) {
 	}
 
 	// Verify data was parsed from cached output
-	if cm.State.LocalConfig.Data.GetOr("key1", "") != "value1" {
-		t.Errorf("Expected key1=value1, got: %s", cm.State.LocalConfig.Data.GetOr("key1", ""))
+	if valueOrEmpty(cm.State.Snapshot().Local("key1")) != "value1" {
+		t.Errorf("Expected key1=value1, got: %s", valueOrEmpty(cm.State.Snapshot().Local("key1")))
 	}
 
 	// Second call - should still use cached output
@@ -144,8 +144,8 @@ func TestLoadLocalConfigWithRetry_CachedOutput(t *testing.T) {
 	}
 
 	// Verify data is still correct
-	if cm.State.LocalConfig.Data.GetOr("key2", "") != "value2" {
-		t.Errorf("Expected key2=value2, got: %s", cm.State.LocalConfig.Data.GetOr("key2", ""))
+	if valueOrEmpty(cm.State.Snapshot().Local("key2")) != "value2" {
+		t.Errorf("Expected key2=value2, got: %s", valueOrEmpty(cm.State.Snapshot().Local("key2")))
 	}
 }
 

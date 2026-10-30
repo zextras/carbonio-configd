@@ -237,12 +237,13 @@ func TestConfigManager_ConcurrentLoadAndLookup(t *testing.T) {
 	}
 }
 
-// TestConfigManager_ConcurrentCompareKeys tests concurrent change detection.
-// This validates that CompareKeys is thread-safe.
-func TestConfigManager_ConcurrentCompareKeys(t *testing.T) {
+// TestConfigManager_ConcurrentObserve tests concurrent observation of the
+// lookups behind change detection. This validates that Observe (the read side
+// of Plan) is thread-safe.
+func TestConfigManager_ConcurrentObserve(t *testing.T) {
 	ctx := context.Background()
 	if testing.Short() {
-		t.Skip("Skipping concurrent compare keys test in short mode")
+		t.Skip("Skipping concurrent observe test in short mode")
 	}
 
 	mainCfg, err := config.NewConfig()
@@ -274,10 +275,10 @@ func TestConfigManager_ConcurrentCompareKeys(t *testing.T) {
 			defer wg.Done()
 
 			for j := range numIterations {
-				err := cm.CompareKeys(context.Background())
-				if err != nil {
+				snap := cm.Observe(context.Background(), cm.State.Snapshot(), cm.State.GetMtaConfig())
+				if snap == nil {
 					errorCount.Add(1)
-					t.Logf("Goroutine %d iteration %d: CompareKeys failed: %v", id, j, err)
+					t.Logf("Goroutine %d iteration %d: Observe returned nil", id, j)
 				} else {
 					successCount.Add(1)
 				}
@@ -293,7 +294,7 @@ func TestConfigManager_ConcurrentCompareKeys(t *testing.T) {
 
 	select {
 	case <-done:
-		t.Logf("CompareKeys operations completed. Success: %d, Errors: %d",
+		t.Logf("Observe operations completed. Success: %d, Errors: %d",
 			successCount.Load(), errorCount.Load())
 	case <-time.After(30 * time.Second):
 		t.Fatal("Test timed out after 30 seconds")
@@ -341,7 +342,7 @@ func TestConfigManager_RaceConditions(t *testing.T) {
 	operations := []func(){
 		func() { cm.LoadAllConfigs(context.Background()) },
 		func() { cm.LoadLocalConfig(context.Background()) },
-		func() { cm.CompareKeys(context.Background()) },
+		func() { cm.Observe(ctx, cm.State.Snapshot(), cm.State.GetMtaConfig()) },
 		func() { cm.LookUpConfig(ctx, "LOCAL", "zmconfigd_listen_port") },
 		func() { cm.LookUpConfig(ctx, "GLOBAL", "zimbra_server_hostname") },
 	}

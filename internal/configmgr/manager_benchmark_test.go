@@ -113,10 +113,11 @@ func BenchmarkConfigManager_LoadGlobalConfig(b *testing.B) {
 	}
 }
 
-// BenchmarkConfigManager_CompareKeys benchmarks change detection.
+// BenchmarkConfigManager_Plan benchmarks change detection (observing the
+// lookups and computing the plan).
 // Requirement: SHALL complete in < 100ms for 100 configuration variables
 // NOTE: Requires live Carbonio environment with zmlocalconfig and zmprov available
-func BenchmarkConfigManager_CompareKeys(b *testing.B) {
+func BenchmarkConfigManager_Plan(b *testing.B) {
 	ctx := context.Background()
 
 	mainCfg, err := config.NewConfig()
@@ -137,9 +138,8 @@ func BenchmarkConfigManager_CompareKeys(b *testing.B) {
 	b.ReportAllocs()
 
 	for b.Loop() {
-		err := cm.CompareKeys(context.Background())
-		if err != nil {
-			b.Fatalf("CompareKeys failed: %v", err)
+		if _, err := cm.Plan(context.Background()); err != nil {
+			b.Fatalf("Plan failed: %v", err)
 		}
 	}
 }
@@ -241,9 +241,8 @@ func BenchmarkConfigManager_FullCycle(b *testing.B) {
 		}
 
 		// Detect configuration changes
-		err = cm.CompareKeys(context.Background())
-		if err != nil {
-			b.Fatalf("CompareKeys failed: %v", err)
+		if _, err = cm.Plan(context.Background()); err != nil {
+			b.Fatalf("Plan failed: %v", err)
 		}
 
 		// Perform configuration lookups (simulate template expansion)
@@ -296,7 +295,7 @@ func BenchmarkConfigManager_MemoryUsage(b *testing.B) {
 		}
 
 		// Perform operations
-		_ = cm.CompareKeys(context.Background())
+		_, _ = cm.Plan(context.Background())
 
 		// Multiple lookups
 		for range 100 {
@@ -338,7 +337,7 @@ func BenchmarkConfigManager_ConcurrentFullCycle(b *testing.B) {
 			_, _ = cm.LookUpConfig(ctx, "LOCAL", "zimbra_server_hostname")
 
 			// Simulate change detection
-			_ = cm.CompareKeys(context.Background())
+			_ = cm.Observe(context.Background(), cm.State.Snapshot(), cm.State.GetMtaConfig())
 		}
 	})
 }
@@ -347,9 +346,8 @@ func BenchmarkConfigManager_ConcurrentFullCycle(b *testing.B) {
 // This simulates the entire RunMainLoop workflow including:
 //   - LoadAllConfigs (local, LDAP, global, misc, server)
 //   - ParseMtaConfig (zmconfigd.cf parsing)
-//   - CompareKeys (change detection)
-//   - CompileActions (action compilation)
-//   - DoConfigRewrites (template generation, postconf operations)
+//   - Plan (change detection and action planning)
+//   - Execute (template generation, postconf operations)
 //
 // This is the most comprehensive benchmark representing real-world performance.
 // Requirement: First loop SHALL complete in < 30 seconds, subsequent loops in < 10 seconds
@@ -397,30 +395,27 @@ func BenchmarkFullLoop(b *testing.B) {
 			b.Fatalf("ParseMtaConfig failed: %v", err)
 		}
 
-		// Detect configuration changes
-		// Compares current vs. previous configuration state
-		err = cm.CompareKeys(context.Background())
+		// Plan the cycle: compares the current vs. previous configuration
+		// state and determines which templates need regeneration and which
+		// services need restart
+		pl, err := cm.Plan(context.Background())
 		if err != nil {
-			b.Fatalf("CompareKeys failed: %v", err)
+			b.Fatalf("Plan failed: %v", err)
 		}
-
-		// Compile actions based on detected changes
-		// Determines which templates need regeneration and which services need restart
-		cm.CompileActions(context.Background())
 
 		// Execute configuration rewrites
 		// Generates configuration files from templates, runs postconf operations
 		// This includes proxy configs (nginx), MTA configs (postfix), etc.
-		err = cm.DoConfigRewrites(context.Background())
+		err = cm.Execute(context.Background(), pl)
 		if err != nil {
-			b.Fatalf("DoConfigRewrites failed: %v", err)
+			b.Fatalf("Execute failed: %v", err)
 		}
 
-		// Note: We skip DoRestarts() in benchmark as it would restart actual services
+		// Note: We skip ApplyRestarts() in benchmark as it would restart actual services
 		// and is explicitly disabled via mainCfg.RestartConfig = false
 
 		// Mark FirstRun as false for subsequent iterations
-		appState.FirstRun = false
+		appState.SetFirstRun(false)
 	}
 }
 
@@ -454,14 +449,14 @@ func BenchmarkFullLoop_FirstRun(b *testing.B) {
 	for b.Loop() {
 		// Create fresh state and manager for each iteration to simulate first run
 		freshState := state.NewState()
-		freshState.FirstRun = true // Explicitly set FirstRun flag
+		freshState.SetFirstRun(true) // Explicitly set FirstRun flag
 		cm := NewConfigManager(ctx, mainCfg, freshState, ldapClient, nil, hostEnv())
 
 		// Execute full loop with FirstRun=true
 		_ = cm.LoadAllConfigs(context.Background())
 		_ = cm.ParseMtaConfig(context.Background(), mainCfg.ConfigFile)
-		_ = cm.CompareKeys(context.Background())
-		cm.CompileActions(context.Background())
-		_ = cm.DoConfigRewrites(context.Background())
+		if pl, err := cm.Plan(context.Background()); err == nil {
+			_ = cm.Execute(context.Background(), pl)
+		}
 	}
 }

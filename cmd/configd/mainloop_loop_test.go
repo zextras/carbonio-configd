@@ -10,6 +10,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -19,8 +20,10 @@ import (
 	"github.com/zextras/carbonio-configd/internal/cache"
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/configmgr"
+	"github.com/zextras/carbonio-configd/internal/plan"
 	"github.com/zextras/carbonio-configd/internal/sdnotify"
 	"github.com/zextras/carbonio-configd/internal/services"
+	"github.com/zextras/carbonio-configd/internal/snapshot"
 	"github.com/zextras/carbonio-configd/internal/state"
 	"github.com/zextras/carbonio-configd/internal/sys"
 	"github.com/zextras/carbonio-configd/internal/sys/systest"
@@ -175,17 +178,14 @@ func TestRunRestartsPhase(t *testing.T) {
 	deps := newLoopFixture(t)
 	ctx := context.Background()
 
-	t.Run("disabled returns zero", func(t *testing.T) {
-		deps.cfg.RestartConfig = false
-		assert.Equal(t, time.Duration(0), runRestartsPhase(ctx, deps.cfg, deps.configManager))
-	})
-
-	t.Run("enabled runs DoRestarts on empty state", func(t *testing.T) {
-		deps.cfg.RestartConfig = true
-		// No pending restarts: must complete quickly and return elapsed time.
-		dur := runRestartsPhase(ctx, deps.cfg, deps.configManager)
-		assert.GreaterOrEqual(t, dur, time.Duration(0))
-	})
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("always applies restarts (config restarts=%v)", enabled), func(t *testing.T) {
+			deps.cfg.RestartConfig = enabled
+			// Empty plan: ApplyRestarts always runs and returns promptly.
+			dur := runRestartsPhase(ctx, deps.configManager, &plan.Plan{})
+			assert.GreaterOrEqual(t, dur, time.Duration(0))
+		})
+	}
 }
 
 func TestNotifyReady_NotifierDisabled(t *testing.T) {
@@ -235,7 +235,7 @@ func TestMaybeStartListener_StartsServer(t *testing.T) {
 	ctx := context.Background()
 	appState := state.NewState()
 	// Port 0 binds an ephemeral port, keeping the test parallel-safe.
-	appState.LocalConfig.Data.Set("zmconfigd_listen_port", "0")
+	appState.Publish(snapshot.New(snapshot.Parts{Local: map[string]string{"zmconfigd_listen_port": "0"}}))
 
 	trigger := &MainLoopActionTrigger{ReloadChan: make(chan struct{}, 1), State: appState}
 
@@ -250,15 +250,16 @@ func TestMaybeStartListener_StartsServer(t *testing.T) {
 
 func TestRunConfigPhases_EmptyState(t *testing.T) {
 	deps := newLoopFixture(t)
-	// Arm the reload channel so a CompareKeys back-off sleep cannot hang the test.
+	// Arm the reload channel so a Plan back-off sleep cannot hang the test.
 	deps.reloadChan <- struct{}{}
 
-	timings, skipIter := runConfigPhases(
+	timings, pl, skipIter := runConfigPhases(
 		context.Background(), deps.env.Clock, deps.cfg, deps.appState, deps.configManager,
 		deps.serviceManager, deps.wd, deps.reloadChan,
 	)
 	assert.False(t, skipIter, "empty state must not trigger the back-off path")
-	assert.GreaterOrEqual(t, timings.compareKeys, time.Duration(0))
+	assert.NotNil(t, pl)
+	assert.GreaterOrEqual(t, timings.plan, time.Duration(0))
 }
 
 func TestFinalizeIteration(t *testing.T) {
@@ -409,4 +410,73 @@ func TestRunMainLoop_CancelledContextReturnsZero(t *testing.T) {
 
 	code := RunMainLoop(ctx, sys.Real(), cfg, appState, nil, &Args{Once: true}, notifier)
 	assert.Equal(t, 0, code)
+}
+
+func TestRunConfigPhases_PlanErrorBacksOff(t *testing.T) {
+	deps := newLoopFixture(t)
+	fake := systest.New()
+	run := func(reload chan struct{}) (*plan.Plan, bool) {
+		_, pl, skip := runConfigPhases(
+			context.Background(), fake.Clock, deps.cfg, deps.appState, deps.configManager,
+			deps.serviceManager, deps.wd, reload,
+		)
+
+		return pl, skip
+	}
+
+	// Cycle 1: two enabled services become tracked.
+	deps.appState.Publish(snapshot.New(snapshot.Parts{
+		Services: map[string]string{"mta": "TRUE", "proxy": "TRUE"},
+	}))
+
+	pl, skip := run(make(chan struct{}))
+	require.False(t, skip)
+	require.NotNil(t, pl)
+
+	// Cycle 2: every tracked service disappears, which the plan rejects.
+	deps.appState.Publish(snapshot.New(snapshot.Parts{}))
+
+	type result struct {
+		pl   *plan.Plan
+		skip bool
+	}
+
+	done := make(chan result, 1)
+
+	go func() {
+		pl, skip := run(make(chan struct{}))
+		done <- result{pl, skip}
+	}()
+
+	require.Eventually(t, func() bool { return fake.Clock.Waiters() == 1 },
+		5*time.Second, time.Millisecond, "60s back-off must be armed on the fake clock")
+
+	fake.Clock.Advance(59 * time.Second)
+
+	select {
+	case <-done:
+		t.Fatal("returned before the 60s back-off elapsed")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	fake.Clock.Advance(time.Second)
+
+	r := <-done
+	assert.True(t, r.skip)
+	assert.Nil(t, r.pl)
+}
+
+func TestMaybeStartListener_ReadsSnapshot(t *testing.T) {
+	ctx := context.Background()
+	appState := state.NewState()
+	appState.Publish(snapshot.New(snapshot.Parts{
+		Local:  map[string]string{"zmconfigd_listen_port": "0"},
+		Server: map[string]string{"zimbraIPMode": "ipv4"},
+	}))
+
+	trigger := &MainLoopActionTrigger{ReloadChan: make(chan struct{}, 1), State: appState}
+
+	srv := maybeStartListener(ctx, appState, &Args{}, trigger, nil)
+	require.NotNil(t, srv)
+	srv.Shutdown(ctx)
 }

@@ -15,7 +15,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/zextras/carbonio-configd/internal/state"
 	"github.com/zextras/carbonio-configd/internal/sys"
 	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
@@ -25,7 +24,7 @@ const fakeBase = "/opt/zextras"
 func newFakeRewriter() (*Rewriter, *systest.Fakes) {
 	fakes := systest.New()
 
-	return NewRewriter(fakeBase, newMockLookup(), &state.State{}, fakes.System()), fakes
+	return NewRewriter(fakeBase, newMockLookup(), fakes.System()), fakes
 }
 
 func TestAtomicReplace_RenameSameFilesystem(t *testing.T) {
@@ -111,7 +110,7 @@ func TestScanAndWrite_FlushFailure(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, closed.Close())
 
-	r := NewRewriter(dir, nil, nil, sys.Real())
+	r := NewRewriter(dir, nil, sys.Real())
 	err = r.scanAndWrite(context.Background(), src, closed)
 	require.Error(t, err, "writing through a closed file must fail")
 }

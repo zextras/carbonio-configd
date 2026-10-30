@@ -18,6 +18,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/ldap"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/network"
+	"github.com/zextras/carbonio-configd/internal/plan"
 	"github.com/zextras/carbonio-configd/internal/sdnotify"
 	"github.com/zextras/carbonio-configd/internal/services"
 	"github.com/zextras/carbonio-configd/internal/state"
@@ -82,13 +83,19 @@ func runForcedMode(
 	}
 
 	buildServiceDependencies(ctx, serviceManager, appState)
-	configManager.CompileActions(ctx)
 
-	if err := configManager.DoConfigRewrites(ctx); err != nil {
+	pl, err := configManager.Plan(ctx)
+	if err != nil {
+		logger.ErrorContext(ctx, "Failed to plan forced config rewrites", "error", err)
+
+		return
+	}
+
+	if err := configManager.Execute(ctx, pl); err != nil {
 		logger.ErrorContext(ctx, "Error during forced config rewrites", "error", err)
 	}
 
-	// No restarts on forced rewrites in Jython, so skipping DoRestarts here.
+	// No restarts on forced rewrites in Jython, so the plan's restarts are not applied here.
 	logger.InfoContext(ctx, "Completed forced run", "program", mainCfg.Progname)
 }
 
@@ -173,12 +180,13 @@ func maybeStartListener(
 		return server
 	}
 
-	listenerPortStr, _ := appState.GetLocalConfig().Data.Get("zmconfigd_listen_port")
+	snap := appState.Snapshot()
+	listenerPortStr, _ := snap.Local("zmconfigd_listen_port")
 	listenerPort, _ := strconv.Atoi(listenerPortStr)
 	listenerAddr := "127.0.0.1"
 	ipv6 := false
 
-	ipMode, _ := appState.GetServerConfig().Data.Get("zimbraIPMode")
+	ipMode, _ := snap.Server("zimbraIPMode")
 	if ipMode == "ipv6" {
 		listenerAddr = "::1"
 		ipv6 = true
@@ -213,15 +221,14 @@ func notifyReady(ctx context.Context, notifier *sdnotify.Notifier, loopCount int
 
 // phaseTimings carries the elapsed time of each runConfigPhases step for later logging.
 type phaseTimings struct {
-	buildDeps      time.Duration
-	compareKeys    time.Duration
-	compileActions time.Duration
-	rewrites       time.Duration
+	buildDeps time.Duration
+	plan      time.Duration
+	rewrites  time.Duration
 }
 
-// runConfigPhases executes the per-iteration dependency, compare, compile, and rewrite phases.
-// Returns phase timings and skipIter=true when the caller should continue the outer loop
-// (after a CompareKeys failure and the 60s back-off sleep).
+// runConfigPhases executes the per-iteration dependency, plan and execute phases.
+// Returns phase timings, the plan of the cycle and skipIter=true when the caller should
+// continue the outer loop (after a planning failure and the 60s back-off sleep).
 func runConfigPhases(
 	ctx context.Context,
 	clock sys.Clock,
@@ -231,7 +238,7 @@ func runConfigPhases(
 	serviceManager services.Manager,
 	wd *watchdog.Watchdog,
 	reloadChan chan struct{},
-) (timings phaseTimings, skipIter bool) {
+) (timings phaseTimings, pl *plan.Plan, skipIter bool) {
 	phaseStart := time.Now()
 
 	buildServiceDependencies(ctx, serviceManager, appState)
@@ -244,23 +251,24 @@ func runConfigPhases(
 
 	phaseStart = time.Now()
 
-	if err := configManager.CompareKeys(ctx); err != nil {
+	pl, err := configManager.Plan(ctx)
+	if err != nil {
 		logger.ErrorContext(ctx, "Configuration inconsistency detected (sleeping 60s)", "error", err)
 		SleepWithContext(ctx, clock, 60*time.Second, reloadChan)
 
-		return timings, true
+		return timings, nil, true
 	}
 
-	timings.compareKeys = time.Since(phaseStart)
+	timings.plan = time.Since(phaseStart)
 
-	logger.DebugContext(ctx, "Timing: CompareKeys completed",
-		"duration_seconds", timings.compareKeys.Seconds(),
-		"operation", "compare_keys")
+	logger.DebugContext(ctx, "Timing: Plan completed",
+		"duration_seconds", timings.plan.Seconds(),
+		"operation", "plan")
 
 	if appState.IsFirstRun() {
 		phaseStart = time.Now()
 
-		updateWatchdogServices(ctx, wd, appState, mainCfg)
+		updateWatchdogServices(ctx, wd, pl.Tracked, mainCfg)
 
 		logger.DebugContext(ctx, "Timing: updateWatchdogServices completed",
 			"duration_seconds", time.Since(phaseStart).Seconds(),
@@ -269,27 +277,17 @@ func runConfigPhases(
 
 	phaseStart = time.Now()
 
-	configManager.CompileActions(ctx)
-
-	timings.compileActions = time.Since(phaseStart)
-
-	logger.DebugContext(ctx, "Timing: CompileActions completed",
-		"duration_seconds", timings.compileActions.Seconds(),
-		"operation", "compile_actions")
-
-	phaseStart = time.Now()
-
-	if err := configManager.DoConfigRewrites(ctx); err != nil {
+	if err := configManager.Execute(ctx, pl); err != nil {
 		logger.ErrorContext(ctx, "Error during config rewrites", "error", err)
 	}
 
 	timings.rewrites = time.Since(phaseStart)
 
-	logger.DebugContext(ctx, "Timing: DoConfigRewrites completed",
+	logger.DebugContext(ctx, "Timing: Execute completed",
 		"duration_seconds", timings.rewrites.Seconds(),
-		"operation", "do_config_rewrites")
+		"operation", "execute_plan")
 
-	return timings, false
+	return timings, pl, false
 }
 
 // daemonLoopDeps bundles dependencies of the daemon main loop.
@@ -400,7 +398,7 @@ func runLoopIteration(ctx context.Context, deps *daemonLoopDeps, st *loopIterSta
 		notifyReady(ctx, deps.notifier, st.loopCount)
 	}
 
-	timings, skipIter := runConfigPhases(
+	timings, pl, skipIter := runConfigPhases(
 		ctx, deps.env.Clock, deps.cfg, deps.appState, deps.configManager,
 		deps.serviceManager, deps.wd, deps.reloadChan,
 	)
@@ -415,7 +413,7 @@ func runLoopIteration(ctx context.Context, deps *daemonLoopDeps, st *loopIterSta
 		return iterExit
 	}
 
-	restartsDur := runRestartsPhase(ctx, deps.cfg, deps.configManager)
+	restartsDur := runRestartsPhase(ctx, deps.configManager, pl)
 
 	return finalizeIteration(ctx, deps, st, &loopPhaseDurations{
 		t1:       t1,
@@ -456,22 +454,19 @@ func handleIdleSleep(ctx context.Context, deps *daemonLoopDeps, st *loopIterStat
 	}
 }
 
-// runRestartsPhase runs DoRestarts when restarts are enabled and returns the
-// elapsed time (zero when disabled).
-func runRestartsPhase(ctx context.Context, cfg *config.Config, cm *configmgr.ConfigManager) time.Duration {
-	if !cfg.RestartConfig {
-		return 0
-	}
-
+// runRestartsPhase hands the plan's restarts to the restart policy and returns
+// the elapsed time. The policy runs every cycle: with restarts disabled it only
+// publishes the dependency graph and keeps the restarts pending.
+func runRestartsPhase(ctx context.Context, cm *configmgr.ConfigManager, pl *plan.Plan) time.Duration {
 	phaseStart := time.Now()
 
-	cm.DoRestarts(ctx)
+	cm.ApplyRestarts(ctx, pl)
 
 	dur := time.Since(phaseStart)
 
-	logger.DebugContext(ctx, "Timing: DoRestarts completed",
+	logger.DebugContext(ctx, "Timing: Restarts completed",
 		"duration_seconds", dur.Seconds(),
-		"operation", "do_restarts")
+		"operation", "restarts")
 
 	return dur
 }
@@ -519,8 +514,7 @@ func finalizeIteration(
 		"load_configs_seconds", dur.load.Seconds(),
 		"parse_mta_seconds", dur.parse.Seconds(),
 		"build_deps_seconds", dur.config.buildDeps.Seconds(),
-		"compare_keys_seconds", dur.config.compareKeys.Seconds(),
-		"compile_actions_seconds", dur.config.compileActions.Seconds(),
+		"plan_seconds", dur.config.plan.Seconds(),
 		"rewrites_seconds", dur.config.rewrites.Seconds(),
 		"restarts_seconds", dur.restarts.Seconds())
 	logger.InfoContext(ctx, "Loop completed", "total_duration_seconds", lt.Seconds())
@@ -619,7 +613,9 @@ func buildServiceDependencies(ctx context.Context, serviceMgr services.Manager, 
 
 // updateWatchdogServices updates the watchdog with currently tracked services.
 // This is called on first run to notify watchdog about services that should be monitored.
-func updateWatchdogServices(ctx context.Context, wd *watchdog.Watchdog, appState *state.State, mainCfg *config.Config) {
+func updateWatchdogServices(
+	ctx context.Context, wd *watchdog.Watchdog, tracked map[string]string, mainCfg *config.Config,
+) {
 	ctx = logger.ContextWithComponent(ctx, "mainloop")
 	// Get watchdog service list from config (defaults to ["antivirus"])
 	watchdogServices := mainCfg.WdList
@@ -631,7 +627,7 @@ func updateWatchdogServices(ctx context.Context, wd *watchdog.Watchdog, appState
 	wd.UpdateServiceList(ctx, watchdogServices)
 
 	// For services that are currently tracked and in the watchdog list, mark them as available
-	for service := range appState.CurrentActions.Services {
+	for service := range tracked {
 		// Check if service is in watchdog list
 		isInWatchdogList := slices.Contains(watchdogServices, service)
 

@@ -25,9 +25,12 @@ func parseCfForParity(t *testing.T, content string, enabledServices ...string) *
 	require.NoError(t, os.WriteFile(cfgFile, []byte(content), 0o644))
 
 	cm := setupTestConfigManagerForParser(dir)
+	services := make(map[string]string, len(enabledServices))
 	for _, svc := range enabledServices {
-		cm.State.ServerConfig.ServiceConfig.Set(svc, "TRUE")
+		services[svc] = "zimbraServiceEnabled"
 	}
+
+	setServer(cm, nil, services)
 
 	require.NoError(t, cm.ParseMtaConfig(context.Background(), cfgFile))
 
@@ -99,13 +102,21 @@ SECTION proxy
 	VAR zimbraReverseProxyHttpPort
 `, "mta")
 
-	cm.State.GlobalConfig.Data.Set("zimbraReverseProxyHttpPort", "8080")
-	cm.State.GlobalConfig.Data.Set("zimbraMtaMyNetworks", "127.0.0.0/8")
+	setGlobal(cm, map[string]string{
+		"zimbraReverseProxyHttpPort": "8080",
+		"zimbraMtaMyNetworks":        "127.0.0.0/8",
+	})
 
-	require.NoError(t, cm.CompareKeys(context.Background()))
+	pl, err := cm.Plan(context.Background())
+	require.NoError(t, err)
 
-	assert.NotContains(t, cm.State.LastVals, "proxy", "disabled section recorded last values")
-	assert.Contains(t, cm.State.LastVals, "mta")
+	var names []string
+	for _, sec := range pl.Sections {
+		names = append(names, sec.Name)
+	}
+
+	assert.NotContains(t, names, "proxy", "disabled section planned")
+	assert.Contains(t, names, "mta")
 }
 
 // legacy POSTCONF/POSTCONFD call section.requiredvars(fields[3], fields[2]) for a
@@ -179,10 +190,8 @@ func TestParseMtaConfig_ConditionalPostconfRequiredVarsOnlyWhenTrue(t *testing.T
 	require.NoError(t, os.WriteFile(cfgFile, []byte(cf), 0o644))
 
 	cm := setupTestConfigManagerForParser(dir)
-	cm.State.ServerConfig.ServiceConfig.Set("mta", "TRUE")
-	cm.State.ServerConfig.ServiceConfig.Set("cbpolicyd", "TRUE")
-	cm.State.GlobalConfig.Data.Set("flagOn", "TRUE")
-	cm.State.GlobalConfig.Data.Set("flagOff", "FALSE")
+	setServer(cm, nil, map[string]string{"mta": "zimbraServiceEnabled", "cbpolicyd": "zimbraServiceEnabled"})
+	setGlobal(cm, map[string]string{"flagOn": "TRUE", "flagOff": "FALSE"})
 
 	require.NoError(t, cm.ParseMtaConfig(context.Background(), cfgFile))
 
@@ -218,8 +227,7 @@ func TestParseMtaConfig_NestedConditionalFollowsOuterCondition(t *testing.T) {
 `
 
 	cm := parseCfForParity(t, cf, "mta")
-	cm.State.GlobalConfig.Data.Set("flagOn", "TRUE")
-	cm.State.GlobalConfig.Data.Set("flagOff", "FALSE")
+	setGlobal(cm, map[string]string{"flagOn": "TRUE", "flagOff": "FALSE"})
 
 	section := cm.State.MtaConfig.Sections["mta"]
 	require.Len(t, section.Conditionals, 2)

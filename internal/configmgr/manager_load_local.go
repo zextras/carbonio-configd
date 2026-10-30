@@ -12,6 +12,7 @@ import (
 
 	"github.com/zextras/carbonio-configd/internal/localconfig"
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/snapshot"
 	"github.com/zextras/carbonio-configd/internal/tracing"
 )
 
@@ -29,29 +30,27 @@ func (cm *ConfigManager) LoadLocalConfig(ctx context.Context) error {
 func (cm *ConfigManager) loadLocalConfigWithRetry(ctx context.Context, maxRetries int) error {
 	t1 := time.Now()
 
-	_, err := retryWithBackoff(ctx, cm.env.Clock, "LocalConfig", maxRetries, func() (struct{}, error) {
+	data, err := retryWithBackoff(ctx, cm.env.Clock, "LocalConfig", maxRetries, func() (map[string]string, error) {
 		output, err := cm.executeLocalConfigCommand(ctx)
 		if err != nil {
-			return struct{}{}, err
+			return nil, err
 		}
 
-		if err := cm.parseLocalConfigOutput(ctx, output); err != nil {
-			return struct{}{}, err
-		}
-
-		return struct{}{}, nil
+		return cm.parseLocalConfigOutput(ctx, output)
 	})
 	if err != nil {
 		return err
 	}
 
-	// Do not publish into main config once the caller gave up on this load.
+	// Do not publish once the caller gave up on this load.
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
+	cm.sink(ctx).setLocal(data)
+
 	// Update main config based on local config
-	cm.mainConfig.SetVals(cm.State.LocalConfig)
+	cm.mainConfig.SetVals(snapshot.New(snapshot.Parts{Local: data}).LocalConfig())
 
 	dt := time.Since(t1)
 	logger.DebugContext(ctx, "Localconfig load completed",
@@ -95,10 +94,9 @@ func (cm *ConfigManager) executeLocalConfigCommand(ctx context.Context) (string,
 	return output, nil
 }
 
-// parseLocalConfigOutput parses the output from localconfig command, applies the
-// post-processing defaults on a local copy and publishes the result into the
-// state in one step. Nothing is published once ctx is cancelled.
-func (cm *ConfigManager) parseLocalConfigOutput(ctx context.Context, output string) error {
+// parseLocalConfigOutput parses the output from localconfig command and applies
+// the post-processing defaults. Nothing is returned once ctx is cancelled.
+func (cm *ConfigManager) parseLocalConfigOutput(ctx context.Context, output string) (map[string]string, error) {
 	lines := strings.Split(strings.TrimSpace(output), "\n")
 	logger.DebugContext(ctx, "Localconfig loaded",
 		"entry_count", len(lines))
@@ -106,7 +104,7 @@ func (cm *ConfigManager) parseLocalConfigOutput(ctx context.Context, output stri
 	if len(lines) == 0 {
 		logger.DebugContext(ctx, "No data returned")
 
-		return fmt.Errorf("no data returned from localconfig")
+		return nil, fmt.Errorf("no data returned from localconfig")
 	}
 
 	// Parse key=value pairs
@@ -124,12 +122,10 @@ func (cm *ConfigManager) parseLocalConfigOutput(ctx context.Context, output stri
 	applyLocalConfigDefaults(data)
 
 	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("localconfig load cancelled before publish: %w", err)
+		return nil, fmt.Errorf("localconfig load cancelled before publish: %w", err)
 	}
 
-	cm.State.LocalConfig.Data.Replace(data)
-
-	return nil
+	return data, nil
 }
 
 // applyLocalConfigDefaults performs post-processing on a parsed local configuration.

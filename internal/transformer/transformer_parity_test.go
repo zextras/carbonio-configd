@@ -37,7 +37,7 @@ func newParityTransformer() *Transformer {
 			"plain":    "mailhost.example.com",
 			"two":      "first second",
 		},
-	}), nil)
+	}))
 }
 
 // state.py: `if line.count('@') < 2 and line.count('%') < 2: return line`.
@@ -242,7 +242,7 @@ func TestBinaryTrueFalse_NegatedKey(t *testing.T) {
 
 	tr := NewTransformer(testutil.NewMockConfigLookupWithData(map[string]map[string]string{
 		"VAR": {"on": "TRUE", "off": "FALSE"},
-	}), nil)
+	}))
 
 	tests := []struct {
 		input string

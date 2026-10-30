@@ -8,7 +8,7 @@ import (
 	"context"
 
 	"github.com/zextras/carbonio-configd/internal/mtaops"
-	"github.com/zextras/carbonio-configd/internal/state"
+	"github.com/zextras/carbonio-configd/internal/snapshot"
 )
 
 var (
@@ -19,12 +19,24 @@ var (
 // MockMtaExecutor is a test double for mtaops.Executor.
 // Set function fields for per-test behavior; defaults return nil.
 type MockMtaExecutor struct {
-	ExecutePostconfFn      func(ctx context.Context, op mtaops.PostconfOperation) error
-	ExecutePostconfBatchFn func(ctx context.Context, ops []mtaops.PostconfOperation) error
-	ExecutePostconfdFn     func(ctx context.Context, op mtaops.PostconfdOperation) error
+	ExecutePostconfFn       func(ctx context.Context, op mtaops.PostconfOperation) error
+	ExecutePostconfBatchFn  func(ctx context.Context, ops []mtaops.PostconfOperation) error
+	ExecutePostconfdFn      func(ctx context.Context, op mtaops.PostconfdOperation) error
 	ExecutePostconfdBatchFn func(ctx context.Context, ops []mtaops.PostconfdOperation) error
-	ExecuteMapfileFn       func(ctx context.Context, op mtaops.MapfileOperation) error
-	ExecuteLdapWriteFn     func(ctx context.Context, op mtaops.LdapOperation) error
+	ExecuteMapfileFn        func(ctx context.Context, op mtaops.MapfileOperation) error
+	ExecuteLdapWriteFn      func(ctx context.Context, op mtaops.LdapOperation) error
+	ReadPostconfFn          func(ctx context.Context, key string, explicitOnly bool) (string, bool, error)
+}
+
+// ReadPostconf delegates to ReadPostconfFn or returns ("", false, nil).
+func (m *MockMtaExecutor) ReadPostconf(
+	ctx context.Context, key string, explicitOnly bool,
+) (value string, set bool, err error) {
+	if m.ReadPostconfFn != nil {
+		return m.ReadPostconfFn(ctx, key, explicitOnly)
+	}
+
+	return "", false, nil
 }
 
 // ExecutePostconf delegates to ExecutePostconfFn or returns nil.
@@ -84,13 +96,15 @@ func (m *MockMtaExecutor) ExecuteLdapWrite(ctx context.Context, op mtaops.LdapOp
 // MockMtaResolver is a test double for mtaops.OperationResolver.
 // Set ResolveValueFn for per-test behavior; default returns ("", nil).
 type MockMtaResolver struct {
-	ResolveValueFn func(ctx context.Context, valueType, key string, st *state.State) (string, error)
+	ResolveValueFn func(ctx context.Context, valueType, key string, snap *snapshot.Snapshot) (string, error)
 }
 
 // ResolveValue delegates to ResolveValueFn or returns ("", nil).
-func (m *MockMtaResolver) ResolveValue(ctx context.Context, valueType, key string, st *state.State) (string, error) {
+func (m *MockMtaResolver) ResolveValue(
+	ctx context.Context, valueType, key string, snap *snapshot.Snapshot,
+) (string, error) {
 	if m.ResolveValueFn != nil {
-		return m.ResolveValueFn(ctx, valueType, key, st)
+		return m.ResolveValueFn(ctx, valueType, key, snap)
 	}
 
 	return "", nil

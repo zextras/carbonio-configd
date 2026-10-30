@@ -34,7 +34,7 @@ func newRaiseTransformer() *Transformer {
 			"blank": "   ",
 			"plain": "host.example",
 		},
-	}), nil)
+	}))
 }
 
 func TestTransform_LegacyRaisePointsAbortLine(t *testing.T) {

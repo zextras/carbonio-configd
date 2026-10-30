@@ -13,6 +13,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/parser"
+	"github.com/zextras/carbonio-configd/internal/plan"
 )
 
 // ParseMtaConfig parses the zmconfigd.cf file using the proper parser and populates the MtaConfig.
@@ -31,7 +32,7 @@ func (cm *ConfigManager) ParseMtaConfig(ctx context.Context, configFile string) 
 		return fmt.Errorf("failed to parse MTA config file %s: %w", configFile, err)
 	}
 
-	serviceConfig := cm.State.ServerConfig.ServiceConfig.Snapshot()
+	snap := cm.State.Snapshot()
 
 	for sectionName, section := range mtaConfig.Sections {
 		logger.DebugContext(ctx, "Found SECTION",
@@ -42,7 +43,7 @@ func (cm *ConfigManager) ParseMtaConfig(ctx context.Context, configFile string) 
 		// every consumer (compare, rewrites, mapfiles, restarts, dependencies)
 		// and means no LDAP lookups are resolved for it. Deleting the current
 		// key while ranging a map is well defined.
-		if !sectionEnabledOnNode(sectionName, serviceConfig) {
+		if !plan.SectionEnabled(sectionName, snap.ServiceEnabled) {
 			logger.DebugContext(ctx, "Section service not enabled on node, dropping section",
 				"section", sectionName)
 

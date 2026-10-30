@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/zextras/carbonio-configd/internal/services"
+	"github.com/zextras/carbonio-configd/internal/snapshot"
 	"github.com/zextras/carbonio-configd/internal/state"
 )
 
@@ -80,6 +81,10 @@ func (m *MockServiceManager) AddRestart(_ context.Context, service string) error
 	}
 	m.restartQueue[service] = true
 	return nil
+}
+
+func (m *MockServiceManager) AddRestartWithReasons(ctx context.Context, service string, _ []string) error {
+	return m.AddRestart(ctx, service)
 }
 
 func (m *MockServiceManager) ProcessRestarts(_ context.Context, configLookup func(string) string) error {
@@ -1158,9 +1163,11 @@ func newEnabledWatchdog(t *testing.T, mockSM *MockServiceManager, nodeServices .
 	t.Helper()
 
 	st := state.NewState()
+	enabled := make(map[string]string, len(nodeServices))
 	for _, s := range nodeServices {
-		st.ServerConfig.ServiceConfig.Set(s, "zimbraServiceEnabled")
+		enabled[s] = "zimbraServiceEnabled"
 	}
+	st.Publish(snapshot.New(snapshot.Parts{Services: enabled}))
 
 	wd := NewWatchdog(Config{ServiceManager: mockSM, State: st, CheckInterval: time.Hour})
 	wd.enabled = true

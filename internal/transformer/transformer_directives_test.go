@@ -12,7 +12,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/zextras/carbonio-configd/internal/state"
 	"github.com/zextras/carbonio-configd/internal/testutil"
 )
 
@@ -45,9 +44,8 @@ func TestTransformCommentDirective(t *testing.T) {
 		},
 	}
 
-	st := &state.State{}
 	mockLookup := newMockLookup()
-	transformer := NewTransformer(mockLookup, st)
+	transformer := NewTransformer(mockLookup)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -78,9 +76,8 @@ func TestTransformListDirective(t *testing.T) {
 		},
 	}
 
-	st := &state.State{}
 	mockLookup := newMockLookup()
-	transformer := NewTransformer(mockLookup, st)
+	transformer := NewTransformer(mockLookup)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -116,9 +113,8 @@ func TestTransformBinaryDirective(t *testing.T) {
 		},
 	}
 
-	st := &state.State{}
 	mockLookup := newMockLookup()
-	transformer := NewTransformer(mockLookup, st)
+	transformer := NewTransformer(mockLookup)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -154,9 +150,8 @@ func TestTransformTrueFalseDirective(t *testing.T) {
 		},
 	}
 
-	st := &state.State{}
 	mockLookup := newMockLookup()
-	transformer := NewTransformer(mockLookup, st)
+	transformer := NewTransformer(mockLookup)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -193,8 +188,7 @@ func TestTransformContainsDirective(t *testing.T) {
 		},
 	}
 
-	st := &state.State{}
-	transformer := NewTransformer(mockLookup, st)
+	transformer := NewTransformer(mockLookup)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -231,8 +225,7 @@ func TestTransformExactDirective(t *testing.T) {
 		},
 	}
 
-	st := &state.State{}
-	transformer := NewTransformer(mockLookup, st)
+	transformer := NewTransformer(mockLookup)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -270,8 +263,7 @@ func TestTransformRangeDirective(t *testing.T) {
 		},
 	}
 
-	st := &state.State{}
-	transformer := NewTransformer(mockLookup, st)
+	transformer := NewTransformer(mockLookup)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -321,8 +313,7 @@ func TestTransformFreqDirective(t *testing.T) {
 		},
 	}
 
-	st := &state.State{}
-	transformer := NewTransformer(mockLookup, st)
+	transformer := NewTransformer(mockLookup)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -354,8 +345,7 @@ func TestTransformExplodeDirective(t *testing.T) {
 		},
 	}
 
-	st := &state.State{}
-	transformer := NewTransformer(mockLookup, st)
+	transformer := NewTransformer(mockLookup)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -398,8 +388,7 @@ func TestTransformUncommentDirective(t *testing.T) {
 		},
 	}
 
-	st := &state.State{}
-	transformer := NewTransformer(mockLookup, st)
+	transformer := NewTransformer(mockLookup)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -459,8 +448,7 @@ func TestTransformCommentDirectiveWithValSet(t *testing.T) {
 		},
 	}
 
-	st := &state.State{}
-	transformer := NewTransformer(mockLookup, st)
+	transformer := NewTransformer(mockLookup)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -477,9 +465,8 @@ func TestTransformCommentDirectiveWithValSet(t *testing.T) {
 // TestInvalidDirectiveFormats tests error handling for malformed directives
 func TestInvalidDirectiveFormats(t *testing.T) {
 	ctx := context.Background()
-	st := &state.State{}
 	mockLookup := newMockLookup()
-	transformer := NewTransformer(mockLookup, st)
+	transformer := NewTransformer(mockLookup)
 
 	tests := []struct {
 		name     string
@@ -523,7 +510,6 @@ func TestInvalidDirectiveFormats(t *testing.T) {
 // TestExplodeDirectiveRealWorld tests explode with realistic scenarios
 func TestExplodeDirectiveRealWorld(t *testing.T) {
 	ctx := context.Background()
-	st := &state.State{}
 
 	mock := testutil.NewMockConfigLookupWithData(map[string]map[string]string{
 		"VAR": {
@@ -533,7 +519,7 @@ func TestExplodeDirectiveRealWorld(t *testing.T) {
 		},
 	})
 
-	transformer := NewTransformer(mock, st)
+	transformer := NewTransformer(mock)
 
 	tests := []struct {
 		name     string
@@ -570,7 +556,6 @@ func TestExplodeDirectiveRealWorld(t *testing.T) {
 // TestExactDirectiveRealWorld tests exact with realistic scenarios from Postfix
 func TestExactDirectiveRealWorld(t *testing.T) {
 	ctx := context.Background()
-	st := &state.State{}
 
 	mock := testutil.NewMockConfigLookupWithData(map[string]map[string]string{
 		"VAR": {
@@ -579,7 +564,7 @@ func TestExactDirectiveRealWorld(t *testing.T) {
 		},
 	})
 
-	transformer := NewTransformer(mock, st)
+	transformer := NewTransformer(mock)
 
 	tests := []struct {
 		name     string
@@ -626,7 +611,6 @@ func TestExactDirectiveRealWorld(t *testing.T) {
 // TestContainsDirectiveEdgeCases tests contains with edge cases
 func TestContainsDirectiveEdgeCases(t *testing.T) {
 	ctx := context.Background()
-	st := &state.State{}
 
 	mock := testutil.NewMockConfigLookupWithData(map[string]map[string]string{
 		"VAR": {
@@ -635,7 +619,7 @@ func TestContainsDirectiveEdgeCases(t *testing.T) {
 		},
 	})
 
-	transformer := NewTransformer(mock, st)
+	transformer := NewTransformer(mock)
 
 	tests := []struct {
 		name     string
@@ -682,7 +666,6 @@ func TestContainsDirectiveEdgeCases(t *testing.T) {
 // TestListDirectiveEdgeCases tests list with various separators and edge cases
 func TestListDirectiveEdgeCases(t *testing.T) {
 	ctx := context.Background()
-	st := &state.State{}
 
 	mock := testutil.NewMockConfigLookupWithData(map[string]map[string]string{
 		"VAR": {
@@ -692,7 +675,7 @@ func TestListDirectiveEdgeCases(t *testing.T) {
 		},
 	})
 
-	transformer := NewTransformer(mock, st)
+	transformer := NewTransformer(mock)
 
 	tests := []struct {
 		name     string
@@ -739,7 +722,6 @@ func TestListDirectiveEdgeCases(t *testing.T) {
 // TestFreqDirectiveEdgeCases tests frequency calculations
 func TestFreqDirectiveEdgeCases(t *testing.T) {
 	ctx := context.Background()
-	st := &state.State{}
 
 	mock := testutil.NewMockConfigLookupWithData(map[string]map[string]string{
 		"VAR": {
@@ -749,7 +731,7 @@ func TestFreqDirectiveEdgeCases(t *testing.T) {
 		},
 	})
 
-	transformer := NewTransformer(mock, st)
+	transformer := NewTransformer(mock)
 
 	tests := []struct {
 		name     string
@@ -781,7 +763,6 @@ func TestFreqDirectiveEdgeCases(t *testing.T) {
 // TestValSetDirective tests comment/uncomment with valset
 func TestValSetDirective(t *testing.T) {
 	ctx := context.Background()
-	st := &state.State{}
 
 	mock := testutil.NewMockConfigLookupWithData(map[string]map[string]string{
 		"VAR": {
@@ -790,7 +771,7 @@ func TestValSetDirective(t *testing.T) {
 		},
 	})
 
-	transformer := NewTransformer(mock, st)
+	transformer := NewTransformer(mock)
 
 	tests := []struct {
 		name     string
@@ -879,7 +860,7 @@ func TestDirectiveHandlers_LookupFailure(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tr := NewTransformer(&errorConfigLookup{}, nil)
+			tr := NewTransformer(&errorConfigLookup{})
 
 			got, err := tt.call(tr, context.Background())
 			if tt.wantErr {
@@ -900,7 +881,7 @@ func TestHandleFreqDirective_ValIntLessThanOne(t *testing.T) {
 		"VAR": {"bigInterval": "100h"},
 	})
 
-	got, err := NewTransformer(mock, nil).handleFreqDirective(context.Background(), "freq VAR:bigInterval 3")
+	got, err := NewTransformer(mock).handleFreqDirective(context.Background(), "freq VAR:bigInterval 3")
 	require.NoError(t, err)
 	assert.Equal(t, "1", got)
 }
@@ -911,7 +892,7 @@ func TestResolveCommentState_NegateWithValSet(t *testing.T) {
 	mock := testutil.NewMockConfigLookupWithData(map[string]map[string]string{
 		"VAR": {"level": "debug"},
 	})
-	tr := NewTransformer(mock, nil)
+	tr := NewTransformer(mock)
 
 	got := mustTransform(t, tr, ctx, "%%comment VAR:!level,#,debug,trace%%line content")
 	want := "line content\n"
@@ -937,7 +918,7 @@ func TestResolveCommentState_NegateNoValSet_Uncomment(t *testing.T) {
 			"disabled": "FALSE",
 		},
 	})
-	tr := NewTransformer(mock, nil)
+	tr := NewTransformer(mock)
 
 	got := mustTransform(t, tr, ctx, "%%uncomment VAR:!enabled%%content")
 	want := "#content\n"
@@ -961,7 +942,7 @@ func TestResolveCommentState_NegateNoValSet_Comment(t *testing.T) {
 			"disabled": "FALSE",
 		},
 	})
-	tr := NewTransformer(mock, nil)
+	tr := NewTransformer(mock)
 
 	got := mustTransform(t, tr, ctx, "%%comment VAR:!enabled%%content")
 	want := "content\n"
@@ -979,7 +960,7 @@ func TestResolveCommentState_NegateNoValSet_Comment(t *testing.T) {
 // TestProcessPrefixDirective_NoClosingDelimiter exercises the endIdx==-1 branch.
 func TestProcessPrefixDirective_NoClosingDelimiter(t *testing.T) {
 	ctx := context.Background()
-	tr := NewTransformer(newMockLookup(), nil)
+	tr := NewTransformer(newMockLookup())
 
 	result, err := tr.processPrefixDirective(ctx, "%%comment VAR:key_no_close")
 	if err != nil {
@@ -998,7 +979,6 @@ func TestProcessPrefixDirective_NoClosingDelimiter(t *testing.T) {
 //     so postfix never sees an unexpanded %%…%% token in the written value.
 func TestProcessWrappingDirective_ContainsWithEmbeddedVar(t *testing.T) {
 	ctx := context.Background()
-	st := &state.State{}
 
 	tests := []struct {
 		name    string
@@ -1052,7 +1032,7 @@ func TestProcessWrappingDirective_ContainsWithEmbeddedVar(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tr := NewTransformer(testutil.NewMockConfigLookupWithData(tt.data), st)
+			tr := NewTransformer(testutil.NewMockConfigLookupWithData(tt.data))
 			got := mustTransform(t, tr, ctx, tt.input)
 			if tt.want != "" && got != tt.want {
 				t.Errorf("got %q, want %q", got, tt.want)
@@ -1075,7 +1055,6 @@ func TestProcessWrappingDirective_ContainsWithEmbeddedVar(t *testing.T) {
 // be compared against the looked-up value verbatim instead of its value.
 func TestProcessWrappingDirective_ExactWithEmbeddedVar(t *testing.T) {
 	ctx := context.Background()
-	st := &state.State{}
 
 	tests := []struct {
 		name string
@@ -1108,7 +1087,7 @@ func TestProcessWrappingDirective_ExactWithEmbeddedVar(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tr := NewTransformer(testutil.NewMockConfigLookupWithData(tt.data), st)
+			tr := NewTransformer(testutil.NewMockConfigLookupWithData(tt.data))
 			got := mustTransform(t, tr, ctx, input)
 			if got != tt.want {
 				t.Errorf("got %q, want %q", got, tt.want)
@@ -1123,13 +1102,12 @@ func TestProcessWrappingDirective_ExactWithEmbeddedVar(t *testing.T) {
 // of leaving the raw %%explode …%% token in the output.
 func TestProcessInlineDirectives_Explode(t *testing.T) {
 	ctx := context.Background()
-	st := &state.State{}
 	data := map[string]map[string]string{
 		"VAR": {
 			"zimbraUpstreamServer": "server1",
 		},
 	}
-	tr := NewTransformer(testutil.NewMockConfigLookupWithData(data), st)
+	tr := NewTransformer(testutil.NewMockConfigLookupWithData(data))
 
 	got := mustTransform(t, tr, ctx, "prefix: %%explode upstream VAR:zimbraUpstreamServer%% suffix")
 	want := "prefix: upstream server1 suffix\n"

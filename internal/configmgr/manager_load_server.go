@@ -51,8 +51,7 @@ func (cm *ConfigManager) loadServerConfigWithRetry(ctx context.Context, maxRetri
 		return fmt.Errorf("server config load cancelled before publish: %w", err)
 	}
 
-	cm.State.ServerConfig.Data.Replace(configData.Data)
-	cm.State.ServerConfig.ServiceConfig.Replace(configData.ServiceConfig)
+	cm.sink(ctx).setServer(configData.Data, configData.ServiceConfig)
 
 	dt := time.Since(t1)
 	logger.DebugContext(ctx, "ServerConfig loaded",

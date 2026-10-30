@@ -337,8 +337,9 @@ func TestResolveValueSpec_FILE(t *testing.T) {
 	t.Run("contains directives fully expanded - regression guard no %%", func(t *testing.T) {
 		cm, resolve := setup(t, "smtpd_sender_login_maps.cf", senderLoginMapsContent)
 		// Seed the lookup value so both %%contains%% lines hit.
-		cm.State.GlobalConfig.Data.Set("zimbraMtaSmtpdSenderLoginMaps",
-			"lmdb:/opt/zextras/conf/slm-exceptions-db proxy:ldap:/opt/zextras/conf/ldap-slm.cf")
+		setGlobal(cm, map[string]string{
+			"zimbraMtaSmtpdSenderLoginMaps": "lmdb:/opt/zextras/conf/slm-exceptions-db proxy:ldap:/opt/zextras/conf/ldap-slm.cf",
+		})
 
 		result, err := resolve("smtpd_sender_login_maps", "FILE zmconfigd/smtpd_sender_login_maps.cf")
 		require.NoError(t, err)
@@ -355,7 +356,7 @@ func TestResolveValueSpec_FILE(t *testing.T) {
 	t.Run("bare variable expanded", func(t *testing.T) {
 		const contentFilterContent = "smtp-amavis:[%%zimbraLocalBindAddress%%]:10024\n"
 		cm, resolve := setup(t, "postfix_content_filter.cf", contentFilterContent)
-		cm.State.GlobalConfig.Data.Set("zimbraLocalBindAddress", "127.0.0.1")
+		setGlobal(cm, map[string]string{"zimbraLocalBindAddress": "127.0.0.1"})
 
 		result, err := resolve("content_filter", "FILE zmconfigd/postfix_content_filter.cf")
 		require.NoError(t, err)
@@ -366,7 +367,7 @@ func TestResolveValueSpec_FILE(t *testing.T) {
 	t.Run("contains miss - empty lines dropped from join", func(t *testing.T) {
 		cm, resolve := setup(t, "smtpd_sender_login_maps.cf", senderLoginMapsContent)
 		// VAR value does not contain either search string → both lines resolve to "".
-		cm.State.GlobalConfig.Data.Set("zimbraMtaSmtpdSenderLoginMaps", "ldap:/some/other/map")
+		setGlobal(cm, map[string]string{"zimbraMtaSmtpdSenderLoginMaps": "ldap:/some/other/map"})
 
 		result, err := resolve("smtpd_sender_login_maps", "FILE zmconfigd/smtpd_sender_login_maps.cf")
 		require.NoError(t, err)

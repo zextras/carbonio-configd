@@ -19,7 +19,6 @@ import (
 
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/lookup"
-	"github.com/zextras/carbonio-configd/internal/state"
 	"github.com/zextras/carbonio-configd/internal/sys"
 	"github.com/zextras/carbonio-configd/internal/transformer"
 )
@@ -34,7 +33,6 @@ var ErrPathEscapesBaseDir = errors.New("path escapes base directory")
 type Rewriter struct {
 	BaseDir      string
 	ConfigLookup lookup.ConfigLookup
-	State        *state.State
 	Transformer  *transformer.Transformer
 
 	fs sys.FS
@@ -42,12 +40,11 @@ type Rewriter struct {
 
 // NewRewriter creates a new Rewriter instance. Every file operation goes
 // through env.FS.
-func NewRewriter(baseDir string, cl lookup.ConfigLookup, st *state.State, env sys.System) *Rewriter {
+func NewRewriter(baseDir string, cl lookup.ConfigLookup, env sys.System) *Rewriter {
 	return &Rewriter{
 		BaseDir:      baseDir,
 		ConfigLookup: cl,
-		State:        st,
-		Transformer:  transformer.NewTransformer(cl, st),
+		Transformer:  transformer.NewTransformer(cl),
 		fs:           env.FS,
 	}
 }

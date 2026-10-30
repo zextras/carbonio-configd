@@ -36,6 +36,10 @@ type Config struct {
 	WatchdogInterval int  // Watchdog check interval in seconds
 	SkipIdlePolls    bool // Skip config reloads when no events received
 	RestartConfig    bool
+	// RestartDebounce is zmconfigd_restart_debounce_seconds: when > 0 a service
+	// restart is only issued once its requests have been quiet for that many
+	// seconds. 0 (the default) restarts in the cycle the change is detected.
+	RestartDebounce  int
 	Watchdog         bool
 	WdList           []string
 	LogLevel         int
@@ -76,7 +80,6 @@ type MtaConfig struct {
 // MtaConfigSection represents a section within zmconfigd.cf.
 type MtaConfigSection struct {
 	Name         string
-	Changed      bool
 	Depends      map[string]bool
 	Rewrites     map[string]RewriteEntry // (val, mode)
 	Restarts     map[string]bool
@@ -202,6 +205,7 @@ func (c *Config) SetVals(localConfig *LocalConfig) {
 	localBoolTrue(data, "zmconfigd_debug", &c.Debug)
 	localBoolNotFalse(data, "zmconfigd_watchdog", &c.Watchdog)
 	localBoolNotFalse(data, "zmconfigd_enable_config_restarts", &c.RestartConfig)
+	localInt(data, "zmconfigd_restart_debounce_seconds", &c.RestartDebounce)
 
 	if v, ok := data.Get("zmconfigd_watchdog_services"); ok {
 		c.WdList = strings.Fields(v)

@@ -33,7 +33,7 @@ func BenchmarkNewTransformer_Allocs(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		_ = NewTransformer(lookup, nil)
+		_ = NewTransformer(lookup)
 	}
 }
 
@@ -67,7 +67,7 @@ func TestTransform_Concurrent(t *testing.T) {
 		go func() {
 			defer wg.Done()
 
-			tx := NewTransformer(lookup, nil)
+			tx := NewTransformer(lookup)
 			ctx := context.Background()
 
 			for range perWorker {

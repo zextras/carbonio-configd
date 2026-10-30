@@ -40,30 +40,30 @@ zimbraMtaHeaderChecks: pcre:/opt/zextras/conf/postfix_header_checks`
 	}
 
 	// Verify data was parsed
-	if cm.State.ServerConfig.Data.GetOr("zimbraServiceEnabled", "") != "mta mailbox" {
+	if valueOrEmpty(cm.State.Snapshot().Server("zimbraServiceEnabled")) != "mta mailbox" {
 		t.Errorf("Expected zimbraServiceEnabled to be 'mta mailbox', got: %s",
-			cm.State.ServerConfig.Data.GetOr("zimbraServiceEnabled", ""))
+			valueOrEmpty(cm.State.Snapshot().Server("zimbraServiceEnabled")))
 	}
 
 	// Verify ServiceConfig was populated
-	if cm.State.ServerConfig.ServiceConfig.GetOr("mta", "") != "zimbraServiceEnabled" {
+	if cm.State.Snapshot().ServicesMap()["mta"] != "zimbraServiceEnabled" {
 		t.Error("Expected mta service to be enabled")
 	}
 
 	// Verify SSL protocols were processed (should be sorted)
-	if _, ok := cm.State.ServerConfig.Data.Get("zimbraMailboxdSSLProtocols"); !ok {
+	if _, ok := cm.State.Snapshot().Server("zimbraMailboxdSSLProtocols"); !ok {
 		t.Error("Expected zimbraMailboxdSSLProtocols to be processed")
 	}
 
 	// Verify zimbraMtaMyNetworksPerLine was generated
-	if networks, ok := cm.State.ServerConfig.Data.Get("zimbraMtaMyNetworksPerLine"); !ok {
+	if networks, ok := cm.State.Snapshot().Server("zimbraMtaMyNetworksPerLine"); !ok {
 		t.Error("Expected zimbraMtaMyNetworksPerLine to be generated")
 	} else if !strings.Contains(networks, "\n") {
 		t.Error("Expected zimbraMtaMyNetworksPerLine to contain newlines")
 	}
 
 	// Verify comma-separated conversion
-	if headers, ok := cm.State.ServerConfig.Data.Get("zimbraMtaHeaderChecks"); !ok {
+	if headers, ok := cm.State.Snapshot().Server("zimbraMtaHeaderChecks"); !ok {
 		t.Error("Expected zimbraMtaHeaderChecks to be processed")
 	} else if headers != "pcre:/opt/zextras/conf/postfix_header_checks" {
 		t.Errorf("Expected single header check, got: %s", headers)
@@ -151,8 +151,8 @@ func TestLoadServerConfigWithRetry_EmptyOutput(t *testing.T) {
 	}
 
 	// Verify the data map exists but is empty (or has only post-processed defaults)
-	if cm.State.ServerConfig.Data.Len() > 5 {
-		t.Errorf("Expected minimal or empty config data, got %d entries", cm.State.ServerConfig.Data.Len())
+	if len(cm.State.Snapshot().ServerMap()) > 5 {
+		t.Errorf("Expected minimal or empty config data, got %d entries", len(cm.State.Snapshot().ServerMap()))
 	}
 }
 
@@ -178,9 +178,9 @@ zimbraMailboxdSSLProtocols: TLSv1.3`
 	}
 
 	// Verify data was loaded even without cache
-	if cm.State.ServerConfig.Data.GetOr("zimbraServiceEnabled", "") != "mailbox" {
+	if valueOrEmpty(cm.State.Snapshot().Server("zimbraServiceEnabled")) != "mailbox" {
 		t.Errorf("Expected zimbraServiceEnabled to be 'mailbox', got: %s",
-			cm.State.ServerConfig.Data.GetOr("zimbraServiceEnabled", ""))
+			valueOrEmpty(cm.State.Snapshot().Server("zimbraServiceEnabled")))
 	}
 }
 
@@ -205,23 +205,23 @@ func TestLoadServerConfigWithRetry_ServiceMapping(t *testing.T) {
 	}
 
 	// Verify service mappings
-	if cm.State.ServerConfig.ServiceConfig.GetOr("mailbox", "") != "zimbraServiceEnabled" {
+	if cm.State.Snapshot().ServicesMap()["mailbox"] != "zimbraServiceEnabled" {
 		t.Error("Expected mailbox service to be enabled")
 	}
 
-	if cm.State.ServerConfig.ServiceConfig.GetOr("mailboxd", "") != "zimbraServiceEnabled" {
+	if cm.State.Snapshot().ServicesMap()["mailboxd"] != "zimbraServiceEnabled" {
 		t.Error("Expected mailboxd service to be mapped from mailbox")
 	}
 
-	if cm.State.ServerConfig.ServiceConfig.GetOr("mta", "") != "zimbraServiceEnabled" {
+	if cm.State.Snapshot().ServicesMap()["mta"] != "zimbraServiceEnabled" {
 		t.Error("Expected mta service to be enabled")
 	}
 
-	if cm.State.ServerConfig.ServiceConfig.GetOr("sasl", "") != "zimbraServiceEnabled" {
+	if cm.State.Snapshot().ServicesMap()["sasl"] != "zimbraServiceEnabled" {
 		t.Error("Expected sasl service to be mapped from mta")
 	}
 
-	if cm.State.ServerConfig.ServiceConfig.GetOr("ldap", "") != "zimbraServiceEnabled" {
+	if cm.State.Snapshot().ServicesMap()["ldap"] != "zimbraServiceEnabled" {
 		t.Error("Expected ldap service to be enabled")
 	}
 }
@@ -262,9 +262,8 @@ func TestLoadServerConfigWithRetry_IPv6RoundTrip(t *testing.T) {
 // wins over the global one, as in the legacy configd.
 func TestLookUpConfigVar_ServerOverridesGlobal(t *testing.T) {
 	cm := newTestConfigManager(t)
-	cm.State.GlobalConfig.Data.Set("zimbraMtaMyNetworks", "global")
-	cm.State.GlobalConfig.Data.Set("zimbraOnlyGlobal", "global")
-	cm.State.ServerConfig.Data.Set("zimbraMtaMyNetworks", "server")
+	setGlobal(cm, map[string]string{"zimbraMtaMyNetworks": "global", "zimbraOnlyGlobal": "global"})
+	setServer(cm, map[string]string{"zimbraMtaMyNetworks": "server"}, nil)
 
 	for key, want := range map[string]string{
 		"zimbraMtaMyNetworks": "server",
@@ -293,7 +292,7 @@ func TestLoadServerConfig_MilterFromInheritedGS(t *testing.T) {
 		t.Fatalf("loadServerConfigWithRetry: %v", err)
 	}
 
-	if got := cm.State.ServerConfig.Data.GetOr("zimbraMtaSmtpdMilters", ""); got != "inet:127.0.0.1:7026" {
+	if got := valueOrEmpty(cm.State.Snapshot().Server("zimbraMtaSmtpdMilters")); got != "inet:127.0.0.1:7026" {
 		t.Errorf("zimbraMtaSmtpdMilters = %q, want inet:127.0.0.1:7026", got)
 	}
 }

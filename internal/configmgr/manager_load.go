@@ -190,7 +190,7 @@ func (cm *ConfigManager) LoadAllConfigsWithRetry(ctx context.Context, maxRetries
 
 	cm.State.ClearFileCache(ctx)
 
-	threadWaitTime := parseLDAPReadTimeout(cm.State.GetLocalConfig().Data.Snapshot())
+	threadWaitTime := parseLDAPReadTimeout(cm.State.Snapshot().LocalMap())
 
 	loadFuncs := []loadFunc{
 		{"lc", cm.LoadLocalConfig},  // Thread name matches Python
@@ -212,7 +212,11 @@ func (cm *ConfigManager) LoadAllConfigsWithRetry(ctx context.Context, maxRetries
 			}
 		}
 
-		timedOut, errors, ctxErr := runLoadAttempt(ctx, cm.env.Clock, loadFuncs, threadWaitTime)
+		// Every attempt stages its results; they are published as one
+		// snapshot only when all loaders succeeded.
+		stage := &stagedLoad{}
+
+		timedOut, errors, ctxErr := runLoadAttempt(withStage(ctx, stage), cm.env.Clock, loadFuncs, threadWaitTime)
 		if ctxErr != nil {
 			return ctxErr
 		}
@@ -220,6 +224,7 @@ func (cm *ConfigManager) LoadAllConfigsWithRetry(ctx context.Context, maxRetries
 		shouldRetry, err := evaluateLoadResult(timedOut, errors, attempt, maxRetries, threadWaitTime)
 		if !shouldRetry {
 			if err == nil {
+				cm.State.Publish(stage.snapshot())
 				logger.DebugContext(ctx, "All configs fetched")
 			}
 
