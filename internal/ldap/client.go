@@ -185,6 +185,9 @@ func NewClient(config *ClientConfig) (*Client, error) {
 	return client, nil
 }
 
+// BaseDN returns the base DN the client was configured with (cn=zimbra).
+func (c *Client) BaseDN() string { return c.baseDN }
+
 // getConnection gets a connection from the pool or creates a new one.
 func (c *Client) getConnection() (*ldap.Conn, error) {
 	c.poolMu.Lock()

@@ -21,6 +21,10 @@ const (
 	defaultBaseDir = ZextrasBase
 	// programName is the name of the configd program.
 	programName = "zmconfigd"
+	// defaultLdapChangePollSeconds and defaultLdapChangeDebounceSeconds are the
+	// defaults of the opt-in LDAP change watcher (zmconfigd_ldap_change_*).
+	defaultLdapChangePollSeconds     = 5
+	defaultLdapChangeDebounceSeconds = 2
 )
 
 // Config holds the application-wide configuration parameters.
@@ -49,6 +53,17 @@ type Config struct {
 	// LdapStartTLSRequired indicates whether LDAP connections must use StartTLS.
 	// Defaults to true for security; set to false only for development/testing.
 	LdapStartTLSRequired bool
+
+	// LdapChangeTrigger is zmconfigd_ldap_change_trigger: when true a watcher
+	// polls the LDAP entries a cycle reads and wakes the main loop as soon as
+	// one changes. false (the default) starts no watcher at all.
+	LdapChangeTrigger bool
+	// LdapChangePollSeconds is zmconfigd_ldap_change_poll_seconds, the watcher's
+	// poll interval.
+	LdapChangePollSeconds int
+	// LdapChangeDebounceSeconds is zmconfigd_ldap_change_debounce_seconds, the
+	// quiet window that coalesces a burst of changes into one cycle.
+	LdapChangeDebounceSeconds int
 }
 
 // LocalConfig represents the local configuration settings.
@@ -133,6 +148,10 @@ func NewConfig() (*Config, error) {
 		Watchdog:         true,
 		WdList:           []string{"antivirus"},
 		LogLevel:         3, // Info level (3 = Info, see logger.SetLogLevel)
+
+		// Only read when zmconfigd_ldap_change_trigger=TRUE (opt-in, off by default).
+		LdapChangePollSeconds:     defaultLdapChangePollSeconds,
+		LdapChangeDebounceSeconds: defaultLdapChangeDebounceSeconds,
 	}
 
 	// Get hostname, similar to os.popen("/opt/zextras/bin/zmhostname").readline().strip()
@@ -206,6 +225,11 @@ func (c *Config) SetVals(localConfig *LocalConfig) {
 	localBoolNotFalse(data, "zmconfigd_watchdog", &c.Watchdog)
 	localBoolNotFalse(data, "zmconfigd_enable_config_restarts", &c.RestartConfig)
 	localInt(data, "zmconfigd_restart_debounce_seconds", &c.RestartDebounce)
+
+	// Opt-in LDAP change watcher: off unless TRUE.
+	localBoolTrue(data, "zmconfigd_ldap_change_trigger", &c.LdapChangeTrigger)
+	localInt(data, "zmconfigd_ldap_change_poll_seconds", &c.LdapChangePollSeconds)
+	localInt(data, "zmconfigd_ldap_change_debounce_seconds", &c.LdapChangeDebounceSeconds)
 
 	if v, ok := data.Get("zmconfigd_watchdog_services"); ok {
 		c.WdList = strings.Fields(v)

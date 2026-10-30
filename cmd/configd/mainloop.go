@@ -16,6 +16,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/configmgr"
 	"github.com/zextras/carbonio-configd/internal/ldap"
+	"github.com/zextras/carbonio-configd/internal/ldapwatch"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/network"
 	"github.com/zextras/carbonio-configd/internal/plan"
@@ -302,6 +303,9 @@ type daemonLoopDeps struct {
 	notifier       *sdnotify.Notifier
 	trigger        *MainLoopActionTrigger
 	reloadChan     chan struct{}
+	// ldapSource replaces the LDAP client as the source the opt-in LDAP change
+	// watcher polls; production leaves it nil.
+	ldapSource ldapwatch.Source
 }
 
 // loopIterState carries mutable per-iteration counters between runs.
@@ -310,6 +314,7 @@ type loopIterState struct {
 	loopCount      int
 	reloadSignaled bool
 	server         *network.ThreadedStreamServer
+	ldapWatch      *ldapWatch // nil unless zmconfigd_ldap_change_trigger started it
 }
 
 // iterOutcome signals how runLoopIteration wants the caller to proceed.
@@ -325,6 +330,8 @@ func runDaemonLoop(ctx context.Context, deps *daemonLoopDeps) {
 	st := &loopIterState{}
 
 	defer func() {
+		st.ldapWatch.stop()
+
 		if st.server != nil {
 			st.server.Shutdown(ctx)
 		}
@@ -389,6 +396,7 @@ func runLoopIteration(ctx context.Context, deps *daemonLoopDeps, st *loopIterSta
 	}
 
 	st.server = maybeStartListener(ctx, deps.appState, deps.args, deps.trigger, st.server)
+	st.ldapWatch = syncLDAPWatch(ctx, deps, st.ldapWatch)
 
 	// Signal readiness as soon as the IPC listener is serving on 7171. The first
 	// config rewrite is steady-state reconciliation (re-run every interval), not a

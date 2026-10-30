@@ -67,6 +67,7 @@ Each iteration runs the following phases in order:
 | Idle check | — | Only with `zmconfigd_skip_idle_polls=TRUE` (off by default, as legacy): skips to sleep if no REWRITE events and not first run and no reload signal |
 | Load configs | `configManager.LoadAllConfigs` | Four concurrent goroutines; see Config loading pipeline below |
 | Start listener | `network.NewThreadedStreamServer` | First run only; skipped in `--once` mode |
+| LDAP watcher | `syncLDAPWatch` | Right after the load, every iteration: with `zmconfigd_ldap_change_trigger=TRUE` starts the LDAP change watcher (once) or stops it when the key turns `FALSE`; with the key off (default) it does nothing and no goroutine exists. See [LDAP change detection](#ldap-change-detection-opt-in) |
 | Parse MTA config | `configManager.ParseMtaConfig` | Reads `conf/zmconfigd.cf` |
 | Build dependencies | `buildServiceDependencies` | Extracts DEPENDS entries from MTA sections for the watchdog's service manager (config-driven restarts do not cascade, see restart-behavior.md) |
 | Snapshot + Observe | `configManager.Plan` (first half) | Freezes the loaded configs into an immutable `snapshot.Snapshot`, resolves every lookup `configd.cf` requires and publishes the result |
@@ -74,7 +75,7 @@ Each iteration runs the following phases in order:
 | Execute | `configManager.Execute` | Mapfiles first (self-heal included), then proxygen, rewrites, postconf, postconfd and LDAP concurrently |
 | Apply restarts | `configManager.ApplyRestarts` | `restart.Policy.Apply`: runs every cycle; honours `zmconfigd_enable_config_restarts`, debounce and `--disable-restarts` |
 | READY=1 | `notifier.Ready()` | Sent after every loop; first iteration transitions systemd from activating → active |
-| Sleep | `SleepWithContext` | Default 300 s; woken early by SIGHUP or TCP REWRITE |
+| Sleep | `SleepWithContext` | Default 300 s; woken early by SIGHUP, TCP REWRITE or, when enabled, an LDAP change |
 
 Forced mode (`configd rewrite`-style standalone runs) uses the same Plan and Execute and
 never applies restarts.
@@ -182,6 +183,67 @@ Load ─► Snapshot ─► Observe ─► Plan ─► Execute ─► ApplyResta
 When every service looks disabled `Compute` returns `plan.ErrAllServicesDisabled`; nothing is
 consumed, the previous snapshot stays the baseline and the requested sections stay queued.
 
+## LDAP change detection (opt-in)
+
+Source: `internal/ldapwatch`, `cmd/configd/ldapwatch.go`
+
+By default configd notices an LDAP change at the next cycle, up to `zmconfigd_interval`
+(300 s) later. With `zmconfigd_ldap_change_trigger=TRUE` (off by default, see
+[localconfig.md](localconfig.md#configd-only-keys-not-in-the-defaults-registry)) a watcher
+wakes the main loop as soon as an entry the cycle reads changes. Everything else is
+unchanged: the woken iteration is the normal cycle (Load, Snapshot, Plan, Execute, Apply
+restarts), rendered files, restart decisions and log lines are the same, and the regular
+interval poll keeps running as the safety net. A failing or stopped watcher therefore only
+costs latency.
+
+**What is watched.** The entries the cycle reads from LDAP: the global config
+(`cn=config,cn=zimbra`, base search), the server entries (`cn=servers,cn=zimbra`, one level,
+`zimbraServer`) and the `zimbraDomain` entries (subtree from the root, as the proxy
+generator does). The server entries cover this server's own attributes and services, the
+upstream servers the proxy generates and the servers that `gamau`, `garpu` and `garpb`
+enumerate; those three lookups read the *servers* list, not the domains. Domains are read by
+the proxy generator only. Each search asks for `entryCSN` and `modifyTimestamp` only; the
+watcher hashes DN plus those values per component, so additions and deletions change the
+digest as well as modifications. The LDAP writes of a cycle go to slapd's own configuration
+database (the `LDAP` section, over ldapi), which is not watched, so a cycle cannot trigger
+itself.
+
+**Why polling a fingerprint.** Measured on the QA container (carbonio-core 4.6.7):
+
+- OpenLDAP has no persistent search control.
+- RFC 4533 syncrepl `refreshAndPersist` (available in go-ldap v3) needs the `syncprov` overlay
+  on the data database. The QA directory loads only `dynlist`, `unique` and `noopsrch`
+  there: the root DSE has no `contextCSN`, and a search with the sync control is accepted
+  and then ends in a plain success without a Sync Done control and without ever streaming a
+  change. A watcher built on it would silently never fire.
+- `contextCSN`, where it exists, moves on every write (every mailbox account change), so it
+  cannot distinguish a relevant change from noise; the `entryCSN` of the few entries a cycle
+  reads can. `entryCSN` and `modifyTimestamp` are readable by the `zimbra` admin on all three
+  queries.
+
+Polling works on every topology (single node, replicas, failover) and needs nothing from the
+server. The cost is the poll: three small searches per `zmconfigd_ldap_change_poll_seconds`
+(default 5 s). The domains search is the one that scales with the directory, which is why the
+interval is a key.
+
+**Behaviour** (`ldapwatch.Watcher.Run`, a single goroutine, all waits and time reads through
+the injected `sys.Clock`):
+
+| Aspect | Behaviour |
+|---|---|
+| Baseline | The first successful poll only records the fingerprint and never triggers. A change between the first cycle's load and that poll is picked up by the interval poll |
+| Coalescing | A change is reported once it has been quiet for `zmconfigd_ldap_change_debounce_seconds` (default 2 s), or after ten windows of continuous changes at the latest, so one burst of writes yields one cycle and a steady stream cannot postpone it forever. `0` reports it in the poll that sees it. Further tokens while a cycle is pending collapse in the one-slot reload channel |
+| Trigger | `MainLoopActionTrigger.TriggerReload`: a non-blocking send on the reload channel SIGHUP and REWRITE use. Unlike SIGHUP it does not send `RELOADING=1` and does not zero the sleep timer, and unlike REWRITE it requests no section; the cycle is a full one (`reloadSignaled`, so `zmconfigd_skip_idle_polls` does not skip it) |
+| Errors | A failed poll is logged as a warning (never an error) and retried after 1 s, 2 s, 4 s, ... capped at 60 s; the first good poll resets the wait. The fingerprint is compared with the last good one, so a change made while LDAP was unreachable triggers after the reconnect |
+| Client | The watcher reuses the config manager's native LDAP client (pool, retries, timeouts). Its searches take no context, so `LDAPSource` runs them in a helper goroutine and abandons the wait on cancel; the helper ends with the in-flight search, bounded by the client's operation timeout |
+| Lifecycle | Started from the main loop goroutine after the first successful load (the LDAP client and the parameters come from the loaded localconfig), stopped and joined when the key turns `FALSE` and when the daemon loop exits; cancelling the daemon context stops it too. Poll and debounce seconds are copied at start. Never started in `--once` mode |
+| Default off | With the key off `syncLDAPWatch` returns without starting anything: no goroutine, no timer, no LDAP query |
+
+Logs (component `ldapwatch`): `LDAP change watcher started` and `... stopped` at info,
+`LDAP change detected, requesting configuration reload` at info with the changed components
+and how many changes were coalesced, the baseline and each observed change at debug, and
+`LDAP change poll failed, backing off` at warn.
+
 ## Package map
 
 | Package | Role |
@@ -191,6 +253,7 @@ consumed, the previous snapshot stays the baseline and the requested sections st
 | `internal/plan` | Pure `Compute`, plan types, reasons, text/JSON rendering |
 | `internal/configmgr` | Loaders, `Observe`, `Plan`, `Execute`, `ApplyRestarts`, `PlanHost` (host observation for `configd plan`) |
 | `internal/restart` | Restart policy: enabled-only, debounce, max failed restarts |
+| `internal/ldapwatch` | Opt-in LDAP change watcher: polls `entryCSN`/`modifyTimestamp` fingerprints, coalesces bursts, backs off on errors, requests an early cycle |
 | `internal/services` | Service registry and manager (start order, retries, MTA reload) |
 | `internal/cli/plancmd` | `configd plan` command |
 | `internal/sys` | Side-effect boundary (exec, fs, proc, clock) |

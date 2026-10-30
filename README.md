@@ -174,6 +174,13 @@ Like the legacy daemon, every poll reloads LDAP and localconfig, so changes made
 been received since the last cycle; changes made only in LDAP then wait for a REWRITE
 request or SIGHUP, which always forces a full cycle.
 
+To apply LDAP changes without waiting for the interval, set
+`zmconfigd_ldap_change_trigger=TRUE` (off by default): a watcher polls the global config,
+server and domain entries a cycle reads and starts a full cycle as soon as one changes. The
+interval poll keeps running as the safety net. See
+[docs/architecture.md](docs/architecture.md#ldap-change-detection-opt-in) and
+[docs/localconfig.md](docs/localconfig.md#configd-only-keys-not-in-the-defaults-registry).
+
 ### Localconfig subcommand
 
 Drop-in replacement for the Java `zmlocalconfig` CLI. Reads `localconfig.xml`,
