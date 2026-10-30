@@ -5,14 +5,17 @@
 package restart_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/metrics"
 	"github.com/zextras/carbonio-configd/internal/plan"
 	"github.com/zextras/carbonio-configd/internal/restart"
@@ -379,4 +382,25 @@ func TestApply_MetricsDebouncedCountedWhenQueued(t *testing.T) {
 	h.policy.Apply(t.Context(), &plan.Plan{}, settings)
 
 	assert.Contains(t, string(reg.Render()), `configd_restart_requests_total{reason="service-enabled",service="mta"} 1`)
+}
+
+// TestApply_ShutdownDuringRestartsIsNotAnError: when the context is cancelled
+// the manager reports the interrupted processing; the policy must not turn
+// that normal stop into an ERROR log.
+func TestApply_ShutdownDuringRestartsIsNotAnError(t *testing.T) {
+	t.Parallel()
+
+	h := newHarness()
+	h.procErr = context.Canceled
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	var logs bytes.Buffer
+
+	ctx = logger.ContextWithLogger(ctx, slog.New(slog.NewTextHandler(&logs, nil)))
+
+	h.policy.Apply(ctx, &plan.Plan{Restarts: []plan.Restart{req("mta")}}, restart.Settings{Enabled: true})
+
+	assert.NotContains(t, logs.String(), "level=ERROR")
 }

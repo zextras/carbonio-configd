@@ -430,6 +430,12 @@ func (w *Watchdog) restartDownService(ctx context.Context, service string) {
 	}
 
 	if err := w.serviceManager.ProcessRestarts(ctx, w.configLookup); err != nil {
+		// Interrupted by a shutdown (already logged by the manager): neither
+		// an error nor a failed restart.
+		if ctx.Err() != nil {
+			return
+		}
+
 		logger.ErrorContext(ctx, "Failed to restart service", "service", service, "error", err)
 		w.metrics.WatchdogRestart(service, false)
 

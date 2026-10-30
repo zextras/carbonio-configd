@@ -216,6 +216,12 @@ func (p *Policy) process(ctx context.Context, enabled []string) {
 	}
 
 	if err := p.mgr.ProcessRestarts(ctx, lookup); err != nil {
+		// A shutdown interrupted the restarts; the manager already logged the
+		// pending ones. A normal stop is not an error.
+		if ctx.Err() != nil {
+			return
+		}
+
 		logger.ErrorContext(ctx, "Error during service restarts",
 			"error", err)
 	}

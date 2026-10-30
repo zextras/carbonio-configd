@@ -217,3 +217,11 @@ error wrapping `ErrRestartsFailed` that lists, sorted by name, every service tha
 left queued without progress. The watchdog logs that as a failed restart and leaves the service
 untracked until a later status check sees it running (legacy parity); configmgr logs it at ERROR.
 Services with equal start order (including all those missing from `StartOrder`) restart in name order.
+
+**Shutdown.** When the context is cancelled (SIGTERM/SIGINT) while restarts are being processed,
+`ProcessRestarts` stops at once: the interrupted restart is not retried and does not count toward
+`MaxFailedRestarts`, no further service is restarted, and one INFO line
+`Shutdown during service restarts` lists the pending services. The error it returns wraps the
+context error (not `ErrRestartsFailed`), and neither the restart policy nor the watchdog log it as
+an ERROR or count a failed restart. The legacy zmconfigd also stops immediately on these signals
+(its handler calls `sys.exit(0)`).

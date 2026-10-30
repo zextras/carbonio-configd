@@ -205,6 +205,12 @@ func (sm *ServiceManager) ProcessRestarts(ctx context.Context, configLookup func
 	for len(sm.RestartQueue) > 0 {
 		madeProgress := sm.processRestartRound(ctx, failedRestarts, processedThisRound, configLookup)
 
+		// A shutdown stops the processing at once: nothing is retried and
+		// the interrupted restart is neither a failure nor an error.
+		if ctx.Err() != nil {
+			return sm.interruptedRestarts(ctx)
+		}
+
 		if madeProgress {
 			processedThisRound = make(map[string]bool)
 		} else {
@@ -236,6 +242,17 @@ func (sm *ServiceManager) ProcessRestarts(ctx context.Context, configLookup func
 	return nil
 }
 
+// interruptedRestarts logs the restarts left pending by a shutdown and returns
+// the error that tells the caller the processing was interrupted (not failed).
+func (sm *ServiceManager) interruptedRestarts(ctx context.Context) error {
+	pending := slices.Sorted(maps.Keys(sm.RestartQueue))
+
+	logger.InfoContext(ctx, "Shutdown during service restarts",
+		"pending", strings.Join(pending, ", "))
+
+	return fmt.Errorf("service restarts interrupted: %w", context.Cause(ctx))
+}
+
 // logDryRunRestarts logs what would be restarted in dry-run mode.
 func (sm *ServiceManager) logDryRunRestarts(ctx context.Context) {
 	logger.DebugContext(ctx, "Restart disabled (dry-run mode)",
@@ -257,6 +274,10 @@ func (sm *ServiceManager) processRestartRound(
 	madeProgress := false
 
 	for _, service := range sm.getSortedServices() {
+		if ctx.Err() != nil {
+			break
+		}
+
 		if !sm.RestartQueue[service] || processedThisRound[service] {
 			continue
 		}
@@ -293,6 +314,12 @@ func (sm *ServiceManager) attemptServiceRestart(
 		}
 
 		return true
+	}
+
+	// The restart was cut short by a shutdown: it is not a failed attempt, so
+	// it neither counts toward MaxFailedRestarts nor is logged as a failure.
+	if ctx.Err() != nil {
+		return false
 	}
 
 	failedRestarts[service]++

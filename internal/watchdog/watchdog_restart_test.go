@@ -235,3 +235,28 @@ func TestRestartDownService_CountsRestartsInMetrics(t *testing.T) {
 		t.Errorf("missing failure counter:\n%s", out)
 	}
 }
+
+// TestRestartDownService_ShutdownIsNotAFailure verifies a restart interrupted
+// by a shutdown is neither counted as a failed restart nor re-added to the
+// tracked services.
+func TestRestartDownService_ShutdownIsNotAFailure(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	reg := metrics.New()
+
+	mgr := NewMockServiceManager()
+	mgr.processRestartsFunc = func(func(string) string) error {
+		cancel()
+
+		return context.Canceled
+	}
+
+	wd := NewWatchdog(Config{ServiceManager: mgr, State: state.NewState()})
+	wd.SetMetrics(reg)
+	wd.restartDownService(ctx, "amavis")
+
+	if out := string(reg.Render()); strings.Contains(out, `service="amavis"`) {
+		t.Errorf("an interrupted restart must not be counted:\n%s", out)
+	}
+}

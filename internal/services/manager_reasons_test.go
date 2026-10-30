@@ -157,3 +157,9 @@ func TestProcessRestarts_DroppedServiceClearsReasons(t *testing.T) {
 	require.ErrorIs(t, sm.ProcessRestarts(context.Background(), nil), ErrRestartsFailed)
 	assert.Empty(t, sm.restartReasons)
 }
+
+// captureInto returns ctx with a logger writing text records to buf.
+func captureInto(ctx context.Context, buf *bytes.Buffer) context.Context {
+	return logger.ContextWithLogger(ctx,
+		slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+}
