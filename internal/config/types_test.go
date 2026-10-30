@@ -44,7 +44,7 @@ func TestNewConfig(t *testing.T) {
 			expectedProgname: "zmconfigd",
 			expectedInterval: 300,
 			expectedWatchdog: true,
-			expectedSkipIdle: true,
+			expectedSkipIdle: false,
 		},
 		{
 			name:             "custom ZEXTRAS_HOME",
@@ -54,7 +54,7 @@ func TestNewConfig(t *testing.T) {
 			expectedProgname: "zmconfigd",
 			expectedInterval: 300,
 			expectedWatchdog: true,
-			expectedSkipIdle: true,
+			expectedSkipIdle: false,
 		},
 		{
 			name:             "custom hostname override",
@@ -64,7 +64,7 @@ func TestNewConfig(t *testing.T) {
 			expectedProgname: "zmconfigd",
 			expectedInterval: 300,
 			expectedWatchdog: true,
-			expectedSkipIdle: true,
+			expectedSkipIdle: false,
 		},
 	}
 
@@ -207,6 +207,18 @@ func TestConfig_SetVals(t *testing.T) {
 				}
 				if !cfg.RestartConfig {
 					t.Error("RestartConfig should be true")
+				}
+			},
+		},
+		{
+			// Legacy polls LDAP every interval; skipping idle polls is opt-in only.
+			name: "skip idle polls only when TRUE",
+			localConfig: &LocalConfig{
+				Data: testConfigMap(map[string]string{"zmconfigd_skip_idle_polls": "yes"}),
+			},
+			validate: func(t *testing.T, cfg *Config) {
+				if cfg.SkipIdlePolls {
+					t.Error("SkipIdlePolls should be false for a value other than TRUE")
 				}
 			},
 		},

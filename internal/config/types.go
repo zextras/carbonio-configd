@@ -123,10 +123,10 @@ func NewConfig() (*Config, error) {
 		BaseDir:          baseDir,
 		ConfigFile:       baseDir + "/conf/zmconfigd.cf",
 		LogFile:          baseDir + "/log/zmconfigd.log",
-		Interval:         300,  // Increased from 60s to 5min (300s) to reduce zm* process spawns
-		WatchdogInterval: 120,  // Check services every 2 minutes instead of 60s
-		SkipIdlePolls:    true, // Skip polling when no rewrite events received
-		RestartConfig:    true, // Default matches  zmconfigd_enable_config_restarts=true
+		Interval:         300,   // Increased from 60s to 5min (300s) to reduce zm* process spawns
+		WatchdogInterval: 120,   // Check services every 2 minutes instead of 60s
+		SkipIdlePolls:    false, // Opt-in: legacy reloads every interval to see LDAP changes
+		RestartConfig:    true,  // Default matches  zmconfigd_enable_config_restarts=true
 		Watchdog:         true,
 		WdList:           []string{"antivirus"},
 		LogLevel:         3, // Info level (3 = Info, see logger.SetLogLevel)
@@ -196,7 +196,9 @@ func (c *Config) SetVals(localConfig *LocalConfig) {
 	localInt(data, "zmconfigd_interval", &c.Interval)
 	localInt(data, "zmconfigd_watchdog_interval", &c.WatchdogInterval)
 
-	localBoolNotFalse(data, "zmconfigd_skip_idle_polls", &c.SkipIdlePolls)
+	// Off unless TRUE: skipping idle polls hides changes made directly in LDAP
+	// (zmprov, admin console), which legacy configd.py detects on every interval.
+	localBoolTrue(data, "zmconfigd_skip_idle_polls", &c.SkipIdlePolls)
 	localBoolTrue(data, "zmconfigd_debug", &c.Debug)
 	localBoolNotFalse(data, "zmconfigd_watchdog", &c.Watchdog)
 	localBoolNotFalse(data, "zmconfigd_enable_config_restarts", &c.RestartConfig)

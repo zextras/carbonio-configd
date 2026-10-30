@@ -108,7 +108,7 @@ func TestResolveMemcacheServers(t *testing.T) {
 	t.Run("returns formatted memcache servers from cache", func(t *testing.T) {
 		g := &Generator{
 			upstreamCache: &upstreamQueryCache{
-				populated: true,
+				memcachedPopulated: true,
 				memcachedServers: []MemcacheServer{
 					{Hostname: "mc1.example.com", Port: 11211},
 					{Hostname: "mc2.example.com", Port: 11212},
@@ -134,8 +134,8 @@ func TestResolveMemcacheServers(t *testing.T) {
 	t.Run("returns empty string when no servers in cache", func(t *testing.T) {
 		g := &Generator{
 			upstreamCache: &upstreamQueryCache{
-				populated:        true,
-				memcachedServers: []MemcacheServer{},
+				memcachedPopulated: true,
+				memcachedServers:   []MemcacheServer{},
 			},
 		}
 		result, err := g.resolveMemcacheServers(context.Background())
@@ -322,7 +322,7 @@ func TestResolveWebUpstreamTargetAvailable(t *testing.T) {
 	t.Run("returns true when cached backends present", func(t *testing.T) {
 		g := &Generator{
 			upstreamCache: &upstreamQueryCache{
-				populated:            true,
+				backendsPopulated:    true,
 				reverseProxyBackends: []UpstreamServer{{Host: "backend.example.com", Port: 8080}},
 			},
 		}
@@ -338,7 +338,7 @@ func TestResolveWebUpstreamTargetAvailable(t *testing.T) {
 	t.Run("returns false when cached backends empty", func(t *testing.T) {
 		g := &Generator{
 			upstreamCache: &upstreamQueryCache{
-				populated:            true,
+				backendsPopulated:    true,
 				reverseProxyBackends: []UpstreamServer{},
 			},
 		}
@@ -357,7 +357,7 @@ func TestResolveWebAvailable(t *testing.T) {
 	t.Run("returns true when backends exist in cache", func(t *testing.T) {
 		g := &Generator{
 			upstreamCache: &upstreamQueryCache{
-				populated:            true,
+				backendsPopulated:    true,
 				reverseProxyBackends: []UpstreamServer{{Host: "server1.example.com", Port: 443}},
 			},
 		}
@@ -373,7 +373,7 @@ func TestResolveWebAvailable(t *testing.T) {
 	t.Run("returns false when no backends", func(t *testing.T) {
 		g := &Generator{
 			upstreamCache: &upstreamQueryCache{
-				populated:            true,
+				backendsPopulated:    true,
 				reverseProxyBackends: []UpstreamServer{},
 			},
 		}

@@ -13,7 +13,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/zextras/carbonio-configd/internal/fileutil"
 	"github.com/zextras/carbonio-configd/internal/ldap"
@@ -318,8 +320,7 @@ func (e *executor) executeMapFile(ctx context.Context, op MapfileOperation, file
 		return nil
 	}
 
-	// File permissions 0o600 are intentionally restrictive for security.
-	if err := fileutil.AtomicWrite(filePath, data, 0o600); err != nil {
+	if err := writeMapfile(filePath, data); err != nil {
 		return fmt.Errorf("MAPFILE %s: failed to write file %s: %w", op.Key, filePath, err)
 	}
 
@@ -329,6 +330,48 @@ func (e *executor) executeMapFile(ctx context.Context, op MapfileOperation, file
 		"file_path", filePath)
 
 	return nil
+}
+
+// writeMapfile keeps the file-mode semantics of jylibs/state.py:401-406
+// (open(mapfile, "w")): an existing regular file keeps its mode, a new file
+// gets 0666 &^ umask (0640 under the zextras 0027 umask). Unlike legacy it
+// writes atomically (temp + rename) so a reader such as nginx never sees a
+// truncated file and no planted symlink is followed.
+func writeMapfile(path string, data []byte) error {
+	mode := os.FileMode(0o666) &^ currentUmask()
+
+	if fi, err := os.Lstat(path); err == nil && fi.Mode().IsRegular() {
+		mode = fi.Mode().Perm()
+	}
+
+	if err := fileutil.AtomicWrite(path, data, mode); err != nil {
+		return fmt.Errorf("atomic write: %w", err)
+	}
+
+	return nil
+}
+
+// umaskLine matches the "Umask:" field of /proc/self/status (Linux >= 4.7).
+var umaskLine = regexp.MustCompile(`(?m)^Umask:\s*([0-7]+)\s*$`)
+
+// currentUmask returns the process umask. It reads /proc/self/status, which
+// does not touch the process-wide umask and is therefore race-free against
+// concurrent file creation. Only when that is unavailable does it fall back to
+// syscall.Umask(0) followed by an immediate restore; the window is a few
+// instructions and configd creates its files from this same goroutine path.
+func currentUmask() os.FileMode {
+	if b, err := os.ReadFile("/proc/self/status"); err == nil {
+		if m := umaskLine.FindSubmatch(b); m != nil {
+			if v, err := strconv.ParseUint(string(m[1]), 8, 32); err == nil {
+				return os.FileMode(v) //nolint:gosec // G115: umask is at most 0777
+			}
+		}
+	}
+
+	old := syscall.Umask(0)
+	syscall.Umask(old)
+
+	return os.FileMode(old) //nolint:gosec // G115: umask is at most 0777
 }
 
 // ExecuteLdapWrite executes an LDAP cn=config write operation.

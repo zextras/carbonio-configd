@@ -155,8 +155,8 @@ func TestWriteFileAtomic(t *testing.T) {
 		t.Fatalf("Failed to stat file: %v", err)
 	}
 
-	if info.Mode().Perm() != 0644 {
-		t.Errorf("Expected permissions 0644, got %o", info.Mode().Perm())
+	if info.Mode().Perm() != 0640 {
+		t.Errorf("Expected permissions 0640, got %o", info.Mode().Perm())
 	}
 
 	// Test overwrite
@@ -333,51 +333,6 @@ func TestSetVerbose(t *testing.T) {
 	if gen.Verbose {
 		t.Error("Expected Verbose to be false after SetVerbose(false)")
 	}
-}
-
-// TestGetCarboVersion tests GetCarboVersion returns version from config or default
-func TestGetCarboVersion(t *testing.T) {
-	t.Run("returns carbonio_version when set", func(t *testing.T) {
-		gen := &Generator{
-			LocalConfig: &config.LocalConfig{
-				Data: configtest.NewConfigMapFrom(map[string]string{"carbonio_version": "25.3.0"}),
-			},
-		}
-		if v := gen.GetCarboVersion(); v != "25.3.0" {
-			t.Errorf("GetCarboVersion() = %q, expected %q", v, "25.3.0")
-		}
-	})
-
-	t.Run("falls back to zimbra_version", func(t *testing.T) {
-		gen := &Generator{
-			LocalConfig: &config.LocalConfig{
-				Data: configtest.NewConfigMapFrom(map[string]string{"zimbra_version": "9.0.0"}),
-			},
-		}
-		if v := gen.GetCarboVersion(); v != "9.0.0" {
-			t.Errorf("GetCarboVersion() = %q, expected %q", v, "9.0.0")
-		}
-	})
-
-	t.Run("returns default when LocalConfig is nil", func(t *testing.T) {
-		gen := &Generator{}
-		v := gen.GetCarboVersion()
-		if v == "" {
-			t.Error("GetCarboVersion() returned empty string")
-		}
-	})
-
-	t.Run("returns default when no version keys set", func(t *testing.T) {
-		gen := &Generator{
-			LocalConfig: &config.LocalConfig{
-				Data: configtest.NewConfigMapFrom(map[string]string{"some_other_key": "value"}),
-			},
-		}
-		v := gen.GetCarboVersion()
-		if v == "" {
-			t.Error("GetCarboVersion() returned empty string, expected default")
-		}
-	})
 }
 
 // TestDiscoverRealTemplates tests discovery with actual nginx templates from conf/nginx/templates

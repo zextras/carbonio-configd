@@ -21,6 +21,18 @@ import (
 	"github.com/zextras/carbonio-configd/internal/tracing"
 )
 
+const (
+	// generatedFileMode is the mode of every generated proxy config file
+	// (legacy ProxyConfGen output is 0640 zextras:zextras).
+	generatedFileMode os.FileMode = 0o640
+	// coreConfName is the main nginx entry-point config inside ConfDir.
+	coreConfName = "nginx.conf"
+	// confGenSuccessMarker / confGenErrorMarker are the result markers legacy
+	// ProxyConfGen appends to nginx.conf for zmnginxctl.
+	confGenSuccessMarker = "__SUCCESS__"
+	confGenErrorMarker   = "__CONF_GEN_ERROR__:"
+)
+
 // DiscoverTemplates scans the template directory and returns a list of template files
 // Templates are discovered from:
 // 1. conf/nginx/templates/ (standard templates)
@@ -179,6 +191,9 @@ func (g *Generator) GenerateAll(ctx context.Context) error {
 	// Process each template
 	successCount := 0
 	errorCount := 0
+
+	var firstErr error
+
 	totalProcessingTime := time.Duration(0)
 
 	for _, templatePath := range templates {
@@ -197,6 +212,10 @@ func (g *Generator) GenerateAll(ctx context.Context) error {
 				"error", err)
 
 			errorCount++
+
+			if firstErr == nil {
+				firstErr = err
+			}
 
 			continue
 		}
@@ -228,10 +247,38 @@ func (g *Generator) GenerateAll(ctx context.Context) error {
 		"failed", errorCount)
 
 	if errorCount > 0 {
+		g.appendConfGenResult(ctx, confGenErrorMarker+firstErr.Error())
+
 		return fmt.Errorf("failed to process %d templates", errorCount)
 	}
 
+	g.appendConfGenResult(ctx, confGenSuccessMarker)
+
 	return nil
+}
+
+// appendConfGenResult appends "\n#<text>\n" to ConfDir/nginx.conf so that
+// zmnginxctl restart can detect generation problems. Legacy
+// ProxyConfGen.appendConfGenResultToConf: skipped on dry-run and when the file
+// does not exist; write failures are ignored.
+func (g *Generator) appendConfGenResult(ctx context.Context, text string) {
+	if g.DryRun {
+		return
+	}
+
+	//nolint:gosec // G304: path is ConfDir joined with a constant file name
+	f, err := os.OpenFile(filepath.Join(g.ConfDir, coreConfName), os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		return
+	}
+
+	if _, err := f.WriteString("\n#" + text + "\n"); err != nil {
+		logger.WarnContext(ctx, "Failed to append generation result to nginx.conf", "error", err)
+	}
+
+	if err := f.Close(); err != nil {
+		logger.WarnContext(ctx, "Failed to close nginx.conf", "error", err)
+	}
 }
 
 // prefetchOperation executes a single prefetch operation with timing and error logging.
@@ -353,7 +400,7 @@ func (g *Generator) ProcessTemplateWithProcessor(
 	// nginx.conf.template) must live in ConfDir — that's where nginx -c points.
 	// All other rendered templates go into the IncludesDir.
 	outputPath := filepath.Join(g.IncludesDir, outputName)
-	if outputName == "nginx.conf" {
+	if outputName == coreConfName {
 		outputPath = filepath.Join(g.ConfDir, outputName)
 	}
 
@@ -395,9 +442,9 @@ func (g *Generator) writeFile(ctx context.Context, path string, content []byte) 
 		return nil
 	}
 
-	// Mode 0644: nginx config must be world-readable for the nginx worker user.
-	//nolint:gosec // G302: nginx must read the generated config
-	if err := fileutil.AtomicWrite(path, content, 0o644); err != nil {
+	// Mode 0640: owner/group only, matching the files legacy ProxyConfGen produces
+	// (zextras:zextras); the nginx worker runs as the zextras user.
+	if err := fileutil.AtomicWrite(path, content, generatedFileMode); err != nil {
 		return fmt.Errorf("failed to write file %s: %w", path, err)
 	}
 
@@ -406,20 +453,4 @@ func (g *Generator) writeFile(ctx context.Context, path string, content []byte) 
 		"path", path)
 
 	return nil
-}
-
-// GetCarboVersion returns the Carbonio version string for banners
-// Reads from local config or returns default value
-func (g *Generator) GetCarboVersion() string {
-	if g.LocalConfig != nil {
-		if version, ok := g.LocalConfig.Data.Get("carbonio_version"); ok && version != "" {
-			return version
-		}
-		// Fallback to zimbraversion
-		if version, ok := g.LocalConfig.Data.Get("zimbra_version"); ok && version != "" {
-			return version
-		}
-	}
-
-	return "24.12.0" // Default Carbonio version
 }

@@ -178,9 +178,7 @@ func (cm *ConfigManager) LoadGlobalConfig(ctx context.Context) error {
 func (cm *ConfigManager) loadGlobalConfigWithRetry(ctx context.Context, maxRetries int) error {
 	t1 := time.Now()
 
-	configData, err := loadConfigWithCache[map[string]string](ctx, cm.Cache, "ldap:global_config", func() (any, error) {
-		return cm.fetchGlobalConfig(ctx, maxRetries)
-	})
+	configData, err := cm.cachedGlobalConfig(ctx, maxRetries)
 	if err != nil {
 		return err
 	}
@@ -196,6 +194,13 @@ func (cm *ConfigManager) loadGlobalConfigWithRetry(ctx context.Context, maxRetri
 		"duration_seconds", dt.Seconds())
 
 	return nil
+}
+
+// cachedGlobalConfig returns the global config through the shared cache entry.
+func (cm *ConfigManager) cachedGlobalConfig(ctx context.Context, maxRetries int) (map[string]string, error) {
+	return loadConfigWithCache[map[string]string](ctx, cm.Cache, "ldap:global_config", func() (any, error) {
+		return cm.fetchGlobalConfig(ctx, maxRetries)
+	})
 }
 
 // fetchGlobalConfig fetches fresh global config from LDAP (cache miss path)

@@ -18,12 +18,16 @@ import (
 	"github.com/willabides/kongplete"
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/ldap"
+	"github.com/zextras/carbonio-configd/internal/localconfig"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/security"
 	"github.com/zextras/carbonio-configd/internal/state"
 )
 
-const ipModeIPv4 = "ipv4"
+const (
+	ipModeIPv4        = "ipv4"
+	defaultListenPort = 7171
+)
 
 func configureLogFormat(logConfig *logger.Config) {
 	logFormat := os.Getenv("CONFIGD_LOG_FORMAT")
@@ -92,36 +96,69 @@ func initializeConfig() (*config.Config, *state.State, *ldap.Ldap) {
 	return mainCfg, appState, ldapClient
 }
 
-// handleForcedConfigs handles forced configuration rewrites if provided.
-// When config names are given on the command line, configd acts as a TCP client:
-// it sends a REWRITE command to the running daemon and exits.
-// This is the replacement for: echo "REWRITE mta proxy" | nc localhost 7171
-func handleForcedConfigs(ctx context.Context, args *Args, appState *state.State) {
+// forcedRewrite sends REWRITE for args.ForcedConfigs to the running daemon and
+// returns the exit code. When no daemon answers, standalone rewrites the configs
+// in-process: legacy configrewrite falls back to "zmconfigd <configs>", and
+// configd.py run with arguments processes them itself when contact_service fails
+// (carbonio-core 4.6.7), so zmtlsctl, zmproxyctl and forced rewrites keep working
+// while the daemon is stopped.
+func forcedRewrite(ctx context.Context, args *Args, standalone func(context.Context, *Args) int) int {
+	// An unreadable localconfig leaves the legacy defaults; the standalone run
+	// reports the real error when it loads the configuration itself.
+	lc, _ := localconfig.LoadResolvedConfig()
+	listenPort, ipMode := listenerAddress(lc)
+
+	return rewriteViaDaemon(ctx, args, listenPort, ipMode, standalone)
+}
+
+// rewriteViaDaemon is forcedRewrite with the listener address resolved.
+func rewriteViaDaemon(
+	ctx context.Context,
+	args *Args,
+	listenPort int,
+	ipMode string,
+	standalone func(context.Context, *Args) int,
+) int {
 	ctx = logger.ContextWithComponent(ctx, "main")
 
-	if !args.HasForcedConfigs() {
-		return
-	}
-
-	listenPortStr, _ := appState.LocalConfig.Data.Get("zmconfigd_listen_port")
-	listenPort, _ := strconv.Atoi(listenPortStr)
-	ipMode, _ := appState.LocalConfig.Data.Get("zimbraIPMode")
-
 	if ContactService("REWRITE", args.ForcedConfigs, listenPort, ipMode) {
-		logger.ErrorContext(ctx, "Failed to contact configd service",
+		logger.InfoContext(ctx, "configd service not reachable, rewriting in-process",
 			"port", listenPort,
 			"configs", args.ForcedConfigs)
-		fmt.Fprintf(os.Stderr,
-			"Error: could not contact configd on port %d. Is carbonio-configd.service running?\n",
-			listenPort)
-		os.Exit(1)
+
+		return standalone(ctx, args)
 	}
 
 	logger.InfoContext(ctx, "Completed configuration update",
 		"program", "configd", //nolint:goconst // semantic use differs from service name
 		"configs", args.ForcedConfigs,
 		"contacted_service", true)
-	os.Exit(0)
+
+	return 0
+}
+
+// runStandaloneRewrite runs one forced cycle in this process, as the legacy
+// "zmconfigd <configs>" standalone mode does.
+func runStandaloneRewrite(ctx context.Context, args *Args) int {
+	mainCfg, appState, ldapClient := initializeConfig()
+
+	return RunMainLoop(ctx, mainCfg, appState, ldapClient, args, nil)
+}
+
+// listenerAddress returns the daemon listener port and IP mode from the
+// resolved localconfig lc, defaulting to 7171 over IPv4 like the legacy listener.
+func listenerAddress(lc map[string]string) (port int, ipMode string) {
+	port, _ = strconv.Atoi(lc["zmconfigd_listen_port"])
+	if port == 0 {
+		port = defaultListenPort
+	}
+
+	ipMode = lc["zimbraIPMode"]
+	if ipMode == "" {
+		ipMode = ipModeIPv4
+	}
+
+	return port, ipMode
 }
 
 // setupProfilingAndTracing sets up profiling and tracing if requested in args.

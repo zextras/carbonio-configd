@@ -1070,3 +1070,51 @@ func TestGetServersWithServiceSorted(t *testing.T) {
 		t.Errorf("expected aaa.example.com first, got %q", servers[0].Hostname)
 	}
 }
+
+// TestSplitTemplateLines verifies Java readLine semantics: a trailing newline
+// terminates the last line rather than yielding an extra blank line.
+func TestSplitTemplateLines(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string][]string{
+		"":       nil,
+		"a":      {"a"},
+		"a\n":    {"a"},
+		"a\n\n":  {"a", ""},
+		"a\nb\n": {"a", "b"},
+		"\n":     {""},
+	}
+
+	for in, want := range cases {
+		got := splitTemplateLines(in)
+		if len(got) != len(want) {
+			t.Errorf("splitTemplateLines(%q) = %q, want %q", in, got, want)
+
+			continue
+		}
+
+		for i := range got {
+			if got[i] != want[i] {
+				t.Errorf("splitTemplateLines(%q) = %q, want %q", in, got, want)
+			}
+		}
+	}
+}
+
+// TestInterpolateLine_DisabledEnablerKeepsFollowingWhitespace verifies a disabled
+// enabler is replaced in place by "#" (legacy StringUtil.fillTemplate), so the
+// whitespace after the enabler is preserved instead of trimmed.
+func TestInterpolateLine_DisabledEnablerKeepsFollowingWhitespace(t *testing.T) {
+	t.Parallel()
+
+	tp := newFuzzProcessor()
+
+	got, err := tp.interpolateLine(context.Background(), "${mail.pop3.enabled}    location = /certauth {")
+	if err != nil {
+		t.Fatalf("interpolateLine: %v", err)
+	}
+
+	if want := "#    location = /certauth {"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}

@@ -110,6 +110,11 @@ func NewConfigManager(ctx context.Context, mainCfg *config.Config,
 // exercised without touching disk.
 var loadLocalConfigForLDAP = localconfig.LoadLocalConfig
 
+// loadResolvedLocalConfig loads localconfig.xml merged with the LC.java
+// defaults and interpolated, matching legacy `zmlocalconfig -s -x`. Tests
+// override it.
+var loadResolvedLocalConfig = localconfig.LoadResolvedConfig
+
 // initNativeLdapClient initializes the native LDAP client from localconfig.
 // If initialization fails, it logs a warning and the manager will fall back to zmprov subprocess calls.
 func (cm *ConfigManager) initNativeLdapClient(ctx context.Context) {

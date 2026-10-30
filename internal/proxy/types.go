@@ -10,6 +10,7 @@ package proxy
 
 import (
 	"context"
+	"sync"
 
 	"github.com/zextras/carbonio-configd/internal/cache"
 	"github.com/zextras/carbonio-configd/internal/config"
@@ -231,6 +232,14 @@ type upstreamQueryCache struct {
 	// serverAttrsByHost caches all servers indexed by zimbraServiceHostname with
 	// their full attribute maps, used by the Java-faithful upstream resolvers.
 	serverAttrsByHost map[string]map[string]string
-	// populated indicates whether the cache has been populated
-	populated bool
+	// backendsPopulated, backendsSSLPopulated and memcachedPopulated record, per
+	// list, whether the corresponding query already ran. They are independent:
+	// a shared flag made whichever list was requested second return empty.
+	backendsPopulated    bool
+	backendsSSLPopulated bool
+	memcachedPopulated   bool
+	// mu serialises cache reads/writes (PrefetchUpstreamData queries concurrently).
+	mu sync.Mutex
+	// attrsMu guards serverAttrsByHost.
+	attrsMu sync.Mutex
 }

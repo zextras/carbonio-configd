@@ -28,7 +28,14 @@ func (cm *ConfigManager) DoConfigRewrites(ctx context.Context) error {
 
 	var wg sync.WaitGroup
 
-	errChan := make(chan error, 6) // Buffer matches goroutine count to prevent blocking
+	errChan := make(chan error, 6) // Buffer matches step count to prevent blocking
+
+	// Mapped files first: legacy writes them while compiling actions
+	// (state.py lookUpConfig MAPFILE), before any rewrite, and the other steps
+	// read them: proxygen enables ssl_dhparam only if dhparam.pem exists.
+	if err := cm.doMapfile(ctx); err != nil {
+		errChan <- err
+	}
 
 	// Proxygen takes longest, so launch it first.
 	cm.runStep(ctx, &wg, errChan, func(ctx context.Context) error {
@@ -38,7 +45,6 @@ func (cm *ConfigManager) DoConfigRewrites(ctx context.Context) error {
 	cm.runStep(ctx, &wg, errChan, cm.doPostconf)
 	cm.runStep(ctx, &wg, errChan, cm.doPostconfd)
 	cm.runStep(ctx, &wg, errChan, cm.doLdap)
-	cm.runStep(ctx, &wg, errChan, cm.doMapfile)
 
 	wg.Wait()
 	close(errChan)
@@ -286,7 +292,8 @@ func (cm *ConfigManager) rewriteTransform(ctx context.Context, srcPath string, t
 // rewriteAtomicCommit sets permissions on tmpFileName and atomically replaces
 // destPath, falling back to copy+delete when rename crosses filesystems.
 func rewriteAtomicCommit(ctx context.Context, tmpFileName, destPath, modeStr string) error {
-	var fileMode os.FileMode = 0o644
+	// Legacy state.py:775 defaults to 0440.
+	var fileMode os.FileMode = 0o440
 
 	if modeStr != "" {
 		modeInt, err := strconv.ParseInt(modeStr, 8, 32)
@@ -356,7 +363,7 @@ func (cm *ConfigManager) processRewrite(ctx context.Context, filePath string, re
 
 	modeStr := rewriteEntry.Mode
 	if modeStr == "" {
-		modeStr = "0644"
+		modeStr = "0440"
 	}
 
 	logger.DebugContext(ctx, "File rewrite completed",

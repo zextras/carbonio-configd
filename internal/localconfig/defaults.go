@@ -10,7 +10,7 @@ import "maps"
 // Go equivalent of the KnownKey registry in the Java LC class and the fallback
 // consulted by MergeDefaults for keys absent from localconfig.xml.
 //
-// The contents come from lcDefaults (a verbatim port of LC.java) so that
+// The contents come from lcDefaults (generated from LC.java by scripts/gen-lc.py) so that
 // "configd localconfig" is a true drop-in for the retired LocalConfigCLI.
 var Defaults = buildDefaults()
 
@@ -22,4 +22,10 @@ func buildDefaults() map[string]string {
 	maps.Copy(d, lcDefaults)
 
 	return d
+}
+
+// IsProtected reports whether key is declared .protect() in LC.java
+// (KnownKey.needForceToEdit): editing it requires -f.
+func IsProtected(key string) bool {
+	return lcProtected[key]
 }

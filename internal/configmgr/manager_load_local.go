@@ -73,8 +73,10 @@ func (cm *ConfigManager) executeLocalConfigCommand(ctx context.Context) (string,
 		return cachedOutput, nil
 	}
 
-	// Load configuration directly from XML file
-	localCfg, err := localconfig.LoadLocalConfig()
+	// Legacy getlocal (jylibs/commands.py) reads LC.get over LC.getAllKeys: the
+	// LC.java defaults merged under localconfig.xml with ${var} expanded
+	// (zmlocalconfig -s -x).
+	localCfg, err := loadResolvedLocalConfig()
 	if err != nil {
 		return "", fmt.Errorf("failed to load localconfig: %w", err)
 	}

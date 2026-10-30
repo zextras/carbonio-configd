@@ -8,7 +8,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strconv"
 
 	"github.com/zextras/carbonio-configd/internal/localconfig"
 	"github.com/zextras/carbonio-configd/internal/logger"
@@ -76,15 +75,7 @@ func (c *InitCmd) Run() error {
 		os.Exit(1)
 	}
 
-	listenPort, _ := strconv.Atoi(lc["zmconfigd_listen_port"])
-	if listenPort == 0 {
-		listenPort = 7171
-	}
-
-	ipMode := lc["zimbraIPMode"]
-	if ipMode == "" {
-		ipMode = ipModeIPv4
-	}
+	listenPort, ipMode := listenerAddress(lc)
 
 	if ContactService("REWRITE", []string{component}, listenPort, ipMode) {
 		fmt.Fprintln(os.Stderr, "Error: configd daemon is not running. Start it first:")

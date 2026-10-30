@@ -115,18 +115,72 @@ func (g *Generator) getAllReverseProxyBackendsSSL(ctx context.Context) ([]Upstre
 
 // getAllReverseProxyBackendsBy is the shared implementation for backend discovery.
 // When ssl=true, it uses SSL ports and cache fields; otherwise plain HTTP.
+// The plain and SSL lists are cached independently; both return the localhost
+// fallback when no backend exists, whether the result was just queried or cached.
 func (g *Generator) getAllReverseProxyBackendsBy(ctx context.Context, ssl bool) ([]UpstreamServer, error) {
-	label, fallbackPort, buildFn, cached := g.backendsByParams(ssl)
-
-	if g.upstreamCache != nil && g.upstreamCache.populated && cached != nil {
-		logger.DebugContext(ctx, "Using cached "+label+"reverse proxy backends",
-			"server_count", len(*cached))
-
-		return *cached, nil
+	servers, err := g.reverseProxyBackendsRaw(ctx, ssl)
+	if err != nil {
+		return nil, err
 	}
 
-	logger.DebugContext(ctx, "Querying all "+label+"reverse proxy backend servers (cache miss)")
+	return backendsOrFallback(servers, g.backendsByParams(ssl).fallbackPort), nil
+}
 
+// reverseProxyBackendsRaw returns the discovered backends without the localhost
+// fallback (empty when none exist), querying and caching on first use. The
+// availability enablers use it: legacy reports "no servers" as false.
+func (g *Generator) reverseProxyBackendsRaw(ctx context.Context, ssl bool) ([]UpstreamServer, error) {
+	p := g.backendsByParams(ssl)
+
+	if g.upstreamCache != nil {
+		g.upstreamCache.mu.Lock()
+		defer g.upstreamCache.mu.Unlock()
+	}
+
+	if p.populated != nil && *p.populated {
+		logger.DebugContext(ctx, "Using cached "+p.label+"reverse proxy backends",
+			"server_count", len(*p.servers))
+
+		return *p.servers, nil
+	}
+
+	logger.DebugContext(ctx, "Querying all "+p.label+"reverse proxy backend servers (cache miss)")
+
+	byHost, err := g.serverAttrsForQuery(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	servers := buildReverseProxyBackends(byHost, p.build)
+
+	logger.DebugContext(ctx, "Found "+p.label+"reverse proxy backend servers",
+		"server_count", len(servers))
+
+	if p.populated != nil {
+		*p.servers = servers
+		*p.populated = true
+	}
+
+	if len(servers) == 0 {
+		logger.WarnContext(ctx, "No "+p.label+"reverse proxy backends found",
+			"fallback_port", p.fallbackPort)
+	}
+
+	return servers, nil
+}
+
+// backendsOrFallback returns servers, or the single localhost fallback when empty.
+func backendsOrFallback(servers []UpstreamServer, fallbackPort int) []UpstreamServer {
+	if len(servers) == 0 {
+		return []UpstreamServer{{Host: localhostName, Port: fallbackPort}}
+	}
+
+	return servers
+}
+
+// serverAttrsForQuery returns the indexed server attributes for a cache-miss
+// query, failing early when neither a cached index nor an LDAP client exists.
+func (g *Generator) serverAttrsForQuery(ctx context.Context) (map[string]map[string]string, error) {
 	if g.upstreamCache == nil || g.upstreamCache.serverAttrsByHost == nil {
 		if g.LdapClient == nil || g.LdapClient.NativeClient == nil {
 			return nil, fmt.Errorf(errGetAllServers, errNativeLDAPClientNotInitialized)
@@ -138,52 +192,37 @@ func (g *Generator) getAllReverseProxyBackendsBy(ctx context.Context, ssl bool) 
 		return nil, fmt.Errorf(errGetAllServers, err)
 	}
 
-	servers := buildReverseProxyBackends(byHost, buildFn)
+	return byHost, nil
+}
 
-	logger.DebugContext(ctx, "Found "+label+"reverse proxy backend servers",
-		"server_count", len(servers))
-
-	if g.upstreamCache != nil {
-		if cached != nil {
-			*cached = servers
-		}
-
-		g.upstreamCache.populated = true
-	}
-
-	if len(servers) == 0 {
-		logger.WarnContext(ctx, "No "+label+"reverse proxy backends found, using fallback",
-			"fallback_port", fallbackPort)
-
-		return []UpstreamServer{{Host: localhostName, Port: fallbackPort}}, nil
-	}
-
-	return servers, nil
+// backendParams holds what differs between SSL and non-SSL backend lookups.
+// servers and populated point into the upstream cache (nil when there is none).
+type backendParams struct {
+	label        string
+	fallbackPort int
+	build        func(string, map[string]string) UpstreamServer
+	servers      *[]UpstreamServer
+	populated    *bool
 }
 
 // backendsByParams returns the parameters that vary between SSL and non-SSL backend lookups.
-func (g *Generator) backendsByParams(ssl bool) (
-	label string, fallbackPort int, buildFn func(string, map[string]string) UpstreamServer, cached *[]UpstreamServer,
-) {
+func (g *Generator) backendsByParams(ssl bool) backendParams {
+	p := backendParams{label: "", fallbackPort: 8080, build: g.buildUpstreamServer}
 	if ssl {
-		label = "SSL "
-		fallbackPort = 8443
-		buildFn = g.buildUpstreamServerSSL
+		p = backendParams{label: "SSL ", fallbackPort: 8443, build: g.buildUpstreamServerSSL}
+	}
 
-		if g.upstreamCache != nil {
-			cached = &g.upstreamCache.reverseProxyBackendsSSL
-		}
-	} else {
-		label = ""
-		fallbackPort = 8080
-		buildFn = g.buildUpstreamServer
-
-		if g.upstreamCache != nil {
-			cached = &g.upstreamCache.reverseProxyBackends
+	if g.upstreamCache != nil {
+		if ssl {
+			p.servers = &g.upstreamCache.reverseProxyBackendsSSL
+			p.populated = &g.upstreamCache.backendsSSLPopulated
+		} else {
+			p.servers = &g.upstreamCache.reverseProxyBackends
+			p.populated = &g.upstreamCache.backendsPopulated
 		}
 	}
 
-	return label, fallbackPort, buildFn, cached
+	return p
 }
 
 // buildMemcachedServers filters byHost (as returned by
@@ -213,8 +252,13 @@ func buildMemcachedServers(byHost map[string]map[string]string) []MemcacheServer
 // This is equivalent to the Jython gamcs() function
 // Results are cached to avoid repeated expensive LDAP calls.
 func (g *Generator) getAllMemcachedServers(ctx context.Context) ([]MemcacheServer, error) {
+	if g.upstreamCache != nil {
+		g.upstreamCache.mu.Lock()
+		defer g.upstreamCache.mu.Unlock()
+	}
+
 	// Check cache first
-	if g.upstreamCache != nil && g.upstreamCache.populated {
+	if g.upstreamCache != nil && g.upstreamCache.memcachedPopulated {
 		logger.DebugContext(ctx, "Using cached memcached servers",
 			"server_count", len(g.upstreamCache.memcachedServers))
 
@@ -223,15 +267,9 @@ func (g *Generator) getAllMemcachedServers(ctx context.Context) ([]MemcacheServe
 
 	logger.DebugContext(ctx, "Querying all memcached servers (cache miss)")
 
-	if g.upstreamCache == nil || g.upstreamCache.serverAttrsByHost == nil {
-		if g.LdapClient == nil || g.LdapClient.NativeClient == nil {
-			return nil, fmt.Errorf(errGetAllServers, errNativeLDAPClientNotInitialized)
-		}
-	}
-
-	byHost, err := g.getServerAttrsByHostname(ctx)
+	byHost, err := g.serverAttrsForQuery(ctx)
 	if err != nil {
-		return nil, fmt.Errorf(errGetAllServers, err)
+		return nil, err
 	}
 
 	servers := buildMemcachedServers(byHost)
@@ -242,8 +280,7 @@ func (g *Generator) getAllMemcachedServers(ctx context.Context) ([]MemcacheServe
 	// Cache the result
 	if g.upstreamCache != nil {
 		g.upstreamCache.memcachedServers = servers
-		// Mark cache as populated after first query
-		g.upstreamCache.populated = true
+		g.upstreamCache.memcachedPopulated = true
 	}
 
 	return servers, nil

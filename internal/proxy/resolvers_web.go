@@ -58,7 +58,7 @@ func (g *Generator) resolveProxyHTTPCompression(ctx context.Context) (any, error
 	// Check zimbraHttpCompressionEnabled from server config
 	enabled := true // default
 
-	if val, ok := g.getConfigValue("zimbraHttpCompressionEnabled", sourceServer); ok {
+	if val, ok := g.getConfigValue("zimbraHttpCompressionEnabled", sourceServer, sourceGlobal); ok {
 		enabled = config.IsTruthy(val)
 	}
 
@@ -95,7 +95,7 @@ func (g *Generator) resolveWebSSLProtocols(ctx context.Context) (any, error) {
 	defaultProtocols := []string{tlsV12, tlsV13}
 
 	// Check ServerConfig for zimbraReverseProxySSLProtocols
-	if val, ok := g.getConfigValue("zimbraReverseProxySSLProtocols", sourceServer); ok {
+	if val, ok := g.getConfigValue("zimbraReverseProxySSLProtocols", sourceServer, sourceGlobal); ok {
 		// Multi-value attribute - split by comma or space
 		protocols := strings.FieldsFunc(val, func(r rune) bool {
 			return r == ',' || r == ' ' || r == '\n'
@@ -226,14 +226,14 @@ func (g *Generator) makeLoginURLResolver(configKey string) func(context.Context)
 }
 
 // makeLogoutRedirectResolver creates a resolver that checks the given config key
-// for a custom logout URL. If set, returns "return 200"; otherwise "return 307 /static/login/".
+// for a custom logout URL. If set, returns "return 200"; otherwise "return 303 /static/login/".
 func (g *Generator) makeLogoutRedirectResolver(configKey string) func(context.Context) (any, error) {
 	return func(ctx context.Context) (any, error) {
 		if _, ok := g.getConfigValue(configKey, sourceGlobal); ok {
 			return nginxReturn200, nil
 		}
 
-		return nginxReturn307Path, nil
+		return nginxReturn303Path, nil
 	}
 }
 
@@ -299,7 +299,7 @@ func (g *Generator) resolveErrorPages(ctx context.Context) (any, error) {
 func (g *Generator) resolveSSLSessionCacheSize(ctx context.Context) (any, error) {
 	size := "10m"
 
-	if val, ok := g.getConfigValue("zimbraReverseProxySSLSessionCacheSize", sourceGlobal); ok {
+	if val, ok := g.getConfigValue("zimbraReverseProxySSLSessionCacheSize", sourceServer, sourceGlobal); ok {
 		size = val
 	}
 
@@ -316,7 +316,7 @@ func (g *Generator) resolveSSLSessionCacheSize(ctx context.Context) (any, error)
 func (g *Generator) resolveUpstreamFairShmSize(ctx context.Context) (any, error) {
 	sizeStr := "32"
 
-	if val, ok := g.getConfigValue("zimbraReverseProxyUpstreamFairShmSize", sourceGlobal); ok {
+	if val, ok := g.getConfigValue("zimbraReverseProxyUpstreamFairShmSize", sourceServer, sourceGlobal); ok {
 		sizeStr = val
 	}
 
@@ -338,7 +338,7 @@ func (g *Generator) resolveUpstreamFairShmSize(ctx context.Context) (any, error)
 // resolveHTTPEnabled/resolveHTTPSEnabled, which differ only in which mail
 // mode disables them (Java HttpEnablerVar / HttpsEnablerVar).
 func (g *Generator) resolveMailModeEnabled(disabledWhenMode string) (any, error) {
-	if mailMode, ok := g.getConfigValue("zimbraReverseProxyMailMode", sourceGlobal); ok {
+	if mailMode, ok := g.getConfigValue("zimbraReverseProxyMailMode", sourceServer, sourceGlobal); ok {
 		if strings.EqualFold(mailMode, disabledWhenMode) {
 			return false, nil
 		}

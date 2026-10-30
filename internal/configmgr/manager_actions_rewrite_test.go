@@ -170,14 +170,14 @@ func TestRewriteAtomicCommit_HappyPath(t *testing.T) {
 
 	destPath := filepath.Join(tmpDir, "dest.txt")
 
-	// Execute rewriteAtomicCommit with empty mode (should default to 0644)
+	// Execute rewriteAtomicCommit with empty mode (should default to 0440, legacy state.py:775)
 	err = rewriteAtomicCommit(ctx, tmpFile.Name(), destPath, "")
 	require.NoError(t, err)
 
 	// Verify destination file exists
 	stat, err := os.Stat(destPath)
 	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0o644), stat.Mode().Perm())
+	require.Equal(t, os.FileMode(0o440), stat.Mode().Perm())
 
 	// Verify temp file is gone
 	_, err = os.Stat(tmpFile.Name())

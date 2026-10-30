@@ -446,7 +446,7 @@ func TestGetAllReverseProxyBackendsByPopulatedCache(t *testing.T) {
 
 	g := &Generator{
 		upstreamCache: &upstreamQueryCache{
-			populated:            true,
+			backendsPopulated:    true,
 			reverseProxyBackends: cached,
 		},
 	}
@@ -467,7 +467,7 @@ func TestGetAllReverseProxyBackendsBySSLPopulatedCache(t *testing.T) {
 
 	g := &Generator{
 		upstreamCache: &upstreamQueryCache{
-			populated:               true,
+			backendsSSLPopulated:    true,
 			reverseProxyBackendsSSL: cached,
 		},
 	}
@@ -497,7 +497,6 @@ func TestGetAllReverseProxyBackendsWithServerAttrsCache(t *testing.T) {
 
 	g := &Generator{
 		upstreamCache: &upstreamQueryCache{
-			populated:         false,
 			serverAttrsByHost: byHost,
 		},
 	}
@@ -512,7 +511,7 @@ func TestGetAllReverseProxyBackendsWithServerAttrsCache(t *testing.T) {
 	if servers[0].Host != "backend.example.com" {
 		t.Errorf("expected backend.example.com, got %q", servers[0].Host)
 	}
-	if !g.upstreamCache.populated {
+	if !g.upstreamCache.backendsPopulated {
 		t.Error("cache should be populated after first query")
 	}
 }
@@ -531,7 +530,6 @@ func TestGetAllReverseProxyBackendsNoServersUseFallback(t *testing.T) {
 	}
 	g := &Generator{
 		upstreamCache: &upstreamQueryCache{
-			populated:         false,
 			serverAttrsByHost: byHost,
 		},
 	}
@@ -550,7 +548,7 @@ func TestGetAllReverseProxyBackendsNoServersUseFallback(t *testing.T) {
 // is empty and no native LDAP client is available.
 func TestGetAllReverseProxyBackendsByNilLdap(t *testing.T) {
 	g := &Generator{
-		upstreamCache: &upstreamQueryCache{populated: false},
+		upstreamCache: &upstreamQueryCache{},
 		LdapClient:    nil,
 	}
 	_, err := g.getAllReverseProxyBackends(context.Background())
@@ -565,8 +563,8 @@ func TestGetAllMemcachedServersCacheHit(t *testing.T) {
 	expected := []MemcacheServer{{Hostname: "mc.example.com", Port: 11211}}
 	g := &Generator{
 		upstreamCache: &upstreamQueryCache{
-			populated:        true,
-			memcachedServers: expected,
+			memcachedPopulated: true,
+			memcachedServers:   expected,
 		},
 	}
 	got, err := g.getAllMemcachedServers(ctx)
@@ -591,7 +589,6 @@ func TestGetAllMemcachedServersWithServerAttrsCache(t *testing.T) {
 	}
 	g := &Generator{
 		upstreamCache: &upstreamQueryCache{
-			populated:         false,
 			serverAttrsByHost: byHost,
 		},
 	}
@@ -602,7 +599,7 @@ func TestGetAllMemcachedServersWithServerAttrsCache(t *testing.T) {
 	if len(got) != 1 || got[0].Hostname != "mc.example.com" || got[0].Port != 11211 {
 		t.Errorf("unexpected result: %+v", got)
 	}
-	if !g.upstreamCache.populated {
+	if !g.upstreamCache.memcachedPopulated {
 		t.Error("cache should be populated after first query")
 	}
 }
@@ -611,7 +608,7 @@ func TestGetAllMemcachedServersWithServerAttrsCache(t *testing.T) {
 func TestGetAllMemcachedServersCacheMissNilLdap(t *testing.T) {
 	ctx := context.Background()
 	g := &Generator{
-		upstreamCache: &upstreamQueryCache{populated: false},
+		upstreamCache: &upstreamQueryCache{},
 		LdapClient:    nil,
 	}
 	_, err := g.getAllMemcachedServers(ctx)
@@ -653,12 +650,74 @@ func TestGetAllReverseProxyBackendsByLDAPQueryError(t *testing.T) {
 	l.NativeClient = new(ldap.Client) // zero-value: no URLs → query fails
 
 	g := &Generator{
-		upstreamCache: &upstreamQueryCache{populated: false},
+		upstreamCache: &upstreamQueryCache{},
 		LdapClient:    l,
 	}
 
 	_, err := g.getAllReverseProxyBackends(context.Background())
 	if err == nil {
 		t.Fatal("expected error when LDAP query fails, got nil")
+	}
+}
+
+// TestGetAllReverseProxyBackends_PlainAndSSLIndependent guards against the shared
+// "populated" flag bug: whichever of the plain/SSL lists was requested second
+// used to get an empty cached list (ResolveAllVariables asks in map order).
+// Both request orders are exercised explicitly so the test is order-independent.
+func TestGetAllReverseProxyBackends_PlainAndSSLIndependent(t *testing.T) {
+	newGen := func() *Generator {
+		return &Generator{upstreamCache: &upstreamQueryCache{
+			serverAttrsByHost: map[string]map[string]string{
+				"backend.example.com": {
+					zimbraServiceHostnameAttr:          "backend.example.com",
+					zimbraReverseProxyLookupTargetAttr: "TRUE",
+					zimbraMailModeAttr:                 "http",
+					zimbraMailPortAttr:                 "8080",
+					zimbraMailSSLPortAttr:              "8443",
+				},
+			},
+		}}
+	}
+
+	orders := map[string][]bool{"plain-then-ssl": {false, true}, "ssl-then-plain": {true, false}}
+	ports := map[bool]int{false: 8080, true: 8443}
+
+	for name, order := range orders {
+		t.Run(name, func(t *testing.T) {
+			g := newGen()
+
+			for _, ssl := range order {
+				got, err := g.getAllReverseProxyBackendsBy(context.Background(), ssl)
+				if err != nil {
+					t.Fatalf("ssl=%v: %v", ssl, err)
+				}
+
+				if len(got) != 1 || got[0].Host != "backend.example.com" || got[0].Port != ports[ssl] {
+					t.Errorf("ssl=%v: got %+v, want backend.example.com:%d", ssl, got, ports[ssl])
+				}
+			}
+		})
+	}
+}
+
+// TestGetAllReverseProxyBackends_EmptyCachedFallsBack verifies a cached empty list
+// yields the same localhost fallback as the first (uncached) call.
+func TestGetAllReverseProxyBackends_EmptyCachedFallsBack(t *testing.T) {
+	g := &Generator{upstreamCache: &upstreamQueryCache{
+		serverAttrsByHost: map[string]map[string]string{},
+	}}
+
+	first, err := g.getAllReverseProxyBackends(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	second, err := g.getAllReverseProxyBackends(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(first) != 1 || len(second) != 1 || first[0] != second[0] {
+		t.Errorf("first=%+v second=%+v, want identical localhost fallback", first, second)
 	}
 }

@@ -298,3 +298,25 @@ func TestLookUpConfigVar_ServerOverridesGlobal(t *testing.T) {
 		}
 	}
 }
+
+// TestLoadServerConfig_MilterFromInheritedGS covers the gs output of a server
+// whose milter attributes were inherited from global config (the ldap client
+// applies serverInherited defaults, as zmprov -l gs does): the milter must be
+// seen as enabled and zimbraMtaSmtpdMilters derived rather than emptied.
+func TestLoadServerConfig_MilterFromInheritedGS(t *testing.T) {
+	cm := newTestConfigManager(t)
+
+	cm.CommandRegistry.Commands["gs"] = commands.NewCommand("gs", "gs",
+		func(_ context.Context, _ ...string) (string, error) {
+			return "zimbraServiceEnabled: mta\nzimbraIPMode: ipv4\n" +
+				"zimbraMilterServerEnabled: TRUE\nzimbraMilterBindPort: 7026", nil
+		})
+
+	if err := cm.loadServerConfigWithRetry(context.Background(), 1); err != nil {
+		t.Fatalf("loadServerConfigWithRetry: %v", err)
+	}
+
+	if got := cm.State.ServerConfig.Data.GetOr("zimbraMtaSmtpdMilters", ""); got != "inet:127.0.0.1:7026" {
+		t.Errorf("zimbraMtaSmtpdMilters = %q, want inet:127.0.0.1:7026", got)
+	}
+}

@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 
 	carboldap "github.com/zextras/carbonio-configd/internal/ldap"
@@ -247,28 +246,13 @@ func (c *ProxyRewriteCmd) Run() error {
 }
 
 // proxyContactDaemon sends a REWRITE request for the given configs to the running
-// configd daemon. Shared by ProxyGenCmd and ProxyRewriteCmd.
+// configd daemon, rewriting in-process when it is not running (legacy
+// configrewrite). Shared by ProxyGenCmd and ProxyRewriteCmd.
 func proxyContactDaemon(configs []string) {
-	lc, err := localconfig.LoadResolvedConfig()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading localconfig: %v\n", err)
-		os.Exit(1)
-	}
+	ctx := initializeLogging()
 
-	listenPort, _ := strconv.Atoi(lc["zmconfigd_listen_port"])
-	if listenPort == 0 {
-		listenPort = 7171
-	}
-
-	ipMode := lc["zimbraIPMode"]
-	if ipMode == "" {
-		ipMode = ipModeIPv4
-	}
-
-	if ContactService("REWRITE", configs, listenPort, ipMode) {
-		fmt.Fprintln(os.Stderr,
-			"Error: could not contact configd service. Is carbonio-configd.service running?")
-		os.Exit(1)
+	if code := forcedRewrite(ctx, &Args{ForcedConfigs: configs}, runStandaloneRewrite); code != 0 {
+		os.Exit(code)
 	}
 }
 

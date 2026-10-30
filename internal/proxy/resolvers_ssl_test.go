@@ -74,34 +74,21 @@ func TestResolveWebSSLProtocols(t *testing.T) {
 	}
 }
 
-// TestResolveClientCertCADefault tests all branches of resolveClientCertCADefault
-func TestResolveClientCertCADefault(t *testing.T) {
-	t.Run("returns :empty: when file does not exist", func(t *testing.T) {
-		g := &Generator{ConfDir: "/tmp/nonexistent-dir-xyz"}
-		result, err := g.resolveClientCertCADefault(context.Background())
-		if err != nil {
-			t.Fatalf("resolveClientCertCADefault failed: %v", err)
-		}
-		if result != ":empty:" {
-			t.Errorf("expected :empty:, got %v", result)
-		}
-	})
+// TestClientCertCADefaultAlwaysPath verifies ssl.clientcertca.default is the default
+// CA path regardless of file existence (legacy ClientCertAuthDefaultCAVar.update
+// assigns mDefault unconditionally).
+func TestClientCertCADefaultAlwaysPath(t *testing.T) {
+	g := &Generator{ConfDir: "/tmp/nonexistent-dir-xyz"}
+	g.RegisterVariables(context.Background())
 
-	t.Run("returns path when file exists", func(t *testing.T) {
-		dir := t.TempDir()
-		caPath := filepath.Join(dir, "nginx.client.ca.crt")
-		if err := os.WriteFile(caPath, []byte("fake-cert"), 0o644); err != nil {
-			t.Fatalf("failed to create test file: %v", err)
-		}
-		g := &Generator{ConfDir: dir}
-		result, err := g.resolveClientCertCADefault(context.Background())
-		if err != nil {
-			t.Fatalf("resolveClientCertCADefault failed: %v", err)
-		}
-		if result != caPath {
-			t.Errorf("expected %q, got %v", caPath, result)
-		}
-	})
+	v, err := g.LookupValue(context.Background(), g.Variables["ssl.clientcertca.default"])
+	if err != nil {
+		t.Fatalf("LookupValue: %v", err)
+	}
+
+	if want := "/tmp/nonexistent-dir-xyz/nginx.client.ca.crt"; v != want {
+		t.Errorf("got %v, want %v", v, want)
+	}
 }
 
 // TestResolveDHParamEnabled tests all branches of resolveDHParamEnabled

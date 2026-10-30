@@ -52,42 +52,6 @@ func TestParseSystemctlShow(t *testing.T) {
 	}
 }
 
-func TestSelectValues(t *testing.T) {
-	configured := map[string]string{
-		"custom": "override",
-		"known":  "value",
-	}
-
-	defaults := (&localconfigOpts{showDefaults: true}).selectValues(configured)
-	if len(defaults) == 0 {
-		t.Fatal("expected defaults to be returned")
-	}
-
-	if _, ok := defaults["custom"]; ok {
-		t.Fatal("defaults must not contain configured-only keys")
-	}
-
-	changed := (&localconfigOpts{showChanged: true}).selectValues(configured)
-	if changed["custom"] != "override" {
-		t.Fatalf("expected changed config to preserve custom key, got %q", changed["custom"])
-	}
-
-	plain := (&localconfigOpts{}).selectValues(configured)
-	if plain["known"] != "value" || plain["zimbra_home"] == "" {
-		t.Fatalf("expected configured keys over defaults, got known=%q zimbra_home=%q",
-			plain["known"], plain["zimbra_home"])
-	}
-}
-
-func TestSelectValues_KeyFilter(t *testing.T) {
-	configured := map[string]string{"a": "1", "b": "2"}
-
-	filtered := (&localconfigOpts{keys: []string{"b", "missing"}, quiet: true}).selectValues(configured)
-	if len(filtered) != 1 || filtered["b"] != "2" {
-		t.Fatalf("expected only b=2, got %v", filtered)
-	}
-}
-
 func TestCLIToArgs(t *testing.T) {
 	cli := &CLI{DisableRestarts: true}
 	args := cli.toArgs()

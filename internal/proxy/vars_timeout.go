@@ -21,7 +21,7 @@ func (g *Generator) registerTimeoutVariables() {
 	g.registerVar("web.upstream.connect.timeout", 25,
 		withAttribute("zimbraReverseProxyUpstreamConnectTimeout"),
 		withValueType(ValueTypeInteger),
-		withOverrideType(OverrideConfig),
+		withOverrideType(OverrideServer),
 		withDescription("Timeout for connecting to upstream servers (in seconds)"),
 	)
 	g.registerVar("web.upstream.read.timeout", 60000,

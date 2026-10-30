@@ -8,7 +8,9 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/zextras/carbonio-configd/internal/cache"
 	"github.com/zextras/carbonio-configd/internal/config"
@@ -1090,6 +1092,59 @@ func TestDoConfigRewrites_WithPostconfAndLdap(t *testing.T) {
 	}
 }
 
+// orderingExecutor records whether postconf started while a mapfile write was
+// still in progress.
+type orderingExecutor struct {
+	mockMtaExecutor
+	postconfStarted chan struct{}
+	overlapped      atomic.Bool
+}
+
+func (o *orderingExecutor) ExecuteMapfile(ctx context.Context, op mtaops.MapfileOperation) error {
+	select {
+	case <-o.postconfStarted:
+		o.overlapped.Store(true)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	return o.mockMtaExecutor.ExecuteMapfile(ctx, op)
+}
+
+func (o *orderingExecutor) ExecutePostconfBatch(ctx context.Context, ops []mtaops.PostconfOperation) error {
+	close(o.postconfStarted)
+
+	return o.mockMtaExecutor.ExecutePostconfBatch(ctx, ops)
+}
+
+// TestDoConfigRewrites_MapfilesBeforeOtherSteps pins the legacy order: mapped
+// files (dhparam.pem) are written before any other step runs, because proxygen
+// and rewrites read them; legacy writes them while compiling actions.
+func TestDoConfigRewrites_MapfilesBeforeOtherSteps(t *testing.T) {
+	cm, _ := newTestCMWithExecutor(t)
+	exec := &orderingExecutor{postconfStarted: make(chan struct{})}
+	cm.mtaExecutor = exec
+	cm.State.FirstRun = false
+	cm.State.GlobalConfig.Data.Set(dhParamKey, "ZGF0YQ==")
+	cm.State.MtaConfig.Sections["mta"] = &config.MtaConfigSection{
+		Name:         "mta",
+		Changed:      true,
+		RequiredVars: map[string]string{dhParamKey: configTypeMAPFILE},
+	}
+	cm.State.CurrentActions.Postconf["myhostname"] = "mail.example.com"
+
+	if err := cm.DoConfigRewrites(context.Background()); err != nil {
+		t.Fatalf("DoConfigRewrites: %v", err)
+	}
+
+	if len(exec.mapfileOps) != 1 || len(exec.postconfOps) != 1 {
+		t.Fatalf("ops: mapfile=%d postconf=%d, want 1 and 1", len(exec.mapfileOps), len(exec.postconfOps))
+	}
+
+	if exec.overlapped.Load() {
+		t.Error("postconf started before the mapped file was written")
+	}
+}
+
 // ---- DoRestarts extended tests (configLookup closure coverage) ----
 
 // TestDoRestarts_AddRestartError exercises the AddRestart error logging branch.
@@ -1309,7 +1364,7 @@ func TestCleanupRewriteFiles_TmpFileIsDirectory(t *testing.T) {
 // Instead we exercise the scanner error path by having a bad file descriptor.
 // We verify the function gracefully handles a source file opened but becomes unreadable.
 
-// TestProcessRewrite_SuccessfulRename verifies the happy path with default mode (0644).
+// TestProcessRewrite_SuccessfulRename verifies the happy path with default mode (0440).
 func TestProcessRewrite_SuccessfulRename(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: configmgr test may have retry delays")
@@ -1333,6 +1388,10 @@ func TestProcessRewrite_SuccessfulRename(t *testing.T) {
 	}
 	if len(destContent) == 0 {
 		t.Error("expected non-empty destination file")
+	}
+	// Legacy state.py:775 default mode is 0440.
+	if fi, err := os.Stat(baseDir + "/" + destRelPath); err != nil || fi.Mode().Perm() != 0o440 {
+		t.Errorf("default rewrite mode = %v (err %v), want 0440", fi.Mode().Perm(), err)
 	}
 	// Rewrite should have called DelRewrite
 	if _, ok := cm.State.CurrentActions.Rewrites[srcRelPath]; ok {
