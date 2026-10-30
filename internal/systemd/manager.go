@@ -10,32 +10,24 @@ package systemd
 
 import (
 	"context"
-	"os"
-	"os/exec"
 	"sync"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
-// IsBooted reports whether systemd is the init system on this host. The check
-// follows libsystemd's sd_booted(3): /run/systemd/system must be a directory.
-// Cached for the process lifetime — sd_booted state never changes at runtime.
-func IsBooted() bool {
-	bootedOnce.Do(func() {
-		st, err := os.Stat("/run/systemd/system")
-		booted = err == nil && st.IsDir()
-	})
+// runSystemdDir is the directory whose presence marks a systemd-booted host
+// (libsystemd's sd_booted(3)).
+const runSystemdDir = "/run/systemd/system"
 
-	return booted
-}
+// Manager provides an interface for interacting with systemd. Every host
+// effect goes through the injected sys.System.
+type Manager struct {
+	env sys.System
 
-var (
-	booted     bool
 	bootedOnce sync.Once
-)
-
-// Manager provides an interface for interacting with systemd.
-type Manager struct{}
+	booted     bool
+}
 
 // Carbonio systemd targets used to determine if systemd is enabled
 var carbonioTargets = []string{
@@ -46,16 +38,27 @@ var carbonioTargets = []string{
 	"service-discover.target",
 }
 
-// NewManager creates a new Systemd Manager.
-func NewManager() *Manager {
-	return &Manager{}
+// NewManager creates a Systemd Manager acting through env.
+func NewManager(env sys.System) *Manager {
+	return &Manager{env: env}
+}
+
+// IsBooted reports whether systemd is the init system on this host. The check
+// follows libsystemd's sd_booted(3): /run/systemd/system must be a directory.
+// Cached per Manager — sd_booted state never changes at runtime.
+func (m *Manager) IsBooted() bool {
+	m.bootedOnce.Do(func() {
+		st, err := m.env.FS.Stat(runSystemdDir)
+		m.booted = err == nil && st.IsDir()
+	})
+
+	return m.booted
 }
 
 // IsEnabled checks if a systemd unit is enabled.
 func (m *Manager) IsEnabled(ctx context.Context, unit string) bool {
 	ctx = logger.ContextWithComponent(ctx, "systemd")
-	cmd := exec.CommandContext(ctx, "systemctl", "is-enabled", unit) //nolint:gosec // fixed binary, unit from registry
-	err := cmd.Run()
+	_, err := m.env.Exec.Run(ctx, &sys.Cmd{Path: "systemctl", Args: []string{"is-enabled", unit}})
 
 	return err == nil
 }

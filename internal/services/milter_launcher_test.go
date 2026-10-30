@@ -13,22 +13,24 @@ import (
 	"testing"
 )
 
-// --- milterCustomStart (loadConfig override) ---
+// --- milterCustomStart (ctl.loadConfig override) ---
 
 func TestMilterCustomStart_LoadConfigFails(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 
-	old := loadConfig
-	loadConfig = func() (map[string]string, error) {
+	ctl.loadConfig = func() (map[string]string, error) {
 		return nil, fmt.Errorf("test config error")
 	}
-	defer func() { loadConfig = old }()
 
-	err := milterCustomStart(context.Background(), nil)
+	err := ctl.milterCustomStart(context.Background(), nil)
 	if err == nil {
-		t.Fatal("expected error when loadConfig fails")
+		t.Fatal("expected error when ctl.loadConfig fails")
 	}
 	if !strings.Contains(err.Error(), "failed to load localconfig") {
 		t.Errorf("error = %q, want it to contain %q", err, "failed to load localconfig")
@@ -36,20 +38,22 @@ func TestMilterCustomStart_LoadConfigFails(t *testing.T) {
 }
 
 func TestMilterCustomStart_JavaBinaryMissing(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	tmp := t.TempDir()
 
-	oldLC := loadConfig
-	loadConfig = func() (map[string]string, error) {
+	ctl.loadConfig = func() (map[string]string, error) {
 		return map[string]string{
 			"mailboxd_java_home": tmp,
 		}, nil
 	}
-	defer func() { loadConfig = oldLC }()
 
-	err := milterCustomStart(context.Background(), nil)
+	err := ctl.milterCustomStart(context.Background(), nil)
 	if err == nil {
 		t.Fatal("expected error when java binary is missing")
 	}
@@ -59,6 +63,10 @@ func TestMilterCustomStart_JavaBinaryMissing(t *testing.T) {
 }
 
 func TestMilterCustomStart_JavaBinaryPresent(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -78,31 +86,21 @@ func TestMilterCustomStart_JavaBinaryPresent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldLC := loadConfig
-	loadConfig = func() (map[string]string, error) {
+	ctl.loadConfig = func() (map[string]string, error) {
 		return map[string]string{
 			"mailboxd_java_home": filepath.Join(tmp, "jdk"),
 		}, nil
 	}
-	defer func() { loadConfig = oldLC }()
 
-	oldLog := logPath
-	logPath = logDir
-	defer func() { logPath = oldLog }()
+	ctl.p.log = logDir
 
-	oldConf := confPath
-	confPath = filepath.Join(tmp, "conf")
-	defer func() { confPath = oldConf }()
+	ctl.p.conf = filepath.Join(tmp, "conf")
 
-	oldMailbox := mailboxPath
-	mailboxPath = filepath.Join(tmp, "mailbox")
-	defer func() { mailboxPath = oldMailbox }()
+	ctl.p.mailbox = filepath.Join(tmp, "mailbox")
 
-	oldBase := basePath
-	basePath = tmp
-	defer func() { basePath = oldBase }()
+	ctl.p.base = tmp
 
-	err := milterCustomStart(context.Background(), nil)
+	err := ctl.milterCustomStart(context.Background(), nil)
 	if err != nil {
 		t.Errorf("milterCustomStart returned error: %v", err)
 	}

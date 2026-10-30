@@ -43,7 +43,7 @@ func TestConfigManager_BasicIntegration(t *testing.T) {
 	ldapClient := ldap.NewLdap(context.Background(), mainCfg)
 
 	// Create ConfigManager
-	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil)
+	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv())
 
 	// Test loading configurations
 	t.Run("LoadAllConfigs", func(t *testing.T) {
@@ -118,7 +118,7 @@ func TestConfigManager_ConcurrentAccess_Integration(t *testing.T) {
 	appState := state.NewState()
 	ldapClient := ldap.NewLdap(context.Background(), mainCfg)
 
-	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil)
+	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv())
 
 	// Load initial configuration
 	done := make(chan error, 1)
@@ -180,7 +180,7 @@ func TestConfigManager_ErrorHandling_Integration(t *testing.T) {
 	appState := state.NewState()
 	ldapClient := ldap.NewLdap(context.Background(), mainCfg)
 
-	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil)
+	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv())
 
 	t.Run("InvalidKey", func(t *testing.T) {
 		_, err := cm.LookUpConfig(ctx, "LOCAL", "invalid_key_that_does_not_exist")

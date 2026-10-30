@@ -36,7 +36,13 @@ func newTestConfigManager(t *testing.T) *ConfigManager {
 	ctx := context.Background()
 	cacheInstance := cache.New(ctx, false)
 
-	return NewConfigManager(ctx, cfg, st, nil, cacheInstance)
+	return NewConfigManager(ctx, cfg, st, nil, cacheInstance, hostEnv())
+}
+
+// realFSConfigManager is a ConfigManager that only carries the real host
+// boundary, for tests of helpers that act on real temp files.
+func realFSConfigManager() *ConfigManager {
+	return &ConfigManager{env: hostEnv()}
 }
 
 // mockMtaExecutor is a controllable mock for mtaops.Executor used in these tests.
@@ -108,6 +114,7 @@ func newTestCMWithExecutor(t *testing.T) (*ConfigManager, *mockMtaExecutor) {
 	exec := &mockMtaExecutor{}
 	resolver := &mockMtaResolver{}
 	cm := &ConfigManager{
+		env: hostEnv(),
 		mainConfig: &config.Config{
 			BaseDir:  t.TempDir(),
 			Hostname: "testhost",
@@ -850,6 +857,7 @@ func TestDoRestarts_WithAddRestartError(t *testing.T) {
 	cacheInstance := cache.New(ctx, false)
 
 	cm := &ConfigManager{
+		env:        hostEnv(),
 		mainConfig: &config.Config{BaseDir: "/tmp", Hostname: "testhost"},
 		State:      state.NewState(),
 		ServiceMgr: &testutil.MockServiceManager{},
@@ -887,7 +895,7 @@ func TestCleanupRewriteFiles_AlreadyClosed(t *testing.T) {
 	tmpFile.Close()
 
 	// Should handle gracefully (isAlreadyClosedError absorbs the error)
-	cleanupRewriteFiles(ctx, srcFile, tmpFile, tmpPath)
+	realFSConfigManager().cleanupRewriteFiles(ctx, srcFile, tmpFile, tmpPath)
 }
 
 // ---- parseLocalConfigOutput tests ----
@@ -1162,6 +1170,7 @@ func TestDoRestarts_AddRestartError(t *testing.T) {
 	}
 
 	cm := &ConfigManager{
+		env:        hostEnv(),
 		mainConfig: &config.Config{BaseDir: "/tmp", Hostname: "testhost"},
 		State:      state.NewState(),
 		ServiceMgr: mgr,
@@ -1188,6 +1197,7 @@ func TestDoRestarts_ProcessRestartsError(t *testing.T) {
 	}
 
 	cm := &ConfigManager{
+		env:        hostEnv(),
 		mainConfig: &config.Config{BaseDir: "/tmp", Hostname: "testhost"},
 		State:      state.NewState(),
 		ServiceMgr: mgr,
@@ -1218,6 +1228,7 @@ func TestDoRestarts_ConfigLookup_ServiceEnabled(t *testing.T) {
 	}
 
 	cm := &ConfigManager{
+		env:        hostEnv(),
 		mainConfig: &config.Config{BaseDir: "/tmp", Hostname: "testhost"},
 		State:      state.NewState(),
 		ServiceMgr: capturedMgr,
@@ -1272,6 +1283,7 @@ func TestDoRestarts_ConfigLookup_ServiceEnabledPath(t *testing.T) {
 	}
 
 	cm := &ConfigManager{
+		env:        hostEnv(),
 		mainConfig: &config.Config{BaseDir: "/tmp", Hostname: "testhost"},
 		State:      state.NewState(),
 		ServiceMgr: captureMgr,
@@ -1324,6 +1336,7 @@ func TestProcessIsRunning_IsRunningError(t *testing.T) {
 	}
 
 	cm := &ConfigManager{
+		env:        hostEnv(),
 		mainConfig: &config.Config{BaseDir: "/tmp", Hostname: "testhost"},
 		State:      state.NewState(),
 		ServiceMgr: errMgr,
@@ -1354,7 +1367,7 @@ func TestCleanupRewriteFiles_TmpFileIsDirectory(t *testing.T) {
 
 	// Pass subDir as tmpFileName — os.Remove on a non-empty directory fails on some OSes
 	// or on an empty one returns nil. Either way, this exercises the stat+remove path.
-	cleanupRewriteFiles(ctx, nil, nil, subDir)
+	realFSConfigManager().cleanupRewriteFiles(ctx, nil, nil, subDir)
 	// No assertion needed — just verify no panic
 }
 
@@ -1675,7 +1688,7 @@ func TestCleanupRewriteFiles_NonEmptyDir(t *testing.T) {
 	}
 
 	// Should log a warning but not panic
-	cleanupRewriteFiles(ctx, nil, nil, subDir)
+	realFSConfigManager().cleanupRewriteFiles(ctx, nil, nil, subDir)
 }
 
 // ---- LoadAllConfigsWithRetry additional paths ----
@@ -1798,6 +1811,7 @@ func TestDoRestarts_ConfigLookup_EnabledMatchPath(t *testing.T) {
 	}
 
 	cm := &ConfigManager{
+		env:        hostEnv(),
 		mainConfig: &config.Config{BaseDir: "/tmp", Hostname: "testhost"},
 		State:      state.NewState(),
 		ServiceMgr: captureMgr,

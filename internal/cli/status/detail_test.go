@@ -9,17 +9,72 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/zextras/carbonio-configd/internal/cli/cliutil"
 	"github.com/zextras/carbonio-configd/internal/services"
+	"github.com/zextras/carbonio-configd/internal/sys"
+	"github.com/zextras/carbonio-configd/internal/sys/systest"
 	"github.com/zextras/carbonio-configd/internal/zxadmin"
 )
+
+const (
+	testProc = "/usr/bin/fake-svc"
+	testPID  = 4242
+	testBase = "/zx"
+)
+
+// fixture is a Reporter over fake host operations.
+type fixture struct {
+	f   *systest.Fakes
+	ctl *services.Controller
+	r   *Reporter
+}
+
+// newFixture returns a fixture whose Controller serves registry. In systemd
+// mode (strict) status goes through `systemctl is-active`; in legacy mode it
+// goes through the process table.
+func newFixture(systemd bool, registry map[string]*services.ServiceDef) *fixture {
+	f := systest.New()
+	if systemd {
+		f.FS.PutDir("/run/systemd/system", 0o755) // sd_booted(3)
+	} else {
+		f.Exec.OnCmdline("systemctl is-enabled", systest.Fail(1, ""))
+	}
+
+	load := func() (map[string]string, error) { return map[string]string{}, nil }
+	ctl := services.NewController(f.System(),
+		services.WithBaseDir(testBase),
+		services.WithConfigLoader(load),
+		services.WithRawConfigLoader(load),
+		services.WithRegistry(registry),
+	)
+
+	r := NewReporter(f.System(), ctl)
+	r.loadLocalConfig = load
+
+	return &fixture{f: f, ctl: ctl, r: r}
+}
+
+// svcRegistry returns a one-service registry for name, identified by testProc.
+func svcRegistry(name string) map[string]*services.ServiceDef {
+	return map[string]*services.ServiceDef{
+		name: {Name: name, DisplayName: name, ProcessName: testProc, SystemdUnits: []string{name + ".service"}},
+	}
+}
+
+// start puts the test process in the process table (legacy "running").
+func (fx *fixture) start() {
+	fx.f.Proc.Add(sys.ProcEntry{PID: testPID, Argv: []string{testProc}, Exe: testProc, Comm: "fake-svc"})
+	fx.f.FS.PutDir("/proc/"+strconv.Itoa(testPID), 0o555)
+}
+
+// inactive makes every `systemctl is-active` exit 3 (systemd mode "stopped").
+func (fx *fixture) inactive() {
+	fx.f.Exec.OnCmdline("/usr/bin/systemctl is-active", systest.Fail(3, "inactive"))
+}
 
 // newConsole returns a console writing to buffers, and the stdout buffer.
 func newConsole() (*cliutil.Console, *bytes.Buffer) {
@@ -28,60 +83,20 @@ func newConsole() (*cliutil.Console, *bytes.Buffer) {
 	return cliutil.NewConsole(&out, &bytes.Buffer{}), &out
 }
 
-// livePidFileDef returns a def whose PidFile points at the test process and
-// whose ProcessName is the test binary, so the legacy detail path resolves a
-// real PID (the pidfile PID is believed only when its binary matches the
-// identity) and a real /proc start time.
-func livePidFileDef(t *testing.T) *services.ServiceDef {
-	t.Helper()
-
-	self, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	pidFile := filepath.Join(t.TempDir(), "live.pid")
-	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	return &services.ServiceDef{
-		Name:        "test",
-		DisplayName: "test",
-		PidFile:     pidFile,
-		ProcessName: self,
-	}
-}
-
-// stubProbes replaces the live status/mode probes for the test's duration.
-func stubProbes(t *testing.T, running bool, systemd bool) {
-	t.Helper()
-
-	origStatus, origMode := serviceStatusFn, isSystemdModeFn
-
-	t.Cleanup(func() {
-		serviceStatusFn = origStatus
-		isSystemdModeFn = origMode
-	})
-
-	serviceStatusFn = func(_ context.Context, _ string) (bool, error) { return running, nil }
-	isSystemdModeFn = func() bool { return systemd }
-}
-
 // TestShowServiceDetail_LegacyReportsPidAndSince is the regression guard for
 // the "Since: n/a" bug: with no Carbonio target enabled the detail must come
 // from /proc, never from systemctl show of a unit that may not even exist.
 func TestShowServiceDetail_LegacyReportsPidAndSince(t *testing.T) {
-	stubProbes(t, true, false)
+	t.Parallel()
 
-	def := livePidFileDef(t)
-	def.SystemdUnits = []string{"carbonio-nonexistent-for-test.service"}
+	fx := newFixture(false, svcRegistry("test"))
+	fx.start()
 
 	c, out := newConsole()
-	showServiceDetail(context.Background(), c, def)
+	fx.r.showServiceDetail(context.Background(), c, fx.ctl.LookupService("test"))
 
-	if !strings.Contains(out.String(), "  PID: "+strconv.Itoa(os.Getpid())+"\n") {
-		t.Errorf("output missing own PID: %q", out)
+	if !strings.Contains(out.String(), "  PID: "+strconv.Itoa(testPID)+"\n") {
+		t.Errorf("output missing PID: %q", out)
 	}
 
 	if !strings.Contains(out.String(), "  Since: ") {
@@ -91,21 +106,23 @@ func TestShowServiceDetail_LegacyReportsPidAndSince(t *testing.T) {
 	if strings.Contains(out.String(), "n/a") {
 		t.Errorf("start time must never render as n/a: %q", out)
 	}
+
+	for _, line := range fx.f.Exec.Lines() {
+		if strings.HasPrefix(line, "systemctl show") {
+			t.Errorf("legacy detail must not query systemctl show: %q", line)
+		}
+	}
 }
 
 // TestShowServiceDetail_NoPidPrintsNothing covers the not-resolvable case:
 // no pidfile, no matching process, so there is no detail to print.
 func TestShowServiceDetail_NoPidPrintsNothing(t *testing.T) {
-	stubProbes(t, true, false)
+	t.Parallel()
 
-	def := &services.ServiceDef{
-		Name:        "test",
-		DisplayName: "test",
-		ProcessName: "nonexistent-for-test-xyz",
-	}
+	fx := newFixture(false, svcRegistry("test"))
 
 	c, out := newConsole()
-	showServiceDetail(context.Background(), c, def)
+	fx.r.showServiceDetail(context.Background(), c, fx.ctl.LookupService("test"))
 
 	if out.Len() != 0 {
 		t.Errorf("expected no output, got %q", out)
@@ -115,20 +132,46 @@ func TestShowServiceDetail_NoPidPrintsNothing(t *testing.T) {
 // TestShowUnitDetail_UnknownUnitPrintsNoSince asserts systemd's "n/a"
 // placeholder for a never-activated unit is suppressed rather than displayed.
 func TestShowUnitDetail_UnknownUnitPrintsNoSince(t *testing.T) {
-	c, out := newConsole()
-	showUnitDetail(context.Background(), c, "carbonio-nonexistent-for-test.service")
+	t.Parallel()
 
-	if strings.Contains(out.String(), "Since:") || strings.Contains(out.String(), "PID:") {
+	fx := newFixture(true, svcRegistry("test"))
+	fx.f.Exec.OnCmdline("systemctl show", func(*sys.Cmd) (sys.Result, error) {
+		return sys.Result{Stdout: []byte("MainPID=0\nActiveEnterTimestamp=n/a\nMemoryCurrent=[not set]\n")}, nil
+	})
+
+	c, out := newConsole()
+	fx.r.showUnitDetail(context.Background(), c, "carbonio-nonexistent-for-test.service")
+
+	if out.Len() != 0 {
 		t.Errorf("unknown unit must yield no detail lines, got %q", out)
 	}
 }
 
+func TestShowUnitDetail_PrintsProperties(t *testing.T) {
+	t.Parallel()
+
+	fx := newFixture(true, svcRegistry("test"))
+	fx.f.Exec.OnCmdline("systemctl show", func(*sys.Cmd) (sys.Result, error) {
+		return sys.Result{Stdout: []byte("MainPID=456\nActiveEnterTimestamp=Mon 2026-01-05 10:00:00 UTC\nMemoryCurrent=1024\n")}, nil
+	})
+
+	c, out := newConsole()
+	fx.r.showUnitDetail(context.Background(), c, "x.service")
+
+	want := "  PID: 456\n  Since: Mon 2026-01-05 10:00:00 UTC\n  Memory: 1024\n"
+	if out.String() != want {
+		t.Errorf("output = %q, want %q", out, want)
+	}
+}
+
 func TestPrintServiceStatus_UnknownService(t *testing.T) {
-	stubProbes(t, false, false)
+	t.Parallel()
+
+	fx := newFixture(false, svcRegistry("test"))
 
 	c, out := newConsole()
 
-	err := PrintServiceStatus(context.Background(), c, "no-such-service")
+	err := fx.r.PrintServiceStatus(context.Background(), c, "no-such-service")
 	if err == nil {
 		t.Fatal("expected an error for an unknown service")
 	}
@@ -141,30 +184,34 @@ func TestPrintServiceStatus_UnknownService(t *testing.T) {
 // TestPrintServiceStatus_NotRunning covers the stopped path: the service
 // prints "is not running" and the error drives the exit code.
 func TestPrintServiceStatus_NotRunning(t *testing.T) {
-	stubProbes(t, false, false)
+	t.Parallel()
+
+	fx := newFixture(false, svcRegistry("cbpolicyd"))
 
 	c, out := newConsole()
 
-	err := PrintServiceStatus(context.Background(), c, "cbpolicyd")
+	err := fx.r.PrintServiceStatus(context.Background(), c, "cbpolicyd")
 	if err == nil || err.Error() != "service cbpolicyd is not running" {
 		t.Fatalf("err = %v, want 'service cbpolicyd is not running'", err)
 	}
 
-	if got, want := out.String(), services.LookupService("cbpolicyd").DisplayName+" is not running.\n"; got != want {
+	if got, want := out.String(), "cbpolicyd is not running.\n"; got != want {
 		t.Errorf("output = %q, want %q", got, want)
 	}
 }
 
 func TestPrintServiceStatus_ProbeError(t *testing.T) {
-	orig := serviceStatusFn
-	t.Cleanup(func() { serviceStatusFn = orig })
+	t.Parallel()
 
-	serviceStatusFn = func(context.Context, string) (bool, error) { return false, errors.New("boom") }
+	fx := newFixture(true, svcRegistry("cbpolicyd"))
+	fx.f.Exec.FailStart(func(c *sys.Cmd) bool { return c.Path == "/usr/bin/systemctl" && c.Args[0] == "is-active" },
+		errors.New("boom"))
 
 	c, out := newConsole()
 
-	err := PrintServiceStatus(context.Background(), c, "cbpolicyd")
-	if err == nil || err.Error() != "failed to get status for service cbpolicyd: boom" {
+	err := fx.r.PrintServiceStatus(context.Background(), c, "cbpolicyd")
+	if err == nil || !strings.HasPrefix(err.Error(), "failed to get status for service cbpolicyd: ") ||
+		!strings.HasSuffix(err.Error(), ": boom") {
 		t.Fatalf("err = %v", err)
 	}
 
@@ -173,59 +220,39 @@ func TestPrintServiceStatus_ProbeError(t *testing.T) {
 	}
 }
 
-// TestPrintServiceStatus_RunningShowsDetail covers the running branch, which
-// depends on a live probe, hence the serviceStatusFn seam.
+// TestPrintServiceStatus_RunningShowsDetail covers the running branch.
 func TestPrintServiceStatus_RunningShowsDetail(t *testing.T) {
-	stubProbes(t, true, false)
+	t.Parallel()
+
+	fx := newFixture(false, svcRegistry("cbpolicyd"))
+	fx.start()
 
 	c, out := newConsole()
 
-	if err := PrintServiceStatus(context.Background(), c, "cbpolicyd"); err != nil {
+	if err := fx.r.PrintServiceStatus(context.Background(), c, "cbpolicyd"); err != nil {
 		t.Fatalf("PrintServiceStatus = %v, want nil", err)
 	}
 
-	want := services.LookupService("cbpolicyd").DisplayName + " is running.\n"
+	want := "cbpolicyd is running.\n  PID: " + strconv.Itoa(testPID) + "\n"
 	if !strings.HasPrefix(out.String(), want) {
 		t.Errorf("output = %q, want prefix %q", out, want)
 	}
 }
 
-// TestPrintServiceStatus_ProbeOKButUnknownDef covers the nil-def guard: the
-// probe answering for a name the registry does not know must not panic.
-func TestPrintServiceStatus_ProbeOKButUnknownDef(t *testing.T) {
-	stubProbes(t, true, false)
-
-	c, _ := newConsole()
-
-	err := PrintServiceStatus(context.Background(), c, "no-such-service")
-	if err == nil || !strings.Contains(err.Error(), "unknown service") {
-		t.Errorf("err = %v, want an unknown-service error", err)
-	}
-}
-
 // TestShowServiceDetail_SystemdModeQueriesUnit covers the strict-systemd
-// branch against a unit that really is active on any systemd host.
+// branch: the detail comes from `systemctl show` of each unit.
 func TestShowServiceDetail_SystemdModeQueriesUnit(t *testing.T) {
-	if _, err := exec.LookPath("systemctl"); err != nil {
-		t.Skip("systemctl unavailable")
-	}
+	t.Parallel()
 
-	if err := exec.Command("systemctl", "is-active", "--quiet", "dbus.service").Run(); err != nil {
-		t.Skip("dbus.service is not active on this host")
-	}
-
-	stubProbes(t, true, true)
-
-	def := &services.ServiceDef{
-		Name:         "test",
-		DisplayName:  "test",
-		SystemdUnits: []string{"dbus.service"},
-	}
+	fx := newFixture(true, svcRegistry("test"))
+	fx.f.Exec.OnCmdline("systemctl show", func(*sys.Cmd) (sys.Result, error) {
+		return sys.Result{Stdout: []byte("MainPID=77\nActiveEnterTimestamp=Mon 2026-01-05 10:00:00 UTC\n")}, nil
+	})
 
 	c, out := newConsole()
-	showServiceDetail(context.Background(), c, def)
+	fx.r.showServiceDetail(context.Background(), c, fx.ctl.LookupService("test"))
 
-	if !strings.Contains(out.String(), "PID: ") || !strings.Contains(out.String(), "Since: ") {
+	if !strings.Contains(out.String(), "PID: 77") || !strings.Contains(out.String(), "Since: ") {
 		t.Errorf("expected unit detail from systemctl show, got %q", out)
 	}
 }
@@ -255,29 +282,56 @@ func TestParseSystemctlShow(t *testing.T) {
 }
 
 func TestServiceDetail(t *testing.T) {
-	ctx := context.Background()
+	t.Parallel()
 
-	if got := ServiceDetail(ctx, "mta", false); got != "" {
+	ctx := context.Background()
+	fx := newFixture(false, svcRegistry("mta"))
+
+	if got := fx.r.ServiceDetail(ctx, "mta", false); got != "" {
 		t.Errorf("not running: got %q, want empty", got)
 	}
 
-	if got := ServiceDetail(ctx, "nonexistent-xyz", true); got != "" {
+	if got := fx.r.ServiceDetail(ctx, "nonexistent-xyz", true); got != "" {
 		t.Errorf("unknown service: got %q, want empty", got)
+	}
+
+	fx.start()
+
+	want := "(pid " + strconv.Itoa(testPID) + ", since "
+	if got := fx.r.ServiceDetail(ctx, "mta", true); !strings.HasPrefix(got, want) || strings.Contains(got, "n/a") {
+		t.Errorf("running legacy service: got %q, want prefix %q and a real start time", got, want)
 	}
 }
 
-func TestServiceDetailFromSystemd_NoUnits(t *testing.T) {
+func TestServiceDetailFromSystemd(t *testing.T) {
+	t.Parallel()
+
 	for _, units := range [][]string{nil, {}} {
+		fx := newFixture(true, svcRegistry("test"))
 		def := &services.ServiceDef{Name: "test", DisplayName: "Test", SystemdUnits: units}
-		if got := serviceDetailFromSystemd(context.Background(), def); got != "" {
+
+		if got := fx.r.serviceDetailFromSystemd(context.Background(), def); got != "" {
 			t.Errorf("units %v: got %q, want empty", units, got)
 		}
+	}
+
+	fx := newFixture(true, svcRegistry("test"))
+	fx.f.Exec.OnCmdline("systemctl show", func(*sys.Cmd) (sys.Result, error) {
+		return sys.Result{Stdout: []byte("MainPID=77\nActiveEnterTimestamp=Mon 2026-01-05 10:00:00 UTC\n")}, nil
+	})
+
+	got := fx.r.serviceDetailFromSystemd(context.Background(), fx.ctl.LookupService("test"))
+	if want := "(pid 77, since Mon 2026-01-05 10:00:00 UTC)"; got != want {
+		t.Errorf("got %q, want %q", got, want)
 	}
 }
 
 func TestServiceDetailFromProc_ZeroPID(t *testing.T) {
-	def := &services.ServiceDef{Name: "test", DisplayName: "Test", ProcessName: "nonexistent-process-xyz"}
-	if got := serviceDetailFromProc(context.Background(), def); got != "" {
+	t.Parallel()
+
+	fx := newFixture(false, svcRegistry("test"))
+
+	if got := fx.r.serviceDetailFromProc(context.Background(), fx.ctl.LookupService("test")); got != "" {
 		t.Errorf("expected empty string for service with PID 0, got %q", got)
 	}
 }
@@ -285,19 +339,29 @@ func TestServiceDetailFromProc_ZeroPID(t *testing.T) {
 // TestServiceDetailFromProc_IncludesSince guards the legacy-mode start time:
 // a live PID must yield a "since <timestamp>", never a missing or "n/a" value.
 func TestServiceDetailFromProc_IncludesSince(t *testing.T) {
-	result := serviceDetailFromProc(context.Background(), livePidFileDef(t))
+	t.Parallel()
 
-	if !strings.HasPrefix(result, "(pid "+strconv.Itoa(os.Getpid())+", since ") || strings.Contains(result, "n/a") {
+	fx := newFixture(false, svcRegistry("test"))
+	fx.start()
+
+	result := fx.r.serviceDetailFromProc(context.Background(), fx.ctl.LookupService("test"))
+
+	if !strings.HasPrefix(result, "(pid "+strconv.Itoa(testPID)+", since ") || strings.Contains(result, "n/a") {
 		t.Errorf("expected detail to carry pid and a real start time, got %q", result)
 	}
 }
 
 func TestProcStartTime(t *testing.T) {
-	if since, ok := procStartTime(os.Getpid()); !ok || since == "" {
-		t.Errorf("procStartTime(self) = %q, %v; want a timestamp", since, ok)
+	t.Parallel()
+
+	fx := newFixture(false, svcRegistry("test"))
+	fx.start()
+
+	if since, ok := fx.r.procStartTime(testPID); !ok || since == "" {
+		t.Errorf("procStartTime(live) = %q, %v; want a timestamp", since, ok)
 	}
 
-	if since, ok := procStartTime(-1); ok {
+	if since, ok := fx.r.procStartTime(-1); ok {
 		t.Errorf("procStartTime(-1) = %q, true; want not-ok", since)
 	}
 }
@@ -332,66 +396,57 @@ func TestShortErr(t *testing.T) {
 	}
 }
 
-// fakeAdvancedInstall points CARBONIO_BASE_DIR at a tree that looks like an
-// Advanced install, so advancedJARsPresent passes.
-func fakeAdvancedInstall(t *testing.T) {
+// fakeAdvancedInstall makes the fake filesystem look like an Advanced install
+// under CARBONIO_BASE_DIR=testBase, so advancedJARsPresent passes. It sets the
+// environment, so callers must not be parallel.
+func fakeAdvancedInstall(t *testing.T, fx *fixture) {
 	t.Helper()
 
-	base := t.TempDir()
+	t.Setenv("CARBONIO_BASE_DIR", testBase)
 
-	extDir := filepath.Join(base, "lib", "ext", "carbonio")
-	if err := os.MkdirAll(extDir, 0o750); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := os.WriteFile(filepath.Join(extDir, "carbonio-advanced-core-26.6.5.jar"), nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	t.Setenv("CARBONIO_BASE_DIR", base)
+	extDir := testBase + "/lib/ext/carbonio"
+	fx.f.FS.PutDir(extDir, 0o750)
+	fx.f.FS.Put(extDir+"/carbonio-advanced-core-26.6.5.jar", nil, 0o600)
 }
 
 // TestAdvancedJARsPresent drives both branches through CARBONIO_BASE_DIR.
 func TestAdvancedJARsPresent(t *testing.T) {
-	t.Setenv("CARBONIO_BASE_DIR", t.TempDir())
+	t.Setenv("CARBONIO_BASE_DIR", testBase)
 
-	if advancedJARsPresent() {
+	fx := newFixture(false, svcRegistry("test"))
+
+	if fx.r.advancedJARsPresent() {
 		t.Error("missing ext dir must not count as Advanced installed")
 	}
 
-	fakeAdvancedInstall(t)
+	fakeAdvancedInstall(t, fx)
 
-	if !advancedJARsPresent() {
+	if !fx.r.advancedJARsPresent() {
 		t.Error("carbonio-advanced-*.jar must count as Advanced installed")
 	}
 }
 
 func TestAdvanced_NoJarsPrintsNothing(t *testing.T) {
-	t.Setenv("CARBONIO_BASE_DIR", t.TempDir())
+	t.Setenv("CARBONIO_BASE_DIR", testBase)
+
+	fx := newFixture(false, svcRegistry("test"))
 
 	c, out := newConsole()
-	Advanced(context.Background(), c)
+	fx.r.Advanced(context.Background(), c)
 
 	if out.Len() != 0 {
 		t.Errorf("expected no output, got %q", out)
 	}
 }
 
-func stubLocalConfig(t *testing.T, fn func() (map[string]string, error)) {
-	t.Helper()
-
-	orig := loadLocalConfigFn
-	t.Cleanup(func() { loadLocalConfigFn = orig })
-
-	loadLocalConfigFn = fn
-}
-
 func TestAdvanced_LocalconfigFailure(t *testing.T) {
-	fakeAdvancedInstall(t)
-	stubLocalConfig(t, func() (map[string]string, error) { return nil, errors.New("localconfig.xml missing") })
+	fx := newFixture(false, svcRegistry("test"))
+	fakeAdvancedInstall(t, fx)
+
+	fx.r.loadLocalConfig = func() (map[string]string, error) { return nil, errors.New("localconfig.xml missing") }
 
 	c, out := newConsole()
-	Advanced(context.Background(), c)
+	fx.r.Advanced(context.Background(), c)
 
 	want := "\n\tCarbonio Advanced\n\tmodule status unavailable: localconfig.xml missing\n"
 	if out.String() != want {
@@ -400,20 +455,21 @@ func TestAdvanced_LocalconfigFailure(t *testing.T) {
 }
 
 func TestAdvanced_ProbeFailure(t *testing.T) {
-	fakeAdvancedInstall(t)
+	fx := newFixture(false, svcRegistry("test"))
+	fakeAdvancedInstall(t, fx)
 
 	// Port 1 has no listener, so the probe fails fast instead of waiting out
-	// the client's timeout.
-	stubLocalConfig(t, func() (map[string]string, error) {
+	// the client's timeout (network I/O stays real: zxadmin dials TCP).
+	fx.r.loadLocalConfig = func() (map[string]string, error) {
 		return map[string]string{
 			"zimbra_ldap_user":     "zimbra",
 			"zimbra_ldap_password": "x",
 			"mailboxd_admin_port":  "1",
 		}, nil
-	})
+	}
 
 	c, out := newConsole()
-	Advanced(context.Background(), c)
+	fx.r.Advanced(context.Background(), c)
 
 	if !strings.HasPrefix(out.String(), "\n\tCarbonio Advanced\n") {
 		t.Errorf("expected the Advanced section header, got %q", out)

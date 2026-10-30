@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // TestTemplateProcessorVariableSubstitution tests basic variable substitution
@@ -93,13 +94,13 @@ func TestTemplateProcessorVariableSubstitution(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &config.Config{BaseDir: "/tmp/test"}
-			gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
+			gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
 			if err != nil {
 				t.Fatalf("NewGenerator(, nil) error = %v", err)
 			}
 			tt.setupVars(gen)
 
-			processor := NewTemplateProcessor(gen, "", "")
+			processor := NewTemplateProcessor(gen, gen.env.FS, "", "")
 			result, err := processor.interpolateLine(context.Background(), tt.template)
 			if err != nil {
 				t.Fatalf("interpolateLine() error = %v", err)
@@ -115,7 +116,7 @@ func TestTemplateProcessorVariableSubstitution(t *testing.T) {
 // TestTemplateProcessorMultilineTemplate tests processing of multi-line templates
 func TestTemplateProcessorMultilineTemplate(t *testing.T) {
 	cfg := &config.Config{BaseDir: "/tmp/test"}
-	gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewGenerator(, nil) error = %v", err)
 	}
@@ -139,7 +140,7 @@ func TestTemplateProcessorMultilineTemplate(t *testing.T) {
 		Lines:   strings.Split(templateContent, "\n"),
 	}
 
-	processor := NewTemplateProcessor(gen, "", "")
+	processor := NewTemplateProcessor(gen, gen.env.FS, "", "")
 	result, err := processor.ProcessTemplate(context.Background(), tmpl)
 	if err != nil {
 		t.Fatalf("ProcessTemplate() error = %v", err)
@@ -171,7 +172,7 @@ func TestTemplateProcessorLoadTemplate(t *testing.T) {
 		t.Fatalf("Failed to create test template: %v", err)
 	}
 
-	processor := NewTemplateProcessor(nil, tmpDir, "")
+	processor := NewTemplateProcessor(nil, sys.RealFS{}, tmpDir, "")
 	tmpl, err := processor.LoadTemplate(context.Background(), "test.template")
 	if err != nil {
 		t.Fatalf("LoadTemplate() error = %v", err)
@@ -194,7 +195,7 @@ func TestTemplateProcessorLoadTemplate(t *testing.T) {
 func TestTemplateProcessorWriteOutput(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	processor := NewTemplateProcessor(nil, "", tmpDir)
+	processor := NewTemplateProcessor(nil, sys.RealFS{}, "", tmpDir)
 	content := "server { listen 80; }"
 	name := "nginx.conf.template"
 
@@ -256,7 +257,7 @@ func TestFormatValue(t *testing.T) {
 // TestTemplateProcessorCustomFormatter tests custom formatters
 func TestTemplateProcessorCustomFormatter(t *testing.T) {
 	cfg := &config.Config{BaseDir: "/tmp/test"}
-	gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewGenerator(, nil) error = %v", err)
 	}
@@ -271,7 +272,7 @@ func TestTemplateProcessorCustomFormatter(t *testing.T) {
 		},
 	}
 
-	processor := NewTemplateProcessor(gen, "", "")
+	processor := NewTemplateProcessor(gen, gen.env.FS, "", "")
 	result, err := processor.interpolateLine(context.Background(), "ssl_protocols ${web.ssl.protocols};")
 	if err != nil {
 		t.Fatalf("interpolateLine() error = %v", err)
@@ -286,11 +287,11 @@ func TestTemplateProcessorCustomFormatter(t *testing.T) {
 // TestTemplateProcessorExplodeDirective tests detection of explode directives
 func TestTemplateProcessorExplodeDirective(t *testing.T) {
 	cfg := &config.Config{BaseDir: "/tmp/test"}
-	gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewGenerator(, nil) error = %v", err)
 	}
-	processor := NewTemplateProcessor(gen, "", "")
+	processor := NewTemplateProcessor(gen, gen.env.FS, "", "")
 
 	// Template with explode directive
 	tmpl := &Template{
@@ -333,14 +334,14 @@ func TestTemplateProcessorProcessAllTemplates(t *testing.T) {
 	}
 
 	cfg := &config.Config{BaseDir: "/tmp/test"}
-	gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewGenerator(, nil) error = %v", err)
 	}
 	gen.Variables["core.workers"] = &Variable{Value: "4"}
 	gen.Variables["mail.ctimeout"] = &Variable{Value: "30s"}
 
-	processor := NewTemplateProcessor(gen, tmpInputDir, tmpOutputDir)
+	processor := NewTemplateProcessor(gen, gen.env.FS, tmpInputDir, tmpOutputDir)
 
 	if err := processor.ProcessAllTemplates(context.Background()); err != nil {
 		t.Fatalf("ProcessAllTemplates() error = %v", err)
@@ -485,7 +486,7 @@ func TestTruncateString(t *testing.T) {
 // TestProcessEnablerLineTrueEnabler tests processEnablerLine when enabler variable is true
 func TestProcessEnablerLineTrueEnabler(t *testing.T) {
 	cfg := &config.Config{BaseDir: "/tmp/test"}
-	gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewGenerator: %v", err)
 	}
@@ -497,7 +498,7 @@ func TestProcessEnablerLineTrueEnabler(t *testing.T) {
 		Value:     true,
 	}
 
-	processor := NewTemplateProcessor(gen, "", "")
+	processor := NewTemplateProcessor(gen, gen.env.FS, "", "")
 
 	// The enabler pattern: whitespace + ${var} + rest
 	line := "    ${mail.imap.enabled}listen 143;"
@@ -517,7 +518,7 @@ func TestProcessEnablerLineTrueEnabler(t *testing.T) {
 // TestProcessEnablerLineFalseEnabler tests processEnablerLine when enabler variable is false
 func TestProcessEnablerLineFalseEnabler(t *testing.T) {
 	cfg := &config.Config{BaseDir: "/tmp/test"}
-	gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewGenerator: %v", err)
 	}
@@ -528,7 +529,7 @@ func TestProcessEnablerLineFalseEnabler(t *testing.T) {
 		Value:     false,
 	}
 
-	processor := NewTemplateProcessor(gen, "", "")
+	processor := NewTemplateProcessor(gen, gen.env.FS, "", "")
 
 	line := "    ${mail.imap.enabled}listen 143;"
 	result, err := processor.interpolateLine(context.Background(), line)
@@ -546,7 +547,7 @@ func TestProcessEnablerLineFalseEnabler(t *testing.T) {
 // commented out, not just the first.
 func TestProcessEnablerLineFalseEnablerMultiLine(t *testing.T) {
 	cfg := &config.Config{BaseDir: "/tmp/test"}
-	gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewGenerator: %v", err)
 	}
@@ -562,7 +563,7 @@ func TestProcessEnablerLineFalseEnablerMultiLine(t *testing.T) {
 		Value:   "server srv1:8080 fail_timeout=10s;\n    server srv2:8080 fail_timeout=10s;",
 	}
 
-	processor := NewTemplateProcessor(gen, "", "")
+	processor := NewTemplateProcessor(gen, gen.env.FS, "", "")
 
 	line := "    ${web.ews.upstream.disable}    ${web.upstream.ewsserver.:servers}"
 	result, err := processor.interpolateLine(context.Background(), line)
@@ -583,7 +584,7 @@ func TestProcessEnablerLineFalseEnablerMultiLine(t *testing.T) {
 
 func TestProcessEnablerLineStringEnabler(t *testing.T) {
 	cfg := &config.Config{BaseDir: "/tmp/test"}
-	gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewGenerator: %v", err)
 	}
@@ -594,7 +595,7 @@ func TestProcessEnablerLineStringEnabler(t *testing.T) {
 		Value:     "server", // non-empty string = enabled
 	}
 
-	processor := NewTemplateProcessor(gen, "", "")
+	processor := NewTemplateProcessor(gen, gen.env.FS, "", "")
 
 	line := "    ${mail.pop3.enabled}listen 110;"
 	result, err := processor.interpolateLine(context.Background(), line)
@@ -609,7 +610,7 @@ func TestProcessEnablerLineStringEnabler(t *testing.T) {
 // TestProcessEnablerLineIntEnabler tests processEnablerLine with int enabler
 func TestProcessEnablerLineIntEnabler(t *testing.T) {
 	cfg := &config.Config{BaseDir: "/tmp/test"}
-	gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewGenerator: %v", err)
 	}
@@ -621,7 +622,7 @@ func TestProcessEnablerLineIntEnabler(t *testing.T) {
 		Value:     int(0),
 	}
 
-	processor := NewTemplateProcessor(gen, "", "")
+	processor := NewTemplateProcessor(gen, gen.env.FS, "", "")
 
 	line := "    ${mail.imaps.enabled}listen 993 ssl;"
 	result, err := processor.interpolateLine(context.Background(), line)
@@ -637,7 +638,7 @@ func TestProcessEnablerLineIntEnabler(t *testing.T) {
 // branch (L131-135) when an enabler variable holds a non-bool/non-string/non-int value.
 func TestProcessEnablerLineUnexpectedType(t *testing.T) {
 	cfg := &config.Config{BaseDir: "/tmp/test"}
-	gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewGenerator: %v", err)
 	}
@@ -649,7 +650,7 @@ func TestProcessEnablerLineUnexpectedType(t *testing.T) {
 		Value:     float64(3.14),
 	}
 
-	processor := NewTemplateProcessor(gen, "", "")
+	processor := NewTemplateProcessor(gen, gen.env.FS, "", "")
 
 	// The default branch treats the enabler as disabled, so the line should be
 	// commented out (same as a disabled bool/string/int(0) enabler).
@@ -667,7 +668,7 @@ func TestProcessEnablerLineUnexpectedType(t *testing.T) {
 // TestProcessEnablerLineNotEnabler tests that a non-enabler variable in enabler position is ignored
 func TestProcessEnablerLineNotEnabler(t *testing.T) {
 	cfg := &config.Config{BaseDir: "/tmp/test"}
-	gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewGenerator: %v", err)
 	}
@@ -679,7 +680,7 @@ func TestProcessEnablerLineNotEnabler(t *testing.T) {
 		Value:     "mail.example.com",
 	}
 
-	processor := NewTemplateProcessor(gen, "", "")
+	processor := NewTemplateProcessor(gen, gen.env.FS, "", "")
 
 	// This looks like the enabler pattern syntactically but the variable is not ValueTypeEnabler
 	line := "    ${web.server_name} extra stuff"
@@ -696,7 +697,7 @@ func TestProcessEnablerLineNotEnabler(t *testing.T) {
 // TestExpandVariableTimeTypes tests ExpandVariable with TIME and TimeInSec types
 func TestExpandVariableTimeTypes(t *testing.T) {
 	cfg := &config.Config{BaseDir: "/tmp/test"}
-	gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewGenerator: %v", err)
 	}
@@ -733,13 +734,13 @@ func TestExpandVariableTimeTypes(t *testing.T) {
 func TestWriteOutputDryRun(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &config.Config{BaseDir: tmpDir}
-	gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewGenerator: %v", err)
 	}
 	gen.DryRun = true
 
-	processor := NewTemplateProcessor(gen, "", tmpDir)
+	processor := NewTemplateProcessor(gen, gen.env.FS, "", tmpDir)
 	if err := processor.WriteOutput(context.Background(), "test.template", "content"); err != nil {
 		t.Fatalf("WriteOutput dry-run: %v", err)
 	}
@@ -754,14 +755,14 @@ func TestWriteOutputDryRun(t *testing.T) {
 func TestWriteOutputDryRunVerbose(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &config.Config{BaseDir: tmpDir}
-	gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewGenerator: %v", err)
 	}
 	gen.DryRun = true
 	gen.Verbose = true
 
-	processor := NewTemplateProcessor(gen, "", tmpDir)
+	processor := NewTemplateProcessor(gen, gen.env.FS, "", tmpDir)
 	if err := processor.WriteOutput(context.Background(), "test.template", "verbose dry content"); err != nil {
 		t.Fatalf("WriteOutput dry-run verbose: %v", err)
 	}
@@ -771,13 +772,13 @@ func TestWriteOutputDryRunVerbose(t *testing.T) {
 func TestWriteOutputVerbose(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &config.Config{BaseDir: tmpDir}
-	gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewGenerator: %v", err)
 	}
 	gen.Verbose = true
 
-	processor := NewTemplateProcessor(gen, "", tmpDir)
+	processor := NewTemplateProcessor(gen, gen.env.FS, "", tmpDir)
 	if err := processor.WriteOutput(context.Background(), "nginx.conf.template", "content"); err != nil {
 		t.Fatalf("WriteOutput verbose: %v", err)
 	}
@@ -790,7 +791,7 @@ func TestWriteOutputVerbose(t *testing.T) {
 // TestWriteOutputNilGenerator tests WriteOutput when generator is nil
 func TestWriteOutputNilGenerator(t *testing.T) {
 	tmpDir := t.TempDir()
-	processor := NewTemplateProcessor(nil, "", tmpDir)
+	processor := NewTemplateProcessor(nil, sys.RealFS{}, "", tmpDir)
 	if err := processor.WriteOutput(context.Background(), "test.template", "content"); err != nil {
 		t.Fatalf("WriteOutput nil gen: %v", err)
 	}
@@ -802,13 +803,13 @@ func TestWriteOutputNilGenerator(t *testing.T) {
 // TestProcessTemplateLinesSkipComments tests processTemplateLines with skipComments=true
 func TestProcessTemplateLinesSkipComments(t *testing.T) {
 	cfg := &config.Config{BaseDir: "/tmp/test"}
-	gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewGenerator: %v", err)
 	}
 	gen.Variables["key"] = &Variable{Value: "val"}
 
-	processor := NewTemplateProcessor(gen, "", "")
+	processor := NewTemplateProcessor(gen, gen.env.FS, "", "")
 
 	lines := []string{
 		"# this is a comment",
@@ -839,12 +840,12 @@ func TestProcessTemplateLinesSkipComments(t *testing.T) {
 // TestProcessTemplateLinesNoSkipComments tests processTemplateLines with skipComments=false
 func TestProcessTemplateLinesNoSkipComments(t *testing.T) {
 	cfg := &config.Config{BaseDir: "/tmp/test"}
-	gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewGenerator: %v", err)
 	}
 
-	processor := NewTemplateProcessor(gen, "", "")
+	processor := NewTemplateProcessor(gen, gen.env.FS, "", "")
 
 	lines := []string{"# comment", "line2"}
 
@@ -865,12 +866,12 @@ func TestProcessTemplateLinesNoSkipComments(t *testing.T) {
 // TestProcessTemplateFileError tests ProcessTemplateFile when load fails
 func TestProcessTemplateFileError(t *testing.T) {
 	cfg := &config.Config{BaseDir: "/tmp/test"}
-	gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewGenerator: %v", err)
 	}
 
-	processor := NewTemplateProcessor(gen, "/nonexistent-dir", t.TempDir())
+	processor := NewTemplateProcessor(gen, gen.env.FS, "/nonexistent-dir", t.TempDir())
 	err = processor.ProcessTemplateFile(context.Background(), "nonexistent.template")
 	if err == nil {
 		t.Error("Expected error for non-existent template file, got nil")
@@ -885,7 +886,7 @@ func TestLoadTemplateAbsolutePath(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	processor := NewTemplateProcessor(nil, "/some/other/dir", "")
+	processor := NewTemplateProcessor(nil, sys.RealFS{}, "/some/other/dir", "")
 	tmpl, err := processor.LoadTemplate(context.Background(), absPath)
 	if err != nil {
 		t.Fatalf("LoadTemplate absolute path: %v", err)
@@ -897,7 +898,7 @@ func TestLoadTemplateAbsolutePath(t *testing.T) {
 
 // TestLoadTemplateNonExistent tests LoadTemplate with non-existent file
 func TestLoadTemplateNonExistent(t *testing.T) {
-	processor := NewTemplateProcessor(nil, "/tmp", "")
+	processor := NewTemplateProcessor(nil, sys.RealFS{}, "/tmp", "")
 	_, err := processor.LoadTemplate(context.Background(), "nonexistent.template")
 	if err == nil {
 		t.Error("Expected error for non-existent template, got nil")
@@ -906,8 +907,8 @@ func TestLoadTemplateNonExistent(t *testing.T) {
 
 // TestGetDomainsNilLdap tests getDomains when LdapClient is nil returns empty slice
 func TestGetDomainsNilLdap(t *testing.T) {
-	g := &Generator{LdapClient: nil}
-	tp := NewTemplateProcessor(g, "", "")
+	g := &Generator{env: sys.Real(), LdapClient: nil}
+	tp := NewTemplateProcessor(g, g.env.FS, "", "")
 
 	domains := tp.getDomains(context.Background())
 	if len(domains) != 0 {
@@ -917,8 +918,8 @@ func TestGetDomainsNilLdap(t *testing.T) {
 
 // TestGetDomainsWithProvider tests getDomains when domainProvider is injected
 func TestGetDomainsWithProvider(t *testing.T) {
-	g := &Generator{LdapClient: nil}
-	tp := NewTemplateProcessor(g, "", "")
+	g := &Generator{env: sys.Real(), LdapClient: nil}
+	tp := NewTemplateProcessor(g, g.env.FS, "", "")
 	tp.domainProvider = func() []DomainInfo {
 		return []DomainInfo{
 			{Name: "example.com", VirtualHostname: "mail.example.com"},
@@ -936,8 +937,8 @@ func TestGetDomainsWithProvider(t *testing.T) {
 
 // TestGetServersWithServiceNilLdap tests getServersWithService when LdapClient is nil
 func TestGetServersWithServiceNilLdap(t *testing.T) {
-	g := &Generator{LdapClient: nil}
-	tp := NewTemplateProcessor(g, "", "")
+	g := &Generator{env: sys.Real(), LdapClient: nil}
+	tp := NewTemplateProcessor(g, g.env.FS, "", "")
 
 	servers := tp.getServersWithService(context.Background(), "mailbox")
 	if len(servers) != 0 {
@@ -947,8 +948,8 @@ func TestGetServersWithServiceNilLdap(t *testing.T) {
 
 // TestGetServersWithServiceWithProvider tests getServersWithService when serverProvider is injected
 func TestGetServersWithServiceWithProvider(t *testing.T) {
-	g := &Generator{LdapClient: nil}
-	tp := NewTemplateProcessor(g, "", "")
+	g := &Generator{env: sys.Real(), LdapClient: nil}
+	tp := NewTemplateProcessor(g, g.env.FS, "", "")
 	tp.serverProvider = func(serviceName string) []ServerInfo {
 		if serviceName == "mailbox" {
 			return []ServerInfo{{ID: "1", Hostname: "mailbox.example.com"}}
@@ -978,12 +979,12 @@ func TestProcessAllTemplatesWithError(t *testing.T) {
 	}
 
 	cfg := &config.Config{BaseDir: "/tmp/test"}
-	gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewGenerator: %v", err)
 	}
 
-	processor := NewTemplateProcessor(gen, tmpInputDir, tmpOutputDir)
+	processor := NewTemplateProcessor(gen, gen.env.FS, tmpInputDir, tmpOutputDir)
 	err = processor.ProcessAllTemplates(context.Background())
 	if err == nil {
 		t.Error("expected error for invalid template, got nil")
@@ -993,12 +994,12 @@ func TestProcessAllTemplatesWithError(t *testing.T) {
 // TestProcessAllTemplatesNonExistentDir tests ProcessAllTemplates when template dir does not exist
 func TestProcessAllTemplatesNonExistentDir(t *testing.T) {
 	cfg := &config.Config{BaseDir: "/tmp/test"}
-	gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewGenerator: %v", err)
 	}
 
-	processor := NewTemplateProcessor(gen, "/nonexistent-dir-xyz", t.TempDir())
+	processor := NewTemplateProcessor(gen, gen.env.FS, "/nonexistent-dir-xyz", t.TempDir())
 	err = processor.ProcessAllTemplates(context.Background())
 	if err == nil {
 		t.Error("expected error for non-existent template directory, got nil")
@@ -1019,7 +1020,7 @@ func TestWriteOutputCreateTempError(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(roDir, 0755) })
 
-	processor := NewTemplateProcessor(nil, "", roDir)
+	processor := NewTemplateProcessor(nil, sys.RealFS{}, "", roDir)
 	err := processor.WriteOutput(context.Background(), "test.template", "content")
 	// As root the chmod may be ignored; just ensure no panic
 	if err != nil {
@@ -1029,8 +1030,8 @@ func TestWriteOutputCreateTempError(t *testing.T) {
 
 // TestGetDomainsWithMultipleProviderDomainsSorted tests getDomains sorting behaviour
 func TestGetDomainsWithMultipleProviderDomainsSorted(t *testing.T) {
-	g := &Generator{LdapClient: nil}
-	tp := NewTemplateProcessor(g, "", "")
+	g := &Generator{env: sys.Real(), LdapClient: nil}
+	tp := NewTemplateProcessor(g, g.env.FS, "", "")
 	tp.domainProvider = func() []DomainInfo {
 		return []DomainInfo{
 			{Name: "zzz.com"},
@@ -1051,8 +1052,8 @@ func TestGetDomainsWithMultipleProviderDomainsSorted(t *testing.T) {
 
 // TestGetServersWithServiceSorted tests getServersWithService sorting behaviour
 func TestGetServersWithServiceSorted(t *testing.T) {
-	g := &Generator{LdapClient: nil}
-	tp := NewTemplateProcessor(g, "", "")
+	g := &Generator{env: sys.Real(), LdapClient: nil}
+	tp := NewTemplateProcessor(g, g.env.FS, "", "")
 	tp.serverProvider = func(serviceName string) []ServerInfo {
 		return []ServerInfo{
 			{ID: "3", Hostname: "zzz.example.com"},

@@ -10,13 +10,13 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 
 	"github.com/zextras/carbonio-configd/internal/cli/cliutil"
 	"github.com/zextras/carbonio-configd/internal/cli/rewrite"
 	"github.com/zextras/carbonio-configd/internal/localconfig"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/services"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 const (
@@ -40,16 +40,17 @@ type Options struct {
 // Run executes the init subcommand and returns the process exit status.
 // It triggers a REWRITE on the running daemon for the specified component,
 // then starts the corresponding service.
-func Run(ctx context.Context, stdout, stderr io.Writer, opts *Options) int {
+func Run(ctx context.Context, env sys.System, stdout, stderr io.Writer, opts *Options) int {
 	if !cliutil.RequireZextras(stderr) {
 		return 1
 	}
 
-	return run(ctx, stdout, stderr, opts, localconfig.LoadResolvedConfig)
+	return run(ctx, env, services.NewController(env), stdout, stderr, opts, localconfig.LoadResolvedConfig)
 }
 
 func run(
-	ctx context.Context, stdout, stderr io.Writer, opts *Options, loadConfig func() (map[string]string, error),
+	ctx context.Context, env sys.System, ctl *services.Controller, stdout, stderr io.Writer, opts *Options,
+	loadConfig func() (map[string]string, error),
 ) int {
 	component := opts.Component
 
@@ -61,7 +62,7 @@ func run(
 	}
 
 	// Check if configs already exist (basic guard)
-	if !opts.Force && configsExist(component) {
+	if !opts.Force && configsExist(env, component) {
 		_, _ = fmt.Fprintf(stderr, "Configs for %s already exist. Use --force to reinitialize.\n", component)
 
 		return 1
@@ -91,7 +92,7 @@ func run(
 	// Start the service
 	_, _ = fmt.Fprintf(stdout, "Starting %s service...\n", component)
 
-	if err := services.ServiceStart(ctx, component); err != nil {
+	if err := ctl.ServiceStart(ctx, component); err != nil {
 		logger.WarnContext(ctx, "Service start failed", "component", component, "error", err)
 		_, _ = fmt.Fprintf(stderr, "Warning: service start failed: %v\n", err)
 		_, _ = fmt.Fprintln(stderr, "Configs were generated. Start the service manually.")
@@ -102,13 +103,13 @@ func run(
 	return 0
 }
 
-func configsExist(component string) bool {
+func configsExist(env sys.System, component string) bool {
 	switch component {
 	case componentMTA:
-		_, err := os.Stat(cliutil.BasePath("common", "conf", "postfix", "main.cf"))
+		_, err := env.FS.Stat(cliutil.BasePath("common", "conf", "postfix", "main.cf"))
 		return err == nil
 	case componentProxy:
-		_, err := os.Stat(cliutil.BasePath("conf", "nginx", "nginx.conf"))
+		_, err := env.FS.Stat(cliutil.BasePath("conf", "nginx", "nginx.conf"))
 		return err == nil
 	}
 

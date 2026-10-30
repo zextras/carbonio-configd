@@ -10,6 +10,7 @@ import (
 	"slices"
 
 	"github.com/zextras/carbonio-configd/internal/cli/service"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 const norewriteArg = "norewrite"
@@ -27,16 +28,16 @@ type ServiceCmd struct {
 }
 
 // runService executes one "configd service" action.
-func runService(opts *service.Options) error {
-	return exitWith(service.Run(context.Background(), os.Stdout, os.Stderr, opts))
+func runService(env sys.System, opts *service.Options) error {
+	return exitWith(service.Run(context.Background(), env, os.Stdout, os.Stderr, opts))
 }
 
 // ServiceListCmd lists all services with their status.
 type ServiceListCmd struct{}
 
 // Run executes the service list command.
-func (c *ServiceListCmd) Run() error {
-	return runService(&service.Options{Action: service.ActionList})
+func (c *ServiceListCmd) Run(env sys.System) error {
+	return runService(env, &service.Options{Action: service.ActionList})
 }
 
 // ServiceStartCmd starts a service.
@@ -47,9 +48,9 @@ type ServiceStartCmd struct {
 }
 
 // Run executes the service start command.
-func (c *ServiceStartCmd) Run() error {
+func (c *ServiceStartCmd) Run(env sys.System) error {
 	// Supports both --no-rewrite flag and legacy "norewrite" positional arg.
-	return runService(&service.Options{
+	return runService(env, &service.Options{
 		Action:    service.ActionStart,
 		Name:      c.Name,
 		NoRewrite: c.NoRewrite || slices.Contains(c.Extra, norewriteArg),
@@ -64,8 +65,8 @@ type ServiceStartSystemdCmd struct {
 }
 
 // Run executes the systemd-leaf start command.
-func (c *ServiceStartSystemdCmd) Run() error {
-	return runService(&service.Options{Action: service.ActionStartSystemd, Name: c.Name})
+func (c *ServiceStartSystemdCmd) Run(env sys.System) error {
+	return runService(env, &service.Options{Action: service.ActionStartSystemd, Name: c.Name})
 }
 
 // ServiceStopSystemdCmd is the systemd ExecStop leaf: it stops the service
@@ -75,8 +76,8 @@ type ServiceStopSystemdCmd struct {
 }
 
 // Run executes the systemd-leaf stop command.
-func (c *ServiceStopSystemdCmd) Run() error {
-	return runService(&service.Options{Action: service.ActionStopSystemd, Name: c.Name})
+func (c *ServiceStopSystemdCmd) Run(env sys.System) error {
+	return runService(env, &service.Options{Action: service.ActionStopSystemd, Name: c.Name})
 }
 
 // ServiceStopCmd stops a service.
@@ -85,8 +86,8 @@ type ServiceStopCmd struct {
 }
 
 // Run executes the service stop command.
-func (c *ServiceStopCmd) Run() error {
-	return runService(&service.Options{Action: service.ActionStop, Name: c.Name})
+func (c *ServiceStopCmd) Run(env sys.System) error {
+	return runService(env, &service.Options{Action: service.ActionStop, Name: c.Name})
 }
 
 // ServiceRestartCmd restarts a service.
@@ -97,8 +98,8 @@ type ServiceRestartCmd struct {
 }
 
 // Run executes the service restart command.
-func (c *ServiceRestartCmd) Run() error {
-	return runService(&service.Options{
+func (c *ServiceRestartCmd) Run(env sys.System) error {
+	return runService(env, &service.Options{
 		Action:    service.ActionRestart,
 		Name:      c.Name,
 		NoRewrite: c.NoRewrite || slices.Contains(c.Extra, norewriteArg),
@@ -111,8 +112,8 @@ type ServiceReloadCmd struct {
 }
 
 // Run executes the service reload command.
-func (c *ServiceReloadCmd) Run() error {
-	return runService(&service.Options{Action: service.ActionReload, Name: c.Name})
+func (c *ServiceReloadCmd) Run(env sys.System) error {
+	return runService(env, &service.Options{Action: service.ActionReload, Name: c.Name})
 }
 
 // ServiceStatusCmd shows detailed status for a service.
@@ -121,6 +122,6 @@ type ServiceStatusCmd struct {
 }
 
 // Run executes the service status command.
-func (c *ServiceStatusCmd) Run() error {
-	return runService(&service.Options{Action: service.ActionStatus, Name: c.Name})
+func (c *ServiceStatusCmd) Run(env sys.System) error {
+	return runService(env, &service.Options{Action: service.ActionStatus, Name: c.Name})
 }

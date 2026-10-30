@@ -53,16 +53,20 @@ func TestE2E_ConfigdCycleWithProxy(t *testing.T) {
 	ldapClient := ldap.NewLdap(context.Background(), mainCfg)
 
 	// Create ConfigManager
-	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil)
+	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv())
 
 	// Create Service Manager
-	serviceManager := services.NewServiceManager()
+	env := hostEnv()
+	controller := services.NewController(env)
+	serviceManager := services.NewServiceManager(controller)
 
 	// Create Watchdog (but don't start it yet)
 	wd := watchdog.NewWatchdog(watchdog.Config{
 		CheckInterval:  5 * time.Second, // Faster for testing
 		ServiceManager: serviceManager,
 		State:          appState,
+		Clock:          env.Clock,
+		Snapshots:      controller,
 		ConfigLookup: func(key string) string {
 			if val, exists := appState.LocalConfig.Data.Get(key); exists {
 				return val
@@ -288,7 +292,7 @@ func TestE2E_NetworkCommandsWithProxy(t *testing.T) {
 	ldapClient := ldap.NewLdap(context.Background(), mainCfg)
 
 	// Create ConfigManager
-	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil)
+	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv())
 
 	// Load initial configs
 	err = cm.LoadAllConfigs(context.Background())
@@ -431,7 +435,7 @@ func TestE2E_ProxyConfigValidation(t *testing.T) {
 
 	// Load configs
 	ldapClient := ldap.NewLdap(context.Background(), mainCfg)
-	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil)
+	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv())
 
 	err = cm.LoadAllConfigs(context.Background())
 	if err != nil {
@@ -453,6 +457,7 @@ func TestE2E_ProxyConfigValidation(t *testing.T) {
 		// Create proxy generator with full configs
 		gen, err := proxy.LoadConfiguration(
 			context.Background(),
+			hostEnv(),
 			mainCfg,
 			appState.LocalConfig,
 			appState.GlobalConfig,

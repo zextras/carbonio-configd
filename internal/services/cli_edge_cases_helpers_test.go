@@ -9,7 +9,6 @@ import (
 	"errors"
 	"net"
 	"strconv"
-	"testing"
 )
 
 // rewriteViaConfigdWithPort is a test helper that mirrors rewriteViaConfigd
@@ -51,17 +50,4 @@ func rewriteViaConfigdWithPort(ctx context.Context, configs []string, port int) 
 	}
 
 	return nil
-}
-
-// withMode forces IsSystemdMode() to return the given value for the duration
-// of a test, then restores the production detector. The two orchestration
-// modes are mutually exclusive; this helper lets each test pin the one it
-// means to exercise without depending on the host's target enablement.
-func withMode(t *testing.T, strict bool) {
-	t.Helper()
-
-	orig := isSystemdModeFn
-	isSystemdModeFn = func() bool { return strict }
-
-	t.Cleanup(func() { isSystemdModeFn = orig })
 }

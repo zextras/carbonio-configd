@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // TestExplodeDomainBasic tests basic domain explode functionality with mock data
@@ -38,9 +40,10 @@ server {
 
 	// Create generator and processor
 	gen := &Generator{
+		env:       sys.Real(),
 		Variables: make(map[string]*Variable),
 	}
-	proc := NewTemplateProcessor(gen, templateDir, outputDir)
+	proc := NewTemplateProcessor(gen, gen.env.FS, templateDir, outputDir)
 
 	// Inject mock domain provider
 	proc.domainProvider = func() []DomainInfo {
@@ -134,9 +137,10 @@ server {
 	}
 
 	gen := &Generator{
+		env:       sys.Real(),
 		Variables: make(map[string]*Variable),
 	}
-	proc := NewTemplateProcessor(gen, templateDir, outputDir)
+	proc := NewTemplateProcessor(gen, gen.env.FS, templateDir, outputDir)
 
 	// Mock domains: one with SSO, two without
 	proc.domainProvider = func() []DomainInfo {
@@ -221,6 +225,7 @@ server {
 	}
 
 	gen := &Generator{
+		env:       sys.Real(),
 		Variables: make(map[string]*Variable),
 	}
 
@@ -235,7 +240,7 @@ server {
 		Value:     "/opt/zextras/ssl/default.key",
 	}
 
-	proc := NewTemplateProcessor(gen, templateDir, outputDir)
+	proc := NewTemplateProcessor(gen, gen.env.FS, templateDir, outputDir)
 
 	// Mock domain with custom SSL cert
 	proc.domainProvider = func() []DomainInfo {
@@ -338,9 +343,10 @@ upstream ${server_id}_backend {
 	}
 
 	gen := &Generator{
+		env:       sys.Real(),
 		Variables: make(map[string]*Variable),
 	}
-	proc := NewTemplateProcessor(gen, templateDir, outputDir)
+	proc := NewTemplateProcessor(gen, gen.env.FS, templateDir, outputDir)
 
 	// Mock servers with mailbox service
 	proc.serverProvider = func(serviceName string) []ServerInfo {
@@ -423,9 +429,10 @@ upstream ${server_id}_docs {
 	}
 
 	gen := &Generator{
+		env:       sys.Real(),
 		Variables: make(map[string]*Variable),
 	}
-	proc := NewTemplateProcessor(gen, templateDir, outputDir)
+	proc := NewTemplateProcessor(gen, gen.env.FS, templateDir, outputDir)
 
 	// Mock single docs server
 	proc.serverProvider = func(serviceName string) []ServerInfo {
@@ -503,9 +510,10 @@ server {
 	}
 
 	gen := &Generator{
+		env:       sys.Real(),
 		Variables: make(map[string]*Variable),
 	}
-	proc := NewTemplateProcessor(gen, templateDir, outputDir)
+	proc := NewTemplateProcessor(gen, gen.env.FS, templateDir, outputDir)
 
 	// No domain provider - uses default (empty list)
 	// Load and process template
@@ -552,8 +560,8 @@ func TestExplodeDomainDeterministicOrdering(t *testing.T) {
 		t.Fatalf("Failed to write template: %v", err)
 	}
 
-	gen := &Generator{Variables: make(map[string]*Variable)}
-	proc := NewTemplateProcessor(gen, templateDir, outputDir)
+	gen := &Generator{env: sys.Real(), Variables: make(map[string]*Variable)}
+	proc := NewTemplateProcessor(gen, gen.env.FS, templateDir, outputDir)
 	proc.domainProvider = func() []DomainInfo {
 		return []DomainInfo{
 			{Name: "z.example.com", VirtualHostname: "z.example.com"},
@@ -606,8 +614,8 @@ func TestExplodeServerDeterministicOrdering(t *testing.T) {
 		t.Fatalf("Failed to write template: %v", err)
 	}
 
-	gen := &Generator{Variables: make(map[string]*Variable)}
-	proc := NewTemplateProcessor(gen, templateDir, outputDir)
+	gen := &Generator{env: sys.Real(), Variables: make(map[string]*Variable)}
+	proc := NewTemplateProcessor(gen, gen.env.FS, templateDir, outputDir)
 	proc.serverProvider = func(serviceName string) []ServerInfo {
 		return []ServerInfo{
 			{ID: "3", Hostname: "z.example.com"},
@@ -664,9 +672,10 @@ upstream ${server_id}_backend {
 	}
 
 	gen := &Generator{
+		env:       sys.Real(),
 		Variables: make(map[string]*Variable),
 	}
-	proc := NewTemplateProcessor(gen, templateDir, outputDir)
+	proc := NewTemplateProcessor(gen, gen.env.FS, templateDir, outputDir)
 
 	// Mock returns empty server list for "nonexistent" service
 	proc.serverProvider = func(serviceName string) []ServerInfo {
@@ -748,9 +757,10 @@ func TestExplodeInvalidDirective(t *testing.T) {
 			}
 
 			gen := &Generator{
+				env:       sys.Real(),
 				Variables: make(map[string]*Variable),
 			}
-			proc := NewTemplateProcessor(gen, templateDir, outputDir)
+			proc := NewTemplateProcessor(gen, gen.env.FS, templateDir, outputDir)
 
 			tmpl, err := proc.LoadTemplate(context.Background(), "invalid.http.template")
 			if err != nil {

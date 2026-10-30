@@ -12,6 +12,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/services"
 	"github.com/zextras/carbonio-configd/internal/state"
+	"github.com/zextras/carbonio-configd/internal/sys/systest"
 	"github.com/zextras/carbonio-configd/internal/watchdog"
 )
 
@@ -83,9 +84,15 @@ func TestMainLoopActionTrigger_TriggerRewrite_EmptyConfigs(t *testing.T) {
 	}
 }
 
+// newFakeServiceManager builds a ServiceManager on fake host fakes: the tests
+// using it only exercise bookkeeping and never reach a service.
+func newFakeServiceManager() *services.ServiceManager {
+	return services.NewServiceManager(services.NewController(systest.New().System()))
+}
+
 func TestBuildServiceDependencies_NilSections(t *testing.T) {
 	ctx := context.Background()
-	sm := services.NewServiceManager()
+	sm := newFakeServiceManager()
 	appState := state.NewState()
 	// MtaConfig.Sections is initialized to empty map by NewState, set nil to test guard
 	appState.MtaConfig.Sections = nil
@@ -95,7 +102,7 @@ func TestBuildServiceDependencies_NilSections(t *testing.T) {
 
 func TestBuildServiceDependencies_WithDeps(t *testing.T) {
 	ctx := context.Background()
-	sm := services.NewServiceManager()
+	sm := newFakeServiceManager()
 	appState := state.NewState()
 
 	appState.MtaConfig.Sections["mta"] = &config.MtaConfigSection{
@@ -111,7 +118,7 @@ func TestBuildServiceDependencies_WithDeps(t *testing.T) {
 
 func TestBuildServiceDependencies_EmptySections(t *testing.T) {
 	ctx := context.Background()
-	sm := services.NewServiceManager()
+	sm := newFakeServiceManager()
 	appState := state.NewState()
 	// Empty sections — no deps to set
 	buildServiceDependencies(ctx, sm, appState)
@@ -125,8 +132,9 @@ func TestUpdateWatchdogServices_EmptyList(t *testing.T) {
 
 	wd := watchdog.NewWatchdog(watchdog.Config{
 		CheckInterval:  0,
-		ServiceManager: services.NewServiceManager(),
+		ServiceManager: newFakeServiceManager(),
 		State:          appState,
+		Clock:          systest.New().Clock,
 		ConfigLookup:   func(_ string) string { return "" },
 	})
 
@@ -142,8 +150,9 @@ func TestUpdateWatchdogServices_WithList(t *testing.T) {
 
 	wd := watchdog.NewWatchdog(watchdog.Config{
 		CheckInterval:  0,
-		ServiceManager: services.NewServiceManager(),
+		ServiceManager: newFakeServiceManager(),
 		State:          appState,
+		Clock:          systest.New().Clock,
 		ConfigLookup:   func(_ string) string { return "" },
 	})
 
@@ -161,8 +170,9 @@ func TestUpdateWatchdogServices_ServiceInWatchdogList(t *testing.T) {
 
 	wd := watchdog.NewWatchdog(watchdog.Config{
 		CheckInterval:  0,
-		ServiceManager: services.NewServiceManager(),
+		ServiceManager: newFakeServiceManager(),
 		State:          appState,
+		Clock:          systest.New().Clock,
 		ConfigLookup:   func(_ string) string { return "" },
 	})
 

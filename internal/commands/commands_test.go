@@ -10,6 +10,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/zextras/carbonio-configd/internal/sys"
+	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
 
 func TestNewCommand(t *testing.T) {
@@ -145,6 +148,7 @@ func TestCommand_Execute_ExternalCommand(t *testing.T) {
 			cmd := &Command{
 				Name:    "test",
 				Binary:  tt.binary,
+				Exec:    sys.RealExec{},
 				CmdArgs: tt.cmdArgs,
 			}
 			status, output, err := cmd.Execute(context.Background(), tt.args...)
@@ -286,7 +290,7 @@ func TestDummyFunctions(t *testing.T) {
 		},
 		{
 			name:     "proxygen",
-			fn:       proxygen,
+			fn:       makeProxygen(systest.New().System()),
 			args:     []string{"test.example.com"},
 			wantErr:  true, // Will fail since templates don't exist in test env
 			contains: "",
@@ -343,7 +347,7 @@ func TestProxygen(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := proxygen(context.Background(), tt.args...)
+			_, err := proxygen(context.Background(), systest.New().System(), tt.args)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("proxygen() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -384,7 +388,7 @@ func TestCommand_runBinary_ErrorCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cmd := &Command{Name: "test", Binary: tt.binary}
+			cmd := &Command{Name: "test", Binary: tt.binary, Exec: sys.RealExec{}}
 			ctx := context.Background()
 			exitCode, _, err := cmd.runBinaryWithContext(ctx, nil)
 
@@ -491,7 +495,7 @@ func TestProxygen_ArgumentParsing(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := proxygen(context.Background(), tt.args...)
+			_, err := proxygen(context.Background(), systest.New().System(), tt.args)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("proxygen() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -549,6 +553,7 @@ func TestRunBinaryWithContext(t *testing.T) {
 			cmd := &Command{
 				Name:    "test",
 				Binary:  tt.binary,
+				Exec:    sys.RealExec{},
 				CmdArgs: tt.cmdArgs,
 			}
 			exitCode, _, err := cmd.runBinaryWithContext(context.Background(), tt.args)
@@ -567,6 +572,7 @@ func TestExecuteWithContext_BinaryPath(t *testing.T) {
 	cmd := &Command{
 		Name:    "echo-test",
 		Binary:  "echo",
+		Exec:    sys.RealExec{},
 		CmdArgs: []string{"hello"},
 	}
 	status, output, errStr := cmd.ExecuteWithContext(context.Background())
@@ -743,6 +749,7 @@ func TestCommand_Execute_BinaryArgs(t *testing.T) {
 			cmd := &Command{
 				Name:    "test",
 				Binary:  tt.binary,
+				Exec:    sys.RealExec{},
 				CmdArgs: tt.cmdArgs,
 			}
 			status, _, errStr := cmd.Execute(context.Background(), tt.args...)
@@ -881,7 +888,7 @@ func TestBuildBackendURL(t *testing.T) {
 // no-args error, the empty postconf-path error, and the command-execution path.
 func TestMakePostconfExec(t *testing.T) {
 	t.Run("no args returns error", func(t *testing.T) {
-		fn := makePostconfExec("/usr/sbin/postconf")
+		fn := makePostconfExec(sys.RealExec{}, "/usr/sbin/postconf")
 		_, err := fn(context.Background())
 		if err == nil {
 			t.Fatal("expected error for no args, got nil")
@@ -892,7 +899,7 @@ func TestMakePostconfExec(t *testing.T) {
 	})
 
 	t.Run("empty postconf path returns error", func(t *testing.T) {
-		fn := makePostconfExec("")
+		fn := makePostconfExec(sys.RealExec{}, "")
 		_, err := fn(context.Background(), "smtpd_banner=test")
 		if err == nil {
 			t.Fatal("expected error for empty postconf path, got nil")
@@ -903,7 +910,7 @@ func TestMakePostconfExec(t *testing.T) {
 	})
 
 	t.Run("whitespace-only postconf path returns error", func(t *testing.T) {
-		fn := makePostconfExec("   ")
+		fn := makePostconfExec(sys.RealExec{}, "   ")
 		_, err := fn(context.Background(), "smtpd_banner=test")
 		if err == nil {
 			t.Fatal("expected error for whitespace-only postconf path, got nil")
@@ -914,7 +921,7 @@ func TestMakePostconfExec(t *testing.T) {
 	})
 
 	t.Run("nonexistent binary returns command-failed error", func(t *testing.T) {
-		fn := makePostconfExec("nonexistent_postconf_binary_xyz")
+		fn := makePostconfExec(sys.RealExec{}, "nonexistent_postconf_binary_xyz")
 		_, err := fn(context.Background(), "smtpd_banner=test")
 		if err == nil {
 			t.Fatal("expected error for nonexistent binary, got nil")
@@ -980,10 +987,10 @@ func TestCommandExecutor_requireLDAP(t *testing.T) {
 	}
 }
 
-// TestNewRegistry_DefaultZextrasHome verifies NewRegistry("") falls back to the default
+// TestNewRegistry_DefaultZextrasHome verifies NewRegistry("", systest.New().System()) falls back to the default
 // zextras home path and returns a non-nil registry.
 func TestNewRegistry_DefaultZextrasHome(t *testing.T) {
-	r := NewRegistry("")
+	r := NewRegistry("", systest.New().System())
 	if r == nil {
 		t.Fatal("NewRegistry(\"\") returned nil")
 	}
@@ -999,6 +1006,7 @@ func TestExecuteWithContext_CancelledContext(t *testing.T) {
 	cmd := &Command{
 		Name:    "cancelled-sleep",
 		Binary:  "sleep",
+		Exec:    sys.RealExec{},
 		CmdArgs: []string{"10"},
 	}
 	exitCode, _, _ := cmd.ExecuteWithContext(ctx)
@@ -1012,6 +1020,7 @@ func TestExecuteWithContext_NonZeroExitKeepsOutput(t *testing.T) {
 	cmd := &Command{
 		Name:    "failing",
 		Binary:  "sh",
+		Exec:    sys.RealExec{},
 		CmdArgs: []string{"-c", "echo out-text; echo err-text >&2; exit 3"},
 	}
 
@@ -1033,7 +1042,7 @@ func TestExecuteWithContext_NonZeroExitKeepsOutput(t *testing.T) {
 // TestExecuteWithContext_SignalIsError verifies rc < 0 (killed by signal) is
 // still an error, as in legacy.
 func TestExecuteWithContext_SignalIsError(t *testing.T) {
-	cmd := &Command{Name: "sig", Binary: "sh", CmdArgs: []string{"-c", "kill -9 $$"}}
+	cmd := &Command{Name: "sig", Binary: "sh", CmdArgs: []string{"-c", "kill -9 $$"}, Exec: sys.RealExec{}}
 
 	rc, _, stderr := cmd.Execute(context.Background())
 

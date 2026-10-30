@@ -22,6 +22,8 @@ import (
 	"github.com/zextras/carbonio-configd/internal/sdnotify"
 	"github.com/zextras/carbonio-configd/internal/services"
 	"github.com/zextras/carbonio-configd/internal/state"
+	"github.com/zextras/carbonio-configd/internal/sys"
+	"github.com/zextras/carbonio-configd/internal/sys/systest"
 	"github.com/zextras/carbonio-configd/internal/watchdog"
 )
 
@@ -37,12 +39,16 @@ func newLoopFixture(t *testing.T) *daemonLoopDeps {
 		ConfigFile: t.TempDir() + "/missing-zmconfigd.cf",
 		Interval:   0,
 	}
-	cm := configmgr.NewConfigManager(ctx, cfg, appState, nil, cache.New(ctx, true))
-	sm := services.NewServiceManager()
+	env := sys.Real()
+	cm := configmgr.NewConfigManager(ctx, cfg, appState, nil, cache.New(ctx, true), env)
+	ctl := services.NewController(env)
+	sm := services.NewServiceManager(ctl)
 	wd := watchdog.NewWatchdog(watchdog.Config{
 		CheckInterval:  time.Minute,
 		ServiceManager: sm,
 		State:          appState,
+		Clock:          env.Clock,
+		Snapshots:      ctl,
 		ConfigLookup:   func(string) string { return "" },
 	})
 	notifier, err := sdnotify.New()
@@ -51,6 +57,7 @@ func newLoopFixture(t *testing.T) *daemonLoopDeps {
 	reloadChan := make(chan struct{}, 1)
 
 	return &daemonLoopDeps{
+		env:            env,
 		cfg:            cfg,
 		appState:       appState,
 		configManager:  cm,
@@ -247,7 +254,7 @@ func TestRunConfigPhases_EmptyState(t *testing.T) {
 	deps.reloadChan <- struct{}{}
 
 	timings, skipIter := runConfigPhases(
-		context.Background(), deps.cfg, deps.appState, deps.configManager,
+		context.Background(), deps.env.Clock, deps.cfg, deps.appState, deps.configManager,
 		deps.serviceManager, deps.wd, deps.reloadChan,
 	)
 	assert.False(t, skipIter, "empty state must not trigger the back-off path")
@@ -339,7 +346,9 @@ func TestRunLoopIteration_CancelledContextExits(t *testing.T) {
 // interval (not hot-loop) and stay interruptible by shutdown.
 func TestRunLoopIterationSafe_PanicBacksOff(t *testing.T) {
 	// A nil trigger panics inside the iteration; the wrapper must absorb it.
+	clock := systest.New().Clock
 	deps := &daemonLoopDeps{
+		env:        sys.System{Clock: clock},
 		cfg:        &config.Config{Interval: 3600},
 		reloadChan: make(chan struct{}),
 	}
@@ -351,11 +360,10 @@ func TestRunLoopIterationSafe_PanicBacksOff(t *testing.T) {
 
 	go func() { done <- runLoopIterationSafe(ctx, deps, &loopIterState{}) }()
 
-	select {
-	case <-done:
-		t.Fatal("runLoopIterationSafe returned right after a panic without backing off")
-	case <-time.After(200 * time.Millisecond):
-	}
+	// The backoff arms one timer on the clock; until the interval elapses the
+	// wrapper must not return.
+	require.Eventually(t, func() bool { return clock.Waiters() == 1 }, 10*time.Second, time.Millisecond)
+	require.Empty(t, done, "runLoopIterationSafe returned right after a panic without backing off")
 
 	cancel()
 
@@ -399,6 +407,6 @@ func TestRunMainLoop_CancelledContextReturnsZero(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	code := RunMainLoop(ctx, cfg, appState, nil, &Args{Once: true}, notifier)
+	code := RunMainLoop(ctx, sys.Real(), cfg, appState, nil, &Args{Once: true}, notifier)
 	assert.Equal(t, 0, code)
 }

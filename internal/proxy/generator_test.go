@@ -9,6 +9,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/config/configtest"
 	"github.com/zextras/carbonio-configd/internal/ldap"
+	"github.com/zextras/carbonio-configd/internal/sys"
 	"os"
 	"path/filepath"
 	"strings"
@@ -54,6 +55,7 @@ func TestDiscoverTemplates(t *testing.T) {
 
 	// Create generator
 	gen := &Generator{
+		env:         sys.Real(),
 		Config:      &config.Config{BaseDir: tempDir},
 		TemplateDir: templateDir,
 		ConfDir:     tempDir,
@@ -109,6 +111,7 @@ func TestDiscoverTemplatesNoCustom(t *testing.T) {
 	}
 
 	gen := &Generator{
+		env:         sys.Real(),
 		Config:      &config.Config{BaseDir: tempDir},
 		TemplateDir: templateDir,
 		ConfDir:     tempDir,
@@ -128,6 +131,7 @@ func TestDiscoverTemplatesNoCustom(t *testing.T) {
 func TestWriteFileAtomic(t *testing.T) {
 	tempDir := t.TempDir()
 	gen := &Generator{
+		env:    sys.Real(),
 		Config: &config.Config{BaseDir: tempDir},
 	}
 
@@ -179,6 +183,7 @@ func TestWriteFileAtomic(t *testing.T) {
 func TestWriteFileDryRun(t *testing.T) {
 	tempDir := t.TempDir()
 	gen := &Generator{
+		env:    sys.Real(),
 		Config: &config.Config{BaseDir: tempDir},
 		DryRun: true,
 	}
@@ -203,6 +208,7 @@ func TestEnsureIncludesDir(t *testing.T) {
 	includesDir := filepath.Join(tempDir, "includes")
 
 	gen := &Generator{
+		env:         sys.Real(),
 		Config:      &config.Config{BaseDir: tempDir},
 		IncludesDir: includesDir,
 	}
@@ -282,7 +288,7 @@ func TestGenerateAllIntegration(t *testing.T) {
 	// Create LDAP client (can be nil for this test)
 	var ldapClient *ldap.Ldap
 
-	gen, err := NewGenerator(context.Background(), cfg, localCfg, globalCfg, serverCfg, ldapClient, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, localCfg, globalCfg, serverCfg, ldapClient, nil)
 	if err != nil {
 		t.Fatalf("NewGenerator failed: %v", err)
 	}
@@ -307,7 +313,7 @@ func TestGenerateAllIntegration(t *testing.T) {
 
 // TestSetDryRun tests SetDryRun sets the flag
 func TestSetDryRun(t *testing.T) {
-	gen := &Generator{}
+	gen := &Generator{env: sys.Real()}
 
 	gen.SetDryRun(context.Background(), true)
 	if !gen.DryRun {
@@ -322,7 +328,7 @@ func TestSetDryRun(t *testing.T) {
 
 // TestSetVerbose tests SetVerbose sets the flag
 func TestSetVerbose(t *testing.T) {
-	gen := &Generator{}
+	gen := &Generator{env: sys.Real()}
 
 	gen.SetVerbose(context.Background(), true)
 	if !gen.Verbose {
@@ -344,6 +350,7 @@ func TestDiscoverRealTemplates(t *testing.T) {
 	}
 
 	gen := &Generator{
+		env: sys.Real(),
 		Config: &config.Config{
 			BaseDir: "../..",
 		},
@@ -396,7 +403,7 @@ func TestDiscoverTemplatesInDirWalkError(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(restrictedDir, 0755) })
 
-	_, err := discoverTemplatesInDir(tempDir)
+	_, err := discoverTemplatesInDir(sys.RealFS{}, tempDir)
 	// On Linux as root the permission check may be skipped; just ensure no panic
 	if err != nil {
 		t.Logf("Got expected error: %v", err)
@@ -405,7 +412,7 @@ func TestDiscoverTemplatesInDirWalkError(t *testing.T) {
 
 // TestDiscoverTemplatesInDirNonExistent tests that a non-existent dir returns empty
 func TestDiscoverTemplatesInDirNonExistent(t *testing.T) {
-	results, err := discoverTemplatesInDir("/nonexistent-path-xyz-123")
+	results, err := discoverTemplatesInDir(sys.RealFS{}, "/nonexistent-path-xyz-123")
 	if err != nil {
 		t.Fatalf("Expected nil error for non-existent dir, got %v", err)
 	}
@@ -417,7 +424,7 @@ func TestDiscoverTemplatesInDirNonExistent(t *testing.T) {
 // TestWriteFileRenameError tests writeFile when rename fails (cross-filesystem)
 func TestWriteFileRenameError(t *testing.T) {
 	// Write to /tmp but with a path in a non-existent subdir — CreateTemp will fail
-	gen := &Generator{Config: &config.Config{}, DryRun: false}
+	gen := &Generator{env: sys.Real(), Config: &config.Config{}, DryRun: false}
 	err := gen.writeFile(context.Background(), "/nonexistent-dir-xyz/subdir/file.conf", []byte("data"))
 	if err == nil {
 		t.Error("Expected error for bad path, got nil")
@@ -427,6 +434,7 @@ func TestWriteFileRenameError(t *testing.T) {
 // TestWriteFilePermissionError tests writeFile when it cannot create a temp file (bad dir)
 func TestWriteFilePermissionError(t *testing.T) {
 	gen := &Generator{
+		env:    sys.Real(),
 		Config: &config.Config{},
 		DryRun: false,
 	}
@@ -448,6 +456,7 @@ func TestEnsureIncludesDirError(t *testing.T) {
 	}
 
 	gen := &Generator{
+		env:         sys.Real(),
 		Config:      &config.Config{BaseDir: tempDir},
 		IncludesDir: filepath.Join(blocker, "subdir"), // blocker is a file, so this fails
 	}
@@ -462,13 +471,14 @@ func TestEnsureIncludesDirError(t *testing.T) {
 func TestProcessTemplateWithProcessorLoadError(t *testing.T) {
 	tempDir := t.TempDir()
 	gen := &Generator{
+		env:         sys.Real(),
 		Config:      &config.Config{BaseDir: tempDir},
 		TemplateDir: tempDir,
 		IncludesDir: filepath.Join(tempDir, "includes"),
 		Variables:   make(map[string]*Variable),
 	}
 
-	processor := NewTemplateProcessor(gen, tempDir, gen.IncludesDir)
+	processor := NewTemplateProcessor(gen, gen.env.FS, tempDir, gen.IncludesDir)
 
 	// Non-existent template path should cause load error
 	err := gen.ProcessTemplateWithProcessor(
@@ -503,6 +513,7 @@ func TestProcessTemplateWithProcessorNginxConf(t *testing.T) {
 	}
 
 	gen := &Generator{
+		env:         sys.Real(),
 		Config:      &config.Config{BaseDir: tempDir},
 		TemplateDir: templateDir,
 		IncludesDir: includesDir,
@@ -510,7 +521,7 @@ func TestProcessTemplateWithProcessorNginxConf(t *testing.T) {
 		Variables:   make(map[string]*Variable),
 	}
 
-	processor := NewTemplateProcessor(gen, templateDir, includesDir)
+	processor := NewTemplateProcessor(gen, gen.env.FS, templateDir, includesDir)
 	err := gen.ProcessTemplateWithProcessor(context.Background(), processor, templatePath, "nginx.conf")
 	if err != nil {
 		t.Fatalf("ProcessTemplateWithProcessor failed: %v", err)
@@ -547,6 +558,7 @@ func TestProcessTemplateWithProcessorVerbose(t *testing.T) {
 	}
 
 	gen := &Generator{
+		env:         sys.Real(),
 		Config:      &config.Config{BaseDir: tempDir},
 		TemplateDir: templateDir,
 		IncludesDir: includesDir,
@@ -555,7 +567,7 @@ func TestProcessTemplateWithProcessorVerbose(t *testing.T) {
 		Verbose:     true,
 	}
 
-	processor := NewTemplateProcessor(gen, templateDir, includesDir)
+	processor := NewTemplateProcessor(gen, gen.env.FS, templateDir, includesDir)
 	if err := gen.ProcessTemplateWithProcessor(context.Background(), processor, templatePath, "test"); err != nil {
 		t.Fatalf("ProcessTemplateWithProcessor verbose failed: %v", err)
 	}
@@ -570,6 +582,7 @@ func TestGenerateAllNoTemplates(t *testing.T) {
 	}
 
 	gen := &Generator{
+		env:         sys.Real(),
 		Config:      &config.Config{BaseDir: tempDir},
 		TemplateDir: templateDir,
 		IncludesDir: filepath.Join(tempDir, "includes"),
@@ -609,6 +622,7 @@ func TestGenerateAllWithErrors(t *testing.T) {
 	}
 
 	gen := &Generator{
+		env:         sys.Real(),
 		Config:      &config.Config{BaseDir: tempDir},
 		TemplateDir: templateDir,
 		IncludesDir: includesDir,
@@ -637,6 +651,7 @@ func TestGenerateAllDryRun(t *testing.T) {
 	}
 
 	gen := &Generator{
+		env:         sys.Real(),
 		Config:      &config.Config{BaseDir: tempDir},
 		TemplateDir: templateDir,
 		IncludesDir: filepath.Join(tempDir, "includes-does-not-exist"),
@@ -663,7 +678,7 @@ func TestLoadConfigurationNilConfigs(t *testing.T) {
 	}
 
 	// All three optional configs are nil — should create empty defaults and succeed
-	gen, err := LoadConfiguration(context.Background(), cfg, nil, nil, nil, nil, nil)
+	gen, err := LoadConfiguration(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("LoadConfiguration(nil configs) failed: %v", err)
 	}
@@ -686,7 +701,7 @@ func TestLoadConfigurationWithConfigs(t *testing.T) {
 		ServiceConfig: config.NewConfigMap(),
 	}
 
-	gen, err := LoadConfiguration(context.Background(), cfg, localCfg, globalCfg, serverCfg, nil, nil)
+	gen, err := LoadConfiguration(context.Background(), sys.Real(), cfg, localCfg, globalCfg, serverCfg, nil, nil)
 	if err != nil {
 		t.Fatalf("LoadConfiguration with configs failed: %v", err)
 	}

@@ -13,8 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/zextras/carbonio-configd/internal/fileutil"
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // Per-domain certificate layout, mirroring legacy ProxyConfGen.java
@@ -117,7 +117,7 @@ func (tp *TemplateProcessor) deployDomainCerts(ctx context.Context, domains []Do
 	}
 
 	dir := g.domainCertsDir()
-	if err := os.MkdirAll(dir, domainCertsDirMode); err != nil {
+	if err := g.env.FS.MkdirAll(dir, domainCertsDirMode); err != nil {
 		return fmt.Errorf("unable to create folder %s: %w", dir, err)
 	}
 
@@ -128,11 +128,11 @@ func (tp *TemplateProcessor) deployDomainCerts(ctx context.Context, domains []Do
 			continue
 		}
 
-		if err := writeIfChanged(ctx, g.domainCertFilePath(d.Name, sslCrtExt), d.SSLCertificate); err != nil {
+		if err := writeIfChanged(ctx, g.env.FS, g.domainCertFilePath(d.Name, sslCrtExt), d.SSLCertificate); err != nil {
 			return fmt.Errorf("unable to write certificate for domain %s: %w", d.Name, err)
 		}
 
-		if err := writeIfChanged(ctx, g.domainCertFilePath(d.Name, sslKeyExt), d.SSLPrivateKey); err != nil {
+		if err := writeIfChanged(ctx, g.env.FS, g.domainCertFilePath(d.Name, sslKeyExt), d.SSLPrivateKey); err != nil {
 			return fmt.Errorf("unable to write private key for domain %s: %w", d.Name, err)
 		}
 	}
@@ -146,14 +146,14 @@ func (tp *TemplateProcessor) deployDomainCerts(ctx context.Context, domains []Do
 func (tp *TemplateProcessor) removeObsoleteDomainCerts(ctx context.Context, dir string, domains []DomainInfo) {
 	dryRun := tp.generator.DryRun
 
-	for _, path := range obsoleteDomainCertFiles(dir, domains) {
+	for _, path := range obsoleteDomainCertFiles(tp.generator.env.FS, dir, domains) {
 		if dryRun {
 			logger.InfoContext(ctx, "DRY-RUN: Will delete obsoleted domain certificate file", "path", path)
 
 			continue
 		}
 
-		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err := tp.generator.env.FS.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			logger.WarnContext(ctx, "Unable to delete obsolete domain certificate file",
 				"path", path, "error", err)
 
@@ -166,17 +166,17 @@ func (tp *TemplateProcessor) removeObsoleteDomainCerts(ctx context.Context, dir 
 
 // writeIfChanged atomically writes content to path unless the file already
 // holds exactly that content.
-func writeIfChanged(ctx context.Context, path, content string) error {
+func writeIfChanged(ctx context.Context, fsys sys.FS, path, content string) error {
 	data := []byte(content)
 
 	//nolint:gosec // G304: path is <conf>/domaincerts/<validated domain name>
-	if existing, err := os.ReadFile(path); err == nil && bytes.Equal(existing, data) {
-		if info, statErr := os.Stat(path); statErr == nil && info.Mode().Perm() == domainCertFileMode {
+	if existing, err := fsys.ReadFile(path); err == nil && bytes.Equal(existing, data) {
+		if info, statErr := fsys.Stat(path); statErr == nil && info.Mode().Perm() == domainCertFileMode {
 			return nil
 		}
 	}
 
-	if err := fileutil.AtomicWrite(path, data, domainCertFileMode); err != nil {
+	if err := fsys.WriteFileAtomic(path, data, domainCertFileMode); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
 
@@ -191,8 +191,8 @@ func writeIfChanged(ctx context.Context, path, content string) error {
 // regular files only). The match is made on the file name rather than the
 // whole path so a domain called e.g. "conf" cannot shield every file.
 // The result is sorted (os.ReadDir order) for deterministic logs.
-func obsoleteDomainCertFiles(dir string, domains []DomainInfo) []string {
-	entries, err := os.ReadDir(dir)
+func obsoleteDomainCertFiles(fsys sys.FS, dir string, domains []DomainInfo) []string {
+	entries, err := fsys.ReadDir(dir)
 	if err != nil {
 		return nil
 	}

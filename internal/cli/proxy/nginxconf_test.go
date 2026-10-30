@@ -6,15 +6,19 @@ package proxy
 
 import (
 	"bytes"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
 
 func TestPrintNginxLine_Plain(t *testing.T) {
+	t.Parallel()
+
+	fk := systest.New()
 	var buf bytes.Buffer
-	opts := &nginxConfOpts{}
+	opts := &nginxConfOpts{fs: fk.FS}
 	printNginxLine(&buf, "server_name example.com;", "", opts)
 	got := buf.String()
 	if got != "server_name example.com;\n" {
@@ -23,8 +27,11 @@ func TestPrintNginxLine_Plain(t *testing.T) {
 }
 
 func TestPrintNginxLine_WithPrefix(t *testing.T) {
+	t.Parallel()
+
+	fk := systest.New()
 	var buf bytes.Buffer
-	opts := &nginxConfOpts{}
+	opts := &nginxConfOpts{fs: fk.FS}
 	printNginxLine(&buf, "listen 80;", "  ", opts)
 	got := buf.String()
 	if got != "  listen 80;\n" {
@@ -33,8 +40,11 @@ func TestPrintNginxLine_WithPrefix(t *testing.T) {
 }
 
 func TestPrintNginxLine_SkipComment(t *testing.T) {
+	t.Parallel()
+
+	fk := systest.New()
 	var buf bytes.Buffer
-	opts := &nginxConfOpts{noComments: true}
+	opts := &nginxConfOpts{fs: fk.FS, noComments: true}
 	printNginxLine(&buf, "# this is a comment", "", opts)
 	if buf.Len() != 0 {
 		t.Errorf("expected comment line to be skipped, got %q", buf.String())
@@ -42,8 +52,11 @@ func TestPrintNginxLine_SkipComment(t *testing.T) {
 }
 
 func TestPrintNginxLine_KeepComment(t *testing.T) {
+	t.Parallel()
+
+	fk := systest.New()
 	var buf bytes.Buffer
-	opts := &nginxConfOpts{noComments: false}
+	opts := &nginxConfOpts{fs: fk.FS, noComments: false}
 	printNginxLine(&buf, "# keep me", "", opts)
 	if !strings.Contains(buf.String(), "# keep me") {
 		t.Errorf("expected comment to be kept, got %q", buf.String())
@@ -51,8 +64,11 @@ func TestPrintNginxLine_KeepComment(t *testing.T) {
 }
 
 func TestPrintNginxLine_SkipEmpty(t *testing.T) {
+	t.Parallel()
+
+	fk := systest.New()
 	var buf bytes.Buffer
-	opts := &nginxConfOpts{noEmpty: true}
+	opts := &nginxConfOpts{fs: fk.FS, noEmpty: true}
 	printNginxLine(&buf, "   ", "", opts)
 	if buf.Len() != 0 {
 		t.Errorf("expected empty line to be skipped, got %q", buf.String())
@@ -60,8 +76,11 @@ func TestPrintNginxLine_SkipEmpty(t *testing.T) {
 }
 
 func TestPrintNginxLine_KeepEmpty(t *testing.T) {
+	t.Parallel()
+
+	fk := systest.New()
 	var buf bytes.Buffer
-	opts := &nginxConfOpts{noEmpty: false}
+	opts := &nginxConfOpts{fs: fk.FS, noEmpty: false}
 	printNginxLine(&buf, "", "", opts)
 	if buf.String() != "\n" {
 		t.Errorf("expected empty line to produce newline, got %q", buf.String())
@@ -69,8 +88,11 @@ func TestPrintNginxLine_KeepEmpty(t *testing.T) {
 }
 
 func TestPrintNginxConfFile_FileNotFound(t *testing.T) {
+	t.Parallel()
+
+	fk := systest.New()
 	var buf bytes.Buffer
-	opts := &nginxConfOpts{}
+	opts := &nginxConfOpts{fs: fk.FS}
 	// Non-existent file: should print an error comment, not panic
 	printNginxConfFile(&buf, "/nonexistent/path/nginx.conf", 0, opts)
 	got := buf.String()
@@ -80,12 +102,15 @@ func TestPrintNginxConfFile_FileNotFound(t *testing.T) {
 }
 
 func TestPrintNginxConfFile_WithMarkers(t *testing.T) {
-	dir := t.TempDir()
+	t.Parallel()
+
+	fk := systest.New()
+	dir := "/etc/nginx"
 	f := filepath.Join(dir, "nginx.conf")
-	_ = os.WriteFile(f, []byte("worker_processes 1;\n"), 0o600)
+	fk.FS.Put(f, []byte("worker_processes 1;\n"), 0o600)
 
 	var buf bytes.Buffer
-	opts := &nginxConfOpts{markers: true}
+	opts := &nginxConfOpts{fs: fk.FS, markers: true}
 	printNginxConfFile(&buf, f, 0, opts)
 	got := buf.String()
 
@@ -101,12 +126,15 @@ func TestPrintNginxConfFile_WithMarkers(t *testing.T) {
 }
 
 func TestPrintNginxConfFile_WithIndent(t *testing.T) {
-	dir := t.TempDir()
+	t.Parallel()
+
+	fk := systest.New()
+	dir := "/etc/nginx"
 	f := filepath.Join(dir, "nginx.conf")
-	_ = os.WriteFile(f, []byte("server_name example.com;\n"), 0o600)
+	fk.FS.Put(f, []byte("server_name example.com;\n"), 0o600)
 
 	var buf bytes.Buffer
-	opts := &nginxConfOpts{indent: true}
+	opts := &nginxConfOpts{fs: fk.FS, indent: true}
 	printNginxConfFile(&buf, f, 2, opts)
 	got := buf.String()
 
@@ -117,13 +145,16 @@ func TestPrintNginxConfFile_WithIndent(t *testing.T) {
 }
 
 func TestPrintNginxConfFile_WorkingDirectory(t *testing.T) {
-	dir := t.TempDir()
+	t.Parallel()
+
+	fk := systest.New()
+	dir := "/etc/nginx"
 	f := filepath.Join(dir, "nginx.conf")
 	content := "working_directory " + dir + ";\n"
-	_ = os.WriteFile(f, []byte(content), 0o600)
+	fk.FS.Put(f, []byte(content), 0o600)
 
 	var buf bytes.Buffer
-	opts := &nginxConfOpts{}
+	opts := &nginxConfOpts{fs: fk.FS}
 	printNginxConfFile(&buf, f, 0, opts)
 
 	// workingDir should be populated after parsing
@@ -133,8 +164,11 @@ func TestPrintNginxConfFile_WorkingDirectory(t *testing.T) {
 }
 
 func TestPrintNginxInclude_NoWorkingDir(t *testing.T) {
+	t.Parallel()
+
+	fk := systest.New()
 	var buf bytes.Buffer
-	opts := &nginxConfOpts{workingDir: ""}
+	opts := &nginxConfOpts{fs: fk.FS, workingDir: ""}
 	// Without workingDir, should print a comment
 	printNginxInclude(&buf, "relative/path.conf", "", 0, opts)
 	got := buf.String()
@@ -144,12 +178,15 @@ func TestPrintNginxInclude_NoWorkingDir(t *testing.T) {
 }
 
 func TestPrintNginxInclude_AbsolutePath(t *testing.T) {
-	dir := t.TempDir()
+	t.Parallel()
+
+	fk := systest.New()
+	dir := "/etc/nginx"
 	included := filepath.Join(dir, "included.conf")
-	_ = os.WriteFile(included, []byte("include_content;\n"), 0o600)
+	fk.FS.Put(included, []byte("include_content;\n"), 0o600)
 
 	var buf bytes.Buffer
-	opts := &nginxConfOpts{workingDir: dir}
+	opts := &nginxConfOpts{fs: fk.FS, workingDir: dir}
 	printNginxInclude(&buf, included, "", 0, opts)
 	got := buf.String()
 	if !strings.Contains(got, "include_content") {
@@ -158,12 +195,15 @@ func TestPrintNginxInclude_AbsolutePath(t *testing.T) {
 }
 
 func TestPrintNginxInclude_RelativePath(t *testing.T) {
-	dir := t.TempDir()
+	t.Parallel()
+
+	fk := systest.New()
+	dir := "/etc/nginx"
 	included := filepath.Join(dir, "sub.conf")
-	_ = os.WriteFile(included, []byte("sub_content;\n"), 0o600)
+	fk.FS.Put(included, []byte("sub_content;\n"), 0o600)
 
 	var buf bytes.Buffer
-	opts := &nginxConfOpts{workingDir: dir}
+	opts := &nginxConfOpts{fs: fk.FS, workingDir: dir}
 	// Pass relative path — should be joined with workingDir
 	printNginxInclude(&buf, "sub.conf", "", 0, opts)
 	got := buf.String()
@@ -173,8 +213,11 @@ func TestPrintNginxInclude_RelativePath(t *testing.T) {
 }
 
 func TestPrintNginxConf_GlobNoMatch(t *testing.T) {
+	t.Parallel()
+
+	fk := systest.New()
 	var buf bytes.Buffer
-	opts := &nginxConfOpts{}
+	opts := &nginxConfOpts{fs: fk.FS}
 	// Non-matching glob — falls back to the pattern itself, which won't open
 	printNginxConf(&buf, "/nonexistent/*.conf", 0, opts)
 	got := buf.String()
@@ -185,14 +228,17 @@ func TestPrintNginxConf_GlobNoMatch(t *testing.T) {
 }
 
 func TestPrintNginxConf_GlobWithMatch(t *testing.T) {
-	dir := t.TempDir()
+	t.Parallel()
+
+	fk := systest.New()
+	dir := "/etc/nginx"
 	f1 := filepath.Join(dir, "a.conf")
 	f2 := filepath.Join(dir, "b.conf")
-	_ = os.WriteFile(f1, []byte("content_a;\n"), 0o600)
-	_ = os.WriteFile(f2, []byte("content_b;\n"), 0o600)
+	fk.FS.Put(f1, []byte("content_a;\n"), 0o600)
+	fk.FS.Put(f2, []byte("content_b;\n"), 0o600)
 
 	var buf bytes.Buffer
-	opts := &nginxConfOpts{}
+	opts := &nginxConfOpts{fs: fk.FS}
 	printNginxConf(&buf, filepath.Join(dir, "*.conf"), 0, opts)
 	got := buf.String()
 

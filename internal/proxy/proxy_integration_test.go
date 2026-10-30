@@ -10,6 +10,7 @@ import (
 	"context"
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/config/configtest"
+	"github.com/zextras/carbonio-configd/internal/sys"
 	"os"
 	"path/filepath"
 	"strings"
@@ -52,7 +53,7 @@ ssl_certificate_key ${ssl.key.default};
 		Hostname: "test.example.com",
 	}
 
-	gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
 	if err != nil {
 		if strings.Contains(err.Error(), "no templates found") {
 			t.Skip("Templates not available, skipping")
@@ -65,7 +66,7 @@ ssl_certificate_key ${ssl.key.default};
 	gen.ConfDir = outputDir
 
 	// Create template processor
-	processor := NewTemplateProcessor(gen, templateDir, outputDir)
+	processor := NewTemplateProcessor(gen, gen.env.FS, templateDir, outputDir)
 
 	// Process all templates
 	if err := processor.ProcessAllTemplates(context.Background()); err != nil {
@@ -125,7 +126,7 @@ func TestProxyGeneratorWithRealTemplate(t *testing.T) {
 		Hostname: "test.example.com",
 	}
 
-	gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewGenerator(, nil) failed: %v", err)
 	}
@@ -134,7 +135,7 @@ func TestProxyGeneratorWithRealTemplate(t *testing.T) {
 	gen.ConfDir = outputDir
 
 	// Process just the main template (use generator's TemplateDir)
-	processor := NewTemplateProcessor(gen, gen.TemplateDir, outputDir)
+	processor := NewTemplateProcessor(gen, gen.env.FS, gen.TemplateDir, outputDir)
 
 	// Load and process the main template (LoadTemplate expects just filename)
 	tmpl, err := processor.LoadTemplate(context.Background(), "nginx.conf.main.template")
@@ -193,7 +194,7 @@ func TestDryRunMode(t *testing.T) {
 		Hostname: "test.example.com",
 	}
 
-	gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewGenerator(, nil) failed: %v", err)
 	}
@@ -207,7 +208,7 @@ func TestDryRunMode(t *testing.T) {
 	}
 
 	// Process templates
-	processor := NewTemplateProcessor(gen, templateDir, outputDir)
+	processor := NewTemplateProcessor(gen, gen.env.FS, templateDir, outputDir)
 	if err := processor.ProcessAllTemplates(context.Background()); err != nil {
 		t.Fatalf("ProcessAllTemplates() failed: %v", err)
 	}
@@ -248,7 +249,7 @@ func TestVerboseMode(t *testing.T) {
 		Hostname: "test.example.com",
 	}
 
-	gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewGenerator(, nil) failed: %v", err)
 	}
@@ -262,7 +263,7 @@ func TestVerboseMode(t *testing.T) {
 	}
 
 	// Process templates
-	processor := NewTemplateProcessor(gen, templateDir, outputDir)
+	processor := NewTemplateProcessor(gen, gen.env.FS, templateDir, outputDir)
 	if err := processor.ProcessAllTemplates(context.Background()); err != nil {
 		t.Fatalf("ProcessAllTemplates() failed: %v", err)
 	}
@@ -305,7 +306,7 @@ error_log ${main.logfile};`
 		Hostname: "test.example.com",
 	}
 
-	gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewGenerator(, nil) failed: %v", err)
 	}
@@ -323,7 +324,7 @@ error_log ${main.logfile};`
 	}
 
 	// Process templates
-	processor := NewTemplateProcessor(gen, templateDir, outputDir)
+	processor := NewTemplateProcessor(gen, gen.env.FS, templateDir, outputDir)
 	if err := processor.ProcessAllTemplates(context.Background()); err != nil {
 		t.Fatalf("ProcessAllTemplates() failed: %v", err)
 	}
@@ -361,7 +362,7 @@ func TestFullStackIntegration(t *testing.T) {
 
 	// Copy all real templates
 	realTemplateDir := "../../conf/nginx/templates"
-	templates, err := discoverTemplatesInDir(realTemplateDir)
+	templates, err := discoverTemplatesInDir(sys.RealFS{}, realTemplateDir)
 	if err != nil || len(templates) == 0 {
 		t.Skip("Real templates not found, skipping")
 	}
@@ -431,7 +432,7 @@ func TestFullStackIntegration(t *testing.T) {
 	}
 
 	// Create generator with full configuration using NewGenerator
-	gen, err := NewGenerator(context.Background(), baseConfig, localConfig, globalConfig, serverConfig, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), baseConfig, localConfig, globalConfig, serverConfig, nil, nil)
 	if err != nil {
 		t.Fatalf("NewGenerator(, nil) failed: %v", err)
 	}
@@ -662,7 +663,7 @@ server {
 		Hostname: "mail.example.com",
 	}
 
-	gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewGenerator(, nil) failed: %v", err)
 	}
@@ -671,7 +672,7 @@ server {
 	gen.ConfDir = outputDir
 
 	// Process template
-	processor := NewTemplateProcessor(gen, templateDir, outputDir)
+	processor := NewTemplateProcessor(gen, gen.env.FS, templateDir, outputDir)
 	if err := processor.ProcessAllTemplates(context.Background()); err != nil {
 		t.Fatalf("ProcessAllTemplates() failed: %v", err)
 	}
@@ -830,7 +831,7 @@ func TestProxyConfGenOutputStructure(t *testing.T) {
 		Hostname: "mail.example.com",
 	}
 
-	gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewGenerator(, nil) failed: %v", err)
 	}
@@ -839,7 +840,7 @@ func TestProxyConfGenOutputStructure(t *testing.T) {
 	gen.ConfDir = outputDir
 
 	// Process all templates
-	processor := NewTemplateProcessor(gen, templateDir, outputDir)
+	processor := NewTemplateProcessor(gen, gen.env.FS, templateDir, outputDir)
 	if err := processor.ProcessAllTemplates(context.Background()); err != nil {
 		t.Fatalf("ProcessAllTemplates() failed: %v", err)
 	}

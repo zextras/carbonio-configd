@@ -12,10 +12,14 @@ import (
 // TestStartService_NonSystemdCustomStart verifies startService uses CustomStart
 // when systemd is not booted.
 func TestStartService_NonSystemdCustomStart(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	if IsSystemdMode() {
+	if ctl.IsSystemdMode() {
 		t.Skip("startService non-systemd path not reachable on systemd-booted host")
 	}
 
@@ -29,7 +33,7 @@ func TestStartService_NonSystemdCustomStart(t *testing.T) {
 		},
 	}
 
-	err := startService(context.Background(), "testservice", def)
+	err := ctl.startService(context.Background(), "testservice", def)
 	if err != nil {
 		t.Errorf("startService returned unexpected error: %v", err)
 	}
@@ -41,10 +45,14 @@ func TestStartService_NonSystemdCustomStart(t *testing.T) {
 // TestStopService_NonSystemdCustomStop verifies stopService uses CustomStop
 // when systemd is not booted.
 func TestStopService_NonSystemdCustomStop(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	if IsSystemdMode() {
+	if ctl.IsSystemdMode() {
 		t.Skip("stopService non-systemd path not reachable on systemd-booted host")
 	}
 
@@ -58,7 +66,7 @@ func TestStopService_NonSystemdCustomStop(t *testing.T) {
 		},
 	}
 
-	err := stopService(context.Background(), "testservice", def)
+	err := ctl.stopService(context.Background(), "testservice", def)
 	if err != nil {
 		t.Errorf("stopService returned unexpected error: %v", err)
 	}
@@ -72,14 +80,18 @@ func TestStopService_NonSystemdCustomStop(t *testing.T) {
 // invoking systemctl. This guards the container fix: statsCustomStop must
 // actually run to terminate workers that live outside any systemd cgroup.
 func TestStopService_LegacyMode_BypassesSystemctl(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 
-	withMode(t, false)
+	ctl.pinMode(false)
 
-	orig := Registry["memcached"]
-	defer func() { Registry["memcached"] = orig }()
+	orig := ctl.registry["memcached"]
+	defer func() { ctl.registry["memcached"] = orig }()
 
 	called := false
 	def := *orig
@@ -89,9 +101,9 @@ func TestStopService_LegacyMode_BypassesSystemctl(t *testing.T) {
 		called = true
 		return nil
 	}
-	Registry["memcached"] = &def
+	ctl.registry["memcached"] = &def
 
-	if err := stopService(context.Background(), "memcached", &def); err != nil {
+	if err := ctl.stopService(context.Background(), "memcached", &def); err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 

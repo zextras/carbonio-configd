@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"slices"
 	"strconv"
@@ -16,12 +17,12 @@ import (
 	"time"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // openLogFile opens (or creates) a log file for append writing with mode 0640.
-func openLogFile(path string) (*os.File, error) {
-	//nolint:gosec // log file path is from internal service registry
-	fd, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o640)
+func (c *Controller) openLogFile(path string) (sys.File, error) {
+	fd, err := c.env.FS.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o640)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open %s: %w", path, err)
 	}
@@ -45,13 +46,12 @@ func openLogFile(path string) (*os.File, error) {
 // is nevertheless running (its pidfile lost or overwritten), the processes
 // found by identity are stopped the same graceful way. An empty processName
 // means no identity is declared and the pidfile PID is trusted when alive.
-func gracefulStopViaPidfile(
+func (c *Controller) gracefulStopViaPidfile(
 	ctx context.Context, pidFile, serviceName, processName string, timeout time.Duration,
 ) error {
-	//nolint:gosec // pidfile path is from internal service registry
-	data, err := os.ReadFile(pidFile)
+	data, err := c.env.FS.ReadFile(pidFile)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, fs.ErrNotExist) {
 			logger.InfoContext(ctx, "Service already stopped (no pidfile)", "service", serviceName, "pidfile", pidFile)
 
 			return nil
@@ -67,24 +67,24 @@ func gracefulStopViaPidfile(
 
 	pids := []int{pid}
 
-	if !pidBelongsTo(ctx, pid, processName) {
+	if !c.pidBelongsTo(ctx, pid, processName) {
 		logger.InfoContext(ctx, "Pidfile does not name a running process of this service, treating it as stale",
 			"service", serviceName, "pidfile", pidFile, "pid", pid)
 
-		pids = pidsByIdentity(processName)
+		pids = c.pidsByIdentity(processName)
 	}
 
 	var stopErr error
 
 	for _, p := range pids {
-		stopErr = errors.Join(stopErr, gracefulStopPID(ctx, p, serviceName, timeout))
+		stopErr = errors.Join(stopErr, c.gracefulStopPID(ctx, p, serviceName, timeout))
 	}
 
 	if stopErr != nil {
 		return stopErr
 	}
 
-	_ = os.Remove(pidFile)
+	_ = c.env.FS.Remove(pidFile)
 
 	return nil
 }
@@ -92,13 +92,13 @@ func gracefulStopViaPidfile(
 // pidsByIdentity lists the live processes of the given identity from a fresh
 // /proc listing, excluding the current process and its parent. A scan failure
 // yields none: the caller already has nothing better to act on.
-func pidsByIdentity(name string) []int {
-	pids, err := scanProcesses(name)
+func (c *Controller) pidsByIdentity(name string) []int {
+	pids, err := c.scanProcesses(name)
 	if err != nil {
 		return nil
 	}
 
-	isSelfOrParent := selfOrParentFilter()
+	isSelfOrParent := c.selfOrParentFilter()
 
 	return slices.DeleteFunc(pids, isSelfOrParent)
 }
@@ -114,15 +114,10 @@ func pidsByIdentity(name string) []int {
 // (e.g. EPERM signaling the wrong UID) surfaced as an error rather than
 // swallowed. Only the polling loop is shared, via waitForProcessExit ->
 // pollUntilExit (cli_process.go).
-func gracefulStopPID(ctx context.Context, pid int, serviceName string, timeout time.Duration) error {
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return fmt.Errorf("failed to find process %d: %w", pid, err)
-	}
-
+func (c *Controller) gracefulStopPID(ctx context.Context, pid int, serviceName string, timeout time.Duration) error {
 	logger.InfoContext(ctx, "Stopping service gracefully (SIGTERM)", "service", serviceName, "pid", pid)
 
-	if err := proc.Signal(syscall.SIGTERM); err != nil {
+	if err := c.env.Proc.Signal(pid, syscall.SIGTERM); err != nil {
 		// ESRCH: process already gone — treat as stopped.
 		if errors.Is(err, os.ErrProcessDone) || errors.Is(err, syscall.ESRCH) {
 			return nil
@@ -131,7 +126,7 @@ func gracefulStopPID(ctx context.Context, pid int, serviceName string, timeout t
 		return fmt.Errorf("failed to SIGTERM process %d: %w", pid, err)
 	}
 
-	if waitForProcessExit(ctx, pid, timeout) {
+	if c.waitForProcessExit(ctx, pid, timeout) {
 		return nil
 	}
 
@@ -139,7 +134,7 @@ func gracefulStopPID(ctx context.Context, pid int, serviceName string, timeout t
 	logger.WarnContext(ctx, "Service did not exit after SIGTERM, sending SIGKILL",
 		"service", serviceName, "pid", pid, "timeout", timeout)
 
-	if err := proc.Signal(syscall.SIGKILL); err != nil &&
+	if err := c.env.Proc.Signal(pid, syscall.SIGKILL); err != nil &&
 		!errors.Is(err, os.ErrProcessDone) && !errors.Is(err, syscall.ESRCH) {
 		return fmt.Errorf("failed to SIGKILL process %d: %w", pid, err)
 	}
@@ -151,6 +146,6 @@ func gracefulStopPID(ctx context.Context, pid int, serviceName string, timeout t
 // timeout elapses. Returns true if the process exited within the budget.
 // Thin wrapper around the shared pollUntilExit core (cli_process.go) at the
 // original 50ms cadence.
-func waitForProcessExit(ctx context.Context, pid int, timeout time.Duration) bool {
-	return pollUntilExit(ctx, pid, timeout, 50*time.Millisecond)
+func (c *Controller) waitForProcessExit(ctx context.Context, pid int, timeout time.Duration) bool {
+	return c.pollUntilExit(ctx, pid, timeout, 50*time.Millisecond)
 }

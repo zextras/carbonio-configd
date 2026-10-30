@@ -12,6 +12,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 const (
@@ -24,13 +26,14 @@ func newDomainCertProcessor(t *testing.T, domains []DomainInfo) (*TemplateProces
 
 	confDir := t.TempDir()
 	gen := &Generator{
+		env:     sys.Real(),
 		ConfDir: confDir,
 		Variables: map[string]*Variable{
 			"ssl.crt.default": {Keyword: "ssl.crt.default", ValueType: ValueTypeString, Value: confDir + "/nginx.crt"},
 			"ssl.key.default": {Keyword: "ssl.key.default", ValueType: ValueTypeString, Value: confDir + "/nginx.key"},
 		},
 	}
-	tp := NewTemplateProcessor(gen, t.TempDir(), t.TempDir())
+	tp := NewTemplateProcessor(gen, gen.env.FS, t.TempDir(), t.TempDir())
 	tp.domainProvider = func() []DomainInfo { return domains }
 
 	return tp, filepath.Join(confDir, "domaincerts")

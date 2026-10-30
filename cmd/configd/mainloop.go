@@ -21,6 +21,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/sdnotify"
 	"github.com/zextras/carbonio-configd/internal/services"
 	"github.com/zextras/carbonio-configd/internal/state"
+	"github.com/zextras/carbonio-configd/internal/sys"
 	"github.com/zextras/carbonio-configd/internal/watchdog"
 )
 
@@ -223,6 +224,7 @@ type phaseTimings struct {
 // (after a CompareKeys failure and the 60s back-off sleep).
 func runConfigPhases(
 	ctx context.Context,
+	clock sys.Clock,
 	mainCfg *config.Config,
 	appState *state.State,
 	configManager *configmgr.ConfigManager,
@@ -244,7 +246,7 @@ func runConfigPhases(
 
 	if err := configManager.CompareKeys(ctx); err != nil {
 		logger.ErrorContext(ctx, "Configuration inconsistency detected (sleeping 60s)", "error", err)
-		SleepWithContext(ctx, 60*time.Second, reloadChan)
+		SleepWithContext(ctx, clock, 60*time.Second, reloadChan)
 
 		return timings, true
 	}
@@ -292,6 +294,7 @@ func runConfigPhases(
 
 // daemonLoopDeps bundles dependencies of the daemon main loop.
 type daemonLoopDeps struct {
+	env            sys.System
 	cfg            *config.Config
 	appState       *state.State
 	configManager  *configmgr.ConfigManager
@@ -353,7 +356,7 @@ func runLoopIterationSafe(ctx context.Context, deps *daemonLoopDeps, st *loopIte
 
 		logger.ErrorContext(ctx, "Main loop iteration panicked, backing off",
 			"interval_seconds", deps.cfg.Interval)
-		SleepWithContext(ctx, time.Duration(deps.cfg.Interval)*time.Second, deps.reloadChan)
+		SleepWithContext(ctx, deps.env.Clock, time.Duration(deps.cfg.Interval)*time.Second, deps.reloadChan)
 	}()
 
 	defer recoverGoroutine(ctx, "main-loop")
@@ -382,7 +385,7 @@ func runLoopIteration(ctx context.Context, deps *daemonLoopDeps, st *loopIterSta
 
 	loadDur, parseDur, err := runLoadAndParse(ctx, deps.configManager, deps.cfg)
 	if err != nil {
-		SleepWithContext(ctx, 60*time.Second, deps.reloadChan)
+		SleepWithContext(ctx, deps.env.Clock, 60*time.Second, deps.reloadChan)
 
 		return iterContinue
 	}
@@ -398,7 +401,7 @@ func runLoopIteration(ctx context.Context, deps *daemonLoopDeps, st *loopIterSta
 	}
 
 	timings, skipIter := runConfigPhases(
-		ctx, deps.cfg, deps.appState, deps.configManager,
+		ctx, deps.env.Clock, deps.cfg, deps.appState, deps.configManager,
 		deps.serviceManager, deps.wd, deps.reloadChan,
 	)
 	if skipIter {
@@ -448,7 +451,7 @@ func handleIdleSleep(ctx context.Context, deps *daemonLoopDeps, st *loopIterStat
 	logger.DebugContext(ctx, "Skipping idle config poll", "reason", "no_events_since_last_check")
 	logger.DebugContext(ctx, "Sleeping", "interval_seconds", deps.cfg.Interval)
 
-	if SleepWithContext(ctx, time.Duration(deps.cfg.Interval)*time.Second, deps.reloadChan) {
+	if SleepWithContext(ctx, deps.env.Clock, time.Duration(deps.cfg.Interval)*time.Second, deps.reloadChan) {
 		st.reloadSignaled = true
 	}
 }
@@ -531,7 +534,7 @@ func finalizeIteration(
 
 	logger.DebugContext(ctx, "Sleeping for interval", "interval_seconds", deps.cfg.Interval)
 
-	if SleepWithContext(ctx, time.Duration(deps.cfg.Interval)*time.Second, deps.reloadChan) {
+	if SleepWithContext(ctx, deps.env.Clock, time.Duration(deps.cfg.Interval)*time.Second, deps.reloadChan) {
 		st.reloadSignaled = true
 	}
 
@@ -542,6 +545,7 @@ func finalizeIteration(
 // It returns an exit code: 0 for success, 1 for error.
 func RunMainLoop(
 	ctx context.Context,
+	env sys.System,
 	mainCfg *config.Config,
 	appState *state.State,
 	ldapClient *ldap.Ldap,
@@ -553,10 +557,10 @@ func RunMainLoop(
 	defer cancel()
 
 	// Bootstrap core dependencies
-	configManager, serviceManager, wd := bootstrapDependencies(ctx, mainCfg, appState, ldapClient, args)
+	configManager, serviceManager, wd := bootstrapDependencies(ctx, env, mainCfg, appState, ldapClient, args)
 
 	// Bootstrap systemd integration
-	reloadChan := bootstrapSystemd(ctx, appState, cancel, notifier)
+	reloadChan := bootstrapSystemd(ctx, env, appState, cancel, notifier)
 
 	// Start watchdog in daemon mode (not for forced configs)
 	if !args.HasForcedConfigs() {
@@ -576,6 +580,7 @@ func RunMainLoop(
 	}
 
 	runDaemonLoop(ctx, &daemonLoopDeps{
+		env:            env,
 		cfg:            mainCfg,
 		appState:       appState,
 		configManager:  configManager,

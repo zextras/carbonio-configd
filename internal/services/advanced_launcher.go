@@ -6,11 +6,9 @@ package services
 
 import (
 	"context"
-	"os"
 	"strings"
 	"time"
 
-	"github.com/zextras/carbonio-configd/internal/localconfig"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/zxadmin"
 )
@@ -20,17 +18,15 @@ const (
 	advancedPollAttempts = 10
 )
 
-var advancedJARDir = basePath + "/lib/ext/carbonio"
-
 // MailboxAdvancedStatusHook is a PostStart hook for mailbox that polls
 // Carbonio Advanced modules until they are ready, mirroring the legacy
 // `advanced_status 2` call in mailboxdctl.sh.
-func MailboxAdvancedStatusHook(ctx context.Context, _ *ServiceManager) error {
-	if !advancedInstalled() {
+func (c *Controller) MailboxAdvancedStatusHook(ctx context.Context, _ *ServiceManager) error {
+	if !c.advancedInstalled() {
 		return nil
 	}
 
-	cfg, err := localconfig.LoadLocalConfig()
+	cfg, err := c.loadRawConfig()
 	if err != nil {
 		logger.DebugContext(ctx, "Advanced status hook: localconfig load failed", "error", err)
 
@@ -51,7 +47,7 @@ func MailboxAdvancedStatusHook(ctx context.Context, _ *ServiceManager) error {
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-time.After(advancedPollInterval):
+		case <-c.env.Clock.After(advancedPollInterval):
 		}
 	}
 
@@ -61,8 +57,8 @@ func MailboxAdvancedStatusHook(ctx context.Context, _ *ServiceManager) error {
 }
 
 // advancedInstalled returns true if at least one carbonio-advanced-*.jar is present.
-func advancedInstalled() bool {
-	entries, err := os.ReadDir(advancedJARDir)
+func (c *Controller) advancedInstalled() bool {
+	entries, err := c.env.FS.ReadDir(c.p.advancedJARDir)
 	if err != nil {
 		return false
 	}

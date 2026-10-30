@@ -17,26 +17,29 @@ import (
 	"github.com/zextras/carbonio-configd/internal/sdnotify"
 	"github.com/zextras/carbonio-configd/internal/services"
 	"github.com/zextras/carbonio-configd/internal/state"
+	"github.com/zextras/carbonio-configd/internal/sys"
 	"github.com/zextras/carbonio-configd/internal/systemd"
 	"github.com/zextras/carbonio-configd/internal/watchdog"
 )
 
 // startSdWatchdogKeepAlive launches a goroutine that pings systemd's watchdog at pingInterval.
-func startSdWatchdogKeepAlive(ctx context.Context, notifier *sdnotify.Notifier, pingInterval time.Duration) {
+func startSdWatchdogKeepAlive(
+	ctx context.Context, clock sys.Clock, notifier *sdnotify.Notifier, pingInterval time.Duration,
+) {
 	logger.InfoContext(ctx, "Starting systemd watchdog keep-alive",
 		"ping_interval", pingInterval)
 
 	go func() {
 		defer recoverGoroutine(ctx, "watchdog")
 
-		ticker := time.NewTicker(pingInterval)
+		ticker := clock.NewTicker(pingInterval)
 		defer ticker.Stop()
 
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-ticker.C:
+			case <-ticker.C():
 				if err := notifier.WatchdogPing(); err != nil {
 					logger.ErrorContext(ctx, "Failed to send watchdog ping", "error", err)
 				}
@@ -50,6 +53,7 @@ func startSdWatchdogKeepAlive(ctx context.Context, notifier *sdnotify.Notifier, 
 // Returns the initialized managers and watchdog instance.
 func bootstrapDependencies(
 	ctx context.Context,
+	env sys.System,
 	mainCfg *config.Config,
 	appState *state.State,
 	ldapClient *ldap.Ldap,
@@ -57,10 +61,11 @@ func bootstrapDependencies(
 ) (*configmgr.ConfigManager, services.Manager, *watchdog.Watchdog) {
 	cacheInstance := cache.New(ctx, false) // skipCache=false to enable caching
 
-	configManager := configmgr.NewConfigManager(ctx, mainCfg, appState, ldapClient, cacheInstance)
-	serviceManager := services.NewServiceManager()
+	configManager := configmgr.NewConfigManager(ctx, mainCfg, appState, ldapClient, cacheInstance, env)
+	controller := services.NewController(env)
+	serviceManager := services.NewServiceManager(controller)
 
-	systemdManager := systemd.NewManager()
+	systemdManager := systemd.NewManager(env)
 	if systemdManager.IsSystemdEnabled(ctx) {
 		logger.InfoContext(ctx, "Detected systemd-enabled environment",
 			"use_systemctl", true,
@@ -82,6 +87,8 @@ func bootstrapDependencies(
 		CheckInterval:  watchdogInterval,
 		ServiceManager: serviceManager,
 		State:          appState,
+		Clock:          env.Clock,
+		Snapshots:      controller,
 		ConfigLookup: func(key string) string {
 			if val, exists := appState.GetLocalConfig().Data.Get(key); exists {
 				return val
@@ -99,6 +106,7 @@ func bootstrapDependencies(
 // wake the main loop for a configuration reload.
 func bootstrapSystemd(
 	ctx context.Context,
+	env sys.System,
 	appState *state.State,
 	cancel context.CancelFunc,
 	notifier *sdnotify.Notifier,
@@ -110,7 +118,7 @@ func bootstrapSystemd(
 	// Pings at half the interval so we stay well within the WatchdogSec deadline.
 	if wdInterval, ok := sdnotify.WatchdogEnabled(); ok {
 		pingInterval := wdInterval / 2 //nolint:mnd // half of WatchdogSec is the recommended ping interval
-		startSdWatchdogKeepAlive(ctx, notifier, pingInterval)
+		startSdWatchdogKeepAlive(ctx, env.Clock, notifier, pingInterval)
 	}
 
 	return reloadChan

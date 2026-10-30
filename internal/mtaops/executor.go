@@ -10,18 +10,15 @@ import (
 	"encoding/base64"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
-	"syscall"
 
-	"github.com/zextras/carbonio-configd/internal/fileutil"
 	"github.com/zextras/carbonio-configd/internal/ldap"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/redact"
 	"github.com/zextras/carbonio-configd/internal/state"
+	"github.com/zextras/carbonio-configd/internal/sys"
 	"github.com/zextras/carbonio-configd/internal/tracing"
 )
 
@@ -35,15 +32,18 @@ type executor struct {
 	postconfPath string
 	ldapManager  ldap.AttributeModifier
 	mappedFiles  map[string]string // key -> file path mapping
+	env          sys.System
 }
 
-// NewExecutor creates a new MTA operations executor.
-func NewExecutor(baseDir string, ldapManager ldap.AttributeModifier) Executor {
+// NewExecutor creates a new MTA operations executor. All host access (postconf,
+// mapped-file reads and writes, umask) goes through env.
+func NewExecutor(baseDir string, ldapManager ldap.AttributeModifier, env sys.System) Executor {
 	return &executor{
 		baseDir:      baseDir,
 		postconfPath: filepath.Join(baseDir, "common", "sbin", "postconf"),
 		ldapManager:  ldapManager,
 		mappedFiles:  mappedFilePaths(baseDir),
+		env:          env,
 	}
 }
 
@@ -135,10 +135,7 @@ func (e *executor) ExecutePostconfBatch(ctx context.Context, ops []PostconfOpera
 		return nil
 	}
 
-	//nolint:gosec // G204: Command from trusted data
-	cmd := exec.CommandContext(ctx, e.postconfPath, args...)
-
-	output, err := cmd.CombinedOutput()
+	output, err := sys.CombinedOutput(ctx, e.env.Exec, e.postconfPath, args...)
 	if err != nil {
 		logger.ErrorContext(ctx, "Postconf batch failed",
 			"error", err,
@@ -186,10 +183,7 @@ func (e *executor) ExecutePostconfdBatch(ctx context.Context, ops []PostconfdOpe
 			"key", op.Key)
 	}
 
-	//nolint:gosec // G204: Command from trusted data
-	cmd := exec.CommandContext(ctx, e.postconfPath, args...)
-
-	output, err := cmd.CombinedOutput()
+	output, err := sys.CombinedOutput(ctx, e.env.Exec, e.postconfPath, args...)
 	if err != nil {
 		// postconf -X warns (and exits non-zero) when a key doesn't exist; that's
 		// expected and safe to ignore. Any other failure (missing binary, permission
@@ -225,7 +219,7 @@ func (e *executor) ExecutePostconfdBatch(ctx context.Context, ops []PostconfdOpe
 // zimbraSSLDHParam -> conf/dhparam.pem) does not leave a stale file behind. A
 // missing file is a no-op.
 func (e *executor) handleEmptyMapfileData(ctx context.Context, op MapfileOperation, filePath string) error {
-	if _, err := os.Stat(filePath); err != nil {
+	if _, err := e.env.FS.Stat(filePath); err != nil {
 		if os.IsNotExist(err) {
 			logger.DebugContext(ctx, "MAPFILE no data in LDAP and no existing file",
 				"key", op.Key,
@@ -237,7 +231,7 @@ func (e *executor) handleEmptyMapfileData(ctx context.Context, op MapfileOperati
 		return fmt.Errorf("MAPFILE %s: error checking file %s: %w", op.Key, filePath, err)
 	}
 
-	if err := os.Remove(filePath); err != nil {
+	if err := e.env.FS.Remove(filePath); err != nil {
 		return fmt.Errorf("MAPFILE %s: failed to remove stale file %s: %w", op.Key, filePath, err)
 	}
 
@@ -279,7 +273,7 @@ func (e *executor) ExecuteMapfile(ctx context.Context, op MapfileOperation) erro
 
 // executeMapLocal handles MAPLOCAL operations: checks whether the mapped file exists.
 func (e *executor) executeMapLocal(ctx context.Context, op MapfileOperation, filePath string) error {
-	if _, err := os.Stat(filePath); err != nil {
+	if _, err := e.env.FS.Stat(filePath); err != nil {
 		if os.IsNotExist(err) {
 			logger.DebugContext(ctx, "MAPLOCAL file does not exist",
 				"key", op.Key,
@@ -311,7 +305,7 @@ func (e *executor) executeMapFile(ctx context.Context, op MapfileOperation, file
 
 	// Skip write when content is unchanged.
 	//nolint:gosec // G304: File path comes from trusted MAPPEDFILES map
-	existingData, err := os.ReadFile(filePath)
+	existingData, err := e.env.FS.ReadFile(filePath)
 	if err == nil && bytes.Equal(existingData, data) {
 		logger.DebugContext(ctx, "MAPFILE already has correct content",
 			"key", op.Key,
@@ -320,7 +314,7 @@ func (e *executor) executeMapFile(ctx context.Context, op MapfileOperation, file
 		return nil
 	}
 
-	if err := writeMapfile(filePath, data); err != nil {
+	if err := e.writeMapfile(filePath, data); err != nil {
 		return fmt.Errorf("MAPFILE %s: failed to write file %s: %w", op.Key, filePath, err)
 	}
 
@@ -337,41 +331,18 @@ func (e *executor) executeMapFile(ctx context.Context, op MapfileOperation, file
 // gets 0666 &^ umask (0640 under the zextras 0027 umask). Unlike legacy it
 // writes atomically (temp + rename) so a reader such as nginx never sees a
 // truncated file and no planted symlink is followed.
-func writeMapfile(path string, data []byte) error {
-	mode := os.FileMode(0o666) &^ currentUmask()
+func (e *executor) writeMapfile(path string, data []byte) error {
+	mode := os.FileMode(0o666) &^ e.env.Proc.Umask()
 
-	if fi, err := os.Lstat(path); err == nil && fi.Mode().IsRegular() {
+	if fi, err := e.env.FS.Lstat(path); err == nil && fi.Mode().IsRegular() {
 		mode = fi.Mode().Perm()
 	}
 
-	if err := fileutil.AtomicWrite(path, data, mode); err != nil {
+	if err := e.env.FS.WriteFileAtomic(path, data, mode); err != nil {
 		return fmt.Errorf("atomic write: %w", err)
 	}
 
 	return nil
-}
-
-// umaskLine matches the "Umask:" field of /proc/self/status (Linux >= 4.7).
-var umaskLine = regexp.MustCompile(`(?m)^Umask:\s*([0-7]+)\s*$`)
-
-// currentUmask returns the process umask. It reads /proc/self/status, which
-// does not touch the process-wide umask and is therefore race-free against
-// concurrent file creation. Only when that is unavailable does it fall back to
-// syscall.Umask(0) followed by an immediate restore; the window is a few
-// instructions and configd creates its files from this same goroutine path.
-func currentUmask() os.FileMode {
-	if b, err := os.ReadFile("/proc/self/status"); err == nil {
-		if m := umaskLine.FindSubmatch(b); m != nil {
-			if v, err := strconv.ParseUint(string(m[1]), 8, 32); err == nil {
-				return os.FileMode(v) //nolint:gosec // G115: umask is at most 0777
-			}
-		}
-	}
-
-	old := syscall.Umask(0)
-	syscall.Umask(old)
-
-	return os.FileMode(old) //nolint:gosec // G115: umask is at most 0777
 }
 
 // ExecuteLdapWrite executes an LDAP cn=config write operation.

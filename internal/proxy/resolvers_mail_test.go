@@ -15,6 +15,7 @@ import (
 
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/config/configtest"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // TestResolveGreeting tests resolveGreeting branches
@@ -56,6 +57,7 @@ func TestResolveGreeting(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			g := &Generator{
+				env:          sys.Real(),
 				GlobalConfig: &config.GlobalConfig{Data: tt.globalData},
 				LocalConfig:  &config.LocalConfig{Data: configtest.NewConfigMapFrom(map[string]string{})},
 			}
@@ -119,7 +121,7 @@ func TestResolveIMAPId(t *testing.T) {
 		dir := t.TempDir()
 		writeBuildInfoJar(t, dir, "MAJORVERSION=4\nVERSION=4.38.10_ZEXTRAS_202610\nRELEASE=carbonio\nDATE=202610\n")
 
-		g := &Generator{WorkingDir: dir}
+		g := &Generator{env: sys.Real(), WorkingDir: dir}
 
 		result, err := g.resolveIMAPId(context.Background())
 		if err != nil {
@@ -133,7 +135,7 @@ func TestResolveIMAPId(t *testing.T) {
 	})
 
 	t.Run("unknown when mailbox.jar is missing", func(t *testing.T) {
-		g := &Generator{WorkingDir: t.TempDir()}
+		g := &Generator{env: sys.Real(), WorkingDir: t.TempDir()}
 
 		result, err := g.resolveIMAPId(context.Background())
 		if err != nil {
@@ -151,6 +153,7 @@ func TestResolveIMAPId(t *testing.T) {
 func TestResolveIMAPGreeting(t *testing.T) {
 	t.Run("returns empty when disabled", func(t *testing.T) {
 		g := &Generator{
+			env:          sys.Real(),
 			GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMap()},
 			LocalConfig:  &config.LocalConfig{Data: configtest.NewConfigMapFrom(map[string]string{})},
 		}
@@ -165,6 +168,7 @@ func TestResolveIMAPGreeting(t *testing.T) {
 
 	t.Run("returns IMAP greeting when enabled", func(t *testing.T) {
 		g := &Generator{
+			env: sys.Real(),
 			GlobalConfig: &config.GlobalConfig{Data: configtest.NewConfigMapFrom(map[string]string{
 				"zimbraReverseProxyImapExposeVersionOnBanner": "TRUE",
 			})},
@@ -185,6 +189,7 @@ func TestResolveIMAPGreeting(t *testing.T) {
 func TestResolvePOP3Greeting(t *testing.T) {
 	t.Run("returns empty when disabled", func(t *testing.T) {
 		g := &Generator{
+			env:          sys.Real(),
 			GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMap()},
 			LocalConfig:  &config.LocalConfig{Data: configtest.NewConfigMapFrom(map[string]string{})},
 		}
@@ -199,6 +204,7 @@ func TestResolvePOP3Greeting(t *testing.T) {
 
 	t.Run("returns POP3 greeting when enabled", func(t *testing.T) {
 		g := &Generator{
+			env: sys.Real(),
 			GlobalConfig: &config.GlobalConfig{Data: configtest.NewConfigMapFrom(map[string]string{
 				"zimbraReverseProxyPop3ExposeVersionOnBanner": "TRUE",
 			})},
@@ -219,6 +225,7 @@ func TestResolvePOP3Greeting(t *testing.T) {
 func TestResolveMailWhitelistIPs(t *testing.T) {
 	t.Run("returns empty when not configured", func(t *testing.T) {
 		g := &Generator{
+			env:          sys.Real(),
 			ServerConfig: &config.ServerConfig{Data: configtest.NewConfigMapFrom(map[string]string{})},
 			GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMap()},
 		}
@@ -233,6 +240,7 @@ func TestResolveMailWhitelistIPs(t *testing.T) {
 
 	t.Run("returns single IP", func(t *testing.T) {
 		g := &Generator{
+			env: sys.Real(),
 			ServerConfig: &config.ServerConfig{Data: configtest.NewConfigMapFrom(map[string]string{
 				"zimbraReverseProxyIPThrottleWhitelist": "1.2.3.4",
 			})},
@@ -253,6 +261,7 @@ func TestResolveMailWhitelistIPs(t *testing.T) {
 
 	t.Run("returns multiple IPs with proper formatting", func(t *testing.T) {
 		g := &Generator{
+			env: sys.Real(),
 			ServerConfig: &config.ServerConfig{Data: configtest.NewConfigMapFrom(map[string]string{
 				"zimbraReverseProxyIPThrottleWhitelist": "1.2.3.4\n5.6.7.8",
 			})},
@@ -275,6 +284,7 @@ func TestResolveMailWhitelistIPs(t *testing.T) {
 
 	t.Run("falls back to global config", func(t *testing.T) {
 		g := &Generator{
+			env:          sys.Real(),
 			ServerConfig: &config.ServerConfig{Data: configtest.NewConfigMapFrom(map[string]string{})},
 			GlobalConfig: &config.GlobalConfig{Data: configtest.NewConfigMapFrom(map[string]string{
 				"zimbraReverseProxyIPThrottleWhitelist": "10.0.0.1",

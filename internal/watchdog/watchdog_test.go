@@ -7,6 +7,7 @@ package watchdog
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -173,6 +174,8 @@ func (m *MockServiceManager) setAddRestartError(err error) {
 
 // Test 1: NewWatchdog creates a watchdog with proper defaults
 func TestNewWatchdog(t *testing.T) {
+	t.Parallel()
+
 	mockSM := NewMockServiceManager()
 	st := state.NewState()
 
@@ -207,6 +210,8 @@ func TestNewWatchdog(t *testing.T) {
 
 // Test 2: Default check interval is set when not provided
 func TestNewWatchdog_DefaultCheckInterval(t *testing.T) {
+	t.Parallel()
+
 	mockSM := NewMockServiceManager()
 	st := state.NewState()
 
@@ -225,6 +230,8 @@ func TestNewWatchdog_DefaultCheckInterval(t *testing.T) {
 
 // Test 3: Start and Stop watchdog
 func TestWatchdog_StartStop(t *testing.T) {
+	t.Parallel()
+
 	mockSM := NewMockServiceManager()
 	st := state.NewState()
 
@@ -234,7 +241,8 @@ func TestWatchdog_StartStop(t *testing.T) {
 		CheckInterval:  100 * time.Millisecond,
 	}
 
-	wd := NewWatchdog(cfg)
+	h := newHarness(t, cfg)
+	wd := h.wd
 
 	// Initially not enabled
 	if wd.IsEnabled() {
@@ -244,10 +252,7 @@ func TestWatchdog_StartStop(t *testing.T) {
 	ctx := context.Background()
 
 	// Start watchdog
-	wd.Start(ctx)
-
-	// Allow goroutine to start
-	time.Sleep(10 * time.Millisecond)
+	h.start()
 
 	if !wd.IsEnabled() {
 		t.Error("Watchdog should be enabled after Start()")
@@ -259,10 +264,16 @@ func TestWatchdog_StartStop(t *testing.T) {
 	if wd.IsEnabled() {
 		t.Error("Watchdog should not be enabled after Stop()")
 	}
+
+	if n := h.clock.Waiters(); n != 0 {
+		t.Errorf("Stop must release the ticker, %d waiter(s) still armed", n)
+	}
 }
 
 // Test 4: AddService and RemoveService
 func TestWatchdog_AddRemoveService(t *testing.T) {
+	t.Parallel()
+
 	mockSM := NewMockServiceManager()
 	st := state.NewState()
 
@@ -290,6 +301,8 @@ func TestWatchdog_AddRemoveService(t *testing.T) {
 
 // Test 5: SetServiceEnabled and IsServiceEnabled
 func TestWatchdog_ServiceEnabled(t *testing.T) {
+	t.Parallel()
+
 	mockSM := NewMockServiceManager()
 	st := state.NewState()
 
@@ -322,6 +335,8 @@ func TestWatchdog_ServiceEnabled(t *testing.T) {
 
 // Test 6: Watchdog detects failed service and restarts it
 func TestWatchdog_DetectAndRestart(t *testing.T) {
+	t.Parallel()
+
 	mockSM := NewMockServiceManager()
 	st := state.NewState()
 
@@ -331,7 +346,8 @@ func TestWatchdog_DetectAndRestart(t *testing.T) {
 		CheckInterval:  50 * time.Millisecond,
 	}
 
-	wd := NewWatchdog(cfg)
+	h := newHarness(t, cfg)
+	wd := h.wd
 
 	// Setup: service is tracked and monitoring is enabled
 	wd.AddService(context.Background(), "proxy")
@@ -341,11 +357,11 @@ func TestWatchdog_DetectAndRestart(t *testing.T) {
 	mockSM.setRunning("proxy", true)
 
 	// Start watchdog
-	wd.Start(context.Background())
-	defer wd.Stop(context.Background())
+	h.start()
+	defer h.stop()
 
 	// Wait for first check (should see service running)
-	time.Sleep(70 * time.Millisecond)
+	h.cycle()
 
 	// Verify no restart yet
 	if mockSM.getRestartCount("proxy") > 0 {
@@ -356,7 +372,7 @@ func TestWatchdog_DetectAndRestart(t *testing.T) {
 	mockSM.setRunning("proxy", false)
 
 	// Wait for watchdog to detect and restart
-	time.Sleep(70 * time.Millisecond)
+	h.cycle()
 
 	// Verify restart was called
 	if mockSM.getRestartCount("proxy") != 1 {
@@ -371,6 +387,8 @@ func TestWatchdog_DetectAndRestart(t *testing.T) {
 
 // Test 7: Watchdog does not restart disabled services
 func TestWatchdog_DoesNotRestartDisabled(t *testing.T) {
+	t.Parallel()
+
 	mockSM := NewMockServiceManager()
 	st := state.NewState()
 
@@ -380,7 +398,8 @@ func TestWatchdog_DoesNotRestartDisabled(t *testing.T) {
 		CheckInterval:  50 * time.Millisecond,
 	}
 
-	wd := NewWatchdog(cfg)
+	h := newHarness(t, cfg)
+	wd := h.wd
 
 	// Setup: service is tracked but monitoring is NOT enabled
 	wd.AddService(context.Background(), "amavis")
@@ -390,11 +409,11 @@ func TestWatchdog_DoesNotRestartDisabled(t *testing.T) {
 	mockSM.setRunning("amavis", false)
 
 	// Start watchdog
-	wd.Start(context.Background())
-	defer wd.Stop(context.Background())
+	h.start()
+	defer h.stop()
 
 	// Wait for check cycle
-	time.Sleep(70 * time.Millisecond)
+	h.cycle()
 
 	// Verify no restart
 	if mockSM.getRestartCount("amavis") > 0 {
@@ -404,6 +423,8 @@ func TestWatchdog_DoesNotRestartDisabled(t *testing.T) {
 
 // Test 8: UpdateServiceList updates monitored services
 func TestWatchdog_UpdateServiceList(t *testing.T) {
+	t.Parallel()
+
 	mockSM := NewMockServiceManager()
 	st := state.NewState()
 
@@ -444,6 +465,8 @@ func TestWatchdog_UpdateServiceList(t *testing.T) {
 
 // Test 9: Watchdog removes failed service from tracking after restart
 func TestWatchdog_RemovesServiceOnFailure(t *testing.T) {
+	t.Parallel()
+
 	mockSM := NewMockServiceManager()
 	st := state.NewState()
 
@@ -453,7 +476,8 @@ func TestWatchdog_RemovesServiceOnFailure(t *testing.T) {
 		CheckInterval:  50 * time.Millisecond,
 	}
 
-	wd := NewWatchdog(cfg)
+	h := newHarness(t, cfg)
+	wd := h.wd
 
 	// Setup
 	wd.AddService(context.Background(), "cbpolicyd")
@@ -468,11 +492,11 @@ func TestWatchdog_RemovesServiceOnFailure(t *testing.T) {
 	mockSM.setRunning("cbpolicyd", false)
 
 	// Start watchdog
-	wd.Start(context.Background())
-	defer wd.Stop(context.Background())
+	h.start()
+	defer h.stop()
 
 	// Wait for watchdog to detect failure
-	time.Sleep(70 * time.Millisecond)
+	h.cycle()
 
 	// Service should be re-added after successful restart
 	// (our mock always succeeds, so service should be tracked again)
@@ -483,6 +507,8 @@ func TestWatchdog_RemovesServiceOnFailure(t *testing.T) {
 
 // Test 10: Multiple check cycles
 func TestWatchdog_MultipleCycles(t *testing.T) {
+	t.Parallel()
+
 	mockSM := NewMockServiceManager()
 	st := state.NewState()
 
@@ -492,7 +518,8 @@ func TestWatchdog_MultipleCycles(t *testing.T) {
 		CheckInterval:  30 * time.Millisecond,
 	}
 
-	wd := NewWatchdog(cfg)
+	h := newHarness(t, cfg)
+	wd := h.wd
 
 	// Setup multiple services
 	services := []string{"ldap", "mailbox", "mta"}
@@ -503,11 +530,11 @@ func TestWatchdog_MultipleCycles(t *testing.T) {
 	}
 
 	// Start watchdog
-	wd.Start(context.Background())
-	defer wd.Stop(context.Background())
+	h.start()
+	defer h.stop()
 
 	// Wait for multiple check cycles
-	time.Sleep(100 * time.Millisecond)
+	h.cycle()
 
 	// All services still running, no restarts
 	for _, svc := range services {
@@ -519,6 +546,8 @@ func TestWatchdog_MultipleCycles(t *testing.T) {
 
 // Test 11: Watchdog handles IsRunning errors gracefully
 func TestWatchdog_IsRunningError(t *testing.T) {
+	t.Parallel()
+
 	mockSM := NewMockServiceManager()
 	st := state.NewState()
 
@@ -528,7 +557,8 @@ func TestWatchdog_IsRunningError(t *testing.T) {
 		CheckInterval:  50 * time.Millisecond,
 	}
 
-	wd := NewWatchdog(cfg)
+	h := newHarness(t, cfg)
+	wd := h.wd
 
 	// Setup
 	wd.AddService(context.Background(), "antivirus")
@@ -538,11 +568,11 @@ func TestWatchdog_IsRunningError(t *testing.T) {
 	mockSM.setIsRunningError(fmt.Errorf("connection failed"))
 
 	// Start watchdog
-	wd.Start(context.Background())
-	defer wd.Stop(context.Background())
+	h.start()
+	defer h.stop()
 
 	// Wait for check
-	time.Sleep(70 * time.Millisecond)
+	h.cycle()
 
 	// Should not have attempted restart due to error
 	if mockSM.getRestartCount("antivirus") > 0 {
@@ -552,6 +582,8 @@ func TestWatchdog_IsRunningError(t *testing.T) {
 
 // Test 12: Concurrent operations are thread-safe
 func TestWatchdog_ThreadSafety(t *testing.T) {
+	t.Parallel()
+
 	mockSM := NewMockServiceManager()
 	st := state.NewState()
 
@@ -561,11 +593,12 @@ func TestWatchdog_ThreadSafety(t *testing.T) {
 		CheckInterval:  50 * time.Millisecond,
 	}
 
-	wd := NewWatchdog(cfg)
+	h := newHarness(t, cfg)
+	wd := h.wd
 
 	// Start watchdog
-	wd.Start(context.Background())
-	defer wd.Stop(context.Background())
+	h.start()
+	defer h.stop()
 
 	// Perform concurrent operations
 	done := make(chan bool)
@@ -573,7 +606,7 @@ func TestWatchdog_ThreadSafety(t *testing.T) {
 	go func() {
 		for i := range 10 {
 			wd.AddService(context.Background(), fmt.Sprintf("service%d", i))
-			time.Sleep(5 * time.Millisecond)
+			runtime.Gosched()
 		}
 		done <- true
 	}()
@@ -581,10 +614,15 @@ func TestWatchdog_ThreadSafety(t *testing.T) {
 	go func() {
 		for i := range 10 {
 			wd.SetServiceEnabled(context.Background(), fmt.Sprintf("service%d", i), true)
-			time.Sleep(5 * time.Millisecond)
+			runtime.Gosched()
 		}
 		done <- true
 	}()
+
+	// Check cycles run while both goroutines mutate the watchdog.
+	for range 3 {
+		h.cycle()
+	}
 
 	// Wait for both goroutines
 	<-done
@@ -595,6 +633,8 @@ func TestWatchdog_ThreadSafety(t *testing.T) {
 
 // Test 13: Service restart with failed restart attempt
 func TestWatchdog_RestartFailure(t *testing.T) {
+	t.Parallel()
+
 	mockSM := NewMockServiceManager()
 	st := state.NewState()
 
@@ -605,7 +645,8 @@ func TestWatchdog_RestartFailure(t *testing.T) {
 		ConfigLookup:   func(key string) string { return "" },
 	}
 
-	wd := NewWatchdog(cfg)
+	h := newHarness(t, cfg)
+	wd := h.wd
 
 	// Setup
 	wd.AddService(context.Background(), "opendkim")
@@ -618,17 +659,14 @@ func TestWatchdog_RestartFailure(t *testing.T) {
 	mockSM.setAddRestartError(fmt.Errorf("restart failed: insufficient resources"))
 
 	// Start watchdog
-	wd.Start(context.Background())
-	defer wd.Stop(context.Background())
+	h.start()
+	defer h.stop()
 
-	// Poll until watchdog removes service from tracking (or timeout)
-	deadline := time.After(2 * time.Second)
-	for wd.IsServiceTracked("opendkim") {
-		select {
-		case <-deadline:
-			t.Fatal("Timed out waiting for service to be removed from tracking after failed restart attempt")
-		case <-time.After(10 * time.Millisecond):
-		}
+	// One check cycle drops the failed service from tracking
+	h.cycle()
+
+	if wd.IsServiceTracked("opendkim") {
+		t.Fatal("service must be removed from tracking after a failed restart attempt")
 	}
 
 	// Verify restart was attempted (AddRestart should have been called)
@@ -639,6 +677,8 @@ func TestWatchdog_RestartFailure(t *testing.T) {
 
 // Test 14: Multiple simultaneous service failures
 func TestWatchdog_MultipleServiceFailures(t *testing.T) {
+	t.Parallel()
+
 	mockSM := NewMockServiceManager()
 	st := state.NewState()
 
@@ -649,7 +689,8 @@ func TestWatchdog_MultipleServiceFailures(t *testing.T) {
 		ConfigLookup:   func(key string) string { return "" },
 	}
 
-	wd := NewWatchdog(cfg)
+	h := newHarness(t, cfg)
+	wd := h.wd
 
 	// Setup multiple services
 	services := []string{"ldap", "mailbox", "mta", "proxy"}
@@ -660,11 +701,11 @@ func TestWatchdog_MultipleServiceFailures(t *testing.T) {
 	}
 
 	// Start watchdog
-	wd.Start(context.Background())
-	defer wd.Stop(context.Background())
+	h.start()
+	defer h.stop()
 
 	// Wait for first check (all running)
-	time.Sleep(70 * time.Millisecond)
+	h.cycle()
 
 	// Simulate multiple simultaneous failures
 	mockSM.setRunning("ldap", false)
@@ -672,7 +713,7 @@ func TestWatchdog_MultipleServiceFailures(t *testing.T) {
 	mockSM.setRunning("proxy", false)
 
 	// Wait for watchdog to detect and restart
-	time.Sleep(70 * time.Millisecond)
+	h.cycle()
 
 	// Verify all failed services were restarted
 	for _, svc := range []string{"ldap", "mta", "proxy"} {
@@ -692,6 +733,8 @@ func TestWatchdog_MultipleServiceFailures(t *testing.T) {
 
 // Test 15: Restart loop prevention - service removed from tracking on failure
 func TestWatchdog_RestartLoopPrevention(t *testing.T) {
+	t.Parallel()
+
 	mockSM := NewMockServiceManager()
 	st := state.NewState()
 
@@ -702,7 +745,8 @@ func TestWatchdog_RestartLoopPrevention(t *testing.T) {
 		ConfigLookup:   func(key string) string { return "" },
 	}
 
-	wd := NewWatchdog(cfg)
+	h := newHarness(t, cfg)
+	wd := h.wd
 
 	// Setup
 	wd.AddService(context.Background(), "antispam")
@@ -712,17 +756,17 @@ func TestWatchdog_RestartLoopPrevention(t *testing.T) {
 	mockSM.setRunning("antispam", true)
 
 	// Start watchdog
-	wd.Start(context.Background())
-	defer wd.Stop(context.Background())
+	h.start()
+	defer h.stop()
 
 	// Wait for first check
-	time.Sleep(50 * time.Millisecond)
+	h.cycle()
 
 	// Service fails
 	mockSM.setRunning("antispam", false)
 
 	// Wait for restart
-	time.Sleep(50 * time.Millisecond)
+	h.cycle()
 
 	// After restart, service should be re-added to tracking
 	if !wd.IsServiceTracked("antispam") {
@@ -738,7 +782,7 @@ func TestWatchdog_RestartLoopPrevention(t *testing.T) {
 	mockSM.setRunning("antispam", false)
 
 	// Wait for another restart
-	time.Sleep(50 * time.Millisecond)
+	h.cycle()
 
 	// Should have been restarted again
 	if mockSM.getRestartCount("antispam") != 2 {
@@ -748,6 +792,8 @@ func TestWatchdog_RestartLoopPrevention(t *testing.T) {
 
 // Test 16: Service re-tracking after successful restart
 func TestWatchdog_ServiceRetrackingAfterRestart(t *testing.T) {
+	t.Parallel()
+
 	mockSM := NewMockServiceManager()
 	st := state.NewState()
 
@@ -758,7 +804,8 @@ func TestWatchdog_ServiceRetrackingAfterRestart(t *testing.T) {
 		ConfigLookup:   func(key string) string { return "" },
 	}
 
-	wd := NewWatchdog(cfg)
+	h := newHarness(t, cfg)
+	wd := h.wd
 
 	// Setup
 	wd.AddService(context.Background(), "stats")
@@ -773,11 +820,11 @@ func TestWatchdog_ServiceRetrackingAfterRestart(t *testing.T) {
 	mockSM.setRunning("stats", false)
 
 	// Start watchdog
-	wd.Start(context.Background())
-	defer wd.Stop(context.Background())
+	h.start()
+	defer h.stop()
 
 	// Wait for watchdog to detect and restart
-	time.Sleep(70 * time.Millisecond)
+	h.cycle()
 
 	// Verify service is re-tracked after successful restart
 	if !wd.IsServiceTracked("stats") {
@@ -792,6 +839,8 @@ func TestWatchdog_ServiceRetrackingAfterRestart(t *testing.T) {
 
 // Test 17: Failed restart leaves service untracked
 func TestWatchdog_FailedRestartLeavesUntracked(t *testing.T) {
+	t.Parallel()
+
 	st := state.NewState()
 
 	// Create a mock that succeeds AddRestart but fails ProcessRestarts
@@ -813,7 +862,8 @@ func TestWatchdog_FailedRestartLeavesUntracked(t *testing.T) {
 		ConfigLookup:   func(key string) string { return "" },
 	}
 
-	wd := NewWatchdog(cfg)
+	h := newHarness(t, cfg)
+	wd := h.wd
 
 	// Setup
 	wd.AddService(context.Background(), "amavis")
@@ -828,11 +878,11 @@ func TestWatchdog_FailedRestartLeavesUntracked(t *testing.T) {
 	mockWithFailedProcess.setRunning("amavis", false)
 
 	// Start watchdog
-	wd.Start(context.Background())
-	defer wd.Stop(context.Background())
+	h.start()
+	defer h.stop()
 
 	// Wait for watchdog to attempt restart
-	time.Sleep(70 * time.Millisecond)
+	h.cycle()
 
 	// Verify ProcessRestarts was called
 	if !processRestartsCalled.Load() {
@@ -852,6 +902,8 @@ func TestWatchdog_FailedRestartLeavesUntracked(t *testing.T) {
 
 // Test 18: ConfigLookup is passed correctly to ProcessRestarts
 func TestWatchdog_ConfigLookupPassed(t *testing.T) {
+	t.Parallel()
+
 	mockSM := NewMockServiceManager()
 	st := state.NewState()
 
@@ -866,7 +918,8 @@ func TestWatchdog_ConfigLookupPassed(t *testing.T) {
 		ConfigLookup:   testConfigLookup,
 	}
 
-	wd := NewWatchdog(cfg)
+	h := newHarness(t, cfg)
+	wd := h.wd
 
 	// Setup
 	wd.AddService(context.Background(), "sasl")
@@ -876,11 +929,11 @@ func TestWatchdog_ConfigLookupPassed(t *testing.T) {
 	mockSM.setRunning("sasl", false)
 
 	// Start watchdog
-	wd.Start(context.Background())
-	defer wd.Stop(context.Background())
+	h.start()
+	defer h.stop()
 
 	// Wait for watchdog to restart
-	time.Sleep(70 * time.Millisecond)
+	h.cycle()
 
 	// Verify configLookup is set in watchdog
 	if wd.configLookup == nil {
@@ -895,6 +948,8 @@ func TestWatchdog_ConfigLookupPassed(t *testing.T) {
 
 // Test 19: Watchdog with very fast check interval
 func TestWatchdog_FastCheckInterval(t *testing.T) {
+	t.Parallel()
+
 	mockSM := NewMockServiceManager()
 	st := state.NewState()
 
@@ -905,7 +960,8 @@ func TestWatchdog_FastCheckInterval(t *testing.T) {
 		ConfigLookup:   func(key string) string { return "" },
 	}
 
-	wd := NewWatchdog(cfg)
+	h := newHarness(t, cfg)
+	wd := h.wd
 
 	// Setup
 	wd.AddService(context.Background(), "memcached")
@@ -913,11 +969,11 @@ func TestWatchdog_FastCheckInterval(t *testing.T) {
 	mockSM.setRunning("memcached", true)
 
 	// Start watchdog
-	wd.Start(context.Background())
-	defer wd.Stop(context.Background())
+	h.start()
+	defer h.stop()
 
 	// Service is healthy - wait for multiple checks
-	time.Sleep(50 * time.Millisecond)
+	h.cycle()
 
 	// Should not have restarted healthy service
 	if mockSM.getRestartCount("memcached") > 0 {
@@ -928,7 +984,7 @@ func TestWatchdog_FastCheckInterval(t *testing.T) {
 	mockSM.setRunning("memcached", false)
 
 	// Wait for quick detection
-	time.Sleep(20 * time.Millisecond)
+	h.cycle()
 
 	// Should have restarted quickly
 	if mockSM.getRestartCount("memcached") != 1 {
@@ -938,6 +994,8 @@ func TestWatchdog_FastCheckInterval(t *testing.T) {
 
 // Test 20: Start when already running logs warning and is a no-op
 func TestStart_AlreadyRunning(t *testing.T) {
+	t.Parallel()
+
 	mockSM := NewMockServiceManager()
 	st := state.NewState()
 
@@ -947,14 +1005,12 @@ func TestStart_AlreadyRunning(t *testing.T) {
 		CheckInterval:  100 * time.Millisecond,
 	}
 
-	wd := NewWatchdog(cfg)
+	h := newHarness(t, cfg)
+	wd := h.wd
 	ctx := context.Background()
 
 	// First Start — normal path
-	wd.Start(ctx)
-
-	// Ensure goroutine is up
-	time.Sleep(10 * time.Millisecond)
+	h.start()
 
 	if !wd.IsEnabled() {
 		t.Fatal("Watchdog should be enabled after first Start()")
@@ -978,6 +1034,8 @@ func TestStart_AlreadyRunning(t *testing.T) {
 
 // Test 21: Stop when not running logs warning and is a no-op
 func TestStop_WhenNotRunning(t *testing.T) {
+	t.Parallel()
+
 	mockSM := NewMockServiceManager()
 	st := state.NewState()
 
@@ -1000,6 +1058,8 @@ func TestStop_WhenNotRunning(t *testing.T) {
 
 // Test 22: checkServices early-returns when enabled=false
 func TestCheckServices_WhenDisabled(t *testing.T) {
+	t.Parallel()
+
 	mockSM := NewMockServiceManager()
 	st := state.NewState()
 
@@ -1027,6 +1087,8 @@ func TestCheckServices_WhenDisabled(t *testing.T) {
 
 // Test 23: checkOneService skips a service that is not yet tracked
 func TestCheckOneService_ServiceNotTracked(t *testing.T) {
+	t.Parallel()
+
 	mockSM := NewMockServiceManager()
 	st := state.NewState()
 
@@ -1052,6 +1114,8 @@ func TestCheckOneService_ServiceNotTracked(t *testing.T) {
 
 // Test 24: Stop watchdog during service restart
 func TestWatchdog_StopDuringRestart(t *testing.T) {
+	t.Parallel()
+
 	mockSM := NewMockServiceManager()
 	st := state.NewState()
 
@@ -1062,7 +1126,8 @@ func TestWatchdog_StopDuringRestart(t *testing.T) {
 		ConfigLookup:   func(key string) string { return "" },
 	}
 
-	wd := NewWatchdog(cfg)
+	h := newHarness(t, cfg)
+	wd := h.wd
 
 	// Setup
 	wd.AddService(context.Background(), "mailboxd")
@@ -1072,12 +1137,10 @@ func TestWatchdog_StopDuringRestart(t *testing.T) {
 	mockSM.setRunning("mailboxd", false)
 
 	// Start watchdog
-	wd.Start(context.Background())
+	h.start()
 
-	// Allow very brief time for watchdog to start
-	time.Sleep(5 * time.Millisecond)
-
-	// Stop immediately (potentially during restart)
+	// Tick, then stop immediately (potentially during restart)
+	h.clock.Advance(h.wd.CheckInterval)
 	wd.Stop(context.Background())
 
 	// Verify watchdog stopped cleanly
@@ -1109,6 +1172,8 @@ func newEnabledWatchdog(t *testing.T, mockSM *MockServiceManager, nodeServices .
 // A watchdog-listed service not enabled on the node (antivirus on a
 // directory/appserver node) must not be probed, as in legacy configd.
 func TestCheckServices_SkipsServiceNotEnabledOnNode(t *testing.T) {
+	t.Parallel()
+
 	mockSM := NewMockServiceManager()
 	wd := newEnabledWatchdog(t, mockSM, "ldap", "mailbox")
 
@@ -1122,6 +1187,8 @@ func TestCheckServices_SkipsServiceNotEnabledOnNode(t *testing.T) {
 // A watchdog-listed service enabled and tracked on the node is probed once
 // per cycle; a stopped one is still restarted from that single probe.
 func TestCheckServices_ProbesEnabledServiceOncePerCycle(t *testing.T) {
+	t.Parallel()
+
 	for _, running := range []bool{true, false} {
 		t.Run(fmt.Sprintf("running=%v", running), func(t *testing.T) {
 			mockSM := NewMockServiceManager()

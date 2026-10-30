@@ -587,7 +587,7 @@ func setupTestConfigManagerForParser(baseDir string, enabledServices ...string) 
 	ctx := context.Background()
 	cacheInstance := cache.New(ctx, false)
 
-	cm := NewConfigManager(ctx, cfg, st, ldapClient, cacheInstance)
+	cm := NewConfigManager(ctx, cfg, st, ldapClient, cacheInstance, hostEnv())
 
 	return cm
 }

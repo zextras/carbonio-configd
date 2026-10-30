@@ -7,7 +7,6 @@ package services
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -15,11 +14,12 @@ import (
 
 	carboldap "github.com/zextras/carbonio-configd/internal/ldap"
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // ldapCustomStart builds and executes the slapd command with bind_url from localconfig.
-func ldapCustomStart(ctx context.Context, def *ServiceDef) error {
-	lc, err := loadConfig()
+func (c *Controller) ldapCustomStart(ctx context.Context, def *ServiceDef) error {
+	lc, err := c.loadConfig()
 	if err != nil {
 		return fmt.Errorf("failed to load localconfig: %w", err)
 	}
@@ -31,12 +31,12 @@ func ldapCustomStart(ctx context.Context, def *ServiceDef) error {
 		"-d", "0",
 		"-l", "LOCAL0",
 		"-h", bindURL + " ldapi:///",
-		"-F", dataPath + "/ldap/config",
+		"-F", c.p.data + "/ldap/config",
 	}
 
-	logFile := logPath + "/slapd.out"
+	logFile := c.p.log + "/slapd.out"
 
-	logFd, err := openLogFile(logFile)
+	logFd, err := c.openLogFile(logFile)
 	if err != nil {
 		return err
 	}
@@ -44,14 +44,17 @@ func ldapCustomStart(ctx context.Context, def *ServiceDef) error {
 	defer func() { _ = logFd.Close() }()
 
 	// slapd is a long-lived detached daemon: its lifetime must NOT be bound to
-	// the start request's context. With exec.CommandContext(ctx, ...) a later
-	// cancellation of ctx (e.g. a future cancellable ServiceStart caller) would
-	// SIGKILL slapd out from under the running system. Use a background context
-	// so only an explicit stop terminates it.
-	cmd := exec.CommandContext(context.Background(), commonPath+"/libexec/slapd", args...)
-	cmd.Stdout = logFd
-	cmd.Stderr = logFd
-	cmd.SysProcAttr = detachedSysProcAttr()
+	// the start request's context. Starting it with ctx, a later cancellation
+	// of ctx (e.g. a future cancellable ServiceStart caller) would SIGKILL
+	// slapd out from under the running system. startThenProbe starts it with
+	// a background context so only an explicit stop terminates it.
+	cmd := &sys.Cmd{
+		Path:   c.p.common + "/libexec/slapd",
+		Args:   args,
+		Stdout: logFd,
+		Stderr: logFd,
+		Setsid: true,
+	}
 
 	logger.InfoContext(ctx, "Starting LDAP server", "bind_url", bindURL, "log", logFile)
 
@@ -62,7 +65,7 @@ func ldapCustomStart(ctx context.Context, def *ServiceDef) error {
 	// start — seeing slapd already listening — succeeded. Instead we start
 	// slapd and actively probe the LDAP endpoint until it answers, so readiness
 	// reflects "actually serving" and returns in ~1s.
-	return startThenProbe(ctx, cmd, bindURL)
+	return c.startThenProbe(ctx, cmd, bindURL)
 }
 
 // ldapReadyTimeout bounds how long startThenProbe waits for slapd to begin
@@ -106,18 +109,15 @@ func buildLDAPBindURL(lc map[string]string) string {
 	return fmt.Sprintf("ldap://%s:%s", host, port)
 }
 
-// ldapProbeFn performs one readiness probe against the given LDAP URLs.
-// Overridable in tests. Returns nil when slapd answers.
-var ldapProbeFn = probeLDAPReady
-
 // startThenProbe starts cmd and waits until the LDAP server actually answers a
 // query (or the child exits, ctx is cancelled, or ldapReadyTimeout elapses).
 // This replaces sd_notify readiness for slapd, which is built without
 // libsystemd and never sends READY=1.
-func startThenProbe(ctx context.Context, cmd *exec.Cmd, bindURL string) error {
+func (c *Controller) startThenProbe(ctx context.Context, cmd *sys.Cmd, bindURL string) error {
 	const service = "ldap"
 
-	if err := cmd.Start(); err != nil {
+	proc, err := c.env.Exec.Start(context.Background(), cmd)
+	if err != nil {
 		return fmt.Errorf("start %s: %w", service, err)
 	}
 
@@ -125,18 +125,18 @@ func startThenProbe(ctx context.Context, cmd *exec.Cmd, bindURL string) error {
 	// timeout when slapd dies during startup (e.g. cannot bind its listener).
 	exited := make(chan error, 1)
 
-	go func() { exited <- cmd.Wait() }()
+	go func() { exited <- proc.Wait() }()
 
 	// bindURL may contain multiple space-separated URLs (HA); probe all.
 	urls := carboldap.ParseURLs(bindURL)
 
-	deadline := time.Now().Add(ldapReadyTimeout)
-	ticker := time.NewTicker(ldapProbeInterval)
+	deadline := c.env.Clock.Now().Add(ldapReadyTimeout)
+	ticker := c.env.Clock.NewTicker(ldapProbeInterval)
 
 	defer ticker.Stop()
 
 	for {
-		if err := ldapProbeFn(ctx, urls); err == nil {
+		if err := c.ldapProbe(ctx, urls); err == nil {
 			logger.InfoContext(ctx, "LDAP server is answering queries", "service", service, "urls", urls)
 
 			return nil
@@ -147,8 +147,8 @@ func startThenProbe(ctx context.Context, cmd *exec.Cmd, bindURL string) error {
 			return ctx.Err()
 		case waitErr := <-exited:
 			return fmt.Errorf("%s exited during startup before becoming ready: %w", service, waitErr)
-		case <-ticker.C:
-			if time.Now().After(deadline) {
+		case <-ticker.C():
+			if c.env.Clock.Now().After(deadline) {
 				return fmt.Errorf("%s did not become ready within %s", service, ldapReadyTimeout)
 			}
 		}

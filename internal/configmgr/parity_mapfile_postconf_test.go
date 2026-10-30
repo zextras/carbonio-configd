@@ -27,7 +27,7 @@ const dhParamKey = "zimbraSSLDHParam"
 // rewrites it on every lookup), and that steady-state cycles report no change.
 func TestCompareKeys_MapfileSelfHeals(t *testing.T) {
 	cm, _ := newTestCMWithExecutor(t)
-	cm.mtaExecutor = mtaops.NewExecutor(cm.mainConfig.BaseDir, nil)
+	cm.mtaExecutor = mtaops.NewExecutor(cm.mainConfig.BaseDir, nil, cm.env)
 	cm.comparator = NewComparator(cm, cm.State, cm.ServiceMgr)
 
 	content := []byte("dh params")

@@ -14,7 +14,9 @@ import (
 	"io"
 
 	"github.com/zextras/carbonio-configd/internal/cli/cliutil"
+	"github.com/zextras/carbonio-configd/internal/cli/status"
 	"github.com/zextras/carbonio-configd/internal/services"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // Action is the "configd control" subcommand to run.
@@ -36,20 +38,32 @@ type Options struct {
 	Host string
 }
 
-// Overridable in tests: the real implementation probes live services.
-var controlStatusFn = controlStatus
+// orchestrator carries what one "configd control" invocation drives: the
+// Controller, the status reporter and the per-service status probe.
+type orchestrator struct {
+	ctl      *services.Controller
+	reporter *status.Reporter
+	// svcStatus probes one service; defaults to ctl.ServiceStatus.
+	svcStatus func(ctx context.Context, name string) (bool, error)
+}
+
+func newOrchestrator(env sys.System) *orchestrator {
+	ctl := services.NewController(env)
+
+	return &orchestrator{ctl: ctl, reporter: status.NewReporter(env, ctl), svcStatus: ctl.ServiceStatus}
+}
 
 // Run executes "configd control" and returns the exit status. Every action
 // requires the zextras user.
-func Run(ctx context.Context, stdout, stderr io.Writer, opts *Options) int {
+func Run(ctx context.Context, env sys.System, stdout, stderr io.Writer, opts *Options) int {
 	if !cliutil.RequireZextras(stderr) {
 		return 1
 	}
 
-	return run(ctx, stdout, stderr, opts)
+	return newOrchestrator(env).run(ctx, stdout, stderr, opts)
 }
 
-func run(ctx context.Context, stdout, stderr io.Writer, opts *Options) int {
+func (o *orchestrator) run(ctx context.Context, stdout, stderr io.Writer, opts *Options) int {
 	cliutil.InitCLILogging(stderr)
 
 	c := cliutil.NewConsole(stdout, stderr)
@@ -58,10 +72,10 @@ func run(ctx context.Context, stdout, stderr io.Writer, opts *Options) int {
 		// Legacy parity: control.pl:doStatus returns 1 when a service is
 		// stopped. Return it directly so stderr stays free of an "Error:"
 		// line legacy never printed.
-		return controlStatusFn(ctx, c)
+		return o.controlStatus(ctx, c)
 	}
 
-	if err := dispatch(ctx, c, opts); err != nil {
+	if err := o.dispatch(ctx, c, opts); err != nil {
 		_, _ = fmt.Fprintf(stderr, "Error: %v\n", err)
 
 		return 1
@@ -70,16 +84,16 @@ func run(ctx context.Context, stdout, stderr io.Writer, opts *Options) int {
 	return 0
 }
 
-func dispatch(ctx context.Context, c *cliutil.Console, opts *Options) error {
+func (o *orchestrator) dispatch(ctx context.Context, c *cliutil.Console, opts *Options) error {
 	switch opts.Action {
 	case ActionStart:
-		return start(ctx, c, opts.Host)
+		return o.start(ctx, c, opts.Host)
 	case ActionStop:
-		return stop(ctx, c, opts.Host)
+		return o.stop(ctx, c, opts.Host)
 	case ActionRestart:
-		return restart(ctx, c, opts.Host)
+		return o.restart(ctx, c, opts.Host)
 	case ActionStatus:
-		_, err := services.RemoteHostStatus(ctx, opts.Host, "all")
+		_, err := o.ctl.RemoteHostStatus(ctx, opts.Host, "all")
 
 		return err
 	default:
@@ -87,42 +101,42 @@ func dispatch(ctx context.Context, c *cliutil.Console, opts *Options) error {
 	}
 }
 
-func start(ctx context.Context, c *cliutil.Console, host string) error {
+func (o *orchestrator) start(ctx context.Context, c *cliutil.Console, host string) error {
 	if host != "" {
-		return services.RemoteHostStart(ctx, host, "all")
+		return o.ctl.RemoteHostStart(ctx, host, "all")
 	}
 
-	if controlStart(ctx, c) != 0 {
+	if o.controlStart(ctx, c) != 0 {
 		return errors.New("some services failed to start")
 	}
 
 	return nil
 }
 
-func stop(ctx context.Context, c *cliutil.Console, host string) error {
+func (o *orchestrator) stop(ctx context.Context, c *cliutil.Console, host string) error {
 	if host != "" {
-		return services.RemoteHostStop(ctx, host, "all")
+		return o.ctl.RemoteHostStop(ctx, host, "all")
 	}
 
-	if controlStop(ctx, c) != 0 {
+	if o.controlStop(ctx, c) != 0 {
 		return errors.New("some services failed to stop")
 	}
 
 	return nil
 }
 
-func restart(ctx context.Context, c *cliutil.Console, host string) error {
+func (o *orchestrator) restart(ctx context.Context, c *cliutil.Console, host string) error {
 	if host != "" {
-		if err := services.RemoteHostStop(ctx, host, "all"); err != nil {
+		if err := o.ctl.RemoteHostStop(ctx, host, "all"); err != nil {
 			return err
 		}
 
-		return services.RemoteHostStart(ctx, host, "all")
+		return o.ctl.RemoteHostStart(ctx, host, "all")
 	}
 
 	// Legacy parity: control.pl doRestart runs doShutdown then doStartup
 	// unconditionally; the stop result is deliberately not consulted.
-	controlStop(ctx, c)
+	o.controlStop(ctx, c)
 
-	return start(ctx, c, "")
+	return o.start(ctx, c, "")
 }

@@ -12,17 +12,21 @@ import (
 
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/state"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // resolver implements the OperationResolver interface.
 type resolver struct {
 	baseDir string
+	env     sys.System
 }
 
-// NewResolver creates a new operation resolver.
-func NewResolver(baseDir string) OperationResolver {
+// NewResolver creates a new operation resolver. MAPLOCAL lookups stat the
+// mapped file through env.
+func NewResolver(baseDir string, env sys.System) OperationResolver {
 	return &resolver{
 		baseDir: baseDir,
+		env:     env,
 	}
 }
 
@@ -83,7 +87,7 @@ func (r *resolver) resolveMAPLOCAL(ctx context.Context, key string) (string, err
 		return "", fmt.Errorf("MAPLOCAL: unknown mapped file key: %s", key)
 	}
 
-	if _, err := os.Stat(filePath); err != nil {
+	if _, err := r.env.FS.Stat(filePath); err != nil {
 		if os.IsNotExist(err) {
 			logger.DebugContext(ctx, "MAPLOCAL file does not exist",
 				"key", key, "file_path", filePath)

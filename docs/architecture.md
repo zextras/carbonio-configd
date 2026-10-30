@@ -26,14 +26,34 @@ Source: `cmd/configd/cli.go` (`DaemonCmd.Run`), `cmd/configd/configd.go`, `cmd/c
 
 Inside `RunMainLoop` before the first iteration:
 
-- `configmgr.NewConfigManager` and `services.NewServiceManager` are constructed.
-- `systemd.NewManager().IsSystemdEnabled` checks whether Carbonio systemd targets exist;
-  the service manager itself gates on this internally via `services.IsSystemdMode()` — there
-  is no longer a per-instance mode flag to set.
+- `configmgr.NewConfigManager` and `services.NewServiceManager(services.NewController(env))` are
+  constructed. `env` is the `sys.System` built once in `main` (`sys.Real()`).
+- `systemd.NewManager(env).IsSystemdEnabled` checks whether Carbonio systemd targets exist;
+  the service manager itself gates on this internally via `Controller.IsSystemdMode()` — there
+  is no per-instance mode flag to set.
 - A watchdog goroutine is started.
 - Signal handlers are registered (SIGTERM/SIGINT → cancel context; SIGHUP → reload channel).
 - The systemd watchdog keep-alive goroutine is started when `WATCHDOG_USEC` is set, pinging
   at half the declared interval.
+
+## Side-effect boundary (`internal/sys`)
+
+Every host side effect that production code performs — running a program (`sys.Exec`), touching
+the filesystem (`sys.FS`), inspecting or signalling processes (`sys.Proc`) and behavioural time
+(`sys.Clock`: tickers, timers, sleeps, retry back-off) — goes through the interfaces bundled in
+`sys.System`. `main` builds `sys.Real()` once and passes it through constructors and struct fields
+(`configmgr.NewConfigManager`, `services.NewController`, `mtaops.NewExecutor`,
+`proxy.NewGenerator`, `watchdog.Config.Clock`, the `Run` entry points of `internal/cli/*`); there
+are no package-level seam variables.
+
+Tests use the recording fakes in `internal/sys/systest` (`systest.New()`): an in-memory
+filesystem, a scripted `Exec`, a process table and a manual clock, all writing to one ordered
+`Recorder`, so a test can assert the exact sequence of side effects of a cycle (see
+`internal/configmgr/do_config_rewrites_sequence_test.go`). Tests that are about real OS behaviour
+pass `sys.Real()` with `t.TempDir()`.
+
+Deliberately outside the boundary: network I/O (LDAP, the TCP 7171 listener, the sd_notify
+datagram socket), `os.Getenv`, and `time.Now()` used only to log durations.
 
 ## Main loop phases
 

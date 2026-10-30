@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/state"
+	"github.com/zextras/carbonio-configd/internal/sys"
+	"github.com/zextras/carbonio-configd/internal/sys/systest"
 	"github.com/zextras/carbonio-configd/internal/testutil"
 	"io"
 	"os"
@@ -47,7 +49,7 @@ func newMockLookup() *testutil.MockConfigLookup {
 func TestRewriteReader(t *testing.T) {
 	mockLookup := newMockLookup()
 	st := &state.State{}
-	rewriter := NewRewriter("/opt/zextras", mockLookup, st)
+	rewriter := NewRewriter("/opt/zextras", mockLookup, st, systest.New().System())
 
 	tests := []struct {
 		name     string
@@ -111,7 +113,7 @@ func TestRewriteReader(t *testing.T) {
 func TestRewriteReader_MultipleLines(t *testing.T) {
 	mockLookup := newMockLookup()
 	st := &state.State{}
-	rewriter := NewRewriter("/opt/zextras", mockLookup, st)
+	rewriter := NewRewriter("/opt/zextras", mockLookup, st, systest.New().System())
 
 	input := `# Postfix configuration
 myhostname = %%VAR:zimbraServerHostname%%
@@ -159,7 +161,7 @@ func TestRewriteConfig(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	rewriter := NewRewriter(tmpDir, mockLookup, st)
+	rewriter := NewRewriter(tmpDir, mockLookup, st, sys.Real())
 
 	// Create a source .in file
 	sourceContent := `myhostname = %%VAR:zimbraServerHostname%%
@@ -218,7 +220,7 @@ func TestRewriteConfig_CustomMode(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	rewriter := NewRewriter(tmpDir, mockLookup, st)
+	rewriter := NewRewriter(tmpDir, mockLookup, st, sys.Real())
 
 	// Create a source .in file
 	sourceContent := `secret_key = %%VAR:zimbraServerHostname%%`
@@ -255,7 +257,7 @@ func TestRewriteConfig_AtomicOverwrite(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	rewriter := NewRewriter(tmpDir, mockLookup, st)
+	rewriter := NewRewriter(tmpDir, mockLookup, st, sys.Real())
 
 	// Create a source .in file
 	sourceContent := `hostname = %%VAR:zimbraServerHostname%%`
@@ -296,7 +298,7 @@ func TestRewriteConfig_InvalidMode(t *testing.T) {
 	tmpDir, _ := os.MkdirTemp("", "configd-rewrite-test-*")
 	defer os.RemoveAll(tmpDir)
 
-	rewriter := NewRewriter(tmpDir, mockLookup, st)
+	rewriter := NewRewriter(tmpDir, mockLookup, st, sys.Real())
 
 	// Test with invalid mode
 	err := rewriter.RewriteConfig(context.Background(), "test.in", "test.out", "invalid")
@@ -314,7 +316,7 @@ func TestRewriteConfig_MissingSourceFile(t *testing.T) {
 	tmpDir, _ := os.MkdirTemp("", "configd-rewrite-test-*")
 	defer os.RemoveAll(tmpDir)
 
-	rewriter := NewRewriter(tmpDir, mockLookup, st)
+	rewriter := NewRewriter(tmpDir, mockLookup, st, sys.Real())
 
 	// Test with non-existent source file
 	err := rewriter.RewriteConfig(context.Background(), "nonexistent.in", "test.out", "")
@@ -337,7 +339,7 @@ func TestRewriteAllConfigs(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	rewriter := NewRewriter(tmpDir, mockLookup, st)
+	rewriter := NewRewriter(tmpDir, mockLookup, st, sys.Real())
 
 	// Create source files
 	sourceFiles := map[string]string{
@@ -444,7 +446,7 @@ func (e *errorWriter) Write(p []byte) (int, error) {
 func TestRewriteReader_WriteError(t *testing.T) {
 	mockLookup := newMockLookup()
 	st := &state.State{}
-	rewriter := NewRewriter("/opt/zextras", mockLookup, st)
+	rewriter := NewRewriter("/opt/zextras", mockLookup, st, systest.New().System())
 
 	// bufio.Writer buffers writes; the underlying write error surfaces either on
 	// WriteString (if buffer is full) or on Flush. Either way an error is returned.
@@ -465,7 +467,7 @@ func TestRewriteReader_WriteError(t *testing.T) {
 func TestRewriteReader_FlushError(t *testing.T) {
 	mockLookup := newMockLookup()
 	st := &state.State{}
-	rewriter := NewRewriter("/opt/zextras", mockLookup, st)
+	rewriter := NewRewriter("/opt/zextras", mockLookup, st, systest.New().System())
 
 	// Use a pipe: close the read-end with an error so the write-end always fails.
 	pr, pw := io.Pipe()
@@ -491,7 +493,7 @@ func TestRewriteConfig_TargetInSubdir(t *testing.T) {
 	mockLookup := newMockLookup()
 	st := &state.State{}
 	tmpDir := t.TempDir()
-	rewriter := NewRewriter(tmpDir, mockLookup, st)
+	rewriter := NewRewriter(tmpDir, mockLookup, st, sys.Real())
 
 	sourceContent := "hostname = %%VAR:zimbraServerHostname%%\n"
 	sourcePath := filepath.Join(tmpDir, "source.in")
@@ -527,7 +529,7 @@ func TestRewriteConfig_EmptySource(t *testing.T) {
 	mockLookup := newMockLookup()
 	st := &state.State{}
 	tmpDir := t.TempDir()
-	rewriter := NewRewriter(tmpDir, mockLookup, st)
+	rewriter := NewRewriter(tmpDir, mockLookup, st, sys.Real())
 
 	// Empty source file — scanner produces no lines, result should be empty.
 	sourcePath := filepath.Join(tmpDir, "empty.in")
@@ -554,7 +556,7 @@ func TestRewriteConfig_UnknownVarFallback(t *testing.T) {
 	mockLookup := newMockLookup()
 	st := &state.State{}
 	tmpDir := t.TempDir()
-	rewriter := NewRewriter(tmpDir, mockLookup, st)
+	rewriter := NewRewriter(tmpDir, mockLookup, st, sys.Real())
 
 	// Template with an unknown variable — transformer falls back to empty or key name.
 	sourceContent := "key = %%VAR:unknownKey%%\n"
@@ -580,7 +582,7 @@ func TestRewriteConfig_SourceDoesNotExist(t *testing.T) {
 	mockLookup := newMockLookup()
 	st := &state.State{}
 	tmpDir := t.TempDir()
-	rewriter := NewRewriter(tmpDir, mockLookup, st)
+	rewriter := NewRewriter(tmpDir, mockLookup, st, sys.Real())
 
 	err := rewriter.RewriteConfig(context.Background(), "ghost.in", "ghost.conf", "0440")
 	if err == nil {
@@ -598,7 +600,7 @@ func TestRewriteConfig_PlainTextLines(t *testing.T) {
 	mockLookup := newMockLookup()
 	st := &state.State{}
 	tmpDir := t.TempDir()
-	rewriter := NewRewriter(tmpDir, mockLookup, st)
+	rewriter := NewRewriter(tmpDir, mockLookup, st, sys.Real())
 
 	// A source with plain-text lines (no %% substitutions) — transformer returns
 	// them without a trailing '\n', triggering the HasSuffix branch body.
@@ -628,7 +630,7 @@ func TestRewriteConfig_PlainTextLines(t *testing.T) {
 func TestRewriteReader_PlainTextLines(t *testing.T) {
 	mockLookup := newMockLookup()
 	st := &state.State{}
-	rewriter := NewRewriter("/opt/zextras", mockLookup, st)
+	rewriter := NewRewriter("/opt/zextras", mockLookup, st, systest.New().System())
 
 	// Plain lines: transformer returns without '\n', rewriter appends it.
 	input := strings.NewReader("# comment\nplain = value\n")
@@ -669,7 +671,7 @@ func TestRewriteConfig_MkdirAllFailure(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(noWriteDir, 0o755) })
 
-	rewriter := NewRewriter(tmpDir, mockLookup, st)
+	rewriter := NewRewriter(tmpDir, mockLookup, st, sys.Real())
 
 	// Target path is inside the unwritable directory — MkdirAll must fail.
 	err := rewriter.RewriteConfig(context.Background(), "source.in", "noperm/sub/out.conf", "0440")
@@ -706,7 +708,7 @@ func TestRewriteConfig_CreateTempFailure(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(targetDir, 0o755) })
 
-	rewriter := NewRewriter(tmpDir, mockLookup, st)
+	rewriter := NewRewriter(tmpDir, mockLookup, st, sys.Real())
 
 	err := rewriter.RewriteConfig(context.Background(), "source.in", "readonly/out.conf", "0440")
 	if err == nil {
@@ -730,7 +732,7 @@ func TestRewriteConfig_ChmodFailure(t *testing.T) {
 		t.Fatalf("setup: write source: %v", err)
 	}
 
-	rewriter := NewRewriter(tmpDir, mockLookup, st)
+	rewriter := NewRewriter(tmpDir, mockLookup, st, sys.Real())
 	err := rewriter.RewriteConfig(context.Background(), "source.in", "out.conf", "0755")
 	if err != nil {
 		t.Fatalf("RewriteConfig with mode 0755: %v", err)
@@ -762,7 +764,7 @@ func TestRewriteConfig_FlushAndCloseCoverage(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 
-	rewriter := NewRewriter(tmpDir, mockLookup, st)
+	rewriter := NewRewriter(tmpDir, mockLookup, st, sys.Real())
 
 	err := rewriter.RewriteConfig(context.Background(), "large.in", "large.conf", "0640")
 	if err != nil {
@@ -790,7 +792,7 @@ func TestRewriteConfig_TargetSubdirMultiLevel(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 
-	rewriter := NewRewriter(tmpDir, mockLookup, st)
+	rewriter := NewRewriter(tmpDir, mockLookup, st, sys.Real())
 
 	err := rewriter.RewriteConfig(context.Background(), "s.in", "a/b/c/d/out.conf", "0600")
 	if err != nil {
@@ -822,7 +824,7 @@ func TestRewriteConfig_OverwriteReadOnly(t *testing.T) {
 		t.Fatalf("setup target: %v", err)
 	}
 
-	rewriter := NewRewriter(tmpDir, mockLookup, st)
+	rewriter := NewRewriter(tmpDir, mockLookup, st, sys.Real())
 
 	err := rewriter.RewriteConfig(context.Background(), "ro.in", "ro.conf", "0440")
 	if err != nil {
@@ -843,7 +845,7 @@ func TestRewriteConfig_OverwriteReadOnly(t *testing.T) {
 func TestRewriteReader_ScannerError(t *testing.T) {
 	mockLookup := newMockLookup()
 	st := &state.State{}
-	rewriter := NewRewriter("/opt/zextras", mockLookup, st)
+	rewriter := NewRewriter("/opt/zextras", mockLookup, st, systest.New().System())
 
 	// A single line longer than bufio.MaxScanTokenSize (64 KiB) causes
 	// scanner.Scan() to return false and scanner.Err() to return a non-nil error.

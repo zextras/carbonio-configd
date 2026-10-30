@@ -88,6 +88,7 @@ func TestProcessIsRunning(t *testing.T) {
 	}
 
 	cm := &ConfigManager{
+		env: hostEnv(),
 		mainConfig: &config.Config{
 			BaseDir:  "/tmp",
 			Hostname: "testhost",
@@ -133,6 +134,7 @@ func TestProcessIsNotRunning(t *testing.T) {
 	}
 
 	cm := &ConfigManager{
+		env: hostEnv(),
 		mainConfig: &config.Config{
 			BaseDir:  "/tmp",
 			Hostname: "testhost",
@@ -348,6 +350,7 @@ func TestDoRestarts(t *testing.T) {
 		}
 
 		cm := &ConfigManager{
+			env: hostEnv(),
 			mainConfig: &config.Config{
 				BaseDir:  "/tmp",
 				Hostname: "testhost",
@@ -396,6 +399,7 @@ func TestDoRestarts(t *testing.T) {
 		mockSvcMgr := &testutil.MockServiceManager{}
 
 		cm := &ConfigManager{
+			env: hostEnv(),
 			mainConfig: &config.Config{
 				BaseDir:  "/tmp",
 				Hostname: "testhost",
@@ -429,6 +433,7 @@ func TestClearLocalConfigCache(t *testing.T) {
 
 	t.Run("clear non-empty cache", func(t *testing.T) {
 		cm := &ConfigManager{
+			env: hostEnv(),
 			mainConfig: &config.Config{
 				BaseDir:  "/tmp",
 				Hostname: "testhost",
@@ -454,6 +459,7 @@ func TestClearLocalConfigCache(t *testing.T) {
 
 	t.Run("clear already empty cache", func(t *testing.T) {
 		cm := &ConfigManager{
+			env: hostEnv(),
 			mainConfig: &config.Config{
 				BaseDir:  "/tmp",
 				Hostname: "testhost",
@@ -497,7 +503,7 @@ func TestCleanupRewriteFiles(t *testing.T) {
 		}
 
 		// Call cleanup
-		cleanupRewriteFiles(ctx, srcFile, tmpFile, tmpPath)
+		realFSConfigManager().cleanupRewriteFiles(ctx, srcFile, tmpFile, tmpPath)
 
 		// Verify temp file was removed
 		if _, err := os.Stat(tmpPath); err == nil {
@@ -514,7 +520,7 @@ func TestCleanupRewriteFiles(t *testing.T) {
 		}
 
 		// Call cleanup with nil source
-		cleanupRewriteFiles(ctx, nil, tmpFile, tmpPath)
+		realFSConfigManager().cleanupRewriteFiles(ctx, nil, tmpFile, tmpPath)
 
 		// Verify temp file was removed
 		if _, err := os.Stat(tmpPath); err == nil {
@@ -531,14 +537,14 @@ func TestCleanupRewriteFiles(t *testing.T) {
 		}
 
 		// Call cleanup with nil temp file
-		cleanupRewriteFiles(ctx, srcFile, nil, "")
+		realFSConfigManager().cleanupRewriteFiles(ctx, srcFile, nil, "")
 
 		// Should complete without error (nothing to verify since no temp file)
 	})
 
 	t.Run("cleanup with all nil", func(t *testing.T) {
 		// Call cleanup with everything nil (should be a no-op)
-		cleanupRewriteFiles(ctx, nil, nil, "")
+		realFSConfigManager().cleanupRewriteFiles(ctx, nil, nil, "")
 
 		// Should complete without error
 	})
@@ -552,7 +558,7 @@ func TestCleanupRewriteFiles(t *testing.T) {
 		}
 
 		// Call cleanup with nonexistent temp file path
-		cleanupRewriteFiles(ctx, srcFile, nil, tmpDir+"/nonexistent.txt")
+		realFSConfigManager().cleanupRewriteFiles(ctx, srcFile, nil, tmpDir+"/nonexistent.txt")
 
 		// Should complete without error even though file doesn't exist
 	})
@@ -570,6 +576,7 @@ func TestCompileActions(t *testing.T) {
 		mockSvcMgr := &testutil.MockServiceManager{}
 
 		cm := &ConfigManager{
+			env: hostEnv(),
 			mainConfig: &config.Config{
 				BaseDir:  "/tmp",
 				Hostname: "testhost",
@@ -619,6 +626,7 @@ func TestCompileActions(t *testing.T) {
 		mockSvcMgr := &testutil.MockServiceManager{}
 
 		cm := &ConfigManager{
+			env: hostEnv(),
 			mainConfig: &config.Config{
 				BaseDir:  "/tmp",
 				Hostname: "testhost",
@@ -669,6 +677,7 @@ func TestCompileActions(t *testing.T) {
 		mockSvcMgr := &testutil.MockServiceManager{}
 
 		cm := &ConfigManager{
+			env: hostEnv(),
 			mainConfig: &config.Config{
 				BaseDir:  "/tmp",
 				Hostname: "testhost",
@@ -727,6 +736,7 @@ func TestCompileActions_ForcedSectionRestartsAreSectionScoped(t *testing.T) {
 	cacheInstance := cache.New(ctx, false)
 
 	cm := &ConfigManager{
+		env: hostEnv(),
 		mainConfig: &config.Config{
 			BaseDir:  "/tmp",
 			Hostname: "testhost",
@@ -784,6 +794,7 @@ func TestLookUpConfig(t *testing.T) {
 
 	t.Run("lookup VAR type from GlobalConfig", func(t *testing.T) {
 		cm := &ConfigManager{
+			env: hostEnv(),
 			mainConfig: &config.Config{
 				BaseDir:  tmpDir,
 				Hostname: "testhost",
@@ -806,6 +817,7 @@ func TestLookUpConfig(t *testing.T) {
 
 	t.Run("lookup VAR type from MiscConfig", func(t *testing.T) {
 		cm := &ConfigManager{
+			env: hostEnv(),
 			mainConfig: &config.Config{
 				BaseDir:  tmpDir,
 				Hostname: "testhost",
@@ -828,6 +840,7 @@ func TestLookUpConfig(t *testing.T) {
 
 	t.Run("lookup VAR type from ServerConfig", func(t *testing.T) {
 		cm := &ConfigManager{
+			env: hostEnv(),
 			mainConfig: &config.Config{
 				BaseDir:  tmpDir,
 				Hostname: "testhost",
@@ -850,6 +863,7 @@ func TestLookUpConfig(t *testing.T) {
 
 	t.Run("lookup LOCAL type", func(t *testing.T) {
 		cm := &ConfigManager{
+			env: hostEnv(),
 			mainConfig: &config.Config{
 				BaseDir:  tmpDir,
 				Hostname: "testhost",
@@ -872,6 +886,7 @@ func TestLookUpConfig(t *testing.T) {
 
 	t.Run("lookup SERVICE type - enabled", func(t *testing.T) {
 		cm := &ConfigManager{
+			env: hostEnv(),
 			mainConfig: &config.Config{
 				BaseDir:  tmpDir,
 				Hostname: "testhost",
@@ -894,6 +909,7 @@ func TestLookUpConfig(t *testing.T) {
 
 	t.Run("lookup SERVICE type - disabled", func(t *testing.T) {
 		cm := &ConfigManager{
+			env: hostEnv(),
 			mainConfig: &config.Config{
 				BaseDir:  tmpDir,
 				Hostname: "testhost",
@@ -914,6 +930,7 @@ func TestLookUpConfig(t *testing.T) {
 
 	t.Run("lookup unknown config type", func(t *testing.T) {
 		cm := &ConfigManager{
+			env: hostEnv(),
 			mainConfig: &config.Config{
 				BaseDir:  tmpDir,
 				Hostname: "testhost",
@@ -930,6 +947,7 @@ func TestLookUpConfig(t *testing.T) {
 
 	t.Run("lookup VAR type - key not found", func(t *testing.T) {
 		cm := &ConfigManager{
+			env: hostEnv(),
 			mainConfig: &config.Config{
 				BaseDir:  tmpDir,
 				Hostname: "testhost",
@@ -959,6 +977,7 @@ func TestLookUpConfig(t *testing.T) {
 
 		stateInstance := state.NewState()
 		cm := &ConfigManager{
+			env: hostEnv(),
 			mainConfig: &config.Config{
 				BaseDir:  tmpDir,
 				Hostname: "testhost",
@@ -990,6 +1009,7 @@ func TestLookUpConfig(t *testing.T) {
 	t.Run("lookup FILE type - from cache", func(t *testing.T) {
 		stateInstance := state.NewState()
 		cm := &ConfigManager{
+			env: hostEnv(),
 			mainConfig: &config.Config{
 				BaseDir:  tmpDir,
 				Hostname: "testhost",
@@ -1014,6 +1034,7 @@ func TestLookUpConfig(t *testing.T) {
 	t.Run("lookup FILE type - file not found", func(t *testing.T) {
 		stateInstance := state.NewState()
 		cm := &ConfigManager{
+			env: hostEnv(),
 			mainConfig: &config.Config{
 				BaseDir:  tmpDir,
 				Hostname: "testhost",
@@ -1042,6 +1063,7 @@ func TestLookUpConfig(t *testing.T) {
 		}
 
 		cm := &ConfigManager{
+			env: hostEnv(),
 			mainConfig: &config.Config{
 				BaseDir:  tmpDir,
 				Hostname: "testhost",
@@ -1065,6 +1087,7 @@ func TestLookUpConfig(t *testing.T) {
 		// Use a fresh temp directory without creating conf dir
 		tmpDir2 := t.TempDir()
 		cm := &ConfigManager{
+			env: hostEnv(),
 			mainConfig: &config.Config{
 				BaseDir:  tmpDir2,
 				Hostname: "testhost",
@@ -1086,6 +1109,7 @@ func TestLookUpConfig(t *testing.T) {
 
 	t.Run("lookup MAPFILE type - key not in MAPPEDFILES", func(t *testing.T) {
 		cm := &ConfigManager{
+			env: hostEnv(),
 			mainConfig: &config.Config{
 				BaseDir:  tmpDir,
 				Hostname: "testhost",
@@ -1113,6 +1137,7 @@ func TestLookUpConfig(t *testing.T) {
 		}
 
 		cm := &ConfigManager{
+			env: hostEnv(),
 			mainConfig: &config.Config{
 				BaseDir:  tmpDir,
 				Hostname: "testhost",
@@ -1135,6 +1160,7 @@ func TestLookUpConfig(t *testing.T) {
 		// Use a fresh temp directory without creating conf dir
 		tmpDir3 := t.TempDir()
 		cm := &ConfigManager{
+			env: hostEnv(),
 			mainConfig: &config.Config{
 				BaseDir:  tmpDir3,
 				Hostname: "testhost",
@@ -1163,6 +1189,7 @@ func TestCompileSectionActions(t *testing.T) {
 
 	t.Run("compile rewrites", func(t *testing.T) {
 		cm := &ConfigManager{
+			env: hostEnv(),
 			mainConfig: &config.Config{
 				BaseDir:  "/tmp",
 				Hostname: "testhost",
@@ -1196,6 +1223,7 @@ func TestCompileSectionActions(t *testing.T) {
 
 	t.Run("compile postconf and postconfd", func(t *testing.T) {
 		cm := &ConfigManager{
+			env: hostEnv(),
 			mainConfig: &config.Config{
 				BaseDir:  "/tmp",
 				Hostname: "testhost",
@@ -1237,6 +1265,7 @@ func TestCompileSectionActions(t *testing.T) {
 
 	t.Run("compile proxygen directive", func(t *testing.T) {
 		cm := &ConfigManager{
+			env: hostEnv(),
 			mainConfig: &config.Config{
 				BaseDir:  "/tmp",
 				Hostname: "testhost",
@@ -1261,6 +1290,7 @@ func TestCompileSectionActions(t *testing.T) {
 
 	t.Run("compile ldap entries", func(t *testing.T) {
 		cm := &ConfigManager{
+			env: hostEnv(),
 			mainConfig: &config.Config{
 				BaseDir:  "/tmp",
 				Hostname: "testhost",
@@ -1291,6 +1321,7 @@ func TestCompileSectionActions(t *testing.T) {
 
 	t.Run("skip restarts on first run", func(t *testing.T) {
 		cm := &ConfigManager{
+			env: hostEnv(),
 			mainConfig: &config.Config{
 				BaseDir:  "/tmp",
 				Hostname: "testhost",
@@ -1319,6 +1350,7 @@ func TestCompileSectionActions(t *testing.T) {
 
 	t.Run("skip restarts with forced config", func(t *testing.T) {
 		cm := &ConfigManager{
+			env: hostEnv(),
 			mainConfig: &config.Config{
 				BaseDir:  "/tmp",
 				Hostname: "testhost",
@@ -1347,6 +1379,7 @@ func TestCompileSectionActions(t *testing.T) {
 
 	t.Run("skip restarts with requested config", func(t *testing.T) {
 		cm := &ConfigManager{
+			env: hostEnv(),
 			mainConfig: &config.Config{
 				BaseDir:  "/tmp",
 				Hostname: "testhost",
@@ -1374,6 +1407,7 @@ func TestCompileSectionActions(t *testing.T) {
 
 	t.Run("add restart for enabled service", func(t *testing.T) {
 		cm := &ConfigManager{
+			env: hostEnv(),
 			mainConfig: &config.Config{
 				BaseDir:  "/tmp",
 				Hostname: "testhost",
@@ -1404,6 +1438,7 @@ func TestCompileSectionActions(t *testing.T) {
 
 	t.Run("add stop for disabled service", func(t *testing.T) {
 		cm := &ConfigManager{
+			env: hostEnv(),
 			mainConfig: &config.Config{
 				BaseDir:  "/tmp",
 				Hostname: "testhost",
@@ -1434,6 +1469,7 @@ func TestCompileSectionActions(t *testing.T) {
 
 	t.Run("add opendkim restart when mta is enabled", func(t *testing.T) {
 		cm := &ConfigManager{
+			env: hostEnv(),
 			mainConfig: &config.Config{
 				BaseDir:  "/tmp",
 				Hostname: "testhost",
@@ -1465,6 +1501,7 @@ func TestCompileSectionActions(t *testing.T) {
 
 	t.Run("compile conditionals", func(t *testing.T) {
 		cm := &ConfigManager{
+			env: hostEnv(),
 			mainConfig: &config.Config{
 				BaseDir:  "/tmp",
 				Hostname: "testhost",
@@ -1503,6 +1540,7 @@ func TestCompileSectionActions(t *testing.T) {
 
 	t.Run("compile multiple directives together", func(t *testing.T) {
 		cm := &ConfigManager{
+			env: hostEnv(),
 			mainConfig: &config.Config{
 				BaseDir:  "/tmp",
 				Hostname: "testhost",
@@ -1571,6 +1609,7 @@ func TestCompileActions_ConcurrentWithDelRewrite(t *testing.T) {
 	cacheInstance := cache.New(ctx, false)
 
 	cm := &ConfigManager{
+		env: hostEnv(),
 		mainConfig: &config.Config{
 			BaseDir:  t.TempDir(),
 			Hostname: "testhost",
@@ -1644,6 +1683,7 @@ func TestDoConfigRewrites_ErrorCollection(t *testing.T) {
 	cacheInstance := cache.New(ctx, false)
 
 	cm := &ConfigManager{
+		env: hostEnv(),
 		mainConfig: &config.Config{
 			BaseDir:  t.TempDir(),
 			Hostname: "testhost",
@@ -1679,6 +1719,7 @@ func TestDoConfigRewrites_ErrorSurfacing(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	cm := &ConfigManager{
+		env: hostEnv(),
 		mainConfig: &config.Config{
 			BaseDir:  tmpDir,
 			Hostname: "testhost",

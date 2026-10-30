@@ -6,37 +6,42 @@ package services
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"net"
 	"os"
-	"os/exec"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/zextras/carbonio-configd/internal/sys"
+	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
 
-// TestMain sets notifySocketDir to a writable temp directory so tests don't
-// require /run/carbonio to exist.
-func TestMain(m *testing.M) {
-	dir, err := os.MkdirTemp("", "configd-sd-notify-test-*")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to create temp dir for sd_notify tests: %v\n", err)
-		os.Exit(1)
-	}
+// newSDController returns a Controller whose notify sockets are real unixgram
+// sockets under a temp run dir (the sd_notify protocol is kernel I/O), but
+// whose processes and clock are fakes: started children stay "running" until
+// released, and the 30s readiness deadline runs on the manual clock.
+func newSDController(t *testing.T) (*Controller, *systest.Fakes) {
+	t.Helper()
 
-	defer func() { _ = os.RemoveAll(dir) }()
+	f := systest.New()
+	env := sys.Real()
+	env.Exec = blockingExec{Exec: f.Exec}
+	env.Clock = f.Clock
 
-	notifySocketDir = dir
+	ctl := NewController(withMode(env, false),
+		WithBaseDir(t.TempDir()), WithRunDir(t.TempDir()),
+		WithConfigLoader(emptyConfig), WithRawConfigLoader(emptyConfig))
 
-	os.Exit(m.Run())
+	return ctl, f
 }
 
 // expectedSocketPath returns the socket path startWithSDNotify will create
 // for the given service name. The path is service-addressable (not
 // per-PID) so both the start-side READY=1 listener and the stop-side
 // STOPPING=1 observer can bind to it across independent CLI invocations.
-func expectedSocketPath(service string) string {
-	return sdNotifySocketPath(service)
+func expectedSocketPath(ctl *Controller, service string) string {
+	return ctl.p.sdNotifySocket(service)
 }
 
 // sendReady sends a READY=1 datagram to the given Unix socket path, retrying
@@ -67,79 +72,118 @@ func sendReady(t *testing.T, socketPath string) {
 	t.Fatalf("socket %s never appeared within 2 seconds", socketPath)
 }
 
-// TestStartWithSDNotify_Ready verifies that startWithSDNotify returns nil when
-// READY=1 is sent to the notify socket.
-func TestStartWithSDNotify_Ready(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	cmd := exec.Command("sleep", "5")
-	socketPath := expectedSocketPath("test-ready")
+// startAsync runs startWithSDNotify in a goroutine and returns its result channel.
+type sdResult struct {
+	proc sys.Process
+	err  error
+}
 
-	done := make(chan error, 1)
+func startAsync(ctx context.Context, ctl *Controller, cmd *sys.Cmd, service string) <-chan sdResult {
+	done := make(chan sdResult, 1)
 
 	go func() {
-		done <- startWithSDNotify(context.Background(), cmd, "test-ready")
+		proc, err := ctl.startWithSDNotify(ctx, cmd, service)
+		done <- sdResult{proc, err}
 	}()
 
-	sendReady(t, socketPath)
+	return done
+}
+
+// TestStartWithSDNotify_Ready verifies that startWithSDNotify returns nil and
+// the started process when READY=1 is sent to the notify socket.
+func TestStartWithSDNotify_Ready(t *testing.T) {
+	t.Parallel()
+
+	ctl, f := newSDController(t)
+	cmd := &sys.Cmd{Path: "slapd"}
+
+	done := startAsync(context.Background(), ctl, cmd, "test-ready")
+
+	sendReady(t, expectedSocketPath(ctl, "test-ready"))
 
 	select {
-	case err := <-done:
-		if err != nil {
-			t.Errorf("expected nil, got %v", err)
+	case r := <-done:
+		if r.err != nil {
+			t.Errorf("expected nil, got %v", r.err)
+		}
+
+		if r.proc == nil {
+			t.Error("expected the started process to be returned")
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for startWithSDNotify to return")
 	}
 
-	if cmd.Process != nil {
-		_ = cmd.Process.Kill()
+	if got := f.Rec.Of("exec.start"); len(got) != 1 {
+		t.Errorf("expected exactly one process start, got %q", got)
 	}
 }
 
 // TestStartWithSDNotify_Timeout verifies that startWithSDNotify returns an error
-// when no READY=1 datagram is received within the deadline.
+// when no READY=1 datagram is received within the (manual-clock) deadline.
 func TestStartWithSDNotify_Timeout(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping 30s timeout test in short mode")
+	t.Parallel()
+
+	ctl, f := newSDController(t)
+
+	done := startAsync(context.Background(), ctl, &sys.Cmd{Path: "slapd"}, "test-timeout")
+
+	for {
+		select {
+		case r := <-done:
+			if r.err == nil {
+				t.Fatal("expected error on timeout, got nil")
+			}
+
+			if !strings.Contains(r.err.Error(), "READY=1") {
+				t.Errorf("expected error about READY=1, got: %v", r.err)
+			}
+
+			if r.proc == nil {
+				t.Error("the started process must still be returned on a readiness timeout")
+			}
+
+			return
+		case <-time.After(time.Millisecond):
+			// Keep the clock beyond the deadline: it is computed after the
+			// process start, so a single early Advance could be missed.
+			f.Clock.Advance(sdNotifyReadyTimeout + time.Second)
+		}
 	}
+}
 
-	cmd := exec.Command("sleep", "60")
+// TestStartWithSDNotify_ChildExitFailsFast verifies that a child exiting
+// before READY=1 aborts the wait with its exit error.
+func TestStartWithSDNotify_ChildExitFailsFast(t *testing.T) {
+	t.Parallel()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
-	defer cancel()
+	f := systest.New()
+	f.Exec.OnPath("slapd", systest.Fail(1, ""))
 
-	err := startWithSDNotify(ctx, cmd, "test-timeout")
-	if err == nil {
-		t.Fatal("expected error on timeout, got nil")
-	}
+	env := sys.Real()
+	env.Exec = f.Exec
+	env.Clock = f.Clock
 
-	if !strings.Contains(err.Error(), "READY=1") {
-		t.Errorf("expected error about READY=1, got: %v", err)
-	}
+	ctl := NewController(withMode(env, false), WithBaseDir(t.TempDir()), WithRunDir(t.TempDir()),
+		WithConfigLoader(emptyConfig), WithRawConfigLoader(emptyConfig))
 
-	if cmd.Process != nil {
-		_ = cmd.Process.Kill()
+	_, err := ctl.startWithSDNotify(context.Background(), &sys.Cmd{Path: "slapd"}, "test-exit")
+	if err == nil || !strings.Contains(err.Error(), "exited during startup before signaling READY=1") {
+		t.Fatalf("error = %v, want early-exit failure", err)
 	}
 }
 
 // TestStartWithSDNotify_ContextCancel verifies that startWithSDNotify returns
 // context.Canceled when the context is cancelled before READY=1 is received.
 func TestStartWithSDNotify_ContextCancel(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	cmd := exec.Command("sleep", "60")
+	t.Parallel()
+
+	ctl, _ := newSDController(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	socketPath := expectedSocketPath("test-cancel")
+	socketPath := expectedSocketPath(ctl, "test-cancel")
 
-	done := make(chan error, 1)
-
-	go func() {
-		done <- startWithSDNotify(ctx, cmd, "test-cancel")
-	}()
+	done := startAsync(ctx, ctl, &sys.Cmd{Path: "slapd"}, "test-cancel")
 
 	// Wait until the socket exists (startWithSDNotify is in the wait loop).
 	deadline := time.Now().Add(2 * time.Second)
@@ -155,39 +199,36 @@ func TestStartWithSDNotify_ContextCancel(t *testing.T) {
 	cancel()
 
 	select {
-	case err := <-done:
-		if err != context.Canceled {
-			t.Errorf("expected context.Canceled, got: %v", err)
+	case r := <-done:
+		if !errors.Is(r.err, context.Canceled) {
+			t.Errorf("expected context.Canceled, got: %v", r.err)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for startWithSDNotify to return after cancel")
-	}
-
-	if cmd.Process != nil {
-		_ = cmd.Process.Kill()
 	}
 }
 
 // TestStartWithSDNotify_NotifySocketInEnv verifies that cmd.Env contains
 // NOTIFY_SOCKET pointing to the expected socket path.
 func TestStartWithSDNotify_NotifySocketInEnv(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	cmd := exec.Command("sleep", "5")
-	socketPath := expectedSocketPath("test-env")
+	t.Parallel()
 
-	done := make(chan error, 1)
+	ctl, f := newSDController(t)
+	cmd := &sys.Cmd{Path: "slapd"}
+	socketPath := expectedSocketPath(ctl, "test-env")
 
-	go func() {
-		done <- startWithSDNotify(context.Background(), cmd, "test-env")
-	}()
+	done := startAsync(context.Background(), ctl, cmd, "test-env")
 
 	sendReady(t, socketPath)
 	<-done
 
+	started := f.Exec.Calls()
+	if len(started) != 1 {
+		t.Fatalf("expected one started command, got %d", len(started))
+	}
+
 	notifyVal := ""
-	for _, e := range cmd.Env {
+	for _, e := range started[0].Env {
 		if val, ok := strings.CutPrefix(e, "NOTIFY_SOCKET="); ok {
 			notifyVal = val
 
@@ -202,36 +243,23 @@ func TestStartWithSDNotify_NotifySocketInEnv(t *testing.T) {
 	if notifyVal != socketPath {
 		t.Errorf("NOTIFY_SOCKET = %q, want %q", notifyVal, socketPath)
 	}
-
-	if cmd.Process != nil {
-		_ = cmd.Process.Kill()
-	}
 }
 
 // TestStartWithSDNotify_SocketCleanedUp verifies the socket file is removed
 // after startWithSDNotify returns.
 func TestStartWithSDNotify_SocketCleanedUp(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	cmd := exec.Command("sleep", "5")
-	socketPath := expectedSocketPath("test-cleanup")
+	t.Parallel()
 
-	done := make(chan error, 1)
+	ctl, _ := newSDController(t)
+	socketPath := expectedSocketPath(ctl, "test-cleanup")
 
-	go func() {
-		done <- startWithSDNotify(context.Background(), cmd, "test-cleanup")
-	}()
+	done := startAsync(context.Background(), ctl, &sys.Cmd{Path: "slapd"}, "test-cleanup")
 
 	sendReady(t, socketPath)
 	<-done
 
 	if _, err := os.Stat(socketPath); !os.IsNotExist(err) {
 		t.Errorf("socket %s still exists after startWithSDNotify returned", socketPath)
-	}
-
-	if cmd.Process != nil {
-		_ = cmd.Process.Kill()
 	}
 }
 
@@ -241,11 +269,15 @@ func TestStartWithSDNotify_SocketCleanedUp(t *testing.T) {
 // distinguish a daemon that engaged its graceful-shutdown hook from one that
 // silently ignored SIGTERM and was forcibly reaped.
 func TestAwaitSDNotifyStopping_ReturnsOnStoppingDatagram(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: uses a real Unix datagram socket")
 	}
 
-	socketPath := expectedSocketPath("test-stopping")
+	socketPath := expectedSocketPath(ctl, "test-stopping")
 	_ = os.Remove(socketPath)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -254,7 +286,7 @@ func TestAwaitSDNotifyStopping_ReturnsOnStoppingDatagram(t *testing.T) {
 	done := make(chan struct{})
 
 	go func() {
-		awaitSDNotifyStopping(ctx, "test-stopping")
+		ctl.awaitSDNotifyStopping(ctx, "test-stopping")
 
 		close(done)
 	}()
@@ -290,17 +322,21 @@ func TestAwaitSDNotifyStopping_ReturnsOnStoppingDatagram(t *testing.T) {
 // exits when its parent context is cancelled, so a stop() call never leaks
 // the goroutine past its own lifetime.
 func TestAwaitSDNotifyStopping_ReturnsOnContextCancel(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: uses a real Unix datagram socket")
 	}
 
-	_ = os.Remove(expectedSocketPath("test-cancel-stopping"))
+	_ = os.Remove(expectedSocketPath(ctl, "test-cancel-stopping"))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 
 	go func() {
-		awaitSDNotifyStopping(ctx, "test-cancel-stopping")
+		ctl.awaitSDNotifyStopping(ctx, "test-cancel-stopping")
 
 		close(done)
 	}()
@@ -316,15 +352,27 @@ func TestAwaitSDNotifyStopping_ReturnsOnContextCancel(t *testing.T) {
 }
 
 func TestStartWithSDNotify_CmdStartFails(t *testing.T) {
-	cmd := exec.Command("/nonexistent/binary/that/does/not/exist")
-	err := startWithSDNotify(context.Background(), cmd, "test-start-fail")
+	t.Parallel()
+
+	ctl, f := newSDController(t)
+	f.Exec.FailStart(func(*sys.Cmd) bool { return true }, errors.New("fork/exec: no such file or directory"))
+
+	proc, err := ctl.startWithSDNotify(context.Background(), &sys.Cmd{Path: "slapd"}, "test-start-fail")
 	if err == nil {
-		t.Fatal("expected error when cmd.Start fails")
+		t.Fatal("expected error when the process cannot be started")
+	}
+
+	if proc != nil {
+		t.Error("no process may be returned when the start fails")
 	}
 }
 
 func TestSdNotifySocketPath_Format(t *testing.T) {
-	path := sdNotifySocketPath("myservice")
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	path := ctl.p.sdNotifySocket("myservice")
 	if !strings.Contains(path, "notify-myservice.sock") {
 		t.Errorf("expected socket path to contain 'notify-myservice.sock', got %s", path)
 	}

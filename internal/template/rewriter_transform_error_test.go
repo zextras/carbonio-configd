@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/zextras/carbonio-configd/internal/state"
+	"github.com/zextras/carbonio-configd/internal/sys"
 	"github.com/zextras/carbonio-configd/internal/transformer"
 )
 
@@ -24,7 +25,7 @@ import (
 // keeps its previous content.
 func TestRewriter_TransformErrorAbortsRewrite(t *testing.T) {
 	base := t.TempDir()
-	rewriter := NewRewriter(base, newMockLookup(), &state.State{})
+	rewriter := NewRewriter(base, newMockLookup(), &state.State{}, sys.Real())
 
 	require.NoError(t, os.WriteFile(filepath.Join(base, "a.in"), []byte("ok\nx=@@SPLIT unset_key@@\n"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(base, "a.conf"), []byte("previous\n"), 0o644))

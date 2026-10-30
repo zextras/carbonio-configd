@@ -13,6 +13,10 @@ import (
 
 // TestStartDirect_DetachedMissingBinary verifies startDetached returns error for missing binary.
 func TestStartDirect_DetachedMissingBinary(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -26,7 +30,7 @@ func TestStartDirect_DetachedMissingBinary(t *testing.T) {
 		LogFile:    logFile,
 	}
 
-	err := startDetached(context.Background(), "testdetached", def)
+	err := ctl.startDetached(context.Background(), "testdetached", def)
 	if err == nil {
 		t.Error("expected error when detached binary is missing")
 	}
@@ -34,6 +38,10 @@ func TestStartDirect_DetachedMissingBinary(t *testing.T) {
 
 // TestStartDetached_LogFileOpenError exercises the os.OpenFile error path.
 func TestStartDetached_LogFileOpenError(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -43,7 +51,7 @@ func TestStartDetached_LogFileOpenError(t *testing.T) {
 		LogFile:    "/nonexistent-dir-xyz/test.log",
 	}
 
-	err := startDetached(context.Background(), "testservice", def)
+	err := ctl.startDetached(context.Background(), "testservice", def)
 	if err == nil {
 		t.Error("expected error when log file cannot be opened")
 	}
@@ -51,6 +59,10 @@ func TestStartDetached_LogFileOpenError(t *testing.T) {
 
 // TestStartDetached_LogOpenFails verifies startDetached returns error when log cannot be opened.
 func TestStartDetached_LogOpenFails(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -61,7 +73,7 @@ func TestStartDetached_LogOpenFails(t *testing.T) {
 		LogFile:    "/nonexistent/dir/test.out",
 	}
 
-	err := startDetached(context.Background(), "testdetached", def)
+	err := ctl.startDetached(context.Background(), "testdetached", def)
 	if err == nil {
 		t.Error("expected error when log file cannot be opened")
 	}
@@ -69,6 +81,10 @@ func TestStartDetached_LogOpenFails(t *testing.T) {
 
 // TestStartDetached_SuccessNoSDNotify exercises the successful detach path (no SDNotify).
 func TestStartDetached_SuccessNoSDNotify(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -82,7 +98,7 @@ func TestStartDetached_SuccessNoSDNotify(t *testing.T) {
 		Detached:    false,
 	}
 
-	err := startDetached(context.Background(), "testservice", def)
+	err := ctl.startDetached(context.Background(), "testservice", def)
 	if err != nil {
 		t.Errorf("startDetached returned unexpected error: %v", err)
 	}
@@ -90,6 +106,10 @@ func TestStartDetached_SuccessNoSDNotify(t *testing.T) {
 
 // TestStartDetached_Success verifies startDetached spawns a background process.
 func TestStartDetached_Success(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -105,21 +125,23 @@ func TestStartDetached_Success(t *testing.T) {
 		LogFile:     logFile,
 	}
 
-	err := startDetached(context.Background(), "testdetached", def)
+	err := ctl.startDetached(context.Background(), "testdetached", def)
 	if err != nil {
 		t.Errorf("startDetached returned unexpected error: %v", err)
 	}
 }
 
-// TestStartDetached_DefaultLogPath verifies startDetached uses basePath/log/<name>.out
+// TestStartDetached_DefaultLogPath verifies startDetached uses ctl.p.base/log/<name>.out
 // when LogFile is empty.
 func TestStartDetached_DefaultLogPath(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	old := basePath
-	basePath = "/nonexistent-base-path-xyz"
-	defer func() { basePath = old }()
+	ctl.p.base = "/nonexistent-base-path-xyz"
 
 	def := &ServiceDef{
 		Name:       "testdetached",
@@ -128,7 +150,7 @@ func TestStartDetached_DefaultLogPath(t *testing.T) {
 		LogFile:    "",
 	}
 
-	err := startDetached(context.Background(), "testdetached", def)
+	err := ctl.startDetached(context.Background(), "testdetached", def)
 	if err == nil {
 		t.Error("expected error when default log path directory doesn't exist")
 	}
@@ -136,6 +158,10 @@ func TestStartDetached_DefaultLogPath(t *testing.T) {
 
 // TestStartDetached_UseSDNotify exercises the UseSDNotify=true branch.
 func TestStartDetached_UseSDNotify(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -154,12 +180,16 @@ func TestStartDetached_UseSDNotify(t *testing.T) {
 		Detached:    false,
 	}
 
-	startDetached(context.Background(), "testservice", def)
+	ctl.startDetached(context.Background(), "testservice", def)
 }
 
 // TestStartDetached_SDNotify_BinaryMissing verifies startDetached returns error
 // when UseSDNotify=true and binary is missing.
 func TestStartDetached_SDNotify_BinaryMissing(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -174,7 +204,7 @@ func TestStartDetached_SDNotify_BinaryMissing(t *testing.T) {
 		LogFile:     logFile,
 	}
 
-	err := startDetached(context.Background(), "testdetached", def)
+	err := ctl.startDetached(context.Background(), "testdetached", def)
 	if err == nil {
 		t.Error("expected error when UseSDNotify=true and binary is missing")
 	}

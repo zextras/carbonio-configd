@@ -13,13 +13,17 @@ import (
 // --- openLogFile (error paths) ---
 
 func TestOpenLogFile_NestedDirCreation(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	// openLogFile should succeed when the parent directory exists.
 	tmp := t.TempDir()
 	logFile := filepath.Join(tmp, "service.log")
 
-	f, err := openLogFile(logFile)
+	f, err := ctl.openLogFile(logFile)
 	if err != nil {
-		t.Fatalf("openLogFile() unexpected error: %v", err)
+		t.Fatalf("ctl.openLogFile() unexpected error: %v", err)
 	}
 	defer f.Close()
 

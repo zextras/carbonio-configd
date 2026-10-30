@@ -24,13 +24,21 @@ import (
 const safePID = 999999990
 
 func TestServiceStop_UnknownSvc(t *testing.T) {
-	if err := ServiceStop(context.Background(), "nonexistent-service-xyz"); err == nil {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	if err := ctl.ServiceStop(context.Background(), "nonexistent-service-xyz"); err == nil {
 		t.Error("expected error for unknown service")
 	}
 }
 
 func TestServiceReload_UnknownSvc(t *testing.T) {
-	if err := ServiceReload(context.Background(), "nonexistent-service-xyz"); err == nil {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	if err := ctl.ServiceReload(context.Background(), "nonexistent-service-xyz"); err == nil {
 		t.Error("expected error for unknown service")
 	}
 }
@@ -44,74 +52,88 @@ func TestServiceReload_UnknownSvc(t *testing.T) {
 // no-op'ing (the old code's incidental behavior, an artifact of only ever
 // looping over SystemdUnits).
 func TestServiceReload_NoUnitsNoop(t *testing.T) {
-	orig := isSystemdModeFn
-	defer func() { isSystemdModeFn = orig }()
-	isSystemdModeFn = func() bool { return false }
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	ctl.pinMode(false)
 
 	def := &ServiceDef{Name: "test-reload-empty", SystemdUnits: nil}
-	Registry["test-reload-empty"] = def
-	defer delete(Registry, "test-reload-empty")
+	ctl.registry["test-reload-empty"] = def
+	defer delete(ctl.registry, "test-reload-empty")
 
-	err := ServiceReload(context.Background(), "test-reload-empty")
+	err := ctl.ServiceReload(context.Background(), "test-reload-empty")
 	if err == nil || !strings.Contains(err.Error(), "no ProcessName") {
 		t.Errorf("expected legacy fallback stop error, got %v", err)
 	}
 }
 
 func TestServiceListStatus_LegacyMode(t *testing.T) {
-	orig := isSystemdModeFn
-	defer func() { isSystemdModeFn = orig }()
-	isSystemdModeFn = func() bool { return false }
+	t.Parallel()
 
-	infos := ServiceListStatus(context.Background())
+	ctl := newRealController(t)
+
+	ctl.pinMode(false)
+
+	infos := ctl.ServiceListStatus(context.Background())
 	if len(infos) == 0 {
 		t.Error("expected non-empty list from registry")
 	}
 }
 
 func TestServiceListStatusStream_CtxCancelled(t *testing.T) {
-	orig := isSystemdModeFn
-	defer func() { isSystemdModeFn = orig }()
-	isSystemdModeFn = func() bool { return false }
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	ctl.pinMode(false)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	ch := ServiceListStatusStream(ctx)
+	ch := ctl.ServiceListStatusStream(ctx)
 	for range ch {
 	}
 }
 
 func TestRewriteViaConfigd_NotReachable(t *testing.T) {
-	oldLC := loadConfig
-	loadConfig = func() (map[string]string, error) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	ctl.loadConfig = func() (map[string]string, error) {
 		return map[string]string{"zmconfigd_listen_port": "1"}, nil
 	}
-	defer func() { loadConfig = oldLC }()
 
-	err := rewriteViaConfigd(context.Background(), []string{"proxy"})
+	err := ctl.rewriteViaConfigd(context.Background(), []string{"proxy"})
 	if err == nil {
 		t.Error("expected error when configd is not listening on port 1")
 	}
 }
 
 func TestRewriteViaConfigd_LCErrDefaultsToDefaultPort(t *testing.T) {
-	oldLC := loadConfig
-	loadConfig = func() (map[string]string, error) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	ctl.loadConfig = func() (map[string]string, error) {
 		return nil, fmt.Errorf("no lc")
 	}
-	defer func() { loadConfig = oldLC }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 
-	err := rewriteViaConfigd(ctx, []string{"mta"})
+	err := ctl.rewriteViaConfigd(ctx, []string{"mta"})
 	if err == nil {
 		t.Error("expected error dialing default port when configd not running")
 	}
 }
 
 func TestRewriteViaConfigd_ServerReturnsError(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	ln, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
@@ -133,19 +155,21 @@ func TestRewriteViaConfigd_ServerReturnsError(t *testing.T) {
 		_, _ = conn.Write([]byte("ERROR: bad section\n"))
 	}()
 
-	oldLC := loadConfig
-	loadConfig = func() (map[string]string, error) {
+	ctl.loadConfig = func() (map[string]string, error) {
 		return map[string]string{"zmconfigd_listen_port": port}, nil
 	}
-	defer func() { loadConfig = oldLC }()
 
-	err = rewriteViaConfigd(context.Background(), []string{"bogus"})
+	err = ctl.rewriteViaConfigd(context.Background(), []string{"bogus"})
 	if err == nil || !strings.Contains(err.Error(), "configd returned error") {
 		t.Errorf("expected configd error response, got %v", err)
 	}
 }
 
 func TestRewriteViaConfigd_ServerSucceeds(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	ln, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
@@ -167,33 +191,35 @@ func TestRewriteViaConfigd_ServerSucceeds(t *testing.T) {
 		_, _ = conn.Write([]byte("OK\n"))
 	}()
 
-	oldLC := loadConfig
-	loadConfig = func() (map[string]string, error) {
+	ctl.loadConfig = func() (map[string]string, error) {
 		return map[string]string{"zmconfigd_listen_port": port}, nil
 	}
-	defer func() { loadConfig = oldLC }()
 
-	if err := rewriteViaConfigd(context.Background(), []string{"proxy"}); err != nil {
+	if err := ctl.rewriteViaConfigd(context.Background(), []string{"proxy"}); err != nil {
 		t.Errorf("expected success, got %v", err)
 	}
 }
 
 func TestStopService_LegacyNoProcessName(t *testing.T) {
-	orig := isSystemdModeFn
-	defer func() { isSystemdModeFn = orig }()
-	isSystemdModeFn = func() bool { return false }
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	ctl.pinMode(false)
 
 	def := &ServiceDef{Name: "test-nostop", ProcessName: "", CustomStop: nil}
-	err := stopService(context.Background(), "test-nostop", def)
+	err := ctl.stopService(context.Background(), "test-nostop", def)
 	if err == nil || !strings.Contains(err.Error(), "no ProcessName") {
 		t.Errorf("expected 'no ProcessName' error, got %v", err)
 	}
 }
 
 func TestStopService_LegacyCustomStop(t *testing.T) {
-	orig := isSystemdModeFn
-	defer func() { isSystemdModeFn = orig }()
-	isSystemdModeFn = func() bool { return false }
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	ctl.pinMode(false)
 
 	sentinel := fmt.Errorf("custom-stop-called")
 	def := &ServiceDef{
@@ -203,26 +229,34 @@ func TestStopService_LegacyCustomStop(t *testing.T) {
 		},
 	}
 
-	err := stopService(context.Background(), "test-custom-stop", def)
+	err := ctl.stopService(context.Background(), "test-custom-stop", def)
 	if err != sentinel {
 		t.Errorf("expected sentinel from CustomStop, got %v", err)
 	}
 }
 
 func TestKillStatsPidFile_BadPath(t *testing.T) {
-	if killStatsPidFile(context.Background(), filepath.Join(t.TempDir(), "nope.pid")) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	if ctl.killStatsPidFile(context.Background(), filepath.Join(t.TempDir(), "nope.pid")) {
 		t.Error("expected false for missing pidfile")
 	}
 }
 
 func TestKillStatsPidFile_GarbagePID(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	tmp := t.TempDir()
 	p := filepath.Join(tmp, "bad.pid")
 	if err := os.WriteFile(p, []byte("not-a-number\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	if killStatsPidFile(context.Background(), p) {
+	if ctl.killStatsPidFile(context.Background(), p) {
 		t.Error("expected false for garbage pid")
 	}
 	if _, err := os.Stat(p); !os.IsNotExist(err) {
@@ -231,6 +265,10 @@ func TestKillStatsPidFile_GarbagePID(t *testing.T) {
 }
 
 func TestKillStatsPidFile_SafeNonexistentPID(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	tmp := t.TempDir()
 	p := filepath.Join(tmp, "safe.pid")
 	if err := os.WriteFile(p, []byte(strconv.Itoa(safePID)+"\n"), 0o644); err != nil {
@@ -239,114 +277,128 @@ func TestKillStatsPidFile_SafeNonexistentPID(t *testing.T) {
 
 	// safePID does not exist, so killByPIDWithGroupAndSudo hits ESRCH and
 	// reports success without signaling any real process.
-	if !killStatsPidFile(context.Background(), p) {
+	if !ctl.killStatsPidFile(context.Background(), p) {
 		t.Error("expected true for nonexistent PID (ESRCH is success)")
 	}
 }
 
 func TestStatsCustomStart_LoadConfigFails_Covg(t *testing.T) {
-	oldLC := loadConfig
-	loadConfig = func() (map[string]string, error) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	ctl.loadConfig = func() (map[string]string, error) {
 		return nil, fmt.Errorf("no lc")
 	}
-	defer func() { loadConfig = oldLC }()
 
-	if err := statsCustomStart(context.Background(), &ServiceDef{Name: "stats"}); err == nil {
-		t.Error("expected error when loadConfig fails")
+	if err := ctl.statsCustomStart(context.Background(), &ServiceDef{Name: "stats"}); err == nil {
+		t.Error("expected error when ctl.loadConfig fails")
 	}
 }
 
 func TestStatsCustomStart_NoBinaries(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	tmp := t.TempDir()
 
-	oldLibexec := libexecDir
-	libexecDir = tmp
-	defer func() { libexecDir = oldLibexec }()
+	ctl.p.libexec = tmp
 
-	oldLog := logPath
-	logPath = tmp
-	defer func() { logPath = oldLog }()
+	ctl.p.log = tmp
 
-	oldLC := loadConfig
-	loadConfig = func() (map[string]string, error) {
+	ctl.loadConfig = func() (map[string]string, error) {
 		return map[string]string{}, nil
 	}
-	defer func() { loadConfig = oldLC }()
 
-	err := statsCustomStart(context.Background(), &ServiceDef{Name: "stats"})
+	err := ctl.statsCustomStart(context.Background(), &ServiceDef{Name: "stats"})
 	if err == nil || !strings.Contains(err.Error(), "no stats collectors started") {
 		t.Errorf("expected 'no stats collectors started', got %v", err)
 	}
 }
 
 func TestStatsCustomStop_MissingDir(t *testing.T) {
-	oldDir := statsPidDir
-	statsPidDir = filepath.Join(t.TempDir(), "does-not-exist")
-	defer func() { statsPidDir = oldDir }()
+	t.Parallel()
 
-	if err := statsCustomStop(context.Background(), &ServiceDef{Name: "stats"}); err != nil {
+	ctl := newRealController(t)
+
+	ctl.p.statsPidDir = filepath.Join(t.TempDir(), "does-not-exist")
+
+	if err := ctl.statsCustomStop(context.Background(), &ServiceDef{Name: "stats"}); err != nil {
 		t.Errorf("expected nil for missing dir, got %v", err)
 	}
 }
 
 func TestStatsCustomStop_EmptyDir_Covg(t *testing.T) {
-	tmp := t.TempDir()
-	oldDir := statsPidDir
-	statsPidDir = tmp
-	defer func() { statsPidDir = oldDir }()
+	t.Parallel()
 
-	if err := statsCustomStop(context.Background(), &ServiceDef{Name: "stats"}); err != nil {
+	ctl := newRealController(t)
+
+	tmp := t.TempDir()
+	ctl.p.statsPidDir = tmp
+
+	if err := ctl.statsCustomStop(context.Background(), &ServiceDef{Name: "stats"}); err != nil {
 		t.Errorf("expected nil for empty dir, got %v", err)
 	}
 }
 
 func TestStatsCustomStop_WithSafePidFile(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	tmp := t.TempDir()
-	oldDir := statsPidDir
-	statsPidDir = tmp
-	defer func() { statsPidDir = oldDir }()
+	ctl.p.statsPidDir = tmp
 
 	p := filepath.Join(tmp, "zmstat-proc.pid")
 	if err := os.WriteFile(p, []byte(strconv.Itoa(safePID)+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := statsCustomStop(context.Background(), &ServiceDef{Name: "stats"}); err != nil {
+	if err := ctl.statsCustomStop(context.Background(), &ServiceDef{Name: "stats"}); err != nil {
 		t.Errorf("expected nil, got %v", err)
 	}
 }
 
 func TestMailboxCustomStart_LoadConfigFails_Covg(t *testing.T) {
-	oldLC := loadConfig
-	loadConfig = func() (map[string]string, error) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	ctl.loadConfig = func() (map[string]string, error) {
 		return nil, fmt.Errorf("lc boom")
 	}
-	defer func() { loadConfig = oldLC }()
 
-	err := mailboxCustomStart(context.Background(), &ServiceDef{Name: "mailbox"})
+	err := ctl.mailboxCustomStart(context.Background(), &ServiceDef{Name: "mailbox"})
 	if err == nil || !strings.Contains(err.Error(), "failed to load localconfig") {
 		t.Errorf("expected load error, got %v", err)
 	}
 }
 
 func TestMailboxCustomStart_JavaMissing(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	tmp := t.TempDir()
 
-	oldLC := loadConfig
-	loadConfig = func() (map[string]string, error) {
+	ctl.loadConfig = func() (map[string]string, error) {
 		return map[string]string{
 			"mailboxd_java_home": filepath.Join(tmp, "nonexistent-jdk"),
 		}, nil
 	}
-	defer func() { loadConfig = oldLC }()
 
-	err := mailboxCustomStart(context.Background(), &ServiceDef{Name: "mailbox"})
+	err := ctl.mailboxCustomStart(context.Background(), &ServiceDef{Name: "mailbox"})
 	if err == nil || !strings.Contains(err.Error(), "java binary not found") {
 		t.Errorf("expected java-not-found error, got %v", err)
 	}
 }
 
 func TestWaitForSDNotify_CtxCancelled(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	dir := t.TempDir()
 	addr := &net.UnixAddr{Name: filepath.Join(dir, "s.sock"), Net: "unixgram"}
 	conn, err := net.ListenUnixgram("unixgram", addr)
@@ -358,12 +410,16 @@ func TestWaitForSDNotify_CtxCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	if err := waitForSDNotify(ctx, conn, "svc", nil); err == nil {
+	if err := ctl.waitForSDNotify(ctx, conn, "svc", nil); err == nil {
 		t.Error("expected error from cancelled ctx")
 	}
 }
 
 func TestWaitForSDNotify_ReadyReceived(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	dir := t.TempDir()
 	sockPath := filepath.Join(dir, "r.sock")
 	addr := &net.UnixAddr{Name: sockPath, Net: "unixgram"}
@@ -383,7 +439,7 @@ func TestWaitForSDNotify_ReadyReceived(t *testing.T) {
 		_, _ = client.Write([]byte("READY=1\n"))
 	}()
 
-	if err := waitForSDNotify(context.Background(), conn, "svc", nil); err != nil {
+	if err := ctl.waitForSDNotify(context.Background(), conn, "svc", nil); err != nil {
 		t.Errorf("expected READY=1 to succeed, got %v", err)
 	}
 }
@@ -391,6 +447,10 @@ func TestWaitForSDNotify_ReadyReceived(t *testing.T) {
 // TestWaitForSDNotify_ChildExitFailsFast verifies that an early child exit is
 // detected immediately instead of waiting out the 30s readiness deadline.
 func TestWaitForSDNotify_ChildExitFailsFast(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	dir := t.TempDir()
 	addr := &net.UnixAddr{Name: filepath.Join(dir, "e.sock"), Net: "unixgram"}
 	conn, err := net.ListenUnixgram("unixgram", addr)
@@ -403,7 +463,7 @@ func TestWaitForSDNotify_ChildExitFailsFast(t *testing.T) {
 	exited <- errors.New("exit status 1")
 
 	start := time.Now()
-	err = waitForSDNotify(context.Background(), conn, "svc", exited)
+	err = ctl.waitForSDNotify(context.Background(), conn, "svc", exited)
 	if err == nil {
 		t.Fatal("expected error when child exits before READY=1")
 	}

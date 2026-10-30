@@ -13,6 +13,7 @@ import (
 
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/config/configtest"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // TestResolveWebSSLProtocols tests all branches of resolveWebSSLProtocols
@@ -52,6 +53,7 @@ func TestResolveWebSSLProtocols(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			g := &Generator{
+				env:          sys.Real(),
 				ServerConfig: &config.ServerConfig{Data: tt.serverData},
 			}
 			result, err := g.resolveWebSSLProtocols(context.Background())
@@ -78,7 +80,7 @@ func TestResolveWebSSLProtocols(t *testing.T) {
 // CA path regardless of file existence (legacy ClientCertAuthDefaultCAVar.update
 // assigns mDefault unconditionally).
 func TestClientCertCADefaultAlwaysPath(t *testing.T) {
-	g := &Generator{ConfDir: "/tmp/nonexistent-dir-xyz"}
+	g := &Generator{env: sys.Real(), ConfDir: "/tmp/nonexistent-dir-xyz"}
 	g.RegisterVariables(context.Background())
 
 	v, err := g.LookupValue(context.Background(), g.Variables["ssl.clientcertca.default"])
@@ -94,7 +96,7 @@ func TestClientCertCADefaultAlwaysPath(t *testing.T) {
 // TestResolveDHParamEnabled tests all branches of resolveDHParamEnabled
 func TestResolveDHParamEnabled(t *testing.T) {
 	t.Run("returns empty string when file does not exist", func(t *testing.T) {
-		g := &Generator{ConfDir: "/tmp/nonexistent-dir-xyz"}
+		g := &Generator{env: sys.Real(), ConfDir: "/tmp/nonexistent-dir-xyz"}
 		result, err := g.resolveDHParamEnabled(context.Background())
 		if err != nil {
 			t.Fatalf("resolveDHParamEnabled failed: %v", err)
@@ -110,7 +112,7 @@ func TestResolveDHParamEnabled(t *testing.T) {
 		if err := os.WriteFile(dhPath, []byte("fake-dhparam"), 0o644); err != nil {
 			t.Fatalf("failed to create test file: %v", err)
 		}
-		g := &Generator{ConfDir: dir}
+		g := &Generator{env: sys.Real(), ConfDir: dir}
 		result, err := g.resolveDHParamEnabled(context.Background())
 		if err != nil {
 			t.Fatalf("resolveDHParamEnabled failed: %v", err)
@@ -125,6 +127,7 @@ func TestResolveDHParamEnabled(t *testing.T) {
 func TestResolveSSLSessionCacheSize(t *testing.T) {
 	t.Run("returns default 10m when not configured", func(t *testing.T) {
 		g := &Generator{
+			env:          sys.Real(),
 			GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMap()},
 		}
 		result, err := g.resolveSSLSessionCacheSize(context.Background())
@@ -138,6 +141,7 @@ func TestResolveSSLSessionCacheSize(t *testing.T) {
 
 	t.Run("returns configured size", func(t *testing.T) {
 		g := &Generator{
+			env: sys.Real(),
 			GlobalConfig: &config.GlobalConfig{Data: configtest.NewConfigMapFrom(map[string]string{
 				"zimbraReverseProxySSLSessionCacheSize": "20m",
 			})},
@@ -161,6 +165,7 @@ func TestResolveWebSSLDhparamEnabled(t *testing.T) {
 			t.Fatalf("failed to create test file: %v", err)
 		}
 		g := &Generator{
+			env: sys.Real(),
 			LocalConfig: &config.LocalConfig{Data: configtest.NewConfigMapFrom(map[string]string{
 				"web.ssl.dhparam.file": dhPath,
 			})},
@@ -176,6 +181,7 @@ func TestResolveWebSSLDhparamEnabled(t *testing.T) {
 
 	t.Run("returns false when file does not exist", func(t *testing.T) {
 		g := &Generator{
+			env: sys.Real(),
 			LocalConfig: &config.LocalConfig{Data: configtest.NewConfigMapFrom(map[string]string{
 				"web.ssl.dhparam.file": "/tmp/nonexistent-dhparam-xyz.pem",
 			})},
@@ -191,6 +197,7 @@ func TestResolveWebSSLDhparamEnabled(t *testing.T) {
 
 	t.Run("uses default path when LocalConfig not set", func(t *testing.T) {
 		g := &Generator{
+			env:         sys.Real(),
 			LocalConfig: &config.LocalConfig{Data: configtest.NewConfigMapFrom(map[string]string{})},
 		}
 		result, err := g.resolveWebSSLDhparamEnabled(context.Background())
@@ -209,7 +216,7 @@ func TestResolveSSLClientCertCAEnabled(t *testing.T) {
 		if err := os.WriteFile(caPath, []byte("certificate-content"), 0o644); err != nil {
 			t.Fatalf("failed to create test file: %v", err)
 		}
-		g := &Generator{ConfDir: dir}
+		g := &Generator{env: sys.Real(), ConfDir: dir}
 		result, err := g.resolveSSLClientCertCAEnabled(context.Background())
 		if err != nil {
 			t.Fatalf("resolveSSLClientCertCAEnabled failed: %v", err)
@@ -225,7 +232,7 @@ func TestResolveSSLClientCertCAEnabled(t *testing.T) {
 		if err := os.WriteFile(caPath, []byte(""), 0o644); err != nil {
 			t.Fatalf("failed to create test file: %v", err)
 		}
-		g := &Generator{ConfDir: dir}
+		g := &Generator{env: sys.Real(), ConfDir: dir}
 		result, err := g.resolveSSLClientCertCAEnabled(context.Background())
 		if err != nil {
 			t.Fatalf("resolveSSLClientCertCAEnabled failed: %v", err)
@@ -236,7 +243,7 @@ func TestResolveSSLClientCertCAEnabled(t *testing.T) {
 	})
 
 	t.Run("returns false when file does not exist", func(t *testing.T) {
-		g := &Generator{ConfDir: "/tmp/nonexistent-dir-xyz"}
+		g := &Generator{env: sys.Real(), ConfDir: "/tmp/nonexistent-dir-xyz"}
 		result, err := g.resolveSSLClientCertCAEnabled(context.Background())
 		if err != nil {
 			t.Fatalf("resolveSSLClientCertCAEnabled failed: %v", err)

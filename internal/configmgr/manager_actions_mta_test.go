@@ -65,7 +65,7 @@ func TestDoMapfileSection_HappyPath(t *testing.T) {
 		ConfigFile: filepath.Join(tmpDir, "zmconfigd.cf"),
 	}
 	cacheInstance := cache.New(ctx, false)
-	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance)
+	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance, hostEnv())
 
 	// Setup mock executor
 	mockExec := &mockMtaExecutorForMta{}
@@ -123,7 +123,7 @@ func TestDoMapfileSection_ErrorPath(t *testing.T) {
 		ConfigFile: filepath.Join(tmpDir, "zmconfigd.cf"),
 	}
 	cacheInstance := cache.New(ctx, false)
-	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance)
+	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance, hostEnv())
 
 	// Setup mock executor that returns an error
 	mockExec := &mockMtaExecutorForMta{
@@ -165,7 +165,7 @@ func TestDoMapfileSection_NoChanges(t *testing.T) {
 		ConfigFile: filepath.Join(tmpDir, "zmconfigd.cf"),
 	}
 	cacheInstance := cache.New(ctx, false)
-	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance)
+	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance, hostEnv())
 
 	// Setup mock executor
 	mockExec := &mockMtaExecutorForMta{}
@@ -205,7 +205,7 @@ func TestDoMapfileSection_FirstRunNoChanges(t *testing.T) {
 		ConfigFile: filepath.Join(tmpDir, "zmconfigd.cf"),
 	}
 	cacheInstance := cache.New(ctx, false)
-	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance)
+	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance, hostEnv())
 
 	// Setup mock executor
 	mockExec := &mockMtaExecutorForMta{}
@@ -245,7 +245,7 @@ func TestDoMapfileSection_MultipleErrors(t *testing.T) {
 		ConfigFile: filepath.Join(tmpDir, "zmconfigd.cf"),
 	}
 	cacheInstance := cache.New(ctx, false)
-	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance)
+	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance, hostEnv())
 
 	// Setup mock executor that always fails
 	mockExec := &mockMtaExecutorForMta{

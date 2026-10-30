@@ -6,19 +6,19 @@ package mtaops
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/config/configtest"
 	"github.com/zextras/carbonio-configd/internal/state"
+	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
 
 // TestNewResolver verifies resolver creation.
 func TestNewResolver(t *testing.T) {
 	baseDir := "/opt/zextras"
-	r := NewResolver(baseDir)
+	r := NewResolver(baseDir, systest.New().System())
 
 	if r == nil {
 		t.Fatal("NewResolver() returned nil")
@@ -30,7 +30,7 @@ func TestNewResolver(t *testing.T) {
 
 // TestResolveValue_VAR tests resolving values from VAR type (GlobalConfig or ServerConfig).
 func TestResolveValue_VAR(t *testing.T) {
-	r := NewResolver("/opt/zextras")
+	r := NewResolver("/opt/zextras", systest.New().System())
 	st := &state.State{
 		GlobalConfig: &config.GlobalConfig{
 			Data: configtest.NewConfigMapFrom(map[string]string{
@@ -93,7 +93,7 @@ func TestResolveValue_VAR(t *testing.T) {
 
 // TestResolveValue_LOCAL tests resolving values from LOCAL type (LocalConfig).
 func TestResolveValue_LOCAL(t *testing.T) {
-	r := NewResolver("/opt/zextras")
+	r := NewResolver("/opt/zextras", systest.New().System())
 	st := &state.State{
 		LocalConfig: &config.LocalConfig{
 			Data: configtest.NewConfigMapFrom(map[string]string{
@@ -142,7 +142,7 @@ func TestResolveValue_LOCAL(t *testing.T) {
 // deliberately does not resolve FILE — transformer expansion of %%…%% directives
 // inside .cf fragments is owned by configmgr.lookupFileKey (CO-4096).
 func TestResolveValue_FILE_NotHandled(t *testing.T) {
-	r := NewResolver(t.TempDir())
+	r := NewResolver(t.TempDir(), systest.New().System())
 	st := &state.State{}
 	key := "zmconfigd/smtpd_sender_login_maps.cf"
 	got, err := r.ResolveValue(context.Background(), "FILE", key, st)
@@ -156,20 +156,15 @@ func TestResolveValue_FILE_NotHandled(t *testing.T) {
 
 // TestResolveValue_MAPLOCAL tests resolving mapped file paths.
 func TestResolveValue_MAPLOCAL(t *testing.T) {
-	// Create temp directory for test
-	tmpDir := t.TempDir()
-	confDir := filepath.Join(tmpDir, "conf")
-	if err := os.MkdirAll(confDir, 0755); err != nil {
-		t.Fatalf("Failed to create conf dir: %v", err)
-	}
+	t.Parallel()
 
-	// Create dhparam.pem file
-	dhparamFile := filepath.Join(confDir, "dhparam.pem")
-	if err := os.WriteFile(dhparamFile, []byte("test dhparam data"), 0644); err != nil {
-		t.Fatalf("Failed to write dhparam file: %v", err)
-	}
+	const baseDir = "/opt/zextras"
 
-	r := NewResolver(tmpDir)
+	fakes := systest.New()
+	dhparamFile := filepath.Join(baseDir, "conf", "dhparam.pem")
+	fakes.FS.Put(dhparamFile, []byte("test dhparam data"), 0o644)
+
+	r := NewResolver(baseDir, fakes.System())
 	st := &state.State{}
 
 	tests := []struct {
@@ -208,11 +203,12 @@ func TestResolveValue_MAPLOCAL(t *testing.T) {
 
 // TestResolveValue_MAPLOCAL_FileNotExists tests MAPLOCAL when file doesn't exist.
 func TestResolveValue_MAPLOCAL_FileNotExists(t *testing.T) {
-	tmpDir := t.TempDir()
-	r := NewResolver(tmpDir)
+	t.Parallel()
+
+	r := NewResolver("/opt/zextras", systest.New().System())
 	st := &state.State{}
 
-	// dhparam.pem doesn't exist in tmpDir
+	// dhparam.pem doesn't exist in the fake filesystem
 	got, err := r.ResolveValue(context.Background(), "MAPLOCAL", attrZimbraSSLDHParam, st)
 	if err != nil {
 		t.Errorf("ResolveValue() returned error for non-existent file: %v", err)
@@ -224,7 +220,7 @@ func TestResolveValue_MAPLOCAL_FileNotExists(t *testing.T) {
 
 // TestResolveValue_Literal tests literal values (unknown types).
 func TestResolveValue_Literal(t *testing.T) {
-	r := NewResolver("/opt/zextras")
+	r := NewResolver("/opt/zextras", systest.New().System())
 	st := &state.State{}
 
 	tests := []struct {
@@ -268,7 +264,7 @@ func TestResolveValue_Literal(t *testing.T) {
 
 // TestResolvePostconfDirective tests POSTCONF directive resolution.
 func TestResolvePostconfDirective(t *testing.T) {
-	r := NewResolver("/opt/zextras").(*resolver)
+	r := NewResolver("/opt/zextras", systest.New().System()).(*resolver)
 	st := &state.State{
 		GlobalConfig: &config.GlobalConfig{
 			Data: configtest.NewConfigMapFrom(map[string]string{
@@ -345,7 +341,7 @@ func TestResolvePostconfDirective(t *testing.T) {
 
 // TestResolvePostconfdDirective tests POSTCONFD directive resolution (delete operation).
 func TestResolvePostconfdDirective(t *testing.T) {
-	r := NewResolver("/opt/zextras").(*resolver)
+	r := NewResolver("/opt/zextras", systest.New().System()).(*resolver)
 
 	tests := []struct {
 		name    string
@@ -376,7 +372,7 @@ func TestResolvePostconfdDirective(t *testing.T) {
 
 // TestResolveLdapDirective tests LDAP directive resolution.
 func TestResolveLdapDirective(t *testing.T) {
-	r := NewResolver("/opt/zextras").(*resolver)
+	r := NewResolver("/opt/zextras", systest.New().System()).(*resolver)
 	st := &state.State{
 		LocalConfig: &config.LocalConfig{
 			Data: configtest.NewConfigMapFrom(map[string]string{
@@ -433,8 +429,9 @@ func TestResolveLdapDirective(t *testing.T) {
 
 // TestResolveMapfileDirective tests MAPFILE directive resolution.
 func TestResolveMapfileDirective(t *testing.T) {
-	tmpDir := t.TempDir()
-	r := NewResolver(tmpDir).(*resolver)
+	const tmpDir = "/opt/zextras"
+
+	r := NewResolver(tmpDir, systest.New().System()).(*resolver)
 
 	expectedPath := filepath.Join(tmpDir, "conf", "dhparam.pem")
 

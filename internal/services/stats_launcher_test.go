@@ -16,39 +16,43 @@ import (
 // --- statsCustomStart (conditional collectors) ---
 
 func TestStatsCustomStart_MysqlCollectorEnabled(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	// Verify zmstat-mysql is included when zmstat_mysql_enabled=TRUE.
 	// We don't have localconfig, so this will error, but it exercises
 	// the collector list building.
 	tmp := t.TempDir()
 
-	oldLibexec := libexecDir
-	libexecDir = tmp
-	defer func() { libexecDir = oldLibexec }()
+	ctl.p.libexec = tmp
 
 	// This test verifies the function call path does not panic
 	// even when localconfig is unavailable.
-	err := statsCustomStart(context.Background(), &ServiceDef{Name: "stats"})
+	err := ctl.statsCustomStart(context.Background(), &ServiceDef{Name: "stats"})
 	if err == nil {
 		t.Log("statsCustomStart succeeded unexpectedly (localconfig available)")
 	}
 }
 
-// --- statsCustomStart (loadConfig override) ---
+// --- statsCustomStart (ctl.loadConfig override) ---
 
 func TestStatsCustomStart_LoadConfigFails(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 
-	old := loadConfig
-	loadConfig = func() (map[string]string, error) {
+	ctl.loadConfig = func() (map[string]string, error) {
 		return nil, fmt.Errorf("test config error")
 	}
-	defer func() { loadConfig = old }()
 
-	err := statsCustomStart(context.Background(), &ServiceDef{Name: "stats"})
+	err := ctl.statsCustomStart(context.Background(), &ServiceDef{Name: "stats"})
 	if err == nil {
-		t.Fatal("expected error when loadConfig fails")
+		t.Fatal("expected error when ctl.loadConfig fails")
 	}
 	if !strings.Contains(err.Error(), "failed to load localconfig") {
 		t.Errorf("error = %q, want it to contain %q", err, "failed to load localconfig")
@@ -56,26 +60,24 @@ func TestStatsCustomStart_LoadConfigFails(t *testing.T) {
 }
 
 func TestStatsCustomStart_NoCollectorBinariesWithConfig(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	tmp := t.TempDir()
 
-	oldLC := loadConfig
-	loadConfig = func() (map[string]string, error) {
+	ctl.loadConfig = func() (map[string]string, error) {
 		return map[string]string{}, nil
 	}
-	defer func() { loadConfig = oldLC }()
 
-	oldLibexec := libexecDir
-	libexecDir = tmp
-	defer func() { libexecDir = oldLibexec }()
+	ctl.p.libexec = tmp
 
-	oldLog := logPath
-	logPath = filepath.Join(tmp, "log")
-	defer func() { logPath = oldLog }()
+	ctl.p.log = filepath.Join(tmp, "log")
 
-	err := statsCustomStart(context.Background(), &ServiceDef{Name: "stats"})
+	err := ctl.statsCustomStart(context.Background(), &ServiceDef{Name: "stats"})
 	if err == nil {
 		t.Fatal("expected error when no collector binaries exist")
 	}
@@ -85,6 +87,10 @@ func TestStatsCustomStart_NoCollectorBinariesWithConfig(t *testing.T) {
 }
 
 func TestStatsCustomStart_SomeCollectorsPresent(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -94,11 +100,9 @@ func TestStatsCustomStart_SomeCollectorsPresent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldLC := loadConfig
-	loadConfig = func() (map[string]string, error) {
+	ctl.loadConfig = func() (map[string]string, error) {
 		return map[string]string{}, nil
 	}
-	defer func() { loadConfig = oldLC }()
 
 	for _, name := range []string{"zmstat-proc", "zmstat-cpu"} {
 		bin := filepath.Join(tmp, name)
@@ -107,21 +111,21 @@ func TestStatsCustomStart_SomeCollectorsPresent(t *testing.T) {
 		}
 	}
 
-	oldLibexec := libexecDir
-	libexecDir = tmp
-	defer func() { libexecDir = oldLibexec }()
+	ctl.p.libexec = tmp
 
-	oldLog := logPath
-	logPath = logDir
-	defer func() { logPath = oldLog }()
+	ctl.p.log = logDir
 
-	err := statsCustomStart(context.Background(), &ServiceDef{Name: "stats"})
+	err := ctl.statsCustomStart(context.Background(), &ServiceDef{Name: "stats"})
 	if err != nil {
 		t.Errorf("statsCustomStart returned error: %v", err)
 	}
 }
 
 func TestStatsCustomStart_ConditionalMysqlCollectorEnabled(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -131,13 +135,11 @@ func TestStatsCustomStart_ConditionalMysqlCollectorEnabled(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldLC := loadConfig
-	loadConfig = func() (map[string]string, error) {
+	ctl.loadConfig = func() (map[string]string, error) {
 		return map[string]string{
 			"zmstat_mysql_enabled": "TRUE",
 		}, nil
 	}
-	defer func() { loadConfig = oldLC }()
 
 	collectors := []string{
 		"zmstat-proc", "zmstat-cpu", "zmstat-vm", "zmstat-io",
@@ -150,15 +152,11 @@ func TestStatsCustomStart_ConditionalMysqlCollectorEnabled(t *testing.T) {
 		}
 	}
 
-	oldLibexec := libexecDir
-	libexecDir = tmp
-	defer func() { libexecDir = oldLibexec }()
+	ctl.p.libexec = tmp
 
-	oldLog := logPath
-	logPath = logDir
-	defer func() { logPath = oldLog }()
+	ctl.p.log = logDir
 
-	err := statsCustomStart(context.Background(), &ServiceDef{Name: "stats"})
+	err := ctl.statsCustomStart(context.Background(), &ServiceDef{Name: "stats"})
 	if err != nil {
 		t.Errorf("statsCustomStart returned error: %v", err)
 	}

@@ -11,13 +11,16 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 )
 
 // TestServiceRestart_MTA_IsRegistered verifies that MTA restart calls ServiceReload.
 func TestServiceRestart_MTA_IsRegistered(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -25,21 +28,25 @@ func TestServiceRestart_MTA_IsRegistered(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	err := ServiceRestart(ctx, "mta")
+	err := ctl.ServiceRestart(ctx, "mta")
 	_ = err
 }
 
 // TestServiceRestart_StopFailedStartAnyway exercises the "stop failed, start anyway" branch.
 func TestServiceRestart_StopFailedStartAnyway(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	if IsSystemdMode() {
+	if ctl.IsSystemdMode() {
 		t.Skip("skipping: restart test on systemd-booted host")
 	}
 
-	orig := Registry["memcached"]
-	defer func() { Registry["memcached"] = orig }()
+	orig := ctl.registry["memcached"]
+	defer func() { ctl.registry["memcached"] = orig }()
 
 	def := *orig
 	def.Name = "memcached"
@@ -53,22 +60,26 @@ func TestServiceRestart_StopFailedStartAnyway(t *testing.T) {
 		return nil
 	}
 	def.ConfigRewrite = nil
-	Registry["memcached"] = &def
+	ctl.registry["memcached"] = &def
 
-	ServiceRestart(context.Background(), "memcached")
+	ctl.ServiceRestart(context.Background(), "memcached")
 }
 
 // TestServiceRestart_NonMTA_StopAndStartBoth exercises the stop-failed-warn-then-start path.
 func TestServiceRestart_NonMTA_StopAndStartBoth(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	if IsSystemdMode() {
+	if ctl.IsSystemdMode() {
 		t.Skip("skipping restart branch test on systemd-booted host")
 	}
 
-	orig := Registry["memcached"]
-	defer func() { Registry["memcached"] = orig }()
+	orig := ctl.registry["memcached"]
+	defer func() { ctl.registry["memcached"] = orig }()
 
 	stopCalled := false
 	startCalled := false
@@ -91,9 +102,9 @@ func TestServiceRestart_NonMTA_StopAndStartBoth(t *testing.T) {
 		startCalled = true
 		return nil
 	}
-	Registry["memcached"] = &def
+	ctl.registry["memcached"] = &def
 
-	ServiceRestart(context.Background(), "memcached")
+	ctl.ServiceRestart(context.Background(), "memcached")
 
 	if !stopCalled {
 		t.Error("expected stop to be called")
@@ -109,21 +120,23 @@ func TestServiceRestart_NonMTA_StopAndStartBoth(t *testing.T) {
 // bifurcates on CustomStop/ProcessName/BinaryPath rather than SystemdUnits
 // (see TestServiceReload_Legacy_* below for the legacy paths).
 func TestServiceReload_NoSystemdUnits(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	orig := isSystemdModeFn
-	defer func() { isSystemdModeFn = orig }()
-	isSystemdModeFn = func() bool { return true }
+	ctl.pinMode(true)
 
-	origDef := Registry["memcached"]
-	defer func() { Registry["memcached"] = origDef }()
+	origDef := ctl.registry["memcached"]
+	defer func() { ctl.registry["memcached"] = origDef }()
 
 	def := *origDef
 	def.SystemdUnits = nil
-	Registry["memcached"] = &def
+	ctl.registry["memcached"] = &def
 
-	err := ServiceReload(context.Background(), "memcached")
+	err := ctl.ServiceReload(context.Background(), "memcached")
 	if err != nil {
 		t.Errorf("ServiceReload with no units returned error: %v", err)
 	}
@@ -131,7 +144,7 @@ func TestServiceReload_NoSystemdUnits(t *testing.T) {
 
 // stubMTADeps replaces the saslauthd and milter registry entries with
 // recorders and returns the recorded "<service> <action>" calls.
-func stubMTADeps(t *testing.T, saslEnabled, milterEnabled bool) *[]string {
+func stubMTADeps(t *testing.T, ctl *Controller, saslEnabled, milterEnabled bool) *[]string {
 	t.Helper()
 
 	calls := &[]string{}
@@ -145,10 +158,10 @@ func stubMTADeps(t *testing.T, saslEnabled, milterEnabled bool) *[]string {
 	}
 
 	for name, enabled := range map[string]bool{svcSaslauthd: saslEnabled, svcMilter: milterEnabled} {
-		saved := Registry[name]
-		t.Cleanup(func() { Registry[name] = saved })
+		saved := ctl.registry[name]
+		t.Cleanup(func() { ctl.registry[name] = saved })
 
-		Registry[name] = &ServiceDef{
+		ctl.registry[name] = &ServiceDef{
 			Name:        name,
 			CustomStart: record("start"),
 			CustomStop:  record("stop"),
@@ -163,22 +176,16 @@ func stubMTADeps(t *testing.T, saslEnabled, milterEnabled bool) *[]string {
 // reload: saslauthd (and milter when enabled) are stopped and started before
 // postfix reload; a disabled milter is left alone.
 func TestServiceReload_Legacy_MTA_RestartsEnabledDeps(t *testing.T) {
-	orig := isSystemdModeFn
-	defer func() { isSystemdModeFn = orig }()
-	isSystemdModeFn = func() bool { return false }
+	t.Parallel()
 
-	calls := stubMTADeps(t, true, false)
+	ctl, _ := newFakeController(t)
 
-	tmp := t.TempDir()
-	oldSudo := sudoBin
-	sudoBin = filepath.Join(tmp, "sudo")
-	if err := os.WriteFile(sudoBin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { sudoBin = oldSudo }()
+	ctl.pinMode(false)
 
-	if err := ServiceReload(context.Background(), "mta"); err != nil {
-		t.Fatalf("ServiceReload(mta): %v", err)
+	calls := stubMTADeps(t, ctl, true, false)
+
+	if err := ctl.ServiceReload(context.Background(), "mta"); err != nil {
+		t.Fatalf("ctl.ServiceReload(mta): %v", err)
 	}
 
 	want := []string{svcSaslauthd + " stop", svcSaslauthd + " start"}
@@ -188,52 +195,32 @@ func TestServiceReload_Legacy_MTA_RestartsEnabledDeps(t *testing.T) {
 }
 
 // TestServiceReload_Legacy_MTA_NativeReload is the regression guard for the
-// cli.go:279 bug: ServiceReload used to try Systemctl("reload") in every
+// cli.go:279 bug: ServiceReload used to try ctl.Systemctl("reload") in every
 // mode, and its only fallback was a hard stopService+startService — for MTA
 // that meant a full postfix restart (dropping in-flight SMTP) whenever the
 // host wasn't orchestrated by Carbonio's systemd targets. In legacy mode,
 // MTA reload must run "postfix reload" directly and never touch systemctl
 // or fall back to mtaCustomStop/mtaCustomStart.
 func TestServiceReload_Legacy_MTA_NativeReload(t *testing.T) {
-	orig := isSystemdModeFn
-	defer func() { isSystemdModeFn = orig }()
-	isSystemdModeFn = func() bool { return false }
+	t.Parallel()
 
-	stubMTADeps(t, false, false)
+	ctl, f := newFakeController(t)
 
-	tmp := t.TempDir()
-	callLog := filepath.Join(tmp, "calls.log")
+	ctl.pinMode(false)
 
-	oldSudo := sudoBin
-	sudoBin = filepath.Join(tmp, "sudo")
-	fakeSudo := "#!/bin/sh\necho \"$@\" >> " + callLog + "\nexit 0\n"
-	if err := os.WriteFile(sudoBin, []byte(fakeSudo), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { sudoBin = oldSudo }()
+	stubMTADeps(t, ctl, false, false)
 
-	oldPostfix := postfixBin
-	postfixBin = filepath.Join(tmp, "postfix")
-	defer func() { postfixBin = oldPostfix }()
-
-	if err := ServiceReload(context.Background(), "mta"); err != nil {
+	if err := ctl.ServiceReload(context.Background(), "mta"); err != nil {
 		t.Fatalf("expected nil from native postfix reload, got %v", err)
 	}
 
-	data, err := os.ReadFile(callLog)
-	if err != nil {
-		t.Fatalf("expected sudo to be invoked, read calls.log: %v", err)
+	calls := f.Exec.Lines()
+	if len(calls) != 1 {
+		t.Fatalf("expected exactly one command (sudo postfix reload), got %q", calls)
 	}
 
-	calls := strings.TrimSpace(string(data))
-	if !strings.Contains(calls, "reload") {
-		t.Errorf("expected native postfix reload call, got %q", calls)
-	}
-	if strings.Contains(calls, "stop") || strings.Contains(calls, "start") {
-		t.Errorf("legacy MTA reload must not fall back to stop/start, got %q", calls)
-	}
-	if strings.Count(calls, "\n")+1 != 1 {
-		t.Errorf("expected exactly one sudo invocation (reload only), got %q", calls)
+	if want := sudoBin + " " + ctl.p.postfixBin + " reload"; calls[0] != want {
+		t.Errorf("command = %q, want %q", calls[0], want)
 	}
 }
 
@@ -243,9 +230,11 @@ func TestServiceReload_Legacy_MTA_NativeReload(t *testing.T) {
 // never systemctl — even when SystemdUnits is populated with a
 // real-looking unit name.
 func TestServiceReload_Legacy_Fallback_IgnoresSystemdUnits(t *testing.T) {
-	orig := isSystemdModeFn
-	defer func() { isSystemdModeFn = orig }()
-	isSystemdModeFn = func() bool { return false }
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	ctl.pinMode(false)
 
 	var order []string
 
@@ -261,10 +250,10 @@ func TestServiceReload_Legacy_Fallback_IgnoresSystemdUnits(t *testing.T) {
 			return nil
 		},
 	}
-	Registry["test-reload-fallback"] = def
-	defer delete(Registry, "test-reload-fallback")
+	ctl.registry["test-reload-fallback"] = def
+	defer delete(ctl.registry, "test-reload-fallback")
 
-	if err := ServiceReload(context.Background(), "test-reload-fallback"); err != nil {
+	if err := ctl.ServiceReload(context.Background(), "test-reload-fallback"); err != nil {
 		t.Fatalf("expected nil, got %v", err)
 	}
 
@@ -281,18 +270,20 @@ func TestServiceReload_Legacy_Fallback_IgnoresSystemdUnits(t *testing.T) {
 // the stop half fails because there was nothing to stop — so a dead
 // service's restart always reaches the start path.
 func TestProcessRestarts_DeadServiceInvokesStart(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	orig := isSystemdModeFn
-	defer func() { isSystemdModeFn = orig }()
-	isSystemdModeFn = func() bool { return false }
+	ctl.pinMode(false)
 
 	tmp := t.TempDir()
 	pidFile := filepath.Join(tmp, "dead-svc.pid")
 	started := false
 
-	Registry["watchdog-dead-svc"] = &ServiceDef{
+	ctl.registry["watchdog-dead-svc"] = &ServiceDef{
 		Name:    "watchdog-dead-svc",
 		PidFile: pidFile,
 		CustomStart: func(_ context.Context, _ *ServiceDef) error {
@@ -304,9 +295,9 @@ func TestProcessRestarts_DeadServiceInvokesStart(t *testing.T) {
 			return os.Remove(pidFile) // fails: nothing to stop, service is dead
 		},
 	}
-	defer delete(Registry, "watchdog-dead-svc")
+	defer delete(ctl.registry, "watchdog-dead-svc")
 
-	sm := NewServiceManager()
+	sm := NewServiceManager(ctl)
 
 	// Precondition: the service is dead (no pidfile yet).
 	running, err := sm.IsRunning(context.Background(), "watchdog-dead-svc")

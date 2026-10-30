@@ -12,6 +12,7 @@ import (
 	"strconv"
 
 	"github.com/zextras/carbonio-configd/internal/cli/rewrite"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // exitStatus is the error a Kong Run method returns to make main exit with a
@@ -34,9 +35,9 @@ func exitWith(code int) error {
 // standaloneRewrite returns the in-process rewrite the cli commands fall back
 // to when no daemon answers on the listener port: one forced cycle of
 // RunMainLoop, as the legacy "zmconfigd <configs>" standalone mode does.
-func standaloneRewrite(disableRestarts bool) rewrite.Standalone {
+func standaloneRewrite(env sys.System, disableRestarts bool) rewrite.Standalone {
 	return func(ctx context.Context, configs []string) int {
-		return runStandaloneRewrite(ctx, &Args{DisableRestarts: disableRestarts, ForcedConfigs: configs})
+		return runStandaloneRewrite(ctx, env, &Args{DisableRestarts: disableRestarts, ForcedConfigs: configs})
 	}
 }
 

@@ -8,15 +8,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"os"
 	"os/user"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/go-ldap/ldap/v3"
 
 	"github.com/zextras/carbonio-configd/internal/security"
+	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
 
 type fakeConn struct {
@@ -49,7 +48,7 @@ func TestRun_NotZextras(t *testing.T) {
 		t.Run(string(action), func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 
-			code := Run(context.Background(), &stdout, &stderr, &Options{
+			code := Run(context.Background(), systest.New().System(), &stdout, &stderr, &Options{
 				Action:   action,
 				Protocol: "imap",
 				Standalone: func(context.Context, []string) int {
@@ -75,11 +74,11 @@ func TestRun_NotZextras(t *testing.T) {
 }
 
 func TestRun_ConfNginxNotInstalled(t *testing.T) {
-	t.Setenv("CARBONIO_BASE_DIR", t.TempDir())
+	t.Setenv("CARBONIO_BASE_DIR", "/cb")
 
 	var stdout, stderr bytes.Buffer
 
-	code := Run(context.Background(), &stdout, &stderr, &Options{Action: ActionConf})
+	code := Run(context.Background(), systest.New().System(), &stdout, &stderr, &Options{Action: ActionConf})
 
 	if code != 0 || stdout.String() != "Nginx not installed, exiting\n" {
 		t.Errorf("code=%d stdout=%q, want 0 and the not-installed line", code, stdout.String())
@@ -87,26 +86,16 @@ func TestRun_ConfNginxNotInstalled(t *testing.T) {
 }
 
 func TestRun_ConfPrintsConfig(t *testing.T) {
-	base := t.TempDir()
-	t.Setenv("CARBONIO_BASE_DIR", base)
+	t.Setenv("CARBONIO_BASE_DIR", "/cb")
 
-	if err := os.MkdirAll(filepath.Join(base, "common", "sbin"), 0o750); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := os.WriteFile(filepath.Join(base, "common", "sbin", "nginx"), nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	conf := filepath.Join(base, "nginx.conf")
-	if err := os.WriteFile(conf, []byte("# c\n\nworker_processes 1;\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	f := systest.New()
+	f.FS.Put("/cb/common/sbin/nginx", nil, 0o600)
+	f.FS.Put("/cb/nginx.conf", []byte("# c\n\nworker_processes 1;\n"), 0o600)
 
 	var stdout, stderr bytes.Buffer
 
-	code := Run(context.Background(), &stdout, &stderr, &Options{
-		Action: ActionConf, ConfigFile: conf, NoComments: true, NoEmpty: true,
+	code := Run(context.Background(), f.System(), &stdout, &stderr, &Options{
+		Action: ActionConf, ConfigFile: "/cb/nginx.conf", NoComments: true, NoEmpty: true,
 	})
 
 	if code != 0 || stdout.String() != "worker_processes 1;\n" {
@@ -207,7 +196,7 @@ func TestShowProxyStatus_Error(t *testing.T) {
 func TestRun_UnknownAction(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if code := Run(context.Background(), &stdout, &stderr, &Options{Action: "x"}); code != 1 {
+	if code := Run(context.Background(), systest.New().System(), &stdout, &stderr, &Options{Action: "x"}); code != 1 {
 		t.Errorf("code = %d, want 1", code)
 	}
 }

@@ -10,10 +10,14 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"syscall"
+	"slices"
+	"strings"
 	"testing"
 
+	"github.com/zextras/carbonio-configd/internal/ldap"
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/sys"
+	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
 
 func TestMain(m *testing.M) {
@@ -25,11 +29,25 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+// testBaseDir is the fake installation root every fake-backed test uses.
+const testBaseDir = "/opt/zextras"
+
+// newFakeExecutor builds an executor over fresh fakes.
+func newFakeExecutor(ldapMgr ldap.AttributeModifier) (*executor, *systest.Fakes) {
+	fakes := systest.New()
+
+	return NewExecutor(testBaseDir, ldapMgr, fakes.System()).(*executor), fakes
+}
+
+const postconfBin = testBaseDir + "/common/sbin/postconf"
+
 func TestExecutor_Initialization(t *testing.T) {
+	t.Parallel()
+
 	mockLdap := &mockLdapManager{}
 	baseDir := "/opt/zextras"
 
-	executor := NewExecutor(baseDir, mockLdap).(*executor)
+	executor := NewExecutor(baseDir, mockLdap, systest.New().System()).(*executor)
 
 	if executor == nil {
 		t.Fatal("NewExecutor should not return nil")
@@ -61,23 +79,9 @@ func TestExecutor_Initialization(t *testing.T) {
 }
 
 func TestExecutePostconf(t *testing.T) {
-	mockLdap := &mockLdapManager{}
-	tmpDir := t.TempDir()
+	t.Parallel()
 
-	// Create a fake postconf script that just exits successfully
-	postconfPath := filepath.Join(tmpDir, "common", "sbin", "postconf")
-	if err := os.MkdirAll(filepath.Dir(postconfPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	script := `#!/bin/sh
-exit 0
-`
-	if err := os.WriteFile(postconfPath, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	executor := NewExecutor(tmpDir, mockLdap)
+	executor, fakes := newFakeExecutor(&mockLdapManager{})
 
 	op := PostconfOperation{
 		Key:   "myhostname",
@@ -88,27 +92,17 @@ exit 0
 	if err != nil {
 		t.Errorf("ExecutePostconf failed: %v", err)
 	}
+
+	want := []string{"exec " + postconfBin + " -e myhostname=mail.example.com"}
+	if got := fakes.Rec.Strings(); !slices.Equal(got, want) {
+		t.Errorf("recorded ops = %q, want %q", got, want)
+	}
 }
 
 func TestExecutePostconfBatch_MultilineValues(t *testing.T) {
-	mockLdap := &mockLdapManager{}
-	tmpDir := t.TempDir()
+	t.Parallel()
 
-	// Create a fake postconf script
-	postconfPath := filepath.Join(tmpDir, "common", "sbin", "postconf")
-	if err := os.MkdirAll(filepath.Dir(postconfPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	script := `#!/bin/sh
-echo "$@" > ` + filepath.Join(tmpDir, "postconf_args.txt") + `
-exit 0
-`
-	if err := os.WriteFile(postconfPath, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	executor := NewExecutor(tmpDir, mockLdap)
+	executor, fakes := newFakeExecutor(&mockLdapManager{})
 
 	// Test multi-line value normalization
 	ops := []PostconfOperation{
@@ -123,23 +117,17 @@ exit 0
 		t.Errorf("ExecutePostconfBatch failed: %v", err)
 	}
 
-	// Read the captured arguments
-	argsFile := filepath.Join(tmpDir, "postconf_args.txt")
-	argsData, err := os.ReadFile(argsFile)
-	if err != nil {
-		t.Fatalf("Failed to read args file: %v", err)
-	}
-
 	// Should have comma-separated format
-	args := string(argsData)
-	if !contains(args, "restriction_class1, restriction_class2, restriction_class3") {
+	args := strings.Join(fakes.Exec.Calls()[0].Args, " ")
+	if !strings.Contains(args, "restriction_class1, restriction_class2, restriction_class3") {
 		t.Errorf("Multi-line value not normalized correctly: %s", args)
 	}
 }
 
 func TestExecutePostconfBatch_EmptyBatch(t *testing.T) {
-	mockLdap := &mockLdapManager{}
-	executor := NewExecutor("/opt/zextras", mockLdap)
+	t.Parallel()
+
+	executor, fakes := newFakeExecutor(&mockLdapManager{})
 
 	err := executor.ExecutePostconfBatch(context.Background(), nil)
 	if err != nil {
@@ -150,26 +138,16 @@ func TestExecutePostconfBatch_EmptyBatch(t *testing.T) {
 	if err != nil {
 		t.Errorf("ExecutePostconfBatch with empty slice should not error: %v", err)
 	}
+
+	if got := fakes.Rec.Strings(); len(got) != 0 {
+		t.Errorf("empty batch must not run anything, recorded %q", got)
+	}
 }
 
 func TestExecutePostconfd(t *testing.T) {
-	mockLdap := &mockLdapManager{}
-	tmpDir := t.TempDir()
+	t.Parallel()
 
-	// Create a fake postconf script
-	postconfPath := filepath.Join(tmpDir, "common", "sbin", "postconf")
-	if err := os.MkdirAll(filepath.Dir(postconfPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	script := `#!/bin/sh
-exit 0
-`
-	if err := os.WriteFile(postconfPath, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	executor := NewExecutor(tmpDir, mockLdap)
+	executor, fakes := newFakeExecutor(&mockLdapManager{})
 
 	op := PostconfdOperation{
 		Key: "deprecated_param",
@@ -179,27 +157,19 @@ exit 0
 	if err != nil {
 		t.Errorf("ExecutePostconfd failed: %v", err)
 	}
+
+	want := []string{"exec " + postconfBin + " -X deprecated_param"}
+	if got := fakes.Rec.Strings(); !slices.Equal(got, want) {
+		t.Errorf("recorded ops = %q, want %q", got, want)
+	}
 }
 
 func TestExecutePostconfdBatch_NonExistentKey(t *testing.T) {
-	mockLdap := &mockLdapManager{}
-	tmpDir := t.TempDir()
+	t.Parallel()
 
-	// Create a fake postconf script that fails (key doesn't exist)
-	postconfPath := filepath.Join(tmpDir, "common", "sbin", "postconf")
-	if err := os.MkdirAll(filepath.Dir(postconfPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	script := `#!/bin/sh
-echo "postconf: warning: unknown parameter: deprecated_param" >&2
-exit 1
-`
-	if err := os.WriteFile(postconfPath, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	executor := NewExecutor(tmpDir, mockLdap)
+	executor, fakes := newFakeExecutor(&mockLdapManager{})
+	// postconf -X fails (key doesn't exist)
+	fakes.Exec.OnPath(postconfBin, systest.Fail(1, "postconf: warning: unknown parameter: deprecated_param\n"))
 
 	ops := []PostconfdOperation{
 		{Key: "deprecated_param"},
@@ -216,23 +186,10 @@ exit 1
 // unrelated to an unknown parameter (e.g. permission denied, crash) is reported
 // to the caller instead of being silently swallowed.
 func TestExecutePostconfdBatch_GenericFailure(t *testing.T) {
-	mockLdap := &mockLdapManager{}
-	tmpDir := t.TempDir()
+	t.Parallel()
 
-	postconfPath := filepath.Join(tmpDir, "common", "sbin", "postconf")
-	if err := os.MkdirAll(filepath.Dir(postconfPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	script := `#!/bin/sh
-echo "postconf: fatal: permission denied" >&2
-exit 1
-`
-	if err := os.WriteFile(postconfPath, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	executor := NewExecutor(tmpDir, mockLdap)
+	executor, fakes := newFakeExecutor(&mockLdapManager{})
+	fakes.Exec.OnPath(postconfBin, systest.Fail(1, "postconf: fatal: permission denied\n"))
 
 	ops := []PostconfdOperation{
 		{Key: "some_param"},
@@ -243,19 +200,22 @@ exit 1
 		t.Fatal("ExecutePostconfdBatch should return an error for non-unknown-parameter failures")
 	}
 
-	if !contains(err.Error(), "permission denied") {
+	if !strings.Contains(err.Error(), "permission denied") {
 		t.Errorf("error should include the postconf output snippet, got: %v", err)
+	}
+
+	if !strings.Contains(err.Error(), "postconf -X batch failed: exit status 1, output: ") {
+		t.Errorf("error text changed: %v", err)
 	}
 }
 
 func TestExecuteMapfile_WriteBase64Data(t *testing.T) {
-	mockLdap := &mockLdapManager{}
-	tmpDir := t.TempDir()
+	t.Parallel()
 
-	executor := NewExecutor(tmpDir, mockLdap).(*executor)
+	executor, fakes := newFakeExecutor(&mockLdapManager{})
 
 	// Set up mapped file path
-	testFilePath := filepath.Join(tmpDir, "test.pem")
+	testFilePath := filepath.Join(testBaseDir, "test.pem")
 	executor.mappedFiles["testKey"] = testFilePath
 
 	// Create test data
@@ -274,29 +234,34 @@ func TestExecuteMapfile_WriteBase64Data(t *testing.T) {
 	}
 
 	// Verify file was written
-	writtenData, err := os.ReadFile(testFilePath)
-	if err != nil {
-		t.Fatalf("Failed to read written file: %v", err)
+	writtenData, ok := fakes.FS.Data(testFilePath)
+	if !ok {
+		t.Fatal("mapped file was not written")
 	}
 
 	if string(writtenData) != testData {
 		t.Errorf("Written data = %q, want %q", string(writtenData), testData)
 	}
 
-	// Test idempotency - writing same data again should succeed
+	// Test idempotency - writing same data again should succeed without a second write
+	fakes.Rec.Reset()
+
 	err = executor.ExecuteMapfile(context.Background(), op)
 	if err != nil {
 		t.Errorf("ExecuteMapfile should be idempotent: %v", err)
 	}
+
+	if got := fakes.Rec.Strings(); len(got) != 0 {
+		t.Errorf("unchanged content must not be rewritten, recorded %q", got)
+	}
 }
 
 func TestExecuteMapfile_InvalidBase64(t *testing.T) {
-	mockLdap := &mockLdapManager{}
-	tmpDir := t.TempDir()
+	t.Parallel()
 
-	executor := NewExecutor(tmpDir, mockLdap).(*executor)
+	executor, _ := newFakeExecutor(&mockLdapManager{})
 
-	testFilePath := filepath.Join(tmpDir, "test.pem")
+	testFilePath := filepath.Join(testBaseDir, "test.pem")
 	executor.mappedFiles["testKey"] = testFilePath
 
 	op := MapfileOperation{
@@ -312,10 +277,9 @@ func TestExecuteMapfile_InvalidBase64(t *testing.T) {
 }
 
 func TestExecuteMapfile_UnmappedKey(t *testing.T) {
-	mockLdap := &mockLdapManager{}
-	tmpDir := t.TempDir()
+	t.Parallel()
 
-	executor := NewExecutor(tmpDir, mockLdap)
+	executor, _ := newFakeExecutor(&mockLdapManager{})
 
 	op := MapfileOperation{
 		Key:        "unmappedKey",
@@ -325,25 +289,21 @@ func TestExecuteMapfile_UnmappedKey(t *testing.T) {
 
 	err := executor.ExecuteMapfile(context.Background(), op)
 	if err == nil {
-		t.Error("ExecuteMapfile should fail with unmapped key")
+		t.Fatal("ExecuteMapfile should fail with unmapped key")
 	}
 
-	if !contains(err.Error(), "unmapped MAPFILE key") {
+	if !strings.Contains(err.Error(), "unmapped MAPFILE key") {
 		t.Errorf("Error should mention unmapped key, got: %v", err)
 	}
 }
 
 func TestExecuteMapfile_MAPLOCAL_FileExists(t *testing.T) {
-	mockLdap := &mockLdapManager{}
-	tmpDir := t.TempDir()
+	t.Parallel()
 
-	executor := NewExecutor(tmpDir, mockLdap).(*executor)
+	executor, fakes := newFakeExecutor(&mockLdapManager{})
 
-	// Create test file
-	testFilePath := filepath.Join(tmpDir, "existing.crt")
-	if err := os.WriteFile(testFilePath, []byte("test cert"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	testFilePath := filepath.Join(testBaseDir, "existing.crt")
+	fakes.FS.Put(testFilePath, []byte("test cert"), 0o600)
 
 	executor.mappedFiles["testCert"] = testFilePath
 
@@ -359,12 +319,11 @@ func TestExecuteMapfile_MAPLOCAL_FileExists(t *testing.T) {
 }
 
 func TestExecuteMapfile_MAPLOCAL_FileNotExists(t *testing.T) {
-	mockLdap := &mockLdapManager{}
-	tmpDir := t.TempDir()
+	t.Parallel()
 
-	executor := NewExecutor(tmpDir, mockLdap).(*executor)
+	executor, _ := newFakeExecutor(&mockLdapManager{})
 
-	testFilePath := filepath.Join(tmpDir, "nonexistent.crt")
+	testFilePath := filepath.Join(testBaseDir, "nonexistent.crt")
 	executor.mappedFiles["testCert"] = testFilePath
 
 	op := MapfileOperation{
@@ -380,19 +339,16 @@ func TestExecuteMapfile_MAPLOCAL_FileNotExists(t *testing.T) {
 }
 
 func TestHandleEmptyMapfileData_RemovesStaleFile(t *testing.T) {
-	mockLdap := &mockLdapManager{}
-	tmpDir := t.TempDir()
+	t.Parallel()
 
-	executor := NewExecutor(tmpDir, mockLdap).(*executor)
+	executor, fakes := newFakeExecutor(&mockLdapManager{})
 
-	testFilePath := filepath.Join(tmpDir, "test.pem")
+	testFilePath := filepath.Join(testBaseDir, "test.pem")
 	executor.mappedFiles["testKey"] = testFilePath
 
 	// Existing mapped file that should be removed when the VAR is cleared,
 	// mirroring jylibs/state.py os.remove(mapfile) (e.g. clearing zimbraSSLDHParam).
-	if err := os.WriteFile(testFilePath, []byte("stale content"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	fakes.FS.Put(testFilePath, []byte("stale content"), 0o600)
 
 	op := MapfileOperation{
 		Key:        "testKey",
@@ -404,18 +360,17 @@ func TestHandleEmptyMapfileData_RemovesStaleFile(t *testing.T) {
 		t.Fatalf("ExecuteMapfile with empty data should remove the stale file: %v", err)
 	}
 
-	if _, err := os.Stat(testFilePath); !os.IsNotExist(err) {
-		t.Errorf("stale mapfile should have been removed, stat err = %v", err)
+	if fakes.FS.Exists(testFilePath) {
+		t.Error("stale mapfile should have been removed")
 	}
 }
 
 func TestHandleEmptyMapfileData_NoBackupNoFile(t *testing.T) {
-	mockLdap := &mockLdapManager{}
-	tmpDir := t.TempDir()
+	t.Parallel()
 
-	executor := NewExecutor(tmpDir, mockLdap).(*executor)
+	executor, fakes := newFakeExecutor(&mockLdapManager{})
 
-	testFilePath := filepath.Join(tmpDir, "test.pem")
+	testFilePath := filepath.Join(testBaseDir, "test.pem")
 	executor.mappedFiles["testKey"] = testFilePath
 
 	op := MapfileOperation{
@@ -431,14 +386,16 @@ func TestHandleEmptyMapfileData_NoBackupNoFile(t *testing.T) {
 	}
 
 	// File should not be created
-	if _, err := os.Stat(testFilePath); !os.IsNotExist(err) {
+	if fakes.FS.Exists(testFilePath) {
 		t.Error("File should not be created when there's no data")
 	}
 }
 
 func TestExecuteLdapWrite_Success(t *testing.T) {
+	t.Parallel()
+
 	mockLdap := &mockLdapManager{}
-	executor := NewExecutor("/opt/zextras", mockLdap)
+	executor := NewExecutor("/opt/zextras", mockLdap, systest.New().System())
 
 	op := LdapOperation{
 		Key:   "ldap_db_maxsize",
@@ -464,10 +421,12 @@ func TestExecuteLdapWrite_Success(t *testing.T) {
 }
 
 func TestExecuteLdapWrite_Failure(t *testing.T) {
+	t.Parallel()
+
 	mockLdap := &mockLdapManager{
 		modifyErr: errors.New("ldap connection failed"),
 	}
-	executor := NewExecutor("/opt/zextras", mockLdap)
+	executor := NewExecutor("/opt/zextras", mockLdap, systest.New().System())
 
 	op := LdapOperation{
 		Key:   "ldap_db_maxsize",
@@ -476,34 +435,21 @@ func TestExecuteLdapWrite_Failure(t *testing.T) {
 
 	err := executor.ExecuteLdapWrite(context.Background(), op)
 	if err == nil {
-		t.Error("ExecuteLdapWrite should fail when LDAP manager returns error")
+		t.Fatal("ExecuteLdapWrite should fail when LDAP manager returns error")
 	}
 
-	if !contains(err.Error(), "LDAP write failed") {
+	if !strings.Contains(err.Error(), "LDAP write failed") {
 		t.Errorf("Error should mention LDAP write failure, got: %v", err)
 	}
 }
 
 // TestExecutePostconfdBatch_SuccessWithOutput covers the debug-output branch
-// (L172-175) where postconf -X succeeds and produces stdout.
+// where postconf -X succeeds and produces stdout.
 func TestExecutePostconfdBatch_SuccessWithOutput(t *testing.T) {
-	mockLdap := &mockLdapManager{}
-	tmpDir := t.TempDir()
+	t.Parallel()
 
-	postconfPath := filepath.Join(tmpDir, "common", "sbin", "postconf")
-	if err := os.MkdirAll(filepath.Dir(postconfPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	script := `#!/bin/sh
-echo "postconf: deprecated: some_param"
-exit 0
-`
-	if err := os.WriteFile(postconfPath, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	executor := NewExecutor(tmpDir, mockLdap)
+	executor, fakes := newFakeExecutor(&mockLdapManager{})
+	fakes.Exec.OnPath(postconfBin, systest.Reply("postconf: deprecated: some_param\n"))
 
 	ops := []PostconfdOperation{
 		{Key: "some_param"},
@@ -515,43 +461,47 @@ exit 0
 	}
 }
 
-// Helper function to check if a string contains a substring
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
-		(len(s) > 0 && len(substr) > 0 && findSubstring(s, substr)))
-}
+// TestExecutePostconfdBatch_StartFailure verifies a postconf that cannot be
+// started (missing binary) surfaces to the caller.
+func TestExecutePostconfdBatch_StartFailure(t *testing.T) {
+	t.Parallel()
 
-func findSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
+	executor, fakes := newFakeExecutor(&mockLdapManager{})
+	fakes.Exec.FailStart(func(*sys.Cmd) bool { return true }, os.ErrNotExist)
+
+	err := executor.ExecutePostconfdBatch(context.Background(), []PostconfdOperation{{Key: "some_param"}})
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("ExecutePostconfdBatch error = %v, want wrapped %v", err, os.ErrNotExist)
 	}
-	return false
 }
 
 // TestExecutePostconfdBatch_NilOps verifies ExecutePostconfdBatch returns nil for nil ops.
 func TestExecutePostconfdBatch_NilOps(t *testing.T) {
-	e := NewExecutor("/opt/zextras", nil)
+	t.Parallel()
+
+	e := NewExecutor("/opt/zextras", nil, systest.New().System())
+
 	err := e.ExecutePostconfdBatch(context.Background(), nil)
 	if err != nil {
 		t.Errorf("ExecutePostconfdBatch(nil) = %v, want nil", err)
 	}
 }
 
-// TestHandleEmptyMapfileData_RemoveError covers the os.Remove error branch in
-// handleEmptyMapfileData (line 197-199): the file exists but cannot be removed
-// because the parent directory is read-only.
+// TestHandleEmptyMapfileData_RemoveError covers the Remove error branch in
+// handleEmptyMapfileData: the file exists but cannot be removed because the
+// parent directory is read-only. It runs on the real filesystem because
+// directory permissions are what the test is about.
 func TestHandleEmptyMapfileData_RemoveError(t *testing.T) {
+	t.Parallel()
+
 	if os.Getuid() == 0 {
 		t.Skip("root bypasses directory permission checks")
 	}
 
-	mockLdap := &mockLdapManager{}
 	tmpDir := t.TempDir()
 
 	// Create a sub-directory to hold the file; we'll make it read-only so
-	// os.Remove inside it fails.
+	// Remove inside it fails.
 	subDir := filepath.Join(tmpDir, "protected")
 	if err := os.Mkdir(subDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -562,13 +512,13 @@ func TestHandleEmptyMapfileData_RemoveError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Make the parent dir read-only so os.Remove fails.
+	// Make the parent dir read-only so Remove fails.
 	if err := os.Chmod(subDir, 0o555); err != nil {
 		t.Fatal(err)
 	}
 	defer os.Chmod(subDir, 0o755) //nolint:errcheck // best-effort cleanup
 
-	ex := NewExecutor(tmpDir, mockLdap).(*executor)
+	ex := NewExecutor(tmpDir, &mockLdapManager{}, sys.Real()).(*executor)
 	ex.mappedFiles["staleKey"] = testFilePath
 
 	op := MapfileOperation{
@@ -579,26 +529,14 @@ func TestHandleEmptyMapfileData_RemoveError(t *testing.T) {
 
 	err := ex.ExecuteMapfile(context.Background(), op)
 	if err == nil {
-		t.Error("expected an error when os.Remove fails, got nil")
+		t.Error("expected an error when Remove fails, got nil")
 	}
 }
 
 func TestExecutePostconfBatch_SkipsInvalidKeys(t *testing.T) {
-	tmpDir := t.TempDir()
-	postconfPath := filepath.Join(tmpDir, "common", "sbin", "postconf")
+	t.Parallel()
 
-	if err := os.MkdirAll(filepath.Dir(postconfPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	argsFile := filepath.Join(tmpDir, "postconf_args.txt")
-	script := "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done > " + argsFile + "\nexit 0\n"
-
-	if err := os.WriteFile(postconfPath, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	ex := NewExecutor(tmpDir, &mockLdapManager{})
+	ex, fakes := newFakeExecutor(&mockLdapManager{})
 
 	ops := []PostconfOperation{
 		{Key: "-X", Value: "evil"},
@@ -612,33 +550,38 @@ func TestExecutePostconfBatch_SkipsInvalidKeys(t *testing.T) {
 		t.Fatalf("ExecutePostconfBatch: %v", err)
 	}
 
-	data, err := os.ReadFile(argsFile)
-	if err != nil {
-		t.Fatal(err)
+	got := fakes.Exec.Calls()
+	if len(got) != 1 {
+		t.Fatalf("postconf ran %d times, want 1", len(got))
 	}
 
-	if got, want := string(data), "-e\nlmtp_tls_CAfile=/ca\nmyhostname=h\n"; got != want {
-		t.Errorf("postconf args = %q, want %q", got, want)
+	if want := []string{"-e", "lmtp_tls_CAfile=/ca", "myhostname=h"}; !slices.Equal(got[0].Args, want) {
+		t.Errorf("postconf args = %q, want %q", got[0].Args, want)
 	}
 }
 
 func TestExecutePostconfBatch_AllKeysInvalidRunsNothing(t *testing.T) {
-	// postconf binary does not exist: any exec attempt would error.
-	ex := NewExecutor(t.TempDir(), &mockLdapManager{})
+	t.Parallel()
+
+	ex, fakes := newFakeExecutor(&mockLdapManager{})
 
 	err := ex.ExecutePostconfBatch(context.Background(), []PostconfOperation{{Key: "-X", Value: "v"}})
 	if err != nil {
 		t.Errorf("expected nil when every key is skipped, got %v", err)
 	}
+
+	if got := fakes.Rec.Strings(); len(got) != 0 {
+		t.Errorf("no command may run when every key is skipped, recorded %q", got)
+	}
 }
 
 func TestExecuteMapfile_NewFileHonoursUmask(t *testing.T) {
-	old := syscall.Umask(0o027)
-	defer syscall.Umask(old)
+	t.Parallel()
 
-	tmpDir := t.TempDir()
-	ex := NewExecutor(tmpDir, &mockLdapManager{}).(*executor)
-	path := filepath.Join(tmpDir, "dhparam.pem")
+	ex, fakes := newFakeExecutor(&mockLdapManager{})
+	fakes.Proc.UmaskValue = 0o027
+
+	path := filepath.Join(testBaseDir, "dhparam.pem")
 	ex.mappedFiles["k"] = path
 
 	op := MapfileOperation{Key: "k", Base64Data: base64.StdEncoding.EncodeToString([]byte("dh"))}
@@ -646,26 +589,60 @@ func TestExecuteMapfile_NewFileHonoursUmask(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	fi, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
+	mode, ok := fakes.FS.Mode(path)
+	if !ok {
+		t.Fatal("mapped file was not written")
 	}
 
-	if fi.Mode().Perm() != 0o640 {
-		t.Errorf("new MAPFILE mode = %o, want 640 (legacy open(w) under umask 027)", fi.Mode().Perm())
+	if mode.Perm() != 0o640 {
+		t.Errorf("new MAPFILE mode = %o, want 640 (legacy open(w) under umask 027)", mode.Perm())
+	}
+
+	want := []string{"fs.write-atomic " + path + " mode=0640"}
+	if got := fakes.Rec.Strings(); !slices.Equal(got, want) {
+		t.Errorf("recorded ops = %q, want %q", got, want)
 	}
 }
 
 func TestExecuteMapfile_ExistingFileKeepsMode(t *testing.T) {
-	tmpDir := t.TempDir()
-	ex := NewExecutor(tmpDir, &mockLdapManager{}).(*executor)
-	path := filepath.Join(tmpDir, "dhparam.pem")
+	t.Parallel()
 
-	if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
+	ex, fakes := newFakeExecutor(&mockLdapManager{})
+	path := filepath.Join(testBaseDir, "dhparam.pem")
+	fakes.FS.Put(path, []byte("old"), 0o600)
+
+	ex.mappedFiles["k"] = path
+
+	op := MapfileOperation{Key: "k", Base64Data: base64.StdEncoding.EncodeToString([]byte("new"))}
+	if err := ex.ExecuteMapfile(context.Background(), op); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := os.Chmod(path, 0o600); err != nil {
+	if mode, _ := fakes.FS.Mode(path); mode.Perm() != 0o600 {
+		t.Errorf("existing MAPFILE mode = %o, want 600 preserved", mode.Perm())
+	}
+
+	if b, _ := fakes.FS.Data(path); string(b) != "new" {
+		t.Errorf("content = %q", b)
+	}
+
+	want := []string{"fs.write-atomic " + path + " mode=0600"}
+	if got := fakes.Rec.Strings(); !slices.Equal(got, want) {
+		t.Errorf("recorded ops = %q, want %q", got, want)
+	}
+}
+
+// TestExecuteMapfile_RealFSWritesAtomically runs the real filesystem: temp +
+// rename replaces the inode instead of truncating it, and the new file honours
+// the process umask via the real Proc.
+func TestExecuteMapfile_RealFSWritesAtomically(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	ex := NewExecutor(tmpDir, &mockLdapManager{}, sys.Real()).(*executor)
+	path := filepath.Join(tmpDir, "dhparam.pem")
+
+	if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -681,19 +658,17 @@ func TestExecuteMapfile_ExistingFileKeepsMode(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	fi, _ := os.Stat(path)
-	if fi.Mode().Perm() != 0o600 {
-		t.Errorf("existing MAPFILE mode = %o, want 600 preserved", fi.Mode().Perm())
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if after.Mode().Perm() != 0o600 {
+		t.Errorf("existing MAPFILE mode = %o, want 600 preserved", after.Mode().Perm())
 	}
 
 	if b, _ := os.ReadFile(path); string(b) != "new" {
 		t.Errorf("content = %q", b)
-	}
-
-	// Atomic write: temp + rename replaces the inode instead of truncating it.
-	after, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
 	}
 
 	if os.SameFile(before, after) {

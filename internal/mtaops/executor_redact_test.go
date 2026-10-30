@@ -8,14 +8,13 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
 
 func debugCtx(buf *bytes.Buffer) context.Context {
@@ -27,9 +26,11 @@ func debugCtx(buf *bytes.Buffer) context.Context {
 func TestExecuteLdapWrite_SecretValueNotLogged(t *testing.T) {
 	const secret = "ldap-hunter2-secret"
 
+	t.Parallel()
+
 	var buf bytes.Buffer
 
-	exec := NewExecutor("/opt/zextras", &mockLdapManager{})
+	exec := NewExecutor("/opt/zextras", &mockLdapManager{}, systest.New().System())
 	require.NoError(t, exec.ExecuteLdapWrite(debugCtx(&buf),
 		LdapOperation{Key: "ldap_root_password", Value: secret}))
 
@@ -40,15 +41,11 @@ func TestExecuteLdapWrite_SecretValueNotLogged(t *testing.T) {
 func TestExecutePostconfBatch_SecretValueNotLogged(t *testing.T) {
 	const secret = "smtp-hunter2-secret"
 
-	baseDir := t.TempDir()
-	bin := filepath.Join(baseDir, "common", "sbin")
-	require.NoError(t, os.MkdirAll(bin, 0o750))
-	//nolint:gosec // test stub binary must be executable
-	require.NoError(t, os.WriteFile(filepath.Join(bin, "postconf"), []byte("#!/bin/sh\nexit 0\n"), 0o700))
+	t.Parallel()
 
 	var buf bytes.Buffer
 
-	exec := NewExecutor(baseDir, nil)
+	exec := NewExecutor("/opt/zextras", nil, systest.New().System())
 	require.NoError(t, exec.ExecutePostconfBatch(debugCtx(&buf), []PostconfOperation{
 		{Key: "smtp_sasl_password_maps", Value: "a\n" + secret},
 		{Key: "myhostname", Value: "mx.example.com"},

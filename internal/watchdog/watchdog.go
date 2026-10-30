@@ -16,7 +16,16 @@ import (
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/services"
 	"github.com/zextras/carbonio-configd/internal/state"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
+
+// SnapshotProvider scopes one process-table snapshot to a context so every
+// status probe of a watchdog tick answers from the same view. It is satisfied
+// by *services.Controller.
+type SnapshotProvider interface {
+	// WithProcessSnapshot returns ctx carrying a process-table snapshot.
+	WithProcessSnapshot(ctx context.Context) context.Context
+}
 
 // Watchdog monitors services and automatically restarts them on failure.
 type Watchdog struct {
@@ -52,6 +61,12 @@ type Watchdog struct {
 
 	// configLookup function for checking service configuration
 	configLookup func(string) string
+
+	// clock drives the check ticker.
+	clock sys.Clock
+
+	// snapshots scopes a process-table snapshot to each tick; nil probes live.
+	snapshots SnapshotProvider
 }
 
 const (
@@ -108,6 +123,15 @@ type Config struct {
 
 	// ConfigLookup function for checking service configuration
 	ConfigLookup func(string) string
+
+	// Clock paces the health-check ticker (sys.Real().Clock in production).
+	// Required: NewWatchdog does not default it.
+	Clock sys.Clock
+
+	// Snapshots gives each tick one shared process-table snapshot (usually the
+	// *services.Controller behind ServiceManager). Nil makes every probe read
+	// the live process table.
+	Snapshots SnapshotProvider
 }
 
 // NewWatchdog creates a new Watchdog instance.
@@ -124,6 +148,8 @@ func NewWatchdog(cfg Config) *Watchdog {
 		ServiceEnabled: make(map[string]bool),
 		prevServices:   make(map[string]string),
 		configLookup:   cfg.ConfigLookup,
+		clock:          cfg.Clock,
+		snapshots:      cfg.Snapshots,
 	}
 }
 
@@ -220,7 +246,7 @@ func (w *Watchdog) IsServiceTracked(service string) bool {
 func (w *Watchdog) run(ctx context.Context, stopChan <-chan struct{}, runningChan chan<- struct{}) {
 	defer close(runningChan)
 
-	ticker := time.NewTicker(w.CheckInterval)
+	ticker := w.clock.NewTicker(w.CheckInterval)
 	defer ticker.Stop()
 
 	for {
@@ -229,7 +255,7 @@ func (w *Watchdog) run(ctx context.Context, stopChan <-chan struct{}, runningCha
 			logger.DebugContext(ctx, "Watchdog stopped")
 
 			return
-		case <-ticker.C:
+		case <-ticker.C():
 			w.checkServices(ctx)
 		}
 	}
@@ -252,7 +278,10 @@ func (w *Watchdog) checkServices(ctx context.Context) {
 	// restart decisions come from the same view and /proc is walked once.
 	// Restarts (which re-check status before starting) keep the caller's ctx
 	// and see live process state.
-	probeCtx := services.WithProcessSnapshot(ctx)
+	probeCtx := ctx
+	if w.snapshots != nil {
+		probeCtx = w.snapshots.WithProcessSnapshot(ctx)
+	}
 
 	observed := w.logServiceStatusChanges(probeCtx)
 

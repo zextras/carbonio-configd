@@ -11,6 +11,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/config/configtest"
 	"github.com/zextras/carbonio-configd/internal/proxy"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // TestVariableResolutionFromGlobalConfig tests that variables are resolved from GlobalConfig
@@ -45,7 +46,7 @@ func TestVariableResolutionFromGlobalConfig(t *testing.T) {
 	}
 
 	// Create generator
-	gen, err := proxy.LoadConfiguration(context.Background(), cfg, localCfg, globalCfg, serverCfg, nil, nil)
+	gen, err := proxy.LoadConfiguration(context.Background(), sys.Real(), cfg, localCfg, globalCfg, serverCfg, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create generator: %v", err)
 	}
@@ -94,7 +95,7 @@ func TestVariableResolutionDefaults(t *testing.T) {
 	}
 
 	// Create generator
-	gen, err := proxy.LoadConfiguration(context.Background(), cfg, localCfg, globalCfg, serverCfg, nil, nil)
+	gen, err := proxy.LoadConfiguration(context.Background(), sys.Real(), cfg, localCfg, globalCfg, serverCfg, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create generator: %v", err)
 	}

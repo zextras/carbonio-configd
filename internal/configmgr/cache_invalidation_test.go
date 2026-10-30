@@ -42,7 +42,7 @@ func TestInvalidateLDAPCache(t *testing.T) {
 	// Create ConfigManager with cache
 	mainCfg := &config.Config{BaseDir: "/tmp", Hostname: "test"}
 	appState := state.NewState()
-	cm := NewConfigManager(ctx, mainCfg, appState, nil, cacheInstance)
+	cm := NewConfigManager(ctx, mainCfg, appState, nil, cacheInstance, hostEnv())
 
 	// Test cache invalidation
 	t.Log("Calling InvalidateLDAPCache...")
@@ -76,7 +76,7 @@ func TestInvalidateLDAPCache_NilCache(t *testing.T) {
 	// Create ConfigManager without cache
 	mainCfg := &config.Config{BaseDir: "/tmp", Hostname: "test"}
 	appState := state.NewState()
-	cm := NewConfigManager(ctx, mainCfg, appState, nil, nil)
+	cm := NewConfigManager(ctx, mainCfg, appState, nil, nil, hostEnv())
 
 	// Should not panic with nil cache
 	cm.InvalidateLDAPCache(ctx)

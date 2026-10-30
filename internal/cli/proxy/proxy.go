@@ -12,7 +12,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	"github.com/go-ldap/ldap/v3"
@@ -20,6 +19,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/cli/cliutil"
 	"github.com/zextras/carbonio-configd/internal/cli/rewrite"
 	"github.com/zextras/carbonio-configd/internal/localconfig"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 const (
@@ -82,10 +82,10 @@ type ldapConn interface {
 
 // Run executes the proxy action and returns the process exit status.
 // conf and status do not require the zextras user, as in the legacy tools.
-func Run(_ context.Context, stdout, stderr io.Writer, opts *Options) int {
+func Run(_ context.Context, env sys.System, stdout, stderr io.Writer, opts *Options) int {
 	switch opts.Action {
 	case ActionConf:
-		return runConf(stdout, stderr, opts)
+		return runConf(env.FS, stdout, stderr, opts)
 	case ActionStatus:
 		return withLDAP(stdout, stderr, showProxyStatus)
 	case ActionGen, ActionRewrite:
@@ -112,7 +112,7 @@ func Run(_ context.Context, stdout, stderr io.Writer, opts *Options) int {
 	return 1
 }
 
-func runConf(stdout, stderr io.Writer, opts *Options) int {
+func runConf(fsys sys.FS, stdout, stderr io.Writer, opts *Options) int {
 	cliutil.InitCLILogging(stderr)
 
 	conf := opts.ConfigFile
@@ -120,13 +120,14 @@ func runConf(stdout, stderr io.Writer, opts *Options) int {
 		conf = cliutil.BasePath("conf", "nginx.conf")
 	}
 
-	if _, err := os.Stat(cliutil.BasePath("common", "sbin", "nginx")); err != nil {
+	if _, err := fsys.Stat(cliutil.BasePath("common", "sbin", "nginx")); err != nil {
 		_, _ = fmt.Fprintln(stdout, "Nginx not installed, exiting")
 
 		return 0
 	}
 
 	printNginxConf(stdout, conf, 0, &nginxConfOpts{
+		fs:         fsys,
 		markers:    opts.Markers,
 		indent:     opts.Indent,
 		noComments: opts.NoComments,

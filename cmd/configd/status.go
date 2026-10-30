@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"github.com/zextras/carbonio-configd/internal/cli/status"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // StatusCmd handles the "configd status [name]" subcommand.
@@ -17,6 +18,6 @@ type StatusCmd struct {
 }
 
 // Run executes the status subcommand.
-func (c *StatusCmd) Run() error {
-	return exitWith(status.Run(context.Background(), os.Stdout, os.Stderr, &status.Options{Name: c.Name}))
+func (c *StatusCmd) Run(env sys.System) error {
+	return exitWith(status.Run(context.Background(), env, os.Stdout, os.Stderr, &status.Options{Name: c.Name}))
 }

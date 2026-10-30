@@ -6,36 +6,26 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"os"
-	"os/exec"
+	"io/fs"
 	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 const (
 	zmstatEnabledTrue = "TRUE"
 )
 
-var (
-	libexecDir  = basePath + "/libexec"
-	statsPidDir = pidDir + "/stats"
-
-	// statsProcessGlob is the identity of every zmstat-* collector: the
-	// script path under libexecDir statsCustomStart launches (perl scripts, so
-	// it is an argv token of `perl -w <script>`). A glob over the whole path,
-	// so `tail -f .../log/zmstat-proc.out` is not mistaken for a collector.
-	statsProcessGlob = libexecDir + "/zmstat-*"
-)
-
 // statsCustomStart orchestrates the zmstat-* collector suite.
 // Mirrors legacy statctl.pl logic: spawns ~11 collectors, each of which
 // writes its own PID file under /run/carbonio/stats/.
-func statsCustomStart(ctx context.Context, def *ServiceDef) error {
-	lc, err := loadConfig()
+func (c *Controller) statsCustomStart(ctx context.Context, def *ServiceDef) error {
+	lc, err := c.loadConfig()
 	if err != nil {
 		return fmt.Errorf("failed to load localconfig: %w", err)
 	}
@@ -71,17 +61,17 @@ func statsCustomStart(ctx context.Context, def *ServiceDef) error {
 		binary := parts[0]
 		args := parts[1:]
 
-		binaryPath := filepath.Join(libexecDir, binary)
-		if _, statErr := os.Stat(binaryPath); statErr != nil {
+		binaryPath := filepath.Join(c.p.libexec, binary)
+		if _, statErr := c.env.FS.Stat(binaryPath); statErr != nil {
 			logger.WarnContext(ctx, "Skipping missing stats collector",
 				"collector", binary, "path", binaryPath)
 
 			continue
 		}
 
-		logFile := filepath.Join(logPath, binary+".out")
+		logFile := filepath.Join(c.p.log, binary+".out")
 
-		logFd, openErr := openLogFile(logFile)
+		logFd, openErr := c.openLogFile(logFile)
 		if openErr != nil {
 			logger.WarnContext(ctx, "Failed to open log for stats collector",
 				"collector", binary, "log", logFile, "error", openErr)
@@ -89,12 +79,14 @@ func statsCustomStart(ctx context.Context, def *ServiceDef) error {
 			continue
 		}
 
-		cmd := exec.CommandContext(ctx, binaryPath, args...)
-		cmd.Stdout = logFd
-		cmd.Stderr = logFd
-		cmd.SysProcAttr = detachedSysProcAttr()
-
-		if startErr := cmd.Start(); startErr != nil {
+		proc, startErr := c.env.Exec.Start(ctx, &sys.Cmd{
+			Path:   binaryPath,
+			Args:   args,
+			Stdout: logFd,
+			Stderr: logFd,
+			Setsid: true,
+		})
+		if startErr != nil {
 			_ = logFd.Close()
 
 			logger.WarnContext(ctx, "Failed to start stats collector",
@@ -108,14 +100,14 @@ func statsCustomStart(ctx context.Context, def *ServiceDef) error {
 		started++
 
 		logger.InfoContext(ctx, "Started stats collector",
-			"collector", binary, "pid", cmd.Process.Pid, "log", logFile)
+			"collector", binary, "pid", proc.Pid(), "log", logFile)
 	}
 
 	if started == 0 {
 		return fmt.Errorf("no stats collectors started")
 	}
 
-	logger.InfoContext(ctx, "Stats collectors started", "count", started, "piddir", statsPidDir)
+	logger.InfoContext(ctx, "Stats collectors started", "count", started, "piddir", c.p.statsPidDir)
 
 	return nil
 }
@@ -123,10 +115,10 @@ func statsCustomStart(ctx context.Context, def *ServiceDef) error {
 // statsCustomStop kills all zmstat-* collectors by reading their individual
 // PID files from /run/carbonio/stats/. Always finishes with a process-name
 // scan to catch any survivors (e.g. collectors that restarted or self-elevated).
-func statsCustomStop(ctx context.Context, _ *ServiceDef) error {
-	entries, err := os.ReadDir(statsPidDir)
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to read stats PID dir %s: %w", statsPidDir, err)
+func (c *Controller) statsCustomStop(ctx context.Context, _ *ServiceDef) error {
+	entries, err := c.env.FS.ReadDir(c.p.statsPidDir)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("failed to read stats PID dir %s: %w", c.p.statsPidDir, err)
 	}
 
 	killed := 0
@@ -136,13 +128,13 @@ func statsCustomStop(ctx context.Context, _ *ServiceDef) error {
 			continue
 		}
 
-		if killStatsPidFile(ctx, filepath.Join(statsPidDir, entry.Name())) {
+		if c.killStatsPidFile(ctx, filepath.Join(c.p.statsPidDir, entry.Name())) {
 			killed++
 		}
 	}
 
 	// Final pass: send SIGTERM to any zmstat-* survivors found in /proc.
-	_ = killProcess(ctx, statsProcessGlob)
+	_ = c.killProcess(ctx, c.p.statsGlob)
 
 	logger.InfoContext(ctx, "Stopped stats collectors", "killed", killed)
 
@@ -154,8 +146,8 @@ func statsCustomStop(ctx context.Context, _ *ServiceDef) error {
 // with the parent), escalates to SIGKILL after a grace period, and escalates
 // via sudo when the PID is root-owned (sudo-spawned zmstat-fd). Removes the
 // pid file regardless. Returns true when the leader is confirmed gone.
-func killStatsPidFile(ctx context.Context, pidPath string) bool {
-	data, readErr := os.ReadFile(pidPath) //nolint:gosec // path is constructed from internal registry
+func (c *Controller) killStatsPidFile(ctx context.Context, pidPath string) bool {
+	data, readErr := c.env.FS.ReadFile(pidPath)
 	if readErr != nil {
 		logger.WarnContext(ctx, "Failed to read stats PID file", "path", pidPath, "error", readErr)
 
@@ -165,14 +157,14 @@ func killStatsPidFile(ctx context.Context, pidPath string) bool {
 	pid, parseErr := strconv.Atoi(strings.TrimSpace(string(data)))
 	if parseErr != nil {
 		logger.WarnContext(ctx, "Invalid PID in stats PID file", "path", pidPath, "error", parseErr)
-		_ = os.Remove(pidPath)
+		_ = c.env.FS.Remove(pidPath)
 
 		return false
 	}
 
-	killed := killByPIDWithGroupAndSudo(ctx, pid)
+	killed := c.killByPIDWithGroupAndSudo(ctx, pid)
 
-	_ = os.Remove(pidPath)
+	_ = c.env.FS.Remove(pidPath)
 
 	return killed
 }

@@ -17,10 +17,10 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/zextras/carbonio-configd/internal/fileutil"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/lookup"
 	"github.com/zextras/carbonio-configd/internal/state"
+	"github.com/zextras/carbonio-configd/internal/sys"
 	"github.com/zextras/carbonio-configd/internal/transformer"
 )
 
@@ -36,20 +36,24 @@ type Rewriter struct {
 	ConfigLookup lookup.ConfigLookup
 	State        *state.State
 	Transformer  *transformer.Transformer
+
+	fs sys.FS
 }
 
-// NewRewriter creates a new Rewriter instance.
-func NewRewriter(baseDir string, cl lookup.ConfigLookup, st *state.State) *Rewriter {
+// NewRewriter creates a new Rewriter instance. Every file operation goes
+// through env.FS.
+func NewRewriter(baseDir string, cl lookup.ConfigLookup, st *state.State, env sys.System) *Rewriter {
 	return &Rewriter{
 		BaseDir:      baseDir,
 		ConfigLookup: cl,
 		State:        st,
 		Transformer:  transformer.NewTransformer(cl, st),
+		fs:           env.FS,
 	}
 }
 
 // scanAndWrite reads sourceFile line by line, transforms each line, and writes to tmpFile.
-func (r *Rewriter) scanAndWrite(ctx context.Context, sourceFile, tmpFile *os.File) error {
+func (r *Rewriter) scanAndWrite(ctx context.Context, sourceFile, tmpFile sys.File) error {
 	scanner := bufio.NewScanner(sourceFile)
 	writer := bufio.NewWriter(tmpFile)
 
@@ -81,12 +85,12 @@ func (r *Rewriter) scanAndWrite(ctx context.Context, sourceFile, tmpFile *os.Fil
 
 // atomicReplace chmod-s tmpPath then renames it to targetPath.
 // Falls back to copy+delete only when rename fails with EXDEV.
-func atomicReplace(ctx context.Context, tmpPath, targetPath string, fileMode os.FileMode) error {
-	if err := os.Chmod(tmpPath, fileMode); err != nil {
+func (r *Rewriter) atomicReplace(ctx context.Context, tmpPath, targetPath string, fileMode os.FileMode) error {
+	if err := r.fs.Chmod(tmpPath, fileMode); err != nil {
 		return fmt.Errorf("failed to set file mode %o: %w", fileMode, err)
 	}
 
-	err := os.Rename(tmpPath, targetPath)
+	err := r.fs.Rename(tmpPath, targetPath)
 	if err == nil {
 		return nil
 	}
@@ -99,15 +103,15 @@ func atomicReplace(ctx context.Context, tmpPath, targetPath string, fileMode os.
 
 	logger.DebugContext(ctx, "Rename crossed filesystems, falling back to copy")
 
-	if err := fileutil.CopyFile(ctx, tmpPath, targetPath); err != nil {
+	if err := r.fs.CopyFile(ctx, tmpPath, targetPath); err != nil {
 		return fmt.Errorf("failed to copy temporary file to target: %w", err)
 	}
 
-	if err := os.Chmod(targetPath, fileMode); err != nil {
+	if err := r.fs.Chmod(targetPath, fileMode); err != nil {
 		return fmt.Errorf("failed to set file mode %o on copied file: %w", fileMode, err)
 	}
 
-	if err := os.Remove(tmpPath); err != nil && !os.IsNotExist(err) {
+	if err := r.fs.Remove(tmpPath); err != nil && !os.IsNotExist(err) {
 		logger.WarnContext(ctx, "Failed to remove temp file", "path", tmpPath, "error", err)
 	}
 
@@ -157,7 +161,7 @@ func (r *Rewriter) RewriteConfig(ctx context.Context, source, target, mode strin
 		"file_mode", fmt.Sprintf("%o", fileMode))
 
 	//nolint:gosec // G304: File path comes from trusted configuration
-	sourceFile, err := os.Open(sourcePath)
+	sourceFile, err := r.fs.Open(sourcePath)
 	if err != nil {
 		return fmt.Errorf("failed to open source file %s: %w", sourcePath, err)
 	}
@@ -169,11 +173,11 @@ func (r *Rewriter) RewriteConfig(ctx context.Context, source, target, mode strin
 	}()
 
 	targetDir := filepath.Dir(targetPath)
-	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+	if err := r.fs.MkdirAll(targetDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create target directory %s: %w", targetDir, err)
 	}
 
-	tmpFile, err := os.CreateTemp(targetDir, ".configd-tmp-*")
+	tmpFile, err := r.fs.CreateTemp(targetDir, ".configd-tmp-*")
 	if err != nil {
 		return fmt.Errorf("failed to create temporary file in %s: %w", targetDir, err)
 	}
@@ -181,7 +185,7 @@ func (r *Rewriter) RewriteConfig(ctx context.Context, source, target, mode strin
 	tmpPath := tmpFile.Name()
 
 	defer func() {
-		if err := os.Remove(tmpPath); err != nil && !os.IsNotExist(err) {
+		if err := r.fs.Remove(tmpPath); err != nil && !os.IsNotExist(err) {
 			logger.WarnContext(ctx, "Failed to remove temp file", "path", tmpPath, "error", err)
 		}
 	}()
@@ -195,7 +199,7 @@ func (r *Rewriter) RewriteConfig(ctx context.Context, source, target, mode strin
 		return scanErr
 	}
 
-	if err := atomicReplace(ctx, tmpPath, targetPath, os.FileMode(fileMode)); err != nil {
+	if err := r.atomicReplace(ctx, tmpPath, targetPath, os.FileMode(fileMode)); err != nil {
 		return err
 	}
 

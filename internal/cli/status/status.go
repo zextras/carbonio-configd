@@ -15,6 +15,7 @@ import (
 
 	"github.com/zextras/carbonio-configd/internal/cli/cliutil"
 	"github.com/zextras/carbonio-configd/internal/services"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // Options are the parsed arguments of "configd status".
@@ -26,12 +27,14 @@ type Options struct {
 
 // Run executes "configd status [name]" and returns the exit status. There is
 // no permission gate: status is readable by any user.
-func Run(ctx context.Context, stdout, stderr io.Writer, opts *Options) int {
+func Run(ctx context.Context, env sys.System, stdout, stderr io.Writer, opts *Options) int {
 	cliutil.InitCLILogging(stderr)
 
 	c := cliutil.NewConsole(stdout, stderr)
 
-	if err := run(ctx, c, opts); err != nil {
+	ctl := services.NewController(env)
+
+	if err := run(ctx, ctl, NewReporter(env, ctl), c, opts); err != nil {
 		_, _ = fmt.Fprintf(stderr, "Error: %v\n", err)
 
 		return 1
@@ -40,10 +43,10 @@ func Run(ctx context.Context, stdout, stderr io.Writer, opts *Options) int {
 	return 0
 }
 
-func run(ctx context.Context, c *cliutil.Console, opts *Options) error {
+func run(ctx context.Context, ctl *services.Controller, r *Reporter, c *cliutil.Console, opts *Options) error {
 	// Single service detail mode — same output as `configd service status`.
 	if opts.Name != "" {
-		return PrintServiceStatus(ctx, c, opts.Name)
+		return r.PrintServiceStatus(ctx, c, opts.Name)
 	}
 
 	// System-wide summary
@@ -51,7 +54,7 @@ func run(ctx context.Context, c *cliutil.Console, opts *Options) error {
 
 	allRunning := true
 
-	infos := services.ServiceListStatus(ctx)
+	infos := ctl.ServiceListStatus(ctx)
 	for _, info := range infos {
 		c.Status(info.DisplayName, info.Running, "")
 
@@ -60,7 +63,7 @@ func run(ctx context.Context, c *cliutil.Console, opts *Options) error {
 		}
 	}
 
-	Advanced(ctx, c)
+	r.Advanced(ctx, c)
 
 	if !allRunning {
 		return errors.New("some services are not running")

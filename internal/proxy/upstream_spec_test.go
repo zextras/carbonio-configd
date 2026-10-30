@@ -11,12 +11,14 @@ import (
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/config/configtest"
 	"github.com/zextras/carbonio-configd/internal/ldap"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // newSpecTestGenerator builds a Generator with the upstream cache pre-populated
 // with the given servers (indexed by hostname), so resolvers run without LDAP.
 func newSpecTestGenerator(serversByHost map[string]map[string]string) *Generator {
 	return &Generator{
+		env:          sys.Real(),
 		GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMap()},
 		ServerConfig: &config.ServerConfig{Data: config.NewConfigMap()},
 		upstreamCache: &upstreamQueryCache{
@@ -97,7 +99,7 @@ func TestGenerateServerDirective(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := (&Generator{}).generateServerDirective(tc.host, tc.attrs, tc.port)
+			got := (&Generator{env: sys.Real()}).generateServerDirective(tc.host, tc.attrs, tc.port)
 			if got != tc.want {
 				t.Errorf("generateServerDirective = %q, want %q", got, tc.want)
 			}
@@ -245,6 +247,7 @@ func TestMakeUpstreamResolver_SkipsInvalid(t *testing.T) {
 // global config fallback, and zero default.
 func TestResolveServerPort(t *testing.T) {
 	gen := &Generator{
+		env:          sys.Real(),
 		GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMap()},
 		ServerConfig: &config.ServerConfig{Data: config.NewConfigMap()},
 	}
@@ -281,6 +284,7 @@ func TestResolveServerPort(t *testing.T) {
 }
 func TestUpstreamHasServers_ErrorPath(t *testing.T) {
 	g := &Generator{
+		env:           sys.Real(),
 		GlobalConfig:  &config.GlobalConfig{Data: config.NewConfigMap()},
 		ServerConfig:  &config.ServerConfig{Data: config.NewConfigMap()},
 		upstreamCache: &upstreamQueryCache{serverAttrsByHost: map[string]map[string]string{}},
@@ -327,6 +331,7 @@ func TestResolveUpstreamPortAttr_GlobalConfigValue(t *testing.T) {
 
 func TestGetServerAttrsByHostname_NilLdapClient(t *testing.T) {
 	g := &Generator{
+		env:          sys.Real(),
 		GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMap()},
 		ServerConfig: &config.ServerConfig{Data: config.NewConfigMap()},
 	}
@@ -363,6 +368,7 @@ func TestGetServerAttrsByHostname_LDAPQueryError(t *testing.T) {
 	l.NativeClient = new(ldap.Client) // zero-value: no URLs → query will fail
 
 	g := &Generator{
+		env:          sys.Real(),
 		GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMap()},
 		ServerConfig: &config.ServerConfig{Data: config.NewConfigMap()},
 		LdapClient:   l,
@@ -383,6 +389,7 @@ func TestMakeUpstreamResolver_LDAPError(t *testing.T) {
 	l.NativeClient = new(ldap.Client) // zero-value → LDAP query fails
 
 	g := &Generator{
+		env:          sys.Real(),
 		GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMap()},
 		ServerConfig: &config.ServerConfig{Data: config.NewConfigMap()},
 		LdapClient:   l,
@@ -407,6 +414,7 @@ func TestUpstreamHasServers_LDAPError(t *testing.T) {
 	l.NativeClient = new(ldap.Client)
 
 	g := &Generator{
+		env:          sys.Real(),
 		GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMap()},
 		ServerConfig: &config.ServerConfig{Data: config.NewConfigMap()},
 		LdapClient:   l,
@@ -424,7 +432,7 @@ func TestUpstreamHasServers_LDAPError(t *testing.T) {
 func TestGenerateServerDirective_GlobalFallback(t *testing.T) {
 	t.Parallel()
 
-	g := &Generator{GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMap()}}
+	g := &Generator{env: sys.Real(), GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMap()}}
 	g.GlobalConfig.Data.Set(attrMailProxyReconnectTimeout, "10")
 	g.GlobalConfig.Data.Set(attrMailProxyMaxFails, "2")
 

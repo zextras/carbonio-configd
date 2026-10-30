@@ -37,30 +37,30 @@ func validateName(name, kind string) error {
 }
 
 // RemoteHostStart executes a service start command on a remote host via SSH.
-func RemoteHostStart(ctx context.Context, host, service string) error {
+func (c *Controller) RemoteHostStart(ctx context.Context, host, service string) error {
 	if err := validateName(service, "service"); err != nil {
 		return err
 	}
 
-	return remoteExec(ctx, host, "start", service, "Remote service started")
+	return c.remoteExec(ctx, host, "start", service, "Remote service started")
 }
 
 // RemoteHostStop executes a service stop command on a remote host via SSH.
-func RemoteHostStop(ctx context.Context, host, service string) error {
+func (c *Controller) RemoteHostStop(ctx context.Context, host, service string) error {
 	if err := validateName(service, "service"); err != nil {
 		return err
 	}
 
-	return remoteExec(ctx, host, "stop", service, "Remote service stopped")
+	return c.remoteExec(ctx, host, "stop", service, "Remote service stopped")
 }
 
 // RemoteHostStatus queries service status on a remote host via SSH.
-func RemoteHostStatus(ctx context.Context, host, service string) (bool, error) {
+func (c *Controller) RemoteHostStatus(ctx context.Context, host, service string) (bool, error) {
 	if err := validateName(service, "service"); err != nil {
 		return false, err
 	}
 
-	client, err := sshConnect(host)
+	client, err := c.sshConnect(host)
 	if err != nil {
 		return false, fmt.Errorf("failed to connect to %s: %w", host, err)
 	}
@@ -74,7 +74,7 @@ func RemoteHostStatus(ctx context.Context, host, service string) (bool, error) {
 
 	defer func() { _ = session.Close() }()
 
-	cmd := fmt.Sprintf("/usr/bin/sudo -u zextras %s control status %s", binPath+"/configd", service)
+	cmd := fmt.Sprintf("/usr/bin/sudo -u zextras %s control status %s", c.p.bin+"/configd", service)
 
 	output, err := session.CombinedOutput(cmd)
 	if err != nil {
@@ -87,12 +87,12 @@ func RemoteHostStatus(ctx context.Context, host, service string) (bool, error) {
 }
 
 // remoteExec is a helper that executes a control command on a remote host via SSH.
-func remoteExec(ctx context.Context, host, action, service, successMsg string) error {
+func (c *Controller) remoteExec(ctx context.Context, host, action, service, successMsg string) error {
 	if err := validateName(action, "action"); err != nil {
 		return err
 	}
 
-	client, err := sshConnect(host)
+	client, err := c.sshConnect(host)
 	if err != nil {
 		return fmt.Errorf("failed to connect to %s: %w", host, err)
 	}
@@ -106,7 +106,7 @@ func remoteExec(ctx context.Context, host, action, service, successMsg string) e
 
 	defer func() { _ = session.Close() }()
 
-	cmd := fmt.Sprintf("/usr/bin/sudo -u zextras %s control %s %s", binPath+"/configd", action, service)
+	cmd := fmt.Sprintf("/usr/bin/sudo -u zextras %s control %s %s", c.p.bin+"/configd", action, service)
 
 	output, err := session.CombinedOutput(cmd)
 	if err != nil {
@@ -129,16 +129,15 @@ func withDefaultSSHPort(host string) string {
 }
 
 // sshConnect establishes an SSH connection to the remote host using zextras user's SSH key.
-func sshConnect(host string) (*ssh.Client, error) {
+func (c *Controller) sshConnect(host string) (*ssh.Client, error) {
 	homeDir := os.Getenv("HOME")
 	if homeDir == "" {
-		homeDir = basePath
+		homeDir = c.p.base
 	}
 
 	keyPath := filepath.Join(homeDir, ".ssh", "id_rsa")
 
-	//nolint:gosec // SSH key path is constructed from user's home directory
-	keyData, err := os.ReadFile(keyPath)
+	keyData, err := c.env.FS.ReadFile(keyPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read SSH key %s: %w", keyPath, err)
 	}

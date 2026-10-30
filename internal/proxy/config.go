@@ -15,10 +15,11 @@ import (
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/ldap"
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // NewGenerator creates a new proxy configuration generator
-func NewGenerator(ctx context.Context, cfg *config.Config,
+func NewGenerator(ctx context.Context, env sys.System, cfg *config.Config,
 	localCfg *config.LocalConfig,
 	globalCfg *config.GlobalConfig,
 	serverCfg *config.ServerConfig,
@@ -32,6 +33,7 @@ func NewGenerator(ctx context.Context, cfg *config.Config,
 
 	// Initialize generator with configuration
 	g := &Generator{
+		env:           env,
 		Config:        cfg,
 		LocalConfig:   localCfg,
 		GlobalConfig:  globalCfg,
@@ -99,7 +101,7 @@ func NewGenerator(ctx context.Context, cfg *config.Config,
 // LoadConfiguration loads configurations from a ConfigManager's state.
 // This is a convenience function that creates a generator with pre-loaded configurations.
 // In production, this should be called with configs from ConfigManager.State.
-func LoadConfiguration(ctx context.Context, cfg *config.Config,
+func LoadConfiguration(ctx context.Context, env sys.System, cfg *config.Config,
 	localCfg *config.LocalConfig,
 	globalCfg *config.GlobalConfig,
 	serverCfg *config.ServerConfig,
@@ -136,7 +138,7 @@ func LoadConfiguration(ctx context.Context, cfg *config.Config,
 		"global_count", globalCfg.Data.Len(),
 		"server_count", serverCfg.Data.Len())
 
-	return NewGenerator(ctx, cfg, localCfg, globalCfg, serverCfg, ldapClient, cacheInstance)
+	return NewGenerator(ctx, env, cfg, localCfg, globalCfg, serverCfg, ldapClient, cacheInstance)
 }
 
 // SetDryRun enables or disables dry-run mode

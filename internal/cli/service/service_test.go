@@ -13,6 +13,7 @@ import (
 
 	"github.com/zextras/carbonio-configd/internal/security"
 	"github.com/zextras/carbonio-configd/internal/services"
+	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
 
 func TestRun_MutatingActionsNotZextras(t *testing.T) {
@@ -24,9 +25,11 @@ func TestRun_MutatingActionsNotZextras(t *testing.T) {
 		ActionStart, ActionStop, ActionRestart, ActionReload, ActionStartSystemd, ActionStopSystemd,
 	} {
 		t.Run(string(action), func(t *testing.T) {
+			t.Parallel()
+
 			var stdout, stderr bytes.Buffer
 
-			code := Run(context.Background(), &stdout, &stderr, &Options{Action: action, Name: "mta"})
+			code := Run(context.Background(), systest.New().System(), &stdout, &stderr, &Options{Action: action, Name: "mta"})
 
 			if code != 1 {
 				t.Errorf("exit code = %d, want 1", code)
@@ -44,9 +47,11 @@ func TestRun_MutatingActionsNotZextras(t *testing.T) {
 }
 
 func TestRun_StatusNeedsNoPermission(t *testing.T) {
+	t.Parallel()
+
 	var stdout, stderr bytes.Buffer
 
-	code := Run(context.Background(), &stdout, &stderr, &Options{Action: ActionStatus, Name: "no-such-service"})
+	code := Run(context.Background(), systest.New().System(), &stdout, &stderr, &Options{Action: ActionStatus, Name: "no-such-service"})
 
 	if code != 1 {
 		t.Errorf("exit code = %d, want 1", code)
@@ -58,9 +63,13 @@ func TestRun_StatusNeedsNoPermission(t *testing.T) {
 }
 
 func TestRun_ListNeedsNoPermission(t *testing.T) {
+	t.Parallel()
+
+	env := systest.New().System()
+
 	var stdout, stderr bytes.Buffer
 
-	if code := Run(context.Background(), &stdout, &stderr, &Options{Action: ActionList}); code != 0 {
+	if code := Run(context.Background(), env, &stdout, &stderr, &Options{Action: ActionList}); code != 0 {
 		t.Errorf("exit code = %d, want 0", code)
 	}
 
@@ -68,15 +77,19 @@ func TestRun_ListNeedsNoPermission(t *testing.T) {
 		t.Errorf("stderr = %q, want empty", stderr.String())
 	}
 
-	if n := bytes.Count(stdout.Bytes(), []byte("\n")); n != len(services.AllServiceNames()) {
-		t.Errorf("listed %d rows, want %d: %q", n, len(services.AllServiceNames()), stdout.String())
+	want := len(services.NewController(env).AllServiceNames())
+	if n := bytes.Count(stdout.Bytes(), []byte("\n")); n != want {
+		t.Errorf("listed %d rows, want %d: %q", n, want, stdout.String())
 	}
 }
 
 func TestRun_UnknownServiceWrapsError(t *testing.T) {
+	t.Parallel()
+
 	var stdout, stderr bytes.Buffer
 
-	code := run(context.Background(), &stdout, &stderr, &Options{Action: ActionStop, Name: "no-such-service"})
+	opts := &Options{Action: ActionStop, Name: "no-such-service"}
+	code := newRunner(systest.New().System(), opts).run(context.Background(), &stdout, &stderr, opts)
 
 	if code != 1 {
 		t.Errorf("exit code = %d, want 1", code)
@@ -88,36 +101,40 @@ func TestRun_UnknownServiceWrapsError(t *testing.T) {
 }
 
 func TestRun_UnknownAction(t *testing.T) {
+	t.Parallel()
+
 	var stdout, stderr bytes.Buffer
 
-	code := run(context.Background(), &stdout, &stderr, &Options{Action: "bogus"})
+	opts := &Options{Action: "bogus"}
+	code := newRunner(systest.New().System(), opts).run(context.Background(), &stdout, &stderr, opts)
 
 	if code != 1 || stderr.String() != "Error: unknown service action: \"bogus\"\n" {
 		t.Errorf("code = %d, stderr = %q", code, stderr.String())
 	}
 }
 
-func TestMutate_NoRewriteOnlyForStartAndRestart(t *testing.T) {
-	orig := services.NoRewrite
-	t.Cleanup(func() { services.NoRewrite = orig })
+// TestNoRewrite_OnlyForStartAndRestart: --no-rewrite reaches the Controller
+// built for the invocation only for start and restart.
+func TestNoRewrite_OnlyForStartAndRestart(t *testing.T) {
+	t.Parallel()
 
-	services.NoRewrite = false
+	for _, tc := range []struct {
+		action Action
+		flag   bool
+		want   bool
+	}{
+		{ActionStart, true, true},
+		{ActionRestart, true, true},
+		{ActionRestart, false, false},
+		{ActionStop, true, false},
+		{ActionReload, true, false},
+	} {
+		t.Run(string(tc.action), func(t *testing.T) {
+			t.Parallel()
 
-	_ = mutate(context.Background(), &Options{Action: ActionStart, Name: "no-such-service", NoRewrite: true})
-
-	if !services.NoRewrite {
-		t.Error("start must propagate NoRewrite")
-	}
-
-	_ = mutate(context.Background(), &Options{Action: ActionRestart, Name: "no-such-service", NoRewrite: false})
-
-	if services.NoRewrite {
-		t.Error("restart must propagate NoRewrite=false")
-	}
-
-	_ = mutate(context.Background(), &Options{Action: ActionStop, Name: "no-such-service", NoRewrite: true})
-
-	if services.NoRewrite {
-		t.Error("stop must leave NoRewrite alone")
+			if got := noRewrite(&Options{Action: tc.action, NoRewrite: tc.flag}); got != tc.want {
+				t.Errorf("NoRewrite = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }

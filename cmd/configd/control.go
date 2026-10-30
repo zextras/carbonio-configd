@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"github.com/zextras/carbonio-configd/internal/cli/control"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 type ControlCmd struct {
@@ -22,30 +23,32 @@ type ControlCmd struct {
 }
 
 // runControl executes one "configd control" action.
-func runControl(action control.Action, host string) error {
-	return exitWith(control.Run(context.Background(), os.Stdout, os.Stderr, &control.Options{Action: action, Host: host}))
+func runControl(env sys.System, action control.Action, host string) error {
+	opts := &control.Options{Action: action, Host: host}
+
+	return exitWith(control.Run(context.Background(), env, os.Stdout, os.Stderr, opts))
 }
 
 type ControlStartCmd struct{}
 
-func (c *ControlStartCmd) Run(parent *ControlCmd) error {
-	return runControl(control.ActionStart, parent.Host)
+func (c *ControlStartCmd) Run(parent *ControlCmd, env sys.System) error {
+	return runControl(env, control.ActionStart, parent.Host)
 }
 
 type ControlStopCmd struct{}
 
-func (c *ControlStopCmd) Run(parent *ControlCmd) error {
-	return runControl(control.ActionStop, parent.Host)
+func (c *ControlStopCmd) Run(parent *ControlCmd, env sys.System) error {
+	return runControl(env, control.ActionStop, parent.Host)
 }
 
 type ControlRestartCmd struct{}
 
-func (c *ControlRestartCmd) Run(parent *ControlCmd) error {
-	return runControl(control.ActionRestart, parent.Host)
+func (c *ControlRestartCmd) Run(parent *ControlCmd, env sys.System) error {
+	return runControl(env, control.ActionRestart, parent.Host)
 }
 
 type ControlStatusCmd struct{}
 
-func (c *ControlStatusCmd) Run(parent *ControlCmd) error {
-	return runControl(control.ActionStatus, parent.Host)
+func (c *ControlStatusCmd) Run(parent *ControlCmd, env sys.System) error {
+	return runControl(env, control.ActionStatus, parent.Host)
 }

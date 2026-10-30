@@ -34,7 +34,7 @@ func TestConfigManager_ConcurrentLoading(t *testing.T) {
 	appState := state.NewState()
 	ldapClient := ldap.NewLdap(context.Background(), mainCfg)
 
-	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil)
+	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv())
 
 	// Try initial load to check if environment is available
 	err = cm.LoadAllConfigs(context.Background())
@@ -58,7 +58,7 @@ func TestConfigManager_ConcurrentLoading(t *testing.T) {
 
 			for j := range numIterations {
 				// Each goroutine gets its own ConfigManager instance
-				localCM := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil)
+				localCM := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv())
 
 				err := localCM.LoadAllConfigs(context.Background())
 				if err != nil {
@@ -131,7 +131,7 @@ func TestConfigManager_ConcurrentLoadAndLookup(t *testing.T) {
 	appState := state.NewState()
 	ldapClient := ldap.NewLdap(context.Background(), mainCfg)
 
-	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil)
+	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv())
 
 	// Initial load
 	err = cm.LoadAllConfigs(context.Background())
@@ -253,7 +253,7 @@ func TestConfigManager_ConcurrentCompareKeys(t *testing.T) {
 	appState := state.NewState()
 	ldapClient := ldap.NewLdap(context.Background(), mainCfg)
 
-	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil)
+	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv())
 
 	// Initial load
 	err = cm.LoadAllConfigs(context.Background())
@@ -322,7 +322,7 @@ func TestConfigManager_RaceConditions(t *testing.T) {
 	appState := state.NewState()
 	ldapClient := ldap.NewLdap(context.Background(), mainCfg)
 
-	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil)
+	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv())
 
 	// Try initial load
 	err = cm.LoadAllConfigs(context.Background())

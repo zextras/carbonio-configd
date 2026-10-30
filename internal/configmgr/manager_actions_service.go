@@ -101,6 +101,7 @@ func (cm *ConfigManager) RunProxygenWithConfigs(ctx context.Context) error {
 	initStart := time.Now()
 	gen, err := proxy.LoadConfiguration(
 		ctx,
+		cm.env,
 		cm.mainConfig,
 		cm.State.LocalConfig,
 		cm.State.GlobalConfig,

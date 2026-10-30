@@ -17,8 +17,8 @@ import (
 	"time"
 
 	"github.com/zextras/carbonio-configd/internal/config"
-	"github.com/zextras/carbonio-configd/internal/fileutil"
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // DoConfigRewrites executes configuration rewrites, postconf, postconfd, and LDAP changes.
@@ -214,7 +214,7 @@ func (cm *ConfigManager) doRewrites(ctx context.Context) error {
 }
 
 // cleanupRewriteFiles cleans up temporary and source files
-func cleanupRewriteFiles(ctx context.Context, srcFile, tmpFile *os.File, tmpFileName string) {
+func (cm *ConfigManager) cleanupRewriteFiles(ctx context.Context, srcFile, tmpFile sys.File, tmpFileName string) {
 	if srcFile != nil {
 		if err := srcFile.Close(); err != nil && !isAlreadyClosedError(err) {
 			logger.ErrorContext(ctx, "Error closing source file",
@@ -230,8 +230,8 @@ func cleanupRewriteFiles(ctx context.Context, srcFile, tmpFile *os.File, tmpFile
 	}
 
 	if tmpFileName != "" {
-		if _, err := os.Stat(tmpFileName); err == nil {
-			if err := os.Remove(tmpFileName); err != nil {
+		if _, err := cm.env.FS.Stat(tmpFileName); err == nil {
+			if err := cm.env.FS.Remove(tmpFileName); err != nil {
 				logger.WarnContext(ctx, "Failed to remove temporary file",
 					"file", tmpFileName,
 					"error", err)
@@ -247,9 +247,8 @@ func isAlreadyClosedError(err error) bool {
 
 // rewriteTransform opens srcPath, applies transformer to every line, and writes
 // the result to tmpFile. It owns the srcFile lifecycle.
-func (cm *ConfigManager) rewriteTransform(ctx context.Context, srcPath string, tmpFile *os.File) (int, error) {
-	//nolint:gosec // G304: File path comes from trusted configuration
-	srcFile, err := os.Open(srcPath)
+func (cm *ConfigManager) rewriteTransform(ctx context.Context, srcPath string, tmpFile sys.File) (int, error) {
+	srcFile, err := cm.env.FS.Open(srcPath)
 	if err != nil {
 		return 0, fmt.Errorf("open source file %s: %w", srcPath, err)
 	}
@@ -291,7 +290,7 @@ func (cm *ConfigManager) rewriteTransform(ctx context.Context, srcPath string, t
 
 // rewriteAtomicCommit sets permissions on tmpFileName and atomically replaces
 // destPath, falling back to copy+delete when rename crosses filesystems.
-func rewriteAtomicCommit(ctx context.Context, tmpFileName, destPath, modeStr string) error {
+func (cm *ConfigManager) rewriteAtomicCommit(ctx context.Context, tmpFileName, destPath, modeStr string) error {
 	// Legacy state.py:775 defaults to 0440.
 	var fileMode os.FileMode = 0o440
 
@@ -305,24 +304,24 @@ func rewriteAtomicCommit(ctx context.Context, tmpFileName, destPath, modeStr str
 		fileMode = os.FileMode(modeInt)
 	}
 
-	if err := os.Chmod(tmpFileName, fileMode); err != nil {
+	if err := cm.env.FS.Chmod(tmpFileName, fileMode); err != nil {
 		return fmt.Errorf("chmod temp file: %w", err)
 	}
 
-	if err := os.Rename(tmpFileName, destPath); err == nil {
+	if err := cm.env.FS.Rename(tmpFileName, destPath); err == nil {
 		return nil
 	}
 
 	// Cross-device fallback: copy then delete.
-	if err := fileutil.CopyFile(ctx, tmpFileName, destPath); err != nil {
+	if err := cm.env.FS.CopyFile(ctx, tmpFileName, destPath); err != nil {
 		return fmt.Errorf("copy temp to dest %s: %w", destPath, err)
 	}
 
-	if err := os.Chmod(destPath, fileMode); err != nil {
+	if err := cm.env.FS.Chmod(destPath, fileMode); err != nil {
 		return fmt.Errorf("chmod dest file: %w", err)
 	}
 
-	if err := os.Remove(tmpFileName); err != nil && !os.IsNotExist(err) {
+	if err := cm.env.FS.Remove(tmpFileName); err != nil && !os.IsNotExist(err) {
 		logger.WarnContext(ctx, "Failed to remove temp file", "temp_file", tmpFileName, "error", err)
 	}
 
@@ -334,7 +333,7 @@ func (cm *ConfigManager) processRewrite(ctx context.Context, filePath string, re
 	srcPath := cm.mainConfig.BaseDir + "/" + filePath
 	destPath := cm.mainConfig.BaseDir + "/" + rewriteEntry.Value
 
-	tmpFile, err := os.CreateTemp("", "zmconfigd-rewrite-")
+	tmpFile, err := cm.env.FS.CreateTemp("", "zmconfigd-rewrite-")
 	if err != nil {
 		logger.ErrorContext(ctx, "Failed to create temporary file for rewrite", "error", err)
 
@@ -342,7 +341,7 @@ func (cm *ConfigManager) processRewrite(ctx context.Context, filePath string, re
 	}
 
 	tmpFileName := tmpFile.Name()
-	defer cleanupRewriteFiles(ctx, nil, tmpFile, tmpFileName)
+	defer cm.cleanupRewriteFiles(ctx, nil, tmpFile, tmpFileName)
 
 	lineCount, err := cm.rewriteTransform(ctx, srcPath, tmpFile)
 	if err != nil {
@@ -355,7 +354,7 @@ func (cm *ConfigManager) processRewrite(ctx context.Context, filePath string, re
 		logger.ErrorContext(ctx, "Error closing temporary file", "error", err)
 	}
 
-	if err := rewriteAtomicCommit(ctx, tmpFileName, destPath, rewriteEntry.Mode); err != nil {
+	if err := cm.rewriteAtomicCommit(ctx, tmpFileName, destPath, rewriteEntry.Mode); err != nil {
 		logger.ErrorContext(ctx, "Failed to commit rewrite", "dest_path", destPath, "error", err)
 
 		return fmt.Errorf("commit rewrite to %s: %w", destPath, err)

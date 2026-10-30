@@ -6,13 +6,15 @@ package commands
 
 import (
 	"testing"
+
+	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
 
 // TestNewRegistry_DifferentPaths tests that two registries with different ZEXTRAS_HOME
 // paths have different executable paths.
 func TestNewRegistry_DifferentPaths(t *testing.T) {
-	registry1 := NewRegistry("/opt/zextras")
-	registry2 := NewRegistry("/custom/zextras")
+	registry1 := NewRegistry("/opt/zextras", systest.New().System())
+	registry2 := NewRegistry("/custom/zextras", systest.New().System())
 
 	// Verify that the registries have different paths
 	if registry1.Exe["AMAVIS"] == registry2.Exe["AMAVIS"] {
@@ -31,7 +33,7 @@ func TestNewRegistry_DifferentPaths(t *testing.T) {
 
 // TestNewRegistry_DefaultPath tests that NewRegistry with empty string defaults to /opt/zextras
 func TestNewRegistry_DefaultPath(t *testing.T) {
-	registry := NewRegistry("")
+	registry := NewRegistry("", systest.New().System())
 
 	if registry.Exe["AMAVIS"] != "/opt/zextras/bin/zmamavisdctl" {
 		t.Errorf("registry.Exe[AMAVIS] = %q, want %q", registry.Exe["AMAVIS"], "/opt/zextras/bin/zmamavisdctl")
@@ -40,7 +42,7 @@ func TestNewRegistry_DefaultPath(t *testing.T) {
 
 // TestNewRegistry_CommandsInitialized tests that NewRegistry initializes the Commands map
 func TestNewRegistry_CommandsInitialized(t *testing.T) {
-	registry := NewRegistry("/opt/zextras")
+	registry := NewRegistry("/opt/zextras", systest.New().System())
 
 	expectedCommands := []string{
 		"amavis", "antispam", "antivirus", "cbpolicyd", "ldap",
@@ -58,7 +60,7 @@ func TestNewRegistry_CommandsInitialized(t *testing.T) {
 
 // TestRegistry_RegisterLDAPCommands tests that RegisterLDAPCommands adds LDAP commands to the registry
 func TestRegistry_RegisterLDAPCommands(t *testing.T) {
-	registry := NewRegistry("/opt/zextras")
+	registry := NewRegistry("/opt/zextras", systest.New().System())
 	executor := NewCommandExecutor(nil)
 
 	// Before registering, LDAP commands should not be present
@@ -84,8 +86,8 @@ func TestRegistry_RegisterLDAPCommands(t *testing.T) {
 
 // TestRegistry_MultipleInstances tests that multiple registry instances are independent
 func TestRegistry_MultipleInstances(t *testing.T) {
-	registry1 := NewRegistry("/opt/zextras")
-	registry2 := NewRegistry("/custom/zextras")
+	registry1 := NewRegistry("/opt/zextras", systest.New().System())
+	registry2 := NewRegistry("/custom/zextras", systest.New().System())
 
 	executor := NewCommandExecutor(nil)
 

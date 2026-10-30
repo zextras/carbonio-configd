@@ -205,7 +205,7 @@ func (cm *ConfigManager) cachedGlobalConfig(ctx context.Context, maxRetries int)
 
 // fetchGlobalConfig fetches fresh global config from LDAP (cache miss path)
 func (cm *ConfigManager) fetchGlobalConfig(ctx context.Context, maxRetries int) (map[string]string, error) {
-	return retryWithBackoff(ctx, "GlobalConfig", maxRetries, func() (map[string]string, error) {
+	return retryWithBackoff(ctx, cm.env.Clock, "GlobalConfig", maxRetries, func() (map[string]string, error) {
 		configData, err := cm.fetchGlobalAttrs(ctx)
 		if err != nil {
 			return nil, err

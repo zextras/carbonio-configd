@@ -46,7 +46,7 @@ func TestRewriteWorker_HappyPath(t *testing.T) {
 		ConfigFile: filepath.Join(tmpDir, "zmconfigd.cf"),
 	}
 	cacheInstance := cache.New(ctx, false)
-	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance)
+	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance, hostEnv())
 
 	// Create a rewrite entry
 	entry := config.RewriteEntry{
@@ -81,7 +81,7 @@ func TestRewriteWorker_ErrorPath(t *testing.T) {
 		ConfigFile: filepath.Join(tmpDir, "zmconfigd.cf"),
 	}
 	cacheInstance := cache.New(ctx, false)
-	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance)
+	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance, hostEnv())
 
 	// Create a rewrite entry pointing to non-existent source
 	entry := config.RewriteEntry{
@@ -135,7 +135,7 @@ func TestRewriteWorker_DebugLogging(t *testing.T) {
 		ConfigFile: filepath.Join(tmpDir, "zmconfigd.cf"),
 	}
 	cacheInstance := cache.New(ctx, false)
-	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance)
+	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance, hostEnv())
 
 	// Create a rewrite entry
 	entry := config.RewriteEntry{
@@ -171,7 +171,7 @@ func TestRewriteAtomicCommit_HappyPath(t *testing.T) {
 	destPath := filepath.Join(tmpDir, "dest.txt")
 
 	// Execute rewriteAtomicCommit with empty mode (should default to 0440, legacy state.py:775)
-	err = rewriteAtomicCommit(ctx, tmpFile.Name(), destPath, "")
+	err = realFSConfigManager().rewriteAtomicCommit(ctx, tmpFile.Name(), destPath, "")
 	require.NoError(t, err)
 
 	// Verify destination file exists
@@ -202,7 +202,7 @@ func TestRewriteAtomicCommit_InvalidMode(t *testing.T) {
 	destPath := filepath.Join(tmpDir, "dest.txt")
 
 	// Execute rewriteAtomicCommit with invalid mode
-	err = rewriteAtomicCommit(ctx, tmpFile.Name(), destPath, "not-octal")
+	err = realFSConfigManager().rewriteAtomicCommit(ctx, tmpFile.Name(), destPath, "not-octal")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "invalid file mode")
 }
@@ -225,7 +225,7 @@ func TestRewriteAtomicCommit_CustomMode(t *testing.T) {
 	destPath := filepath.Join(tmpDir, "dest.txt")
 
 	// Execute rewriteAtomicCommit with custom mode
-	err = rewriteAtomicCommit(ctx, tmpFile.Name(), destPath, "0755")
+	err = realFSConfigManager().rewriteAtomicCommit(ctx, tmpFile.Name(), destPath, "0755")
 	require.NoError(t, err)
 
 	// Verify destination file has correct mode
@@ -262,7 +262,7 @@ func TestRewriteTransform(t *testing.T) {
 		ConfigFile: filepath.Join(tmpDir, "zmconfigd.cf"),
 	}
 	cacheInstance := cache.New(ctx, false)
-	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance)
+	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance, hostEnv())
 
 	// Execute rewriteTransform
 	lineCount, err := cm.rewriteTransform(ctx, srcPath, tmpFile)
@@ -299,14 +299,13 @@ func TestRewriteTransform_NonexistentSource(t *testing.T) {
 		ConfigFile: filepath.Join(tmpDir, "zmconfigd.cf"),
 	}
 	cacheInstance := cache.New(ctx, false)
-	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance)
+	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance, hostEnv())
 
 	// Execute rewriteTransform with non-existent source
 	_, err = cm.rewriteTransform(ctx, filepath.Join(tmpDir, "nonexistent.txt"), tmpFile)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "open source file")
 }
-
 
 // TestResolveValueSpec_FILE is the CO-4096 regression suite: FILE fragments must be
 // transformer-expanded before reaching postconf. Before the fix, FILE was delegated
@@ -328,7 +327,7 @@ func TestResolveValueSpec_FILE(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(fragDir, fragName), []byte(fragContent), 0644))
 		st := state.NewState()
 		cfg := &config.Config{BaseDir: tmpDir}
-		cm := NewConfigManager(ctx, cfg, st, nil, cache.New(ctx, false))
+		cm := NewConfigManager(ctx, cfg, st, nil, cache.New(ctx, false), hostEnv())
 		resolve := func(key, valueSpec string) (string, error) {
 			return cm.resolveValueSpec(ctx, key, valueSpec)
 		}

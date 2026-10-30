@@ -6,18 +6,23 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/zextras/carbonio-configd/internal/sys"
+	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
 
 // --- buildLDAPBindURL (table-driven consolidation) ---
 
 func TestBuildLDAPBindURL_TableDriven(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name string
 		lc   map[string]string
@@ -62,22 +67,24 @@ func TestBuildLDAPBindURL_TableDriven(t *testing.T) {
 	}
 }
 
-// --- ldapCustomStart (loadConfig override) ---
+// --- ldapCustomStart (ctl.loadConfig override) ---
 
 func TestLdapCustomStart_LoadConfigFails(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 
-	old := loadConfig
-	loadConfig = func() (map[string]string, error) {
+	ctl.loadConfig = func() (map[string]string, error) {
 		return nil, fmt.Errorf("test config error")
 	}
-	defer func() { loadConfig = old }()
 
-	err := ldapCustomStart(context.Background(), &ServiceDef{Name: "ldap"})
+	err := ctl.ldapCustomStart(context.Background(), &ServiceDef{Name: "ldap"})
 	if err == nil {
-		t.Fatal("expected error when loadConfig fails")
+		t.Fatal("expected error when ctl.loadConfig fails")
 	}
 	if !strings.Contains(err.Error(), "failed to load localconfig") {
 		t.Errorf("error = %q, want it to contain %q", err, "failed to load localconfig")
@@ -85,6 +92,10 @@ func TestLdapCustomStart_LoadConfigFails(t *testing.T) {
 }
 
 func TestLdapCustomStart_WithFakeSlapd(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -109,35 +120,27 @@ func TestLdapCustomStart_WithFakeSlapd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldLC := loadConfig
-	loadConfig = func() (map[string]string, error) {
+	ctl.loadConfig = func() (map[string]string, error) {
 		return map[string]string{
 			"ldap_port":              "389",
 			"zimbra_server_hostname": "localhost",
 		}, nil
 	}
-	defer func() { loadConfig = oldLC }()
 
-	oldCommon := commonPath
-	commonPath = tmp
-	defer func() { commonPath = oldCommon }()
+	ctl.p.common = tmp
 
-	oldData := dataPath
-	dataPath = tmp
-	defer func() { dataPath = oldData }()
+	ctl.p.data = tmp
 
-	oldLog := logPath
-	logPath = logDir
-	defer func() { logPath = oldLog }()
+	ctl.p.log = logDir
 
 	// slapd has no sd_notify; readiness is determined by the LDAP probe.
 	// Stub the probe to succeed so ldapCustomStart returns once the fake
 	// slapd is launched.
-	withLdapProbe(t, func(_ context.Context, _ []string) error { return nil })
+	withLdapProbe(t, ctl, func(_ context.Context, _ []string) error { return nil })
 
 	done := make(chan error, 1)
 	go func() {
-		done <- ldapCustomStart(context.Background(), &ServiceDef{Name: "ldap"})
+		done <- ctl.ldapCustomStart(context.Background(), &ServiceDef{Name: "ldap"})
 	}()
 
 	select {
@@ -151,6 +154,10 @@ func TestLdapCustomStart_WithFakeSlapd(t *testing.T) {
 }
 
 func TestLdapCustomStart_ContextTimeout(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -175,33 +182,25 @@ func TestLdapCustomStart_ContextTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldLC := loadConfig
-	loadConfig = func() (map[string]string, error) {
+	ctl.loadConfig = func() (map[string]string, error) {
 		return map[string]string{}, nil
 	}
-	defer func() { loadConfig = oldLC }()
 
-	oldCommon := commonPath
-	commonPath = tmp
-	defer func() { commonPath = oldCommon }()
+	ctl.p.common = tmp
 
-	oldData := dataPath
-	dataPath = tmp
-	defer func() { dataPath = oldData }()
+	ctl.p.data = tmp
 
-	oldLog := logPath
-	logPath = logDir
-	defer func() { logPath = oldLog }()
+	ctl.p.log = logDir
 
 	// Probe never succeeds, so readiness depends solely on ctx/timeout.
-	withLdapProbe(t, func(_ context.Context, _ []string) error {
+	withLdapProbe(t, ctl, func(_ context.Context, _ []string) error {
 		return fmt.Errorf("not ready")
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
-	err := ldapCustomStart(ctx, &ServiceDef{Name: "ldap"})
+	err := ctl.ldapCustomStart(ctx, &ServiceDef{Name: "ldap"})
 	if err == nil {
 		t.Fatal("expected error on context timeout")
 	}
@@ -210,6 +209,8 @@ func TestLdapCustomStart_ContextTimeout(t *testing.T) {
 // --- renderLDAPTable ---
 
 func TestRenderLDAPTable(t *testing.T) {
+	t.Parallel()
+
 	got := renderLDAPTable("ldap://test", "389", startTLSYes, "secret", "query_filter = (cn=%s)\nresult_attribute = cn\n", "extra = line\n")
 
 	want := `server_host = ldap://test
@@ -233,6 +234,8 @@ extra = line
 }
 
 func TestRenderLDAPTable_NoExtra(t *testing.T) {
+	t.Parallel()
+
 	got := renderLDAPTable("ldap://test", "389", "no", "pw", "query_filter = (cn=%s)\n", "")
 
 	if !strings.Contains(got, "start_tls = no") {
@@ -245,6 +248,8 @@ func TestRenderLDAPTable_NoExtra(t *testing.T) {
 }
 
 func TestRenderLDAPTable_AllFields(t *testing.T) {
+	t.Parallel()
+
 	got := renderLDAPTable("ldap://host", "636", startTLSYes, "secret123",
 		"query_filter = (uid=%s)\nresult_attribute = uid\n",
 		"special_result_attribute = member\n")
@@ -268,102 +273,99 @@ func TestRenderLDAPTable_AllFields(t *testing.T) {
 
 // --- startThenProbe ---
 
-func withLdapProbe(t *testing.T, fn func(context.Context, []string) error) {
+func withLdapProbe(t *testing.T, ctl *Controller, fn func(context.Context, []string) error) {
 	t.Helper()
 
-	prev := ldapProbeFn
-	t.Cleanup(func() { ldapProbeFn = prev })
-
-	ldapProbeFn = fn
+	ctl.ldapProbe = fn
 }
 
 // TestStartThenProbe_ReadyOnProbe verifies a fast return once the probe
 // succeeds, without waiting for sd_notify or the full timeout.
 func TestStartThenProbe_ReadyOnProbe(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: spawns a child process")
-	}
+	t.Parallel()
 
-	withLdapProbe(t, func(_ context.Context, _ []string) error { return nil })
+	ctl, f := newFakeController(t)
 
-	cmd := exec.Command("sleep", "30")
+	withLdapProbe(t, ctl, func(_ context.Context, _ []string) error { return nil })
 
-	start := time.Now()
-	err := startThenProbe(context.Background(), cmd, "ldap://localhost:389")
-
-	if cmd.Process != nil {
-		_ = cmd.Process.Kill()
-		go func() { _, _ = cmd.Process.Wait() }()
-	}
-
+	err := ctl.startThenProbe(context.Background(), &sys.Cmd{Path: "slapd"}, "ldap://localhost:389")
 	if err != nil {
 		t.Fatalf("startThenProbe returned error: %v", err)
 	}
-	if elapsed := time.Since(start); elapsed > 2*time.Second {
-		t.Errorf("startThenProbe took %v, expected fast return on probe success", elapsed)
+
+	if got := f.Rec.Of("exec.start"); len(got) != 1 {
+		t.Errorf("expected slapd to be started exactly once, got %q", got)
 	}
 }
 
 // TestStartThenProbe_ChildExitFailsFast verifies that if the child exits before
 // the probe ever succeeds, we fail immediately rather than polling to timeout.
 func TestStartThenProbe_ChildExitFailsFast(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: spawns a child process")
-	}
+	t.Parallel()
+
+	ctl, f := newFakeController(t)
 
 	// Probe never succeeds.
-	withLdapProbe(t, func(_ context.Context, _ []string) error {
+	withLdapProbe(t, ctl, func(_ context.Context, _ []string) error {
 		return fmt.Errorf("not ready")
 	})
 
-	// Child exits almost immediately.
-	cmd := exec.Command("true")
+	// Child exits immediately with a failure.
+	f.Exec.OnPath("slapd", systest.Fail(1, ""))
 
-	start := time.Now()
-	err := startThenProbe(context.Background(), cmd, "ldap://localhost:389")
+	err := ctl.startThenProbe(context.Background(), &sys.Cmd{Path: "slapd"}, "ldap://localhost:389")
 	if err == nil {
 		t.Fatal("expected error when child exits before readiness")
 	}
 	if !strings.Contains(err.Error(), "exited during startup") {
 		t.Errorf("error = %v, want 'exited during startup'", err)
 	}
-	if elapsed := time.Since(start); elapsed > 5*time.Second {
-		t.Errorf("startThenProbe took %v, expected fast fail on child exit", elapsed)
-	}
 }
 
 // TestStartThenProbe_CtxCancel verifies ctx cancellation aborts the wait.
 func TestStartThenProbe_CtxCancel(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: spawns a child process")
-	}
+	t.Parallel()
 
-	withLdapProbe(t, func(_ context.Context, _ []string) error {
+	ctl, _ := newFakeController(t)
+	ctl.withBlockingStart()
+
+	withLdapProbe(t, ctl, func(_ context.Context, _ []string) error {
 		return fmt.Errorf("not ready")
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
-	cmd := exec.Command("sleep", "30")
+	cancel()
 
-	go func() {
-		time.Sleep(300 * time.Millisecond)
-		cancel()
-	}()
-
-	err := startThenProbe(ctx, cmd, "ldap://localhost:389")
-
-	if cmd.Process != nil {
-		_ = cmd.Process.Kill()
-		go func() { _, _ = cmd.Process.Wait() }()
+	err := ctl.startThenProbe(ctx, &sys.Cmd{Path: "slapd"}, "ldap://localhost:389")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
 	}
+}
 
-	if err == nil {
-		t.Fatal("expected error from cancelled ctx")
+// TestStartThenProbe_Timeout verifies the readiness wait gives up once
+// ldapReadyTimeout of (manual) clock time has elapsed without a successful probe.
+func TestStartThenProbe_Timeout(t *testing.T) {
+	t.Parallel()
+
+	ctl, f := newFakeController(t)
+	ctl.withBlockingStart()
+
+	withLdapProbe(t, ctl, func(_ context.Context, _ []string) error {
+		return fmt.Errorf("not ready")
+	})
+
+	pumpClock(t, f.Clock, ldapProbeInterval)
+
+	err := ctl.startThenProbe(context.Background(), &sys.Cmd{Path: "slapd"}, "ldap://localhost:389")
+	if err == nil || !strings.Contains(err.Error(), "did not become ready within") {
+		t.Fatalf("error = %v, want readiness timeout", err)
 	}
 }
 
 // TestProbeLDAPReady_EmptyURLs verifies that an empty URL list causes an error.
 func TestProbeLDAPReady_EmptyURLs(t *testing.T) {
+	t.Parallel()
+
 	err := probeLDAPReady(context.Background(), []string{})
 	if err == nil {
 		t.Error("expected non-nil error for empty URL list")
@@ -373,6 +375,8 @@ func TestProbeLDAPReady_EmptyURLs(t *testing.T) {
 // TestProbeLDAPReady_UnreachableURL verifies that an unreachable host returns
 // a non-nil error.
 func TestProbeLDAPReady_UnreachableURL(t *testing.T) {
+	t.Parallel()
+
 	err := probeLDAPReady(context.Background(), []string{"ldap://127.0.0.1:1"})
 	if err == nil {
 		t.Error("expected non-nil error for unreachable LDAP URL")

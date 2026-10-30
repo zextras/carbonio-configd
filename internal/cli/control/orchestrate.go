@@ -9,7 +9,6 @@ import (
 	"fmt"
 
 	"github.com/zextras/carbonio-configd/internal/cli/cliutil"
-	"github.com/zextras/carbonio-configd/internal/cli/status"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/services"
 )
@@ -28,27 +27,27 @@ const (
 //  3. Then iterate the rest of the registered services in legacy %startorder
 //     (mailbox, memcached, proxy, amavis, ..., mta, stats), filtering by what
 //     LDAP says is enabled on this host.
-func controlStart(ctx context.Context, c *cliutil.Console) int {
+func (o *orchestrator) controlStart(ctx context.Context, c *cliutil.Console) int {
 	c.Header()
 
-	if err := startBootstrapServices(ctx, c); err != nil {
+	if err := o.startBootstrapServices(ctx, c); err != nil {
 		return 1
 	}
 
-	enabledList, err := services.DiscoverEnabledServices(ctx)
+	enabledList, err := o.ctl.DiscoverEnabledServices(ctx)
 	if err != nil {
 		c.Errorf("Cannot determine services: %v\n", err)
 
 		return 1
 	}
 
-	threshold := services.GetDiskThreshold()
+	threshold := o.ctl.GetDiskThreshold()
 	bd := cliutil.BaseDir()
 
 	// CheckDiskSpace returns ok=true on error (statfs failure), matching legacy
 	// hasAvailableSpace which stays silent for unreadable/missing dirs, so the
 	// warning below can only fire with a real measured value.
-	avail, ok, _ := services.CheckDiskSpace(bd, threshold)
+	avail, ok, _ := o.ctl.CheckDiskSpace(bd, threshold)
 	if !ok {
 		c.Warn("Disk space below threshold for %s (%dMB available, %dMB required)", bd, avail, threshold)
 	}
@@ -58,17 +57,14 @@ func controlStart(ctx context.Context, c *cliutil.Console) int {
 		enabledSet[services.MapLDAPServiceToRegistry(s)] = true
 	}
 
-	return startEnabledServices(ctx, c, enabledSet, threshold)
+	return o.startEnabledServices(ctx, c, enabledSet, threshold)
 }
-
-// controlSvcStatusFn is overridden in tests.
-var controlSvcStatusFn = services.ServiceStatus
 
 // statusForStart reports whether name is running. A probe error (as opposed to
 // plain "not running", which is (false, nil)) must not be read as stopped: the
 // start path aborts instead of blindly starting a service that may be up.
-func statusForStart(ctx context.Context, c *cliutil.Console, name string) (bool, error) {
-	running, err := controlSvcStatusFn(ctx, name)
+func (o *orchestrator) statusForStart(ctx context.Context, c *cliutil.Console, name string) (bool, error) {
+	running, err := o.svcStatus(ctx, name)
 	if err != nil {
 		c.Warn("Cannot determine status of %s: %v", name, err)
 
@@ -81,8 +77,8 @@ func statusForStart(ctx context.Context, c *cliutil.Console, name string) (bool,
 // runningForStop reports whether name should be stopped. On a probe error the
 // service is assumed possibly running so the stop is still attempted (legacy
 // control.pl always invoked `<svc>ctl stop`; it never skipped on a failed probe).
-func runningForStop(ctx context.Context, c *cliutil.Console, name string) bool {
-	running, err := controlSvcStatusFn(ctx, name)
+func (o *orchestrator) runningForStop(ctx context.Context, c *cliutil.Console, name string) bool {
+	running, err := o.svcStatus(ctx, name)
 	if err != nil {
 		c.Warn("Cannot determine status of %s: %v; attempting stop anyway", name, err)
 
@@ -92,18 +88,18 @@ func runningForStop(ctx context.Context, c *cliutil.Console, name string) bool {
 	return running
 }
 
-func startBootstrapServices(ctx context.Context, c *cliutil.Console) error {
-	if services.IsLDAPLocal() {
-		running, statErr := statusForStart(ctx, c, ldapServiceName)
+func (o *orchestrator) startBootstrapServices(ctx context.Context, c *cliutil.Console) error {
+	if o.ctl.IsLDAPLocal() {
+		running, statErr := o.statusForStart(ctx, c, ldapServiceName)
 		if statErr != nil {
 			return statErr
 		}
 
 		if !running {
-			def := services.LookupService(ldapServiceName)
+			def := o.ctl.LookupService(ldapServiceName)
 			done := c.Progress("Starting", def.DisplayName)
 
-			err := services.ServiceStart(ctx, ldapServiceName)
+			err := o.ctl.ServiceStart(ctx, ldapServiceName)
 			done(err)
 
 			if err != nil {
@@ -112,16 +108,16 @@ func startBootstrapServices(ctx context.Context, c *cliutil.Console) error {
 		}
 	}
 
-	running, statErr := statusForStart(ctx, c, configdServiceName)
+	running, statErr := o.statusForStart(ctx, c, configdServiceName)
 	if statErr != nil {
 		return statErr
 	}
 
 	if !running {
-		def := services.LookupService(configdServiceName)
+		def := o.ctl.LookupService(configdServiceName)
 		done := c.Progress("Starting", def.DisplayName)
 
-		err := services.ServiceStart(ctx, configdServiceName)
+		err := o.ctl.ServiceStart(ctx, configdServiceName)
 		done(err)
 
 		if err != nil {
@@ -132,27 +128,29 @@ func startBootstrapServices(ctx context.Context, c *cliutil.Console) error {
 	return nil
 }
 
-func startEnabledServices(ctx context.Context, c *cliutil.Console, enabledSet map[string]bool, threshold int) int {
+func (o *orchestrator) startEnabledServices(
+	ctx context.Context, c *cliutil.Console, enabledSet map[string]bool, threshold int,
+) int {
 	rc := 0
 
-	for _, name := range services.AllServiceNames() {
+	for _, name := range o.ctl.AllServiceNames() {
 		if name == ldapServiceName || name == configdServiceName {
 			continue
 		}
 
-		if !enabledSet[name] && !services.IsCustomEnabled(ctx, name) {
+		if !enabledSet[name] && !o.ctl.IsCustomEnabled(ctx, name) {
 			continue
 		}
 
-		def := services.LookupService(name)
+		def := o.ctl.LookupService(name)
 		if def == nil {
 			continue
 		}
 
-		services.CheckServiceDiskSpace(name, threshold)
+		o.ctl.CheckServiceDiskSpace(name, threshold)
 
 		done := c.Progress("Starting", def.DisplayName)
-		startErr := services.ServiceStart(ctx, name)
+		startErr := o.ctl.ServiceStart(ctx, name)
 		done(startErr)
 
 		if startErr != nil {
@@ -163,11 +161,11 @@ func startEnabledServices(ctx context.Context, c *cliutil.Console, enabledSet ma
 	return rc
 }
 
-func controlStop(ctx context.Context, c *cliutil.Console) int {
+func (o *orchestrator) controlStop(ctx context.Context, c *cliutil.Console) int {
 	c.Header()
 
 	rc := 0
-	ordered := services.AllServiceNames()
+	ordered := o.ctl.AllServiceNames()
 
 	// Reverse order for stop
 	for i, j := 0, len(ordered)-1; i < j; i, j = i+1, j-1 {
@@ -179,17 +177,17 @@ func controlStop(ctx context.Context, c *cliutil.Console) int {
 			continue
 		}
 
-		def := services.LookupService(name)
+		def := o.ctl.LookupService(name)
 		if def == nil {
 			continue
 		}
 
-		if !runningForStop(ctx, c, name) {
+		if !o.runningForStop(ctx, c, name) {
 			continue
 		}
 
 		done := c.Progress("Stopping", def.DisplayName)
-		stopErr := services.ServiceStop(ctx, name)
+		stopErr := o.ctl.ServiceStop(ctx, name)
 		done(stopErr)
 
 		if stopErr != nil {
@@ -198,14 +196,14 @@ func controlStop(ctx context.Context, c *cliutil.Console) int {
 	}
 
 	// Stop LDAP last if local
-	rc |= stopLDAPIfLocal(ctx, c, nil)
+	rc |= o.stopLDAPIfLocal(ctx, c, nil)
 
 	// Stop the configd daemon itself — it must be last so it can handle
 	// rewriteConfigs calls from other services during their own shutdown.
-	if runningForStop(ctx, c, configdServiceName) {
-		def := services.LookupService(configdServiceName)
+	if o.runningForStop(ctx, c, configdServiceName) {
+		def := o.ctl.LookupService(configdServiceName)
 		done := c.Progress("Stopping", def.DisplayName)
-		stopErr := services.ServiceStop(ctx, configdServiceName)
+		stopErr := o.ctl.ServiceStop(ctx, configdServiceName)
 		done(stopErr)
 
 		if stopErr != nil {
@@ -217,22 +215,22 @@ func controlStop(ctx context.Context, c *cliutil.Console) int {
 }
 
 // stopLDAPIfLocal stops LDAP if it's local and was enabled (or LDAP discovery failed).
-func stopLDAPIfLocal(ctx context.Context, c *cliutil.Console, enabledSet map[string]bool) int {
+func (o *orchestrator) stopLDAPIfLocal(ctx context.Context, c *cliutil.Console, enabledSet map[string]bool) int {
 	if enabledSet != nil && !enabledSet[ldapServiceName] {
 		return 0
 	}
 
-	if !services.IsLDAPLocal() {
+	if !o.ctl.IsLDAPLocal() {
 		return 0
 	}
 
-	if !runningForStop(ctx, c, ldapServiceName) {
+	if !o.runningForStop(ctx, c, ldapServiceName) {
 		return 0
 	}
 
-	def := services.LookupService(ldapServiceName)
+	def := o.ctl.LookupService(ldapServiceName)
 	done := c.Progress("Stopping", def.DisplayName)
-	stopErr := services.ServiceStop(ctx, ldapServiceName)
+	stopErr := o.ctl.ServiceStop(ctx, ldapServiceName)
 	done(stopErr)
 
 	if stopErr != nil {
@@ -250,20 +248,20 @@ func stopLDAPIfLocal(ctx context.Context, c *cliutil.Console, enabledSet map[str
 // thus showed phantom rows like `directory server`, `mailbox`, `cbpolicyd`,
 // `freshclam`, `saslauthd`, `milter`, `stats` on proxy/MTA-only nodes.
 //
-// When LDAP is unreachable, services.DiscoverEnabledServices already falls
+// When LDAP is unreachable, Controller.DiscoverEnabledServices already falls
 // back to the on-disk cache; we propagate that opportunistically. As a last
 // resort (LDAP and cache both unavailable) we degrade to the full registry
 // view rather than printing nothing — operators must still see something.
 //
 // Exit code: rc=1 if any displayed service except stats/logger is
 // Stopped/Failed or discovery failed, else rc=0 (legacy doStatus).
-func controlStatus(ctx context.Context, c *cliutil.Console) int {
+func (o *orchestrator) controlStatus(ctx context.Context, c *cliutil.Console) int {
 	c.Header()
 
 	// One process-table snapshot answers every status probe and every
 	// pid/uptime detail of this run, so the rows are mutually consistent and
 	// /proc is walked once.
-	ctx = services.WithProcessSnapshot(ctx)
+	ctx = o.ctl.WithProcessSnapshot(ctx)
 
 	type discResult struct {
 		set    map[string]bool
@@ -273,7 +271,7 @@ func controlStatus(ctx context.Context, c *cliutil.Console) int {
 	discCh := make(chan discResult, 1)
 
 	go func() {
-		list, err := services.DiscoverEnabledServices(ctx)
+		list, err := o.ctl.DiscoverEnabledServices(ctx)
 		if err != nil {
 			discCh <- discResult{set: nil, failed: true}
 			return
@@ -298,7 +296,7 @@ func controlStatus(ctx context.Context, c *cliutil.Console) int {
 
 	var rows []svcRow
 
-	stream := services.ServiceListStatusStream(ctx)
+	stream := o.ctl.ServiceListStatusStream(ctx)
 	disc := <-discCh
 
 	for info := range stream {
@@ -306,7 +304,7 @@ func controlStatus(ctx context.Context, c *cliutil.Console) int {
 			continue
 		}
 
-		detail := status.ServiceDetail(ctx, info.Name, info.Running)
+		detail := o.reporter.ServiceDetail(ctx, info.Name, info.Running)
 		c.Status(info.DisplayName, info.Running, detail)
 		rows = append(rows, svcRow{ServiceInfo: info, detail: detail})
 	}
@@ -315,7 +313,7 @@ func controlStatus(ctx context.Context, c *cliutil.Console) int {
 		logger.WarnContext(ctx, "Service discovery unavailable, displayed full registry as fallback")
 	}
 
-	status.Advanced(ctx, c)
+	o.reporter.Advanced(ctx, c)
 
 	if disc.failed {
 		// Legacy: "Cannot determine services" is rc=1.

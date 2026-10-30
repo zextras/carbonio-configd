@@ -10,7 +10,11 @@ import (
 )
 
 func TestProxyProcessNameDoesNotCollideWithPrometheusExporter(t *testing.T) {
-	def := LookupService("proxy")
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	def := ctl.LookupService("proxy")
 	if def == nil {
 		t.Fatal("proxy service not found in registry")
 	}

@@ -29,7 +29,7 @@ func (cm *ConfigManager) LoadLocalConfig(ctx context.Context) error {
 func (cm *ConfigManager) loadLocalConfigWithRetry(ctx context.Context, maxRetries int) error {
 	t1 := time.Now()
 
-	_, err := retryWithBackoff(ctx, "LocalConfig", maxRetries, func() (struct{}, error) {
+	_, err := retryWithBackoff(ctx, cm.env.Clock, "LocalConfig", maxRetries, func() (struct{}, error) {
 		output, err := cm.executeLocalConfigCommand(ctx)
 		if err != nil {
 			return struct{}{}, err
@@ -76,7 +76,7 @@ func (cm *ConfigManager) executeLocalConfigCommand(ctx context.Context) (string,
 	// Legacy getlocal (jylibs/commands.py) reads LC.get over LC.getAllKeys: the
 	// LC.java defaults merged under localconfig.xml with ${var} expanded
 	// (zmlocalconfig -s -x).
-	localCfg, err := loadResolvedLocalConfig()
+	localCfg, err := cm.loadResolvedLocalConfig()
 	if err != nil {
 		return "", fmt.Errorf("failed to load localconfig: %w", err)
 	}

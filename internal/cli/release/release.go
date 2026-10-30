@@ -11,11 +11,10 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/zextras/carbonio-configd/internal/cli/cliutil"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // osReleasePath is where the distribution ID is read from.
@@ -29,16 +28,15 @@ type Options struct {
 
 // installedPackages lists the installed carbonio packages, one
 // "<name> <version>" per line, for the distribution with the given os-release
-// ID. A package manager that fails to run yields no output. Overridable in
-// tests: it executes the host's dpkg/rpm.
-var installedPackages = func(ctx context.Context, distroID string) []byte {
+// ID. A package manager that fails to run yields no output.
+func installedPackages(ctx context.Context, x sys.Exec, distroID string) []byte {
 	var out []byte
 
 	switch distroID {
 	case "ubuntu", "debian":
-		out, _ = exec.CommandContext(ctx, "dpkg-query", "-W", "-f", "${Package} ${Version}\n", "carbonio*").Output()
+		out, _ = sys.Output(ctx, x, "dpkg-query", "-W", "-f", "${Package} ${Version}\n", "carbonio*")
 	default:
-		out, _ = exec.CommandContext(ctx, "rpm", "-qa", "--qf", "%{NAME} %{VERSION}-%{RELEASE}\n", "carbonio*").Output()
+		out, _ = sys.Output(ctx, x, "rpm", "-qa", "--qf", "%{NAME} %{VERSION}-%{RELEASE}\n", "carbonio*")
 	}
 
 	return out
@@ -46,19 +44,19 @@ var installedPackages = func(ctx context.Context, distroID string) []byte {
 
 // Run prints the release and returns the process exit status (always 0, like
 // the legacy tool: a missing .version file yields an empty release).
-func Run(ctx context.Context, stdout, stderr io.Writer, opts *Options) int {
+func Run(ctx context.Context, env sys.System, stdout, stderr io.Writer, opts *Options) int {
 	cliutil.InitCLILogging(stderr)
 
 	// Legacy displayVersion: `cat .version` with a missing file yields an
 	// empty release and exit 0.
-	version, _ := os.ReadFile(cliutil.BasePath(".version"))
+	version, _ := env.FS.ReadFile(cliutil.BasePath(".version"))
 	_, _ = fmt.Fprintf(stdout, "Carbonio Release %s\n", strings.TrimSpace(string(version)))
 
 	if !opts.Packages {
 		return 0
 	}
 
-	out := installedPackages(ctx, distroID(osReleasePath))
+	out := installedPackages(ctx, env.Exec, distroID(env.FS, osReleasePath))
 	if len(out) > 0 {
 		_, _ = fmt.Fprintln(stdout, "\nInstalled packages:")
 		_, _ = fmt.Fprint(stdout, string(out))
@@ -67,10 +65,10 @@ func Run(ctx context.Context, stdout, stderr io.Writer, opts *Options) int {
 	return 0
 }
 
-// distroID returns the ID= value of the os-release file at path, unquoted, or
+// distroID returns the ID= value of the os-release file at path in fsys, unquoted, or
 // "" when the file is unreadable or has no ID.
-func distroID(path string) string {
-	data, err := os.ReadFile(path) //nolint:gosec // path is a fixed os-release location (a parameter only for tests)
+func distroID(fsys sys.FS, path string) string {
+	data, err := fsys.ReadFile(path)
 	if err != nil {
 		return ""
 	}

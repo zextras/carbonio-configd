@@ -10,6 +10,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 func TestValidHostToken(t *testing.T) {
@@ -45,8 +47,8 @@ func TestGetDomains_DropsUnsafeValues(t *testing.T) {
 	t.Parallel()
 
 	pem := "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n"
-	gen := &Generator{Variables: map[string]*Variable{}}
-	tp := NewTemplateProcessor(gen, t.TempDir(), t.TempDir())
+	gen := &Generator{env: sys.Real(), Variables: map[string]*Variable{}}
+	tp := NewTemplateProcessor(gen, gen.env.FS, t.TempDir(), t.TempDir())
 	tp.domainProvider = func() []DomainInfo {
 		return []DomainInfo{
 			{Name: "good.com", VirtualHostname: "mail.good.com", VirtualIPAddress: "10.0.0.1",
@@ -72,8 +74,8 @@ func TestGetDomains_DropsUnsafeValues(t *testing.T) {
 func TestGetServersWithService_DropsUnsafeHostnames(t *testing.T) {
 	t.Parallel()
 
-	gen := &Generator{Variables: map[string]*Variable{}}
-	tp := NewTemplateProcessor(gen, t.TempDir(), t.TempDir())
+	gen := &Generator{env: sys.Real(), Variables: map[string]*Variable{}}
+	tp := NewTemplateProcessor(gen, gen.env.FS, t.TempDir(), t.TempDir())
 	tp.serverProvider = func(string) []ServerInfo {
 		return []ServerInfo{
 			{ID: "1", Hostname: "mbox1.example.com"},

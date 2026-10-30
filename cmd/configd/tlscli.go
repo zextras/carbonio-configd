@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"github.com/zextras/carbonio-configd/internal/cli/tls"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // TLSCmd handles "configd tls" — the Go port of legacy zmtlsctl.
@@ -21,11 +22,11 @@ type TLSCmd struct {
 }
 
 // Run executes the tls command.
-func (c *TLSCmd) Run(cli *CLI) error {
+func (c *TLSCmd) Run(cli *CLI, env sys.System) error {
 	return exitWith(tls.Run(context.Background(), os.Stdout, os.Stderr, &tls.Options{
 		Mode:       c.Mode,
 		Force:      c.Force,
 		Host:       c.Host,
-		Standalone: standaloneRewrite(cli.DisableRestarts),
+		Standalone: standaloneRewrite(env, cli.DisableRestarts),
 	}))
 }

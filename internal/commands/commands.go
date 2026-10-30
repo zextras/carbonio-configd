@@ -9,14 +9,12 @@
 package commands
 
 import (
-	"bytes"
 	"context"
 	stderrors "errors"
 	"fmt"
 	"iter"
 	"maps"
 	"os"
-	"os/exec"
 	"slices"
 	"strings"
 	"time"
@@ -26,6 +24,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/localconfig"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/proxy"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // defaultZextrasHome is the fallback installation root when neither
@@ -80,10 +79,13 @@ type Command struct {
 	Desc string // Description of the command
 	Name string // Name of the command
 	// Binary path for command execution (no shell interpolation)
-	Binary  string                                                    // nolint: lll // Binary is intentionally short for alignment
-	CmdArgs []string                                                  // Additional arguments prepended before runtime args
-	Func    func(ctx context.Context, args ...string) (string, error) // Go function to execute
-	Args    []string
+	Binary  string   // nolint: lll // Binary is intentionally short for alignment
+	CmdArgs []string // Additional arguments prepended before runtime args
+	// Exec runs Binary; it must be set on every Command that has a Binary.
+	// NewRegistry wires it from its sys.System.
+	Exec sys.Exec
+	Func func(ctx context.Context, args ...string) (string, error) // Go function to execute
+	Args []string
 	// State tracking fields
 	Status      int
 	Output      string
@@ -156,7 +158,7 @@ func (c *Command) ExecuteWithContext(ctx context.Context, args ...string) (exitC
 		// Legacy commands.py execute(): any rc >= 0 keeps output/error and is
 		// reported through the status; only spawn failures and death by signal
 		// (rc < 0) are errors.
-		if _, isExit := stderrors.AsType[*exec.ExitError](err); isExit && rc >= 0 {
+		if _, isExit := stderrors.AsType[*sys.ExitError](err); isExit && rc >= 0 {
 			err = nil
 		}
 	case c.Func != nil:
@@ -226,7 +228,7 @@ func (c *Command) runBinaryWithContext(ctx context.Context, args []string) (exit
 }
 
 // runBinaryCapture executes the binary and returns stdout and stderr separately,
-// plus the raw error from os/exec (an *exec.ExitError for non-zero exits).
+// plus the raw error from the Exec (a *sys.ExitError for non-zero exits).
 func (c *Command) runBinaryCapture(
 	ctx context.Context, args []string,
 ) (exitCode int, stdout, stderr string, err error) {
@@ -237,16 +239,11 @@ func (c *Command) runBinaryCapture(
 	logger.DebugContext(ctx, "Executing command",
 		"binary", c.Binary, "args", cmdArgs)
 
-	var outBuf, errBuf bytes.Buffer
-
-	cmd := exec.CommandContext(ctx, c.Binary, cmdArgs...)
-	cmd.Stdout = &outBuf
-	cmd.Stderr = &errBuf
-	cmdErr := cmd.Run()
-	stdout, stderr = outBuf.String(), errBuf.String()
+	res, cmdErr := c.Exec.Run(ctx, &sys.Cmd{Path: c.Binary, Args: cmdArgs})
+	stdout, stderr = string(res.Stdout), string(res.Stderr)
 
 	if cmdErr != nil {
-		if exitErr, ok := stderrors.AsType[*exec.ExitError](cmdErr); ok {
+		if exitErr, ok := stderrors.AsType[*sys.ExitError](cmdErr); ok {
 			exitCode = exitErr.ExitCode()
 		} else {
 			exitCode = 1
@@ -526,7 +523,14 @@ func parseProxygenArgs(args []string) (hostname string, dryRun, verbose bool) {
 	return hostname, dryRun, verbose
 }
 
-func proxygen(ctx context.Context, args ...string) (string, error) {
+// makeProxygen returns the proxygen command function writing through env.
+func makeProxygen(env sys.System) func(ctx context.Context, args ...string) (string, error) {
+	return func(ctx context.Context, args ...string) (string, error) {
+		return proxygen(ctx, env, args)
+	}
+}
+
+func proxygen(ctx context.Context, env sys.System, args []string) (string, error) {
 	logger.DebugContext(ctx, "Executing proxygen command",
 		"args", args)
 
@@ -556,7 +560,7 @@ func proxygen(ctx context.Context, args ...string) (string, error) {
 	// Load configuration and create generator
 	// Pass nil configs - LoadConfiguration will create empty ones for standalone mode
 	// When called from ConfigManager, it should use RunProxygenWithConfigs instead
-	gen, err := proxy.LoadConfiguration(ctx, cfg, nil, nil, nil, ldapClient, nil)
+	gen, err := proxy.LoadConfiguration(ctx, env, cfg, nil, nil, nil, ldapClient, nil)
 	if err != nil {
 		logger.ErrorContext(ctx, "Failed to initialize proxy generator",
 			"error", err)
@@ -596,7 +600,7 @@ func proxygen(ctx context.Context, args ...string) (string, error) {
 
 // postconfExec executes postconf with proper argument handling.
 // Args format: "key=value" (the caller should format as key=value without extra quotes)
-func makePostconfExec(postconfSpec string) func(ctx context.Context, args ...string) (string, error) {
+func makePostconfExec(x sys.Exec, postconfSpec string) func(ctx context.Context, args ...string) (string, error) {
 	return func(ctx context.Context, args ...string) (string, error) {
 		if len(args) == 0 {
 			return "", fmt.Errorf("postconf requires arguments")
@@ -607,7 +611,7 @@ func makePostconfExec(postconfSpec string) func(ctx context.Context, args ...str
 			return "", fmt.Errorf("postconf executable path not configured")
 		}
 
-		cmd := &Command{Binary: fields[0], CmdArgs: []string{"-e"}}
+		cmd := &Command{Binary: fields[0], CmdArgs: []string{"-e"}, Exec: x}
 
 		_, output, err := cmd.runBinaryWithContext(ctx, args[:1])
 		if err != nil {
@@ -632,8 +636,9 @@ type Registry struct {
 
 // NewRegistry creates a new Registry with executable paths and commands initialized
 // based on the provided zextrasHome directory. If zextrasHome is empty, defaults to
-// "/opt/zextras". The registry is safe for concurrent use after construction.
-func NewRegistry(zextrasHome string) *Registry {
+// "/opt/zextras". Every external command runs through env.Exec and proxygen writes
+// through env. The registry is safe for concurrent use after construction.
+func NewRegistry(zextrasHome string, env sys.System) *Registry {
 	r := &Registry{
 		Exe:      make(map[string]string),
 		Commands: make(map[string]*Command),
@@ -666,24 +671,24 @@ func NewRegistry(zextrasHome string) *Registry {
 	}
 
 	r.Commands = map[string]*Command{
-		cmdAmavis:      {Desc: cmdAmavis, Name: cmdAmavis, Binary: r.Exe["AMAVIS"]},
-		cmdAntispam:    {Desc: cmdAntispam, Name: cmdAntispam, Binary: r.Exe["ANTISPAM"]},
-		cmdAntivirus:   {Desc: cmdAntivirus, Name: cmdAntivirus, Binary: r.Exe["ANTIVIRUS"]},
-		cmdCBPolicyd:   {Desc: cmdCBPolicyd, Name: cmdCBPolicyd, Binary: r.Exe["CBPOLICYD"]},
-		cmdLDAP:        {Desc: cmdLDAP, Name: cmdLDAP, Binary: r.Exe["LDAP"]},
+		cmdAmavis:      {Desc: cmdAmavis, Name: cmdAmavis, Binary: r.Exe["AMAVIS"], Exec: env.Exec},
+		cmdAntispam:    {Desc: cmdAntispam, Name: cmdAntispam, Binary: r.Exe["ANTISPAM"], Exec: env.Exec},
+		cmdAntivirus:   {Desc: cmdAntivirus, Name: cmdAntivirus, Binary: r.Exe["ANTIVIRUS"], Exec: env.Exec},
+		cmdCBPolicyd:   {Desc: cmdCBPolicyd, Name: cmdCBPolicyd, Binary: r.Exe["CBPOLICYD"], Exec: env.Exec},
+		cmdLDAP:        {Desc: cmdLDAP, Name: cmdLDAP, Binary: r.Exe["LDAP"], Exec: env.Exec},
 		cmdLocalconfig: {Desc: "Local server configuration", Name: cmdLocalconfig, Func: getlocal},
-		cmdMailbox:     {Desc: cmdMailbox, Name: cmdMailbox, Binary: r.Exe["MAILBOX"]},
-		cmdMailboxd:    {Desc: cmdMailboxd, Name: cmdMailboxd, Binary: r.Exe["MAILBOXD"]},
-		cmdMemcached:   {Desc: cmdMemcached, Name: cmdMemcached, Binary: r.Exe["MEMCACHED"]},
-		cmdMTA:         {Desc: cmdMTA, Name: cmdMTA, Binary: r.Exe["MTA"]},
-		cmdOpenDKIM:    {Desc: cmdOpenDKIM, Name: cmdOpenDKIM, Binary: r.Exe["OPENDKIM"]},
-		cmdPostconf:    {Desc: cmdPostconf, Name: cmdPostconf, Func: makePostconfExec(r.Exe["POSTCONF"])},
-		cmdPostconfd:   {Desc: cmdPostconfd, Name: cmdPostconfd, Binary: r.Exe["POSTCONFD"]},
-		cmdProxy:       {Desc: cmdProxy, Name: cmdProxy, Binary: r.Exe["PROXY"]},
-		cmdProxygen:    {Desc: cmdProxygen, Name: cmdProxygen, Func: proxygen},
-		cmdSASL:        {Desc: cmdSASL, Name: cmdSASL, Binary: r.Exe["SASL"]},
-		cmdService:     {Desc: cmdService, Name: cmdService, Binary: r.Exe["SERVICE"]},
-		cmdStats:       {Desc: cmdStats, Name: cmdStats, Binary: r.Exe["STATS"]},
+		cmdMailbox:     {Desc: cmdMailbox, Name: cmdMailbox, Binary: r.Exe["MAILBOX"], Exec: env.Exec},
+		cmdMailboxd:    {Desc: cmdMailboxd, Name: cmdMailboxd, Binary: r.Exe["MAILBOXD"], Exec: env.Exec},
+		cmdMemcached:   {Desc: cmdMemcached, Name: cmdMemcached, Binary: r.Exe["MEMCACHED"], Exec: env.Exec},
+		cmdMTA:         {Desc: cmdMTA, Name: cmdMTA, Binary: r.Exe["MTA"], Exec: env.Exec},
+		cmdOpenDKIM:    {Desc: cmdOpenDKIM, Name: cmdOpenDKIM, Binary: r.Exe["OPENDKIM"], Exec: env.Exec},
+		cmdPostconf:    {Desc: cmdPostconf, Name: cmdPostconf, Func: makePostconfExec(env.Exec, r.Exe["POSTCONF"])},
+		cmdPostconfd:   {Desc: cmdPostconfd, Name: cmdPostconfd, Binary: r.Exe["POSTCONFD"], Exec: env.Exec},
+		cmdProxy:       {Desc: cmdProxy, Name: cmdProxy, Binary: r.Exe["PROXY"], Exec: env.Exec},
+		cmdProxygen:    {Desc: cmdProxygen, Name: cmdProxygen, Func: makeProxygen(env)},
+		cmdSASL:        {Desc: cmdSASL, Name: cmdSASL, Binary: r.Exe["SASL"], Exec: env.Exec},
+		cmdService:     {Desc: cmdService, Name: cmdService, Binary: r.Exe["SERVICE"], Exec: env.Exec},
+		cmdStats:       {Desc: cmdStats, Name: cmdStats, Binary: r.Exe["STATS"], Exec: env.Exec},
 	}
 
 	return r

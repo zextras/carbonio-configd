@@ -12,12 +12,13 @@ import (
 	"testing"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // newFuzzProcessor builds a TemplateProcessor over an in-memory generator.
 // Explode providers are injected so no LDAP client is ever consulted.
 func newFuzzProcessor() *TemplateProcessor {
-	gen := &Generator{Variables: map[string]*Variable{
+	gen := &Generator{env: sys.Real(), Variables: map[string]*Variable{
 		"mail.imap.enabled":  {Keyword: "mail.imap.enabled", ValueType: ValueTypeEnabler, Value: true},
 		"mail.pop3.enabled":  {Keyword: "mail.pop3.enabled", ValueType: ValueTypeEnabler, Value: false},
 		"mail.imaps.enabled": {Keyword: "mail.imaps.enabled", ValueType: ValueTypeEnabler, Value: "server"},
@@ -37,7 +38,7 @@ func newFuzzProcessor() *TemplateProcessor {
 		"nil.value":       {Keyword: "nil.value", ValueType: ValueTypeString, Value: nil},
 	}}
 
-	tp := NewTemplateProcessor(gen, "", "")
+	tp := NewTemplateProcessor(gen, gen.env.FS, "", "")
 	tp.domainProvider = func() []DomainInfo {
 		return []DomainInfo{
 			{Name: "example.com", VirtualHostname: "mail.example.com", VirtualIPAddress: "192.168.1.10", ClientCertMode: "on"},

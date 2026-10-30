@@ -11,10 +11,14 @@ import (
 )
 
 func TestLookupService_Known(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	def := LookupService("mta")
+	def := ctl.LookupService("mta")
 	if def == nil {
 		t.Fatal("expected mta to be registered")
 	}
@@ -29,34 +33,46 @@ func TestLookupService_Known(t *testing.T) {
 }
 
 func TestLookupService_Unknown(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	def := LookupService("nonexistent")
+	def := ctl.LookupService("nonexistent")
 	if def != nil {
 		t.Error("expected nil for unknown service")
 	}
 }
 
 func TestAllServiceNames_ContainsExpected(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	names := AllServiceNames()
+	names := ctl.AllServiceNames()
 	expected := []string{"ldap", "mta", "proxy", "mailbox", "memcached"}
 
 	for _, exp := range expected {
 		if !slices.Contains(names, exp) {
-			t.Errorf("expected %q in AllServiceNames()", exp)
+			t.Errorf("expected %q in ctl.AllServiceNames()", exp)
 		}
 	}
 }
 
 func TestAllServiceNames_Ordered(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	names := AllServiceNames()
+	names := ctl.AllServiceNames()
 	order := getDefaultStartOrder()
 
 	for i := 1; i < len(names); i++ {
@@ -71,10 +87,14 @@ func TestAllServiceNames_Ordered(t *testing.T) {
 }
 
 func TestRegistryDependencies_MTA(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	def := LookupService("mta")
+	def := ctl.LookupService("mta")
 	if def == nil {
 		t.Fatal("mta not found")
 	}
@@ -96,10 +116,14 @@ func TestRegistryDependencies_MTA(t *testing.T) {
 }
 
 func TestRegistryDependencies_Antivirus(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	def := LookupService("antivirus")
+	def := ctl.LookupService("antivirus")
 	if def == nil {
 		t.Fatal("antivirus not found")
 	}
@@ -132,10 +156,14 @@ func TestRegistryDependencies_Antivirus(t *testing.T) {
 }
 
 func TestRegistryConfigRewrite_Proxy(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	def := LookupService("proxy")
+	def := ctl.LookupService("proxy")
 	if def == nil {
 		t.Fatal("proxy not found")
 	}
@@ -146,10 +174,14 @@ func TestRegistryConfigRewrite_Proxy(t *testing.T) {
 }
 
 func TestRegistrySimpleService_NoDepsnorHooks(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	def := LookupService("memcached")
+	def := ctl.LookupService("memcached")
 	if def == nil {
 		t.Fatal("memcached not found")
 	}
@@ -164,10 +196,14 @@ func TestRegistrySimpleService_NoDepsnorHooks(t *testing.T) {
 }
 
 func TestRegistryDisplayNames_AllLowercase(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	for name, def := range Registry {
+	for name, def := range ctl.registry {
 		if def.DisplayName != strings.ToLower(def.DisplayName) {
 			t.Errorf("service %q has non-lowercase DisplayName %q, want %q",
 				name, def.DisplayName, strings.ToLower(def.DisplayName))
@@ -182,15 +218,19 @@ func TestRegistryDisplayNames_AllLowercase(t *testing.T) {
 // alias map handled "zmconfigd" but ServiceAliases (and thus LookupService)
 // did not.
 func TestLookupService_ZmconfigdAlias(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	def := LookupService("zmconfigd")
+	def := ctl.LookupService("zmconfigd")
 	if def == nil {
 		t.Fatal("expected zmconfigd alias to resolve to a service definition")
 	}
 
-	configdDef := LookupService(svcConfigd)
+	configdDef := ctl.LookupService(svcConfigd)
 	if configdDef == nil {
 		t.Fatal("configd not found")
 	}
@@ -203,25 +243,29 @@ func TestLookupService_ZmconfigdAlias(t *testing.T) {
 // TestRegistryAntivirusLegacyFields verifies the antivirus service definition
 // has all the expected fields for clamd integration.
 func TestRegistryAntivirusLegacyFields(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	def := LookupService("antivirus")
+	def := ctl.LookupService("antivirus")
 	if def == nil {
 		t.Fatal("antivirus not found")
 	}
 
-	// BinaryPath should be commonPath + "/sbin/clamd"
-	expectedBinaryPath := commonPath + "/sbin/clamd"
+	// BinaryPath should be ctl.p.common + "/sbin/clamd"
+	expectedBinaryPath := ctl.p.common + "/sbin/clamd"
 	if def.BinaryPath != expectedBinaryPath {
 		t.Errorf("BinaryPath = %q, want %q", def.BinaryPath, expectedBinaryPath)
 	}
 
-	// BinaryArgs should have exactly one entry: "--config-file=<confPath>/clamd.conf"
+	// BinaryArgs should have exactly one entry: "--config-file=<ctl.p.conf>/clamd.conf"
 	if len(def.BinaryArgs) != 1 {
 		t.Errorf("len(BinaryArgs) = %d, want 1", len(def.BinaryArgs))
 	}
-	expectedArg := "--config-file=" + confPath + "/clamd.conf"
+	expectedArg := "--config-file=" + ctl.p.conf + "/clamd.conf"
 	if len(def.BinaryArgs) > 0 && def.BinaryArgs[0] != expectedArg {
 		t.Errorf("BinaryArgs[0] = %q, want %q", def.BinaryArgs[0], expectedArg)
 	}
@@ -231,8 +275,8 @@ func TestRegistryAntivirusLegacyFields(t *testing.T) {
 		t.Error("Detached = false, want true")
 	}
 
-	// PidFile should be pidDir + "/clamd.pid"
-	expectedPidFile := pidDir + "/clamd.pid"
+	// PidFile should be ctl.p.run + "/clamd.pid"
+	expectedPidFile := ctl.p.run + "/clamd.pid"
 	if def.PidFile != expectedPidFile {
 		t.Errorf("PidFile = %q, want %q", def.PidFile, expectedPidFile)
 	}
@@ -264,12 +308,16 @@ func TestRegistryAntivirusLegacyFields(t *testing.T) {
 // BinaryArgs. Carbonio has no zimbra account, so `-u zimbra` made opendkim
 // exit 65 before signaling READY=1 and legacy-mode starts always failed.
 func TestRegistryOpendkimRunsAsZextras(t *testing.T) {
-	def := LookupService(svcOpendkim)
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	def := ctl.LookupService(svcOpendkim)
 	if def == nil {
 		t.Fatal("opendkim not found")
 	}
 
-	want := []string{"-f", "-x", confPath + "/opendkim.conf", "-u", "zextras"}
+	want := []string{"-f", "-x", ctl.p.conf + "/opendkim.conf", "-u", "zextras"}
 	if !slices.Equal(def.BinaryArgs, want) {
 		t.Errorf("BinaryArgs = %q, want %q", def.BinaryArgs, want)
 	}
@@ -278,15 +326,19 @@ func TestRegistryOpendkimRunsAsZextras(t *testing.T) {
 // TestLookupService_ClamdAlias verifies that the "clamd" alias
 // resolves to the antivirus service definition.
 func TestLookupService_ClamdAlias(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	clamdDef := LookupService("clamd")
+	clamdDef := ctl.LookupService("clamd")
 	if clamdDef == nil {
 		t.Fatal("expected clamd alias to resolve to a service definition")
 	}
 
-	antivirusDef := LookupService("antivirus")
+	antivirusDef := ctl.LookupService("antivirus")
 	if antivirusDef == nil {
 		t.Fatal("antivirus not found")
 	}
@@ -298,21 +350,25 @@ func TestLookupService_ClamdAlias(t *testing.T) {
 }
 
 // TestServiceAliasesNotInRegistry verifies that alias names
-// do not appear in the Registry or AllServiceNames.
+// do not appear in the ctl.registry or AllServiceNames.
 func TestServiceAliasesNotInRegistry(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 
-	names := AllServiceNames()
+	names := ctl.AllServiceNames()
 	nameSet := make(map[string]struct{}, len(names))
 	for _, n := range names {
 		nameSet[n] = struct{}{}
 	}
 
 	for alias := range ServiceAliases {
-		if _, ok := Registry[alias]; ok {
-			t.Errorf("%q should not be a direct Registry entry (it's an alias)", alias)
+		if _, ok := ctl.registry[alias]; ok {
+			t.Errorf("%q should not be a direct ctl.registry entry (it's an alias)", alias)
 		}
 		if _, ok := nameSet[alias]; ok {
 			t.Errorf("%q should not appear in AllServiceNames (it's an alias)", alias)
@@ -323,14 +379,18 @@ func TestServiceAliasesNotInRegistry(t *testing.T) {
 // TestServiceAliasesResolve verifies every alias resolves to its canonical
 // definition.
 func TestServiceAliasesResolve(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	for alias, canonical := range ServiceAliases {
-		aliasDef := LookupService(alias)
-		canonicalDef := LookupService(canonical)
+		aliasDef := ctl.LookupService(alias)
+		canonicalDef := ctl.LookupService(canonical)
 		if canonicalDef == nil {
-			t.Errorf("canonical service %q (target of alias %q) not in Registry", canonical, alias)
+			t.Errorf("canonical service %q (target of alias %q) not in ctl.registry", canonical, alias)
 			continue
 		}
 		if aliasDef != canonicalDef {
@@ -345,12 +405,16 @@ func TestServiceAliasesResolve(t *testing.T) {
 // launch the actual clamd process. Instead, we verify the alias resolution
 // and that the definition has the necessary fields for start code to use.
 func TestServiceStartClamdAlias(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 
 	// Verify the alias resolves to antivirus
-	def := LookupService("clamd")
+	def := ctl.LookupService("clamd")
 	if def == nil {
 		t.Fatal("clamd alias should resolve to a service definition")
 	}
@@ -366,7 +430,7 @@ func TestServiceStartClamdAlias(t *testing.T) {
 	}
 
 	// Verify it's the same as the antivirus definition
-	antivirusDef := LookupService("antivirus")
+	antivirusDef := ctl.LookupService("antivirus")
 	if def != antivirusDef {
 		t.Error("clamd alias does not resolve to the antivirus definition")
 	}

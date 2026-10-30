@@ -7,11 +7,13 @@ package main
 import (
 	"context"
 	"os"
-	"strings"
+	"slices"
 	"testing"
 
 	"github.com/zextras/carbonio-configd/internal/cli/cliutil"
 	"github.com/zextras/carbonio-configd/internal/cli/rewrite"
+	"github.com/zextras/carbonio-configd/internal/sys"
+	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
 
 func TestInitializeConfig(t *testing.T) {
@@ -39,92 +41,121 @@ func TestInitializeConfig(t *testing.T) {
 	}
 }
 
-func TestPerlArchname_ValidOutput(t *testing.T) {
-	if _, err := os.Stat("/usr/bin/perl"); err != nil {
-		t.Skip("perl not available")
-	}
+func TestPerlArchname(t *testing.T) {
+	t.Parallel()
 
-	result := perlArchname()
-	_ = result
-}
-
-func TestPerlArchname_ParseFormat(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    string
+		output   string
 		expected string
 	}{
-		{name: "standard perl output", input: "archname='x86_64-linux-thread-multi'\n", expected: "x86_64-linux-thread-multi"},
-		{name: "no quotes", input: "archname=\n", expected: ""},
-		{name: "single quote only start", input: "archname='value\n", expected: ""},
-		{name: "empty quotes", input: "archname=''\n", expected: ""},
-		{name: "multi segment", input: "archname='aarch64-linux-thread-multi'\n", expected: "aarch64-linux-thread-multi"},
+		{
+			name:     "standard perl output",
+			output:   "archname='x86_64-linux-thread-multi';\n",
+			expected: "x86_64-linux-thread-multi",
+		},
+		{name: "no quotes", output: "archname=\n", expected: ""},
+		{name: "single quote only start", output: "archname='value\n", expected: ""},
+		{name: "empty quotes", output: "archname='';\n", expected: ""},
+		{
+			name:     "multi segment",
+			output:   "archname='aarch64-linux-thread-multi';\n",
+			expected: "aarch64-linux-thread-multi",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := strings.TrimSpace(tt.input)
-			start := strings.IndexByte(s, '\'')
-			end := strings.LastIndexByte(s, '\'')
-			var got string
-			if start >= 0 && end > start {
-				got = s[start+1 : end]
+			t.Parallel()
+
+			fakes := systest.New()
+			fakes.Exec.OnPath("/usr/bin/perl", systest.Reply(tt.output))
+
+			if got := perlArchname(fakes.System()); got != tt.expected {
+				t.Errorf("perlArchname() = %q, want %q", got, tt.expected)
 			}
-			if got != tt.expected {
-				t.Errorf("parse result = %q, want %q", got, tt.expected)
+
+			if want := []string{"exec /usr/bin/perl -V:archname"}; !slices.Equal(fakes.Rec.Strings(), want) {
+				t.Errorf("ops = %v, want %v", fakes.Rec.Strings(), want)
 			}
 		})
 	}
 }
 
+func TestPerlArchname_PerlFails(t *testing.T) {
+	t.Parallel()
+
+	fakes := systest.New()
+	fakes.Exec.OnPath("/usr/bin/perl", systest.Fail(2, "boom"))
+
+	if got := perlArchname(fakes.System()); got != "" {
+		t.Errorf("perlArchname() = %q, want empty when perl fails", got)
+	}
+}
+
 func TestEnsureZextrasPerlEnv_PerlAlreadySet(t *testing.T) {
-	os.Setenv("PERL5LIB", "/existing/path")
-	defer os.Unsetenv("PERL5LIB")
+	t.Setenv("PERL5LIB", "/existing/path")
+	t.Setenv("PERLLIB", "")
 
-	originalPerlLib := os.Getenv("PERLLIB")
-	defer func() {
-		if originalPerlLib != "" {
-			os.Setenv("PERLLIB", originalPerlLib)
-		} else {
-			os.Unsetenv("PERLLIB")
-		}
-	}()
+	fakes := systest.New()
+	ensureZextrasPerlEnv(fakes.System())
 
-	ensureZextrasPerlEnv()
+	if got := os.Getenv("PERLLIB"); got != "" {
+		t.Errorf("PERLLIB = %q, want it untouched when PERL5LIB is already set", got)
+	}
 
-	perlLib := os.Getenv("PERLLIB")
-	if strings.Contains(perlLib, "/opt/zextras/common/lib/perl5") {
-		t.Error("PERLLIB should not be modified when PERL5LIB is already set")
+	if ops := fakes.Rec.Strings(); len(ops) != 0 {
+		t.Errorf("perl must not be run when PERL5LIB is set, got %v", ops)
 	}
 }
 
 func TestEnsureZextrasPerlEnv_PerlNotAvailable(t *testing.T) {
-	origPerl5Lib, hadPerl5Lib := os.LookupEnv("PERL5LIB")
-	os.Unsetenv("PERL5LIB")
-	defer func() {
-		if hadPerl5Lib {
-			os.Setenv("PERL5LIB", origPerl5Lib)
-		}
-	}()
+	unsetEnv(t, "PERL5LIB")
+	unsetEnv(t, "PERLLIB")
 
-	origPerlLib, hadPerlLib := os.LookupEnv("PERLLIB")
-	os.Unsetenv("PERLLIB")
-	defer func() {
-		if hadPerlLib {
-			os.Setenv("PERLLIB", origPerlLib)
-		} else {
-			os.Unsetenv("PERLLIB")
-		}
-	}()
+	fakes := systest.New()
+	fakes.Exec.FailStart(func(c *sys.Cmd) bool { return c.Path == "/usr/bin/perl" }, os.ErrNotExist)
 
-	if _, err := os.Stat("/usr/bin/perl"); err != nil {
-		ensureZextrasPerlEnv()
-		if os.Getenv("PERL5LIB") != "" {
-			t.Error("PERL5LIB should remain unset when perl is missing")
-		}
-		if os.Getenv("PERLLIB") != "" {
-			t.Error("PERLLIB should remain unset when perl is missing")
-		}
+	ensureZextrasPerlEnv(fakes.System())
+
+	if got := os.Getenv("PERL5LIB"); got != "" {
+		t.Errorf("PERL5LIB = %q, want it unset when perl is missing", got)
+	}
+
+	if got := os.Getenv("PERLLIB"); got != "" {
+		t.Errorf("PERLLIB = %q, want it unset when perl is missing", got)
+	}
+}
+
+func TestEnsureZextrasPerlEnv_PerlSetsVars(t *testing.T) {
+	unsetEnv(t, "PERL5LIB")
+	unsetEnv(t, "PERLLIB")
+
+	fakes := systest.New()
+	fakes.Exec.OnPath("/usr/bin/perl", systest.Reply("archname='x86_64-linux-thread-multi';\n"))
+
+	ensureZextrasPerlEnv(fakes.System())
+
+	want := cliutil.BasePath("common", "lib", "perl5", "x86_64-linux-thread-multi") + ":" +
+		cliutil.BasePath("common", "lib", "perl5")
+
+	if got := os.Getenv("PERL5LIB"); got != want {
+		t.Errorf("PERL5LIB = %q, want %q", got, want)
+	}
+
+	if got := os.Getenv("PERLLIB"); got != want {
+		t.Errorf("PERLLIB = %q, want %q", got, want)
+	}
+}
+
+// unsetEnv removes key for the duration of the test and restores it after.
+func unsetEnv(t *testing.T, key string) {
+	t.Helper()
+
+	t.Setenv(key, "")
+
+	if err := os.Unsetenv(key); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -153,25 +184,6 @@ func TestSetupProfilingAndTracing_TracingEnabled(t *testing.T) {
 	}
 
 	StopTracing(tc)
-}
-
-func TestEnsureZextrasPerlEnv_PerlSetsVars(t *testing.T) {
-	if _, err := os.Stat("/usr/bin/perl"); err != nil {
-		t.Skip("perl not available")
-	}
-
-	os.Unsetenv("PERL5LIB")
-	os.Unsetenv("PERLLIB")
-	defer os.Unsetenv("PERL5LIB")
-	defer os.Unsetenv("PERLLIB")
-
-	ensureZextrasPerlEnv()
-
-	perl5lib := os.Getenv("PERL5LIB")
-	perlLib := os.Getenv("PERLLIB")
-	if perl5lib == "" || perlLib == "" {
-		t.Errorf("expected PERL5LIB and PERLLIB to be set when perl is available, got PERL5LIB=%q PERLLIB=%q", perl5lib, perlLib)
-	}
 }
 
 // TestSetupProfilingAndTracing_ValidationFails verifies that an unwritable

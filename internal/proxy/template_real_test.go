@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // TestRealTemplatesWithExplode tests processing of actual nginx templates
@@ -150,7 +151,7 @@ func TestRealTemplatesWithExplode(t *testing.T) {
 
 			// Create generator with config
 			cfg := &config.Config{BaseDir: tempDir}
-			gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
+			gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
 			if err != nil {
 				t.Fatalf("Failed to create generator: %v", err)
 			}
@@ -159,7 +160,7 @@ func TestRealTemplatesWithExplode(t *testing.T) {
 			tt.setupVars(gen)
 
 			// Create processor with domain provider
-			proc := NewTemplateProcessor(gen, templateDir, outputDir)
+			proc := NewTemplateProcessor(gen, gen.env.FS, templateDir, outputDir)
 			proc.domainProvider = tt.setupDomains
 
 			// Load and process template

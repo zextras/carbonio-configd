@@ -8,10 +8,11 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 var (
@@ -21,6 +22,7 @@ var (
 
 // nginxConfOpts holds options for printNginxConf.
 type nginxConfOpts struct {
+	fs         sys.FS
 	markers    bool
 	indent     bool
 	noComments bool
@@ -31,7 +33,7 @@ type nginxConfOpts struct {
 // printNginxConf prints the nginx config at filename, expanding glob patterns and
 // recursively following include directives — mirroring zmproxyconf behaviour.
 func printNginxConf(w io.Writer, filename string, depth int, opts *nginxConfOpts) {
-	matches, err := filepath.Glob(filename)
+	matches, err := opts.fs.Glob(filename)
 	if err != nil || len(matches) == 0 {
 		matches = []string{filename}
 	}
@@ -51,7 +53,7 @@ func printNginxConfFile(w io.Writer, filename string, depth int, opts *nginxConf
 		_, _ = fmt.Fprintf(w, "%s# begin:%s\n", prefix, filename)
 	}
 
-	f, err := os.Open(filename) //nolint:gosec // caller-supplied path
+	f, err := opts.fs.Open(filename) //nolint:gosec // caller-supplied path
 	if err != nil {
 		_, _ = fmt.Fprintf(w, "%s# cannot open %s: %v\n", prefix, filename, err)
 

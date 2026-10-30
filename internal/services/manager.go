@@ -22,10 +22,12 @@ import (
 // operations. ControlProcess and IsRunning delegate entirely to the
 // Registry-backed lifecycle in cli.go (ServiceStart/ServiceStop/
 // ServiceRestart/ServiceStatus) — the same control path the CLI uses,
-// bifurcated internally on IsSystemdMode(). ServiceManager itself only owns
+// bifurcated internally on Controller.IsSystemdMode(). ServiceManager itself only owns
 // the restart-queue bookkeeping consumed by watchdog and configmgr's
 // restart cascade.
 type ServiceManager struct {
+	// ctl is the Controller whose lifecycle methods ControlProcess and IsRunning drive.
+	ctl *Controller
 	// RestartQueue holds services pending restart
 	RestartQueue map[string]bool
 	// MaxFailedRestarts is the maximum number of retry attempts for a failed restart
@@ -38,9 +40,10 @@ type ServiceManager struct {
 	DisableRestarts bool
 }
 
-// NewServiceManager creates a new ServiceManager instance.
-func NewServiceManager() *ServiceManager {
+// NewServiceManager creates a ServiceManager that controls services through ctl.
+func NewServiceManager(ctl *Controller) *ServiceManager {
 	return &ServiceManager{
+		ctl:               ctl,
 		RestartQueue:      make(map[string]bool),
 		MaxFailedRestarts: 3,
 		StartOrder:        getDefaultStartOrder(),
@@ -104,13 +107,13 @@ func (sm *ServiceManager) ControlProcess(ctx context.Context, service string, ac
 
 	switch action {
 	case ActionStart:
-		return ServiceStart(ctx, service)
+		return sm.ctl.ServiceStart(ctx, service)
 	case ActionStop:
-		return ServiceStop(ctx, service)
+		return sm.ctl.ServiceStop(ctx, service)
 	case ActionRestart:
-		return ServiceRestart(ctx, service)
+		return sm.ctl.ServiceRestart(ctx, service)
 	case ActionStatus:
-		running, err := ServiceStatus(ctx, service)
+		running, err := sm.ctl.ServiceStatus(ctx, service)
 		if err != nil {
 			return err
 		}
@@ -129,7 +132,7 @@ func (sm *ServiceManager) ControlProcess(ctx context.Context, service string, ac
 func (sm *ServiceManager) IsRunning(ctx context.Context, service string) (bool, error) {
 	ctx = logger.ContextWithComponentOnce(ctx, "services")
 
-	return ServiceStatus(ctx, strings.ToLower(service))
+	return sm.ctl.ServiceStatus(ctx, strings.ToLower(service))
 }
 
 // AddRestart queues a service for restart.
@@ -324,7 +327,7 @@ func (sm *ServiceManager) GetPendingRestarts() []string {
 // configmgr's first-run tracking; "command" no longer means a legacy
 // zm*ctl path — there isn't one anymore.
 func (sm *ServiceManager) HasCommand(service string) bool {
-	return LookupService(strings.ToLower(service)) != nil
+	return sm.ctl.LookupService(strings.ToLower(service)) != nil
 }
 
 // SetDependencies sets the dependency map for service restart cascading.

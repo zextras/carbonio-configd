@@ -11,55 +11,58 @@ import (
 	"testing"
 )
 
-func withLoadConfig(t *testing.T, fn func() (map[string]string, error)) {
+func withLoadConfig(t *testing.T, ctl *Controller, fn func() (map[string]string, error)) {
 	t.Helper()
 
-	prev := loadConfig
-	t.Cleanup(func() { loadConfig = prev })
-
-	loadConfig = fn
+	ctl.loadConfig = fn
 }
 
-func withCacheFile(t *testing.T, contents string) {
+func withCacheFile(t *testing.T, ctl *Controller, contents string) {
 	t.Helper()
 
 	dir := t.TempDir()
-	prev := cacheFile
-	t.Cleanup(func() { cacheFile = prev })
 
-	cacheFile = filepath.Join(dir, "zmcontrol.cache")
+	ctl.p.cacheFile = filepath.Join(dir, "zmcontrol.cache")
 
 	if contents != "" {
-		if err := os.WriteFile(cacheFile, []byte(contents), 0o600); err != nil {
+		if err := os.WriteFile(ctl.p.cacheFile, []byte(contents), 0o600); err != nil {
 			t.Fatalf("seed cache: %v", err)
 		}
 	}
 }
 
 func TestDiscoverEnabledServices_MissingHostname(t *testing.T) {
-	withLoadConfig(t, func() (map[string]string, error) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	withLoadConfig(t, ctl, func() (map[string]string, error) {
 		return map[string]string{
 			"ldap_master_url": "ldap://srv1:389",
 		}, nil
 	})
 
-	_, err := DiscoverEnabledServices(context.Background())
+	_, err := ctl.DiscoverEnabledServices(context.Background())
 	if err == nil {
 		t.Fatal("expected error when zimbra_server_hostname is missing")
 	}
 }
 
 func TestDiscoverEnabledServices_EmptyMasterURL_FallsBackToCache(t *testing.T) {
-	withLoadConfig(t, func() (map[string]string, error) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	withLoadConfig(t, ctl, func() (map[string]string, error) {
 		return map[string]string{
 			"zimbra_server_hostname": "host.example.com",
 			"ldap_master_url":        "   ",
 		}, nil
 	})
 
-	withCacheFile(t, "amavis\nproxy\nmta\nzmconfigd\n")
+	withCacheFile(t, ctl, "amavis\nproxy\nmta\nzmconfigd\n")
 
-	got, err := DiscoverEnabledServices(context.Background())
+	got, err := ctl.DiscoverEnabledServices(context.Background())
 	if err != nil {
 		t.Fatalf("expected cache fallback to succeed, got err=%v", err)
 	}
@@ -77,16 +80,20 @@ func TestDiscoverEnabledServices_EmptyMasterURL_FallsBackToCache(t *testing.T) {
 }
 
 func TestDiscoverEnabledServices_EmptyMasterURL_NoCache(t *testing.T) {
-	withLoadConfig(t, func() (map[string]string, error) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	withLoadConfig(t, ctl, func() (map[string]string, error) {
 		return map[string]string{
 			"zimbra_server_hostname": "host.example.com",
 			"ldap_master_url":        "",
 		}, nil
 	})
 
-	withCacheFile(t, "")
+	withCacheFile(t, ctl, "")
 
-	_, err := DiscoverEnabledServices(context.Background())
+	_, err := ctl.DiscoverEnabledServices(context.Background())
 	if err == nil {
 		t.Fatal("expected error when both LDAP and cache are unavailable")
 	}

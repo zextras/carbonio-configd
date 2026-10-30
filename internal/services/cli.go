@@ -9,16 +9,13 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"os"
-	"os/exec"
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
-	"github.com/zextras/carbonio-configd/internal/systemd"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 const (
@@ -26,30 +23,11 @@ const (
 	errUnknownService   = "unknown service: %s"
 )
 
-// systemctlBin is the absolute systemctl path (no PATH lookup). Variable so
-// tests can substitute a stub.
-var systemctlBin = "/usr/bin/systemctl"
+// systemctlBin is the absolute systemctl path (no PATH lookup).
+const systemctlBin = "/usr/bin/systemctl"
 
-// NoRewrite disables config rewriting before service start.
-var NoRewrite bool
-
-var (
-	systemdMode     bool
-	systemdModeOnce sync.Once
-)
-
-// isSystemdModeFn is the mode detector. Exposed as a variable so tests can
-// force strict-systemd or pure-legacy behavior without manipulating the host.
-var isSystemdModeFn = defaultIsSystemdMode
-
-func defaultIsSystemdMode() bool {
-	systemdModeOnce.Do(func() {
-		mgr := systemd.NewManager()
-		systemdMode = mgr.IsSystemdEnabled(context.Background())
-	})
-
-	return systemdMode
-}
+// sudoBin is the absolute sudo path (no PATH lookup).
+const sudoBin = "/usr/bin/sudo"
 
 // ErrSystemdNotBooted is returned by Systemctl when /run/systemd/system is
 // missing — i.e. the host did not boot with systemd as PID 1.
@@ -73,21 +51,25 @@ type ServiceInfo struct {
 //
 // Callers must NOT gate on systemd.IsBooted() — the init system being systemd
 // does not imply Carbonio is managed by it. Only target enablement does.
-func IsSystemdMode() bool {
-	return isSystemdModeFn()
+func (c *Controller) IsSystemdMode() bool {
+	c.modeOnce.Do(func() {
+		c.systemdMode = c.systemd.IsSystemdEnabled(context.Background())
+	})
+
+	return c.systemdMode
 }
 
 // ServiceStart starts a service by name, handling dependencies, config rewrite, and hooks.
-func ServiceStart(ctx context.Context, name string) error {
+func (c *Controller) ServiceStart(ctx context.Context, name string) error {
 	ctx = logger.ContextWithComponentOnce(ctx, serviceCliComponent)
 
-	def := LookupService(name)
+	def := c.LookupService(name)
 	if def == nil {
 		return fmt.Errorf(errUnknownService, name)
 	}
 
 	// Skip if already running — avoids redundant starts and dependency hangs
-	running, statusErr := ServiceStatus(ctx, name)
+	running, statusErr := c.ServiceStatus(ctx, name)
 	if statusErr != nil {
 		logger.WarnContext(ctx, "Failed to check service status, proceeding with start",
 			"service", name, "error", statusErr)
@@ -95,26 +77,26 @@ func ServiceStart(ctx context.Context, name string) error {
 
 	if running {
 		logger.InfoContext(ctx, "Service already running, skipping start",
-			"service", name, "pid", RunningPID(ctx, def))
+			"service", name, "pid", c.RunningPID(ctx, def))
 
 		return nil
 	}
 
-	if err := startEnabledDependencies(ctx, name, def); err != nil {
+	if err := c.startEnabledDependencies(ctx, name, def); err != nil {
 		return err
 	}
 
-	if !NoRewrite && len(def.ConfigRewrite) > 0 {
-		rewriteConfigs(ctx, def)
+	if !c.noRewrite && len(def.ConfigRewrite) > 0 {
+		c.rewriteConfigs(ctx, def)
 	}
 
-	sm := NewServiceManager()
+	sm := NewServiceManager(c)
 
 	if err := runPreStartHooks(ctx, name, sm, def); err != nil {
 		return err
 	}
 
-	if err := startService(ctx, name, def); err != nil {
+	if err := c.startService(ctx, name, def); err != nil {
 		return fmt.Errorf("start service %s: %w", name, err)
 	}
 
@@ -130,21 +112,21 @@ func ServiceStart(ctx context.Context, name string) error {
 // what breaks the otherwise-infinite loop: `configd service start <name>` ->
 // `systemctl start carbonio-<name>.service` -> ExecStart -> here, which spawns
 // the workers directly instead of re-entering systemctl.
-func ServiceStartSystemd(ctx context.Context, name string) error {
+func (c *Controller) ServiceStartSystemd(ctx context.Context, name string) error {
 	ctx = logger.ContextWithComponentOnce(ctx, serviceCliComponent)
 
-	def := LookupService(name)
+	def := c.LookupService(name)
 	if def == nil {
 		return fmt.Errorf(errUnknownService, name)
 	}
 
-	sm := NewServiceManager()
+	sm := NewServiceManager(c)
 
 	if err := runPreStartHooks(ctx, name, sm, def); err != nil {
 		return err
 	}
 
-	if err := startWithoutSystemd(ctx, name, def); err != nil {
+	if err := c.startWithoutSystemd(ctx, name, def); err != nil {
 		return fmt.Errorf("start service %s: %w", name, err)
 	}
 
@@ -153,9 +135,9 @@ func ServiceStartSystemd(ctx context.Context, name string) error {
 	return nil
 }
 
-func startEnabledDependencies(ctx context.Context, name string, def *ServiceDef) error {
+func (c *Controller) startEnabledDependencies(ctx context.Context, name string, def *ServiceDef) error {
 	for _, dep := range def.Dependencies {
-		if !isDepEnabled(ctx, dep) {
+		if !c.isDepEnabled(ctx, dep) {
 			logger.DebugContext(ctx, "Skipping disabled dependency", "dependency", dep, "for", name)
 
 			continue
@@ -163,7 +145,7 @@ func startEnabledDependencies(ctx context.Context, name string, def *ServiceDef)
 
 		logger.InfoContext(ctx, "Starting dependency", "dependency", dep, "for", name)
 
-		if err := ServiceStart(ctx, dep); err != nil {
+		if err := c.ServiceStart(ctx, dep); err != nil {
 			return fmt.Errorf("failed to start dependency %s: %w", dep, err)
 		}
 	}
@@ -190,15 +172,15 @@ func runPostStartHooks(ctx context.Context, name string, sm *ServiceManager, def
 }
 
 // ServiceStop stops a service by name, handling hooks and dependencies.
-func ServiceStop(ctx context.Context, name string) error {
+func (c *Controller) ServiceStop(ctx context.Context, name string) error {
 	ctx = logger.ContextWithComponentOnce(ctx, serviceCliComponent)
 
-	def := LookupService(name)
+	def := c.LookupService(name)
 	if def == nil {
 		return fmt.Errorf(errUnknownService, name)
 	}
 
-	sm := NewServiceManager()
+	sm := NewServiceManager(c)
 
 	for _, hook := range def.PreStop {
 		if err := hook(ctx, sm); err != nil {
@@ -207,20 +189,20 @@ func ServiceStop(ctx context.Context, name string) error {
 	}
 
 	// Stop the service — try systemctl first, fall back to direct process
-	if err := stopService(ctx, name, def); err != nil {
+	if err := c.stopService(ctx, name, def); err != nil {
 		return fmt.Errorf("stop service %s: %w", name, err)
 	}
 
 	for i := range slices.Backward(def.Dependencies) {
 		dep := def.Dependencies[i]
 
-		if !isDepEnabled(ctx, dep) {
+		if !c.isDepEnabled(ctx, dep) {
 			continue
 		}
 
 		logger.InfoContext(ctx, "Stopping dependency", "dependency", dep, "for", name)
 
-		if err := ServiceStop(ctx, dep); err != nil {
+		if err := c.ServiceStop(ctx, dep); err != nil {
 			logger.WarnContext(ctx, "Failed to stop dependency", "dependency", dep, "error", err)
 		}
 	}
@@ -232,15 +214,15 @@ func ServiceStop(ctx context.Context, name string) error {
 // unit's ExecStop (via `configd service stop-systemd <name>`). It shuts the
 // service down in-process via the legacy/custom path (CustomStop, then pkill by
 // ProcessName) and NEVER calls systemctl, mirroring ServiceStartSystemd.
-func ServiceStopSystemd(ctx context.Context, name string) error {
+func (c *Controller) ServiceStopSystemd(ctx context.Context, name string) error {
 	ctx = logger.ContextWithComponentOnce(ctx, serviceCliComponent)
 
-	def := LookupService(name)
+	def := c.LookupService(name)
 	if def == nil {
 		return fmt.Errorf(errUnknownService, name)
 	}
 
-	sm := NewServiceManager()
+	sm := NewServiceManager(c)
 
 	for _, hook := range def.PreStop {
 		if err := hook(ctx, sm); err != nil {
@@ -248,7 +230,7 @@ func ServiceStopSystemd(ctx context.Context, name string) error {
 		}
 	}
 
-	if err := stopWithoutSystemd(ctx, name, def); err != nil {
+	if err := c.stopWithoutSystemd(ctx, name, def); err != nil {
 		return fmt.Errorf("stop service %s: %w", name, err)
 	}
 
@@ -256,29 +238,29 @@ func ServiceStopSystemd(ctx context.Context, name string) error {
 }
 
 // ServiceRestart restarts a service.
-func ServiceRestart(ctx context.Context, name string) error {
+func (c *Controller) ServiceRestart(ctx context.Context, name string) error {
 	ctx = logger.ContextWithComponentOnce(ctx, serviceCliComponent)
 
-	def := LookupService(name)
+	def := c.LookupService(name)
 	if def == nil {
 		return fmt.Errorf(errUnknownService, name)
 	}
 
 	// MTA restart is converted to reload for graceful handling
 	if name == serviceMTA {
-		if !NoRewrite && len(def.ConfigRewrite) > 0 {
-			rewriteConfigs(ctx, def)
+		if !c.noRewrite && len(def.ConfigRewrite) > 0 {
+			c.rewriteConfigs(ctx, def)
 		}
 
-		return ServiceReload(ctx, name)
+		return c.ServiceReload(ctx, name)
 	}
 
-	if err := ServiceStop(ctx, name); err != nil {
+	if err := c.ServiceStop(ctx, name); err != nil {
 		logger.WarnContext(ctx, "Stop failed during restart, attempting start anyway",
 			"service", name, "error", err)
 	}
 
-	return ServiceStart(ctx, name)
+	return c.ServiceStart(ctx, name)
 }
 
 // ServiceReload sends a reload signal to a service. Bifurcated on
@@ -289,8 +271,8 @@ func ServiceRestart(ctx context.Context, name string) error {
 //   - legacy: systemctl is never invoked, even as a fallback. See
 //     reloadWithoutSystemd in cli_process.go for the native-reload /
 //     stop+start fallback logic.
-func ServiceReload(ctx context.Context, name string) error {
-	def := LookupService(name)
+func (c *Controller) ServiceReload(ctx context.Context, name string) error {
+	def := c.LookupService(name)
 	if def == nil {
 		return fmt.Errorf(errUnknownService, name)
 	}
@@ -301,22 +283,22 @@ func ServiceReload(ctx context.Context, name string) error {
 		return nil
 	}
 
-	if !IsSystemdMode() {
-		return reloadWithoutSystemd(ctx, name, def)
+	if !c.IsSystemdMode() {
+		return c.reloadWithoutSystemd(ctx, name, def)
 	}
 
 	for _, unit := range def.SystemdUnits {
 		logger.InfoContext(ctx, "Reloading service", "service", def.Name, "unit", unit)
 
-		if err := Systemctl(ctx, "reload", unit); err != nil {
+		if err := c.Systemctl(ctx, "reload", unit); err != nil {
 			// Fallback: try stop+start if reload not supported
 			logger.WarnContext(ctx, "Reload failed, trying restart", "service", name, "error", err)
 
-			if stopErr := stopService(ctx, name, def); stopErr != nil {
+			if stopErr := c.stopService(ctx, name, def); stopErr != nil {
 				return fmt.Errorf("failed to stop %s during reload fallback: %w", name, stopErr)
 			}
 
-			return startService(ctx, name, def)
+			return c.startService(ctx, name, def)
 		}
 	}
 
@@ -340,26 +322,26 @@ func ServiceReload(ctx context.Context, name string) error {
 // inactive even while the workers are live. In legacy mode we never ask
 // systemctl, so ServiceStatus reports the true state and controlStop can
 // invoke statsCustomStop to actually terminate the workers.
-func ServiceStatus(ctx context.Context, name string) (bool, error) {
-	def := LookupService(name)
+func (c *Controller) ServiceStatus(ctx context.Context, name string) (bool, error) {
+	def := c.LookupService(name)
 	if def == nil {
 		return false, fmt.Errorf(errUnknownService, name)
 	}
 
-	if IsSystemdMode() || def.UseSystemdForStatus {
-		return systemdUnitsActive(ctx, def.SystemdUnits)
+	if c.IsSystemdMode() || def.UseSystemdForStatus {
+		return c.systemdUnitsActive(ctx, def.SystemdUnits)
 	}
 
-	return runningPID(ctx, def) > 0, nil
+	return c.runningPID(ctx, def) > 0, nil
 }
 
 // systemdUnitsActive reports whether every unit is active. A non-zero
 // systemctl exit (unit inactive/failed/unknown) or an unbooted systemd is a
 // "not running" answer; only a failure to run systemctl is an error.
-func systemdUnitsActive(ctx context.Context, units []string) (bool, error) {
+func (c *Controller) systemdUnitsActive(ctx context.Context, units []string) (bool, error) {
 	for _, unit := range units {
-		if err := Systemctl(ctx, "is-active", unit); err != nil {
-			var exitErr *exec.ExitError
+		if err := c.Systemctl(ctx, "is-active", unit); err != nil {
+			var exitErr *sys.ExitError
 			if errors.As(err, &exitErr) || errors.Is(err, ErrSystemdNotBooted) {
 				return false, nil
 			}
@@ -377,12 +359,12 @@ func systemdUnitsActive(ctx context.Context, units []string) (bool, error) {
 // shares the snapshot carried by ctx (WithProcessSnapshot), so callers that
 // format status detail (pid/since) from /proc see the very process, in the
 // same process-table view, that ServiceStatus reported as running.
-func RunningPID(ctx context.Context, def *ServiceDef) int {
+func (c *Controller) RunningPID(ctx context.Context, def *ServiceDef) int {
 	if def == nil {
 		return 0
 	}
 
-	return runningPID(ctx, def)
+	return c.runningPID(ctx, def)
 }
 
 // ServiceListStatusStream emits ServiceInfo entries on the returned channel
@@ -390,19 +372,19 @@ func RunningPID(ctx context.Context, def *ServiceDef) int {
 // incrementally without waiting for the full scan to finish. The channel is
 // closed when all services have been probed. The legacy-mode ProcessName
 // probes share a single /proc snapshot taken at the first one.
-func ServiceListStatusStream(ctx context.Context) <-chan ServiceInfo {
-	names := AllServiceNames()
+func (c *Controller) ServiceListStatusStream(ctx context.Context) <-chan ServiceInfo {
+	names := c.AllServiceNames()
 	ch := make(chan ServiceInfo, len(names))
 
 	// One /proc walk serves every ProcessName probe of this listing.
-	ctx = WithProcessSnapshot(ctx)
+	ctx = c.WithProcessSnapshot(ctx)
 
 	go func() {
 		defer close(ch)
 
 		for _, name := range names {
-			def := LookupService(name)
-			running, _ := ServiceStatus(ctx, name)
+			def := c.LookupService(name)
+			running, _ := c.ServiceStatus(ctx, name)
 
 			select {
 			case ch <- ServiceInfo{
@@ -420,27 +402,24 @@ func ServiceListStatusStream(ctx context.Context) <-chan ServiceInfo {
 }
 
 // ServiceListStatus returns all services with their running status.
-func ServiceListStatus(ctx context.Context) []ServiceInfo {
-	result := make([]ServiceInfo, 0, len(Registry))
+func (c *Controller) ServiceListStatus(ctx context.Context) []ServiceInfo {
+	result := make([]ServiceInfo, 0, len(c.registry))
 
-	for info := range ServiceListStatusStream(ctx) {
+	for info := range c.ServiceListStatusStream(ctx) {
 		result = append(result, info)
 	}
 
 	return result
 }
 
-func rewriteConfigs(ctx context.Context, def *ServiceDef) {
+func (c *Controller) rewriteConfigs(ctx context.Context, def *ServiceDef) {
 	logger.InfoContext(ctx, "Rewriting configuration files", "service", def.Name, "configs", def.ConfigRewrite)
 
 	// Use configrewrite script if available (legacy path)
-	configrewrite := basePath + "/libexec/configrewrite"
-	if _, err := os.Stat(configrewrite); err == nil {
+	configrewrite := c.p.configrewrite
+	if _, err := c.env.FS.Stat(configrewrite); err == nil {
 		// #nosec G204 - args come from internal registry
-		args := def.ConfigRewrite
-		cmd := exec.CommandContext(ctx, configrewrite, args...)
-
-		if output, err := cmd.CombinedOutput(); err != nil {
+		if output, err := sys.CombinedOutput(ctx, c.env.Exec, configrewrite, def.ConfigRewrite...); err != nil {
 			logger.WarnContext(ctx, "Config rewrite failed",
 				"service", def.Name, "error", err, "output", string(output))
 		}
@@ -449,17 +428,17 @@ func rewriteConfigs(ctx context.Context, def *ServiceDef) {
 	}
 
 	// Fall back to the running configd daemon via the REWRITE TCP protocol
-	if err := rewriteViaConfigd(ctx, def.ConfigRewrite); err != nil {
+	if err := c.rewriteViaConfigd(ctx, def.ConfigRewrite); err != nil {
 		logger.WarnContext(ctx, "Config rewrite via configd failed",
 			"service", def.Name, "configs", def.ConfigRewrite, "error", err)
 	}
 }
 
 // rewriteViaConfigd sends a REWRITE command to the running configd daemon.
-func rewriteViaConfigd(ctx context.Context, configs []string) error {
+func (c *Controller) rewriteViaConfigd(ctx context.Context, configs []string) error {
 	port := 7171
 
-	lc, err := loadConfig()
+	lc, err := c.loadConfig()
 	if err == nil {
 		if p, err := strconv.Atoi(lc["zmconfigd_listen_port"]); err == nil && p > 0 {
 			port = p
@@ -499,8 +478,8 @@ func rewriteViaConfigd(ctx context.Context, configs []string) error {
 }
 
 // isDepEnabled checks if a conditional dependency should be started.
-func isDepEnabled(ctx context.Context, dep string) bool {
-	def := LookupService(dep)
+func (c *Controller) isDepEnabled(ctx context.Context, dep string) bool {
+	def := c.LookupService(dep)
 	if def == nil {
 		return false
 	}
@@ -516,15 +495,13 @@ func isDepEnabled(ctx context.Context, dep string) bool {
 // init system on this host, returns ErrSystemdNotBooted immediately so callers
 // can choose a fallback without paying for the systemctl invocation and without
 // surfacing systemctl's multi-line "System has not been booted" stderr to users.
-func Systemctl(ctx context.Context, action, unit string) error {
-	if !systemd.IsBooted() {
+func (c *Controller) Systemctl(ctx context.Context, action, unit string) error {
+	if !c.systemd.IsBooted() {
 		return ErrSystemdNotBooted
 	}
 
 	// #nosec G204 — fixed binary path; action/unit come from the internal registry
-	cmd := exec.CommandContext(ctx, systemctlBin, action, unit)
-
-	output, err := cmd.CombinedOutput()
+	output, err := sys.CombinedOutput(ctx, c.env.Exec, systemctlBin, action, unit)
 	if err != nil {
 		return fmt.Errorf("%s %s: %s: %w", action, unit, strings.TrimSpace(string(output)), err)
 	}

@@ -15,6 +15,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/cli/rewrite"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/sdnotify"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // CLI is the root command struct parsed by Kong.
@@ -42,7 +43,7 @@ type CLI struct {
 type DaemonCmd struct{}
 
 // Run executes the daemon command.
-func (c *DaemonCmd) Run(cli *CLI) error {
+func (c *DaemonCmd) Run(cli *CLI, env sys.System) error {
 	if !cliutil.RequireZextras(os.Stderr) {
 		return exitStatus(1)
 	}
@@ -68,7 +69,7 @@ func (c *DaemonCmd) Run(cli *CLI) error {
 
 	mainCfg, appState, ldapClient := initializeConfig()
 
-	exitCode := RunMainLoop(ctx, mainCfg, appState, ldapClient, args, notifier)
+	exitCode := RunMainLoop(ctx, env, mainCfg, appState, ldapClient, args, notifier)
 
 	logger.InfoContext(ctx, "Process exited", "program", mainCfg.Progname)
 
@@ -86,10 +87,10 @@ type RewriteCmd struct {
 }
 
 // Run executes the rewrite command.
-func (c *RewriteCmd) Run(_ *CLI) error {
+func (c *RewriteCmd) Run(_ *CLI, env sys.System) error {
 	return exitWith(rewrite.Run(context.Background(), os.Stdout, os.Stderr, &rewrite.Options{
 		Configs:    c.ConfigNames,
-		Standalone: standaloneRewrite(false),
+		Standalone: standaloneRewrite(env, false),
 	}))
 }
 

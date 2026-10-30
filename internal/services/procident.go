@@ -6,14 +6,13 @@ package services
 
 import (
 	"context"
-	"fmt"
-	"os"
 	"path"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
-	"unicode"
+
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // Process identity (legacy, non-systemd mode).
@@ -48,71 +47,15 @@ import (
 // (TASK_COMM_LEN-1).
 const commMaxLen = 15
 
-// procFSRoot is the path prefix for Linux process entries in /proc.
-// Declared as var so tests can override it with a temporary directory.
-var procFSRoot = "/proc/"
-
-// procEntry is the identity-relevant view of one /proc/<pid> entry.
-type procEntry struct {
-	// argv is the cmdline split on NUL and whitespace.
-	argv []string
-	// exe is the resolved /proc/<pid>/exe target ("" when unreadable).
-	exe string
-	// comm is the kernel short name, read only when argv is empty (the only
-	// case in which it is consulted).
-	comm string
-	pid  int
-}
-
-// isArgSep splits a raw cmdline into tokens at NUL (argv boundaries) and
-// whitespace (title-rewriting daemons keep their whole title in one slot).
-func isArgSep(r rune) bool { return r == 0 || unicode.IsSpace(r) }
-
-// readProcEntry reads the /proc entry e. It reports false for non-numeric
-// names and non-directories. Ownership is intentionally NOT checked: services
-// we register legitimately run as root (postfix master, sudo-spawned
-// zmstat-fd) and must be visible to status. Cross-UID signaling is handled by
-// the caller via sudo fallback in killByPIDWithGroupAndSudo.
-func readProcEntry(e os.DirEntry) (procEntry, bool) {
-	if !e.IsDir() {
-		return procEntry{}, false
-	}
-
-	pid, convErr := strconv.Atoi(e.Name())
-	if convErr != nil {
-		return procEntry{}, false
-	}
-
-	return loadProcEntry(pid), true
-}
-
-// loadProcEntry reads exe, cmdline (and comm when cmdline is empty) of pid.
-// Unreadable files leave the corresponding field empty; the caller decides
-// whether the pid exists.
-func loadProcEntry(pid int) procEntry {
-	procDir := procFSRoot + strconv.Itoa(pid)
-	pe := procEntry{pid: pid}
-
-	if target, err := os.Readlink(procDir + "/exe"); err == nil {
-		pe.exe = strings.TrimSuffix(target, " (deleted)")
-	}
-
-	data, readErr := os.ReadFile(procDir + "/cmdline") //nolint:gosec // path is /proc/<pid>/cmdline, not user-controlled
-	if readErr == nil {
-		pe.argv = strings.FieldsFunc(string(data), isArgSep)
-	}
-
-	if len(pe.argv) > 0 {
-		return pe
-	}
-
-	comm, readErr := os.ReadFile(procDir + "/comm") //nolint:gosec // path is /proc/<pid>/comm, not user-controlled
-	if readErr == nil {
-		pe.comm = strings.TrimSpace(string(comm))
-	}
-
-	return pe
-}
+// entry is the identity-relevant view of one process-table entry: Argv is the
+// cmdline split on NUL and whitespace (title-rewriting daemons keep their whole
+// title in one slot), Exe the resolved /proc/<pid>/exe target ("" when
+// unreadable), Comm the kernel short name (read only when Argv is empty).
+// Ownership is intentionally NOT checked by the table: services we register
+// legitimately run as root (postfix master, sudo-spawned zmstat-fd) and must
+// be visible to status. Cross-UID signaling is handled by the caller via the
+// sudo fallback in killByPIDWithGroupAndSudo.
+type entry = sys.ProcEntry
 
 // nameMatches compares one identity name with one observed string. Names
 // carrying glob metacharacters are matched with path.Match (whole string,
@@ -138,22 +81,22 @@ func commName(name string) string {
 	return base
 }
 
-// matches reports whether the entry is a process of the given identity. An
+// entryMatches reports whether the entry is a process of the given identity. An
 // identity is a program name (see the package-level notes above for the three
 // tiers) optionally followed by space-separated required arguments, for a
 // binary shared with unrelated processes: "/usr/bin/consul agent
 // /etc/zextras/service-discover" is the consul agent of that config dir, not
 // the "consul connect envoy" sidecars. Every required argument must be an argv
 // token (or the value of a -flag=value token); a trailing slash is ignored.
-func (p procEntry) matches(identity string) bool {
+func entryMatches(p *entry, identity string) bool {
 	prog, required, _ := strings.Cut(identity, " ")
 
-	if !p.matchesProgram(prog) {
+	if !matchesProgram(p, prog) {
 		return false
 	}
 
 	for want := range strings.FieldsSeq(required) {
-		if !slices.ContainsFunc(p.argv, func(tok string) bool { return argMatches(want, tok) }) {
+		if !slices.ContainsFunc(p.Argv, func(tok string) bool { return argMatches(want, tok) }) {
 			return false
 		}
 	}
@@ -175,28 +118,28 @@ func argMatches(want, tok string) bool {
 	return ok && nameMatches(want, strings.TrimRight(value, "/"))
 }
 
-// matchesProgram is the program-name part of matches.
+// matchesProgram is the program-name part of entryMatches.
 //
 // argv is authoritative when present: a negative argv verdict must NOT fall
 // through to comm, because the 15-char comm truncation collides unrelated
 // processes. Example: service-discover-wrapper.sh has comm="service-discove",
 // a prefix of the name of the daemon binary the wrapper fronts.
-func (p procEntry) matchesProgram(name string) bool {
+func matchesProgram(p *entry, name string) bool {
 	if name == "" {
 		return false
 	}
 
 	absolute := strings.HasPrefix(name, "/")
 
-	if absolute && p.exe != "" && nameMatches(name, p.exe) {
+	if absolute && p.Exe != "" && nameMatches(name, p.Exe) {
 		return true
 	}
 
-	if len(p.argv) == 0 {
-		return p.comm != "" && nameMatches(commName(name), p.comm)
+	if len(p.Argv) == 0 {
+		return p.Comm != "" && nameMatches(commName(name), p.Comm)
 	}
 
-	for _, tok := range p.argv {
+	for _, tok := range p.Argv {
 		if nameMatches(name, tok) || (!absolute && nameMatches(name, bareToken(tok))) {
 			return true
 		}
@@ -212,7 +155,7 @@ func bareToken(tok string) string {
 	return strings.TrimSuffix(path.Base(tok), ":")
 }
 
-// procSnapshot is a point-in-time listing of procFSRoot, read once and
+// procSnapshot is a point-in-time listing of the process table, read once and
 // matched against any number of identity names. A status listing or watchdog
 // tick probes N services; without a snapshot each probe would re-walk /proc
 // and re-read every cmdline. The listing is loaded lazily on first use and is
@@ -222,29 +165,20 @@ func bareToken(tok string) string {
 // Snapshots are for read-only status probes. Anything that signals a process
 // must use scanProcesses, which always takes a fresh listing.
 type procSnapshot struct {
+	proc    sys.Proc
 	err     error
-	entries []procEntry
+	entries []entry
 	once    sync.Once
 }
 
 func (s *procSnapshot) load() {
 	s.once.Do(func() {
-		dirents, err := os.ReadDir(procFSRoot)
-		if err != nil {
-			s.err = fmt.Errorf("read %s: %w", procFSRoot, err)
-
+		s.entries, s.err = s.proc.Table()
+		if s.err != nil {
 			return
 		}
 
-		s.entries = make([]procEntry, 0, len(dirents))
-
-		for _, e := range dirents {
-			if pe, ok := readProcEntry(e); ok {
-				s.entries = append(s.entries, pe)
-			}
-		}
-
-		slices.SortFunc(s.entries, func(a, b procEntry) int { return a.pid - b.pid })
+		slices.SortFunc(s.entries, func(a, b entry) int { return a.PID - b.PID })
 	})
 }
 
@@ -261,8 +195,8 @@ func (s *procSnapshot) scan(name string) ([]int, error) {
 	var pids []int
 
 	for i := range s.entries {
-		if s.entries[i].matches(name) && !isZombie(s.entries[i].pid) {
-			pids = append(pids, s.entries[i].pid)
+		if entryMatches(&s.entries[i], name) && !s.proc.Zombie(s.entries[i].PID) {
+			pids = append(pids, s.entries[i].PID)
 		}
 	}
 
@@ -270,16 +204,16 @@ func (s *procSnapshot) scan(name string) ([]int, error) {
 }
 
 // lookup returns the snapshot's entry for pid.
-func (s *procSnapshot) lookup(pid int) (procEntry, bool) {
+func (s *procSnapshot) lookup(pid int) (entry, bool) {
 	s.load()
 
 	if s.err != nil {
-		return procEntry{}, false
+		return entry{}, false
 	}
 
-	i, found := slices.BinarySearchFunc(s.entries, pid, func(e procEntry, pid int) int { return e.pid - pid })
+	i, found := slices.BinarySearchFunc(s.entries, pid, func(e entry, pid int) int { return e.PID - pid })
 	if !found {
-		return procEntry{}, false
+		return entry{}, false
 	}
 
 	return s.entries[i], true
@@ -294,12 +228,12 @@ type procSnapshotKey struct{}
 // view. The snapshot is taken lazily on the first probe that needs it and
 // never refreshed: derive the context per batch, not per daemon lifetime. A
 // context that already carries one is returned unchanged.
-func WithProcessSnapshot(ctx context.Context) context.Context {
+func (c *Controller) WithProcessSnapshot(ctx context.Context) context.Context {
 	if snapshotFrom(ctx) != nil {
 		return ctx
 	}
 
-	return context.WithValue(ctx, procSnapshotKey{}, &procSnapshot{})
+	return context.WithValue(ctx, procSnapshotKey{}, &procSnapshot{proc: c.env.Proc})
 }
 
 func snapshotFrom(ctx context.Context) *procSnapshot {
@@ -311,19 +245,19 @@ func snapshotFrom(ctx context.Context) *procSnapshot {
 // scanProcesses lists the live processes of the given identity from a fresh
 // /proc listing, in PID order. Kill paths use it: signaling must always see
 // live state.
-func scanProcesses(name string) ([]int, error) {
-	return (&procSnapshot{}).scan(name)
+func (c *Controller) scanProcesses(name string) ([]int, error) {
+	return (&procSnapshot{proc: c.env.Proc}).scan(name)
 }
 
 // scanProcessesForStatus is scanProcesses for read-only status probes: it
 // matches against the snapshot carried by ctx (WithProcessSnapshot) when
 // there is one, else against a fresh listing.
-func scanProcessesForStatus(ctx context.Context, name string) ([]int, error) {
+func (c *Controller) scanProcessesForStatus(ctx context.Context, name string) ([]int, error) {
 	if s := snapshotFrom(ctx); s != nil {
 		return s.scan(name)
 	}
 
-	return scanProcesses(name)
+	return c.scanProcesses(name)
 }
 
 // readPidFile parses the PID recorded in pidFile. ok is false when the file
@@ -331,8 +265,8 @@ func scanProcessesForStatus(ctx context.Context, name string) ([]int, error) {
 // root:root 0600), empty or corrupt: the caller should fall through to an
 // alternative detection method. Only the first line counts — some services
 // (stats) write several PIDs, the first being the primary/orchestrator.
-func readPidFile(pidFile string) (pid int, ok bool) {
-	data, err := os.ReadFile(pidFile) //nolint:gosec // path from internal registry
+func (c *Controller) readPidFile(pidFile string) (pid int, ok bool) {
+	data, err := c.env.FS.ReadFile(pidFile)
 	if err != nil {
 		return 0, false
 	}
@@ -350,32 +284,13 @@ func readPidFile(pidFile string) (pid int, ok bool) {
 // isRunningByPidFile reports whether the PID in pidFile is alive. ok=false
 // means the file gave no usable PID (see readPidFile). It checks liveness
 // only: use pidBelongsTo when the service's identity is known.
-func isRunningByPidFile(pidFile string) (running bool, ok bool) {
-	pid, ok := readPidFile(pidFile)
+func (c *Controller) isRunningByPidFile(pidFile string) (running bool, ok bool) {
+	pid, ok := c.readPidFile(pidFile)
 	if !ok {
 		return false, false
 	}
 
-	return processAlive(pid), true
-}
-
-// isZombie reports whether a process is in the zombie state (Z).
-// Zombies have already exited — they appear in /proc until their parent reaps
-// them, but they are not running. Returns false if /proc/<pid>/status is
-// unreadable (caller assumes the process is alive in that case).
-func isZombie(pid int) bool {
-	data, err := os.ReadFile(procFSRoot + strconv.Itoa(pid) + "/status") //nolint:gosec // path is /proc/<pid>/status
-	if err != nil {
-		return false
-	}
-
-	for line := range strings.SplitSeq(string(data), "\n") {
-		if state, ok := strings.CutPrefix(line, "State:"); ok {
-			return strings.Contains(state, "Z")
-		}
-	}
-
-	return false
+	return c.processAlive(pid), true
 }
 
 // pidBelongsTo reports whether pid is a live process of the given identity —
@@ -384,18 +299,20 @@ func isZombie(pid int) bool {
 // comes from that frozen view (like every other probe of the batch);
 // otherwise only /proc/<pid> is read, with no full /proc walk. An empty
 // identity means the service declares none, and liveness is all there is.
-func pidBelongsTo(ctx context.Context, pid int, name string) bool {
+func (c *Controller) pidBelongsTo(ctx context.Context, pid int, name string) bool {
 	if name == "" {
-		return processAlive(pid)
+		return c.processAlive(pid)
 	}
 
 	if s := snapshotFrom(ctx); s != nil {
 		e, ok := s.lookup(pid)
 
-		return ok && e.matches(name) && !isZombie(pid)
+		return ok && entryMatches(&e, name) && !c.env.Proc.Zombie(pid)
 	}
 
-	return processAlive(pid) && loadProcEntry(pid).matches(name)
+	e, ok := c.env.Proc.Entry(pid)
+
+	return ok && !c.env.Proc.Zombie(pid) && entryMatches(&e, name)
 }
 
 // pidFromProcessName returns the lowest PID of a live process of the given
@@ -403,17 +320,17 @@ func pidBelongsTo(ctx context.Context, pid int, name string) bool {
 // control status` invocation never matches its own ProcessName), or 0. It
 // answers from the snapshot carried by ctx when present. Empty name
 // short-circuits to 0.
-func pidFromProcessName(ctx context.Context, name string) int {
+func (c *Controller) pidFromProcessName(ctx context.Context, name string) int {
 	if name == "" {
 		return 0
 	}
 
-	pids, err := scanProcessesForStatus(ctx, name)
+	pids, err := c.scanProcessesForStatus(ctx, name)
 	if err != nil {
 		return 0
 	}
 
-	isSelfOrParent := selfOrParentFilter()
+	isSelfOrParent := c.selfOrParentFilter()
 
 	for _, pid := range pids {
 		if !isSelfOrParent(pid) {
@@ -435,12 +352,12 @@ func pidFromProcessName(ctx context.Context, name string) int {
 //
 // An unreadable pidfile (postfix master.pid is root:root 0600) or a stale one
 // both fall through to the scan, as legacy amavisdctl/memcachedctl do.
-func runningPID(ctx context.Context, def *ServiceDef) int {
+func (c *Controller) runningPID(ctx context.Context, def *ServiceDef) int {
 	if def.PidFile != "" {
-		if pid, ok := readPidFile(def.PidFile); ok && pidBelongsTo(ctx, pid, def.ProcessName) {
+		if pid, ok := c.readPidFile(def.PidFile); ok && c.pidBelongsTo(ctx, pid, def.ProcessName) {
 			return pid
 		}
 	}
 
-	return pidFromProcessName(ctx, def.ProcessName)
+	return c.pidFromProcessName(ctx, def.ProcessName)
 }

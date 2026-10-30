@@ -8,7 +8,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -21,6 +20,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/ldap"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/state"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 func initializeConfig() (*config.Config, *state.State, *ldap.Ldap) {
@@ -44,10 +44,10 @@ func initializeConfig() (*config.Config, *state.State, *ldap.Ldap) {
 
 // runStandaloneRewrite runs one forced cycle in this process, as the legacy
 // "zmconfigd <configs>" standalone mode does.
-func runStandaloneRewrite(ctx context.Context, args *Args) int {
+func runStandaloneRewrite(ctx context.Context, env sys.System, args *Args) int {
 	mainCfg, appState, ldapClient := initializeConfig()
 
-	return RunMainLoop(ctx, mainCfg, appState, ldapClient, args, nil)
+	return RunMainLoop(ctx, env, mainCfg, appState, ldapClient, args, nil)
 }
 
 // setupProfilingAndTracing sets up profiling and tracing if requested in args.
@@ -111,12 +111,12 @@ func setupProfilingAndTracing(
 // amavisd fails with "Can't locate Amavis/Boot.pm in @INC".
 //
 // Existing values are preserved so operators can override for debugging.
-func ensureZextrasPerlEnv() {
+func ensureZextrasPerlEnv(env sys.System) {
 	if _, ok := os.LookupEnv("PERL5LIB"); ok {
 		return
 	}
 
-	archname := perlArchname()
+	archname := perlArchname(env)
 	if archname == "" {
 		return
 	}
@@ -132,9 +132,8 @@ func ensureZextrasPerlEnv() {
 // (e.g. "x86_64-linux-thread-multi" or "aarch64-linux-thread-multi"). Returns
 // empty string when perl is missing or the output cannot be parsed; callers
 // treat that as "skip env setup".
-func perlArchname() string {
-	//nolint:noctx,gosec // fixed binary path, runs once at startup
-	out, err := exec.Command("/usr/bin/perl", "-V:archname").Output()
+func perlArchname(env sys.System) string {
+	out, err := sys.Output(context.Background(), env.Exec, "/usr/bin/perl", "-V:archname")
 	if err != nil {
 		return ""
 	}
@@ -152,13 +151,16 @@ func perlArchname() string {
 }
 
 func main() {
-	ensureZextrasPerlEnv()
+	env := sys.Real()
+
+	ensureZextrasPerlEnv(env)
 
 	cli := &CLI{}
 
 	parser, err := kong.New(cli,
 		kong.Description("Configuration management daemon for Carbonio"),
 		kong.Vars{"version": formatVersion()},
+		kong.Bind(env),
 	)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

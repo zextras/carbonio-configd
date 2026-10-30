@@ -9,6 +9,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/config/configtest"
 	"github.com/zextras/carbonio-configd/internal/ldap"
+	"github.com/zextras/carbonio-configd/internal/sys"
 	"os"
 	"path/filepath"
 	"strings"
@@ -98,7 +99,7 @@ func TestValidateAllRealTemplates(t *testing.T) {
 
 	// Create generator with temp output directory and real template directory
 	outputDir := t.TempDir()
-	gen, err := NewGenerator(context.Background(), cfg, localCfg, globalCfg, serverCfg, mockLdap, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, localCfg, globalCfg, serverCfg, mockLdap, nil)
 	if err != nil {
 		t.Fatalf("Failed to create generator: %v", err)
 	}
@@ -129,7 +130,7 @@ func TestValidateAllRealTemplates(t *testing.T) {
 	)
 
 	// Create template processor with empty templateDir since we have absolute paths from DiscoverTemplates
-	processor := NewTemplateProcessor(gen, "", gen.IncludesDir)
+	processor := NewTemplateProcessor(gen, gen.env.FS, "", gen.IncludesDir)
 
 	// Process each template
 	for _, tmplPath := range templates {

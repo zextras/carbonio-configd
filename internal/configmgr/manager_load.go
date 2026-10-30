@@ -18,6 +18,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/commands"
 	"github.com/zextras/carbonio-configd/internal/intern"
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/sys"
 	"github.com/zextras/carbonio-configd/internal/tracing"
 )
 
@@ -45,8 +46,8 @@ const (
 )
 
 // awaitLoaders waits until all loaders are done, the timeout elapses or ctx is cancelled.
-func awaitLoaders(ctx context.Context, done <-chan struct{}, timeout time.Duration) loadWait {
-	timer := time.NewTimer(timeout)
+func awaitLoaders(ctx context.Context, clock sys.Clock, done <-chan struct{}, timeout time.Duration) loadWait {
+	timer := clock.NewTimer(timeout)
 	defer timer.Stop()
 
 	select {
@@ -54,7 +55,7 @@ func awaitLoaders(ctx context.Context, done <-chan struct{}, timeout time.Durati
 		return loadWaitCancelled
 	case <-done:
 		return loadWaitDone
-	case <-timer.C:
+	case <-timer.C():
 		return loadWaitTimedOut
 	}
 }
@@ -80,6 +81,7 @@ func logPendingLoaders(ctx context.Context, loadFuncs []loadFunc, results []load
 // Results of loaders still running at timeout are discarded.
 func runLoadAttempt(
 	ctx context.Context,
+	clock sys.Clock,
 	loadFuncs []loadFunc,
 	timeout time.Duration,
 ) (timedOut bool, errs []error, ctxErr error) {
@@ -120,7 +122,7 @@ func runLoadAttempt(
 		close(done)
 	}()
 
-	switch awaitLoaders(ctx, done, timeout) {
+	switch awaitLoaders(ctx, clock, done, timeout) {
 	case loadWaitCancelled:
 		logger.InfoContext(ctx, "Configuration loading cancelled by shutdown signal")
 
@@ -129,7 +131,7 @@ func runLoadAttempt(
 		logger.ErrorContext(ctx, "Configuration loading timed out", "timeout", timeout)
 		logPendingLoaders(ctx, loadFuncs, results, "Thread still alive, waiting", "wait_seconds", int(timeout.Seconds()))
 
-		switch awaitLoaders(ctx, done, timeout) {
+		switch awaitLoaders(ctx, clock, done, timeout) {
 		case loadWaitCancelled:
 			logger.InfoContext(ctx, "Configuration loading cancelled during retry wait")
 
@@ -205,12 +207,12 @@ func (cm *ConfigManager) LoadAllConfigsWithRetry(ctx context.Context, maxRetries
 				"attempt", attempt,
 				"max_retries", maxRetries)
 
-			if err := sleepCtx(ctx, 2*time.Second); err != nil {
+			if err := cm.env.Clock.Sleep(ctx, 2*time.Second); err != nil {
 				return err
 			}
 		}
 
-		timedOut, errors, ctxErr := runLoadAttempt(ctx, loadFuncs, threadWaitTime)
+		timedOut, errors, ctxErr := runLoadAttempt(ctx, cm.env.Clock, loadFuncs, threadWaitTime)
 		if ctxErr != nil {
 			return ctxErr
 		}

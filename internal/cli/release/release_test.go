@@ -7,13 +7,14 @@ package release
 import (
 	"bytes"
 	"context"
-	"os"
-	"path/filepath"
 	"testing"
+
+	"github.com/zextras/carbonio-configd/internal/sys"
+	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
 
 func TestDistroID(t *testing.T) {
-	dir := t.TempDir()
+	t.Parallel()
 
 	tests := []struct {
 		name    string
@@ -27,33 +28,31 @@ func TestDistroID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			path := filepath.Join(dir, tt.name)
-			if err := os.WriteFile(path, []byte(tt.content), 0o600); err != nil {
-				t.Fatal(err)
-			}
+			t.Parallel()
 
-			if got := distroID(path); got != tt.want {
+			f := systest.New()
+			f.FS.Put("/etc/os-release", []byte(tt.content), 0o644)
+
+			if got := distroID(f.FS, "/etc/os-release"); got != tt.want {
 				t.Errorf("distroID = %q, want %q", got, tt.want)
 			}
 		})
 	}
 
-	if got := distroID(filepath.Join(dir, "missing")); got != "" {
+	if got := distroID(systest.New().FS, "/missing"); got != "" {
 		t.Errorf("distroID(missing) = %q, want empty", got)
 	}
 }
 
 func TestRun_PrintsRelease(t *testing.T) {
-	base := t.TempDir()
-	t.Setenv("CARBONIO_BASE_DIR", base)
+	t.Setenv("CARBONIO_BASE_DIR", "/cb")
 
-	if err := os.WriteFile(filepath.Join(base, ".version"), []byte("25.6.0\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	f := systest.New()
+	f.FS.Put("/cb/.version", []byte("25.6.0\n"), 0o600)
 
 	var stdout, stderr bytes.Buffer
 
-	if code := Run(context.Background(), &stdout, &stderr, &Options{}); code != 0 {
+	if code := Run(context.Background(), f.System(), &stdout, &stderr, &Options{}); code != 0 {
 		t.Errorf("exit code = %d, want 0", code)
 	}
 
@@ -64,16 +63,20 @@ func TestRun_PrintsRelease(t *testing.T) {
 	if stderr.Len() != 0 {
 		t.Errorf("stderr = %q, want empty", stderr.String())
 	}
+
+	if lines := f.Exec.Lines(); len(lines) != 0 {
+		t.Errorf("unexpected commands without -V: %v", lines)
+	}
 }
 
 // TestRun_MissingVersionFile_ExitsZero: legacy `zmcontrol -v` runs
 // `cat .version` and exits 0 even when the file is missing.
 func TestRun_MissingVersionFile_ExitsZero(t *testing.T) {
-	t.Setenv("CARBONIO_BASE_DIR", t.TempDir())
+	t.Setenv("CARBONIO_BASE_DIR", "/cb")
 
 	var stdout, stderr bytes.Buffer
 
-	if code := Run(context.Background(), &stdout, &stderr, &Options{}); code != 0 {
+	if code := Run(context.Background(), systest.New().System(), &stdout, &stderr, &Options{}); code != 0 {
 		t.Errorf("exit code = %d, want 0", code)
 	}
 
@@ -83,32 +86,46 @@ func TestRun_MissingVersionFile_ExitsZero(t *testing.T) {
 }
 
 func TestRun_Packages(t *testing.T) {
-	t.Setenv("CARBONIO_BASE_DIR", t.TempDir())
+	t.Setenv("CARBONIO_BASE_DIR", "/cb")
 
 	tests := []struct {
-		name string
-		out  string
-		want string
+		name     string
+		osID     string
+		out      string
+		want     string
+		wantExec string
 	}{
-		{"listed", "carbonio-core 1.2-3\n", "Carbonio Release \n\nInstalled packages:\ncarbonio-core 1.2-3\n"},
-		{"none installed", "", "Carbonio Release \n"},
+		{
+			"deb listed", "ID=ubuntu\n", "carbonio-core 1.2-3\n",
+			"Carbonio Release \n\nInstalled packages:\ncarbonio-core 1.2-3\n",
+			"dpkg-query -W -f ${Package} ${Version}\n carbonio*",
+		},
+		{
+			"rpm listed", "ID=\"rocky\"\n", "carbonio-core 1.2-3\n",
+			"Carbonio Release \n\nInstalled packages:\ncarbonio-core 1.2-3\n",
+			"rpm -qa --qf %{NAME} %{VERSION}-%{RELEASE}\n carbonio*",
+		},
+		{"none installed", "ID=debian\n", "", "Carbonio Release \n", "dpkg-query -W -f ${Package} ${Version}\n carbonio*"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			prev := installedPackages
-			installedPackages = func(context.Context, string) []byte { return []byte(tt.out) }
-
-			t.Cleanup(func() { installedPackages = prev })
+			f := systest.New()
+			f.FS.Put("/etc/os-release", []byte(tt.osID), 0o644)
+			f.Exec.When(func(*sys.Cmd) bool { return true }, systest.Reply(tt.out))
 
 			var stdout, stderr bytes.Buffer
 
-			if code := Run(context.Background(), &stdout, &stderr, &Options{Packages: true}); code != 0 {
+			if code := Run(context.Background(), f.System(), &stdout, &stderr, &Options{Packages: true}); code != 0 {
 				t.Errorf("exit code = %d, want 0", code)
 			}
 
 			if stdout.String() != tt.want {
 				t.Errorf("stdout = %q, want %q", stdout.String(), tt.want)
+			}
+
+			if lines := f.Exec.Lines(); len(lines) != 1 || lines[0] != tt.wantExec {
+				t.Errorf("commands = %q, want [%q]", lines, tt.wantExec)
 			}
 		})
 	}

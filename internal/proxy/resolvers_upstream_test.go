@@ -12,6 +12,7 @@ import (
 
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/config/configtest"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // TestResolveLookupHandlers tests all branches of resolveLookupHandlers
@@ -71,6 +72,7 @@ func TestResolveLookupHandlers(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			g := &Generator{
+				env:          sys.Real(),
 				GlobalConfig: &config.GlobalConfig{Data: tt.globalData},
 				LocalConfig:  &config.LocalConfig{Data: tt.localData},
 			}
@@ -107,6 +109,7 @@ func TestResolveLookupHandlers(t *testing.T) {
 func TestResolveMemcacheServers(t *testing.T) {
 	t.Run("returns formatted memcache servers from cache", func(t *testing.T) {
 		g := &Generator{
+			env: sys.Real(),
 			upstreamCache: &upstreamQueryCache{
 				memcachedPopulated: true,
 				memcachedServers: []MemcacheServer{
@@ -133,6 +136,7 @@ func TestResolveMemcacheServers(t *testing.T) {
 
 	t.Run("returns empty string when no servers in cache", func(t *testing.T) {
 		g := &Generator{
+			env: sys.Real(),
 			upstreamCache: &upstreamQueryCache{
 				memcachedPopulated: true,
 				memcachedServers:   []MemcacheServer{},
@@ -156,6 +160,7 @@ func TestResolveMemcacheServers(t *testing.T) {
 func TestResolveUpstreamFairShmSize(t *testing.T) {
 	t.Run("returns default 32k when not configured", func(t *testing.T) {
 		g := &Generator{
+			env:          sys.Real(),
 			GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMap()},
 		}
 		result, err := g.resolveUpstreamFairShmSize(context.Background())
@@ -169,6 +174,7 @@ func TestResolveUpstreamFairShmSize(t *testing.T) {
 
 	t.Run("returns configured size", func(t *testing.T) {
 		g := &Generator{
+			env: sys.Real(),
 			GlobalConfig: &config.GlobalConfig{Data: configtest.NewConfigMapFrom(map[string]string{
 				"zimbraReverseProxyUpstreamFairShmSize": "64",
 			})},
@@ -184,6 +190,7 @@ func TestResolveUpstreamFairShmSize(t *testing.T) {
 
 	t.Run("uses minimum 32k for small values", func(t *testing.T) {
 		g := &Generator{
+			env: sys.Real(),
 			GlobalConfig: &config.GlobalConfig{Data: configtest.NewConfigMapFrom(map[string]string{
 				"zimbraReverseProxyUpstreamFairShmSize": "16",
 			})},
@@ -199,6 +206,7 @@ func TestResolveUpstreamFairShmSize(t *testing.T) {
 
 	t.Run("uses default 32k for invalid string", func(t *testing.T) {
 		g := &Generator{
+			env: sys.Real(),
 			GlobalConfig: &config.GlobalConfig{Data: configtest.NewConfigMapFrom(map[string]string{
 				"zimbraReverseProxyUpstreamFairShmSize": "notanumber",
 			})},
@@ -248,6 +256,7 @@ func TestMakeUpstreamTargetResolver(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			g := &Generator{
+				env:          sys.Real(),
 				ServerConfig: &config.ServerConfig{Data: tt.serverData},
 			}
 			resolver := g.makeUpstreamTargetResolver(tt.sslName, tt.nonSSLName)
@@ -309,7 +318,7 @@ func TestResolveWebUpstreamTargetAvailable(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("returns false when no LDAP and no cache", func(t *testing.T) {
-		g := &Generator{LdapClient: nil}
+		g := &Generator{env: sys.Real(), LdapClient: nil}
 		result, err := g.resolveWebUpstreamTargetAvailable(ctx)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -321,6 +330,7 @@ func TestResolveWebUpstreamTargetAvailable(t *testing.T) {
 
 	t.Run("returns true when cached backends present", func(t *testing.T) {
 		g := &Generator{
+			env: sys.Real(),
 			upstreamCache: &upstreamQueryCache{
 				backendsPopulated:    true,
 				reverseProxyBackends: []UpstreamServer{{Host: "backend.example.com", Port: 8080}},
@@ -337,6 +347,7 @@ func TestResolveWebUpstreamTargetAvailable(t *testing.T) {
 
 	t.Run("returns false when cached backends empty", func(t *testing.T) {
 		g := &Generator{
+			env: sys.Real(),
 			upstreamCache: &upstreamQueryCache{
 				backendsPopulated:    true,
 				reverseProxyBackends: []UpstreamServer{},
@@ -356,6 +367,7 @@ func TestResolveWebUpstreamTargetAvailable(t *testing.T) {
 func TestResolveWebAvailable(t *testing.T) {
 	t.Run("returns true when backends exist in cache", func(t *testing.T) {
 		g := &Generator{
+			env: sys.Real(),
 			upstreamCache: &upstreamQueryCache{
 				backendsPopulated:    true,
 				reverseProxyBackends: []UpstreamServer{{Host: "server1.example.com", Port: 443}},
@@ -372,6 +384,7 @@ func TestResolveWebAvailable(t *testing.T) {
 
 	t.Run("returns false when no backends", func(t *testing.T) {
 		g := &Generator{
+			env: sys.Real(),
 			upstreamCache: &upstreamQueryCache{
 				backendsPopulated:    true,
 				reverseProxyBackends: []UpstreamServer{},

@@ -9,14 +9,16 @@ import (
 	"context"
 	"errors"
 	"net"
-	"os"
 	"os/user"
-	"path/filepath"
 	"strconv"
 	"testing"
 
 	"github.com/zextras/carbonio-configd/internal/security"
+	"github.com/zextras/carbonio-configd/internal/services"
+	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
+
+const testBase = "/zx"
 
 func loadFrom(lc map[string]string, err error) func() (map[string]string, error) {
 	return func() (map[string]string, error) { return lc, err }
@@ -31,25 +33,19 @@ func TestInitComponents(t *testing.T) {
 }
 
 func TestConfigsExist(t *testing.T) {
-	base := t.TempDir()
-	t.Setenv("CARBONIO_BASE_DIR", base)
+	t.Setenv("CARBONIO_BASE_DIR", testBase)
 
-	if configsExist(componentMTA) || configsExist(componentProxy) || configsExist("nope") {
+	f := systest.New()
+	env := f.System()
+
+	if configsExist(env, componentMTA) || configsExist(env, componentProxy) || configsExist(env, "nope") {
 		t.Fatal("nothing should exist in an empty base dir")
 	}
 
-	for _, rel := range []string{"common/conf/postfix/main.cf", "conf/nginx/nginx.conf"} {
-		p := filepath.Join(base, rel)
-		if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
-			t.Fatal(err)
-		}
+	f.FS.Put(testBase+"/common/conf/postfix/main.cf", nil, 0o600)
+	f.FS.Put(testBase+"/conf/nginx/nginx.conf", nil, 0o600)
 
-		if err := os.WriteFile(p, nil, 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	if !configsExist(componentMTA) || !configsExist(componentProxy) || configsExist("nope") {
+	if !configsExist(env, componentMTA) || !configsExist(env, componentProxy) || configsExist(env, "nope") {
 		t.Error("existing configs not detected")
 	}
 }
@@ -61,7 +57,7 @@ func TestRun_NotZextras(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 
-	code := Run(context.Background(), &stdout, &stderr, &Options{Component: "mta"})
+	code := Run(context.Background(), systest.New().System(), &stdout, &stderr, &Options{Component: "mta"})
 
 	if want := "Please run this program as the 'zextras' user.\n"; code != 1 || stderr.String() != want || stdout.Len() != 0 {
 		t.Errorf("code=%d stderr=%q stdout=%q", code, stderr.String(), stdout.String())
@@ -69,8 +65,7 @@ func TestRun_NotZextras(t *testing.T) {
 }
 
 func TestRun_Contracts(t *testing.T) {
-	base := t.TempDir()
-	t.Setenv("CARBONIO_BASE_DIR", base)
+	t.Setenv("CARBONIO_BASE_DIR", testBase)
 
 	// A port nobody listens on: grab one and release it.
 	l, err := net.Listen("tcp4", "127.0.0.1:0")
@@ -111,7 +106,8 @@ func TestRun_Contracts(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 
-			code := run(context.Background(), &stdout, &stderr, &tt.opts, tt.load)
+			env := systest.New().System()
+			code := run(context.Background(), env, services.NewController(env), &stdout, &stderr, &tt.opts, tt.load)
 
 			if code != 1 || stdout.String() != tt.wantStdout || stderr.String() != tt.wantStderr {
 				t.Errorf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
@@ -121,21 +117,15 @@ func TestRun_Contracts(t *testing.T) {
 }
 
 func TestRun_ConfigsExistGuard(t *testing.T) {
-	base := t.TempDir()
-	t.Setenv("CARBONIO_BASE_DIR", base)
+	t.Setenv("CARBONIO_BASE_DIR", testBase)
 
-	p := filepath.Join(base, "conf", "nginx", "nginx.conf")
-	if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := os.WriteFile(p, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	f := systest.New()
+	f.FS.Put(testBase+"/conf/nginx/nginx.conf", nil, 0o600)
 
 	var stdout, stderr bytes.Buffer
 
-	code := run(context.Background(), &stdout, &stderr, &Options{Component: "proxy"}, nil)
+	code := run(context.Background(), f.System(), services.NewController(f.System()), &stdout, &stderr,
+		&Options{Component: "proxy"}, nil)
 
 	want := "Configs for proxy already exist. Use --force to reinitialize.\n"
 	if code != 1 || stderr.String() != want || stdout.Len() != 0 {

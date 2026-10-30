@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"github.com/zextras/carbonio-configd/internal/cli/initcmd"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // InitCmd handles the "configd init <component>" subcommand.
@@ -18,8 +19,8 @@ type InitCmd struct {
 }
 
 // Run executes the init subcommand.
-func (c *InitCmd) Run() error {
-	return exitWith(initcmd.Run(context.Background(), os.Stdout, os.Stderr, &initcmd.Options{
+func (c *InitCmd) Run(env sys.System) error {
+	return exitWith(initcmd.Run(context.Background(), env, os.Stdout, os.Stderr, &initcmd.Options{
 		Component: c.Component,
 		Force:     c.Force,
 	}))

@@ -11,6 +11,10 @@ import (
 
 // TestStartWithoutSystemd_CustomStart verifies that CustomStart is called.
 func TestStartWithoutSystemd_CustomStart(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -23,7 +27,7 @@ func TestStartWithoutSystemd_CustomStart(t *testing.T) {
 		},
 	}
 
-	err := startWithoutSystemd(context.Background(), "testservice", def)
+	err := ctl.startWithoutSystemd(context.Background(), "testservice", def)
 	if err != nil {
 		t.Errorf("startWithoutSystemd with CustomStart returned error: %v", err)
 	}
@@ -34,6 +38,10 @@ func TestStartWithoutSystemd_CustomStart(t *testing.T) {
 
 // TestStartWithoutSystemd_NoBinaryWithProcessName verifies the "managed via deps" path.
 func TestStartWithoutSystemd_NoBinaryWithProcessName(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -42,7 +50,7 @@ func TestStartWithoutSystemd_NoBinaryWithProcessName(t *testing.T) {
 		ProcessName: "someprocess",
 	}
 
-	err := startWithoutSystemd(context.Background(), "testservice", def)
+	err := ctl.startWithoutSystemd(context.Background(), "testservice", def)
 	if err != nil {
 		t.Errorf("expected nil when ProcessName set and no BinaryPath, got: %v", err)
 	}
@@ -50,6 +58,10 @@ func TestStartWithoutSystemd_NoBinaryWithProcessName(t *testing.T) {
 
 // TestStartWithoutSystemd_NoBinaryNoProcessName verifies the error path.
 func TestStartWithoutSystemd_NoBinaryNoProcessName(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -57,7 +69,7 @@ func TestStartWithoutSystemd_NoBinaryNoProcessName(t *testing.T) {
 		Name: "testservice",
 	}
 
-	err := startWithoutSystemd(context.Background(), "testservice", def)
+	err := ctl.startWithoutSystemd(context.Background(), "testservice", def)
 	if err == nil {
 		t.Error("expected error when no launcher and no ProcessName")
 	}
@@ -65,6 +77,10 @@ func TestStartWithoutSystemd_NoBinaryNoProcessName(t *testing.T) {
 
 // TestStartWithoutSystemd_BinaryNotFound verifies startDirect returns error for missing binary.
 func TestStartWithoutSystemd_BinaryNotFound(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -73,7 +89,7 @@ func TestStartWithoutSystemd_BinaryNotFound(t *testing.T) {
 		BinaryPath: "/nonexistent/binary/xyz-configd-test",
 	}
 
-	err := startWithoutSystemd(context.Background(), "testservice", def)
+	err := ctl.startWithoutSystemd(context.Background(), "testservice", def)
 	if err == nil {
 		t.Error("expected error for missing binary")
 	}

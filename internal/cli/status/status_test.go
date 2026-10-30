@@ -8,60 +8,74 @@ import (
 	"bytes"
 	"context"
 	"testing"
+
+	"github.com/zextras/carbonio-configd/internal/services"
+	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
 
+// runWithFakes runs "configd status" over fake host operations in systemd mode
+// (the fake systemctl reports every unit active unless inactive is set).
+func runWithFakes(name string, inactive bool) (rc int, stdout, stderr string) {
+	f := systest.New()
+	f.FS.PutDir("/run/systemd/system", 0o755) // sd_booted(3)
+
+	if inactive {
+		f.Exec.OnCmdline("/usr/bin/systemctl is-active", systest.Fail(3, "inactive"))
+	}
+
+	var out, errOut bytes.Buffer
+
+	rc = Run(context.Background(), f.System(), &out, &errOut, &Options{Name: name})
+
+	return rc, out.String(), errOut.String()
+}
+
 func TestRun_UnknownService(t *testing.T) {
-	stubProbes(t, false, false)
+	t.Parallel()
 
-	var stdout, stderr bytes.Buffer
-
-	rc := Run(context.Background(), &stdout, &stderr, &Options{Name: "no-such-service"})
+	rc, stdout, stderr := runWithFakes("no-such-service", false)
 
 	if rc != 1 {
 		t.Errorf("rc = %d, want 1", rc)
 	}
 
-	if stdout.Len() != 0 {
-		t.Errorf("stdout = %q, want empty", &stdout)
+	if stdout != "" {
+		t.Errorf("stdout = %q, want empty", stdout)
 	}
 
-	if want := "Error: unknown service: no-such-service\n"; stderr.String() != want {
-		t.Errorf("stderr = %q, want %q", &stderr, want)
+	if want := "Error: failed to get status for service no-such-service: unknown service: no-such-service\n"; stderr != want {
+		t.Errorf("stderr = %q, want %q", stderr, want)
 	}
 }
 
 func TestRun_ServiceNotRunning(t *testing.T) {
-	stubProbes(t, false, false)
+	t.Parallel()
 
-	var stdout, stderr bytes.Buffer
-
-	rc := Run(context.Background(), &stdout, &stderr, &Options{Name: "cbpolicyd"})
+	rc, stdout, stderr := runWithFakes("cbpolicyd", true)
 
 	if rc != 1 {
 		t.Errorf("rc = %d, want 1", rc)
 	}
 
-	if want := "Error: service cbpolicyd is not running\n"; stderr.String() != want {
-		t.Errorf("stderr = %q, want %q", &stderr, want)
+	if want := "Error: service cbpolicyd is not running\n"; stderr != want {
+		t.Errorf("stderr = %q, want %q", stderr, want)
 	}
 
-	if stdout.Len() == 0 {
+	if stdout == "" {
 		t.Error("expected the 'is not running' line on stdout")
 	}
 }
 
 func TestRun_ServiceRunning(t *testing.T) {
-	stubProbes(t, true, false)
+	t.Parallel()
 
-	var stdout, stderr bytes.Buffer
+	rc, stdout, stderr := runWithFakes("cbpolicyd", false)
 
-	rc := Run(context.Background(), &stdout, &stderr, &Options{Name: "cbpolicyd"})
-
-	if rc != 0 || stderr.Len() != 0 {
-		t.Errorf("rc = %d, stderr = %q; want 0 and empty", rc, &stderr)
+	if rc != 0 || stderr != "" {
+		t.Errorf("rc = %d, stderr = %q; want 0 and empty", rc, stderr)
 	}
 
-	if stdout.Len() == 0 {
-		t.Error("expected the 'is running' line on stdout")
+	if want := services.NewController(systest.New().System()).LookupService("cbpolicyd").DisplayName + " is running.\n"; len(stdout) < len(want) || stdout[:len(want)] != want {
+		t.Errorf("stdout = %q, want prefix %q", stdout, want)
 	}
 }

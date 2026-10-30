@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"github.com/zextras/carbonio-configd/internal/cli/proxy"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // ProxyCmd handles the "configd proxy" subcommand.
@@ -22,10 +23,10 @@ type ProxyCmd struct {
 }
 
 // runProxy executes a proxy action with the process's stdio.
-func runProxy(opts *proxy.Options) error {
-	opts.Standalone = standaloneRewrite(false)
+func runProxy(env sys.System, opts *proxy.Options) error {
+	opts.Standalone = standaloneRewrite(env, false)
 
-	return exitWith(proxy.Run(context.Background(), os.Stdout, os.Stderr, opts))
+	return exitWith(proxy.Run(context.Background(), env, os.Stdout, os.Stderr, opts))
 }
 
 // ProxyConfCmd prints the assembled nginx configuration by following all include
@@ -39,8 +40,8 @@ type ProxyConfCmd struct {
 }
 
 // Run prints the assembled nginx configuration.
-func (c *ProxyConfCmd) Run() error {
-	return runProxy(&proxy.Options{
+func (c *ProxyConfCmd) Run(env sys.System) error {
+	return runProxy(env, &proxy.Options{
 		Action:     proxy.ActionConf,
 		ConfigFile: c.ConfigFile,
 		Markers:    c.Markers,
@@ -57,8 +58,8 @@ type ProxyGenCmd struct {
 }
 
 // Run generates the proxy configs.
-func (c *ProxyGenCmd) Run() error {
-	return runProxy(&proxy.Options{Action: proxy.ActionGen, ExtraConfigs: c.ExtraConfigs})
+func (c *ProxyGenCmd) Run(env sys.System) error {
+	return runProxy(env, &proxy.Options{Action: proxy.ActionGen, ExtraConfigs: c.ExtraConfigs})
 }
 
 // ProxyEnableCmd enables a proxy protocol.
@@ -67,8 +68,8 @@ type ProxyEnableCmd struct {
 }
 
 // Run enables the protocol.
-func (c *ProxyEnableCmd) Run() error {
-	return runProxy(&proxy.Options{Action: proxy.ActionEnable, Protocol: c.Protocol})
+func (c *ProxyEnableCmd) Run(env sys.System) error {
+	return runProxy(env, &proxy.Options{Action: proxy.ActionEnable, Protocol: c.Protocol})
 }
 
 // ProxyDisableCmd disables a proxy protocol.
@@ -77,16 +78,16 @@ type ProxyDisableCmd struct {
 }
 
 // Run disables the protocol.
-func (c *ProxyDisableCmd) Run() error {
-	return runProxy(&proxy.Options{Action: proxy.ActionDisable, Protocol: c.Protocol})
+func (c *ProxyDisableCmd) Run(env sys.System) error {
+	return runProxy(env, &proxy.Options{Action: proxy.ActionDisable, Protocol: c.Protocol})
 }
 
 // ProxyStatusCmd shows proxy protocol statuses.
 type ProxyStatusCmd struct{}
 
 // Run shows the protocol statuses.
-func (c *ProxyStatusCmd) Run() error {
-	return runProxy(&proxy.Options{Action: proxy.ActionStatus})
+func (c *ProxyStatusCmd) Run(env sys.System) error {
+	return runProxy(env, &proxy.Options{Action: proxy.ActionStatus})
 }
 
 // ProxyRewriteCmd handles the fallthrough case: "configd proxy" without
@@ -96,6 +97,6 @@ type ProxyRewriteCmd struct {
 }
 
 // Run rewrites the proxy configs.
-func (c *ProxyRewriteCmd) Run() error {
-	return runProxy(&proxy.Options{Action: proxy.ActionRewrite, ExtraConfigs: c.ExtraConfigs})
+func (c *ProxyRewriteCmd) Run(env sys.System) error {
+	return runProxy(env, &proxy.Options{Action: proxy.ActionRewrite, ExtraConfigs: c.ExtraConfigs})
 }

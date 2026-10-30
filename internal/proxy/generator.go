@@ -16,8 +16,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zextras/carbonio-configd/internal/fileutil"
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/sys"
 	"github.com/zextras/carbonio-configd/internal/tracing"
 )
 
@@ -44,7 +44,7 @@ func (g *Generator) DiscoverTemplates(ctx context.Context) ([]string, error) {
 	logger.DebugContext(ctx, "Discovering templates",
 		"template_dir", g.TemplateDir)
 
-	standardTemplates, err := discoverTemplatesInDir(g.TemplateDir)
+	standardTemplates, err := discoverTemplatesInDir(g.env.FS, g.TemplateDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to discover standard templates: %w", err)
 	}
@@ -56,9 +56,9 @@ func (g *Generator) DiscoverTemplates(ctx context.Context) ([]string, error) {
 	customTemplateDir := filepath.Join(g.ConfDir, "nginx", "templates_custom")
 	customTemplates := make(map[string]string)
 
-	if _, err := os.Stat(customTemplateDir); err == nil {
+	if _, err := g.env.FS.Stat(customTemplateDir); err == nil {
 		// Custom directory exists, scan it
-		customFiles, err := discoverTemplatesInDir(customTemplateDir)
+		customFiles, err := discoverTemplatesInDir(g.env.FS, customTemplateDir)
 		if err != nil {
 			logger.ErrorContext(ctx, "Failed to scan custom templates",
 				"error", err)
@@ -103,16 +103,16 @@ func (g *Generator) DiscoverTemplates(ctx context.Context) ([]string, error) {
 }
 
 // discoverTemplatesInDir scans a directory for .template files
-func discoverTemplatesInDir(dir string) ([]string, error) {
+func discoverTemplatesInDir(fsys sys.FS, dir string) ([]string, error) {
 	var templates []string
 
 	// Check if directory exists
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
+	if _, err := fsys.Stat(dir); os.IsNotExist(err) {
 		return templates, nil
 	}
 
 	// Walk directory and find .template files
-	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+	err := fsys.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -174,7 +174,7 @@ func (g *Generator) GenerateAll(ctx context.Context) error {
 	// This avoids creating 40+ processor instances with duplicate regex compilations
 	// Note: Upstream data is prefetched in NewGenerator() before variable resolution
 	processorStart := time.Now()
-	processor := NewTemplateProcessor(g, g.TemplateDir, g.IncludesDir)
+	processor := NewTemplateProcessor(g, g.env.FS, g.TemplateDir, g.IncludesDir)
 	processorDuration := time.Since(processorStart)
 	logger.DebugContext(ctx, "Timing: Processor creation took",
 		"duration_seconds", processorDuration.Seconds())
@@ -267,7 +267,7 @@ func (g *Generator) appendConfGenResult(ctx context.Context, text string) {
 	}
 
 	//nolint:gosec // G304: path is ConfDir joined with a constant file name
-	f, err := os.OpenFile(filepath.Join(g.ConfDir, coreConfName), os.O_WRONLY|os.O_APPEND, 0)
+	f, err := g.env.FS.OpenFile(filepath.Join(g.ConfDir, coreConfName), os.O_WRONLY|os.O_APPEND, 0)
 	if err != nil {
 		return
 	}
@@ -420,7 +420,7 @@ func (g *Generator) ProcessTemplateWithProcessor(
 
 // ensureIncludesDir creates the includes directory if it doesn't exist
 func (g *Generator) ensureIncludesDir(ctx context.Context) error {
-	if err := os.MkdirAll(g.IncludesDir, 0o755); err != nil {
+	if err := g.env.FS.MkdirAll(g.IncludesDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
@@ -431,7 +431,7 @@ func (g *Generator) ensureIncludesDir(ctx context.Context) error {
 }
 
 // writeFile writes a file atomically with proper permissions via
-// fileutil.AtomicWrite (write temp file → fsync → chmod → rename), ensuring
+// FS.WriteFileAtomic (write temp file → fsync → chmod → rename), ensuring
 // no partial updates are ever visible.
 func (g *Generator) writeFile(ctx context.Context, path string, content []byte) error {
 	if g.DryRun {
@@ -444,7 +444,7 @@ func (g *Generator) writeFile(ctx context.Context, path string, content []byte) 
 
 	// Mode 0640: owner/group only, matching the files legacy ProxyConfGen produces
 	// (zextras:zextras); the nginx worker runs as the zextras user.
-	if err := fileutil.AtomicWrite(path, content, generatedFileMode); err != nil {
+	if err := g.env.FS.WriteFileAtomic(path, content, generatedFileMode); err != nil {
 		return fmt.Errorf("failed to write file %s: %w", path, err)
 	}
 

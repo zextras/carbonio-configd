@@ -23,6 +23,8 @@ import (
 // success, and leaves the service untracked (legacy configd only re-tracks a
 // service once a later status check sees it running).
 func TestRestartDownService_FailureNotLoggedAsSuccess(t *testing.T) {
+	t.Parallel()
+
 	var buf bytes.Buffer
 
 	ctx := logger.ContextWithLogger(context.Background(),
@@ -54,6 +56,8 @@ func TestRestartDownService_FailureNotLoggedAsSuccess(t *testing.T) {
 
 // TestRestartDownService_SuccessRetracks is the success counterpart.
 func TestRestartDownService_SuccessRetracks(t *testing.T) {
+	t.Parallel()
+
 	var buf bytes.Buffer
 
 	ctx := logger.ContextWithLogger(context.Background(),
@@ -76,6 +80,8 @@ func TestRestartDownService_SuccessRetracks(t *testing.T) {
 // TestCheckOneService_ProbeFailureIsWarn verifies a failing status probe is a
 // WARN, not an ERROR.
 func TestCheckOneService_ProbeFailureIsWarn(t *testing.T) {
+	t.Parallel()
+
 	var buf bytes.Buffer
 
 	ctx := logger.ContextWithLogger(context.Background(),
@@ -104,6 +110,8 @@ func TestCheckOneService_ProbeFailureIsWarn(t *testing.T) {
 // context is done even though the monitoring loop is stuck in a restart, and
 // that the watchdog can be started and stopped again afterwards.
 func TestWatchdog_StopHonorsContextWhileRunBusy(t *testing.T) {
+	t.Parallel()
+
 	entered := make(chan struct{}, 1)
 	release := make(chan struct{})
 
@@ -119,15 +127,17 @@ func TestWatchdog_StopHonorsContextWhileRunBusy(t *testing.T) {
 		return nil
 	}
 
-	wd := NewWatchdog(Config{
+	h := newHarness(t, Config{
 		ServiceManager: mockSM,
 		State:          state.NewState(),
 		CheckInterval:  5 * time.Millisecond,
 	})
+	wd := h.wd
 	wd.AddService(context.Background(), "amavis")
 	wd.SetServiceEnabled(context.Background(), "amavis", true)
 
-	wd.Start(context.Background())
+	h.start()
+	h.clock.Advance(h.wd.CheckInterval)
 
 	select {
 	case <-entered:
@@ -181,11 +191,14 @@ func TestWatchdog_StopHonorsContextWhileRunBusy(t *testing.T) {
 // TestWatchdog_StartStopRepeats verifies Stop followed by Start/Stop cycles
 // neither panics (closed channel) nor hangs.
 func TestWatchdog_StartStopRepeats(t *testing.T) {
-	wd := NewWatchdog(Config{
+	t.Parallel()
+
+	h := newHarness(t, Config{
 		ServiceManager: NewMockServiceManager(),
 		State:          state.NewState(),
 		CheckInterval:  time.Millisecond,
 	})
+	wd := h.wd
 
 	for range 3 {
 		wd.Start(context.Background())

@@ -14,6 +14,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/cli/cliutil"
 	"github.com/zextras/carbonio-configd/internal/cli/status"
 	"github.com/zextras/carbonio-configd/internal/services"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // Action is the "configd service" subcommand to run.
@@ -43,45 +44,69 @@ type Options struct {
 }
 
 // mutation describes a service-mutating action: the verb used in the error
-// message and the services function implementing it.
+// message and the Controller method implementing it.
 type mutation struct {
 	verb string
 	fn   func(context.Context, string) error
 }
 
-var mutations = map[Action]mutation{
-	ActionStart:        {"start", services.ServiceStart},
-	ActionStop:         {"stop", services.ServiceStop},
-	ActionRestart:      {"restart", services.ServiceRestart},
-	ActionReload:       {"reload", services.ServiceReload},
-	ActionStartSystemd: {"start", services.ServiceStartSystemd},
-	ActionStopSystemd:  {"stop", services.ServiceStopSystemd},
+// runner carries what one "configd service" invocation drives: the Controller,
+// the status reporter and the mutating-action table bound to that Controller.
+type runner struct {
+	ctl       *services.Controller
+	reporter  *status.Reporter
+	mutations map[Action]mutation
+}
+
+// noRewrite reports whether the invocation skips the REWRITE round-trip.
+// --no-rewrite is read by the Controller's start and restart paths only.
+func noRewrite(opts *Options) bool {
+	return opts.NoRewrite && (opts.Action == ActionStart || opts.Action == ActionRestart)
+}
+
+func newRunner(env sys.System, opts *Options) *runner {
+	ctl := services.NewController(env, services.WithNoRewrite(noRewrite(opts)))
+
+	return &runner{
+		ctl:      ctl,
+		reporter: status.NewReporter(env, ctl),
+		mutations: map[Action]mutation{
+			ActionStart:        {"start", ctl.ServiceStart},
+			ActionStop:         {"stop", ctl.ServiceStop},
+			ActionRestart:      {"restart", ctl.ServiceRestart},
+			ActionReload:       {"reload", ctl.ServiceReload},
+			ActionStartSystemd: {"start", ctl.ServiceStartSystemd},
+			ActionStopSystemd:  {"stop", ctl.ServiceStopSystemd},
+		},
+	}
 }
 
 // Run executes "configd service" and returns the exit status. list and status
 // have no permission gate; every mutating action requires the zextras user.
-func Run(ctx context.Context, stdout, stderr io.Writer, opts *Options) int {
-	if _, mutating := mutations[opts.Action]; mutating && !cliutil.RequireZextras(stderr) {
+func Run(ctx context.Context, env sys.System, stdout, stderr io.Writer, opts *Options) int {
+	r := newRunner(env, opts)
+
+	if _, mutating := r.mutations[opts.Action]; mutating && !cliutil.RequireZextras(stderr) {
 		return 1
 	}
 
-	return run(ctx, stdout, stderr, opts)
+	return r.run(ctx, stdout, stderr, opts)
 }
 
-func run(ctx context.Context, stdout, stderr io.Writer, opts *Options) int {
+func (r *runner) run(ctx context.Context, stdout, stderr io.Writer, opts *Options) int {
 	cliutil.InitCLILogging(stderr)
 
 	c := cliutil.NewConsole(stdout, stderr)
 
 	switch opts.Action {
 	case ActionList:
-		list(ctx, c)
+		r.list(ctx, c)
 
 		return 0
 	case ActionStatus:
-		return report(stderr, status.PrintServiceStatus(ctx, c, opts.Name))
+		return report(stderr, r.reporter.PrintServiceStatus(ctx, c, opts.Name))
 	default:
-		return report(stderr, mutate(ctx, opts))
+		return report(stderr, r.mutate(ctx, opts))
 	}
 }
 
@@ -99,15 +124,10 @@ func report(stderr io.Writer, err error) int {
 
 // mutate runs a service-mutating action, wrapping any error with the verb and
 // service name to match each command's original user-facing message.
-func mutate(ctx context.Context, opts *Options) error {
-	m, ok := mutations[opts.Action]
+func (r *runner) mutate(ctx context.Context, opts *Options) error {
+	m, ok := r.mutations[opts.Action]
 	if !ok {
 		return fmt.Errorf("unknown service action: %q", opts.Action)
-	}
-
-	if opts.Action == ActionStart || opts.Action == ActionRestart {
-		// services.ServiceRestart checks this before rewriting configs.
-		services.NoRewrite = opts.NoRewrite
 	}
 
 	if err := m.fn(ctx, opts.Name); err != nil {
@@ -117,8 +137,8 @@ func mutate(ctx context.Context, opts *Options) error {
 	return nil
 }
 
-func list(ctx context.Context, c *cliutil.Console) {
-	for _, info := range services.ServiceListStatus(ctx) {
+func (r *runner) list(ctx context.Context, c *cliutil.Console) {
+	for _, info := range r.ctl.ServiceListStatus(ctx) {
 		c.Status(info.DisplayName, info.Running, "")
 	}
 }
