@@ -9,7 +9,7 @@ package security
 
 import (
 	"fmt"
-	"os"
+	"io"
 	"os/user"
 
 	"github.com/zextras/carbonio-configd/internal/config"
@@ -35,11 +35,11 @@ func CheckUserPermissions() error {
 }
 
 // MustCheckUserPermissions verifies user permissions.
-// If the check fails, it logs an error to stderr and returns the error.
-// It is up to the caller to handle the error (e.g., by exiting).
-func MustCheckUserPermissions() error {
+// If the check fails, it writes the usage message to stderr and returns the
+// error. It is up to the caller to handle the error (e.g., by exiting).
+func MustCheckUserPermissions(stderr io.Writer) error {
 	if err := CheckUserPermissions(); err != nil {
-		fmt.Fprintf(os.Stderr, "Please run this program as the '%s' user.\n", RequiredUser)
+		_, _ = fmt.Fprintf(stderr, "Please run this program as the '%s' user.\n", RequiredUser)
 
 		return err
 	}

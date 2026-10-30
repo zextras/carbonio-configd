@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-only
 
-package main
+package cliutil
 
 import (
 	"fmt"
@@ -10,13 +10,24 @@ import (
 	carboldap "github.com/zextras/carbonio-configd/internal/ldap"
 )
 
-// openWriteLDAPClient dials a write-capable LDAP client from a resolved
+// Localconfig keys read to reach LDAP.
+const (
+	// LCKeyZimbraServerHostname is the hostname of the local server entry.
+	LCKeyZimbraServerHostname = "zimbra_server_hostname"
+
+	lcKeyZimbraLDAPPassword = "zimbra_ldap_password"
+	lcKeyZimbraLDAPUserDN   = "zimbra_ldap_userdn"
+	lcKeyLDAPURL            = "ldap_url"
+	lcKeyLDAPMasterURL      = "ldap_master_url"
+)
+
+// OpenWriteLDAPClient dials a write-capable LDAP client from a resolved
 // localconfig map. It reads ldap_master_url (writes require the master),
 // falling back to ldap_url when the master URL is unset. Both keys may carry
 // space-separated multi-URL values; ParseURLs is used at both layers so
 // connect-time failover works regardless of which key holds the list
-// (CO-3565). Shared by proxycli and tlscli.
-func openWriteLDAPClient(lc map[string]string) (*carboldap.Client, error) {
+// (CO-3565). Shared by the proxy and tls commands.
+func OpenWriteLDAPClient(lc map[string]string) (*carboldap.Client, error) {
 	urls := carboldap.ParseURLs(lc[lcKeyLDAPMasterURL])
 	if len(urls) == 0 {
 		urls = carboldap.ParseURLs(lc[lcKeyLDAPURL])

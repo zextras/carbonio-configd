@@ -5,11 +5,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 
 	"github.com/alecthomas/kong"
 	"github.com/willabides/kongplete"
+	"github.com/zextras/carbonio-configd/internal/cli/cliutil"
+	"github.com/zextras/carbonio-configd/internal/cli/rewrite"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/sdnotify"
 )
@@ -30,7 +33,7 @@ type CLI struct {
 	Proxy       ProxyCmd                     `cmd:"" help:"Proxy protocol management"`
 	TLS         TLSCmd                       `cmd:"" name:"tls" help:"Manage Carbonio mail mode (legacy zmtlsctl)"`
 	Rewrite     RewriteCmd                   `cmd:"" help:"Force configuration rewrite"`
-	Release     VersionCmd                   `cmd:"" help:"Show Carbonio release and package versions"`
+	Release     ReleaseCmd                   `cmd:"" help:"Show Carbonio release and package versions"`
 	Completion  kongplete.InstallCompletions `cmd:"" help:"Install shell completions"`
 	Daemon      DaemonCmd                    `cmd:"" default:"1" hidden:""`
 }
@@ -40,9 +43,11 @@ type DaemonCmd struct{}
 
 // Run executes the daemon command.
 func (c *DaemonCmd) Run(cli *CLI) error {
-	requireZextras()
+	if !cliutil.RequireZextras(os.Stderr) {
+		return exitStatus(1)
+	}
 
-	ctx := initializeLogging()
+	ctx := cliutil.InitLogging(os.Stderr)
 	ctx = logger.ContextWithComponent(ctx, "main")
 
 	notifier, err := sdnotify.New()
@@ -56,7 +61,10 @@ func (c *DaemonCmd) Run(cli *CLI) error {
 
 	args := cli.toArgs()
 
-	profilingConfig, tracingConfig := setupProfilingAndTracing(ctx, args)
+	profilingConfig, tracingConfig, err := setupProfilingAndTracing(ctx, args)
+	if err != nil {
+		return exitStatus(1)
+	}
 
 	mainCfg, appState, ldapClient := initializeConfig()
 
@@ -64,14 +72,12 @@ func (c *DaemonCmd) Run(cli *CLI) error {
 
 	logger.InfoContext(ctx, "Process exited", "program", mainCfg.Progname)
 
-	// Stop profiling/tracing explicitly so os.Exit can't skip a deferred call
-	// (exitAfterDefer). Both helpers are nil-safe.
+	// Stop profiling/tracing explicitly before returning the exit status so the
+	// profile is flushed before main exits the process. Both helpers are nil-safe.
 	StopProfiling(profilingConfig)
 	StopTracing(tracingConfig)
 
-	os.Exit(exitCode)
-
-	return nil
+	return exitWith(exitCode)
 }
 
 // RewriteCmd sends a forced configuration rewrite to the running daemon.
@@ -80,18 +86,11 @@ type RewriteCmd struct {
 }
 
 // Run executes the rewrite command.
-//
-//nolint:unparam // Kong interface requires error return; failures exit with their code
 func (c *RewriteCmd) Run(_ *CLI) error {
-	requireZextras()
-
-	ctx := initializeLogging()
-
-	if code := forcedRewrite(ctx, &Args{ForcedConfigs: c.ConfigNames}, runStandaloneRewrite); code != 0 {
-		os.Exit(code)
-	}
-
-	return nil
+	return exitWith(rewrite.Run(context.Background(), os.Stdout, os.Stderr, &rewrite.Options{
+		Configs:    c.ConfigNames,
+		Standalone: standaloneRewrite(false),
+	}))
 }
 
 // toArgs converts the parsed CLI globals to an Args struct.

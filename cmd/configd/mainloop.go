@@ -24,6 +24,9 @@ import (
 	"github.com/zextras/carbonio-configd/internal/watchdog"
 )
 
+// componentAntivirus is the watchdog's default monitored service.
+const componentAntivirus = "antivirus"
+
 // MainLoopActionTrigger implements the network.ActionTrigger interface.
 type MainLoopActionTrigger struct {
 	ReloadChan   chan struct{}

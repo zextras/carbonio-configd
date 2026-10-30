@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-only
 
-package main
+package rewrite
 
 import (
 	"context"
@@ -25,7 +25,7 @@ func ContactService(command string, args []string, listenPort int, ipMode string
 	)
 
 	dialer := &net.Dialer{Timeout: 5 * time.Second}
-	if ipMode == ipModeIPv4 {
+	if ipMode == IPModeIPv4 {
 		conn, err = dialer.DialContext(context.Background(), "tcp4", listenerParams)
 	} else {
 		conn, err = dialer.DialContext(context.Background(), "tcp6", listenerParams)
