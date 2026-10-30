@@ -71,9 +71,12 @@ Source: `cmd/configd/localconfig*.go`. Reference: carbonio-mailbox `4.36.6`
   `option 'X' can not be used with option 'Y'`, `invalid option 'X'`.
 - `-i`/`--all` print `internal/localconfig/lcdocs.go`: the `ZsMsg.properties` text of every
   `KnownKey` (80-column wrap, `* Changes are in effect after server restart.` unless
-  `@Reloadable`). `-i` hides keys without LC.java `@Supported`. `lcdocs.go` is generated: run
-  `go generate ./internal/localconfig/` (`scripts/gen-lcdocs.py`, reads `LC.java` and
-  `store/conf/msgs/ZsMsg.properties` from a carbonio-mailbox clone at the release tag) when either changes.
+  `@Reloadable`). `-i` hides keys without LC.java `@Supported`. `lcdocs.go` and `lcdefaults.go` (every `KnownKey` default plus the `.protect()` set behind
+  `-e` without `-f`) are generated: run `make generate` (= `go generate ./internal/localconfig/`,
+  `scripts/gen-lc.py`, reads `LC.java`, `Constants.java` and `store/conf/msgs/ZsMsg.properties` from a
+  carbonio-mailbox clone, default `~/zextras/carbonio-mailbox`) after bumping the tag pinned in
+  `scripts/lc-mailbox-tag`. `make generate-check` regenerates into a temp dir and diffs against the
+  committed files.
 - `-l` authenticates with `zimbra_ldap_user`/`zimbra_ldap_password` and sends
   `ReloadLocalConfigRequest` to `https://${zimbra_zmprov_default_soap_server}:${zimbra_admin_service_port}`
   (read from the default `localconfig.xml`, not from `-c`). A refused connection prints

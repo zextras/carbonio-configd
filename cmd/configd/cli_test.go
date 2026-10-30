@@ -40,7 +40,7 @@ func TestInitCmd_Structure(t *testing.T) {
 	}
 }
 
-func TestDangerousKeys_MatchLegacyProtectedKeys(t *testing.T) {
+func TestProtectedKeys_MatchLegacyProtectedKeys(t *testing.T) {
 	// Keys marked .protect() in legacy LC.java: editing requires -f.
 	for _, key := range []string{
 		"zimbra_home",
@@ -50,7 +50,7 @@ func TestDangerousKeys_MatchLegacyProtectedKeys(t *testing.T) {
 		"mysql_root_password",
 		"zimbra_vami_password",
 	} {
-		if !dangerousKeys[key] {
+		if !localconfig.IsProtected(key) {
 			t.Errorf("%s: legacy requires -f, want dangerous", key)
 		}
 	}
@@ -64,7 +64,7 @@ func TestDangerousKeys_MatchLegacyProtectedKeys(t *testing.T) {
 		"zimbra_ldap_userdn",
 		"zimbra_require_interprocess_security",
 	} {
-		if dangerousKeys[key] {
+		if localconfig.IsProtected(key) {
 			t.Errorf("%s: legacy allows editing without -f, want not dangerous", key)
 		}
 	}

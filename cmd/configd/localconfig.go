@@ -25,9 +25,6 @@ const (
 	modeNokey  = "nokey"
 )
 
-// lcKeyLDAPRootPassword is the localconfig key holding the LDAP root password.
-const lcKeyLDAPRootPassword = "ldap_root_password"
-
 // LocalconfigCmd handles the "configd localconfig" subcommand.
 //
 // Flag letters, compatibility rules and messages mirror the legacy
@@ -214,18 +211,6 @@ func (o *localconfigOpts) saveFailure(err error) error {
 	return failDetail("save to "+o.configPath+" failed", err)
 }
 
-// dangerousKeys lists keys that require -force to edit. It mirrors the keys
-// marked .protect() in the legacy LC.java (KnownKey.needForceToEdit), so
-// scripts that edit other keys without -f keep working.
-var dangerousKeys = map[string]bool{
-	"zimbra_home":           true,
-	"zimbra_mysql_password": true,
-	lcKeyZimbraLDAPPassword: true,
-	lcKeyLDAPRootPassword:   true,
-	"mysql_root_password":   true,
-	"zimbra_vami_password":  true,
-}
-
 // runEdit sets every key=value argument and saves once: legacy sets all keys in
 // memory and saves a single time, so a bad argument leaves the file untouched.
 func (o *localconfigOpts) runEdit() error {
@@ -245,7 +230,7 @@ func (o *localconfigOpts) runEdit() error {
 			return err
 		}
 
-		if dangerousKeys[key] && !o.force {
+		if localconfig.IsProtected(key) && !o.force {
 			return failf("can not edit key %s", key)
 		}
 

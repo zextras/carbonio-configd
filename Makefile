@@ -28,7 +28,7 @@ BUILD_FLAGS_PROFILING=-trimpath -tags profiling $(LDFLAGS)
 BUILD_FLAGS_TRACING=-trimpath -tags tracing $(LDFLAGS)
 BUILD_FLAGS_FULL=-trimpath -tags "profiling tracing" $(LDFLAGS)
 
-.PHONY: all build clean test test-integration deps fmt lint help install deadcode dup dup-baseline fuzz check reuse thirdparties
+.PHONY: all build clean test test-integration deps fmt lint help install deadcode dup dup-baseline fuzz check reuse thirdparties generate generate-check
 
 # REUSE compliance (same gate as the Jenkins 'REUSE Lint' stage)
 reuse:
@@ -37,6 +37,18 @@ reuse:
 # Regenerate THIRDPARTIES exactly as the pre-commit hook / Jenkins verify do
 thirdparties:
 	bash .ci/thirdparties/thirdparties-go.sh THIRDPARTIES
+
+# Regenerate internal/localconfig/lcdocs.go and lcdefaults.go from carbonio-mailbox
+# LC.java at the tag pinned in scripts/lc-mailbox-tag (needs a local clone; override
+# with MAILBOX_REPO=DIR).
+MAILBOX_REPO ?= $(HOME)/zextras/carbonio-mailbox
+
+generate:
+	python3 scripts/gen-lc.py --mailbox-repo $(MAILBOX_REPO)
+
+# Regenerate into a temp dir and diff against the committed files.
+generate-check:
+	scripts/gen-lc-check.sh $(MAILBOX_REPO)
 
 # Default target
 all: clean deps fmt lint test build
