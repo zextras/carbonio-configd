@@ -110,10 +110,40 @@ configd rewrite proxy mta
 # Replaces: echo "REWRITE proxy mta" | netcat -w 120 localhost 7171
 ```
 
+### Plan subcommand (dry run)
+
+`configd plan [sections...] [--json]` shows what a rewrite would change on this host and why,
+without changing anything. It loads the configuration like a forced rewrite, renders the
+templates in memory, reads Postfix with `postconf -h` / `postconf -n`, compares everything with
+the files on disk and prints one line per action with its reasons (or JSON with `--json`).
+Every entry's reason is the host drift found. Without arguments all sections are evaluated; with arguments only the named ones.
+
+```
+$ configd plan mta
+rewrite      conf/postfix/master.cf.in -> conf/postfix/master.cf
+    because: drift: /opt/zextras/conf/postfix/master.cf content differs from the rendered template
+postconf -e  smtpd_tls_loglevel=1
+    because: drift: main.cf smtpd_tls_loglevel = "0" would become "1"
+restart      mta
+    because: drift: configuration of section mta would change
+```
+
+(Output is illustrative; with nothing to do it prints `No changes.`)
+
+Exit codes: `0` no changes, `1` changes would be made, `2` error.
+
+Limitations:
+
+- LDAP `cn=config` attributes cannot be read back, so planned `ldap` writes are always listed.
+- `proxygen` is listed only when another action of one of its sections drifted; the generated
+  proxy files themselves are not rendered by `plan`.
+- Restarts shown are those the drifted sections would trigger. The running daemon restarts
+  services only on variable changes, and a forced rewrite (`configd rewrite`) never restarts.
+
 ### Flags
 
 ```
---disable-restarts   Dry-run mode (no service restarts)
+--disable-restarts   Dry-run mode (no service restarts, including dependency cascades)
 --help, -h           Show help message
 ```
 

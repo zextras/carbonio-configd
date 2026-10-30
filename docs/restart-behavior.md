@@ -6,30 +6,93 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 # Restart Behavior
 
-## REWRITE commands vs. automatic restarts
+## When a section triggers restarts
 
-Source: `internal/configmgr/manager_actions.go` (`compileSectionActions`)
+Source: `internal/plan/compute.go` (`compileSection`, `compileSectionRestarts`)
 
-Service restarts only happen during automatic polling cycles where config changes are
-detected. They do **not** happen when a REWRITE command triggers the cycle.
-
-When the TCP server receives a `REWRITE` command (sent by `configd rewrite <section>...`
-or directly via netcat), it calls `State.AddRequestedConfigs`, which populates
-`RequestedConfig`. In `compileSectionActions`, the restart-compilation block is guarded by:
+`plan.Compute` decides, section by section, which services the plan restarts. A section
+that is processed (first run, forced, requested, or one of its required variables changed)
+compiles its `RESTART` services into plan restarts **unless** the section itself is
+excluded:
 
 ```go
-if firstRun || len(forcedConfig) > 0 || len(requestedConfigs) > 0 {
-    return  // skip restarts
+if !firstRun && !forced[section] && !requested[section] {
+    compileSectionRestarts(...)
 }
 ```
 
-So a REWRITE cycle rewrites config files and runs postconf/LDAP operations, but no service
-is restarted. This makes `configd rewrite proxy` safe to run on a live system — nginx
-config files are updated but nginx itself is not touched.
+The skip is **section-scoped**, not cycle-wide:
 
-Automatic restarts happen when `RequestedConfig` is empty, `ForcedConfig` is empty, and
-it is not the first run. This means only organic polling cycles that detect a config
-change can trigger restarts.
+- On the first run no section restarts anything.
+- A section named by `configd rewrite <section>` (forced) or by a TCP `REWRITE` command
+  (requested) is rewritten but its own services are not restarted. Restarting them would
+  trigger the `ExecStartPre` REWRITE of the very service being restarted.
+- Any other section in the same cycle whose variables changed still restarts its services.
+  A cycle that carries a REWRITE request for `proxy` therefore still restarts `mta` if an
+  `mta` variable changed in that cycle.
+
+So `configd rewrite proxy` is safe on a live system: nginx configuration is rewritten but
+nginx is not touched by that request.
+
+For each `RESTART` service of a restarting section the plan records:
+
+- `restart` when the service is enabled on the node;
+- `opendkim`: `restart` when the MTA is enabled, even if opendkim itself is not;
+- `archiving`: never stopped when disabled;
+- `stop` for any other disabled service.
+
+Services that became enabled or disabled since the previous cycle add `start`/`stop`
+entries with the reasons `service-enabled`/`service-disabled`.
+
+## Reasons
+
+Every plan restart carries the reasons that caused it, and so does every other plan entry:
+
+| Kind | Meaning |
+|---|---|
+| `first-run` | first cycle of the process |
+| `forced` | section named on the command line |
+| `requested` | section named by a REWRITE command |
+| `var-changed` | a variable the section requires changed (`old->new`; secret values redacted, long values truncated) |
+| `service-enabled` / `service-disabled` | the service changed state on this node |
+| `dependency` | rendered as `dependency of <name>`, where `<name>` is the `DEPENDS` key that restarted: the service restarts only because a service it depends on does |
+| `retry` | the previous attempt did not complete |
+| `mapfile-sync` | a mapped file is re-synced every cycle |
+
+When a service is restarted, one INFO line is logged:
+
+```
+msg="Restarting service" service=amavis reasons=[...]
+```
+
+The `reasons` attribute holds the human-readable reasons, for example
+`section mta changed because VAR zimbraMtaRestriction changed 'a'->'b'` or
+`dependency of antivirus`. A service queued several times in one cycle is logged once with
+the merged reasons.
+
+`configd plan` prints the same reasons without changing anything; see the README.
+
+## Restart settings
+
+Source: `internal/restart/policy.go` (`Policy.Apply`)
+
+`ConfigManager.ApplyRestarts` runs `restart.Policy.Apply` once per cycle, even when the plan
+has no restarts, because it also publishes the DEPENDS graph and flushes due debounced
+requests.
+
+| Setting | Effect |
+|---|---|
+| `zmconfigd_enable_config_restarts` (default `true`) | When `false` no plan restart is consumed; they are carried to the next cycle |
+| `zmconfigd_restart_debounce_seconds` (default `0` = off) | When > 0, requests are coalesced across cycles: each request restarts the service's quiet window and the service restarts once no new request arrived for that many seconds (trailing edge). State is in memory and lost on process restart |
+| `MaxFailedRestarts` (service manager, `3`) | Retry limit, see Dependency cascading |
+| `--disable-restarts` | Dry-run: the service manager skips every restart |
+
+**Deliberate correction.** Config-driven restarts now get the DEPENDS cascade and honour
+`--disable-restarts`. Previously the config manager used a separate service manager that
+never received the dependencies and never received `--disable-restarts`: a config change
+restarted only the services named in the section and `--disable-restarts` did not stop them.
+Both the daemon and the restart policy now use the single service manager that
+`buildServiceDependencies` fills and `SetDisableRestarts` configures.
 
 ## Service control priority
 
@@ -115,7 +178,10 @@ Source: `internal/services/manager.go` (`AddDependencyRestarts`, `ProcessRestart
 
 After a service restarts successfully, the service manager checks whether that service has
 any dependents registered in the `Dependencies` map. Dependents come from `DEPENDS` entries
-in `zmconfigd.cf` sections, loaded by `buildServiceDependencies` at the start of each loop.
+in `zmconfigd.cf` sections, loaded by `buildServiceDependencies` at the start of each loop and
+passed along in `plan.Plan.Dependencies`. A dependent restarted this way is queued with the
+reason `dependency of <service>`; `configd plan` shows the predicted cascade as
+`restart <service> (predicted cascade)`.
 
 For each dependent service:
 
