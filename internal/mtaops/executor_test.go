@@ -581,3 +581,52 @@ func TestHandleEmptyMapfileData_RemoveError(t *testing.T) {
 		t.Error("expected an error when os.Remove fails, got nil")
 	}
 }
+
+func TestExecutePostconfBatch_SkipsInvalidKeys(t *testing.T) {
+	tmpDir := t.TempDir()
+	postconfPath := filepath.Join(tmpDir, "common", "sbin", "postconf")
+
+	if err := os.MkdirAll(filepath.Dir(postconfPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	argsFile := filepath.Join(tmpDir, "postconf_args.txt")
+	script := "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done > " + argsFile + "\nexit 0\n"
+
+	if err := os.WriteFile(postconfPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	ex := NewExecutor(tmpDir, &mockLdapManager{})
+
+	ops := []PostconfOperation{
+		{Key: "-X", Value: "evil"},
+		{Key: "lmtp_tls_CAfile", Value: "/ca"},
+		{Key: "a=b", Value: "c"},
+		{Key: "", Value: "c"},
+		{Key: "myhostname", Value: "h"},
+	}
+
+	if err := ex.ExecutePostconfBatch(context.Background(), ops); err != nil {
+		t.Fatalf("ExecutePostconfBatch: %v", err)
+	}
+
+	data, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got, want := string(data), "-e\nlmtp_tls_CAfile=/ca\nmyhostname=h\n"; got != want {
+		t.Errorf("postconf args = %q, want %q", got, want)
+	}
+}
+
+func TestExecutePostconfBatch_AllKeysInvalidRunsNothing(t *testing.T) {
+	// postconf binary does not exist: any exec attempt would error.
+	ex := NewExecutor(t.TempDir(), &mockLdapManager{})
+
+	err := ex.ExecutePostconfBatch(context.Background(), []PostconfOperation{{Key: "-X", Value: "v"}})
+	if err != nil {
+		t.Errorf("expected nil when every key is skipped, got %v", err)
+	}
+}

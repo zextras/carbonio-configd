@@ -335,10 +335,36 @@ func TestRunLoopIteration_CancelledContextExits(t *testing.T) {
 	assert.Equal(t, iterExit, outcome)
 }
 
-func TestRunLoopIterationSafe_RecoverFromPanic(t *testing.T) {
-	// nil deps panics inside the iteration; the safe wrapper must absorb it.
-	outcome := runLoopIterationSafe(context.Background(), nil, &loopIterState{})
-	assert.Equal(t, iterContinue, outcome, "recovered panic falls through to zero value")
+// TestRunLoopIterationSafe_PanicBacksOff: a recovered panic must wait for the
+// interval (not hot-loop) and stay interruptible by shutdown.
+func TestRunLoopIterationSafe_PanicBacksOff(t *testing.T) {
+	// A nil trigger panics inside the iteration; the wrapper must absorb it.
+	deps := &daemonLoopDeps{
+		cfg:        &config.Config{Interval: 3600},
+		reloadChan: make(chan struct{}),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+
+	t.Cleanup(cancel)
+
+	done := make(chan iterOutcome, 1)
+
+	go func() { done <- runLoopIterationSafe(ctx, deps, &loopIterState{}) }()
+
+	select {
+	case <-done:
+		t.Fatal("runLoopIterationSafe returned right after a panic without backing off")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	cancel()
+
+	select {
+	case outcome := <-done:
+		assert.Equal(t, iterContinue, outcome, "recovered panic continues the loop")
+	case <-time.After(10 * time.Second):
+		t.Fatal("backoff was not interrupted by context cancellation")
+	}
 }
 
 func TestRunDaemonLoop_ExitsOnCancelledContext(t *testing.T) {

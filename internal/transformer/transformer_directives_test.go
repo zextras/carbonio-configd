@@ -258,12 +258,12 @@ func TestTransformRangeDirective(t *testing.T) {
 		{
 			name:     "Range calculation at 50%",
 			input:    "workers = %%range VAR:zimbraThreadPoolPercentage 10 100%%",
-			expected: "workers = 55\n", // (50/100) * (100-10) + 10 = 0.5 * 90 + 10 = 55
+			expected: "workers = 55.0\n", // Python 2 str(float); (50/100) * (100-10) + 10 = 0.5 * 90 + 10 = 55
 		},
 		{
 			name:     "Range calculation at 80%",
 			input:    "workers = %%range VAR:zimbraMaxThreads 20 200%%",
-			expected: "workers = 164\n", // (80/100) * (200-20) + 20 = 0.8 * 180 + 20 = 164
+			expected: "workers = 164.0\n", // Python 2 str(float); (80/100) * (200-20) + 20 = 0.8 * 180 + 20 = 164
 		},
 	}
 
@@ -433,14 +433,26 @@ func TestTransformCommentDirectiveWithValSet(t *testing.T) {
 			expected: "log.level = DEBUG\n",
 		},
 		{
-			name:     "Uncomment when value not in set",
+			// Legacy state.py: uncomment with a value set leaves the line active
+			// when the value is listed and comments it otherwise.
+			name:     "Uncomment adds comment when value not in set",
 			input:    "%%uncomment VAR:zimbraAuthMethod,#,basic,oauth%%auth = ldap",
+			expected: "#auth = ldap\n",
+		},
+		{
+			name:     "Uncomment when value in set",
+			input:    "%%uncomment VAR:zimbraAuthMethod,#,ldap,kerberos%%auth = ldap",
 			expected: "auth = ldap\n",
 		},
 		{
-			name:     "Uncomment adds comment when value in set",
-			input:    "%%uncomment VAR:zimbraAuthMethod,#,ldap,kerberos%%auth = ldap",
-			expected: "#auth = ldap\n",
+			name:     "Uncomment when value is the second listed value",
+			input:    "%%uncomment VAR:zimbraAuthMethod,#,kerberos,ldap%%auth = ldap",
+			expected: "auth = ldap\n",
+		},
+		{
+			name:     "Comment when value is the third listed value",
+			input:    "%%comment VAR:zimbraLogLevel,#,info,warn,debug%%log.level = DEBUG",
+			expected: "#log.level = DEBUG\n",
 		},
 	}
 
@@ -833,14 +845,24 @@ func TestValSetDirective(t *testing.T) {
 			expected: "log_level = debug\n",
 		},
 		{
-			name:     "Uncomment when value not in valset",
+			name:     "Uncomment adds comment when value not in valset",
 			input:    "%%uncomment VAR:mode,#,development,staging%%mode = production",
+			expected: "#mode = production\n",
+		},
+		{
+			name:     "Uncomment when value in valset",
+			input:    "%%uncomment VAR:mode,#,production,testing%%mode = production",
 			expected: "mode = production\n",
 		},
 		{
-			name:     "Uncomment adds comment when value in valset",
-			input:    "%%uncomment VAR:mode,#,production,testing%%mode = production",
+			name:     "Comment when key missing with valset",
+			input:    "%%comment VAR:absent,#,x,y%%mode = production",
 			expected: "#mode = production\n",
+		},
+		{
+			name:     "Uncomment when key missing with valset",
+			input:    "%%uncomment VAR:absent,#,x,y%%mode = production",
+			expected: "mode = production\n",
 		},
 	}
 
@@ -883,9 +905,16 @@ func TestHandleContainsDirective_LookupError(t *testing.T) {
 	ctx := context.Background()
 	tr := NewTransformer(&errorConfigLookup{}, nil)
 
+	// Legacy: val = str(None) == "None", so the search misses and altreplace wins.
 	got := tr.handleContainsDirective(ctx, "contains VAR:missingkey search^yes^no")
+	if got != "no" {
+		t.Errorf("contains on a missing key: got %q, want altreplace %q", got, "no")
+	}
+
+	// exact on a missing key returns "" regardless of altreplace (val is None).
+	got = tr.handleExactDirective(ctx, "exact VAR:missingkey search^yes^no")
 	if got != "" {
-		t.Errorf("expected empty string on contains lookup error, got %q", got)
+		t.Errorf("exact on a missing key: got %q, want empty", got)
 	}
 }
 
@@ -1004,8 +1033,10 @@ func TestResolveCommentState_NegateWithValSet(t *testing.T) {
 		t.Errorf("negate+valset match: got %q, want %q", got, want)
 	}
 
+	// Legacy: "!key" yields a Python bool, which is never in the string value set,
+	// so comment gets "" and uncomment gets the comment string.
 	got = tr.Transform(ctx, "%%comment VAR:!level,#,info,warn%%line content")
-	want = "#line content\n"
+	want = "line content\n"
 	if got != want {
 		t.Errorf("negate+valset no-match: got %q, want %q", got, want)
 	}

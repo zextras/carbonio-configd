@@ -14,19 +14,11 @@ import (
 //
 // Deprecated: use ConfigManager.Comparator() for new code.
 func (cm *ConfigManager) CheckConditional(ctx context.Context, cfgType, key string) (bool, error) {
-	if cm.comparator == nil {
-		cm.comparator = NewComparator(cm, cm.State, cm.ServiceMgr)
-	}
-
 	return cm.comparator.CheckConditional(ctx, cfgType, key)
 }
 
 // CompareKeys delegates to the embedded Comparator.
 func (cm *ConfigManager) CompareKeys(ctx context.Context) error {
-	if cm.comparator == nil {
-		cm.comparator = NewComparator(cm, cm.State, cm.ServiceMgr)
-	}
-
 	return cm.comparator.CompareKeys(ctx)
 }
 

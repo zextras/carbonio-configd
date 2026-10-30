@@ -37,24 +37,27 @@ const (
 
 	// configTypeSERVICE is the SERVICE config type for variable substitution.
 	configTypeSERVICE = "SERVICE"
+
+	// pyWhitespace is what Python 2's str.strip()/rstrip() remove from a byte string.
+	pyWhitespace = " \t\n\r\v\f"
 )
 
 // Compiled once at package init. `*regexp.Regexp` is safe for concurrent use.
 var (
-	localConfigRe   = regexp.MustCompile(`@@([^@]+)@@`)
-	configVarRe     = regexp.MustCompile(`%%(VAR|LOCAL|SERVICE):([^%]+)%%`)
-	plainVarRe      = regexp.MustCompile(`%%([^%:]+)%%`)
-	commentRe       = regexp.MustCompile(`comment ([^:]+):([^,\s]+)(?:,([^,]+))?(?:,([^,]+))?`)
-	uncommentRe     = regexp.MustCompile(`uncomment ([^:]+):([^,\s]+)(?:,([^,]+))?(?:,([^,]+))?`)
-	binaryRe        = regexp.MustCompile(`binary ([^:]+):(\S+)`)
-	truefalseRe     = regexp.MustCompile(`truefalse ([^:]+):(\S+)`)
-	rangeRe         = regexp.MustCompile(`range ([^:]+):(\S+)\s+(\S+)\s+(\S+)`)
-	freqRe          = regexp.MustCompile(`freq ([^:]+):(\S+)\s+(\S+)`)
-	freqDigitsRe    = regexp.MustCompile(`\D`)
-	freqNonDigitsRe = regexp.MustCompile(`\d`)
-	explodeRe       = regexp.MustCompile(`explode\s+(.*)\s+([^:]+):(\w+)`)
-	ldapURLRe       = regexp.MustCompile(`ldap.?://(\S+):\d+`)
-	inlineDirectRe  = regexp.MustCompile(`%%([^%]+)%%`)
+	localConfigRe  = regexp.MustCompile(`@@([^@]+)@@`)
+	configVarRe    = regexp.MustCompile(`%%(VAR|LOCAL|SERVICE):([^%]+)%%`)
+	plainVarRe     = regexp.MustCompile(`%%([^%:]+)%%`)
+	commentRe      = regexp.MustCompile(`comment ([^:]+):(\S+)`)
+	uncommentRe    = regexp.MustCompile(`uncomment ([^:]+):(\S+)`)
+	binaryRe       = regexp.MustCompile(`binary ([^:]+):(\S+)`)
+	truefalseRe    = regexp.MustCompile(`truefalse ([^:]+):(\S+)`)
+	rangeRe        = regexp.MustCompile(`range ([^:]+):(\S+)\s+(\S+)\s+(\S+)`)
+	freqRe         = regexp.MustCompile(`freq ([^:]+):(\S+)\s+(\S+)`)
+	freqNonDigitRe = regexp.MustCompile(`\D`)
+	freqDigitRe    = regexp.MustCompile(`\d`)
+	explodeRe      = regexp.MustCompile(`explode (.*) ([^:]+):(\w+)`)
+	ldapURLRe      = regexp.MustCompile(`ldap.?://(\S*):\d+`)
+	inlineDirectRe = regexp.MustCompile(`%%([^%]+)%%`)
 )
 
 // NewTransformer creates a new Transformer instance.
@@ -68,9 +71,11 @@ func NewTransformer(cl lookup.ConfigLookup, st *state.State) *Transformer {
 // Transform applies variable substitutions and conditional processing to a line.
 func (t *Transformer) Transform(ctx context.Context, line string) string {
 	ctx = logger.ContextWithComponentOnce(ctx, "transformer")
-	// Check for early exit if no special characters are present
-	if !strings.Contains(line, "@") && !strings.Contains(line, "%") {
-		return line // Return as-is without adding newline
+	// jylibs/state.py transform(): a line with fewer than two '@' and fewer than
+	// two '%' cannot hold a @@key@@ or %%key%% marker and is returned untouched,
+	// including its trailing whitespace and the missing newline of a last line.
+	if strings.Count(line, "@") < 2 && strings.Count(line, "%") < 2 {
+		return line
 	}
 
 	// Apply @@localconfig_key@@ substitutions
@@ -78,8 +83,8 @@ func (t *Transformer) Transform(ctx context.Context, line string) string {
 		return t.xformLocalConfig(ctx, match)
 	})
 
-	// Trim trailing whitespace before processing %% directives
-	line = strings.TrimRight(line, " \t\r\n")
+	// Trim trailing whitespace before processing %% directives (Python's rstrip()).
+	line = strings.TrimRight(line, pyWhitespace)
 
 	// Handle PREFIX directives like %%comment VAR:key%%rest_of_line
 	// These directives appear at the start of a line and affect the rest of the line
@@ -262,14 +267,13 @@ func (t *Transformer) processInlineDirectives(ctx context.Context, line string) 
 
 // xformLocalConfig handles @@localconfig_key@@ substitutions.
 func (t *Transformer) xformLocalConfig(ctx context.Context, match string) string {
-	key := strings.Trim(match, "@")
-	parts := strings.Fields(key)
+	// jylibs/state.py xformLocalConfig: "FUNC key" is split on the first space
+	// only; without a space the whole text is the key.
+	lookupKey := strings.Trim(match, "@")
 	funcName := ""
-	lookupKey := key
 
-	if len(parts) > 1 {
-		funcName = parts[0]
-		lookupKey = strings.Join(parts[1:], " ")
+	if fn, rest, found := strings.Cut(lookupKey, " "); found {
+		funcName, lookupKey = fn, rest
 	}
 
 	val, err := t.ConfigLookup.LookUpConfig(ctx, "LOCAL", lookupKey)
@@ -290,21 +294,24 @@ func (t *Transformer) xformLocalConfig(ctx context.Context, match string) string
 
 		return before
 	case "PERDITION_LDAP_SPLIT":
-		// This is a complex legacy transformation, simplifying for now
-		// It extracts hostnames from LDAP URLs
-		hostnames := []string{}
+		// Legacy: ' '.join((val.split()[0], ' '.join(re.findall(ldapURLRe, val)))):
+		// the first word, a space, then the host of every ldap URL, with the space
+		// kept when no URL matches. An empty value makes val.split()[0] raise
+		// IndexError in Jython and abort the whole rewrite; here it renders empty.
+		first := strings.Fields(val)
+		if len(first) == 0 {
+			logger.WarnContext(ctx, "PERDITION_LDAP_SPLIT on empty local config value", "key", lookupKey)
 
-		for _, match := range ldapURLRe.FindAllStringSubmatch(val, -1) {
-			if len(match) > 1 {
-				hostnames = append(hostnames, match[1])
-			}
+			return ""
 		}
 
-		if len(hostnames) > 0 {
-			return strings.Fields(val)[0] + " " + strings.Join(hostnames, " ")
+		hostnames := make([]string, 0, 4)
+
+		for _, m := range ldapURLRe.FindAllStringSubmatch(val, -1) {
+			hostnames = append(hostnames, m[1])
 		}
 
-		return strings.Fields(val)[0]
+		return first[0] + " " + strings.Join(hostnames, " ")
 	default:
 		return val
 	}

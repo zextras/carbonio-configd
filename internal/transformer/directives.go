@@ -16,15 +16,22 @@ import (
 	"github.com/zextras/carbonio-configd/internal/state"
 )
 
-// resolveCommentState implements the shared logic for comment/uncomment directives.
-// trueIsComment controls the no-valSet branch: true = comment when value is TRUE (comment
-// directive), false = comment when value is FALSE (uncomment directive).
+// resolveCommentState implements the shared logic for comment/uncomment directives,
+// mirroring jylibs/state.py xformConfig. The operand is "TYPE:key[,commentStr[,v1,v2...]]":
+//
+//   - without a value set the line is commented when the looked-up value is true
+//     (comment) or false (uncomment);
+//   - with a value set it is commented when the value is missing or listed
+//     (comment), or when it is present and not listed (uncomment).
+//
+// A "!" key prefix turns the lookup into a boolean (legacy checkConditional), which
+// is never "missing" and never equal to a listed string.
 func (t *Transformer) resolveCommentState(
 	ctx context.Context,
 	re *regexp.Regexp,
 	warnMsg string,
 	sr string,
-	trueIsComment bool,
+	isComment bool,
 ) string {
 	matches := re.FindStringSubmatch(sr)
 	if len(matches) < 3 {
@@ -33,44 +40,35 @@ func (t *Transformer) resolveCommentState(
 	}
 
 	cmd := matches[1]
-	key := matches[2]
+	parts := strings.SplitN(matches[2], ",", 3)
+	key := parts[0]
+	commentStr := "#"
+
+	if len(parts) > 1 {
+		commentStr = parts[1]
+	}
 
 	negate := strings.HasPrefix(key, "!")
-	if negate {
-		key = key[1:]
-	}
 
-	commentStr := "#"
-	if len(matches) > 3 && matches[3] != "" {
-		commentStr = matches[3]
-	}
-
-	valSet := []string{}
-	if len(matches) > 4 && matches[4] != "" {
-		valSet = strings.Split(matches[4], ",")
-	}
-
-	lookupVal, err := t.ConfigLookup.LookUpConfig(ctx, cmd, key)
+	lookupVal, err := t.ConfigLookup.LookUpConfig(ctx, cmd, strings.TrimPrefix(key, "!"))
 	if err != nil {
-		lookupVal = "" // Treat lookup error as empty
+		lookupVal = "" // legacy None: false for the boolean forms
 	}
 
-	var shouldComment bool
+	var hit bool
 
 	switch {
-	case len(valSet) > 0:
-		shouldComment = slices.Contains(valSet, lookupVal)
-	case trueIsComment:
-		shouldComment = state.IsTrueValue(lookupVal)
+	case len(parts) > 2:
+		missing := err != nil && !negate
+		listed := !negate && err == nil && slices.Contains(strings.Split(parts[2], ","), lookupVal)
+		hit = missing || listed
+	case negate:
+		hit = state.IsFalseValue(lookupVal)
 	default:
-		shouldComment = !state.IsTrueValue(lookupVal)
+		hit = state.IsTrueValue(lookupVal)
 	}
 
-	if negate {
-		shouldComment = !shouldComment
-	}
-
-	if shouldComment {
+	if hit == isComment {
 		return commentStr
 	}
 
@@ -94,15 +92,20 @@ func (t *Transformer) handleUncommentDirective(ctx context.Context, sr string) s
 	return t.resolveCommentState(ctx, uncommentRe, "Invalid uncomment directive", sr, false)
 }
 
-// lookupBooleanValue is a helper to look up a boolean config value.
-// Returns the string value (treating errors as empty string).
-func (t *Transformer) lookupBooleanValue(ctx context.Context, cmd, key string) string {
-	lookupVal, err := t.ConfigLookup.LookUpConfig(ctx, cmd, key)
+// lookupTruth reports whether the value behind TYPE:key is true for the
+// binary/truefalse directives. A "!" key prefix negates the test (legacy
+// checkConditional); a failed lookup is the legacy None, i.e. false.
+func (t *Transformer) lookupTruth(ctx context.Context, cmd, key string) bool {
+	lookupVal, err := t.ConfigLookup.LookUpConfig(ctx, cmd, strings.TrimPrefix(key, "!"))
 	if err != nil {
-		return "" // Treat lookup error as empty
+		lookupVal = ""
 	}
 
-	return lookupVal
+	if strings.HasPrefix(key, "!") {
+		return state.IsFalseValue(lookupVal)
+	}
+
+	return state.IsTrueValue(lookupVal)
 }
 
 // handleBinaryDirective processes binary directives.
@@ -114,9 +117,7 @@ func (t *Transformer) handleBinaryDirective(ctx context.Context, sr string) stri
 		return "" // Invalid format
 	}
 
-	lookupVal := t.lookupBooleanValue(ctx, matches[1], matches[2])
-
-	if state.IsTrueValue(lookupVal) {
+	if t.lookupTruth(ctx, matches[1], matches[2]) {
 		return "1"
 	}
 
@@ -132,9 +133,7 @@ func (t *Transformer) handleTrueFalseDirective(ctx context.Context, sr string) s
 		return "" // Invalid format
 	}
 
-	lookupVal := t.lookupBooleanValue(ctx, matches[1], matches[2])
-
-	if state.IsTrueValue(lookupVal) {
+	if t.lookupTruth(ctx, matches[1], matches[2]) {
 		return "true"
 	}
 
@@ -165,18 +164,40 @@ func (t *Transformer) handleRangeDirective(ctx context.Context, sr string) strin
 		return "" // Return empty string on error
 	}
 
-	lookupVal, err := strconv.Atoi(lookupValStr)
-	if err != nil {
-		logger.WarnContext(ctx, "Invalid integer value for range lookup", "value", lookupValStr)
-		return "" // Return empty string on error
+	lookupVal, errVal := atoiPy(lookupValStr)
+	lo, errLo := atoiPy(loStr)
+	hi, errHi := atoiPy(hiStr)
+
+	if errVal != nil || errLo != nil || errHi != nil {
+		logger.WarnContext(ctx, "Invalid integer in range directive",
+			"value", lookupValStr, "lo", loStr, "hi", hiStr)
+
+		return "" // Legacy int() raises and aborts the rewrite
 	}
 
-	lo, _ := strconv.Atoi(loStr)
-	hi, _ := strconv.Atoi(hiStr)
+	// ((val/100.00) * (hi - lo)) + lo with Python float semantics. The explicit
+	// conversion stops the compiler from fusing the multiply-add (FMA), which
+	// would change the last bit on some architectures.
+	scaled := float64(float64(lookupVal) / 100.00 * float64(hi-lo))
 
-	calculatedVal := ((float64(lookupVal) / 100.00) * float64(hi-lo)) + float64(lo)
+	return pyStrFloat(scaled + float64(lo))
+}
 
-	return fmt.Sprintf("%.0f", calculatedVal)
+// atoiPy parses an integer like Python 2's int(str): surrounding whitespace is ignored.
+func atoiPy(s string) (int, error) {
+	return strconv.Atoi(strings.Trim(s, pyWhitespace))
+}
+
+// pyStrFloat formats f like Python 2's str(float): 12 significant digits with
+// trailing zeros removed, and ".0" appended to an integral value, so 50 renders
+// as "50.0", 6.6 as "6.6" and 1e16 as "1e+16".
+func pyStrFloat(f float64) string {
+	s := strconv.FormatFloat(f, 'g', 12, 64)
+	if strings.ContainsAny(s, ".eIN") {
+		return s
+	}
+
+	return s + ".0"
 }
 
 // handleListDirective processes list directives.
@@ -220,10 +241,15 @@ func (t *Transformer) handleListDirective(ctx context.Context, sr string) string
 // resolveSearchReplaceDirective implements the shared logic for contains/exact directives.
 // Format: %%<directive> VAR:key searchString^replacement^altReplacement%%
 // The match func receives (lookupVal, searchString) and returns whether the value matches.
+//
+// As in jylibs/state.py, replacement and altReplacement are stripped, and an
+// empty replacement falls back to searchString. A missing key is Python's None:
+// contains searches in str(None) == "None", exact (searchInNone false) yields "".
 func (t *Transformer) resolveSearchReplaceDirective(
 	ctx context.Context,
 	directiveName string,
 	sr string,
+	searchInNone bool,
 	match func(lookupVal, searchString string) bool,
 ) string {
 	parts := strings.SplitN(sr, " ", 3)
@@ -245,23 +271,31 @@ func (t *Transformer) resolveSearchReplaceDirective(
 			"key", cfgTypeParts[1],
 			"error", err)
 
-		return ""
+		if !searchInNone {
+			return ""
+		}
+
+		lookupVal = "None"
 	}
 
 	splitReplace := strings.SplitN(parts[2], "^", 3)
 	searchString := splitReplace[0]
-	replacement := searchString
+	replacement := ""
 	altReplacement := ""
 
 	if len(splitReplace) > 1 {
-		replacement = splitReplace[1]
+		replacement = strings.Trim(splitReplace[1], pyWhitespace)
 	}
 
 	if len(splitReplace) > 2 {
-		altReplacement = splitReplace[2]
+		altReplacement = strings.Trim(splitReplace[2], pyWhitespace)
 	}
 
 	if match(lookupVal, searchString) {
+		if replacement == "" {
+			return searchString
+		}
+
 		return replacement
 	}
 
@@ -271,13 +305,13 @@ func (t *Transformer) resolveSearchReplaceDirective(
 // handleContainsDirective processes contains directives.
 // Format: %%contains VAR:key string^replacement^altreplacement%%
 func (t *Transformer) handleContainsDirective(ctx context.Context, sr string) string {
-	return t.resolveSearchReplaceDirective(ctx, "contains", sr, strings.Contains)
+	return t.resolveSearchReplaceDirective(ctx, "contains", sr, true, strings.Contains)
 }
 
 // handleExactDirective processes exact directives.
 // Format: %%exact VAR:key string^replacement^altreplacement%%
 func (t *Transformer) handleExactDirective(ctx context.Context, sr string) string {
-	return t.resolveSearchReplaceDirective(ctx, "exact", sr,
+	return t.resolveSearchReplaceDirective(ctx, "exact", sr, false,
 		func(lookupVal, searchString string) bool {
 			return slices.Contains(strings.Fields(lookupVal), searchString)
 		})
@@ -306,33 +340,43 @@ func (t *Transformer) handleFreqDirective(ctx context.Context, sr string) string
 		return "" // Return empty string on error
 	}
 
-	valNumStr := freqDigitsRe.ReplaceAllString(lookupValStr, "")
-	per := freqNonDigitsRe.ReplaceAllString(lookupValStr, "")
-
-	valNum, _ := strconv.Atoi(valNumStr)
+	// Legacy: per = re.sub(r"\d+", "", val); val = int(re.sub(r"\D", "", val)).
+	// An empty digit string raises ValueError in Jython (the rewrite aborts);
+	// here it counts as 0, which falls through to total.
+	per := freqDigitRe.ReplaceAllString(lookupValStr, "")
+	valNum, _ := strconv.Atoi(freqNonDigitRe.ReplaceAllString(lookupValStr, ""))
 	total, _ := strconv.Atoi(totalStr)
 
+	// Python 2 integer division floors.
 	switch per {
 	case "m":
-		valNum /= 60
+		valNum = floorDiv(valNum, 60)
 	case "s":
-		valNum /= 3600
+		valNum = floorDiv(valNum, 3600)
 	case "d":
 		valNum *= 24
 	}
 
-	var val string
+	val := total
 	if valNum != 0 {
-		val = fmt.Sprintf("%d", total/valNum)
-	} else {
-		val = fmt.Sprintf("%d", total)
+		val = floorDiv(total, valNum)
 	}
 
-	if valInt, _ := strconv.Atoi(val); valInt < 1 && total > 1 {
-		val = "1"
+	if val < 1 && total > 1 {
+		val = 1
 	}
 
-	return val
+	return strconv.Itoa(val)
+}
+
+// floorDiv is Python 2's integer a / b (rounds toward negative infinity); b != 0.
+func floorDiv(a, b int) int {
+	q := a / b
+	if a%b != 0 && (a < 0) != (b < 0) {
+		q--
+	}
+
+	return q
 }
 
 // handleExplodeDirective processes explode directives.

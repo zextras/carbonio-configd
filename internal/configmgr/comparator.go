@@ -11,9 +11,17 @@ import (
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/lookup"
+	"github.com/zextras/carbonio-configd/internal/redact"
 	"github.com/zextras/carbonio-configd/internal/services"
 	"github.com/zextras/carbonio-configd/internal/state"
 )
+
+// mappedFileSyncer is implemented by lookups that can restore a MAPFILE-backed
+// file from its configured value. Legacy lookUpConfig does this as part of every
+// MAPFILE lookup, so the file self-heals on each compare cycle.
+type mappedFileSyncer interface {
+	SyncMappedFile(ctx context.Context, key string) error
+}
 
 // Comparator detects configuration changes between successive load cycles.
 type Comparator struct {
@@ -59,7 +67,7 @@ func (c *Comparator) CheckConditional(ctx context.Context, cfgType, key string) 
 
 	logger.DebugContext(ctx, "Conditional after lookUpConfig",
 		"key", key,
-		"value", value,
+		"value", redact.ForLog(key, value),
 		"type", cfgType,
 		"negate", negate)
 
@@ -163,19 +171,31 @@ func (c *Comparator) compareOneKey(
 		lookupKey = after
 	}
 
+	// Legacy lookUpConfig(MAPFILE) writes (or removes) the mapped file before
+	// reporting its path, so a deleted or hand-edited file is restored here and
+	// the subsequent lookup sees the same path as last cycle: no change, no restart.
+	if syncer, ok := c.lookup.(mappedFileSyncer); ok && cfgType == configTypeMAPFILE {
+		if err := syncer.SyncMappedFile(ctx, lookupKey); err != nil {
+			logger.ErrorContext(ctx, "Failed to sync mapped file", "key", lookupKey, "error", err)
+		}
+	}
+
 	prevVal := c.state.LastVal(ctx, sn, cfgType, lookupKey, "")
 	currentVal, err := c.lookup.LookUpConfig(ctx, cfgType, lookupKey)
 
 	logger.DebugContext(ctx, "Comparing key values",
 		"key", lookupKey,
-		"current", currentVal,
-		"previous", prevVal)
+		"current", redact.ForLog(lookupKey, currentVal),
+		"previous", redact.ForLog(lookupKey, prevVal))
 
+	// An empty value is treated as undefined. Legacy distinguishes None from '',
+	// but state.LastVal cannot store "" (it means "query only"), so a faithful
+	// None/'' split would re-report the same change every cycle.
 	if err != nil || currentVal == "" {
 		if prevVal != "" {
 			logger.InfoContext(ctx, "Variable changed to undefined",
 				"key", lookupKey,
-				"previous_value", prevVal)
+				"previous_value", redact.ForLog(lookupKey, prevVal))
 			c.state.DelVal(sn, cfgType, lookupKey)
 
 			section.Changed = true
@@ -185,11 +205,11 @@ func (c *Comparator) compareOneKey(
 	}
 
 	if prevVal != currentVal {
-		if !c.state.FirstRun {
+		if !c.state.IsFirstRun() {
 			logger.InfoContext(ctx, "Variable changed",
 				"key", lookupKey,
-				"previous_value", prevVal,
-				"current_value", currentVal)
+				"previous_value", redact.ForLog(lookupKey, prevVal),
+				"current_value", redact.ForLog(lookupKey, currentVal))
 		}
 
 		c.state.LastVal(ctx, sn, cfgType, lookupKey, currentVal)
@@ -218,7 +238,7 @@ func (c *Comparator) trackNewlyEnabledServices(ctx context.Context) {
 			continue
 		}
 
-		if c.state.FirstRun {
+		if c.state.IsFirstRun() {
 			c.initServiceOnFirstRun(ctx, service)
 		} else {
 			logger.InfoContext(ctx, "Service was enabled, need to start", "service", service)

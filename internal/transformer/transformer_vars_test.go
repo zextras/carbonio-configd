@@ -417,17 +417,17 @@ func TestNumericBoundaryValues(t *testing.T) {
 		{
 			name:     "Range with 0%",
 			input:    "%%range VAR:zero 0 100%%",
-			expected: "0\n",
+			expected: "0.0\n",
 		},
 		{
 			name:     "Range with 100%",
 			input:    "%%range VAR:hundred 0 100%%",
-			expected: "100\n",
+			expected: "100.0\n",
 		},
 		{
 			name:     "Range with negative value",
 			input:    "%%range VAR:negative 0 100%%",
-			expected: "-50\n", // Negative values are passed through the formula
+			expected: "-50.0\n", // Negative values are passed through the formula
 		},
 		{
 			name:     "Range with decimal fails Atoi",
@@ -495,13 +495,17 @@ func TestXformConfigVariable_LookupError(t *testing.T) {
 	}
 }
 
-// TestLookupBooleanValue_LookupError exercises the error branch in lookupBooleanValue.
-func TestLookupBooleanValue_LookupError(t *testing.T) {
+// TestLookupTruth_LookupError: a failed lookup is the legacy None, which is
+// false, and true behind a "!" key (checkConditional negation).
+func TestLookupTruth_LookupError(t *testing.T) {
 	ctx := context.Background()
 	tr := NewTransformer(&errorConfigLookup{}, nil)
 
-	got := tr.lookupBooleanValue(ctx, "VAR", "missingkey")
-	if got != "" {
-		t.Errorf("expected empty string on lookup error, got %q", got)
+	if tr.lookupTruth(ctx, "VAR", "missingkey") {
+		t.Error("missing key must be false")
+	}
+
+	if !tr.lookupTruth(ctx, "VAR", "!missingkey") {
+		t.Error("negated missing key must be true")
 	}
 }

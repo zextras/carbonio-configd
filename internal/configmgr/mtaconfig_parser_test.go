@@ -49,7 +49,7 @@ SECTION mta DEPENDS amavis
 		t.Fatalf("Failed to create test config file: %v", err)
 	}
 
-	cm := setupTestConfigManagerForParser(tempDir)
+	cm := setupTestConfigManagerForParser(tempDir, "mta")
 
 	err = cm.ParseMtaConfig(context.Background(), configFile)
 	if err != nil {
@@ -163,7 +163,7 @@ func TestParseMtaConfig_WithConditionals(t *testing.T) {
 		t.Fatalf("Failed to create test config file: %v", err)
 	}
 
-	cm := setupTestConfigManagerForParser(tempDir)
+	cm := setupTestConfigManagerForParser(tempDir, "mta")
 
 	err = cm.ParseMtaConfig(context.Background(), configFile)
 	if err != nil {
@@ -215,7 +215,7 @@ func TestParseMtaConfig_WithNestedConditionals(t *testing.T) {
 		t.Fatalf("Failed to create test config file: %v", err)
 	}
 
-	cm := setupTestConfigManagerForParser(tempDir)
+	cm := setupTestConfigManagerForParser(tempDir, "proxy")
 
 	err = cm.ParseMtaConfig(context.Background(), configFile)
 	if err != nil {
@@ -351,7 +351,7 @@ func TestParseMtaConfig_InvalidLDAPSpec(t *testing.T) {
 		t.Fatalf("Failed to create test config file: %v", err)
 	}
 
-	cm := setupTestConfigManagerForParser(tempDir)
+	cm := setupTestConfigManagerForParser(tempDir, "mta")
 
 	err = cm.ParseMtaConfig(context.Background(), configFile)
 	if err != nil {
@@ -390,7 +390,7 @@ func TestParseMtaConfig_MultipleRewritesAndRestarts(t *testing.T) {
 		t.Fatalf("Failed to create test config file: %v", err)
 	}
 
-	cm := setupTestConfigManagerForParser(tempDir)
+	cm := setupTestConfigManagerForParser(tempDir, "mta")
 
 	err = cm.ParseMtaConfig(context.Background(), configFile)
 	if err != nil {
@@ -438,7 +438,7 @@ func TestParseMtaConfig_ServiceConditional(t *testing.T) {
 		t.Fatalf("Failed to create test config file: %v", err)
 	}
 
-	cm := setupTestConfigManagerForParser(tempDir)
+	cm := setupTestConfigManagerForParser(tempDir, "mta")
 
 	err = cm.ParseMtaConfig(context.Background(), configFile)
 	if err != nil {
@@ -494,7 +494,7 @@ func TestParseMtaConfig_ProxygenDirective(t *testing.T) {
 		t.Fatalf("Failed to create test config file: %v", err)
 	}
 
-	cm := setupTestConfigManagerForParser(tempDir)
+	cm := setupTestConfigManagerForParser(tempDir, "proxy")
 
 	err = cm.ParseMtaConfig(context.Background(), configFile)
 	if err != nil {
@@ -540,7 +540,7 @@ func TestParseMtaConfig_AllDirectiveTypes(t *testing.T) {
 		t.Fatalf("Failed to create test config file: %v", err)
 	}
 
-	cm := setupTestConfigManagerForParser(tempDir)
+	cm := setupTestConfigManagerForParser(tempDir, "comprehensive")
 	cm.State.LocalConfig.Data.Set("ldap_url", "ldap://localhost")
 
 	err = cm.ParseMtaConfig(context.Background(), configFile)
@@ -577,10 +577,16 @@ func TestParseMtaConfig_AllDirectiveTypes(t *testing.T) {
 	}
 }
 
-// Helper function to set up a test ConfigManager for parser tests
-func setupTestConfigManagerForParser(baseDir string) *ConfigManager {
+// Helper function to set up a test ConfigManager for parser tests.
+// enabledServices are the node services; ParseMtaConfig drops the sections whose
+// service is not enabled, as the legacy zmconfigd does.
+func setupTestConfigManagerForParser(baseDir string, enabledServices ...string) *ConfigManager {
 	st := state.NewState()
 	st.FirstRun = true
+
+	for _, svc := range enabledServices {
+		st.ServerConfig.ServiceConfig.Set(svc, "TRUE")
+	}
 
 	cfg := &config.Config{
 		BaseDir:    baseDir,

@@ -11,7 +11,6 @@ import (
 	"github.com/zextras/carbonio-configd/internal/state"
 	"slices"
 	"testing"
-	"time"
 )
 
 func TestInvalidateLDAPCache(t *testing.T) {
@@ -48,9 +47,6 @@ func TestInvalidateLDAPCache(t *testing.T) {
 	// Test cache invalidation
 	t.Log("Calling InvalidateLDAPCache...")
 	cm.InvalidateLDAPCache(ctx)
-
-	// Wait a bit for async operations
-	time.Sleep(50 * time.Millisecond)
 
 	// Check LDAP cache is cleared but non-LDAP data remains
 	keys := cacheInstance.GetCacheKeys()

@@ -15,6 +15,7 @@ import (
 
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/redact"
 )
 
 const (
@@ -178,6 +179,64 @@ func (s *State) SetConfigs(lc *config.LocalConfig,
 	s.MtaConfig = mtac
 }
 
+// GetLocalConfig returns the current local configuration reference under the
+// State lock, so readers on other goroutines (e.g. the watchdog) do not race
+// with SetConfigs.
+func (s *State) GetLocalConfig() *config.LocalConfig {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.LocalConfig
+}
+
+// GetGlobalConfig returns the current global configuration reference under the State lock.
+func (s *State) GetGlobalConfig() *config.GlobalConfig {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.GlobalConfig
+}
+
+// GetMiscConfig returns the current misc configuration reference under the State lock.
+func (s *State) GetMiscConfig() *config.MiscConfig {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.MiscConfig
+}
+
+// GetServerConfig returns the current server configuration reference under the State lock.
+func (s *State) GetServerConfig() *config.ServerConfig {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.ServerConfig
+}
+
+// SetMtaConfig publishes a freshly parsed MTA configuration under the State lock.
+func (s *State) SetMtaConfig(mtac *config.MtaConfig) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.MtaConfig = mtac
+}
+
+// GetMtaConfig returns the current MTA configuration reference under the State lock.
+func (s *State) GetMtaConfig() *config.MtaConfig {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.MtaConfig
+}
+
+// IsFirstRun reports the first-run flag under the State lock.
+func (s *State) IsFirstRun() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.FirstRun
+}
+
 // --- Methods for tracking changed keys and last values ---
 
 // ResetChangedKeys clears the list of changed keys for a given section.
@@ -220,7 +279,7 @@ func (s *State) LastVal(ctx context.Context, section, cfgType, key string, val s
 			"section", section,
 			"config_type", cfgType,
 			"key", key,
-			"value", val)
+			"value", redact.ForLog(key, val))
 	}
 
 	if _, ok := s.LastVals[section]; !ok {
@@ -241,7 +300,7 @@ func (s *State) LastVal(ctx context.Context, section, cfgType, key string, val s
 				"section", section,
 				"config_type", cfgType,
 				"key", key,
-				"value", v)
+				"value", redact.ForLog(key, v))
 		}
 
 		return v
@@ -262,26 +321,25 @@ func (s *State) DelVal(section, cfgType, key string) {
 	}
 }
 
-// IsFalseValue checks if a string represents a false value.
-// Matches Python: re.match(r"no|false|0+",str(val),re.I)
-// This means: empty string, "no" (case-insensitive), "false" (case-insensitive), or one or more zeros
+// IsFalseValue reports whether val is a legacy "false" value.
+// It mirrors zmconfigd's state.py isFalseValue:
+//
+//	not val or re.match(r"no|false|0+", str(val), re.I)
+//
+// re.match anchors at the start only, so this is a case-insensitive PREFIX
+// match: "no", "none", "nobody", "false", "falsey", "0", "0.5" and "00:30"
+// are all false values, as is the empty string.
 func IsFalseValue(val string) bool {
-	if val == "" {
+	if val == "" || val[0] == '0' {
 		return true
 	}
 
-	lowerVal := strings.ToLower(val)
-	if lowerVal == "no" || lowerVal == boolFalseStr {
-		return true
-	}
-	// Check if the value consists only of zeros (matching 0+ regex)
-	for _, c := range val {
-		if c != '0' {
-			return false
-		}
-	}
+	return hasPrefixFold(val, "no") || hasPrefixFold(val, boolFalseStr)
+}
 
-	return val != "" // If we got here and not empty, it's all zeros
+// hasPrefixFold reports whether s begins with prefix, ignoring ASCII case.
+func hasPrefixFold(s, prefix string) bool {
+	return len(s) >= len(prefix) && strings.EqualFold(s[:len(prefix)], prefix)
 }
 
 // IsTrueValue checks if a string represents a true value.

@@ -45,8 +45,10 @@ func (cm *ConfigManager) loadLocalConfigWithRetry(ctx context.Context, maxRetrie
 		return err
 	}
 
-	// Post-process configuration
-	cm.postProcessLocalConfig()
+	// Do not publish into main config once the caller gave up on this load.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
 	// Update main config based on local config
 	cm.mainConfig.SetVals(cm.State.LocalConfig)
@@ -91,7 +93,9 @@ func (cm *ConfigManager) executeLocalConfigCommand(ctx context.Context) (string,
 	return output, nil
 }
 
-// parseLocalConfigOutput parses the output from localconfig command.
+// parseLocalConfigOutput parses the output from localconfig command, applies the
+// post-processing defaults on a local copy and publishes the result into the
+// state in one step. Nothing is published once ctx is cancelled.
 func (cm *ConfigManager) parseLocalConfigOutput(ctx context.Context, output string) error {
 	lines := strings.Split(strings.TrimSpace(output), "\n")
 	logger.DebugContext(ctx, "Localconfig loaded",
@@ -104,7 +108,7 @@ func (cm *ConfigManager) parseLocalConfigOutput(ctx context.Context, output stri
 	}
 
 	// Parse key=value pairs
-	cm.State.LocalConfig.Data.Clear()
+	data := make(map[string]string, len(lines))
 
 	for _, line := range lines {
 		parts := strings.SplitN(strings.TrimSpace(line), "=", 2)
@@ -112,21 +116,29 @@ func (cm *ConfigManager) parseLocalConfigOutput(ctx context.Context, output stri
 			continue
 		}
 
-		cm.State.LocalConfig.Data.Set(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
+		data[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
 	}
+
+	applyLocalConfigDefaults(data)
+
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("localconfig load cancelled before publish: %w", err)
+	}
+
+	cm.State.LocalConfig.Data.Replace(data)
 
 	return nil
 }
 
-// postProcessLocalConfig performs post-processing on local configuration.
-func (cm *ConfigManager) postProcessLocalConfig() {
+// applyLocalConfigDefaults performs post-processing on a parsed local configuration.
+func applyLocalConfigDefaults(data map[string]string) {
 	// Set default for zmconfigd_listen_port if not present
-	if _, ok := cm.State.LocalConfig.Data.Get("zmconfigd_listen_port"); !ok {
-		cm.State.LocalConfig.Data.Set("zmconfigd_listen_port", "7171")
+	if _, ok := data["zmconfigd_listen_port"]; !ok {
+		data["zmconfigd_listen_port"] = "7171"
 	}
 
 	// Derive OpenDKIM URIs from ldap_url if present
-	if ldapURL, ok := cm.State.LocalConfig.Data.Get("ldap_url"); ok && ldapURL != "" {
+	if ldapURL := data["ldap_url"]; ldapURL != "" {
 		urls := strings.Fields(ldapURL)
 		signingTableURIs := make([]string, len(urls))
 		keyTableURIs := make([]string, len(urls))
@@ -136,7 +148,7 @@ func (cm *ConfigManager) postProcessLocalConfig() {
 			keyTableURIs[i] = url + "/?DKIMDomain,DKIMSelector,DKIMKey,?sub?(DKIMSelector=$d)"
 		}
 
-		cm.State.LocalConfig.Data.Set("opendkim_signingtable_uri", strings.Join(signingTableURIs, " "))
-		cm.State.LocalConfig.Data.Set("opendkim_keytable_uri", strings.Join(keyTableURIs, " "))
+		data["opendkim_signingtable_uri"] = strings.Join(signingTableURIs, " ")
+		data["opendkim_keytable_uri"] = strings.Join(keyTableURIs, " ")
 	}
 }

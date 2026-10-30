@@ -15,9 +15,9 @@ import (
 // They rely only on in-memory state lookups (no retry/sleep paths), so they are
 // safe to run under -short.
 
-// TestConfigManager_CheckConditional_LazyInit verifies CheckConditional lazily
-// constructs the comparator and delegates correctly.
-func TestConfigManager_CheckConditional_LazyInit(t *testing.T) {
+// TestConfigManager_CheckConditional_Delegates verifies CheckConditional
+// delegates to the constructor-initialised comparator.
+func TestConfigManager_CheckConditional_Delegates(t *testing.T) {
 	cm := newTestConfigManager(t)
 	cm.State.ServerConfig.ServiceConfig.Set("imapd", "TRUE")
 
@@ -28,11 +28,8 @@ func TestConfigManager_CheckConditional_LazyInit(t *testing.T) {
 	if !got {
 		t.Error("CheckConditional() = false, want true for enabled service")
 	}
-	if cm.comparator == nil {
-		t.Error("expected comparator to be initialized after first use")
-	}
 
-	// Second call reuses the existing comparator (covers the non-nil branch).
+	// Second call reuses the same comparator.
 	got, err = cm.CheckConditional(context.Background(), "SERVICE", "!imapd")
 	if err != nil {
 		t.Fatalf("CheckConditional() unexpected error on reuse: %v", err)
@@ -42,18 +39,16 @@ func TestConfigManager_CheckConditional_LazyInit(t *testing.T) {
 	}
 }
 
-// TestConfigManager_CompareKeys_LazyInit verifies CompareKeys lazily constructs
-// the comparator and returns without error for a benign single-service state.
-func TestConfigManager_CompareKeys_LazyInit(t *testing.T) {
+// TestConfigManager_CompareKeys_Delegates verifies CompareKeys delegates to the
+// constructor-initialised comparator and returns without error for a benign
+// single-service state.
+func TestConfigManager_CompareKeys_Delegates(t *testing.T) {
 	cm := newTestConfigManager(t)
 	cm.State.FirstRun = true
 	cm.State.ServerConfig.ServiceConfig.Set("imapd", "TRUE")
 
 	if err := cm.CompareKeys(context.Background()); err != nil {
 		t.Fatalf("CompareKeys() unexpected error: %v", err)
-	}
-	if cm.comparator == nil {
-		t.Error("expected comparator to be initialized after CompareKeys")
 	}
 }
 

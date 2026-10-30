@@ -302,10 +302,56 @@ func (p *parser) parsePostconf(section *config.MtaConfigSection) error {
 	}
 
 	section.Postconf[key] = value
+	recordPostconfRequiredVar(section, value, true)
 
 	p.skipToNewline()
 
 	return nil
+}
+
+// PostconfRequiredVar returns the config key a POSTCONF/POSTCONFD value refers to
+// and its type (VAR, LOCAL, FILE or, when allowMapLocal, MAPLOCAL). Mirroring
+// jylibs/mtaconfig.py, the section depends on that key so a change to it marks
+// the section changed: legacy calls section.requiredvars(fields[3], fields[2])
+// for every POSTCONF (VAR|LOCAL|FILE|MAPLOCAL) and POSTCONFD (VAR|LOCAL|FILE)
+// whose value is a lookup. value is the parsed form ("VAR:key", "FILE path").
+func PostconfRequiredVar(value string, allowMapLocal bool) (name, cfgType string, ok bool) {
+	fields := strings.Fields(value)
+	if len(fields) == 0 {
+		return "", "", false
+	}
+
+	if fields[0] == "FILE" {
+		if len(fields) < 2 {
+			return "", "", false
+		}
+
+		return fields[1], "FILE", true
+	}
+
+	cfgType, name, found := strings.Cut(fields[0], ":")
+	if !found || name == "" {
+		return "", "", false
+	}
+
+	switch cfgType {
+	case "VAR", "LOCAL":
+		return name, cfgType, true
+	case "MAPLOCAL":
+		if allowMapLocal {
+			return name, cfgType, true
+		}
+
+		return "", "", false
+	default:
+		return "", "", false
+	}
+}
+
+func recordPostconfRequiredVar(section *config.MtaConfigSection, value string, allowMapLocal bool) {
+	if name, cfgType, ok := PostconfRequiredVar(value, allowMapLocal); ok {
+		section.RequiredVars[name] = cfgType
+	}
 }
 
 // parsePostconfd parses a POSTCONFD directive (delete postfix parameter).
@@ -320,6 +366,12 @@ func (p *parser) parsePostconfd(section *config.MtaConfigSection) error {
 	section.Postconfd[key] = ""
 
 	p.advance()
+
+	// The value of a deletion is never applied, but legacy still registers the
+	// lookup it names as a required var.
+	if !p.isAtNewline() && !p.isAtEnd() {
+		recordPostconfRequiredVar(section, p.parseValue(), false)
+	}
 
 	p.skipToNewline()
 

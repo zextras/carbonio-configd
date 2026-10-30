@@ -12,6 +12,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/mtaops"
+	"github.com/zextras/carbonio-configd/internal/redact"
 )
 
 // normalizePostconfBool mirrors the legacy Jython zmconfigd (jylibs/mtaconfig.py):
@@ -53,6 +54,9 @@ func (cm *ConfigManager) doPostconf(ctx context.Context) error {
 
 	// Collect all operations first for batch execution
 	ops := make([]mtaops.PostconfOperation, 0, len(cm.State.CurrentActions.Postconf))
+	specs := make(map[string]string, len(cm.State.CurrentActions.Postconf))
+	// pending holds the directives that must be retried next cycle.
+	pending := make(map[string]string)
 
 	var errs []error
 
@@ -74,30 +78,26 @@ func (cm *ConfigManager) doPostconf(ctx context.Context) error {
 				"key", key,
 				"error", err)
 			errs = append(errs, err)
+			pending[key] = valueSpec
 
 			continue
 		}
 
-		// Add to batch
+		specs[key] = valueSpec
 		ops = append(ops, mtaops.PostconfOperation{
 			Key:   key,
 			Value: normalizePostconfBool(valueSpec, resolvedValue),
 		})
 	}
 
-	// Execute all operations in a single batch. Only clear pending postconf
-	// state on success; a failed batch leaves the directives intact so the
-	// next cycle retries them, mirroring doLdap's retry-on-failure semantics.
-	if len(ops) > 0 {
-		if err := cm.mtaExecutor.ExecutePostconfBatch(ctx, ops); err != nil {
-			logger.ErrorContext(ctx, "Failed to execute postconf batch",
-				"error", err)
-			errs = append(errs, err)
-		} else {
-			logger.DebugContext(ctx, "Successfully executed postconf batch",
-				"operation_count", len(ops))
-			cm.State.ClearPostconf()
-		}
+	errs = append(errs, cm.executePostconfOps(ctx, ops, specs, pending)...)
+
+	// Only successfully applied directives are cleared; the rest stay pending
+	// so the next cycle retries them (legacy clears only after a clean pass).
+	cm.State.ClearPostconf()
+
+	for key, valueSpec := range pending {
+		cm.State.CurPostconf(ctx, key, valueSpec)
 	}
 
 	if len(errs) > 0 {
@@ -105,6 +105,44 @@ func (cm *ConfigManager) doPostconf(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// executePostconfOps applies ops in one postconf call. When the batch fails it
+// falls back to one call per key, so a single bad directive cannot block the
+// others; keys that still fail are recorded in pending.
+func (cm *ConfigManager) executePostconfOps(
+	ctx context.Context,
+	ops []mtaops.PostconfOperation,
+	specs, pending map[string]string,
+) []error {
+	if len(ops) == 0 {
+		return nil
+	}
+
+	batchErr := cm.mtaExecutor.ExecutePostconfBatch(ctx, ops)
+	if batchErr == nil {
+		logger.DebugContext(ctx, "Successfully executed postconf batch",
+			"operation_count", len(ops))
+
+		return nil
+	}
+
+	logger.ErrorContext(ctx, "Failed to execute postconf batch, retrying per key",
+		"error", batchErr)
+
+	var errs []error
+
+	for _, op := range ops {
+		if err := cm.mtaExecutor.ExecutePostconf(ctx, op); err != nil {
+			logger.ErrorContext(ctx, "Failed to execute postconf",
+				"key", op.Key,
+				"error", err)
+			errs = append(errs, err)
+			pending[op.Key] = specs[op.Key]
+		}
+	}
+
+	return errs
 }
 
 func (cm *ConfigManager) doPostconfd(ctx context.Context) error {
@@ -191,13 +229,13 @@ func (cm *ConfigManager) doLdap(ctx context.Context) error {
 		if err := cm.mtaExecutor.ExecuteLdapWrite(ctx, op); err != nil {
 			logger.ErrorContext(ctx, "Failed to execute LDAP write",
 				"key", key,
-				"value", op.Value,
+				"value", redact.ForLog(key, op.Value),
 				"error", err)
 			errs = append(errs, err)
 		} else {
 			logger.DebugContext(ctx, "Successfully executed LDAP write",
 				"key", key,
-				"value", op.Value)
+				"value", redact.ForLog(key, op.Value))
 			cm.State.DelLdap(key)
 		}
 	}
@@ -215,7 +253,7 @@ func (cm *ConfigManager) doLdap(ctx context.Context) error {
 // config section. It returns the slice of errors encountered while executing
 // individual mapfile operations.
 func (cm *ConfigManager) doMapfileSection(ctx context.Context, section *config.MtaConfigSection) []error {
-	if !section.Changed && !cm.State.FirstRun {
+	if !section.Changed && !cm.State.IsFirstRun() {
 		return nil
 	}
 
@@ -227,8 +265,14 @@ func (cm *ConfigManager) doMapfileSection(ctx context.Context, section *config.M
 		}
 
 		op := mtaops.MapfileOperation{
-			Key:     varName,
+			Key:     strings.TrimPrefix(varName, "!"),
 			IsLocal: varType == configTypeMAPLOCAL,
+		}
+
+		if !op.IsLocal {
+			// Without the configured value the executor would treat the key as
+			// unset and delete the mapped file.
+			op.Base64Data, _ = cm.lookupVarKey(op.Key)
 		}
 
 		if err := cm.mtaExecutor.ExecuteMapfile(ctx, op); err != nil {
@@ -275,4 +319,17 @@ func (cm *ConfigManager) doMapfile(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// SyncMappedFile brings the file behind a MAPFILE key in line with its
+// configured value, as legacy lookUpConfig(MAPFILE) does on every lookup: the
+// file is written when missing or different and removed when the value is
+// unset. It never reports a change, so a restored file does not restart anything.
+func (cm *ConfigManager) SyncMappedFile(ctx context.Context, key string) error {
+	base64Data, _ := cm.lookupVarKey(key)
+
+	return cm.mtaExecutor.ExecuteMapfile(ctx, mtaops.MapfileOperation{
+		Key:        key,
+		Base64Data: base64Data,
+	})
 }

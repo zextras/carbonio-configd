@@ -17,6 +17,7 @@ import (
 // miscCmdResult holds the outcome of a single misc command execution.
 type miscCmdResult struct {
 	cmdName string
+	name    string // key under which the output is published in MiscConfig
 	output  string
 	err     error
 }
@@ -33,18 +34,13 @@ func (cm *ConfigManager) LoadMiscConfig(ctx context.Context) error {
 
 	miscCommands := []string{"garpu", "garpb", "gamau"}
 
-	cm.State.MiscConfig.Data.Clear()
-
-	var (
-		wg sync.WaitGroup
-		mu sync.Mutex
-	)
+	var wg sync.WaitGroup
 
 	resultsChan := make(chan miscCmdResult, len(miscCommands))
 
 	for _, cmdName := range miscCommands {
 		wg.Go(func() {
-			result := cm.executeMiscCommand(ctx, cmdName, &mu)
+			result := cm.executeMiscCommand(ctx, cmdName)
 			resultsChan <- result
 		})
 	}
@@ -53,12 +49,22 @@ func (cm *ConfigManager) LoadMiscConfig(ctx context.Context) error {
 	close(resultsChan)
 
 	successCount := 0
+	published := make(map[string]string, len(miscCommands))
 
 	for result := range resultsChan {
 		if result.err == nil && result.output != "" {
 			successCount++
+			published[result.name] = result.output
 		}
 	}
+
+	// Publish only when the caller still wants this load: a cancelled (e.g.
+	// timed-out) loader must not overwrite the state of a later cycle.
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("misc config load cancelled before publish: %w", err)
+	}
+
+	cm.State.MiscConfig.Data.Replace(published)
 
 	dt := time.Since(t1)
 	logger.DebugContext(ctx, "Miscconfig loaded",
@@ -69,9 +75,9 @@ func (cm *ConfigManager) LoadMiscConfig(ctx context.Context) error {
 	return nil
 }
 
-// executeMiscCommand fetches a single misc command (via cache or directly),
-// stores the result in MiscConfig.Data, and returns the outcome.
-func (cm *ConfigManager) executeMiscCommand(ctx context.Context, cmdName string, mu *sync.Mutex) miscCmdResult {
+// executeMiscCommand fetches a single misc command (via cache or directly)
+// and returns the outcome; the caller publishes it.
+func (cm *ConfigManager) executeMiscCommand(ctx context.Context, cmdName string) miscCmdResult {
 	output, err := cm.resolveMiscOutput(ctx, cmdName)
 	if err != nil {
 		logger.WarnContext(ctx, "Failed to load misc command",
@@ -92,14 +98,10 @@ func (cm *ConfigManager) executeMiscCommand(ctx context.Context, cmdName string,
 		return miscCmdResult{cmdName: cmdName, err: fmt.Errorf("command not available")}
 	}
 
-	mu.Lock()
-	cm.State.MiscConfig.Data.Set(cmdObj.Name, output)
-	mu.Unlock()
-
-	logger.DebugContext(ctx, "Stored misc command output",
+	logger.DebugContext(ctx, "Fetched misc command output",
 		"command_name", cmdObj.Name, "output", output)
 
-	return miscCmdResult{cmdName: cmdName, output: output}
+	return miscCmdResult{cmdName: cmdName, name: cmdObj.Name, output: output}
 }
 
 // resolveMiscOutput returns the output for a misc command, using the cache when available.
@@ -148,7 +150,7 @@ func (cm *ConfigManager) fetchMiscCommand(ctx context.Context, cmdName string) (
 	}
 
 	if output == "" {
-		logger.ErrorContext(ctx, "Skipping misc command - no data returned",
+		logger.WarnContext(ctx, "Skipping misc command - no data returned",
 			"description", cmd.Desc)
 
 		return "", nil
@@ -181,6 +183,10 @@ func (cm *ConfigManager) loadGlobalConfigWithRetry(ctx context.Context, maxRetri
 	})
 	if err != nil {
 		return err
+	}
+
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("global config load cancelled before publish: %w", err)
 	}
 
 	cm.State.GlobalConfig.Data.Replace(configData)

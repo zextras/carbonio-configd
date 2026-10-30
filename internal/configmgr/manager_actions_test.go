@@ -1474,6 +1474,8 @@ func TestCompileSectionActions(t *testing.T) {
 			Cache:      cacheInstance,
 		}
 
+		cm.comparator = NewComparator(cm, cm.State, cm.ServiceMgr)
+
 		// Set up a condition that will evaluate to true
 		cm.State.LocalConfig.Data.Set("zimbraServiceEnabled", "TRUE")
 

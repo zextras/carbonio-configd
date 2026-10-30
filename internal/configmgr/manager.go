@@ -23,6 +23,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/localconfig"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/mtaops"
+	"github.com/zextras/carbonio-configd/internal/redact"
 	"github.com/zextras/carbonio-configd/internal/services"
 	"github.com/zextras/carbonio-configd/internal/state"
 	"github.com/zextras/carbonio-configd/internal/transformer"
@@ -232,15 +233,15 @@ func (cm *ConfigManager) initConfigLdapClient(ctx context.Context, localCfg map[
 // A value stored on the server entry overrides the global one, matching the
 // legacy configd (state.py assigns global, misc, server; the last one wins).
 func (cm *ConfigManager) lookupVarKey(key string) (string, bool) {
-	if val, ok := cm.State.ServerConfig.Data.Get(key); ok {
+	if val, ok := cm.State.GetServerConfig().Data.Get(key); ok {
 		return val, true
 	}
 
-	if val, ok := cm.State.MiscConfig.Data.Get(key); ok {
+	if val, ok := cm.State.GetMiscConfig().Data.Get(key); ok {
 		return val, true
 	}
 
-	if val, ok := cm.State.GlobalConfig.Data.Get(key); ok {
+	if val, ok := cm.State.GetGlobalConfig().Data.Get(key); ok {
 		return val, true
 	}
 
@@ -249,8 +250,8 @@ func (cm *ConfigManager) lookupVarKey(key string) (string, bool) {
 
 // lookupFileKey returns the value for key from the file cache or disk.
 func (cm *ConfigManager) lookupFileKey(ctx context.Context, key string) (string, error) {
-	if val, ok := cm.State.FileCache[key]; ok {
-		logger.DebugContext(ctx, "Loaded from cache", "key", key, "value", val)
+	if val, ok := cm.State.LookupFile(key); ok {
+		logger.DebugContext(ctx, "Loaded from cache", "key", key, "value", redact.ForLog(key, val))
 
 		return val, nil
 	}
@@ -274,9 +275,9 @@ func (cm *ConfigManager) lookupFileKey(ctx context.Context, key string) (string,
 	}
 
 	value := strings.Join(filteredLines, ", ")
-	cm.State.FileCache[key] = value
+	cm.State.StoreFile(key, value)
 
-	logger.DebugContext(ctx, "Loaded file content", "key", key, "value", value)
+	logger.DebugContext(ctx, "Loaded file content", "key", key, "value", redact.ForLog(key, value))
 
 	return value, nil
 }
@@ -303,7 +304,7 @@ func (cm *ConfigManager) lookupMappedFileKey(ctx context.Context, cfgType, key s
 	}
 
 	logger.DebugContext(ctx, "Mapped file lookup result",
-		"config_type", cfgType, "key", key, "value", value)
+		"config_type", cfgType, "key", key, "value", redact.ForLog(key, value))
 
 	return value, nil
 }
@@ -324,7 +325,7 @@ func (cm *ConfigManager) LookUpConfig(ctx context.Context, cfgType, key string) 
 	case configTypeVAR:
 		value, found = cm.lookupVarKey(key)
 	case configTypeLOCAL:
-		value, found = cm.State.LocalConfig.Data.Get(key)
+		value, found = cm.State.GetLocalConfig().Data.Get(key)
 	case configTypeFILE:
 		value, err = cm.lookupFileKey(ctx, key)
 		if err != nil {
@@ -340,7 +341,7 @@ func (cm *ConfigManager) LookUpConfig(ctx context.Context, cfgType, key string) 
 
 		found = true
 	case configTypeSERVICE:
-		if _, ok := cm.State.ServerConfig.ServiceConfig.Get(key); ok {
+		if _, ok := cm.State.GetServerConfig().ServiceConfig.Get(key); ok {
 			value = constTRUE
 		} else {
 			value = constFALSE
@@ -358,7 +359,7 @@ func (cm *ConfigManager) LookUpConfig(ctx context.Context, cfgType, key string) 
 	}
 
 	logger.DebugContext(ctx, "Config lookup completed",
-		"key", key, "config_type", cfgType, "value", value)
+		"key", key, "config_type", cfgType, "value", redact.ForLog(key, value))
 
 	return value, nil
 }

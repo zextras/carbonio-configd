@@ -6,8 +6,10 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"syscall"
 	"time"
 
@@ -16,15 +18,16 @@ import (
 	"github.com/zextras/carbonio-configd/internal/state"
 )
 
-// SetupSignalHandler sets up a goroutine to listen for OS signals.
+// SetupSignalHandler sets up a goroutine to listen for OS signals until ctx is
+// cancelled or a shutdown signal is dispatched.
 // It takes a context cancel function to trigger immediate shutdown
 // and an optional sd_notify notifier for systemd lifecycle notifications.
 func SetupSignalHandler(
+	ctx context.Context,
 	appState *state.State,
 	cancel context.CancelFunc,
 	reloadChan chan struct{},
 	notifier *sdnotify.Notifier) {
-	ctx := context.Background()
 	ctx = logger.ContextWithComponent(ctx, "signals")
 
 	// Create a channel to receive OS signals
@@ -43,22 +46,71 @@ func SetupSignalHandler(
 	logger.InfoContext(ctx, "Signal handler registered for: SIGINT, SIGTERM, SIGHUP, SIGUSR2, SIGALRM, SIGCHLD")
 
 	go func() {
-		defer recoverGoroutine(ctx, "signal-handler")
+		// Release the registration when the handler exits, so no signal stays
+		// captured with nobody left to read it.
+		defer signal.Stop(signals)
 
 		logger.DebugContext(ctx, "Signal handler goroutine started")
 
-		for sig := range signals {
-			logger.InfoContext(ctx, "Received signal",
-				"signal", sig.String(),
-				"signal_number", int(sig.(syscall.Signal)))
+		for {
+			select {
+			case <-ctx.Done():
+				logger.DebugContext(ctx, "Context cancelled, exiting signal handler goroutine")
 
-			if dispatchSignal(ctx, sig, appState, cancel, reloadChan, notifier) {
 				return
+			case sig := <-signals:
+				logger.InfoContext(ctx, "Received signal",
+					"signal", sig.String(),
+					"signal_number", signalNumber(sig))
+
+				if dispatchSignalSafe(ctx, sig, appState, cancel, reloadChan, notifier) {
+					return
+				}
 			}
 		}
-
-		logger.DebugContext(ctx, "Signal channel closed, exiting handler goroutine")
 	}()
+}
+
+// signalNumber returns the numeric value of sig, or -1 when it is not a syscall.Signal.
+func signalNumber(sig os.Signal) int {
+	if s, ok := sig.(syscall.Signal); ok {
+		return int(s)
+	}
+
+	return -1
+}
+
+// dispatchSignalSafe runs dispatchSignal and absorbs a panic so one bad signal
+// cannot kill the handler goroutine. A panic while handling a shutdown signal
+// still cancels the daemon context: the signal is already consumed, so without
+// this the daemon could no longer be stopped.
+func dispatchSignalSafe(
+	ctx context.Context,
+	sig os.Signal,
+	appState *state.State,
+	cancel context.CancelFunc,
+	reloadChan chan struct{},
+	notifier *sdnotify.Notifier,
+) (stop bool) {
+	defer func() {
+		r := recover()
+		if r == nil {
+			return
+		}
+
+		logger.ErrorContext(ctx, "recovered from panic in signal dispatch",
+			"signal", sig.String(),
+			"panic", fmt.Sprintf("%v", r),
+			"stack", string(debug.Stack()))
+
+		if sig == syscall.SIGINT || sig == syscall.SIGTERM {
+			cancel()
+
+			stop = true
+		}
+	}()
+
+	return dispatchSignal(ctx, sig, appState, cancel, reloadChan, notifier)
 }
 
 func dispatchSignal(
