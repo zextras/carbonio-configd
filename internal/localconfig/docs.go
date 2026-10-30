@@ -9,10 +9,10 @@ import (
 	"slices"
 )
 
-// lcdocs.go is generated from carbonio-mailbox (LC.java + ZsMsg.properties, tag 4.36.6);
-// see scripts/gen-lcdocs.py for the inputs and flags.
+// lcdocs.go and lcdefaults.go are generated from carbonio-mailbox (LC.java + ZsMsg.properties,
+// tag in scripts/lc-mailbox-tag); see scripts/gen-lc.py for the inputs and flags.
 //
-//go:generate python3 ../../scripts/gen-lcdocs.py
+//go:generate python3 ../../scripts/gen-lc.py
 
 // KeyDoc is the documentation of a known localconfig key, as printed by the
 // legacy "zmlocalconfig -i".
