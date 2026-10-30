@@ -32,3 +32,11 @@ repos:
         language: script
         pass_filenames: false
         files: \.go$
+
+      - id: generate-thirdparties
+        name: generate-thirdparties
+        description: Regenerates THIRDPARTIES the same way Jenkins' dt3_thirdparties verify stage does.
+        entry: bash .ci/thirdparties/thirdparties-go.sh THIRDPARTIES
+        language: system
+        pass_filenames: false
+        always_run: true

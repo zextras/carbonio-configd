@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2026 Zextras <https://www.zextras.com>
+
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Integration Tests
 
 This package contains reusable test helpers for spinning up Carbonio service containers (LDAP) via Docker, Podman, or Kubernetes.

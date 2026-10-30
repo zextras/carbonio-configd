@@ -1,0 +1,7 @@
+version = 1
+
+# Generated / non-headerable files of this repository (AGPL-3.0-only, CE).
+[[annotations]]
+path = ["THIRDPARTIES", ".ci/thirdparties/thirdparties-go-rules.json", ".ci/thirdparties/thirdparties-go-deps.tmpl"]
+SPDX-FileCopyrightText = "2026 Zextras <https://www.zextras.com>"
+SPDX-License-Identifier = "AGPL-3.0-only"

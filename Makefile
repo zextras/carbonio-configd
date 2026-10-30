@@ -28,7 +28,15 @@ BUILD_FLAGS_PROFILING=-trimpath -tags profiling $(LDFLAGS)
 BUILD_FLAGS_TRACING=-trimpath -tags tracing $(LDFLAGS)
 BUILD_FLAGS_FULL=-trimpath -tags "profiling tracing" $(LDFLAGS)
 
-.PHONY: all build clean test test-integration deps fmt lint help install deadcode dup dup-baseline fuzz check
+.PHONY: all build clean test test-integration deps fmt lint help install deadcode dup dup-baseline fuzz check reuse thirdparties
+
+# REUSE compliance (same gate as the Jenkins 'REUSE Lint' stage)
+reuse:
+	reuse lint
+
+# Regenerate THIRDPARTIES exactly as the pre-commit hook / Jenkins verify do
+thirdparties:
+	bash .ci/thirdparties/thirdparties-go.sh THIRDPARTIES
 
 # Default target
 all: clean deps fmt lint test build
