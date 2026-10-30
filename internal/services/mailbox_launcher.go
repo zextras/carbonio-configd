@@ -15,6 +15,12 @@ import (
 	"github.com/zextras/carbonio-configd/internal/logger"
 )
 
+// mailboxMainClass is the JVM main class of mailboxd: the last argument
+// mailboxJavaArgs hands to java, and the identity (ServiceDef.ProcessName)
+// under which the running JVM is recognised — legacy zmmailboxdctl's
+// `pgrep -f com.zextras.mailbox.Mailbox`, as an exact argv token.
+const mailboxMainClass = "com.zextras.mailbox.Mailbox"
+
 // mailboxCustomStart starts the appserver mariadb and then the mailboxd JVM,
 // in that order. Matches legacy zmstorectl START_ORDER="mysql.server
 // zmmailboxdctl". The DB is not a separate registered service — keeping
@@ -210,6 +216,6 @@ func mailboxJavaArgs(lc map[string]string) []string {
 		"-Djava.library.path="+libPath,
 		"-Dzimbra.config="+confPath+"/localconfig.xml",
 		"-cp", mailboxPath+"/jars/mailbox.jar:"+mailboxPath+"/jars/*",
-		"com.zextras.mailbox.Mailbox",
+		mailboxMainClass,
 	)
 }

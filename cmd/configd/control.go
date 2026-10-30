@@ -395,6 +395,11 @@ func stopLDAPIfLocal(ctx context.Context, enabledSet map[string]bool) int {
 func controlStatus(ctx context.Context) int {
 	cliHeader()
 
+	// One process-table snapshot answers every status probe and every
+	// pid/uptime detail of this run, so the rows are mutually consistent and
+	// /proc is walked once.
+	ctx = services.WithProcessSnapshot(ctx)
+
 	type discResult struct {
 		set    map[string]bool
 		failed bool
@@ -483,7 +488,7 @@ func getServiceDetail(ctx context.Context, name string, running bool) string {
 		return serviceDetailFromSystemd(ctx, def)
 	}
 
-	return serviceDetailFromProc(def)
+	return serviceDetailFromProc(ctx, def)
 }
 
 // serviceDetailFromSystemd reads MainPID and ActiveEnterTimestamp from
@@ -529,11 +534,12 @@ func serviceDetailFromSystemd(ctx context.Context, def *services.ServiceDef) str
 // serviceDetailFromProc reads PID and start time from /proc directly, so
 // legacy-mode status reflects the process configd actually spawned rather
 // than whatever systemd last remembered before we bypassed it. The PID
-// comes from services.RunningPID (same precedence as ServiceStatus) and
-// the "since" timestamp is /proc/<pid>'s mtime, which on Linux is set at
-// proc-entry creation (close enough to process start for display).
-func serviceDetailFromProc(def *services.ServiceDef) string {
-	pid := services.RunningPID(def)
+// comes from services.RunningPID (the same probe as ServiceStatus, over the
+// process snapshot ctx carries) and the "since" timestamp is /proc/<pid>'s
+// mtime, which on Linux is set at proc-entry creation (close enough to
+// process start for display).
+func serviceDetailFromProc(ctx context.Context, def *services.ServiceDef) string {
+	pid := services.RunningPID(ctx, def)
 	if pid == 0 {
 		return ""
 	}

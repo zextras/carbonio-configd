@@ -95,7 +95,7 @@ func ServiceStart(ctx context.Context, name string) error {
 
 	if running {
 		logger.InfoContext(ctx, "Service already running, skipping start",
-			"service", name, "pid", RunningPID(def))
+			"service", name, "pid", RunningPID(ctx, def))
 
 		return nil
 	}
@@ -327,7 +327,9 @@ func ServiceReload(ctx context.Context, name string) error {
 // IsSystemdMode(); the two paths never mix, with one exception:
 //
 //   - strict systemd: trust systemctl is-active for each unit. No PID scan.
-//   - legacy: PID file first, then ProcessName /proc scan. Never systemctl.
+//   - legacy: process identity (procident.go): the pidfile PID validated
+//     against the service binary, else an exe/argv scan of /proc. A service
+//     that is not running is (false, nil). Never systemctl.
 //     Exception: services with UseSystemdForStatus=true always use systemctl
 //     is-active even in legacy mode (e.g. service-discover, which is always
 //     managed by its systemd unit regardless of Carbonio orchestration mode).
@@ -348,19 +350,7 @@ func ServiceStatus(ctx context.Context, name string) (bool, error) {
 		return systemdUnitsActive(ctx, def.SystemdUnits)
 	}
 
-	// PidFile may be unreadable (e.g. postfix master.pid is root:root 0600)
-	// so we fall through to ProcessName scan on read failure.
-	if def.PidFile != "" {
-		if running, ok := isRunningByPidFile(def.PidFile); ok {
-			return running, nil
-		}
-	}
-
-	if def.ProcessName != "" {
-		return isProcessRunning(ctx, def.ProcessName), nil
-	}
-
-	return false, nil
+	return runningPID(ctx, def) > 0, nil
 }
 
 // systemdUnitsActive reports whether every unit is active. A non-zero
@@ -382,70 +372,17 @@ func systemdUnitsActive(ctx context.Context, units []string) (bool, error) {
 }
 
 // RunningPID returns the primary PID of a running service, or 0 when the
-// service is not running or its PID cannot be determined. Resolution order
-// mirrors the legacy-mode branch of ServiceStatus (PidFile → ProcessName),
-// so callers that format status detail (pid/since) from /proc see the same
-// process that ServiceStatus reports as running.
-func RunningPID(def *ServiceDef) int {
+// service is not running or its PID cannot be determined. It is the same
+// probe as the legacy-mode branch of ServiceStatus (see runningPID), and
+// shares the snapshot carried by ctx (WithProcessSnapshot), so callers that
+// format status detail (pid/since) from /proc see the very process, in the
+// same process-table view, that ServiceStatus reported as running.
+func RunningPID(ctx context.Context, def *ServiceDef) int {
 	if def == nil {
 		return 0
 	}
 
-	if pid := pidFromPidFile(def.PidFile); pid > 0 {
-		return pid
-	}
-
-	return pidFromProcessName(def.ProcessName)
-}
-
-// pidFromPidFile reads a pidfile and returns the PID when that PID points to
-// a live (non-zombie) process. Returns 0 for any failure (unreadable,
-// corrupt, or process gone).
-func pidFromPidFile(pidFile string) int {
-	if pidFile == "" {
-		return 0
-	}
-
-	data, err := os.ReadFile(pidFile) //nolint:gosec // path is from internal registry
-	if err != nil {
-		return 0
-	}
-
-	pidStr, _, _ := strings.Cut(strings.TrimSpace(string(data)), "\n")
-
-	pid, err := strconv.Atoi(strings.TrimSpace(pidStr))
-	if err != nil || pid <= 0 {
-		return 0
-	}
-
-	if !processAlive(pid) {
-		return 0
-	}
-
-	return pid
-}
-
-// pidFromProcessName scans /proc for the first cmdline match that isn't the
-// current process or its parent. Empty processName short-circuits to 0.
-func pidFromProcessName(processName string) int {
-	if processName == "" {
-		return 0
-	}
-
-	pids, err := scanProcessesByCmdline(processName)
-	if err != nil {
-		return 0
-	}
-
-	isSelfOrParent := selfOrParentFilter()
-
-	for _, p := range pids {
-		if !isSelfOrParent(p) {
-			return p
-		}
-	}
-
-	return 0
+	return runningPID(ctx, def)
 }
 
 // ServiceListStatusStream emits ServiceInfo entries on the returned channel

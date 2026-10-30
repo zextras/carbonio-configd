@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Hook is a function that runs before/after service actions.
@@ -44,16 +45,27 @@ type ServiceDef struct {
 	// When true and the current user is not root, startDirect prefixes with sudo.
 	NeedsRoot bool
 	// PidFile is the path to the service's PID file (e.g., /run/carbonio/nginx.pid).
-	// When set, status detection reads the PID from this file and checks /proc/<pid>.
-	// This is the preferred method — faster and more reliable than /proc cmdline scan.
+	// Legacy-mode status reads the PID from this file first and believes it only
+	// when that process is alive AND is of the ProcessName identity (a stale
+	// file whose PID was recycled by another binary is ignored). When the file is
+	// unreadable or stale, detection falls through to the ProcessName scan.
 	PidFile string
-	// ProcessName is the fallback for status detection when PidFile is not set.
-	// Used for /proc cmdline/comm scanning: it is matched as a substring of
-	// /proc/<pid>/cmdline for status, pid lookup and stop, so use the full
-	// binary path like the legacy pidof / pgrep -f patterns. A bare name also
-	// matches unrelated processes, e.g. "consul connect envoy -sidecar-for
-	// carbonio-memcached" for "memcached".
+	// ProcessName is the service's process identity in legacy mode, used for
+	// status, pid lookup and stop (procident.go). It is an exact name, never a
+	// substring: an absolute path (compared with /proc/<pid>/exe and with every
+	// argv token — the script path of a perl service, the retitled
+	// "nginx: master process <path>"), a glob over a whole path
+	// ("/opt/zextras/libexec/zmstat-*"), or a slash-less name such as a Java
+	// main class or "amavisd" (compared with each token and its basename). A
+	// process that merely mentions the service — "tail -f .../clamd.log",
+	// "consul connect envoy -sidecar-for carbonio-memcached" — is not matched.
 	ProcessName string
+	// GracefulStop, when positive, makes the legacy-mode stop SIGTERM the
+	// PidFile process (validated against ProcessName), wait up to this long and
+	// only then SIGKILL — instead of the default immediate SIGTERM-all of
+	// ProcessName with the kill grace. For daemons that must flush a backing
+	// store (slapd/LMDB) before exiting. Requires PidFile; CustomStop wins.
+	GracefulStop time.Duration
 	// Dependencies are services that must be started before this one
 	Dependencies []string
 	// EnableCheck is called to determine if this service should be started (for conditional deps)
@@ -189,7 +201,7 @@ var Registry = map[string]*ServiceDef{
 		Name:         svcStats,
 		DisplayName:  svcStats,
 		SystemdUnits: []string{"carbonio-stats.service"},
-		ProcessName:  "zmstat-",
+		ProcessName:  statsProcessGlob,
 		CustomStart:  statsCustomStart,
 		CustomStop:   statsCustomStop,
 	},
@@ -231,7 +243,7 @@ var Registry = map[string]*ServiceDef{
 		Name:         svcMilter,
 		DisplayName:  svcMilter,
 		SystemdUnits: []string{"carbonio-milter.service"},
-		ProcessName:  "milter.MilterServer",
+		ProcessName:  milterMainClass,
 		EnableCheck:  milterEnabled,
 		CustomStart:  milterCustomStart,
 	},
@@ -275,7 +287,7 @@ var Registry = map[string]*ServiceDef{
 		BinaryArgs:    []string{actionStart},
 		NeedsRoot:     true,
 		PidFile:       dataPath + "/postfix/spool/pid/master.pid",
-		ProcessName:   "common/libexec/master",
+		ProcessName:   commonPath + "/libexec/master",
 		CustomStart:   mtaCustomStart,
 		CustomStop:    mtaCustomStop,
 		Dependencies:  []string{svcSaslauthd, svcMilter},
@@ -288,10 +300,10 @@ var Registry = map[string]*ServiceDef{
 		BinaryPath:   commonPath + "/sbin/nginx",
 		BinaryArgs:   []string{"-c", confPath + "/nginx.conf"},
 		PidFile:      pidDir + "/nginx.pid",
-		// Path fragment, not the bare token "nginx": avoids matching
-		// /usr/bin/carbonio-prometheus-nginx-exporter, whose argv
-		// contains "nginx" multiple times.
-		ProcessName:   "/sbin/nginx",
+		// Full binary path: nginx retitles itself "nginx: master process
+		// <path> -c ...", and /usr/bin/carbonio-prometheus-nginx-exporter
+		// must not be mistaken for it.
+		ProcessName:   commonPath + "/sbin/nginx",
 		UseSDNotify:   true,
 		ConfigRewrite: []string{svcProxy},
 	},
@@ -308,7 +320,7 @@ var Registry = map[string]*ServiceDef{
 		// only; without listing the DB here the stop path would leave
 		// mariadb running after `zmcontrol stop`.
 		SystemdUnits:  []string{"carbonio-appserver-db.service", unitAppserver},
-		ProcessName:   "com.zextras.mailbox.Mailbox",
+		ProcessName:   mailboxMainClass,
 		ConfigRewrite: []string{svcMailbox},
 		CustomStart:   mailboxCustomStart,
 		CustomStop:    mailboxCustomStop,
@@ -326,7 +338,8 @@ var Registry = map[string]*ServiceDef{
 		// stop path does not wait on a STOPPING datagram that never arrives.
 		UseSDNotify: false,
 		CustomStart: ldapCustomStart,
-		CustomStop:  ldapCustomStop,
+		// Declarative stop: see ldapStopTimeout.
+		GracefulStop: ldapStopTimeout,
 	},
 	svcConfigd: {
 		Name:         svcConfigd,
@@ -341,7 +354,7 @@ var Registry = map[string]*ServiceDef{
 		Name:                svcServiceDiscover,
 		DisplayName:         "service discover",
 		SystemdUnits:        []string{"service-discover.service"},
-		ProcessName:         svcServiceDiscover,
+		ProcessName:         serviceDiscoverBinary,
 		ExternallyManaged:   true,
 		UseSystemdForStatus: true,
 	},

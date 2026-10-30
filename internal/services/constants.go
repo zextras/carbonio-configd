@@ -35,6 +35,10 @@ const (
 	// Note: serviceMTA = "mta" is defined in manager.go:128 and is the canonical MTA constant
 )
 
+// serviceDiscoverBinary is the service-discover daemon (its real name ends in
+// "d"), the identity of its process.
+const serviceDiscoverBinary = "/usr/bin/service-discoverd" //nolint:misspell // actual binary name
+
 // Logical service-group identifiers.
 const (
 	groupDirectoryServer = "directory-server"

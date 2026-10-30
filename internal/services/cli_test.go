@@ -397,14 +397,14 @@ func TestRewriteViaConfigd_ErrorFromListener(t *testing.T) {
 }
 
 func TestRunningPID_NilDef(t *testing.T) {
-	if RunningPID(nil) != 0 {
+	if RunningPID(context.Background(), nil) != 0 {
 		t.Error("expected 0 for nil def")
 	}
 }
 
 func TestRunningPID_EmptyPidFile(t *testing.T) {
 	def := &ServiceDef{Name: "test", PidFile: "", ProcessName: ""}
-	if RunningPID(def) != 0 {
+	if RunningPID(context.Background(), def) != 0 {
 		t.Error("expected 0 for empty PidFile and ProcessName")
 	}
 }
@@ -414,6 +414,10 @@ func TestRunningPID_ValidPidFile(t *testing.T) {
 		t.Skip("slow: may read real proc")
 	}
 	self := os.Getpid()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
 	tmpDir := t.TempDir()
 	pidFile := filepath.Join(tmpDir, "test.pid")
 	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(self)+"\n"), 0o644); err != nil {
@@ -423,9 +427,9 @@ func TestRunningPID_ValidPidFile(t *testing.T) {
 	def := &ServiceDef{
 		Name:        "test",
 		PidFile:     pidFile,
-		ProcessName: "nonexistent-process-xyz",
+		ProcessName: exe,
 	}
-	pid := RunningPID(def)
+	pid := RunningPID(context.Background(), def)
 	if pid != self {
 		t.Errorf("expected PID %d, got %d", self, pid)
 	}
@@ -446,43 +450,14 @@ func TestRunningPID_PidFileDeadFallsBackToProcessName(t *testing.T) {
 		PidFile:     pidFile,
 		ProcessName: "nonexistent-process-xyz-test",
 	}
-	pid := RunningPID(def)
+	pid := RunningPID(context.Background(), def)
 	if pid != 0 {
 		t.Errorf("expected 0 for dead pidfile and nonexistent process, got %d", pid)
 	}
 }
 
-func TestPidFromPidFile_EmptyPath(t *testing.T) {
-	if pidFromPidFile("") != 0 {
-		t.Error("expected 0 for empty path")
-	}
-}
-
-func TestPidFromPidFile_NonexistentFile(t *testing.T) {
-	if pidFromPidFile("/nonexistent/path/test.pid") != 0 {
-		t.Error("expected 0 for nonexistent file")
-	}
-}
-
-func TestPidFromPidFile_ValidPid(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: reads /proc")
-	}
-	self := os.Getpid()
-	tmpDir := t.TempDir()
-	pidFile := filepath.Join(tmpDir, "test.pid")
-	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(self)+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	pid := pidFromPidFile(pidFile)
-	if pid != self {
-		t.Errorf("expected %d, got %d", self, pid)
-	}
-}
-
 func TestPidFromProcessName_EmptyName(t *testing.T) {
-	if pidFromProcessName("") != 0 {
+	if pidFromProcessName(context.Background(), "") != 0 {
 		t.Error("expected 0 for empty process name")
 	}
 }
@@ -491,7 +466,7 @@ func TestPidFromProcessName_Nonexistent(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: reads /proc")
 	}
-	pid := pidFromProcessName("nonexistent-process-xyz-12345")
+	pid := pidFromProcessName(context.Background(), "nonexistent-process-xyz-12345")
 	if pid != 0 {
 		t.Errorf("expected 0 for nonexistent process, got %d", pid)
 	}
@@ -634,10 +609,17 @@ func TestServiceStatus_LegacyMode_PidFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// The pidfile PID is believed only when its binary is the service's: the
+	// test process is its own "service" here.
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	def := &ServiceDef{
 		Name:        "test-pid-status",
 		PidFile:     pidFile,
-		ProcessName: "nonexistent-pid-status-xyz",
+		ProcessName: exe,
 	}
 	Registry["test-pid-status"] = def
 	defer delete(Registry, "test-pid-status")

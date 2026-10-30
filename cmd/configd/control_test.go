@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -143,28 +142,15 @@ func TestServiceDetailFromProc_ZeroPID(t *testing.T) {
 		ProcessName: "nonexistent-process-xyz",
 		PidFile:     "",
 	}
-	result := serviceDetailFromProc(def)
+	result := serviceDetailFromProc(context.Background(), def)
 	if result != "" {
 		t.Errorf("expected empty string for service with PID 0, got %q", result)
 	}
 }
 
 func TestServiceDetailFromProc_WithPID(t *testing.T) {
-	self := os.Getpid()
-	tmpDir := t.TempDir()
-	pidFile := filepath.Join(tmpDir, "test.pid")
-	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(self)+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	def := &services.ServiceDef{
-		Name:        "test",
-		DisplayName: "Test",
-		PidFile:     pidFile,
-		ProcessName: "nonexistent-for-test-xyz",
-	}
-	result := serviceDetailFromProc(def)
-	if !strings.Contains(result, "pid") {
+	result := serviceDetailFromProc(context.Background(), livePidFileDef(t))
+	if !strings.Contains(result, "pid "+strconv.Itoa(os.Getpid())) {
 		t.Errorf("expected detail to contain 'pid', got %q", result)
 	}
 }
@@ -172,21 +158,7 @@ func TestServiceDetailFromProc_WithPID(t *testing.T) {
 // TestServiceDetailFromProc_IncludesSince guards the legacy-mode start time:
 // a live PID must yield a "since <timestamp>", never a missing or "n/a" value.
 func TestServiceDetailFromProc_IncludesSince(t *testing.T) {
-	self := os.Getpid()
-	pidFile := filepath.Join(t.TempDir(), "test.pid")
-
-	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(self)+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	def := &services.ServiceDef{
-		Name:        "test",
-		DisplayName: "Test",
-		PidFile:     pidFile,
-		ProcessName: "nonexistent-for-test-xyz",
-	}
-
-	result := serviceDetailFromProc(def)
+	result := serviceDetailFromProc(context.Background(), livePidFileDef(t))
 	if !strings.Contains(result, "since ") || strings.Contains(result, "n/a") {
 		t.Errorf("expected detail to carry a real start time, got %q", result)
 	}
@@ -340,7 +312,7 @@ func TestServiceDetailFromProc_NotRunning(t *testing.T) {
 		Name:        "test-not-running",
 		ProcessName: "nonexistent-process-xyz",
 	}
-	detail := serviceDetailFromProc(def)
+	detail := serviceDetailFromProc(context.Background(), def)
 	if detail != "" {
 		t.Errorf("expected empty detail for not-running service, got %q", detail)
 	}

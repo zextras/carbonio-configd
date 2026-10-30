@@ -390,25 +390,25 @@ func TestIsRunningByPidFile_DeadPid(t *testing.T) {
 	}
 }
 
-// TestScanProcessesByCmdline_NoMatch verifies that a highly unique needle returns
+// TestScanProcesses_NoMatch verifies that a highly unique needle returns
 // no matches against the real /proc filesystem.
-// Note: scanProcessesByCmdline reads /proc directly; procFSRoot only affects
+// Note: scanProcesses reads /proc directly; procFSRoot only affects
 // the per-entry file reads inside matchProcEntry.
-func TestScanProcessesByCmdline_NoMatch(t *testing.T) {
+func TestScanProcesses_NoMatch(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	pids, err := scanProcessesByCmdline("carbonio-configd-unique-needle-xyzzy-no-match-99999")
+	pids, err := scanProcesses("carbonio-configd-unique-needle-xyzzy-no-match-99999")
 	if err != nil {
-		t.Fatalf("scanProcessesByCmdline returned error: %v", err)
+		t.Fatalf("scanProcesses returned error: %v", err)
 	}
 	if len(pids) != 0 {
 		t.Errorf("expected no pids for unique needle, got %v", pids)
 	}
 }
 
-// TestScanProcessesByCmdline_SelfMatch verifies that our own process cmdline is found.
-func TestScanProcessesByCmdline_SelfMatch(t *testing.T) {
+// TestScanProcesses_SelfMatch verifies that our own process cmdline is found.
+func TestScanProcesses_SelfMatch(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -432,9 +432,9 @@ func TestScanProcessesByCmdline_SelfMatch(t *testing.T) {
 		t.Skip("could not determine needle from cmdline")
 	}
 
-	pids, err := scanProcessesByCmdline(needle)
+	pids, err := scanProcesses(needle)
 	if err != nil {
-		t.Fatalf("scanProcessesByCmdline returned error: %v", err)
+		t.Fatalf("scanProcesses returned error: %v", err)
 	}
 	found := false
 	for _, pid := range pids {
@@ -503,7 +503,7 @@ func TestIsProcessRunning_SelfExcluded(t *testing.T) {
 
 	// isProcessRunning excludes self and parent — only self matches → returns false
 	ctx := context.Background()
-	running := isProcessRunning(ctx, "uniqueneedle123")
+	running := pidFromProcessName(ctx, "uniqueneedle123") > 0
 	if running {
 		t.Error("expected isProcessRunning=false when only self matches")
 	}
@@ -516,7 +516,7 @@ func TestIsProcessRunning_NoMatchInRealProc(t *testing.T) {
 		t.Skip("slow: may invoke real system commands")
 	}
 	// Use a needle so unique it cannot possibly appear in any real process cmdline.
-	running := isProcessRunning(context.Background(), "carbonio-configd-test-unique-needle-xyzzy-12345")
+	running := pidFromProcessName(context.Background(), "carbonio-configd-test-unique-needle-xyzzy-12345") > 0
 	if running {
 		t.Error("expected isProcessRunning=false for needle that matches nothing in /proc")
 	}
@@ -575,7 +575,7 @@ func TestKillProcess_EscalatesToSIGKILL(t *testing.T) {
 	}
 
 	require.Eventually(t, func() bool {
-		return isProcessRunning(context.Background(), needle)
+		return pidFromProcessName(context.Background(), needle) > 0
 	}, 5*time.Second, 10*time.Millisecond, "helper never became visible in /proc")
 
 	start := time.Now()
@@ -594,7 +594,7 @@ func TestKillProcess_EscalatesToSIGKILL(t *testing.T) {
 	}
 
 	require.Eventually(t, func() bool {
-		return !isProcessRunning(context.Background(), needle)
+		return pidFromProcessName(context.Background(), needle) == 0
 	}, 2*time.Second, 10*time.Millisecond, "target process survived killProcess — SIGKILL escalation failed")
 }
 
@@ -760,23 +760,23 @@ func TestSudoKill_NonexistentProcess(t *testing.T) {
 	sudoKill(context.Background(), 999999999, "TERM", false)
 }
 
-func TestScanProcessesByCmdline_ReadError(t *testing.T) {
+func TestScanProcesses_ReadError(t *testing.T) {
 	oldRoot := procFSRoot
 	procFSRoot = "/nonexistent-proc-dir-xyzzy/"
 	defer func() { procFSRoot = oldRoot }()
 
 	// The scan lists procFSRoot (not a hard-coded /proc), so an unreadable
 	// root surfaces as an error and callers treat it as "nothing found".
-	pids, err := scanProcessesByCmdline("test")
+	pids, err := scanProcesses("test")
 	if err == nil {
-		t.Error("scanProcessesByCmdline should report an unreadable procFSRoot")
+		t.Error("scanProcesses should report an unreadable procFSRoot")
 	}
 
 	if len(pids) != 0 {
 		t.Errorf("expected no pids on read error, got %v", pids)
 	}
 
-	if isProcessRunning(context.Background(), "test") {
+	if pidFromProcessName(context.Background(), "test") > 0 {
 		t.Error("isProcessRunning must report false when procFSRoot is unreadable")
 	}
 }

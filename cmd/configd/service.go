@@ -173,6 +173,9 @@ var (
 // printServiceStatus reports one service's state plus PID/uptime detail.
 // Shared by `configd service status <name>` and `configd status <name>`.
 func printServiceStatus(ctx context.Context, name string) error {
+	// The status verdict and the PID shown beside it come from one snapshot.
+	ctx = services.WithProcessSnapshot(ctx)
+
 	running, err := serviceStatusFn(ctx, name)
 	if err != nil {
 		return fmt.Errorf("failed to get status for service %s: %w", name, err)
@@ -209,7 +212,7 @@ func showServiceDetail(ctx context.Context, def *services.ServiceDef) {
 		return
 	}
 
-	pid := services.RunningPID(def)
+	pid := services.RunningPID(ctx, def)
 	if pid == 0 {
 		return
 	}

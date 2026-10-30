@@ -50,7 +50,20 @@ control path, not a per-instance flag — each of those functions bifurcates int
    never invoked. There is no `zm*ctl` fallback: services whose legacy launch is too dynamic
    for a static `BinaryPath` (mailbox, stats, mta, ldap, milter, antispam, ...) get a native
    `CustomStart`/`CustomStop` implementation in the corresponding `*_launcher.go` file instead
-   of shelling out to the old `/opt/zextras/bin/zm*ctl` scripts.
+   of shelling out to the old `/opt/zextras/bin/zm*ctl` scripts. Stops that are only a
+   bounded SIGTERM wait (slapd/LMDB) are data too: `ServiceDef.GracefulStop`.
+
+   **Process identity.** Legacy status and stop recognise a service's processes by what the
+   kernel records, never by a cmdline substring (`internal/services/procident.go`). The
+   `ServiceDef.PidFile` PID is believed only if it is alive and its `/proc/<pid>/exe` or argv
+   matches `ServiceDef.ProcessName` (an exact path, glob over a whole path, Java main class or
+   bare daemon name); otherwise `/proc` is scanned for the same identity (exe, then exact argv
+   tokens, then `comm` only for processes with an empty argv). A process that only mentions
+   the service (`tail -f .../clamd.log`, a consul sidecar `-sidecar-for carbonio-x`) never
+   matches, and a stale pidfile naming a recycled PID is ignored. A service that is not
+   running is `(false, nil)`. Every status probe of one `zmcontrol status` run or one
+   watchdog tick shares a single process-table snapshot (`services.WithProcessSnapshot`);
+   start/stop paths always read live state.
 
 **Service name → systemd unit(s)** (`ServiceDef.SystemdUnits`, used when `IsSystemdMode()`):
 

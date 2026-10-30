@@ -23,6 +23,12 @@ const (
 var (
 	libexecDir  = basePath + "/libexec"
 	statsPidDir = pidDir + "/stats"
+
+	// statsProcessGlob is the identity of every zmstat-* collector: the
+	// script path under libexecDir statsCustomStart launches (perl scripts, so
+	// it is an argv token of `perl -w <script>`). A glob over the whole path,
+	// so `tail -f .../log/zmstat-proc.out` is not mistaken for a collector.
+	statsProcessGlob = libexecDir + "/zmstat-*"
 )
 
 // statsCustomStart orchestrates the zmstat-* collector suite.
@@ -136,7 +142,7 @@ func statsCustomStop(ctx context.Context, _ *ServiceDef) error {
 	}
 
 	// Final pass: send SIGTERM to any zmstat-* survivors found in /proc.
-	_ = killProcess(ctx, "zmstat-")
+	_ = killProcess(ctx, statsProcessGlob)
 
 	logger.InfoContext(ctx, "Stopped stats collectors", "killed", killed)
 

@@ -1043,7 +1043,7 @@ func TestCheckOneService_ServiceNotTracked(t *testing.T) {
 	wd.SetServiceEnabled(context.Background(), "mta", true)
 	mockSM.setRunning("mta", false)
 
-	wd.checkOneService(context.Background(), "mta", nil)
+	wd.checkOneService(context.Background(), context.Background(), "mta", nil)
 
 	if mockSM.getRestartCount("mta") > 0 {
 		t.Errorf("checkOneService should skip untracked service, got %d restart(s)", mockSM.getRestartCount("mta"))
