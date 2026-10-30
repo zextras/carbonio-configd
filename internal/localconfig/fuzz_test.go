@@ -160,8 +160,10 @@ func FuzzInterpolate(f *testing.F) {
 			}
 		}
 
-		if (subs == 0) != maps.Equal(before, cfg) {
-			t.Fatalf("subs=%d but unchanged=%v", subs, maps.Equal(before, cfg))
+		// A substitution may legitimately be a no-op (self-reference such as
+		// "a=${a}" resolves to itself), so only subs==0 implies unchanged.
+		if subs == 0 && !maps.Equal(before, cfg) {
+			t.Fatalf("subs=0 but config changed")
 		}
 
 		checkInterpolateAgainstReference(t, before, cfg)

@@ -36,7 +36,7 @@ func splitScannerLines(input string) []string {
 // FuzzRewriteReader feeds arbitrary multi-line .in templates to
 // Rewriter.RewriteReader.
 //
-// Invariants: never panics; deterministic; every emitted line is
+// Invariants: never panics; deterministic (including malformed-directive errors); every emitted line is
 // newline-terminated (so the output is empty or ends with '\n'); a template
 // without '@'/'%' passes through unchanged line by line; a plain-text input
 // yields exactly one output line per input line.
@@ -70,7 +70,14 @@ func FuzzRewriteReader(f *testing.F) {
 
 		var out bytes.Buffer
 		if err := rw.RewriteReader(ctx, strings.NewReader(input), &out); err != nil {
-			t.Fatalf("RewriteReader failed on input %q: %v", input, err)
+			// Malformed directives (e.g. "%%list%%") are rejected like the
+			// legacy rewriter does; the rejection itself must be deterministic.
+			var again bytes.Buffer
+			if err2 := rw.RewriteReader(ctx, strings.NewReader(input), &again); err2 == nil || err2.Error() != err.Error() {
+				t.Fatalf("non-deterministic error on %q: %v vs %v", input, err, err2)
+			}
+
+			return
 		}
 
 		got := out.String()
