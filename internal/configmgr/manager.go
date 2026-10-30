@@ -228,9 +228,11 @@ func (cm *ConfigManager) initConfigLdapClient(ctx context.Context, localCfg map[
 		"bind_dn", ldap.ConfigBackendDN)
 }
 
-// lookupVarKey checks GlobalConfig → MiscConfig → ServerConfig for key.
+// lookupVarKey checks ServerConfig → MiscConfig → GlobalConfig for key.
+// A value stored on the server entry overrides the global one, matching the
+// legacy configd (state.py assigns global, misc, server; the last one wins).
 func (cm *ConfigManager) lookupVarKey(key string) (string, bool) {
-	if val, ok := cm.State.GlobalConfig.Data.Get(key); ok {
+	if val, ok := cm.State.ServerConfig.Data.Get(key); ok {
 		return val, true
 	}
 
@@ -238,7 +240,7 @@ func (cm *ConfigManager) lookupVarKey(key string) (string, bool) {
 		return val, true
 	}
 
-	if val, ok := cm.State.ServerConfig.Data.Get(key); ok {
+	if val, ok := cm.State.GlobalConfig.Data.Get(key); ok {
 		return val, true
 	}
 

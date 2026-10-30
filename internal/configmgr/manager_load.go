@@ -350,36 +350,31 @@ func parseLDAPCommandOutput(output string) map[string]string {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		// LDAP output format: "key: value" or "key:: base64value"
-		// Check for base64-encoded value (double colon)
-		if strings.Contains(line, "::") {
-			parts := strings.SplitN(line, "::", 2)
-			if len(parts) == 2 {
-				key := intern.Attr(strings.TrimSpace(parts[0]))
-				value := strings.TrimSpace(parts[1])
-				// Store base64-encoded value as-is (will be decoded by executor)
-				configData[key] = value
-
-				continue
-			}
-			// Malformed base64 line - skip silently
+		// LDAP output format: "key: value" or "key:: base64value".
+		// The separator is the first colon; values may contain colons
+		// (URLs, IPv6 addresses such as [::1]/128), so "::" only marks
+		// base64 when it immediately follows the attribute name.
+		rawKey, rest, found := strings.Cut(line, ":")
+		if !found {
 			continue
 		}
 
-		// Regular format: "key: value"
-		// SplitN with limit 2 preserves additional colons in the value
-		parts := strings.SplitN(line, ":", 2)
-		if len(parts) == 2 {
-			key := intern.Attr(strings.TrimSpace(parts[0]))
-			value := strings.TrimSpace(parts[1])
-			// Handle multi-value attributes by concatenating with newlines
-			if existingValue, exists := configData[key]; exists {
-				configData[key] = existingValue + "\n" + value
-			} else {
-				configData[key] = value
-			}
+		key := intern.Attr(strings.TrimSpace(rawKey))
+
+		if b64, isB64 := strings.CutPrefix(rest, ":"); isB64 {
+			// Store base64-encoded value as-is (will be decoded by executor)
+			configData[key] = strings.TrimSpace(b64)
+
+			continue
 		}
-		// Malformed lines without colon are silently skipped
+
+		value := strings.TrimSpace(rest)
+		// Handle multi-value attributes by concatenating with newlines
+		if existingValue, exists := configData[key]; exists {
+			configData[key] = existingValue + "\n" + value
+		} else {
+			configData[key] = value
+		}
 	}
 
 	return configData
