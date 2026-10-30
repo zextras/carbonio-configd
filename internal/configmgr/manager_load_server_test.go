@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/zextras/carbonio-configd/internal/commands"
+	"github.com/zextras/carbonio-configd/internal/ldap"
 	"strings"
 	"testing"
 )
@@ -243,5 +244,57 @@ func TestLoadServerConfigWithRetry_ServiceMapping(t *testing.T) {
 
 	if cm.State.ServerConfig.ServiceConfig.GetOr("ldap", "") != "zimbraServiceEnabled" {
 		t.Error("Expected ldap service to be enabled")
+	}
+}
+
+// TestLoadServerConfigWithRetry_IPv6RoundTrip feeds gs with the native LDAP
+// client's serialization and checks values containing "::" survive the
+// map -> text -> map round trip, including derived keys and VAR lookups.
+func TestLoadServerConfigWithRetry_IPv6RoundTrip(t *testing.T) {
+	cm := newTestConfigManager(t)
+
+	serverAttrs := map[string]string{
+		"zimbraMtaMyNetworks":    "127.0.0.0/8 [::1]/128 172.24.0.0/21",
+		"zimbraLocalBindAddress": "::1",
+		"zimbraServiceEnabled":   "mta\namavis",
+	}
+
+	cm.CommandRegistry.Commands["gs"] = commands.NewCommand("Get server test", "gs",
+		func(_ context.Context, _ ...string) (string, error) {
+			return ldap.FormatAsZmprovOutput(serverAttrs), nil
+		})
+
+	if err := cm.loadServerConfigWithRetry(context.Background(), 1); err != nil {
+		t.Fatalf("loadServerConfigWithRetry: %v", err)
+	}
+
+	for key, want := range map[string]string{
+		"zimbraMtaMyNetworks":        "127.0.0.0/8 [::1]/128 172.24.0.0/21",
+		"zimbraMtaMyNetworksPerLine": "127.0.0.0/8\n[::1]/128\n172.24.0.0/21",
+		"zimbraLocalBindAddress":     "::1",
+	} {
+		got, err := cm.LookUpConfig(context.Background(), "VAR", key)
+		if err != nil || got != want {
+			t.Errorf("VAR %s = %q (err %v), want %q", key, got, err, want)
+		}
+	}
+}
+
+// TestLookUpConfigVar_ServerOverridesGlobal checks that a per-server value
+// wins over the global one, as in the legacy configd.
+func TestLookUpConfigVar_ServerOverridesGlobal(t *testing.T) {
+	cm := newTestConfigManager(t)
+	cm.State.GlobalConfig.Data.Set("zimbraMtaMyNetworks", "global")
+	cm.State.GlobalConfig.Data.Set("zimbraOnlyGlobal", "global")
+	cm.State.ServerConfig.Data.Set("zimbraMtaMyNetworks", "server")
+
+	for key, want := range map[string]string{
+		"zimbraMtaMyNetworks": "server",
+		"zimbraOnlyGlobal":    "global",
+	} {
+		got, err := cm.LookUpConfig(context.Background(), "VAR", key)
+		if err != nil || got != want {
+			t.Errorf("VAR %s = %q (err %v), want %q", key, got, err, want)
+		}
 	}
 }

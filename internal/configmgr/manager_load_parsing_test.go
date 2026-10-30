@@ -94,6 +94,18 @@ zimbraTime: 12:34:56`,
 			},
 		},
 		{
+			name: "IPv6 values containing double colon",
+			input: `zimbraMtaMyNetworks: 127.0.0.0/8 [::1]/128 172.24.0.0/21
+zimbraLocalBindAddress: ::1
+zimbraMtaMyNetworks2: fe80::/10
+zimbraMtaMyNetworks2: 2001:db8::1`,
+			expected: map[string]string{
+				"zimbraMtaMyNetworks":    "127.0.0.0/8 [::1]/128 172.24.0.0/21",
+				"zimbraLocalBindAddress": "::1",
+				"zimbraMtaMyNetworks2":   "fe80::/10\n2001:db8::1",
+			},
+		},
+		{
 			name: "malformed lines without colon",
 			input: `zimbraValidKey: valid value
 malformed line without colon
