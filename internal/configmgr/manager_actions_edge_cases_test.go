@@ -1309,7 +1309,7 @@ func TestCleanupRewriteFiles_TmpFileIsDirectory(t *testing.T) {
 // Instead we exercise the scanner error path by having a bad file descriptor.
 // We verify the function gracefully handles a source file opened but becomes unreadable.
 
-// TestProcessRewrite_SuccessfulRename verifies the happy path with default mode (0644).
+// TestProcessRewrite_SuccessfulRename verifies the happy path with default mode (0440).
 func TestProcessRewrite_SuccessfulRename(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: configmgr test may have retry delays")
@@ -1333,6 +1333,10 @@ func TestProcessRewrite_SuccessfulRename(t *testing.T) {
 	}
 	if len(destContent) == 0 {
 		t.Error("expected non-empty destination file")
+	}
+	// Legacy state.py:775 default mode is 0440.
+	if fi, err := os.Stat(baseDir + "/" + destRelPath); err != nil || fi.Mode().Perm() != 0o440 {
+		t.Errorf("default rewrite mode = %v (err %v), want 0440", fi.Mode().Perm(), err)
 	}
 	// Rewrite should have called DelRewrite
 	if _, ok := cm.State.CurrentActions.Rewrites[srcRelPath]; ok {

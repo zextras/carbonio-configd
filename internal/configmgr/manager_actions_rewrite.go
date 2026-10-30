@@ -286,7 +286,8 @@ func (cm *ConfigManager) rewriteTransform(ctx context.Context, srcPath string, t
 // rewriteAtomicCommit sets permissions on tmpFileName and atomically replaces
 // destPath, falling back to copy+delete when rename crosses filesystems.
 func rewriteAtomicCommit(ctx context.Context, tmpFileName, destPath, modeStr string) error {
-	var fileMode os.FileMode = 0o644
+	// Legacy state.py:775 defaults to 0440.
+	var fileMode os.FileMode = 0o440
 
 	if modeStr != "" {
 		modeInt, err := strconv.ParseInt(modeStr, 8, 32)
@@ -356,7 +357,7 @@ func (cm *ConfigManager) processRewrite(ctx context.Context, filePath string, re
 
 	modeStr := rewriteEntry.Mode
 	if modeStr == "" {
-		modeStr = "0644"
+		modeStr = "0440"
 	}
 
 	logger.DebugContext(ctx, "File rewrite completed",
