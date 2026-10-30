@@ -44,7 +44,7 @@ Each iteration runs the following phases in order:
 | Phase | Function | Notes |
 |---|---|---|
 | Shutdown check | — | Checks context cancellation before starting work |
-| Idle check | — | Skips to sleep if no REWRITE events and not first run and no reload signal |
+| Idle check | — | Only with `zmconfigd_skip_idle_polls=TRUE` (off by default, as legacy): skips to sleep if no REWRITE events and not first run and no reload signal |
 | Load configs | `configManager.LoadAllConfigs` | Four concurrent goroutines; see Config loading pipeline below |
 | Start listener | `network.NewThreadedStreamServer` | First run only; skipped in `--once` mode |
 | Parse MTA config | `configManager.ParseMtaConfig` | Reads `conf/zmconfigd.cf` |

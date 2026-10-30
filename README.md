@@ -136,9 +136,11 @@ The daemon polls every **300 seconds** by default. Override with `zmconfigd_inte
 </key>
 ```
 
-Between polls, the daemon skips the config-load phase when no REWRITE events have been
-received since the last cycle (idle-poll skip). This avoids spawning LDAP and `zm*ctl`
-processes on quiet servers. A SIGHUP always bypasses the skip and forces a full cycle.
+Like the legacy daemon, every poll reloads LDAP and localconfig, so changes made with
+`zmprov` or the admin console are applied on the next cycle. Setting
+`zmconfigd_skip_idle_polls=TRUE` skips the config-load phase when no REWRITE events have
+been received since the last cycle; changes made only in LDAP then wait for a REWRITE
+request or SIGHUP, which always forces a full cycle.
 
 ### Localconfig subcommand
 
