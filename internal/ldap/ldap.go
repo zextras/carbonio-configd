@@ -491,6 +491,7 @@ type Domain struct {
 	VirtualHostname  string
 	VirtualIPAddress string
 	ClientCertMode   string
+	ClientCertCA     string
 	SSLCertificate   string
 	SSLPrivateKey    string
 }

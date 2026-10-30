@@ -98,6 +98,12 @@ func (g *Generator) queryDomains(ctx context.Context, _ string) ([]ldap.Domain, 
 		return nil, false
 	}
 
+	// Legacy loads no domains (hence no virtual IP listen addresses) unless
+	// per-virtual-hostname config is enabled (ProxyConfGen.java:253-255).
+	if !g.perVirtualHostnameEnabled() {
+		return []ldap.Domain{}, true
+	}
+
 	if g.Cache != nil {
 		cachedData, err := g.Cache.GetCachedConfig(ctx, "ldap:domains", func() (any, error) {
 			return g.LdapClient.NativeClient.QueryDomains(ctx)

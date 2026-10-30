@@ -170,6 +170,12 @@ func (g *Generator) GenerateAll(ctx context.Context) error {
 	logger.DebugContext(ctx, "Created reusable template processor",
 		"template_count", len(templates))
 
+	// Deploy per-domain certificate/key files before rendering templates that
+	// reference them (legacy ProxyConfGen.java:2224-2240).
+	if err := processor.syncDomainCerts(ctx); err != nil {
+		return fmt.Errorf("failed to sync domain certificates: %w", err)
+	}
+
 	// Process each template
 	successCount := 0
 	errorCount := 0

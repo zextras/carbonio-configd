@@ -161,9 +161,17 @@ func formatCapabilities(val any, protocolName string) (string, error) {
 	}
 
 	var sb strings.Builder
-	for _, cap := range caps {
+
+	for _, capability := range caps {
+		// Capabilities come from LDAP and are emitted inside double quotes;
+		// a quote, backslash or control character would break out of the
+		// nginx string and let the value inject directives.
+		if strings.ContainsAny(capability, "\"\\\r\n\x00;") {
+			continue
+		}
+
 		sb.WriteString(` "`)
-		sb.WriteString(cap)
+		sb.WriteString(capability)
 		sb.WriteString(`"`)
 	}
 

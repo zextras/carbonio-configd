@@ -12,6 +12,7 @@ import (
 	"time"
 
 	ldap "github.com/go-ldap/ldap/v3"
+	"github.com/stretchr/testify/require"
 	errs "github.com/zextras/carbonio-configd/internal/errors"
 )
 
@@ -455,23 +456,46 @@ func BenchmarkFormatAsZmprovOutput(b *testing.B) {
 	}
 }
 
-// TestNextRetryDelay tests the exponential backoff cap logic. The function
-// calls time.Sleep as a side effect; test values are kept tiny to avoid
-// slowing the suite.
+// TestNextRetryDelay tests the exponential backoff cap logic. The function is
+// pure; it does not wait.
 func TestNextRetryDelay(t *testing.T) {
-	c := &Client{maxRetryDelay: 5 * time.Millisecond}
+	c := &Client{maxRetryDelay: 5 * time.Second}
 
-	// Below cap: 1ms * 2 = 2ms < 5ms → returns 2ms
-	got := c.nextRetryDelay(1 * time.Millisecond)
-	if got != 2*time.Millisecond {
-		t.Errorf("nextRetryDelay(1ms) = %v, want 2ms", got)
+	// Below cap: 1s * 2 = 2s < 5s → returns 2s
+	got := c.nextRetryDelay(1 * time.Second)
+	if got != 2*time.Second {
+		t.Errorf("nextRetryDelay(1s) = %v, want 2s", got)
 	}
 
-	// At cap: 3ms * 2 = 6ms > 5ms → returns 5ms
-	got = c.nextRetryDelay(3 * time.Millisecond)
-	if got != 5*time.Millisecond {
-		t.Errorf("nextRetryDelay(3ms) = %v, want 5ms (cap)", got)
+	// At cap: 3s * 2 = 6s > 5s → returns 5s
+	got = c.nextRetryDelay(3 * time.Second)
+	if got != 5*time.Second {
+		t.Errorf("nextRetryDelay(3s) = %v, want 5s (cap)", got)
 	}
+}
+
+// TestWaitRetry_AbortedByClose verifies a pending backoff wait ends as soon
+// as the client is closed rather than sleeping out the full delay.
+func TestWaitRetry_AbortedByClose(t *testing.T) {
+	c := &Client{closed: make(chan struct{})}
+
+	result := make(chan bool, 1)
+
+	go func() { result <- c.waitRetry(time.Hour) }()
+
+	require.NoError(t, c.Close())
+
+	select {
+	case ok := <-result:
+		require.False(t, ok)
+	case <-time.After(5 * time.Second):
+		t.Fatal("waitRetry did not return after Close")
+	}
+}
+
+func TestWaitRetry_Elapses(t *testing.T) {
+	c := &Client{closed: make(chan struct{})}
+	require.True(t, c.waitRetry(time.Millisecond))
 }
 
 // TestClient_HandleOperationError_ConnectionError_NilConn verifies that a connection
