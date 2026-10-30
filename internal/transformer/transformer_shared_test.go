@@ -8,7 +8,19 @@ import (
 	"context"
 	"sync"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
+
+// mustTransform runs Transform and fails the test on a transform error.
+func mustTransform(t testing.TB, tr *Transformer, ctx context.Context, line string) string {
+	t.Helper()
+
+	out, err := tr.Transform(ctx, line)
+	require.NoError(t, err)
+
+	return out
+}
 
 // BenchmarkNewTransformer_Allocs confirms that constructing many Transformer
 // instances no longer triggers per-instance regex compilation. The allocation
@@ -32,7 +44,7 @@ func TestTransform_Concurrent(t *testing.T) {
 	t.Parallel()
 
 	const (
-		workers  = 32
+		workers   = 32
 		perWorker = 1000
 	)
 
@@ -60,7 +72,9 @@ func TestTransform_Concurrent(t *testing.T) {
 
 			for range perWorker {
 				for _, in := range inputs {
-					_ = tx.Transform(ctx, in)
+					if _, err := tx.Transform(ctx, in); err != nil {
+						t.Errorf("Transform(%q): %v", in, err)
+					}
 				}
 			}
 		}()

@@ -374,7 +374,7 @@ func TestWaitForSDNotify_ReadyReceived(t *testing.T) {
 	defer func() { _ = conn.Close() }()
 
 	go func() {
-		time.Sleep(50 * time.Millisecond)
+		// conn is already bound, so dialing cannot race the listener.
 		client, dialErr := net.DialUnix("unixgram", nil, addr)
 		if dialErr != nil {
 			return

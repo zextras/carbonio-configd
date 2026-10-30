@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -76,29 +77,6 @@ func TestValidateProfilingConfig_AllPaths(t *testing.T) {
 	err := ValidateProfilingConfig(cfg)
 	if err != nil {
 		t.Errorf("unexpected error for valid config: %v", err)
-	}
-}
-
-func TestGenerateProfilePath(t *testing.T) {
-	baseDir := "/tmp/profiles"
-	profileType := "cpu"
-	path := GenerateProfilePath(baseDir, profileType)
-
-	if !strings.HasPrefix(path, baseDir) {
-		t.Errorf("expected path to start with %s, got %s", baseDir, path)
-	}
-	if !strings.Contains(path, "cpu-") {
-		t.Errorf("expected path to contain 'cpu-', got %s", path)
-	}
-	if !strings.HasSuffix(path, ".prof") {
-		t.Errorf("expected path to end with .prof, got %s", path)
-	}
-}
-
-func TestGenerateProfilePath_MemType(t *testing.T) {
-	path := GenerateProfilePath("/tmp", "mem")
-	if !strings.Contains(path, "mem-") {
-		t.Errorf("expected path to contain 'mem-', got %s", path)
 	}
 }
 
@@ -315,5 +293,80 @@ func TestEnsureDir_CurrentDir(t *testing.T) {
 	err := ensureDir("file.prof")
 	if err != nil {
 		t.Errorf("ensureDir for current dir should not fail: %v", err)
+	}
+}
+
+func currentProfilingState() *profilingState {
+	profilingMu.Lock()
+	defer profilingMu.Unlock()
+
+	return activeProfilingState
+}
+
+func TestStartProfiling_AutoStopsAfterDuration(t *testing.T) {
+	profilingMu.Lock()
+	activeProfilingState = nil
+	profilingMu.Unlock()
+
+	cfg := &ProfilingConfig{
+		MemProfilePath:  filepath.Join(t.TempDir(), "mem.prof"),
+		CPUProfilePath:  filepath.Join(t.TempDir(), "cpu.prof"),
+		ProfileDuration: 20 * time.Millisecond,
+	}
+
+	if err := StartProfiling(cfg); err != nil {
+		t.Fatalf("StartProfiling failed: %v", err)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for currentProfilingState() != nil && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	if currentProfilingState() != nil {
+		t.Fatal("profiling should have been stopped by the duration timer")
+	}
+
+	if _, err := os.Stat(cfg.MemProfilePath); err != nil {
+		t.Errorf("mem profile should be written by auto-stop: %v", err)
+	}
+}
+
+func TestStopProfiling_CancelsTimerAndIsIdempotent(t *testing.T) {
+	profilingMu.Lock()
+	activeProfilingState = nil
+	profilingMu.Unlock()
+
+	cfg := &ProfilingConfig{
+		TracePath:       filepath.Join(t.TempDir(), "trace.out"),
+		ProfileDuration: time.Hour,
+	}
+
+	if err := StartProfiling(cfg); err != nil {
+		t.Fatalf("StartProfiling failed: %v", err)
+	}
+
+	state := currentProfilingState()
+
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+			StopProfiling(cfg)
+		}()
+	}
+
+	wg.Wait()
+
+	select {
+	case <-state.cancel:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timer goroutine was not cancelled by StopProfiling")
+	}
+
+	if currentProfilingState() != nil {
+		t.Error("state should be nil after StopProfiling")
 	}
 }

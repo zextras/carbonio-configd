@@ -34,10 +34,12 @@ type Watchdog struct {
 	// enabled controls whether watchdog is active
 	enabled bool
 
-	// stopChan signals the watchdog to stop
+	// stopChan signals the current run loop to stop. Recreated by every Start
+	// so the watchdog can be restarted after Stop.
 	stopChan chan struct{}
 
-	// runningChan indicates watchdog is running
+	// runningChan is closed by the current run loop when it exits. Recreated
+	// by every Start together with stopChan.
 	runningChan chan struct{}
 
 	// ServiceEnabled maps service names to their enabled status
@@ -119,8 +121,6 @@ func NewWatchdog(cfg Config) *Watchdog {
 		serviceManager: cfg.ServiceManager,
 		CheckInterval:  cfg.CheckInterval,
 		enabled:        false,
-		stopChan:       make(chan struct{}),
-		runningChan:    make(chan struct{}),
 		ServiceEnabled: make(map[string]bool),
 		prevServices:   make(map[string]string),
 		configLookup:   cfg.ConfigLookup,
@@ -141,15 +141,20 @@ func (w *Watchdog) Start(ctx context.Context) {
 	}
 
 	w.enabled = true
+	w.stopChan = make(chan struct{})
+	w.runningChan = make(chan struct{})
+	stopChan, runningChan := w.stopChan, w.runningChan
 	w.mu.Unlock()
 
 	logger.DebugContext(ctx, "Starting watchdog",
 		"check_interval", w.CheckInterval)
 
-	go w.run(ctx)
+	go w.run(ctx, stopChan, runningChan)
 }
 
-// Stop halts the watchdog monitoring loop.
+// Stop halts the watchdog monitoring loop and waits for it to finish, or
+// until ctx is done, whichever comes first. The loop still exits on its own
+// once its current cycle completes. Start may be called again afterwards.
 func (w *Watchdog) Stop(ctx context.Context) {
 	ctx = logger.ContextWithComponentOnce(ctx, "watchdog")
 
@@ -163,32 +168,18 @@ func (w *Watchdog) Stop(ctx context.Context) {
 	}
 
 	w.enabled = false
+	stopChan, runningChan := w.stopChan, w.runningChan
 	w.mu.Unlock()
 
 	logger.DebugContext(ctx, "Stopping watchdog")
-	close(w.stopChan)
-	<-w.runningChan // Wait for run() to finish
-}
+	close(stopChan)
 
-// IsEnabled returns whether the watchdog is currently active.
-func (w *Watchdog) IsEnabled() bool {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	return w.enabled
-}
-
-// SetServiceEnabled sets whether a specific service should be monitored by watchdog.
-func (w *Watchdog) SetServiceEnabled(ctx context.Context, service string, enabled bool) {
-	ctx = logger.ContextWithComponentOnce(ctx, "watchdog")
-
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	w.ServiceEnabled[service] = enabled
-	logger.DebugContext(ctx, "Watchdog monitoring status changed",
-		"service", service,
-		"enabled", enabled)
+	select {
+	case <-runningChan:
+	case <-ctx.Done():
+		logger.WarnContext(ctx, "Watchdog stop interrupted before the monitoring loop exited",
+			"error", ctx.Err())
+	}
 }
 
 // IsServiceEnabled returns whether a service is monitored by watchdog.
@@ -226,15 +217,15 @@ func (w *Watchdog) IsServiceTracked(service string) bool {
 }
 
 // run is the main watchdog monitoring loop.
-func (w *Watchdog) run(ctx context.Context) {
-	defer close(w.runningChan)
+func (w *Watchdog) run(ctx context.Context, stopChan <-chan struct{}, runningChan chan<- struct{}) {
+	defer close(runningChan)
 
 	ticker := time.NewTicker(w.CheckInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-w.stopChan:
+		case <-stopChan:
 			logger.DebugContext(ctx, "Watchdog stopped")
 
 			return
@@ -292,12 +283,17 @@ func (w *Watchdog) logServiceStatusChanges(ctx context.Context) map[string]bool 
 
 	observed := make(map[string]bool, len(monitored))
 
+	// All probes of this tick share one /proc walk. The snapshot context is
+	// scoped to the probe loop: restarts (which re-check status before
+	// starting) must keep the caller's ctx and see live process state.
+	probeCtx := services.WithProcessSnapshot(ctx)
+
 	for _, service := range monitored {
 		if !w.isEnabledOnNode(service) {
 			continue
 		}
 
-		running, err := w.serviceManager.IsRunning(ctx, service)
+		running, err := w.serviceManager.IsRunning(probeCtx, service)
 		if err != nil {
 			// Don't record a status when the probe itself failed.
 			continue
@@ -361,7 +357,7 @@ func (w *Watchdog) checkOneService(ctx context.Context, service string, observed
 
 		isRunning, err = w.serviceManager.IsRunning(ctx, service)
 		if err != nil {
-			logger.ErrorContext(ctx, "Failed to check service", "service", service, "error", err)
+			logger.WarnContext(ctx, "Failed to check service", "service", service, "error", err)
 
 			return
 		}
@@ -377,7 +373,9 @@ func (w *Watchdog) checkOneService(ctx context.Context, service string, observed
 }
 
 // restartDownService removes the service from watchdog tracking, queues a restart,
-// and re-adds it on success.
+// and re-adds it on success. On failure the service stays untracked, as in legacy
+// configd: controlProcess drops it from watchdogProcess on restart and it only
+// becomes eligible again once a later status check sees it running.
 func (w *Watchdog) restartDownService(ctx context.Context, service string) {
 	logger.WarnContext(ctx, "Service not running, attempting restart", "service", service)
 
@@ -391,10 +389,12 @@ func (w *Watchdog) restartDownService(ctx context.Context, service string) {
 
 	if err := w.serviceManager.ProcessRestarts(ctx, w.configLookup); err != nil {
 		logger.ErrorContext(ctx, "Failed to restart service", "service", service, "error", err)
-	} else {
-		logger.InfoContext(ctx, "Successfully restarted service", "service", service)
-		w.AddService(ctx, service)
+
+		return
 	}
+
+	logger.InfoContext(ctx, "Successfully restarted service", "service", service)
+	w.AddService(ctx, service)
 }
 
 // getTrackedServices returns a list of all services currently tracked by watchdog.

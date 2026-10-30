@@ -7,9 +7,13 @@ package fileutil
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
@@ -34,8 +38,9 @@ type readerOnly struct{ io.Reader }
 type writerOnly struct{ io.Writer }
 
 // CopyFile copies a file from src to dst, preserving content but not metadata.
-// The destination file is removed before creating, so this works even when the
-// existing file is read-only (e.g. mode 0440). The caller is responsible for
+// The content is written to a temp file in dst's directory and renamed over
+// dst, so this works even when the existing file is read-only (e.g. mode 0440)
+// and is not subject to a remove/create race. The caller is responsible for
 // setting the desired permissions on the new file after this function returns.
 func CopyFile(ctx context.Context, src, dst string) error {
 	//nolint:gosec // G304: File path comes from trusted configuration
@@ -52,25 +57,21 @@ func CopyFile(ctx context.Context, src, dst string) error {
 		}
 	}()
 
-	// Remove the destination file first. This is necessary because the existing
-	// file may be read-only (e.g. mode 0440), which would cause os.Create to
-	// fail with "permission denied". Removing and recreating only requires write
-	// permission on the parent directory, which the zextras user has.
-	if err := os.Remove(dst); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to remove existing destination: %w", err)
-	}
-
-	//nolint:gosec // G304: File path comes from trusted configuration
-	destFile, err := os.Create(dst)
+	// Write to a fresh O_EXCL temp file in the destination directory and rename
+	// it over dst. This works when dst is read-only (rename only needs write
+	// permission on the directory) and never follows a symlink or a file
+	// planted at dst between check and create: the rename replaces the
+	// directory entry itself.
+	destFile, tmpPath, err := createExclusiveTemp(dst)
 	if err != nil {
 		return fmt.Errorf("failed to create destination: %w", err)
 	}
 
+	committed := false
+
 	defer func() {
-		if cerr := destFile.Close(); cerr != nil {
-			logger.WarnContext(ctx, "Failed to close dest file",
-				"path", dst,
-				"error", cerr)
+		if !committed {
+			discardTemp(ctx, destFile, tmpPath)
 		}
 	}()
 
@@ -89,5 +90,58 @@ func CopyFile(ctx context.Context, src, dst string) error {
 		return fmt.Errorf("failed to sync destination: %w", err)
 	}
 
+	if err := destFile.Close(); err != nil {
+		return fmt.Errorf("failed to close destination: %w", err)
+	}
+
+	if err := os.Rename(tmpPath, dst); err != nil {
+		return fmt.Errorf("failed to rename temp file to destination: %w", err)
+	}
+
+	committed = true
+
 	return nil
+}
+
+// discardTemp closes and removes an uncommitted temp file, logging failures.
+func discardTemp(ctx context.Context, f *os.File, path string) {
+	if cerr := f.Close(); cerr != nil && !errors.Is(cerr, os.ErrClosed) {
+		logger.WarnContext(ctx, "Failed to close dest file",
+			"path", path,
+			"error", cerr)
+	}
+
+	if rerr := os.Remove(path); rerr != nil && !os.IsNotExist(rerr) {
+		logger.WarnContext(ctx, "Failed to remove temp file",
+			"path", path,
+			"error", rerr)
+	}
+}
+
+// createExclusiveTemp creates a new file next to dst with O_EXCL (so it can
+// never be a pre-existing file or symlink), mode 0666 before umask like
+// os.Create.
+func createExclusiveTemp(dst string) (*os.File, string, error) {
+	dir := filepath.Dir(dst)
+
+	for range 10 {
+		var suffix [8]byte
+		if _, err := rand.Read(suffix[:]); err != nil {
+			return nil, "", fmt.Errorf("failed to generate temp name: %w", err)
+		}
+
+		tmpPath := filepath.Join(dir, ".configd-copy-"+hex.EncodeToString(suffix[:])+".tmp")
+
+		//nolint:gosec // G304: File path comes from trusted configuration
+		f, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o666)
+		if err == nil {
+			return f, tmpPath, nil
+		}
+
+		if !errors.Is(err, os.ErrExist) {
+			return nil, "", err
+		}
+	}
+
+	return nil, "", fmt.Errorf("no unused temp name in %s: %w", dir, os.ErrExist)
 }

@@ -239,3 +239,46 @@ func TestCopyFile_DestCreateFails(t *testing.T) {
 		t.Fatal("expected error when dest directory is read-only, got nil")
 	}
 }
+
+// TestCopyFile_DoesNotFollowDestSymlink verifies that a symlink at dst is
+// replaced, not written through, and leaves no temp files behind.
+func TestCopyFile_DoesNotFollowDestSymlink(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	srcPath := filepath.Join(tmpDir, "src.txt")
+	if err := os.WriteFile(srcPath, []byte("new"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	victim := filepath.Join(tmpDir, "victim.txt")
+	if err := os.WriteFile(victim, []byte("untouched"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	dstPath := filepath.Join(tmpDir, "dst.txt")
+	if err := os.Symlink(victim, dstPath); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := fileutil.CopyFile(ctx, srcPath, dstPath); err != nil {
+		t.Fatalf("CopyFile: %v", err)
+	}
+
+	if got, _ := os.ReadFile(victim); string(got) != "untouched" {
+		t.Errorf("symlink target was written through: %q", got)
+	}
+
+	if got, _ := os.ReadFile(dstPath); string(got) != "new" {
+		t.Errorf("dst content = %q, want new", got)
+	}
+
+	if fi, err := os.Lstat(dstPath); err != nil || fi.Mode()&os.ModeSymlink != 0 {
+		t.Errorf("dst must be a regular file after copy, err=%v", err)
+	}
+
+	entries, _ := filepath.Glob(filepath.Join(tmpDir, ".configd-copy-*"))
+	if len(entries) != 0 {
+		t.Errorf("temp files left behind: %v", entries)
+	}
+}

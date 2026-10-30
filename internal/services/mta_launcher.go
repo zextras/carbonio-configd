@@ -6,14 +6,17 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"os/user"
+	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/fileutil"
 	"github.com/zextras/carbonio-configd/internal/logger"
 )
 
@@ -109,6 +112,13 @@ func mtaIsRunning(ctx context.Context) bool {
 	return cmd.Run() == nil
 }
 
+// postfixAccountNameRe is the shape of a POSIX user/group name accepted for
+// postconf's mail_owner/setgid_group. It rules out option-like (leading "-"),
+// whitespace and "=" values read from localconfig before they reach sudo.
+var postfixAccountNameRe = regexp.MustCompile(`^[a-z_][a-z0-9_-]*$`)
+
+var errInvalidPostfixAccount = errors.New("invalid postfix owner/group name")
+
 // bootstrapPostfixMainCf ensures /opt/zextras/common/conf/main.cf exists
 // with mail_owner and setgid_group set. Skips silently when the file is
 // already present — configrewrite owns the rest of the file's contents.
@@ -119,14 +129,20 @@ func bootstrapPostfixMainCf(ctx context.Context, lc map[string]string) error {
 		return fmt.Errorf("stat %s: %w", mainCfPath, err)
 	}
 
+	owner := strings.TrimSpace(lc["postfix_mail_owner"])
+	group := strings.TrimSpace(lc["postfix_setgid_group"])
+
+	if (owner != "" || group != "") &&
+		(!postfixAccountNameRe.MatchString(owner) || !postfixAccountNameRe.MatchString(group)) {
+		return fmt.Errorf("%w: postfix_mail_owner=%q postfix_setgid_group=%q",
+			errInvalidPostfixAccount, owner, group)
+	}
+
 	// sudo touch — main.cf lives under /opt/zextras/common which is
 	// root-owned; zextras cannot create files there directly.
 	if err := sudoRun(ctx, "/usr/bin/touch", mainCfPath); err != nil {
 		return fmt.Errorf("touch %s: %w", mainCfPath, err)
 	}
-
-	owner := strings.TrimSpace(lc["postfix_mail_owner"])
-	group := strings.TrimSpace(lc["postfix_setgid_group"])
 
 	if owner == "" || group == "" {
 		logger.WarnContext(ctx,
@@ -149,11 +165,12 @@ func bootstrapPostfixMainCf(ctx context.Context, lc map[string]string) error {
 // writePostfixLDAPConfig writes the 8 ldap-*.cf files that postfix's
 // main.cf references. Replaces legacy mtainit.sh.
 //
-// Files are written atomically via os.WriteFile with 0640 so only root and
-// the postfix group can read bind_pw. The files are then chgrp'd to the
-// postfix group (matches legacy `chgrp postfix`); chgrp failures are
-// logged and non-fatal — on fresh installs the postfix group may not
-// exist yet.
+// Files are written atomically (temp file + rename via fileutil.AtomicWrite)
+// with an explicit 0640, so a pre-existing file never keeps a looser mode and
+// readers never see a partial bind_pw. Only the owner and the postfix group
+// can read them. The files are then chgrp'd to the postfix group (matches
+// legacy `chgrp postfix`); chgrp failures are logged and non-fatal — on fresh
+// installs the postfix group may not exist yet.
 func writePostfixLDAPConfig(ctx context.Context, lc map[string]string) error {
 	ldapURL := strings.TrimSpace(lc["ldap_url"])
 	ldapPort := strings.TrimSpace(lc["ldap_port"])
@@ -195,7 +212,7 @@ func writePostfixLDAPConfig(ctx context.Context, lc map[string]string) error {
 
 		// 0640: bind_pw must stay off world-read while remaining group-readable
 		// by postfix (chgrp'd below). Owner 0600 would lock postfix out.
-		if err := os.WriteFile(path, []byte(content), 0o640); err != nil { //nolint:gosec
+		if err := fileutil.AtomicWrite(path, []byte(content), 0o640); err != nil {
 			return fmt.Errorf("write %s: %w", path, err)
 		}
 	}

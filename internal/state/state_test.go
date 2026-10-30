@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/config/configtest"
 	"os"
 	"path/filepath"
 	"sync"
@@ -350,11 +351,29 @@ func TestState_IsFalseValue(t *testing.T) {
 		{"False", true},
 		{"0", true},
 		{"00", true},
+		// Legacy re.match(r"no|false|0+", val, re.I) is a case-insensitive prefix match.
+		{"none", true},
+		{"None", true},
+		{"nobody", true},
+		{"Normal", true},
+		{"nO", true},
+		{"falsey", true},
+		{"FALSEHOOD", true},
+		{"0.5", true},
+		{"00:30", true},
+		{"0abc", true},
 		{"yes", false},
 		{"true", false},
 		{"1", false},
+		{"10", false},
 		{"enabled", false},
 		{"anything", false},
+		{"n", false},
+		{"fals", false},
+		{"fal", false},
+		{" no", false},
+		{"ano", false},
+		{"TRUE", false},
 	}
 
 	for _, tt := range tests {
@@ -829,10 +848,10 @@ func TestState_GetCurrentRewriteKeys(t *testing.T) {
 func TestState_SetConfigs(t *testing.T) {
 	s := NewState()
 
-	lc := &config.LocalConfig{Data: config.NewConfigMapFrom(map[string]string{"key": "val"})}
-	gc := &config.GlobalConfig{Data: config.NewConfigMapFrom(map[string]string{"gkey": "gval"})}
-	mc := &config.MiscConfig{Data: config.NewConfigMapFrom(map[string]string{"mkey": "mval"})}
-	sc := &config.ServerConfig{Data: config.NewConfigMapFrom(map[string]string{}), ServiceConfig: config.NewConfigMapFrom(map[string]string{})}
+	lc := &config.LocalConfig{Data: configtest.NewConfigMapFrom(map[string]string{"key": "val"})}
+	gc := &config.GlobalConfig{Data: configtest.NewConfigMapFrom(map[string]string{"gkey": "gval"})}
+	mc := &config.MiscConfig{Data: configtest.NewConfigMapFrom(map[string]string{"mkey": "mval"})}
+	sc := &config.ServerConfig{Data: configtest.NewConfigMapFrom(map[string]string{}), ServiceConfig: configtest.NewConfigMapFrom(map[string]string{})}
 	mtac := &config.MtaConfig{Sections: map[string]*config.MtaConfigSection{}}
 
 	s.SetConfigs(lc, gc, mc, sc, mtac)

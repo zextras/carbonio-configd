@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/config/configtest"
 )
 
 // TestResolveSaslHostFromIP tests resolveSaslHostFromIP branches
@@ -30,7 +31,7 @@ func TestResolveSaslHostFromIP(t *testing.T) {
 
 	t.Run("returns configured value", func(t *testing.T) {
 		g := &Generator{
-			GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMapFrom(map[string]string{
+			GlobalConfig: &config.GlobalConfig{Data: configtest.NewConfigMapFrom(map[string]string{
 				"zimbraReverseProxySaslHostFromIP": "on",
 			})},
 		}
@@ -61,7 +62,7 @@ func TestResolveLookupTargetAvailable(t *testing.T) {
 
 	t.Run("returns true when attribute is set", func(t *testing.T) {
 		g := &Generator{
-			GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMapFrom(map[string]string{
+			GlobalConfig: &config.GlobalConfig{Data: configtest.NewConfigMapFrom(map[string]string{
 				"zimbraReverseProxyLookupTarget": "TRUE",
 			})},
 		}
@@ -79,7 +80,7 @@ func TestResolveLookupTargetAvailable(t *testing.T) {
 func TestResolveLookupAvailable(t *testing.T) {
 	t.Run("returns true when lookup targets configured", func(t *testing.T) {
 		g := &Generator{
-			GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMapFrom(map[string]string{
+			GlobalConfig: &config.GlobalConfig{Data: configtest.NewConfigMapFrom(map[string]string{
 				"zimbraReverseProxyAvailableLookupTargets": "host1 host2",
 			})},
 		}
@@ -118,7 +119,7 @@ func TestMakeTimeoutResolver(t *testing.T) {
 	}{
 		{
 			name:        "uses default base when key not in config",
-			localData:   config.NewConfigMapFrom(map[string]string{}),
+			localData:   configtest.NewConfigMapFrom(map[string]string{}),
 			configKey:   "zimbra_proxy_timeout",
 			defaultBase: 60,
 			offset:      10,
@@ -126,7 +127,7 @@ func TestMakeTimeoutResolver(t *testing.T) {
 		},
 		{
 			name:        "uses configured value plus offset",
-			localData:   config.NewConfigMapFrom(map[string]string{"zimbra_proxy_timeout": "120"}),
+			localData:   configtest.NewConfigMapFrom(map[string]string{"zimbra_proxy_timeout": "120"}),
 			configKey:   "zimbra_proxy_timeout",
 			defaultBase: 60,
 			offset:      10,
@@ -134,7 +135,7 @@ func TestMakeTimeoutResolver(t *testing.T) {
 		},
 		{
 			name:        "uses default when config value is invalid",
-			localData:   config.NewConfigMapFrom(map[string]string{"zimbra_proxy_timeout": "notanumber"}),
+			localData:   configtest.NewConfigMapFrom(map[string]string{"zimbra_proxy_timeout": "notanumber"}),
 			configKey:   "zimbra_proxy_timeout",
 			defaultBase: 60,
 			offset:      10,
@@ -142,7 +143,7 @@ func TestMakeTimeoutResolver(t *testing.T) {
 		},
 		{
 			name:        "zero offset",
-			localData:   config.NewConfigMapFrom(map[string]string{"zimbra_proxy_timeout": "30"}),
+			localData:   configtest.NewConfigMapFrom(map[string]string{"zimbra_proxy_timeout": "30"}),
 			configKey:   "zimbra_proxy_timeout",
 			defaultBase: 60,
 			offset:      0,

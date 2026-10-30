@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/logger"
 )
 
 // Config type constants
@@ -34,6 +35,7 @@ const (
 
 // parser implements the Parser interface for parsing zmconfigd.cf files.
 type parser struct {
+	ctx     context.Context
 	lexer   Lexer
 	current Token
 	errors  []error
@@ -68,6 +70,8 @@ func (p *parser) ParseString(ctx context.Context, content string) (*config.MtaCo
 	if content == "" {
 		return nil, fmt.Errorf("empty config file")
 	}
+
+	p.ctx = ctx
 
 	// Create a new lexer from content
 	lexer := NewLexer(ctx, strings.NewReader(content))
@@ -191,6 +195,14 @@ func (p *parser) parseDirective(section *config.MtaConfigSection) error {
 		return p.parseProxygen(section)
 	case TokenIf:
 		return p.parseConditional(section)
+	case TokenFi:
+		// Legacy loops forever on a fi outside an if block; skip it instead.
+		// This is what the outer fi of a nested if leaves behind (legacy ends
+		// the block at the first fi, see parseConditionalBody).
+		logger.WarnContext(p.ctx, "Ignoring stray FI outside an if block", "line", p.current.Line)
+		p.skipToNewline()
+
+		return nil
 	case TokenIdentifier:
 		// Handle special identifiers like LDAP
 		if strings.EqualFold(p.current.Literal, "LDAP") {
@@ -284,42 +296,158 @@ func (p *parser) parseMaplocal(section *config.MtaConfigSection) error {
 	return p.parseRequiredVarDirective(section, ConfigTypeMAPLOCAL, errExpectedVarName)
 }
 
-// parsePostconf parses a POSTCONF directive.
-func (p *parser) parsePostconf(section *config.MtaConfigSection) error {
-	p.advance() // skip POSTCONF
+// lookup is the config key a POSTCONF/POSTCONFD value refers to and its type.
+// Mirroring jylibs/mtaconfig.py, the section depends on that key so a change to
+// it marks the section changed. The zero value means "not a lookup".
+type lookup struct {
+	name string
+	typ  string
+}
+
+// register records the lookup as a required variable of vars.
+func (l lookup) register(vars map[string]string) {
+	if l.name != "" {
+		vars[l.name] = l.typ
+	}
+}
+
+// parsePostconfLine parses "<key> [<value>]" after a POSTCONF/POSTCONFD
+// keyword. Legacy treats the value as a lookup when its first field has one of
+// the prefixes VAR|LOCAL|FILE (plus MAPLOCAL when allowMapLocal; re.match is a
+// prefix match, so VARIABLE_X is a lookup of type VARIABLE_X) and the next
+// field is its key; a missing key is an IndexError that aborts the load, here a
+// parse error. Any other value is the literal text.
+func (p *parser) parsePostconfLine(directive string, allowMapLocal bool) (key, value string, lk lookup, err error) {
+	p.advance() // skip directive keyword
 
 	if p.current.Type != TokenIdentifier {
-		return fmt.Errorf("expected postfix parameter name at line %d", p.current.Line)
+		return "", "", lookup{}, fmt.Errorf("expected postfix parameter name for %s at line %d", directive, p.current.Line)
 	}
 
-	key := p.current.Literal
+	key = p.current.Literal
 	p.advance()
 
-	// Parse value (can be VAR, LOCAL, FILE, or literal)
-	value := ""
-	if !p.isAtNewline() && !p.isAtEnd() {
-		value = p.parseValue()
+	if p.isAtNewline() || p.isAtEnd() {
+		return key, "", lookup{}, nil
+	}
+
+	cfgType, ok := p.lookupType(allowMapLocal)
+	if !ok {
+		return key, p.parseLiteralValue(allowMapLocal), lookup{}, nil
+	}
+
+	line := p.current.Line
+	exact := p.current.Type != TokenIdentifier && p.current.Type != TokenString
+	p.advance()
+
+	name := p.readLookupKey(cfgType, exact)
+	if name == "" {
+		return "", "", lookup{}, fmt.Errorf("expected key after %s in %s at line %d", cfgType, directive, line)
+	}
+
+	return key, formatLookup(cfgType, name, exact), lookup{name: name, typ: cfgType}, nil
+}
+
+// lookupType returns the lookup type of the current value token: the keyword
+// itself for VAR/LOCAL/FILE/MAPLOCAL tokens, or, for any other word, the word
+// when it starts with an allowed type name.
+func (p *parser) lookupType(allowMapLocal bool) (string, bool) {
+	types := []string{ConfigTypeVAR, ConfigTypeLOCAL, ConfigTypeFILE}
+	if allowMapLocal {
+		types = append(types, ConfigTypeMAPLOCAL)
+	}
+
+	switch p.current.Type {
+	case TokenVar:
+		return ConfigTypeVAR, true
+	case TokenLocal:
+		return ConfigTypeLOCAL, true
+	case TokenFile:
+		return ConfigTypeFILE, true
+	case TokenMaplocal:
+		return ConfigTypeMAPLOCAL, allowMapLocal
+	case TokenIdentifier, TokenString:
+		for _, t := range types {
+			if strings.HasPrefix(p.current.Literal, t) {
+				return p.current.Literal, true
+			}
+		}
+	}
+
+	return "", false
+}
+
+// readLookupKey reads the key of a lookup. An exact FILE keyword takes a path
+// (possibly split across tokens), every other type a single field.
+func (p *parser) readLookupKey(cfgType string, exact bool) string {
+	if exact && cfgType == ConfigTypeFILE {
+		return p.readPath()
+	}
+
+	if p.current.Type != TokenIdentifier && p.current.Type != TokenString {
+		return ""
+	}
+
+	name := p.current.Literal
+	p.advance()
+
+	return name
+}
+
+// formatLookup renders a lookup as the canonical stored value ("FILE path",
+// "TYPE:key").
+func formatLookup(cfgType, name string, exact bool) string {
+	if exact && cfgType == ConfigTypeFILE {
+		return ConfigTypeFILE + " " + name
+	}
+
+	return cfgType + ":" + name
+}
+
+// parseLiteralValue parses a non-lookup value. A MAPLOCAL keyword that is not a
+// lookup here (conditional POSTCONF, any POSTCONFD) is the literal word, as in
+// legacy " ".join(fields[2:]).
+func (p *parser) parseLiteralValue(allowMapLocal bool) string {
+	if p.current.Type != TokenMaplocal || allowMapLocal {
+		return p.parseValue()
+	}
+
+	first := p.current.Literal
+	p.advance()
+
+	if rest := p.parseValue(); rest != "" {
+		return first + " " + rest
+	}
+
+	return first
+}
+
+// parsePostconf parses a POSTCONF directive.
+func (p *parser) parsePostconf(section *config.MtaConfigSection) error {
+	key, value, lk, err := p.parsePostconfLine(ConfigTypePOSTCONF, true)
+	if err != nil {
+		return err
 	}
 
 	section.Postconf[key] = value
+	lk.register(section.RequiredVars)
 
 	p.skipToNewline()
 
 	return nil
 }
 
-// parsePostconfd parses a POSTCONFD directive (delete postfix parameter).
+// parsePostconfd parses a POSTCONFD directive (delete postfix parameter). The
+// value of a deletion is never applied, but legacy still registers the lookup
+// it names as a required var.
 func (p *parser) parsePostconfd(section *config.MtaConfigSection) error {
-	p.advance() // skip POSTCONFD
-
-	if p.current.Type != TokenIdentifier {
-		return fmt.Errorf("expected postfix parameter name at line %d", p.current.Line)
+	key, _, lk, err := p.parsePostconfLine(ConfigTypePOSTCONFD, false)
+	if err != nil {
+		return err
 	}
 
-	key := p.current.Literal
 	section.Postconfd[key] = ""
-
-	p.advance()
+	lk.register(section.RequiredVars)
 
 	p.skipToNewline()
 

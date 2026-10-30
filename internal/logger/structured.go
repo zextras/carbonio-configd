@@ -25,9 +25,7 @@ type contextKey string
 
 const (
 	loggerContextKey    contextKey = "logger"
-	correlationIDKey    contextKey = "correlation_id"
 	componentContextKey contextKey = "component"
-	operationContextKey contextKey = "operation"
 )
 
 // Standard field names for structured logging
@@ -187,7 +185,6 @@ func ContextWithCorrelationID(ctx context.Context, correlationID string) context
 	}
 
 	logger := LoggerFromContext(ctx).With(FieldCorrelationID, correlationID)
-	ctx = context.WithValue(ctx, correlationIDKey, correlationID)
 
 	return ContextWithLogger(ctx, logger)
 }
@@ -195,19 +192,6 @@ func ContextWithCorrelationID(ctx context.Context, correlationID string) context
 // NewCorrelationID generates a new correlation ID and returns a context with it
 func NewCorrelationID(ctx context.Context) context.Context {
 	return ContextWithCorrelationID(ctx, uuid.New().String())
-}
-
-// CorrelationIDFromContext extracts the correlation ID from the context
-func CorrelationIDFromContext(ctx context.Context) string {
-	if ctx == nil {
-		return ""
-	}
-
-	if id, ok := ctx.Value(correlationIDKey).(string); ok {
-		return id
-	}
-
-	return ""
 }
 
 // ContextWithComponent returns a new context with a component name.
@@ -225,55 +209,6 @@ func ContextWithComponentOnce(ctx context.Context, component string) context.Con
 	}
 
 	return context.WithValue(ctx, componentContextKey, component)
-}
-
-// ContextWithOperation returns a new context with an operation name
-func ContextWithOperation(ctx context.Context, operation string) context.Context {
-	logger := LoggerFromContext(ctx).With(FieldOperation, operation)
-	ctx = context.WithValue(ctx, operationContextKey, operation)
-
-	return ContextWithLogger(ctx, logger)
-}
-
-// ContextWithFields returns a new context with additional structured fields
-func ContextWithFields(ctx context.Context, args ...any) context.Context {
-	logger := LoggerFromContext(ctx).With(args...)
-	return ContextWithLogger(ctx, logger)
-}
-
-// Timer is a helper for timing operations and logging duration
-type Timer struct {
-	start  time.Time
-	ctx    context.Context
-	msg    string
-	fields []any
-}
-
-// StartTimer starts a new timer for an operation
-func StartTimer(ctx context.Context, msg string, fields ...any) *Timer {
-	return &Timer{
-		start:  time.Now(),
-		ctx:    ctx,
-		msg:    msg,
-		fields: fields,
-	}
-}
-
-// End logs the operation completion with duration
-func (t *Timer) End() {
-	duration := time.Since(t.start)
-	fields := append([]any{FieldDurationMS, duration.Milliseconds()}, t.fields...)
-	LoggerFromContext(t.ctx).Info(t.msg, fields...)
-}
-
-// EndWithError logs the operation completion with duration and error
-func (t *Timer) EndWithError(err error) {
-	duration := time.Since(t.start)
-	fields := append([]any{
-		FieldDurationMS, duration.Milliseconds(),
-		FieldError, err.Error(),
-	}, t.fields...)
-	LoggerFromContext(t.ctx).Error(t.msg, fields...)
 }
 
 // logWithCaller logs a message at the given level, capturing the caller

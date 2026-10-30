@@ -25,8 +25,3 @@ func (p *ProfilingArgs) applyTo(args *Args) {
 	args.ProfileDuration = p.ProfileDuration
 	args.Once = p.Once
 }
-
-// hasProfilingEnabled returns true when profiling support is compiled in.
-func hasProfilingEnabled() bool {
-	return true
-}

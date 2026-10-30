@@ -17,8 +17,3 @@ func TestGetVersionInfo(t *testing.T) {
 		t.Error("Version should not be empty")
 	}
 }
-
-func TestPrintVersion(t *testing.T) {
-	// Just verify it doesn't panic
-	PrintVersion()
-}

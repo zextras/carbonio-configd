@@ -52,66 +52,40 @@ func TestParseSystemctlShow(t *testing.T) {
 	}
 }
 
-func TestApplyFilters(t *testing.T) {
-	config := map[string]string{
-		"known":  "value",
+func TestSelectValues(t *testing.T) {
+	configured := map[string]string{
 		"custom": "override",
+		"known":  "value",
 	}
 
-	defaultFiltered := applyFilters(config, &localconfigOpts{showDefaults: true})
-	if len(defaultFiltered) == 0 {
+	defaults := (&localconfigOpts{showDefaults: true}).selectValues(configured)
+	if len(defaults) == 0 {
 		t.Fatal("expected defaults to be returned")
 	}
 
-	changedFiltered := applyFilters(config, &localconfigOpts{showChanged: true})
-	if changedFiltered["custom"] != "override" {
-		t.Fatalf("expected changed config to preserve custom key, got %q", changedFiltered["custom"])
+	if _, ok := defaults["custom"]; ok {
+		t.Fatal("defaults must not contain configured-only keys")
 	}
 
-	plain := applyFilters(config, &localconfigOpts{})
-	if plain["known"] != "value" {
-		t.Fatalf("expected plain config unchanged, got %q", plain["known"])
+	changed := (&localconfigOpts{showChanged: true}).selectValues(configured)
+	if changed["custom"] != "override" {
+		t.Fatalf("expected changed config to preserve custom key, got %q", changed["custom"])
+	}
+
+	plain := (&localconfigOpts{}).selectValues(configured)
+	if plain["known"] != "value" || plain["zimbra_home"] == "" {
+		t.Fatalf("expected configured keys over defaults, got known=%q zimbra_home=%q",
+			plain["known"], plain["zimbra_home"])
 	}
 }
 
-func TestFilterKeys(t *testing.T) {
-	config := map[string]string{
-		"a": "1",
-		"b": "2",
-	}
+func TestSelectValues_KeyFilter(t *testing.T) {
+	configured := map[string]string{"a": "1", "b": "2"}
 
-	all := filterKeys(config, &localconfigOpts{})
-	if len(all) != 2 {
-		t.Fatalf("expected unfiltered config, got %d keys", len(all))
+	filtered := (&localconfigOpts{keys: []string{"b", "missing"}, quiet: true}).selectValues(configured)
+	if len(filtered) != 1 || filtered["b"] != "2" {
+		t.Fatalf("expected only b=2, got %v", filtered)
 	}
-
-	filtered := filterKeys(config, &localconfigOpts{keys: []string{"b", "missing"}, quiet: true})
-	if len(filtered) != 1 {
-		t.Fatalf("expected 1 filtered key, got %d", len(filtered))
-	}
-	if filtered["b"] != "2" {
-		t.Fatalf("expected key b=2, got %q", filtered["b"])
-	}
-}
-
-func TestNoopProfilingAndTracing(t *testing.T) {
-	p := &ProfilingConfig{}
-	if err := StartProfiling(p); err != nil {
-		t.Fatalf("expected nil profiling start error, got %v", err)
-	}
-	if err := ValidateProfilingConfig(p); err != nil {
-		t.Fatalf("expected nil profiling validation error, got %v", err)
-	}
-	StopProfiling(p)
-
-	tr := &TracingConfig{}
-	if err := ValidateTracingConfig(tr); err != nil {
-		t.Fatalf("expected nil tracing validation error, got %v", err)
-	}
-	if err := StartTracing(tr); err != nil {
-		t.Fatalf("expected nil tracing start error, got %v", err)
-	}
-	StopTracing(tr)
 }
 
 func TestCLIToArgs(t *testing.T) {

@@ -149,15 +149,15 @@ func TestConfigLoader_CompareWithReference(t *testing.T) {
 	}
 
 	t.Run("Compare LocalConfig", func(t *testing.T) {
-		compareConfigs(t, "LocalConfig", reference.LocalConfig, cm.State.LocalConfig.Data)
+		compareConfigs(t, "LocalConfig", reference.LocalConfig, cm.State.LocalConfig.Data.Snapshot())
 	})
 
 	t.Run("Compare GlobalConfig", func(t *testing.T) {
-		compareConfigs(t, "GlobalConfig", reference.GlobalConfig, cm.State.GlobalConfig.Data)
+		compareConfigs(t, "GlobalConfig", reference.GlobalConfig, cm.State.GlobalConfig.Data.Snapshot())
 	})
 
 	t.Run("Compare ServerConfig", func(t *testing.T) {
-		compareConfigs(t, "ServerConfig", reference.ServerConfig, cm.State.ServerConfig.Data)
+		compareConfigs(t, "ServerConfig", reference.ServerConfig, cm.State.ServerConfig.Data.Snapshot())
 	})
 
 	t.Run("Compare MiscConfig", func(t *testing.T) {
@@ -223,19 +223,18 @@ func TestConfigLoader_PostProcessing(t *testing.T) {
 
 	t.Run("SSL protocol sorting", func(t *testing.T) {
 		// Simulate unsorted SSL protocols
-		cm.State.GlobalConfig.Data = config.NewConfigMap()
-		cm.State.GlobalConfig.Data["zimbraMailboxdSSLProtocols"] = "TLSv1.3 TLSv1 TLSv1.2"
+		data := map[string]string{"zimbraMailboxdSSLProtocols": "TLSv1.3 TLSv1 TLSv1.2"}
 
-		processSortedSSLConfigForTarget(cm.State.GlobalConfig.Data, "zimbraMailboxdSSLProtocols")
+		processSortedSSLConfigForTarget(data, "zimbraMailboxdSSLProtocols")
 
-		result := cm.State.GlobalConfig.Data["zimbraMailboxdSSLProtocols"]
+		result := data["zimbraMailboxdSSLProtocols"]
 		expected := "TLSv1 TLSv1.2 TLSv1.3"
 		if result != expected {
 			t.Errorf("SSL sorting failed: expected '%s', got '%s'", expected, result)
 		}
 
 		// Check XML version was created
-		xmlResult := cm.State.GlobalConfig.Data["zimbraMailboxdSSLProtocolsXML"]
+		xmlResult := data["zimbraMailboxdSSLProtocolsXML"]
 		if xmlResult == "" {
 			t.Error("XML version not created")
 		}
@@ -244,18 +243,19 @@ func TestConfigLoader_PostProcessing(t *testing.T) {
 
 	t.Run("RBL extraction", func(t *testing.T) {
 		// Simulate MTA restriction with RBL entries
-		cm.State.ServerConfig.Data = config.NewConfigMap()
-		cm.State.ServerConfig.Data.Set("zimbraMtaRestriction", "reject_rbl_client zen.spamhaus.org reject_rbl_client bl.spamcop.net permit")
+		data := map[string]string{
+			"zimbraMtaRestriction": "reject_rbl_client zen.spamhaus.org reject_rbl_client bl.spamcop.net permit",
+		}
 
-		processMtaRestrictionRBLsForData(cm.State.ServerConfig.Data)
+		processMtaRestrictionRBLsForData(data)
 
-		rbls := cm.State.ServerConfig.Data.GetOr("zimbraMtaRestrictionRBLs", "")
+		rbls := data["zimbraMtaRestrictionRBLs"]
 		if rbls != "zen.spamhaus.org, bl.spamcop.net" {
 			t.Errorf("RBL extraction failed: got '%s'", rbls)
 		}
 
 		// Check that RBL entries were removed from restriction
-		restriction := cm.State.ServerConfig.Data.GetOr("zimbraMtaRestriction", "")
+		restriction := data["zimbraMtaRestriction"]
 		if restriction != "permit" {
 			t.Errorf("RBL removal failed: got '%s'", restriction)
 		}
@@ -288,13 +288,12 @@ func TestConfigLoader_PostProcessing(t *testing.T) {
 
 		for _, tc := range testCases {
 			t.Run(tc.mode, func(t *testing.T) {
-				cm.State.ServerConfig.Data = config.NewConfigMap()
-				cm.State.ServerConfig.Data.Set("zimbraIPMode", tc.mode)
+				data := map[string]string{"zimbraIPMode": tc.mode}
 
-				cm.processIPModeConfig()
+				processIPModeConfigForData(data)
 
 				for key, expectedVal := range tc.expected {
-					actualVal := cm.State.ServerConfig.Data.Get(key)
+					actualVal := data[key]
 					if actualVal != expectedVal {
 						t.Errorf("IP mode config for %s: expected '%s', got '%s'", key, expectedVal, actualVal)
 					}

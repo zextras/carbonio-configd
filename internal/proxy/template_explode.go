@@ -7,6 +7,7 @@ package proxy
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -232,6 +233,7 @@ type DomainInfo struct {
 	VirtualHostname  string
 	VirtualIPAddress string
 	ClientCertMode   string
+	ClientCertCA     string
 	SSLCertificate   string
 	SSLPrivateKey    string
 }
@@ -290,6 +292,45 @@ func cachedLDAPQuery[T any](ctx context.Context, cache interface {
 }
 
 func (tp *TemplateProcessor) getDomains(ctx context.Context) []DomainInfo {
+	domains, err := tp.loadDomains(ctx)
+	if err != nil {
+		if !errors.Is(err, errNoDomainSource) {
+			logger.ErrorContext(ctx, "Domain query failed", "error", err)
+		}
+
+		return []DomainInfo{}
+	}
+
+	return domains
+}
+
+// errNoDomainSource means neither a test provider nor an LDAP client is available.
+var errNoDomainSource = errors.New("no domain source available")
+
+// perVirtualHostnameAttr gates all per-domain proxy configuration
+// (legacy ProxyConfGen.java:253-257, server value with global fallback,
+// unset treated as TRUE, see perVirtualHostnameEnabled).
+const perVirtualHostnameAttr = "zimbraReverseProxyGenConfigPerVirtualHostname"
+
+// perVirtualHostnameEnabled reports whether per-virtual-hostname configuration
+// is enabled. Unset means enabled: legacy getBooleanAttr(attr, false) only
+// falls back to false when the attribute is absent from the entry's inherited
+// defaults, but the server inherits from globalConfig, which holds the schema
+// default TRUE written at LDAP init (zimbra-attrs.xml). Only an explicit FALSE
+// disables it.
+func (g *Generator) perVirtualHostnameEnabled() bool {
+	v, ok := g.getConfigValue(perVirtualHostnameAttr, sourceServer, sourceGlobal)
+
+	return !ok || strings.EqualFold(v, "TRUE")
+}
+
+// loadDomains returns the sorted, sanitized domains for explode processing and
+// certificate deployment. Unlike getDomains it reports query failures, so
+// destructive callers (obsolete-file cleanup) can tell "no domains" from
+// "could not read domains". With per-virtual-hostname config disabled it
+// returns no domains, exactly like legacy loadDomainReverseProxyAttrs
+// (ProxyConfGen.java:253-255).
+func (tp *TemplateProcessor) loadDomains(ctx context.Context) ([]DomainInfo, error) {
 	var domainInfos []DomainInfo
 
 	// Resolve the domain source: injected provider (for testing), no LDAP
@@ -299,15 +340,19 @@ func (tp *TemplateProcessor) getDomains(ctx context.Context) []DomainInfo {
 		domainInfos = tp.domainProvider()
 	case tp.generator.LdapClient == nil || tp.generator.LdapClient.NativeClient == nil:
 		logger.DebugContext(ctx, "No LDAP client available, returning empty list")
-		return []DomainInfo{}
+
+		return nil, errNoDomainSource
+	case !tp.generator.perVirtualHostnameEnabled():
+		logger.DebugContext(ctx, "Per-virtual-hostname configuration disabled, no domains")
+
+		return []DomainInfo{}, nil
 	default:
 		domains, err := cachedLDAPQuery(ctx, tp.generator.Cache, "ldap:domains", "domains",
 			func() ([]ldap.Domain, error) {
 				return tp.generator.LdapClient.NativeClient.QueryDomains(ctx)
 			})
 		if err != nil {
-			logger.ErrorContext(ctx, "Domain query failed", "error", err)
-			return []DomainInfo{}
+			return nil, err
 		}
 
 		domainInfos = make([]DomainInfo, 0, len(domains))
@@ -317,6 +362,7 @@ func (tp *TemplateProcessor) getDomains(ctx context.Context) []DomainInfo {
 				VirtualHostname:  domain.VirtualHostname,
 				VirtualIPAddress: domain.VirtualIPAddress,
 				ClientCertMode:   domain.ClientCertMode,
+				ClientCertCA:     domain.ClientCertCA,
 				SSLCertificate:   domain.SSLCertificate,
 				SSLPrivateKey:    domain.SSLPrivateKey,
 			})
@@ -326,12 +372,33 @@ func (tp *TemplateProcessor) getDomains(ctx context.Context) []DomainInfo {
 			"count", len(domainInfos))
 	}
 
+	domainInfos = tp.dropUnsafeDomains(ctx, domainInfos)
+
 	// Sort domains by name for deterministic output
-	slices.SortFunc(domainInfos, func(a, b DomainInfo) int {
+	slices.SortStableFunc(domainInfos, func(a, b DomainInfo) int {
 		return strings.Compare(a.Name, b.Name)
 	})
 
-	return domainInfos
+	return domainInfos, nil
+}
+
+// dropUnsafeDomains removes domains whose LDAP-provided virtual hostname, IP
+// or SSL paths could not be rendered into nginx configuration without
+// changing its structure. A domain is dropped rather than repaired or given
+// the default certificate, so a bad value never silently serves the wrong
+// certificate. Legitimate values pass through unchanged and in order.
+func (tp *TemplateProcessor) dropUnsafeDomains(ctx context.Context, domains []DomainInfo) []DomainInfo {
+	return slices.DeleteFunc(domains, func(d DomainInfo) bool {
+		err := validateDomainInfo(&d)
+		if err == nil {
+			return false
+		}
+
+		logger.ErrorContext(ctx, "Skipping domain with unsafe LDAP value",
+			"domain", truncateForLog(d.Name), "error", err)
+
+		return true
+	})
 }
 
 // getServersWithService returns list of servers that have the specified service enabled.
@@ -379,6 +446,17 @@ func (tp *TemplateProcessor) getServersWithService(ctx context.Context, serviceN
 			"count", len(serverInfos),
 			"service", serviceName)
 	}
+
+	serverInfos = slices.DeleteFunc(serverInfos, func(si ServerInfo) bool {
+		if si.Hostname == "" || validHostToken(si.Hostname) {
+			return false
+		}
+
+		logger.ErrorContext(ctx, "Skipping server with unsafe hostname",
+			"service", serviceName, "hostname", truncateForLog(si.Hostname))
+
+		return true
+	})
 
 	// Sort servers by hostname, then by ID for deterministic output
 	slices.SortFunc(serverInfos, func(a, b ServerInfo) int {
@@ -442,29 +520,78 @@ func (tp *TemplateProcessor) setDomainVariables(domain *DomainInfo) {
 	tp.generator.Variables[varKeySSLCrt] = &Variable{
 		Keyword:   varKeySSLCrt,
 		ValueType: ValueTypeString,
-		Value:     domainSSLValueOrDefault(domain.SSLCertificate, tp.generator.Variables["ssl.crt.default"]),
+		Value: tp.generator.domainSSLPathOrDefault(
+			domain.Name, domain.SSLCertificate, sslCrtExt, tp.generator.Variables["ssl.crt.default"]),
 	}
 	tp.generator.Variables[varKeySSLKey] = &Variable{
 		Keyword:   varKeySSLKey,
 		ValueType: ValueTypeString,
-		Value:     domainSSLValueOrDefault(domain.SSLPrivateKey, tp.generator.Variables["ssl.key.default"]),
+		Value: tp.generator.domainSSLPathOrDefault(
+			domain.Name, domain.SSLPrivateKey, sslKeyExt, tp.generator.Variables["ssl.key.default"]),
+	}
+
+	tp.setDomainClientCertVariables(domain)
+}
+
+// Per-domain client certificate variables (legacy ProxyConfGen.java:808-830).
+const (
+	varKeySSLClientCertMode = "ssl.clientcertmode"
+	varKeySSLClientCertCA   = "ssl.clientcertca"
+	varKeySSOCertAuth       = "web.sso.certauth.enabled"
+	origVarPrefix           = "_orig_"
+)
+
+// domainScopedClientCertKeys are the variables overridden per domain by
+// setDomainClientCertVariables and restored by clearDomainVariables.
+var domainScopedClientCertKeys = []string{varKeySSLClientCertMode, varKeySSLClientCertCA, varKeySSOCertAuth}
+
+// setDomainClientCertVariables mirrors ProxyConfGen.java:808-830:
+//   - ssl.clientcertmode is the domain's mode, or ssl.clientcertmode.default.
+//     When the domain has a mode, web.sso.certauth.enabled is on for "on" and
+//     "optional" and off otherwise.
+//   - ssl.clientcertca is <conf>/domaincerts/<domain>.client.ca.crt when the
+//     domain has a client CA, or ssl.clientcertca.default.
+func (tp *TemplateProcessor) setDomainClientCertVariables(domain *DomainInfo) {
+	vars := tp.generator.Variables
+
+	for _, key := range domainScopedClientCertKeys {
+		vars[origVarPrefix+key] = vars[key]
+	}
+
+	if domain.ClientCertMode != "" {
+		vars[varKeySSLClientCertMode] = stringVar(varKeySSLClientCertMode, domain.ClientCertMode)
+		vars[varKeySSOCertAuth] = &Variable{
+			Keyword:   varKeySSOCertAuth,
+			ValueType: ValueTypeEnabler,
+			Value:     clientCertVerifies(domain.ClientCertMode),
+		}
+	} else {
+		vars[varKeySSLClientCertMode] = stringVar(varKeySSLClientCertMode,
+			defaultVarString(vars["ssl.clientcertmode.default"]))
+	}
+
+	if domain.ClientCertCA != "" {
+		vars[varKeySSLClientCertCA] = stringVar(varKeySSLClientCertCA,
+			tp.generator.domainCertFilePath(domain.Name, sslClientCAExt))
+	} else {
+		vars[varKeySSLClientCertCA] = stringVar(varKeySSLClientCertCA,
+			defaultVarString(vars["ssl.clientcertca.default"]))
 	}
 }
 
-// domainSSLValueOrDefault returns the per-domain SSL path when set, otherwise falls
-// back to the global default variable's value (legacy ProxyConfGen.java:777-786).
-func domainSSLValueOrDefault(domainValue string, defaultVar *Variable) string {
-	if domainValue != "" {
-		return domainValue
+func stringVar(keyword, value string) *Variable {
+	return &Variable{Keyword: keyword, ValueType: ValueTypeString, Value: value}
+}
+
+// defaultVarString returns a variable's string value, or "" when unset.
+func defaultVarString(v *Variable) string {
+	if v == nil {
+		return ""
 	}
 
-	if defaultVar != nil {
-		if s, ok := defaultVar.Value.(string); ok {
-			return s
-		}
-	}
+	s, _ := v.Value.(string)
 
-	return ""
+	return s
 }
 
 // clearDomainVariables removes domain-specific variables after processing.
@@ -497,6 +624,21 @@ func (tp *TemplateProcessor) clearDomainVariables() {
 		}
 
 		delete(tp.generator.Variables, varKeyOrigSSLKey)
+	}
+
+	for _, key := range domainScopedClientCertKeys {
+		orig, ok := tp.generator.Variables[origVarPrefix+key]
+		if !ok {
+			continue
+		}
+
+		if orig != nil {
+			tp.generator.Variables[key] = orig
+		} else {
+			delete(tp.generator.Variables, key)
+		}
+
+		delete(tp.generator.Variables, origVarPrefix+key)
 	}
 }
 

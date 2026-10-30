@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/config/configtest"
 	"github.com/zextras/carbonio-configd/internal/state"
 )
 
@@ -32,13 +33,13 @@ func TestResolveValue_VAR(t *testing.T) {
 	r := NewResolver("/opt/zextras")
 	st := &state.State{
 		GlobalConfig: &config.GlobalConfig{
-			Data: config.NewConfigMapFrom(map[string]string{
+			Data: configtest.NewConfigMapFrom(map[string]string{
 				"zimbraMtaMyNetworks": "127.0.0.0/8 10.0.0.0/8",
 				"zimbraMtaRelayHost":  "relay.example.com",
 			}),
 		},
 		ServerConfig: &config.ServerConfig{
-			Data: config.NewConfigMapFrom(map[string]string{
+			Data: configtest.NewConfigMapFrom(map[string]string{
 				"zimbraServiceHostname": "mail.example.com",
 			}),
 		},
@@ -95,7 +96,7 @@ func TestResolveValue_LOCAL(t *testing.T) {
 	r := NewResolver("/opt/zextras")
 	st := &state.State{
 		LocalConfig: &config.LocalConfig{
-			Data: config.NewConfigMapFrom(map[string]string{
+			Data: configtest.NewConfigMapFrom(map[string]string{
 				"ldap_master_url":         "ldap://ldap.example.com:389",
 				"ldap_starttls_supported": "1",
 			}),
@@ -270,7 +271,7 @@ func TestResolvePostconfDirective(t *testing.T) {
 	r := NewResolver("/opt/zextras").(*resolver)
 	st := &state.State{
 		GlobalConfig: &config.GlobalConfig{
-			Data: config.NewConfigMapFrom(map[string]string{
+			Data: configtest.NewConfigMapFrom(map[string]string{
 				"zimbraMtaMyNetworks": "127.0.0.0/8",
 				"zimbraBooleanTrue":   "TRUE",
 				"zimbraBooleanFalse":  "FALSE",
@@ -378,7 +379,7 @@ func TestResolveLdapDirective(t *testing.T) {
 	r := NewResolver("/opt/zextras").(*resolver)
 	st := &state.State{
 		LocalConfig: &config.LocalConfig{
-			Data: config.NewConfigMapFrom(map[string]string{
+			Data: configtest.NewConfigMapFrom(map[string]string{
 				"ldap_db_maxsize": "85899345920",
 			}),
 		},
@@ -439,7 +440,7 @@ func TestResolveMapfileDirective(t *testing.T) {
 
 	st := &state.State{
 		GlobalConfig: &config.GlobalConfig{
-			Data: config.NewConfigMapFrom(map[string]string{
+			Data: configtest.NewConfigMapFrom(map[string]string{
 				attrZimbraSSLDHParam: "base64encodeddata==",
 			}),
 		},

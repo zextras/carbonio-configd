@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"maps"
 	"slices"
 	"strconv"
 	"sync/atomic"
@@ -96,7 +97,7 @@ func isIdlePoll(
 	lastEventCount int64,
 	reloadSignaled bool,
 ) bool {
-	return cfg.SkipIdlePolls && !appState.FirstRun && !reloadSignaled && trigger.EventCounter.Load() == lastEventCount
+	return cfg.SkipIdlePolls && !appState.IsFirstRun() && !reloadSignaled && trigger.EventCounter.Load() == lastEventCount
 }
 
 // runLoadAndParse runs LoadAllConfigs then ParseMtaConfig, logging errors internally.
@@ -109,7 +110,11 @@ func runLoadAndParse(
 	t := time.Now()
 
 	if err = configManager.LoadAllConfigs(ctx); err != nil {
-		logger.ErrorContext(ctx, "Key lookup failed, sleeping", "error", err, "sleep_seconds", 60)
+		// A cancelled context is a shutdown, not a failed lookup: the caller exits
+		// instead of sleeping, so don't raise an alerting ERROR for it.
+		if ctx.Err() == nil {
+			logger.ErrorContext(ctx, "Key lookup failed, sleeping", "error", err, "sleep_seconds", 60)
+		}
 
 		return time.Since(t), 0, err
 	}
@@ -129,7 +134,9 @@ func runLoadAndParse(
 	t = time.Now()
 
 	if err = configManager.ParseMtaConfig(ctx, mainCfg.ConfigFile); err != nil {
-		logger.ErrorContext(ctx, "Failed to parse MTA config (sleeping 60s)", "error", err)
+		if ctx.Err() == nil {
+			logger.ErrorContext(ctx, "Failed to parse MTA config (sleeping 60s)", "error", err)
+		}
 
 		return loadDur, time.Since(t), err
 	}
@@ -158,16 +165,16 @@ func maybeStartListener(
 	mainLoopTrigger *MainLoopActionTrigger,
 	server *network.ThreadedStreamServer,
 ) *network.ThreadedStreamServer {
-	if !appState.FirstRun || appState.Forced != 0 || server != nil || args.Once {
+	if !appState.IsFirstRun() || appState.Forced != 0 || server != nil || args.Once {
 		return server
 	}
 
-	listenerPortStr, _ := appState.LocalConfig.Data.Get("zmconfigd_listen_port")
+	listenerPortStr, _ := appState.GetLocalConfig().Data.Get("zmconfigd_listen_port")
 	listenerPort, _ := strconv.Atoi(listenerPortStr)
 	listenerAddr := "127.0.0.1"
 	ipv6 := false
 
-	ipMode, _ := appState.ServerConfig.Data.Get("zimbraIPMode")
+	ipMode, _ := appState.GetServerConfig().Data.Get("zimbraIPMode")
 	if ipMode == "ipv6" {
 		listenerAddr = "::1"
 		ipv6 = true
@@ -245,7 +252,7 @@ func runConfigPhases(
 		"duration_seconds", timings.compareKeys.Seconds(),
 		"operation", "compare_keys")
 
-	if appState.FirstRun {
+	if appState.IsFirstRun() {
 		phaseStart = time.Now()
 
 		updateWatchdogServices(ctx, wd, appState, mainCfg)
@@ -327,10 +334,31 @@ func runDaemonLoop(ctx context.Context, deps *daemonLoopDeps) {
 	}
 }
 
-// runLoopIterationSafe wraps runLoopIteration with panic recovery.
-func runLoopIterationSafe(ctx context.Context, deps *daemonLoopDeps, st *loopIterState) iterOutcome {
+// runLoopIterationSafe wraps runLoopIteration with panic recovery. After a
+// recovered panic it backs off for the normal interval (interruptible by
+// shutdown or reload) so a deterministic panic cannot spin the loop hot.
+func runLoopIterationSafe(ctx context.Context, deps *daemonLoopDeps, st *loopIterState) (outcome iterOutcome) {
+	completed := false
+
+	// Deferred first, so it runs after recoverGoroutine has recovered the panic.
+	defer func() {
+		if completed {
+			return
+		}
+
+		outcome = iterContinue
+
+		logger.ErrorContext(ctx, "Main loop iteration panicked, backing off",
+			"interval_seconds", deps.cfg.Interval)
+		SleepWithContext(ctx, time.Duration(deps.cfg.Interval)*time.Second, deps.reloadChan)
+	}()
+
 	defer recoverGoroutine(ctx, "main-loop")
-	return runLoopIteration(ctx, deps, st)
+
+	outcome = runLoopIteration(ctx, deps, st)
+	completed = true
+
+	return outcome
 }
 
 // runLoopIteration performs one main-loop iteration. It returns iterExit
@@ -563,20 +591,16 @@ func RunMainLoop(
 func buildServiceDependencies(ctx context.Context, serviceMgr services.Manager, appState *state.State) {
 	ctx = logger.ContextWithComponent(ctx, "mainloop")
 
-	if appState.MtaConfig.Sections == nil {
+	sections := appState.GetMtaConfig().Sections
+	if sections == nil {
 		return
 	}
 
 	deps := make(map[string][]string)
 
-	for name, section := range appState.MtaConfig.Sections {
+	for name, section := range sections {
 		if len(section.Depends) > 0 {
-			dependList := make([]string, 0, len(section.Depends))
-			for dep := range section.Depends {
-				dependList = append(dependList, dep)
-			}
-
-			deps[name] = dependList
+			deps[name] = slices.Sorted(maps.Keys(section.Depends))
 		}
 	}
 

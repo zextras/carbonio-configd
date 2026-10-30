@@ -5,9 +5,12 @@
 package services
 
 import (
+	"cmp"
 	"context"
+	"errors"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/zextras/carbonio-configd/internal/config"
@@ -82,7 +85,14 @@ const (
 	// serviceStatusEnabled is the LDAP value indicating a service is enabled.
 	// This is distinct from boolean "TRUE"/"1" — it's an LDAP service status string.
 	serviceStatusEnabled = "enabled"
+	// unknownStartOrder is the start order of services missing from StartOrder;
+	// it sorts them after every known service.
+	unknownStartOrder = 1000
 )
+
+// ErrRestartsFailed is returned by ProcessRestarts when at least one queued
+// restart failed (dropped after max attempts, or still queued at no progress).
+var ErrRestartsFailed = errors.New("service restarts failed")
 
 // ControlProcess performs an action on a service by delegating to the
 // Registry-backed lifecycle functions in cli.go — the single control path
@@ -136,6 +146,8 @@ func (sm *ServiceManager) AddRestart(ctx context.Context, service string) error 
 // ProcessRestarts processes all queued service restarts with dependency cascading.
 // Handles dependency ordering and retry logic.
 // The configLookup function is used to check if dependent services are enabled (SERVICE_* keys).
+// It returns an error wrapping ErrRestartsFailed, listing the sorted names, when any service
+// could not be restarted (dropped after max failed attempts or left queued without progress).
 func (sm *ServiceManager) ProcessRestarts(ctx context.Context, configLookup func(string) string) error {
 	ctx = logger.ContextWithComponentOnce(ctx, "services")
 
@@ -161,6 +173,23 @@ func (sm *ServiceManager) ProcessRestarts(ctx context.Context, configLookup func
 
 			break
 		}
+	}
+
+	// failedRestarts only holds services that never recovered (success clears
+	// the entry); anything still queued also did not get restarted.
+	unrecovered := make(map[string]struct{}, len(failedRestarts)+len(sm.RestartQueue))
+	for service := range failedRestarts {
+		unrecovered[service] = struct{}{}
+	}
+
+	for service := range sm.RestartQueue {
+		unrecovered[service] = struct{}{}
+	}
+
+	if len(unrecovered) > 0 {
+		failed := slices.Sorted(maps.Keys(unrecovered))
+
+		return fmt.Errorf("%w: %s", ErrRestartsFailed, strings.Join(failed, ", "))
 	}
 
 	logger.DebugContext(ctx, "All service restarts processed")
@@ -215,6 +244,7 @@ func (sm *ServiceManager) attemptServiceRestart(
 	err := sm.ControlProcess(ctx, service, ActionRestart)
 	if err == nil {
 		delete(sm.RestartQueue, service)
+		delete(failedRestarts, service)
 
 		logger.InfoContext(ctx, "Successfully restarted service", "service", service)
 
@@ -249,23 +279,26 @@ func (sm *ServiceManager) getSortedServices() []string {
 		services = append(services, service)
 	}
 
-	// Sort by start order
-	sort.Slice(services, func(i, j int) bool {
-		orderI, existsI := sm.StartOrder[services[i]]
-		orderJ, existsJ := sm.StartOrder[services[j]]
-
-		if !existsI {
-			orderI = 1000 // Default for undefined services — sort after every known service
-		}
-
-		if !existsJ {
-			orderJ = 1000
-		}
-
-		return orderI < orderJ
+	// Sort by start order; equal orders (notably every service missing from
+	// StartOrder) fall back to name so map iteration order never leaks.
+	slices.SortFunc(services, func(a, b string) int {
+		return cmp.Or(
+			cmp.Compare(sm.startOrderOf(a), sm.startOrderOf(b)),
+			strings.Compare(a, b),
+		)
 	})
 
 	return services
+}
+
+// startOrderOf returns the start order of a service. Services missing from
+// StartOrder get unknownStartOrder so they sort after every known service.
+func (sm *ServiceManager) startOrderOf(service string) int {
+	if order, ok := sm.StartOrder[service]; ok {
+		return order
+	}
+
+	return unknownStartOrder
 }
 
 // ClearRestarts clears all queued restarts.

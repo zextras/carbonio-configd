@@ -80,7 +80,9 @@ func TestHandleEdit_LDAPURLWithoutForce(t *testing.T) {
 	}
 
 	want := "ldap://replica:389 ldap://master:389"
-	handleEdit(&localconfigOpts{configPath: path, keys: []string{"ldap_url=" + want}})
+	if err := (&localconfigOpts{configPath: path, keys: []string{"ldap_url=" + want}}).runEdit(); err != nil {
+		t.Fatal(err)
+	}
 
 	cfg, err := localconfig.LoadLocalConfigFromFile(path)
 	if err != nil {
@@ -161,7 +163,10 @@ func TestFormatVersion(t *testing.T) {
 }
 
 func TestResolveEditKeyValue_KeyValue(t *testing.T) {
-	key, val := resolveEditKeyValue("mykey=myvalue", false)
+	key, val, err := resolveEditKeyValue("mykey=myvalue", false)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if key != "mykey" {
 		t.Errorf("expected key 'mykey', got %q", key)
 	}
@@ -172,7 +177,10 @@ func TestResolveEditKeyValue_KeyValue(t *testing.T) {
 
 func TestResolveEditKeyValue_ValueWithEquals(t *testing.T) {
 	// Value contains an '=' sign — only first '=' is the separator
-	key, val := resolveEditKeyValue("k=v=extra", false)
+	key, val, err := resolveEditKeyValue("k=v=extra", false)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if key != "k" {
 		t.Errorf("expected key 'k', got %q", key)
 	}
@@ -182,7 +190,10 @@ func TestResolveEditKeyValue_ValueWithEquals(t *testing.T) {
 }
 
 func TestResolveEditKeyValue_EmptyValue(t *testing.T) {
-	key, val := resolveEditKeyValue("mykey=", false)
+	key, val, err := resolveEditKeyValue("mykey=", false)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if key != "mykey" {
 		t.Errorf("expected key 'mykey', got %q", key)
 	}
@@ -215,7 +226,9 @@ func TestWriteOutput_Plain(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	writeOutput(map[string]string{"key1": "val1"}, &localconfigOpts{mode: "plain"})
+	if err := writeOutput(map[string]string{"key1": "val1"}, &localconfigOpts{mode: "plain"}); err != nil {
+		t.Fatal(err)
+	}
 
 	w.Close()
 	os.Stdout = old
@@ -233,7 +246,9 @@ func TestWriteOutput_Shell(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	writeOutput(map[string]string{"mykey": "myval"}, &localconfigOpts{mode: "shell"})
+	if err := writeOutput(map[string]string{"mykey": "myval"}, &localconfigOpts{mode: "shell"}); err != nil {
+		t.Fatal(err)
+	}
 
 	w.Close()
 	os.Stdout = old
@@ -251,7 +266,9 @@ func TestWriteOutput_Export(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	writeOutput(map[string]string{"expkey": "expval"}, &localconfigOpts{mode: modeExport})
+	if err := writeOutput(map[string]string{"expkey": "expval"}, &localconfigOpts{mode: modeExport}); err != nil {
+		t.Fatal(err)
+	}
 
 	w.Close()
 	os.Stdout = old
@@ -269,7 +286,9 @@ func TestWriteOutput_Nokey(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	writeOutput(map[string]string{"nk": "nkval"}, &localconfigOpts{mode: "nokey", keys: []string{"nk"}})
+	if err := writeOutput(map[string]string{"nk": "nkval"}, &localconfigOpts{mode: "nokey", keys: []string{"nk"}}); err != nil {
+		t.Fatal(err)
+	}
 
 	w.Close()
 	os.Stdout = old
@@ -287,7 +306,9 @@ func TestWriteOutput_XML(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	writeOutput(map[string]string{"xmlkey": "xmlval"}, &localconfigOpts{mode: "xml"})
+	if err := writeOutput(map[string]string{"xmlkey": "xmlval"}, &localconfigOpts{mode: "xml"}); err != nil {
+		t.Fatal(err)
+	}
 
 	w.Close()
 	os.Stdout = old
@@ -300,40 +321,34 @@ func TestWriteOutput_XML(t *testing.T) {
 	}
 }
 
-func TestFilterKeys_MissingKeyQuiet(t *testing.T) {
-	config := map[string]string{"a": "1"}
+func TestSelectValues_MissingKeyQuiet(t *testing.T) {
+	configured := map[string]string{"a": "1"}
 
-	// quiet=true: missing keys should not produce warning but should be excluded
-	filtered := filterKeys(config, &localconfigOpts{keys: []string{"a", "missing"}, quiet: true})
-	if len(filtered) != 1 {
-		t.Fatalf("expected 1 key, got %d", len(filtered))
+	// quiet=true: missing keys must not warn but must be excluded.
+	var stderr bytes.Buffer
+
+	opts := &localconfigOpts{keys: []string{"a", "missing"}, quiet: true, stderr: &stderr}
+
+	filtered := opts.selectValues(configured)
+	if len(filtered) != 1 || filtered["a"] != "1" {
+		t.Fatalf("expected only a=1, got %v", filtered)
 	}
-	if filtered["a"] != "1" {
-		t.Errorf("expected a=1, got %q", filtered["a"])
+
+	if stderr.Len() != 0 {
+		t.Errorf("quiet mode must not warn, got %q", stderr.String())
 	}
 }
 
-func TestFilterKeys_MissingKeyNotQuiet(t *testing.T) {
-	config := map[string]string{"a": "1"}
+func TestSelectValues_MissingKeyWarns(t *testing.T) {
+	var stderr bytes.Buffer
 
-	// quiet=false: missing key should print a warning to stderr, but not panic
-	old := os.Stderr
-	r, w, _ := os.Pipe()
-	os.Stderr = w
+	opts := &localconfigOpts{keys: []string{"missing"}, stderr: &stderr}
 
-	filtered := filterKeys(config, &localconfigOpts{keys: []string{"missing"}, quiet: false})
-
-	w.Close()
-	os.Stderr = old
-
-	var buf bytes.Buffer
-	_, _ = buf.ReadFrom(r)
-	warn := buf.String()
-
-	if len(filtered) != 0 {
+	if filtered := opts.selectValues(map[string]string{"a": "1"}); len(filtered) != 0 {
 		t.Errorf("expected 0 keys for missing key, got %d", len(filtered))
 	}
-	if !strings.Contains(warn, "Warning") {
-		t.Errorf("expected Warning message to stderr, got %q", warn)
+
+	if want := "Warning: null valued key 'missing'\n"; stderr.String() != want {
+		t.Errorf("stderr = %q, want %q", stderr.String(), want)
 	}
 }

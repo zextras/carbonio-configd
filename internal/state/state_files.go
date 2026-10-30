@@ -174,6 +174,28 @@ func (s *State) ShouldRewriteSection(ctx context.Context, sectionName string, se
 	return false
 }
 
+// LookupFile returns the cached content for a FILE type lookup key.
+func (s *State) LookupFile(key string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	val, ok := s.FileCache[key]
+
+	return val, ok
+}
+
+// StoreFile caches the content for a FILE type lookup key.
+func (s *State) StoreFile(key, value string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.FileCache == nil {
+		s.FileCache = make(map[string]string)
+	}
+
+	s.FileCache[key] = value
+}
+
 // ClearFileCache clears the FILE type lookup cache.
 // This is called at the start of each configuration fetch cycle.
 func (s *State) ClearFileCache(ctx context.Context) {

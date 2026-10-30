@@ -35,6 +35,12 @@ type Client struct {
 	poolSize int
 	poolMu   sync.Mutex
 
+	// closed is closed by Close so a retry backoff wait is abandoned
+	// instead of delaying shutdown. A nil channel (zero-value Client) never
+	// fires.
+	closed    chan struct{}
+	closeOnce sync.Once
+
 	// Retry configuration
 	maxRetries    int
 	retryDelay    time.Duration
@@ -156,6 +162,7 @@ func NewClient(config *ClientConfig) (*Client, error) {
 		opTimeout:     config.OpTimeout,
 		tlsConfig:     tlsConfig,
 		pool:          make([]*ldap.Conn, 0, config.PoolSize),
+		closed:        make(chan struct{}),
 	}
 
 	return client, nil
@@ -255,6 +262,10 @@ func (c *Client) dialAndBind(url string) (*ldap.Conn, error) {
 
 // Close closes all connections in the pool.
 func (c *Client) Close() error {
+	if c.closed != nil {
+		c.closeOnce.Do(func() { close(c.closed) })
+	}
+
 	c.poolMu.Lock()
 	defer c.poolMu.Unlock()
 
@@ -277,6 +288,10 @@ func (c *Client) executeWithRetry(operation func(*ldap.Conn) error) error {
 
 	for attempt := 0; attempt <= c.maxRetries; attempt++ {
 		if attempt > 0 {
+			if !c.waitRetry(delay) {
+				return fmt.Errorf("operation aborted after %d retries: client closed: %w", attempt-1, lastErr)
+			}
+
 			delay = c.nextRetryDelay(delay)
 		}
 
@@ -307,10 +322,23 @@ func (c *Client) executeWithRetry(operation func(*ldap.Conn) error) error {
 	return fmt.Errorf("operation failed after %d retries: %w", c.maxRetries, lastErr)
 }
 
-// nextRetryDelay sleeps for delay and returns the next (exponentially backed-off) delay.
-func (c *Client) nextRetryDelay(delay time.Duration) time.Duration {
-	time.Sleep(delay)
+// waitRetry blocks for delay before the next attempt. It reports false when
+// the client is closed first, in which case the caller must stop retrying.
+func (c *Client) waitRetry(delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
 
+	select {
+	case <-c.closed:
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+// nextRetryDelay returns the next (exponentially backed-off) delay, capped at
+// maxRetryDelay. It is pure; waiting is done by waitRetry.
+func (c *Client) nextRetryDelay(delay time.Duration) time.Duration {
 	delay *= 2
 	if delay > c.maxRetryDelay {
 		return c.maxRetryDelay

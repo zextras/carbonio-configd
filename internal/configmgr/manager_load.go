@@ -28,50 +28,89 @@ type loadFunc struct {
 	fn   func(context.Context) error
 }
 
+// loadResult is the outcome of one loader. Each goroutine writes only its own
+// slot, and the caller reads a slot only after that loader's done channel is
+// closed, so no result is ever shared with a still-running loader.
+type loadResult struct {
+	done chan struct{}
+	err  error
+}
+
+// loadWait is the outcome of waiting for the loaders.
+type loadWait int
+
+const (
+	loadWaitDone loadWait = iota
+	loadWaitTimedOut
+	loadWaitCancelled
+)
+
+// awaitLoaders waits until all loaders are done, the timeout elapses or ctx is cancelled.
+func awaitLoaders(ctx context.Context, done <-chan struct{}, timeout time.Duration) loadWait {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return loadWaitCancelled
+	case <-done:
+		return loadWaitDone
+	case <-timer.C:
+		return loadWaitTimedOut
+	}
+}
+
+// logPendingLoaders logs every loader that has not finished yet.
+func logPendingLoaders(ctx context.Context, loadFuncs []loadFunc, results []loadResult, msg string, args ...any) {
+	for i, lf := range loadFuncs {
+		select {
+		case <-results[i].done:
+		default:
+			logger.WarnContext(ctx, msg, append([]any{"thread", lf.name}, args...)...)
+		}
+	}
+}
+
 // runLoadAttempt launches all loadFuncs concurrently and waits with a two-stage
-// timeout. Returns whether the attempt timed out, any loader errors, and a non-nil
-// ctxErr when the context is cancelled.
+// timeout (legacy jylibs/state.py: join(thread_wait_time), then once more).
+// Returns whether the attempt timed out, the errors of the loaders that finished
+// (in loadFuncs order) and a non-nil ctxErr when the context is cancelled.
+//
+// The loaders run on a child context that is cancelled when this function
+// returns, so a hung loader is told to give up instead of blocking the caller.
+// Results of loaders still running at timeout are discarded.
 func runLoadAttempt(
 	ctx context.Context,
 	loadFuncs []loadFunc,
 	timeout time.Duration,
 ) (timedOut bool, errs []error, ctxErr error) {
+	loadCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	var wg sync.WaitGroup
 
-	errChan := make(chan error, len(loadFuncs))
-	threadStatus := make(map[string]bool)
+	results := make([]loadResult, len(loadFuncs))
 
-	var statusMu sync.Mutex
+	for i, lf := range loadFuncs {
+		results[i].done = make(chan struct{})
 
-	threadTimings := make(map[string]time.Duration)
-
-	var timingMu sync.Mutex
-
-	for _, lf := range loadFuncs {
 		wg.Go(func() {
-			logger.DebugContext(ctx, "Starting config load", "thread", lf.name)
+			defer close(results[i].done)
+
+			logger.DebugContext(loadCtx, "Starting config load", "thread", lf.name)
 
 			threadStart := time.Now()
-			loadErr := lf.fn(ctx)
-			threadDuration := time.Since(threadStart)
+			loadErr := lf.fn(loadCtx)
 
-			timingMu.Lock()
-			threadTimings[lf.name] = threadDuration
-			timingMu.Unlock()
-
-			logger.DebugContext(ctx, "Timing: Config load duration",
+			logger.DebugContext(loadCtx, "Timing: Config load duration",
 				"thread", lf.name,
-				"duration_seconds", threadDuration.Seconds())
-
-			statusMu.Lock()
-			threadStatus[lf.name] = loadErr == nil
-			statusMu.Unlock()
+				"duration_seconds", time.Since(threadStart).Seconds())
 
 			if loadErr != nil {
-				errChan <- fmt.Errorf("thread %s failed: %w", lf.name, loadErr)
+				results[i].err = fmt.Errorf("thread %s failed: %w", lf.name, loadErr)
 			}
 
-			logger.DebugContext(ctx, "Finished config load", "thread", lf.name)
+			logger.DebugContext(loadCtx, "Finished config load", "thread", lf.name)
 		})
 	}
 
@@ -80,56 +119,45 @@ func runLoadAttempt(
 	go func() {
 		wg.Wait()
 		close(done)
-		close(errChan)
 	}()
 
-	select {
-	case <-ctx.Done():
+	switch awaitLoaders(ctx, done, timeout) {
+	case loadWaitCancelled:
 		logger.InfoContext(ctx, "Configuration loading cancelled by shutdown signal")
-		<-done
 
 		return false, nil, ctx.Err()
-	case <-done:
-		logger.DebugContext(ctx, "All config threads completed")
-	case <-time.After(timeout):
+	case loadWaitTimedOut:
 		logger.ErrorContext(ctx, "Configuration loading timed out", "timeout", timeout)
+		logPendingLoaders(ctx, loadFuncs, results, "Thread still alive, waiting", "wait_seconds", int(timeout.Seconds()))
 
-		statusMu.Lock()
-		for _, lf := range loadFuncs {
-			if !threadStatus[lf.name] {
-				logger.WarnContext(ctx, "Thread still alive, waiting",
-					"thread", lf.name,
-					"wait_seconds", int(timeout.Seconds()))
-			}
-		}
-		statusMu.Unlock()
-
-		select {
-		case <-ctx.Done():
+		switch awaitLoaders(ctx, done, timeout) {
+		case loadWaitCancelled:
 			logger.InfoContext(ctx, "Configuration loading cancelled during retry wait")
-			<-done
 
 			return false, nil, ctx.Err()
-		case <-done:
-			logger.DebugContext(ctx, "All threads completed after extended wait")
-		case <-time.After(timeout):
-			statusMu.Lock()
-			for _, lf := range loadFuncs {
-				if !threadStatus[lf.name] {
-					logger.ErrorContext(ctx, "Thread still alive, aborting", "thread", lf.name)
-				}
-			}
-			statusMu.Unlock()
+		case loadWaitTimedOut:
+			logPendingLoaders(ctx, loadFuncs, results, "Thread still alive, aborting")
 
 			timedOut = true
-
-			<-done
+		case loadWaitDone:
+			logger.DebugContext(ctx, "All threads completed after extended wait")
 		}
+	case loadWaitDone:
+		logger.DebugContext(ctx, "All config threads completed")
 	}
 
-	for err := range errChan {
-		logger.ErrorContext(ctx, "Error during config load", "error", err)
-		errs = append(errs, err)
+	for i := range results {
+		select {
+		case <-results[i].done:
+		default:
+			continue
+		}
+
+		if results[i].err != nil {
+			logger.ErrorContext(ctx, "Error during config load", "error", results[i].err)
+
+			errs = append(errs, results[i].err)
+		}
 	}
 
 	return timedOut, errs, nil
@@ -159,9 +187,9 @@ func (cm *ConfigManager) LoadAllConfigsWithRetry(ctx context.Context, maxRetries
 	commands.ResetProvisioning(ctx, "server")
 	commands.ResetProvisioning(ctx, "local")
 
-	cm.State.FileCache = make(map[string]string)
+	cm.State.ClearFileCache(ctx)
 
-	threadWaitTime := parseLDAPReadTimeout(cm.State.LocalConfig.Data.Snapshot())
+	threadWaitTime := parseLDAPReadTimeout(cm.State.GetLocalConfig().Data.Snapshot())
 
 	loadFuncs := []loadFunc{
 		{"lc", cm.LoadLocalConfig},  // Thread name matches Python
@@ -177,7 +205,10 @@ func (cm *ConfigManager) LoadAllConfigsWithRetry(ctx context.Context, maxRetries
 			logger.DebugContext(ctx, "Retry attempt for config loading",
 				"attempt", attempt,
 				"max_retries", maxRetries)
-			time.Sleep(2 * time.Second)
+
+			if err := sleepCtx(ctx, 2*time.Second); err != nil {
+				return err
+			}
 		}
 
 		timedOut, errors, ctxErr := runLoadAttempt(ctx, loadFuncs, threadWaitTime)

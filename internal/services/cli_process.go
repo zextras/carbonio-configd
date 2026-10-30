@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -22,8 +23,8 @@ import (
 // killProcessTimeout is the grace period between SIGTERM and SIGKILL when
 // reaping a service's processes. Long enough for well-behaved daemons to
 // flush state (mailboxd's JVM shutdown hook needs ~30 s); short enough that
-// zmcontrol stop still completes in a reasonable time. Overridable for tests.
-var killProcessTimeout = 30 * time.Second
+// zmcontrol stop still completes in a reasonable time.
+const killProcessTimeout = 30 * time.Second
 
 // procFSRoot is the path prefix for Linux process entries in /proc.
 // Declared as var so tests can override it with a temporary directory.
@@ -306,6 +307,12 @@ func startDetached(_ context.Context, name string, def *ServiceDef) error {
 // the signal. mailboxd's JVM caught SIGTERM but took >80 s to exit via its
 // shutdown hook, leaving the CLI to falsely report success.
 func killProcess(ctx context.Context, processName string) error {
+	return killProcessWithGrace(ctx, processName, killProcessTimeout)
+}
+
+// killProcessWithGrace is killProcess with an explicit SIGTERM→SIGKILL grace
+// period, so tests can shorten it without mutating package state.
+func killProcessWithGrace(ctx context.Context, processName string, grace time.Duration) error {
 	pids, err := scanProcessesByCmdline(processName)
 	if err != nil {
 		return fmt.Errorf("scan processes for %s: %w", processName, err)
@@ -331,7 +338,7 @@ func killProcess(ctx context.Context, processName string) error {
 		signalPID(pid, syscall.SIGTERM)
 	}
 
-	waitAndEscalate(ctx, targets, killProcessTimeout)
+	waitAndEscalate(ctx, targets, grace)
 
 	return nil
 }
@@ -373,7 +380,7 @@ func waitAndEscalate(ctx context.Context, pids []int, timeout time.Duration) {
 // processAlive returns true when /proc/<pid> exists and the entry is not a
 // zombie. Zombies have already exited and are only waiting for a parent reap.
 func processAlive(pid int) bool {
-	if _, err := os.Stat(procFSRoot + strconv.Itoa(pid)); err != nil {
+	if _, err := os.Stat(procFSRoot + strconv.Itoa(pid)); err != nil { //nolint:gosec // path is /proc/<pid>, pid is an int
 		return false
 	}
 
@@ -472,82 +479,167 @@ func killByPIDWithGroupAndSudo(ctx context.Context, pid int) bool {
 	return !processAlive(pid)
 }
 
-// scanProcessesByCmdline walks /proc/<pid> looking for processes whose command
-// line or short name contains the given substring. Returns the matching PIDs.
+// procEntry is the match-relevant view of one /proc/<pid> entry: the cmdline
+// with NULs turned into spaces and the comm short name (read only when the
+// cmdline is empty, the only case in which comm is consulted).
+type procEntry struct {
+	cmdline string
+	comm    string
+	pid     int
+}
+
+// readProcEntry reads the /proc entry e. It reports false for non-numeric
+// names and non-directories. Ownership is intentionally NOT checked: services
+// we register legitimately run as root (postfix master, sudo-spawned
+// zmstat-fd) and must be visible to status. Cross-UID signaling is handled by
+// the caller via sudo fallback in killByPIDWithGroupAndSudo.
+func readProcEntry(e os.DirEntry) (procEntry, bool) {
+	if !e.IsDir() {
+		return procEntry{}, false
+	}
+
+	pid, convErr := strconv.Atoi(e.Name())
+	if convErr != nil {
+		return procEntry{}, false
+	}
+
+	procDir := procFSRoot + e.Name()
+	pe := procEntry{pid: pid}
+
+	data, readErr := os.ReadFile(procDir + "/cmdline") //nolint:gosec // path is /proc/<pid>/cmdline, not user-controlled
+	if readErr == nil && len(data) > 0 {
+		for i, c := range data {
+			if c == 0 {
+				data[i] = ' '
+			}
+		}
+
+		pe.cmdline = string(data)
+
+		return pe, true
+	}
+
+	comm, readErr := os.ReadFile(procDir + "/comm") //nolint:gosec // path is /proc/<pid>/comm, not user-controlled
+	if readErr == nil {
+		pe.comm = strings.TrimSpace(string(comm))
+	}
+
+	return pe, true
+}
+
+// matches reports whether the entry's cmdline or comm identifies needle.
 //
-// Primary match: /proc/<pid>/cmdline (NUL-delimited, replaced with spaces).
-// Fallback: /proc/<pid>/comm (15-char short name). The fallback is needed for
-// daemons like nginx that replace their argv after forking, leaving cmdline
-// empty while comm still contains the binary name.
-func scanProcessesByCmdline(needle string) ([]int, error) {
-	entries, err := os.ReadDir("/proc")
-	if err != nil {
-		return nil, fmt.Errorf("read /proc: %w", err)
+// Primary: cmdline. When it is readable and non-empty the verdict is
+// authoritative — a negative match must NOT fall through to comm, because
+// the 15-char comm truncation (TASK_COMM_LEN-1) collides unrelated
+// processes. Example: service-discover-wrapper.sh has comm="service-discove"
+// which is a prefix of the service-discover daemon binary name
+// "service-discovered"; matching either direction against comm would falsely
+// identify wrapper sidecars as the real daemon.
+//
+// Fallback: cmdline unreadable or empty (some kernel threads, or daemons that
+// zero their argv after fork). Only an *exact* comm match counts — substring
+// semantics are unsafe because of the 15-char truncation.
+func (p procEntry) matches(needle string) bool {
+	if p.cmdline != "" {
+		return strings.Contains(p.cmdline, needle)
+	}
+
+	return p.comm != "" && p.comm == needle
+}
+
+// procSnapshot is a point-in-time listing of procFSRoot, read once and
+// matched against any number of needles. A status listing or watchdog tick
+// probes N services; without a snapshot each probe would re-walk /proc and
+// re-read every cmdline. The listing is loaded lazily on first scan (batches
+// whose services all resolve through pidfiles never touch /proc) and is safe
+// for concurrent use.
+//
+// Snapshots are for read-only status probes. Anything that signals a process
+// must use scanProcessesByCmdline, which always takes a fresh listing.
+type procSnapshot struct {
+	err     error
+	entries []procEntry
+	once    sync.Once
+}
+
+func (s *procSnapshot) load() {
+	s.once.Do(func() {
+		dirents, err := os.ReadDir(procFSRoot)
+		if err != nil {
+			s.err = fmt.Errorf("read %s: %w", procFSRoot, err)
+
+			return
+		}
+
+		s.entries = make([]procEntry, 0, len(dirents))
+
+		for _, e := range dirents {
+			if pe, ok := readProcEntry(e); ok {
+				s.entries = append(s.entries, pe)
+			}
+		}
+	})
+}
+
+// scan returns the PIDs of live (non-zombie) processes matching needle.
+// Zombies have already exited and cannot be signaled — never reported. The
+// zombie check runs only for needle matches, against the current state.
+func (s *procSnapshot) scan(needle string) ([]int, error) {
+	s.load()
+
+	if s.err != nil {
+		return nil, s.err
 	}
 
 	var pids []int
 
-	for _, e := range entries {
-		if pid, ok := matchProcEntry(e, needle); ok {
-			pids = append(pids, pid)
+	for i := range s.entries {
+		if s.entries[i].matches(needle) && !isZombie(s.entries[i].pid) {
+			pids = append(pids, s.entries[i].pid)
 		}
 	}
 
 	return pids, nil
 }
 
-// matchProcEntry returns (pid, true) when the /proc entry represents a live process
-// that matches needle either in its cmdline or comm name.
-func matchProcEntry(e os.DirEntry, needle string) (int, bool) {
-	if !e.IsDir() {
-		return 0, false
+type procSnapshotKey struct{}
+
+// WithProcessSnapshot returns a context carrying a process snapshot that
+// every legacy-mode ServiceStatus probe made with it shares, so a batch of
+// probes (zmcontrol status, a watchdog tick) walks /proc once instead of once
+// per service. The snapshot is taken lazily on the first ProcessName probe
+// and never refreshed: derive the context per batch, not per daemon lifetime.
+// A context that already carries one is returned unchanged.
+func WithProcessSnapshot(ctx context.Context) context.Context {
+	if _, ok := ctx.Value(procSnapshotKey{}).(*procSnapshot); ok {
+		return ctx
 	}
 
-	pid, convErr := strconv.Atoi(e.Name())
-	if convErr != nil {
-		return 0, false
+	return context.WithValue(ctx, procSnapshotKey{}, &procSnapshot{})
+}
+
+// scanProcessesByCmdline walks /proc/<pid> looking for processes whose command
+// line or short name contains the given substring. Returns the matching PIDs.
+// It always reads /proc afresh, which is what kill paths need.
+//
+// Primary match: /proc/<pid>/cmdline (NUL-delimited, replaced with spaces).
+// Fallback: /proc/<pid>/comm (15-char short name). The fallback is needed for
+// daemons like nginx that replace their argv after forking, leaving cmdline
+// empty while comm still contains the binary name.
+func scanProcessesByCmdline(needle string) ([]int, error) {
+	return (&procSnapshot{}).scan(needle)
+}
+
+// scanProcessesForStatus is scanProcessesByCmdline for read-only status
+// probes: it matches against the snapshot carried by ctx
+// (WithProcessSnapshot) when there is one, else against a fresh listing.
+func scanProcessesForStatus(ctx context.Context, needle string) ([]int, error) {
+	if s, ok := ctx.Value(procSnapshotKey{}).(*procSnapshot); ok {
+		return s.scan(needle)
 	}
 
-	procDir := procFSRoot + e.Name()
-
-	// Zombies have already exited and cannot be signaled — never report
-	// them as matches. Ownership is intentionally NOT checked: services
-	// we register legitimately run as root (postfix master, sudo-spawned
-	// zmstat-fd) and must be visible to status. Cross-UID signaling is
-	// handled by the caller via sudo fallback in killByPIDWithGroupAndSudo.
-	if isZombie(pid) {
-		return 0, false
-	}
-
-	// Primary: check cmdline. When cmdline is readable and non-empty the
-	// verdict is authoritative — a negative match here must NOT fall through
-	// to comm, because the 15-char comm truncation (TASK_COMM_LEN-1) collides
-	// unrelated processes. Example: service-discover-wrapper.sh has
-	// comm="service-discove" which is a prefix of the service-discover daemon
-	// binary name "service-discovered"; matching either direction against
-	// comm would falsely identify wrapper sidecars as the real daemon.
-	data, readErr := os.ReadFile(procDir + "/cmdline") //nolint:gosec // path is /proc/<pid>/cmdline, not user-controlled
-	if readErr == nil && len(data) > 0 {
-		cmdline := strings.ReplaceAll(string(data), "\x00", " ")
-		if strings.Contains(cmdline, needle) {
-			return pid, true
-		}
-
-		return 0, false
-	}
-
-	// Fallback: cmdline unreadable or empty (some kernel threads, or daemons
-	// that zero their argv after fork). Only an *exact* comm match counts —
-	// substring semantics are unsafe because of the 15-char truncation.
-	comm, readErr := os.ReadFile(procDir + "/comm") //nolint:gosec // path is /proc/<pid>/comm, not user-controlled
-	if readErr == nil {
-		commStr := strings.TrimSpace(string(comm))
-		if commStr != "" && commStr == needle {
-			return pid, true
-		}
-	}
-
-	return 0, false
+	return scanProcessesByCmdline(needle)
 }
 
 // isRunningByPidFile reads a PID from the given file and checks if
@@ -600,9 +692,11 @@ func isZombie(pid int) bool {
 // It reports whether any *other* process has a command line that contains
 // processName. The current PID and its parent are excluded so a
 // `configd control status` invocation does not self-match its own ProcessName.
-// Implemented directly against /proc to avoid forking pgrep.
-func isProcessRunning(_ context.Context, processName string) bool {
-	pids, err := scanProcessesByCmdline(processName)
+// Implemented directly against /proc to avoid forking pgrep. It matches
+// against the process snapshot carried by ctx (WithProcessSnapshot) when
+// present, so batched probes share one /proc walk.
+func isProcessRunning(ctx context.Context, processName string) bool {
+	pids, err := scanProcessesForStatus(ctx, processName)
 	if err != nil || len(pids) == 0 {
 		return false
 	}

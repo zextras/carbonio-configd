@@ -16,65 +16,61 @@ import (
 	"github.com/zextras/carbonio-configd/internal/state"
 )
 
-// resolveCommentState implements the shared logic for comment/uncomment directives.
-// trueIsComment controls the no-valSet branch: true = comment when value is TRUE (comment
-// directive), false = comment when value is FALSE (uncomment directive).
+// resolveCommentState implements the shared logic for comment/uncomment directives,
+// mirroring jylibs/state.py xformConfig. The operand is "TYPE:key[,commentStr[,v1,v2...]]":
+//
+//   - without a value set the line is commented when the looked-up value is true
+//     (comment) or false (uncomment);
+//   - with a value set it is commented when the value is missing or listed
+//     (comment), or when it is present and not listed (uncomment).
+//
+// A "!" key prefix turns the lookup into a boolean (legacy checkConditional), which
+// is never "missing" and never equal to a listed string.
 func (t *Transformer) resolveCommentState(
 	ctx context.Context,
 	re *regexp.Regexp,
-	warnMsg string,
 	sr string,
-	trueIsComment bool,
-) string {
-	matches := re.FindStringSubmatch(sr)
-	if len(matches) < 3 {
-		logger.WarnContext(ctx, warnMsg, "directive", sr)
-		return "" // Invalid format
+	isComment bool,
+) (string, error) {
+	matches, err := findOne(re, sr)
+	if err != nil {
+		return "", err
 	}
 
 	cmd := matches[1]
-	key := matches[2]
+	parts := strings.SplitN(matches[2], ",", 3)
+	key := parts[0]
+	commentStr := "#"
+
+	if len(parts) > 1 {
+		commentStr = parts[1]
+	}
 
 	negate := strings.HasPrefix(key, "!")
-	if negate {
-		key = key[1:]
-	}
 
-	commentStr := "#"
-	if len(matches) > 3 && matches[3] != "" {
-		commentStr = matches[3]
-	}
-
-	valSet := []string{}
-	if len(matches) > 4 && matches[4] != "" {
-		valSet = strings.Split(matches[4], ",")
-	}
-
-	lookupVal, err := t.ConfigLookup.LookUpConfig(ctx, cmd, key)
+	lookupVal, err := t.ConfigLookup.LookUpConfig(ctx, cmd, strings.TrimPrefix(key, "!"))
 	if err != nil {
-		lookupVal = "" // Treat lookup error as empty
+		lookupVal = "" // legacy None: false for the boolean forms
 	}
 
-	var shouldComment bool
+	var hit bool
 
 	switch {
-	case len(valSet) > 0:
-		shouldComment = slices.Contains(valSet, lookupVal)
-	case trueIsComment:
-		shouldComment = state.IsTrueValue(lookupVal)
+	case len(parts) > 2:
+		missing := err != nil && !negate
+		listed := !negate && err == nil && slices.Contains(strings.Split(parts[2], ","), lookupVal)
+		hit = missing || listed
+	case negate:
+		hit = state.IsFalseValue(lookupVal)
 	default:
-		shouldComment = !state.IsTrueValue(lookupVal)
+		hit = state.IsTrueValue(lookupVal)
 	}
 
-	if negate {
-		shouldComment = !shouldComment
+	if hit == isComment {
+		return commentStr, nil
 	}
 
-	if shouldComment {
-		return commentStr
-	}
-
-	return ""
+	return "", nil
 }
 
 // handleCommentDirective processes comment directives.
@@ -84,200 +80,255 @@ func (t *Transformer) resolveCommentState(
 // When the key is prefixed with `!`, the logic is inverted: comment the line
 // when the value is FALSE/empty (instead of when TRUE). This mirrors the
 // legacy Python configd behavior used in amavisd.conf.in templates.
-func (t *Transformer) handleCommentDirective(ctx context.Context, sr string) string {
-	return t.resolveCommentState(ctx, commentRe, "Invalid comment directive", sr, true)
+func (t *Transformer) handleCommentDirective(ctx context.Context, sr string) (string, error) {
+	return t.resolveCommentState(ctx, commentRe, sr, true)
 }
 
 // handleUncommentDirective processes uncomment directives.
 // Format: %%uncomment VAR:key%% or %%uncomment VAR:key,#%% or %%uncomment VAR:key,#,val1,val2%%
-func (t *Transformer) handleUncommentDirective(ctx context.Context, sr string) string {
-	return t.resolveCommentState(ctx, uncommentRe, "Invalid uncomment directive", sr, false)
+func (t *Transformer) handleUncommentDirective(ctx context.Context, sr string) (string, error) {
+	return t.resolveCommentState(ctx, uncommentRe, sr, false)
 }
 
-// lookupBooleanValue is a helper to look up a boolean config value.
-// Returns the string value (treating errors as empty string).
-func (t *Transformer) lookupBooleanValue(ctx context.Context, cmd, key string) string {
-	lookupVal, err := t.ConfigLookup.LookUpConfig(ctx, cmd, key)
+// lookupTruth reports whether the value behind TYPE:key is true for the
+// binary/truefalse directives. A "!" key prefix negates the test (legacy
+// checkConditional); a failed lookup is the legacy None, i.e. false.
+func (t *Transformer) lookupTruth(ctx context.Context, cmd, key string) bool {
+	lookupVal, err := t.ConfigLookup.LookUpConfig(ctx, cmd, strings.TrimPrefix(key, "!"))
 	if err != nil {
-		return "" // Treat lookup error as empty
+		lookupVal = ""
 	}
 
-	return lookupVal
+	if strings.HasPrefix(key, "!") {
+		return state.IsFalseValue(lookupVal)
+	}
+
+	return state.IsTrueValue(lookupVal)
+}
+
+// transformErr builds an ErrTransform for a directive the legacy code would
+// raise on.
+func transformErr(directive, format string, args ...any) error {
+	return fmt.Errorf("%w: %%%%%s%%%%: %s", ErrTransform, directive, fmt.Sprintf(format, args...))
+}
+
+// findOne mirrors the legacy `[(a, b, ...)] = re.findall(re, sr)`: the directive
+// must match its pattern exactly once, otherwise the unpack raises ValueError.
+func findOne(re *regexp.Regexp, sr string) ([]string, error) {
+	all := re.FindAllStringSubmatch(sr, -1)
+	if len(all) != 1 {
+		return nil, transformErr(sr, "does not match %s exactly once", re)
+	}
+
+	return all[0], nil
+}
+
+// lookupRequired resolves TYPE:key where the legacy code feeds the result to
+// int()/re.sub(), so a missing key (None) raises TypeError.
+func (t *Transformer) lookupRequired(ctx context.Context, sr, cmd, key string) (string, error) {
+	val, err := t.ConfigLookup.LookUpConfig(ctx, cmd, key)
+	if err != nil {
+		return "", transformErr(sr, "%s:%s is not set: %v", cmd, key, err)
+	}
+
+	return val, nil
 }
 
 // handleBinaryDirective processes binary directives.
 // Format: %%binary VAR:key%%
-func (t *Transformer) handleBinaryDirective(ctx context.Context, sr string) string {
-	matches := binaryRe.FindStringSubmatch(sr)
-	if len(matches) < 3 {
-		logger.WarnContext(ctx, "Invalid binary directive", "directive", sr)
-		return "" // Invalid format
+func (t *Transformer) handleBinaryDirective(ctx context.Context, sr string) (string, error) {
+	matches, err := findOne(binaryRe, sr)
+	if err != nil {
+		return "", err
 	}
 
-	lookupVal := t.lookupBooleanValue(ctx, matches[1], matches[2])
-
-	if state.IsTrueValue(lookupVal) {
-		return "1"
+	if t.lookupTruth(ctx, matches[1], matches[2]) {
+		return "1", nil
 	}
 
-	return "0"
+	return "0", nil
 }
 
 // handleTrueFalseDirective processes truefalse directives.
 // Format: %%truefalse VAR:key%%
-func (t *Transformer) handleTrueFalseDirective(ctx context.Context, sr string) string {
-	matches := truefalseRe.FindStringSubmatch(sr)
-	if len(matches) < 3 {
-		logger.WarnContext(ctx, "Invalid truefalse directive", "directive", sr)
-		return "" // Invalid format
+func (t *Transformer) handleTrueFalseDirective(ctx context.Context, sr string) (string, error) {
+	matches, err := findOne(truefalseRe, sr)
+	if err != nil {
+		return "", err
 	}
 
-	lookupVal := t.lookupBooleanValue(ctx, matches[1], matches[2])
-
-	if state.IsTrueValue(lookupVal) {
-		return "true"
+	if t.lookupTruth(ctx, matches[1], matches[2]) {
+		return "true", nil
 	}
 
-	return "false"
+	return "false", nil
 }
 
 // handleRangeDirective processes range directives.
 // Format: %%range VAR:key lo hi%%
-func (t *Transformer) handleRangeDirective(ctx context.Context, sr string) string {
-	matches := rangeRe.FindStringSubmatch(sr)
-	if len(matches) < 5 {
-		logger.WarnContext(ctx, "Invalid range directive", "directive", sr)
-		return "" // Invalid format
-	}
-
-	cmd := matches[1]
-	key := matches[2]
-	loStr := matches[3]
-	hiStr := matches[4]
-
-	lookupValStr, err := t.ConfigLookup.LookUpConfig(ctx, cmd, key)
+//
+// Legacy int(lookUpConfig(...)), int(hi) and int(lo) raise on a missing key or
+// a non-integer, which aborts the rewrite.
+func (t *Transformer) handleRangeDirective(ctx context.Context, sr string) (string, error) {
+	matches, err := findOne(rangeRe, sr)
 	if err != nil {
-		logger.WarnContext(ctx, "Error looking up config for range",
-			"command", cmd,
-			"key", key,
-			"error", err)
-
-		return "" // Return empty string on error
+		return "", err
 	}
 
-	lookupVal, err := strconv.Atoi(lookupValStr)
+	lookupValStr, err := t.lookupRequired(ctx, sr, matches[1], matches[2])
 	if err != nil {
-		logger.WarnContext(ctx, "Invalid integer value for range lookup", "value", lookupValStr)
-		return "" // Return empty string on error
+		return "", err
 	}
 
-	lo, _ := strconv.Atoi(loStr)
-	hi, _ := strconv.Atoi(hiStr)
+	lookupVal, errVal := atoiPy(lookupValStr)
+	lo, errLo := atoiPy(matches[3])
+	hi, errHi := atoiPy(matches[4])
 
-	calculatedVal := ((float64(lookupVal) / 100.00) * float64(hi-lo)) + float64(lo)
+	if errVal != nil || errLo != nil || errHi != nil {
+		return "", transformErr(sr, "value %q, lo %q, hi %q must be integers", lookupValStr, matches[3], matches[4])
+	}
 
-	return fmt.Sprintf("%.0f", calculatedVal)
+	// ((val/100.00) * (hi - lo)) + lo with Python float semantics. The explicit
+	// conversion stops the compiler from fusing the multiply-add (FMA), which
+	// would change the last bit on some architectures.
+	scaled := float64(float64(lookupVal) / 100.00 * float64(hi-lo))
+
+	return pyStrFloat(scaled + float64(lo)), nil
+}
+
+// atoiPy parses an integer like Python 2's int(str): surrounding whitespace is ignored.
+func atoiPy(s string) (int, error) {
+	return strconv.Atoi(strings.Trim(s, pyWhitespace))
+}
+
+// pyStrFloat formats f like Python 2's str(float): 12 significant digits with
+// trailing zeros removed, and ".0" appended to an integral value, so 50 renders
+// as "50.0", 6.6 as "6.6" and 1e16 as "1e+16".
+func pyStrFloat(f float64) string {
+	s := strconv.FormatFloat(f, 'g', 12, 64)
+	if strings.ContainsAny(s, ".eIN") {
+		return s
+	}
+
+	return s + ".0"
+}
+
+// splitTypeKey is the legacy `(type, key) = field.split(':')`: exactly one
+// colon, otherwise the unpack raises ValueError.
+func splitTypeKey(sr, field string) (cfgType, key string, err error) {
+	parts := strings.Split(field, ":")
+	if len(parts) != 2 {
+		return "", "", transformErr(sr, "%q is not TYPE:key", field)
+	}
+
+	return parts[0], parts[1], nil
 }
 
 // handleListDirective processes list directives.
 // Format: %%list VAR:key separator%%
-func (t *Transformer) handleListDirective(ctx context.Context, sr string) string {
-	parts := strings.SplitN(sr, " ", 3)
-	if len(parts) < 3 {
-		logger.WarnContext(ctx, "Invalid list directive", "directive", sr)
-		return "" // Invalid format
+//
+// Legacy fields = sr.split(' ', 2): fields[1] must exist, and fields[2] only
+// when the value is non-empty (an empty or missing value renders empty).
+func (t *Transformer) handleListDirective(ctx context.Context, sr string) (string, error) {
+	fields := strings.SplitN(sr, " ", 3)
+	if len(fields) < 2 {
+		return "", transformErr(sr, "missing TYPE:key")
 	}
 
-	cfgTypeKey := parts[1]
-	separator := parts[2]
-
-	cfgTypeParts := strings.SplitN(cfgTypeKey, ":", 2)
-	if len(cfgTypeParts) != 2 {
-		logger.WarnContext(ctx, "Invalid list config type:key format", "config", cfgTypeKey)
-		return "" // Invalid format
+	cfgType, key, err := splitTypeKey(sr, fields[1])
+	if err != nil {
+		return "", err
 	}
-
-	cfgType := cfgTypeParts[0]
-	key := cfgTypeParts[1]
 
 	lookupVal, err := t.ConfigLookup.LookUpConfig(ctx, cfgType, key)
 	if err != nil {
-		logger.WarnContext(ctx, "Error looking up config for list",
-			"config_type", cfgType,
-			"key", key,
-			"error", err)
-
-		return "" // Return empty string on error
+		lookupVal = "" // legacy None
 	}
 
-	if lookupVal != "" {
-		return strings.Join(strings.Fields(lookupVal), separator)
+	if lookupVal == "" {
+		return "", nil
 	}
 
-	return ""
+	if len(fields) < 3 {
+		return "", transformErr(sr, "missing separator")
+	}
+
+	return strings.Join(strings.Fields(lookupVal), fields[2]), nil
 }
 
 // resolveSearchReplaceDirective implements the shared logic for contains/exact directives.
 // Format: %%<directive> VAR:key searchString^replacement^altReplacement%%
 // The match func receives (lookupVal, searchString) and returns whether the value matches.
+//
+// As in jylibs/state.py, replacement and altReplacement are stripped, and an
+// empty replacement falls back to searchString. A missing key is Python's None:
+// contains searches in str(None) == "None", exact (searchInNone false) yields "".
+// fields[1] (TYPE:key) and fields[2] (the search string) are indexed without a
+// guard, so a missing one raises and aborts the rewrite.
 func (t *Transformer) resolveSearchReplaceDirective(
 	ctx context.Context,
-	directiveName string,
 	sr string,
+	searchInNone bool,
 	match func(lookupVal, searchString string) bool,
-) string {
-	parts := strings.SplitN(sr, " ", 3)
-	if len(parts) < 3 {
-		logger.WarnContext(ctx, "Invalid "+directiveName+" directive", "directive", sr)
-		return ""
+) (string, error) {
+	f := strings.SplitN(sr, "^", 3)
+
+	var replacement, altReplacement string
+
+	if len(f) > 1 {
+		replacement = strings.Trim(f[1], pyWhitespace)
 	}
 
-	cfgTypeParts := strings.SplitN(parts[1], ":", 2)
-	if len(cfgTypeParts) != 2 {
-		logger.WarnContext(ctx, "Invalid "+directiveName+" config type:key format", "config", parts[1])
-		return ""
+	if len(f) > 2 {
+		altReplacement = strings.Trim(f[2], pyWhitespace)
 	}
 
-	lookupVal, err := t.ConfigLookup.LookUpConfig(ctx, cfgTypeParts[0], cfgTypeParts[1])
+	fields := strings.SplitN(f[0], " ", 3)
+	if len(fields) < 2 {
+		return "", transformErr(sr, "missing TYPE:key")
+	}
+
+	cfgType, key, err := splitTypeKey(sr, fields[1])
 	if err != nil {
-		logger.WarnContext(ctx, "Error looking up config for "+directiveName,
-			"config_type", cfgTypeParts[0],
-			"key", cfgTypeParts[1],
-			"error", err)
-
-		return ""
+		return "", err
 	}
 
-	splitReplace := strings.SplitN(parts[2], "^", 3)
-	searchString := splitReplace[0]
-	replacement := searchString
-	altReplacement := ""
+	lookupVal, err := t.ConfigLookup.LookUpConfig(ctx, cfgType, key)
+	if err != nil {
+		if !searchInNone {
+			return "", nil
+		}
 
-	if len(splitReplace) > 1 {
-		replacement = splitReplace[1]
+		lookupVal = "None"
 	}
 
-	if len(splitReplace) > 2 {
-		altReplacement = splitReplace[2]
+	if len(fields) < 3 {
+		return "", transformErr(sr, "missing search string")
 	}
+
+	searchString := fields[2]
 
 	if match(lookupVal, searchString) {
-		return replacement
+		if replacement == "" {
+			return searchString, nil
+		}
+
+		return replacement, nil
 	}
 
-	return altReplacement
+	return altReplacement, nil
 }
 
 // handleContainsDirective processes contains directives.
 // Format: %%contains VAR:key string^replacement^altreplacement%%
-func (t *Transformer) handleContainsDirective(ctx context.Context, sr string) string {
-	return t.resolveSearchReplaceDirective(ctx, "contains", sr, strings.Contains)
+func (t *Transformer) handleContainsDirective(ctx context.Context, sr string) (string, error) {
+	return t.resolveSearchReplaceDirective(ctx, sr, true, strings.Contains)
 }
 
 // handleExactDirective processes exact directives.
 // Format: %%exact VAR:key string^replacement^altreplacement%%
-func (t *Transformer) handleExactDirective(ctx context.Context, sr string) string {
-	return t.resolveSearchReplaceDirective(ctx, "exact", sr,
+func (t *Transformer) handleExactDirective(ctx context.Context, sr string) (string, error) {
+	return t.resolveSearchReplaceDirective(ctx, sr, false,
 		func(lookupVal, searchString string) bool {
 			return slices.Contains(strings.Fields(lookupVal), searchString)
 		})
@@ -285,88 +336,82 @@ func (t *Transformer) handleExactDirective(ctx context.Context, sr string) strin
 
 // handleFreqDirective processes freq directives.
 // Format: %%freq VAR:key total%%
-func (t *Transformer) handleFreqDirective(ctx context.Context, sr string) string {
-	matches := freqRe.FindStringSubmatch(sr)
-	if len(matches) < 4 {
-		logger.WarnContext(ctx, "Invalid freq directive", "directive", sr)
-		return "" // Invalid format
-	}
-
-	cmd := matches[1]
-	key := matches[2]
-	totalStr := matches[3]
-
-	lookupValStr, err := t.ConfigLookup.LookUpConfig(ctx, cmd, key)
+//
+// Legacy re.sub on a missing value, int("") of a value without digits and
+// int(total) of a non-integer all raise and abort the rewrite.
+func (t *Transformer) handleFreqDirective(ctx context.Context, sr string) (string, error) {
+	matches, err := findOne(freqRe, sr)
 	if err != nil {
-		logger.WarnContext(ctx, "Error looking up config for freq",
-			"command", cmd,
-			"key", key,
-			"error", err)
-
-		return "" // Return empty string on error
+		return "", err
 	}
 
-	valNumStr := freqDigitsRe.ReplaceAllString(lookupValStr, "")
-	per := freqNonDigitsRe.ReplaceAllString(lookupValStr, "")
+	lookupValStr, err := t.lookupRequired(ctx, sr, matches[1], matches[2])
+	if err != nil {
+		return "", err
+	}
 
-	valNum, _ := strconv.Atoi(valNumStr)
-	total, _ := strconv.Atoi(totalStr)
+	// Legacy: per = re.sub(r"\d+", "", val); val = int(re.sub(r"\D", "", val)).
+	per := freqDigitRe.ReplaceAllString(lookupValStr, "")
 
+	valNum, errVal := strconv.Atoi(freqNonDigitRe.ReplaceAllString(lookupValStr, ""))
+	total, errTotal := atoiPy(matches[3])
+
+	if errVal != nil || errTotal != nil {
+		return "", transformErr(sr, "value %q and total %q must hold integers", lookupValStr, matches[3])
+	}
+
+	// Python 2 integer division floors.
 	switch per {
 	case "m":
-		valNum /= 60
+		valNum = floorDiv(valNum, 60)
 	case "s":
-		valNum /= 3600
+		valNum = floorDiv(valNum, 3600)
 	case "d":
 		valNum *= 24
 	}
 
-	var val string
+	val := total
 	if valNum != 0 {
-		val = fmt.Sprintf("%d", total/valNum)
-	} else {
-		val = fmt.Sprintf("%d", total)
+		val = floorDiv(total, valNum)
 	}
 
-	if valInt, _ := strconv.Atoi(val); valInt < 1 && total > 1 {
-		val = "1"
+	if val < 1 && total > 1 {
+		val = 1
 	}
 
-	return val
+	return strconv.Itoa(val), nil
+}
+
+// floorDiv is Python 2's integer a / b (rounds toward negative infinity); b != 0.
+func floorDiv(a, b int) int {
+	q := a / b
+	if a%b != 0 && (a < 0) != (b < 0) {
+		q--
+	}
+
+	return q
 }
 
 // handleExplodeDirective processes explode directives.
 // Format: %%explode base_string VAR:key%%
-func (t *Transformer) handleExplodeDirective(ctx context.Context, sr string) string {
-	matches := explodeRe.FindStringSubmatch(sr)
-	if len(matches) < 4 {
-		logger.WarnContext(ctx, "Invalid explode directive", "directive", sr)
-		return "" // Invalid format
-	}
-
-	baseString := matches[1]
-	cmd := matches[2]
-	key := matches[3]
-
-	lookupValsStr, err := t.ConfigLookup.LookUpConfig(ctx, cmd, key)
+func (t *Transformer) handleExplodeDirective(ctx context.Context, sr string) (string, error) {
+	matches, err := findOne(explodeRe, sr)
 	if err != nil {
-		logger.WarnContext(ctx, "Error looking up config for explode",
-			"command", cmd,
-			"key", key,
-			"error", err)
-
-		return "" // Return empty string on error
+		return "", err
 	}
 
-	var explodedLines []string
-
-	if lookupValsStr != "" {
-		for v := range strings.FieldsSeq(lookupValsStr) {
-			explodedLines = append(explodedLines, fmt.Sprintf("%s %s", baseString, v))
-		}
+	lookupValsStr, err := t.ConfigLookup.LookUpConfig(ctx, matches[2], matches[3])
+	if err != nil {
+		lookupValsStr = "" // legacy None: `if vals:` is false
 	}
 
-	return strings.Join(explodedLines, "\n")
+	explodedLines := make([]string, 0, 4)
+
+	for v := range strings.FieldsSeq(lookupValsStr) {
+		explodedLines = append(explodedLines, matches[1]+" "+v)
+	}
+
+	return strings.Join(explodedLines, "\n"), nil
 }
 
 // handleDefaultLookup handles default variable lookups when no directive matches.

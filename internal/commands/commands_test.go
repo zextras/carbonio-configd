@@ -1110,3 +1110,43 @@ func TestExecuteWithContext_CancelledContext(t *testing.T) {
 	// A cancelled context causes a non-zero exit; just ensure no panic.
 	_ = exitCode
 }
+
+// TestExecuteWithContext_NonZeroExitKeepsOutput verifies legacy commands.py
+// parity: a non-zero (>= 0) exit keeps stdout and stderr and reports the rc.
+func TestExecuteWithContext_NonZeroExitKeepsOutput(t *testing.T) {
+	cmd := &Command{
+		Name:    "failing",
+		Binary:  "sh",
+		CmdArgs: []string{"-c", "echo out-text; echo err-text >&2; exit 3"},
+	}
+
+	rc, stdout, stderr := cmd.Execute(context.Background())
+
+	if rc != 3 {
+		t.Errorf("rc = %d, want 3", rc)
+	}
+
+	if strings.TrimSpace(stdout) != "out-text" {
+		t.Errorf("stdout = %q, want %q", stdout, "out-text")
+	}
+
+	if strings.TrimSpace(stderr) != "err-text" {
+		t.Errorf("stderr = %q, want %q", stderr, "err-text")
+	}
+}
+
+// TestExecuteWithContext_SignalIsError verifies rc < 0 (killed by signal) is
+// still an error, as in legacy.
+func TestExecuteWithContext_SignalIsError(t *testing.T) {
+	cmd := &Command{Name: "sig", Binary: "sh", CmdArgs: []string{"-c", "kill -9 $$"}}
+
+	rc, _, stderr := cmd.Execute(context.Background())
+
+	if rc >= 0 {
+		t.Errorf("rc = %d, want < 0", rc)
+	}
+
+	if !strings.Contains(stderr, "UNKNOWN: sig died with error") {
+		t.Errorf("stderr = %q", stderr)
+	}
+}

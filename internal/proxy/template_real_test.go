@@ -117,18 +117,18 @@ func TestRealTemplatesWithExplode(t *testing.T) {
 					{
 						Name:            "example.com",
 						VirtualHostname: "mail.example.com",
-						SSLCertificate:  "/ssl/example.crt",
+						SSLCertificate:  "PEM-example",
 					},
 					{
 						Name:            "test.com",
 						VirtualHostname: "mail.test.com",
-						SSLCertificate:  "/ssl/test.crt",
+						SSLCertificate:  "PEM-test",
 					},
 				}
 			},
 			expectedChecks: []string{
-				"mail.example.com /ssl/example.crt",
-				"mail.test.com /ssl/test.crt",
+				"mail.example.com " + filepath.Join("domaincerts", "example.com.crt"),
+				"mail.test.com " + filepath.Join("domaincerts", "test.com.crt"),
 			},
 		},
 	}

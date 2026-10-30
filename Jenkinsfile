@@ -18,9 +18,23 @@ boolean isCommitTagged() {
 }
 
 pipeline {
+    // Same pod as before (JCasC template 'golang-v1') plus the 'reuse' sidecar that
+    // dt3_reuseCompliance requires (the image dt3_pipeline adds). merge() is mandatory:
+    // the default override() would drop fields declared only in the parent template.
     agent {
-        node {
-            label 'golang-v1'
+        kubernetes {
+            inheritFrom 'golang-v1'
+            yamlMergeStrategy merge()
+            yaml '''\
+spec:
+  containers:
+    - name: reuse
+      image: fsfe/reuse:5.0.2-debian
+      command: [sleep]
+      args: ["99999999"]
+      workingDir: /home/jenkins/agent
+      tty: true
+'''
         }
     }
 
@@ -47,6 +61,24 @@ pipeline {
                 script {
                     gitMetadata()
                 }
+            }
+        }
+
+        stage('REUSE Lint') {
+            steps {
+                dt3_reuseCompliance()
+            }
+        }
+
+        stage('THIRDPARTIES') {
+            when {
+                anyOf {
+                    changeRequest()
+                    expression { env.BRANCH_IS_PRIMARY == 'true' }
+                }
+            }
+            steps {
+                dt3_thirdparties()
             }
         }
 

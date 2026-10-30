@@ -260,7 +260,18 @@ func (cm *ConfigManager) rewriteTransform(ctx context.Context, srcPath string, t
 	for scanner.Scan() {
 		lineCount++
 
-		if _, err := tmpFile.WriteString(cm.Transformer.Transform(ctx, scanner.Text()) + "\n"); err != nil {
+		transformed, err := cm.Transformer.Transform(ctx, scanner.Text())
+		if err != nil {
+			return lineCount, fmt.Errorf("transform %s line %d: %w", srcPath, lineCount, err)
+		}
+
+		// Transform ends a line holding a marker with "\n" already; a line it
+		// returned untouched has lost its newline to the scanner.
+		if !strings.HasSuffix(transformed, "\n") {
+			transformed += "\n"
+		}
+
+		if _, err := tmpFile.WriteString(transformed); err != nil {
 			return lineCount, fmt.Errorf("write to temp file: %w", err)
 		}
 	}

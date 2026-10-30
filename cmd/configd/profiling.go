@@ -25,8 +25,3 @@ func StopProfiling(config *ProfilingConfig) {
 func ValidateProfilingConfig(config *ProfilingConfig) error {
 	return tracing.ValidateProfilingConfig(config)
 }
-
-// GenerateProfilePath delegates to internal/tracing.
-func GenerateProfilePath(baseDir, profileType string) string {
-	return tracing.GenerateProfilePath(baseDir, profileType)
-}

@@ -577,3 +577,77 @@ func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
+
+// TestVersionCmd_MissingVersionFile_ExitsZero: legacy `zmcontrol -v` runs
+// `cat .version` and exits 0 even when the file is missing.
+func TestVersionCmd_MissingVersionFile_ExitsZero(t *testing.T) {
+	t.Setenv("CARBONIO_BASE_DIR", t.TempDir())
+
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	err := (&VersionCmd{}).Run()
+
+	w.Close()
+	os.Stdout = old
+
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+
+	if err != nil {
+		t.Fatalf("expected nil error for missing .version, got %v", err)
+	}
+
+	if got := buf.String(); got != "Carbonio Release \n" {
+		t.Errorf("unexpected output %q", got)
+	}
+}
+
+// TestControlStatusCmd_PropagatesNonZeroRC: legacy doStatus exits non-zero
+// when a service is stopped; the command must not swallow controlStatus's rc.
+func TestControlStatusCmd_PropagatesNonZeroRC(t *testing.T) {
+	got := -1
+	old := exitFn
+	exitFn = func(code int) { got = code }
+
+	defer func() { exitFn = old }()
+
+	oldStatus := controlStatusFn
+	controlStatusFn = func(context.Context) int { return 1 }
+
+	defer func() { controlStatusFn = oldStatus }()
+
+	exitOnStatus(context.Background())
+
+	if got != 1 {
+		t.Fatalf("expected exit 1, got %d", got)
+	}
+}
+
+func TestStatusForStart_ErrorAborts(t *testing.T) {
+	old := controlSvcStatusFn
+	controlSvcStatusFn = func(context.Context, string) (bool, error) { return false, errors.New("exec failed") }
+
+	defer func() { controlSvcStatusFn = old }()
+
+	if _, err := statusForStart(context.Background(), "ldap"); err == nil {
+		t.Fatal("expected error on status failure")
+	}
+}
+
+func TestRunningForStop_ErrorStillStops(t *testing.T) {
+	old := controlSvcStatusFn
+	controlSvcStatusFn = func(context.Context, string) (bool, error) { return false, errors.New("exec failed") }
+
+	defer func() { controlSvcStatusFn = old }()
+
+	if !runningForStop(context.Background(), "mta") {
+		t.Fatal("status error must not skip stop")
+	}
+
+	controlSvcStatusFn = func(context.Context, string) (bool, error) { return false, nil }
+	if runningForStop(context.Background(), "mta") {
+		t.Fatal("plain stopped must skip")
+	}
+}

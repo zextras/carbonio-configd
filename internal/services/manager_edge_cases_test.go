@@ -336,8 +336,8 @@ func TestProcessRestarts_NoProgressBreaksLoop(t *testing.T) {
 	sm.RestartQueue["svc1"] = true
 
 	err := sm.ProcessRestarts(context.Background(), nil)
-	if err != nil {
-		t.Errorf("ProcessRestarts returned error: %v", err)
+	if !errors.Is(err, ErrRestartsFailed) {
+		t.Errorf("ProcessRestarts error = %v, want ErrRestartsFailed", err)
 	}
 	if !sm.RestartQueue["svc1"] {
 		t.Error("expected service to remain in queue (no-progress break)")

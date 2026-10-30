@@ -6,8 +6,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -313,22 +315,32 @@ func TestConfigureLogFormat_Unknown(t *testing.T) {
 	}
 }
 
+// TestSetupProfilingAndTracing_ValidationFails verifies that an unwritable
+// profile path makes setupProfilingAndTracing exit with status 1 when profiling
+// is compiled in (os.Exit would kill the test binary, so it runs in a child
+// process). Without the profiling tag validation is a no-op and the child exits 0.
 func TestSetupProfilingAndTracing_ValidationFails(t *testing.T) {
-	os.Setenv("CONFIGD_LOG_FORMAT", "text")
-	os.Setenv("CONFIGD_LOG_LEVEL", "error")
-	defer os.Unsetenv("CONFIGD_LOG_FORMAT")
-	defer os.Unsetenv("CONFIGD_LOG_LEVEL")
+	if os.Getenv("CONFIGD_TEST_VALIDATION_CHILD") == "1" {
+		initializeLogging()
+		setupProfilingAndTracing(context.Background(), &Args{CPUProfile: "/nonexistent/path/cpu.prof"})
 
-	initializeLogging()
-
-	args := &Args{
-		CPUProfile: "/nonexistent/path/cpu.prof",
+		return
 	}
 
-	defer func() {
-		if r := recover(); r != nil {
-			t.Logf("setupProfilingAndTracing panicked (expected): %v", r)
-		}
-	}()
-	setupProfilingAndTracing(context.Background(), args)
+	cmd := exec.Command(os.Args[0], "-test.run=^TestSetupProfilingAndTracing_ValidationFails$")
+	cmd.Env = append(os.Environ(),
+		"CONFIGD_TEST_VALIDATION_CHILD=1",
+		"CONFIGD_LOG_FORMAT=text",
+		"CONFIGD_LOG_LEVEL=error",
+	)
+
+	err := cmd.Run()
+	if err == nil {
+		return
+	}
+
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
+		t.Fatalf("child failed unexpectedly: %v", err)
+	}
 }

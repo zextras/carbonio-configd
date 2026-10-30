@@ -5,6 +5,7 @@
 package proxy
 
 import "github.com/zextras/carbonio-configd/internal/config"
+
 const nginxConfPrefix = "nginx.conf"
 
 // registerCoreVariables registers core proxy configuration variables

@@ -264,9 +264,9 @@ func TestParser_RealConfig(t *testing.T) {
 			if cond.Negated {
 				negStr = "!"
 			}
-			t.Logf("  Conditional %d: if %s %s%s (postconf: %d, postconfd: %d, ldap: %d)",
+			t.Logf("  Conditional %d: if %s %s%s (postconf: %d, postconfd: %d, required vars: %d)",
 				i+1, cond.Type, negStr, cond.Key,
-				len(cond.Postconf), len(cond.Postconfd), len(cond.Ldap))
+				len(cond.Postconf), len(cond.Postconfd), len(cond.RequiredVars))
 		}
 	} else {
 		t.Error("Section 'mta' not found")

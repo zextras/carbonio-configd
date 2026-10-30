@@ -9,8 +9,7 @@ import (
 )
 
 // syncMap is a generic comparable-keyed map guarded by an RWMutex. It backs
-// ConfigMap and SectionMap, each of which exposes only the subset of
-// methods it needs.
+// ConfigMap.
 type syncMap[K comparable, V any] struct {
 	mu sync.RWMutex
 	m  map[K]V
@@ -94,12 +93,6 @@ type ConfigMap struct {
 // NewConfigMap returns an empty, ready-to-use ConfigMap.
 func NewConfigMap() *ConfigMap { return &ConfigMap{sm: newSyncMap[string, string](nil)} }
 
-// NewConfigMapFrom wraps src as a ConfigMap. A nil src is treated as empty.
-// The supplied map is taken by reference; callers must not retain it.
-func NewConfigMapFrom(src map[string]string) *ConfigMap {
-	return &ConfigMap{sm: newSyncMap(src)}
-}
-
 // Get returns the value for key and whether it was present.
 func (c *ConfigMap) Get(key string) (string, bool) { return c.sm.get(key) }
 
@@ -129,30 +122,3 @@ func (c *ConfigMap) Replace(src map[string]string) { c.sm.replace(src) }
 
 // Clear removes all entries.
 func (c *ConfigMap) Clear() { c.sm.clear() }
-
-// SectionMap is a string→*MtaConfigSection map with RWMutex protection.
-// Sections themselves are immutable after ParseMtaConfig — do not mutate
-// returned *MtaConfigSection values.
-type SectionMap struct {
-	sm *syncMap[string, *MtaConfigSection]
-}
-
-// NewSectionMap returns an empty SectionMap.
-func NewSectionMap() *SectionMap {
-	return &SectionMap{sm: newSyncMap[string, *MtaConfigSection](nil)}
-}
-
-// Get returns the section for name and whether it was present.
-func (s *SectionMap) Get(name string) (*MtaConfigSection, bool) { return s.sm.get(name) }
-
-// Set assigns sec to name.
-func (s *SectionMap) Set(name string, sec *MtaConfigSection) { s.sm.set(name, sec) }
-
-// Len returns the number of sections.
-func (s *SectionMap) Len() int { return s.sm.len() }
-
-// Snapshot returns a shallow copy of the section map.
-func (s *SectionMap) Snapshot() map[string]*MtaConfigSection { return s.sm.snapshot() }
-
-// Replace swaps the backing map for src. A nil src clears the map.
-func (s *SectionMap) Replace(src map[string]*MtaConfigSection) { s.sm.replace(src) }

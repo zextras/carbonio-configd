@@ -11,6 +11,7 @@ import (
 
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/redact"
 )
 
 // CompileActionsSnapshot captures the slice of State needed to compile the
@@ -109,7 +110,7 @@ func (s *State) CurLdap(ctx context.Context, key string, val string) string {
 	if val != "" { // Assuming empty string means no change
 		logger.DebugContext(ctx, "Adding ldap",
 			"key", key,
-			"value", val)
+			"value", redact.ForLog(key, val))
 		s.CurrentActions.Ldap[key] = val
 	}
 
@@ -139,7 +140,7 @@ func (s *State) addOrRetrieveConfig(
 	if val != "" {
 		logger.DebugContext(ctx, "Adding "+configType,
 			"key", key,
-			"value", val)
+			"value", redact.ForLog(key, val))
 		configMap[key] = strings.ReplaceAll(val, "\n", " ")
 	}
 

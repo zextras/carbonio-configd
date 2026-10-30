@@ -74,3 +74,16 @@ func TestStopTracing_NilDelegation(t *testing.T) {
 	// Should not panic
 	StopTracing(nil)
 }
+
+func TestNoopTracing(t *testing.T) {
+	tr := &TracingConfig{}
+	if err := ValidateTracingConfig(tr); err != nil {
+		t.Fatalf("expected nil tracing validation error, got %v", err)
+	}
+
+	if err := StartTracing(tr); err != nil {
+		t.Fatalf("expected nil tracing start error, got %v", err)
+	}
+
+	StopTracing(tr)
+}

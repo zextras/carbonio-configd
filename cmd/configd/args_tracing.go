@@ -19,8 +19,3 @@ func (p *TracingArgs) applyTo(args *Args) {
 	args.EnableTracing = p.EnableTracing
 	args.TracingOutput = p.TracingOutput
 }
-
-// hasTracingEnabled returns true when tracing support is compiled in.
-func hasTracingEnabled() bool {
-	return true
-}

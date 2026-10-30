@@ -7,6 +7,7 @@ package proxy
 import (
 	"context"
 	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/config/configtest"
 	"github.com/zextras/carbonio-configd/internal/ldap"
 	"os"
 	"path/filepath"
@@ -236,151 +237,6 @@ func TestEnsureIncludesDir(t *testing.T) {
 	}
 }
 
-// TestCleanIncludesDir tests cleaning includes directory
-func TestCleanIncludesDir(t *testing.T) {
-	tempDir := t.TempDir()
-	includesDir := filepath.Join(tempDir, "includes")
-
-	if err := os.MkdirAll(includesDir, 0755); err != nil {
-		t.Fatalf("Failed to create includes dir: %v", err)
-	}
-
-	// Create some files
-	files := []string{"test1.conf", "test2.conf", "test3.conf"}
-	for _, name := range files {
-		path := filepath.Join(includesDir, name)
-		if err := os.WriteFile(path, []byte("test"), 0644); err != nil {
-			t.Fatalf("Failed to create test file: %v", err)
-		}
-	}
-
-	// Create a subdirectory (should not be removed)
-	subdir := filepath.Join(includesDir, "subdir")
-	if err := os.MkdirAll(subdir, 0755); err != nil {
-		t.Fatalf("Failed to create subdir: %v", err)
-	}
-
-	gen := &Generator{
-		Config:      &config.Config{BaseDir: tempDir},
-		IncludesDir: includesDir,
-	}
-
-	// Clean directory
-	if err := gen.CleanIncludesDir(context.Background()); err != nil {
-		t.Fatalf("CleanIncludesDir failed: %v", err)
-	}
-
-	// Verify files are gone
-	for _, name := range files {
-		path := filepath.Join(includesDir, name)
-		if _, err := os.Stat(path); !os.IsNotExist(err) {
-			t.Errorf("File %s was not removed", name)
-		}
-	}
-
-	// Verify subdirectory still exists
-	if _, err := os.Stat(subdir); err != nil {
-		t.Error("Subdirectory was removed")
-	}
-}
-
-// TestCleanIncludesDirDryRun tests that dry-run doesn't clean
-func TestCleanIncludesDirDryRun(t *testing.T) {
-	tempDir := t.TempDir()
-	includesDir := filepath.Join(tempDir, "includes")
-
-	if err := os.MkdirAll(includesDir, 0755); err != nil {
-		t.Fatalf("Failed to create includes dir: %v", err)
-	}
-
-	testFile := filepath.Join(includesDir, "test.conf")
-	if err := os.WriteFile(testFile, []byte("test"), 0644); err != nil {
-		t.Fatalf("Failed to create test file: %v", err)
-	}
-
-	gen := &Generator{
-		Config:      &config.Config{BaseDir: tempDir},
-		IncludesDir: includesDir,
-		DryRun:      true,
-	}
-
-	// Clean in dry-run mode
-	if err := gen.CleanIncludesDir(context.Background()); err != nil {
-		t.Fatalf("CleanIncludesDir dry-run failed: %v", err)
-	}
-
-	// File should still exist
-	if _, err := os.Stat(testFile); err != nil {
-		t.Error("File was removed in dry-run mode")
-	}
-}
-
-// TestProcessTemplate tests processing a single template
-func TestProcessTemplate(t *testing.T) {
-	tempDir := t.TempDir()
-	templateDir := filepath.Join(tempDir, "templates")
-	includesDir := filepath.Join(tempDir, "includes")
-
-	if err := os.MkdirAll(templateDir, 0755); err != nil {
-		t.Fatalf("Failed to create template dir: %v", err)
-	}
-
-	if err := os.MkdirAll(includesDir, 0755); err != nil {
-		t.Fatalf("Failed to create includes dir: %v", err)
-	}
-
-	// Create a simple template (no trailing newline to avoid extra blank line)
-	templatePath := filepath.Join(templateDir, "test.template")
-	templateContent := `# Test template
-worker_processes ${main.workers};
-error_log ${main.logfile};`
-
-	if err := os.WriteFile(templatePath, []byte(templateContent), 0644); err != nil {
-		t.Fatalf("Failed to create template: %v", err)
-	}
-
-	// Create generator with variables
-	gen := &Generator{
-		Config: &config.Config{
-			BaseDir: tempDir,
-		},
-		TemplateDir: templateDir,
-		IncludesDir: includesDir,
-		Variables: map[string]*Variable{
-			"main.workers": {
-				Keyword: "main.workers",
-				Value:   4,
-			},
-			"main.logfile": {
-				Keyword: "main.logfile",
-				Value:   "/var/log/nginx/error.log",
-			},
-		},
-	}
-
-	// Process template
-	outputName := "test.conf"
-	if err := gen.ProcessTemplate(context.Background(), templatePath, outputName); err != nil {
-		t.Fatalf("ProcessTemplate failed: %v", err)
-	}
-
-	// Verify output
-	outputPath := filepath.Join(includesDir, outputName)
-	content, err := os.ReadFile(outputPath)
-	if err != nil {
-		t.Fatalf("Failed to read output: %v", err)
-	}
-
-	expectedContent := `# Test template
-worker_processes 4;
-error_log /var/log/nginx/error.log;
-`
-
-	if string(content) != expectedContent {
-		t.Errorf("Output mismatch:\nExpected:\n%s\nGot:\n%s", expectedContent, string(content))
-	}
-}
-
 // TestGenerateAllIntegration tests full generation workflow
 func TestGenerateAllIntegration(t *testing.T) {
 	if testing.Short() {
@@ -449,75 +305,6 @@ func TestGenerateAllIntegration(t *testing.T) {
 	}
 }
 
-// TestValidateTemplate tests template validation
-func TestValidateTemplate(t *testing.T) {
-	tempDir := t.TempDir()
-	templateDir := filepath.Join(tempDir, "templates")
-	includesDir := filepath.Join(tempDir, "includes")
-
-	if err := os.MkdirAll(templateDir, 0755); err != nil {
-		t.Fatalf("Failed to create template dir: %v", err)
-	}
-
-	// Create a valid template
-	validPath := filepath.Join(templateDir, "valid.template")
-	if err := os.WriteFile(validPath, []byte("worker_processes ${main.workers};\n"), 0644); err != nil {
-		t.Fatalf("Failed to create valid template: %v", err)
-	}
-
-	gen := &Generator{
-		Config: &config.Config{
-			BaseDir: tempDir,
-		},
-		TemplateDir: templateDir,
-		IncludesDir: includesDir,
-		Variables: map[string]*Variable{
-			"main.workers": {
-				Keyword: "main.workers",
-				Value:   4,
-			},
-		},
-	}
-
-	// Validate valid template
-	if err := gen.ValidateTemplate(context.Background(), validPath); err != nil {
-		t.Errorf("ValidateTemplate failed for valid template: %v", err)
-	}
-}
-
-// TestValidateAllTemplates tests validation of all templates
-func TestValidateAllTemplates(t *testing.T) {
-	tempDir := t.TempDir()
-	templateDir := filepath.Join(tempDir, "templates")
-	includesDir := filepath.Join(tempDir, "includes")
-
-	if err := os.MkdirAll(templateDir, 0755); err != nil {
-		t.Fatalf("Failed to create template dir: %v", err)
-	}
-
-	// Create valid templates
-	for i := 1; i <= 3; i++ {
-		path := filepath.Join(templateDir, "test"+string(rune('0'+i))+".template")
-		if err := os.WriteFile(path, []byte("# Template\n"), 0644); err != nil {
-			t.Fatalf("Failed to create template: %v", err)
-		}
-	}
-
-	gen := &Generator{
-		Config: &config.Config{
-			BaseDir: tempDir,
-		},
-		TemplateDir: templateDir,
-		IncludesDir: includesDir,
-		Variables:   make(map[string]*Variable),
-	}
-
-	// Validate all
-	if err := gen.ValidateAllTemplates(context.Background()); err != nil {
-		t.Errorf("ValidateAllTemplates failed: %v", err)
-	}
-}
-
 // TestSetDryRun tests SetDryRun sets the flag
 func TestSetDryRun(t *testing.T) {
 	gen := &Generator{}
@@ -530,19 +317,6 @@ func TestSetDryRun(t *testing.T) {
 	gen.SetDryRun(context.Background(), false)
 	if gen.DryRun {
 		t.Error("Expected DryRun to be false after SetDryRun(false)")
-	}
-}
-
-// TestIsDryRun tests IsDryRun returns the current flag value
-func TestIsDryRun(t *testing.T) {
-	gen := &Generator{DryRun: true}
-	if !gen.IsDryRun() {
-		t.Error("Expected IsDryRun() to return true")
-	}
-
-	gen.DryRun = false
-	if gen.IsDryRun() {
-		t.Error("Expected IsDryRun() to return false")
 	}
 }
 
@@ -561,69 +335,12 @@ func TestSetVerbose(t *testing.T) {
 	}
 }
 
-// TestIsVerbose tests IsVerbose returns the current flag value
-func TestIsVerbose(t *testing.T) {
-	gen := &Generator{Verbose: true}
-	if !gen.IsVerbose() {
-		t.Error("Expected IsVerbose() to return true")
-	}
-
-	gen.Verbose = false
-	if gen.IsVerbose() {
-		t.Error("Expected IsVerbose() to return false")
-	}
-}
-
-// TestGetConfigSummary tests GetConfigSummary returns expected keys
-func TestGetConfigSummary(t *testing.T) {
-	gen := &Generator{
-		WorkingDir:  "/opt/zextras",
-		TemplateDir: "/opt/zextras/conf/nginx/templates",
-		ConfDir:     "/opt/zextras/conf",
-		IncludesDir: "/opt/zextras/conf/nginx/includes",
-		Hostname:    "mail.example.com",
-		DryRun:      true,
-		Verbose:     false,
-		Variables:   map[string]*Variable{"a": {}, "b": {}},
-		Domains:     []DomainAttr{{}, {}},
-		Servers:     []ServerAttr{{}},
-	}
-
-	summary := gen.GetConfigSummary()
-
-	expectedKeys := []string{
-		"working_dir", "template_dir", "conf_dir", "includes_dir",
-		"hostname", "dry_run", "verbose", "var_count", "domain_count", "server_count",
-	}
-	for _, key := range expectedKeys {
-		if _, ok := summary[key]; !ok {
-			t.Errorf("GetConfigSummary missing key %q", key)
-		}
-	}
-
-	if summary["hostname"] != "mail.example.com" {
-		t.Errorf("hostname = %v, expected %q", summary["hostname"], "mail.example.com")
-	}
-	if summary["dry_run"] != true {
-		t.Errorf("dry_run = %v, expected true", summary["dry_run"])
-	}
-	if summary["var_count"] != 2 {
-		t.Errorf("var_count = %v, expected 2", summary["var_count"])
-	}
-	if summary["domain_count"] != 2 {
-		t.Errorf("domain_count = %v, expected 2", summary["domain_count"])
-	}
-	if summary["server_count"] != 1 {
-		t.Errorf("server_count = %v, expected 1", summary["server_count"])
-	}
-}
-
 // TestGetCarboVersion tests GetCarboVersion returns version from config or default
 func TestGetCarboVersion(t *testing.T) {
 	t.Run("returns carbonio_version when set", func(t *testing.T) {
 		gen := &Generator{
 			LocalConfig: &config.LocalConfig{
-				Data: config.NewConfigMapFrom(map[string]string{"carbonio_version": "25.3.0"}),
+				Data: configtest.NewConfigMapFrom(map[string]string{"carbonio_version": "25.3.0"}),
 			},
 		}
 		if v := gen.GetCarboVersion(); v != "25.3.0" {
@@ -634,7 +351,7 @@ func TestGetCarboVersion(t *testing.T) {
 	t.Run("falls back to zimbra_version", func(t *testing.T) {
 		gen := &Generator{
 			LocalConfig: &config.LocalConfig{
-				Data: config.NewConfigMapFrom(map[string]string{"zimbra_version": "9.0.0"}),
+				Data: configtest.NewConfigMapFrom(map[string]string{"zimbra_version": "9.0.0"}),
 			},
 		}
 		if v := gen.GetCarboVersion(); v != "9.0.0" {
@@ -653,7 +370,7 @@ func TestGetCarboVersion(t *testing.T) {
 	t.Run("returns default when no version keys set", func(t *testing.T) {
 		gen := &Generator{
 			LocalConfig: &config.LocalConfig{
-				Data: config.NewConfigMapFrom(map[string]string{"some_other_key": "value"}),
+				Data: configtest.NewConfigMapFrom(map[string]string{"some_other_key": "value"}),
 			},
 		}
 		v := gen.GetCarboVersion()
@@ -786,53 +503,6 @@ func TestEnsureIncludesDirError(t *testing.T) {
 	}
 }
 
-// TestCleanIncludesDirNonExistent tests CleanIncludesDir when directory doesn't exist
-func TestCleanIncludesDirNonExistent(t *testing.T) {
-	tempDir := t.TempDir()
-	gen := &Generator{
-		Config:      &config.Config{BaseDir: tempDir},
-		IncludesDir: filepath.Join(tempDir, "nonexistent-includes"),
-	}
-
-	// Should return nil (directory doesn't exist = nothing to clean)
-	if err := gen.CleanIncludesDir(context.Background()); err != nil {
-		t.Errorf("CleanIncludesDir on non-existent dir should return nil, got: %v", err)
-	}
-}
-
-// TestCleanIncludesDirVerbose tests CleanIncludesDir in verbose mode logs removed files
-func TestCleanIncludesDirVerbose(t *testing.T) {
-	tempDir := t.TempDir()
-	includesDir := filepath.Join(tempDir, "includes")
-	if err := os.MkdirAll(includesDir, 0755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
-
-	// Create some files
-	for _, name := range []string{"a.conf", "b.conf"} {
-		if err := os.WriteFile(filepath.Join(includesDir, name), []byte("x"), 0644); err != nil {
-			t.Fatalf("WriteFile: %v", err)
-		}
-	}
-
-	gen := &Generator{
-		Config:      &config.Config{BaseDir: tempDir},
-		IncludesDir: includesDir,
-		Verbose:     true, // exercise verbose branch
-	}
-
-	if err := gen.CleanIncludesDir(context.Background()); err != nil {
-		t.Fatalf("CleanIncludesDir failed: %v", err)
-	}
-
-	entries, _ := os.ReadDir(includesDir)
-	for _, e := range entries {
-		if !e.IsDir() {
-			t.Errorf("File %s was not removed", e.Name())
-		}
-	}
-}
-
 // TestProcessTemplateWithProcessorLoadError tests ProcessTemplateWithProcessor when template load fails
 func TestProcessTemplateWithProcessorLoadError(t *testing.T) {
 	tempDir := t.TempDir()
@@ -933,99 +603,6 @@ func TestProcessTemplateWithProcessorVerbose(t *testing.T) {
 	processor := NewTemplateProcessor(gen, templateDir, includesDir)
 	if err := gen.ProcessTemplateWithProcessor(context.Background(), processor, templatePath, "test"); err != nil {
 		t.Fatalf("ProcessTemplateWithProcessor verbose failed: %v", err)
-	}
-}
-
-// TestValidateTemplateLoadError tests ValidateTemplate when template cannot be loaded
-func TestValidateTemplateLoadError(t *testing.T) {
-	tempDir := t.TempDir()
-	gen := &Generator{
-		Config:      &config.Config{BaseDir: tempDir},
-		TemplateDir: tempDir,
-		IncludesDir: filepath.Join(tempDir, "includes"),
-		Variables:   make(map[string]*Variable),
-	}
-
-	err := gen.ValidateTemplate(context.Background(), "/nonexistent/template.template")
-	if err == nil {
-		t.Error("Expected error for non-existent template, got nil")
-	}
-}
-
-// TestValidateAllTemplatesWithFailures tests ValidateAllTemplates when some templates fail
-func TestValidateAllTemplatesWithFailures(t *testing.T) {
-	tempDir := t.TempDir()
-	templateDir := filepath.Join(tempDir, "templates")
-	if err := os.MkdirAll(templateDir, 0755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
-
-	// Create a valid template
-	if err := os.WriteFile(filepath.Join(templateDir, "good.template"), []byte("# ok\n"), 0644); err != nil {
-		t.Fatalf("WriteFile good: %v", err)
-	}
-
-	gen := &Generator{
-		Config:      &config.Config{BaseDir: tempDir},
-		TemplateDir: templateDir,
-		IncludesDir: filepath.Join(tempDir, "includes"),
-		Variables:   make(map[string]*Variable),
-	}
-
-	// All templates are valid — should succeed
-	if err := gen.ValidateAllTemplates(context.Background()); err != nil {
-		t.Errorf("ValidateAllTemplates with valid templates failed: %v", err)
-	}
-}
-
-// TestValidateAllTemplatesWithInvalidTemplate tests ValidateAllTemplates returns error when a template fails
-func TestValidateAllTemplatesWithInvalidTemplate(t *testing.T) {
-	tempDir := t.TempDir()
-	templateDir := filepath.Join(tempDir, "templates")
-	if err := os.MkdirAll(templateDir, 0755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
-
-	// Create a template with an invalid explode directive (empty args triggers error in processExplodeDomain)
-	invalidContent := "!{explode domain()}\nserver_name ${vhn};\n"
-	if err := os.WriteFile(filepath.Join(templateDir, "bad.template"), []byte(invalidContent), 0644); err != nil {
-		t.Fatalf("WriteFile bad template: %v", err)
-	}
-
-	gen := &Generator{
-		Config:      &config.Config{BaseDir: tempDir},
-		TemplateDir: templateDir,
-		IncludesDir: filepath.Join(tempDir, "includes"),
-		Variables:   make(map[string]*Variable),
-	}
-
-	err := gen.ValidateAllTemplates(context.Background())
-	if err == nil {
-		t.Error("Expected error when a template fails validation, got nil")
-	}
-	if !strings.Contains(err.Error(), "failed validation") {
-		t.Errorf("Unexpected error message: %v", err)
-	}
-}
-
-// TestValidateAllTemplatesNoTemplates tests ValidateAllTemplates with empty template dir
-func TestValidateAllTemplatesNoTemplates(t *testing.T) {
-	tempDir := t.TempDir()
-	templateDir := filepath.Join(tempDir, "templates")
-	if err := os.MkdirAll(templateDir, 0755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
-
-	gen := &Generator{
-		Config:      &config.Config{BaseDir: tempDir},
-		TemplateDir: templateDir,
-		IncludesDir: filepath.Join(tempDir, "includes"),
-		Variables:   make(map[string]*Variable),
-	}
-
-	// Empty dir — DiscoverTemplates returns [] — loop never runs — should succeed
-	if err := gen.ValidateAllTemplates(context.Background()); err != nil {
-		t.Errorf("ValidateAllTemplates empty dir should succeed, got: %v", err)
 	}
 }
 
@@ -1147,10 +724,10 @@ func TestLoadConfigurationWithConfigs(t *testing.T) {
 		Hostname: "test.local",
 	}
 
-	localCfg := &config.LocalConfig{Data: config.NewConfigMapFrom(map[string]string{"key": "val"})}
-	globalCfg := &config.GlobalConfig{Data: config.NewConfigMapFrom(map[string]string{"gkey": "gval"})}
+	localCfg := &config.LocalConfig{Data: configtest.NewConfigMapFrom(map[string]string{"key": "val"})}
+	globalCfg := &config.GlobalConfig{Data: configtest.NewConfigMapFrom(map[string]string{"gkey": "gval"})}
 	serverCfg := &config.ServerConfig{
-		Data:          config.NewConfigMapFrom(map[string]string{"skey": "sval"}),
+		Data:          configtest.NewConfigMapFrom(map[string]string{"skey": "sval"}),
 		ServiceConfig: config.NewConfigMap(),
 	}
 

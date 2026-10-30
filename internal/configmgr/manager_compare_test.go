@@ -472,43 +472,7 @@ func TestProcessConditionals_Skipped(t *testing.T) {
 	}
 }
 
-// TestProcessConditionals_Nested tests processConditionals with nested conditionals
-func TestProcessConditionals_Nested(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
-	cm := newTestConfigManager(t)
-	cm.State.ServerConfig.ServiceConfig.Set("imapd", "TRUE")
-	// VAR type looks in GlobalConfig
-	cm.State.GlobalConfig.Data.Set("zimbraIPMode", "ipv6")
-
-	conditionals := []config.Conditional{
-		{
-			Type: "SERVICE",
-			Key:  "imapd",
-			Nested: []config.Conditional{
-				{
-					Type: "VAR",
-					Key:  "zimbraIPMode",
-					Postconf: map[string]string{
-						"inet_protocols": "ipv6",
-					},
-				},
-			},
-		},
-	}
-
-	cm.processConditionals(context.Background(), conditionals)
-
-	// Check that nested postconf was added (both conditions true)
-	if val, exists := cm.State.CurrentActions.Postconf["inet_protocols"]; !exists {
-		t.Error("Expected nested postconf 'inet_protocols' to be set")
-	} else if val != "ipv6" {
-		t.Errorf("Expected nested postconf value to be 'ipv6', got: %s", val)
-	}
-}
-
-// TestProcessConditionals_MultipleDirectives tests processConditionals with multiple directive types
+// TestProcessConditionals_MultipleDirectives tests processConditionals with POSTCONF and POSTCONFD
 func TestProcessConditionals_MultipleDirectives(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: configmgr test may have retry delays")
@@ -526,9 +490,6 @@ func TestProcessConditionals_MultipleDirectives(t *testing.T) {
 			Postconfd: map[string]string{
 				"policy.cf": "some config content",
 			},
-			Ldap: map[string]string{
-				"ldap-alias.cf": "ldap://localhost",
-			},
 		},
 	}
 
@@ -540,9 +501,6 @@ func TestProcessConditionals_MultipleDirectives(t *testing.T) {
 	}
 	if _, exists := cm.State.CurrentActions.Postconfd["policy.cf"]; !exists {
 		t.Error("Expected postconfd to be set")
-	}
-	if _, exists := cm.State.CurrentActions.Ldap["ldap-alias.cf"]; !exists {
-		t.Error("Expected ldap to be set")
 	}
 }
 

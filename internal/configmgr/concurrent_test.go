@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 // TestConfigManager_ConcurrentLoading tests concurrent configuration loading.
@@ -165,7 +167,9 @@ func TestConfigManager_ConcurrentLoadAndLookup(t *testing.T) {
 					} else {
 						readErrors.Add(1)
 					}
-					time.Sleep(10 * time.Millisecond)
+					if !pause(stop, 10*time.Millisecond) {
+						return
+					}
 				}
 			}
 		}(i)
@@ -188,14 +192,19 @@ func TestConfigManager_ConcurrentLoadAndLookup(t *testing.T) {
 					} else {
 						loadErrors.Add(1)
 					}
-					time.Sleep(500 * time.Millisecond)
+					if !pause(stop, 500*time.Millisecond) {
+						return
+					}
 				}
 			}
 		}(i)
 	}
 
-	// Run for specified duration
-	time.Sleep(duration)
+	// Run until every worker kind has made progress (bounded by duration).
+	require.Eventually(t, func() bool {
+		return readOps.Load()+int64(readErrors.Load()) >= int64(numReaders) &&
+			loadOps.Load()+int64(loadErrors.Load()) >= int64(numLoaders)
+	}, duration, 10*time.Millisecond, "workers made no progress")
 	close(stop)
 	wg.Wait()
 
@@ -326,6 +335,7 @@ func TestConfigManager_RaceConditions(t *testing.T) {
 
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
+	var iterations atomic.Int64
 
 	// Mix of different operations
 	operations := []func(){
@@ -349,15 +359,34 @@ func TestConfigManager_RaceConditions(t *testing.T) {
 					// Randomly execute different operations
 					op := operations[id%len(operations)]
 					op()
-					time.Sleep(50 * time.Millisecond)
+					iterations.Add(1)
+
+					if !pause(stop, 50*time.Millisecond) {
+						return
+					}
 				}
 			}
 		}(i)
 	}
 
-	time.Sleep(duration)
+	require.Eventually(t, func() bool {
+		return iterations.Load() >= numWorkers*3
+	}, duration*10, 10*time.Millisecond, "workers made no progress")
 	close(stop)
 	wg.Wait()
 
 	t.Log("Race detection test completed successfully")
+}
+
+// pause waits d or until stop closes; it reports whether the caller should continue.
+func pause(stop <-chan struct{}, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+
+	select {
+	case <-stop:
+		return false
+	case <-t.C:
+		return true
+	}
 }

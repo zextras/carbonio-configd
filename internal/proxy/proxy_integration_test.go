@@ -9,6 +9,7 @@ package proxy
 import (
 	"context"
 	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/config/configtest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -201,7 +202,7 @@ func TestDryRunMode(t *testing.T) {
 	gen.ConfDir = outputDir
 	gen.SetDryRun(context.Background(), true) // Enable dry-run
 
-	if !gen.IsDryRun() {
+	if !gen.DryRun {
 		t.Error("Expected dry-run to be enabled")
 	}
 
@@ -256,7 +257,7 @@ func TestVerboseMode(t *testing.T) {
 	gen.ConfDir = outputDir
 	gen.SetVerbose(context.Background(), true) // Enable verbose
 
-	if !gen.IsVerbose() {
+	if !gen.Verbose {
 		t.Error("Expected verbose to be enabled")
 	}
 
@@ -314,10 +315,10 @@ error_log ${main.logfile};`
 	gen.SetDryRun(context.Background(), true)  // Enable dry-run
 	gen.SetVerbose(context.Background(), true) // Enable verbose
 
-	if !gen.IsDryRun() {
+	if !gen.DryRun {
 		t.Error("Expected dry-run to be enabled")
 	}
-	if !gen.IsVerbose() {
+	if !gen.Verbose {
 		t.Error("Expected verbose to be enabled")
 	}
 
@@ -334,105 +335,6 @@ error_log ${main.logfile};`
 	}
 
 	t.Log("Dry-run + verbose mode correctly prevented file creation with verbose logging")
-}
-
-// TestConfigSummaryIncludesFlags tests that config summary includes verbose/dry-run flags
-func TestConfigSummaryIncludesFlags(t *testing.T) {
-	cfg := &config.Config{
-		BaseDir:  "/opt/zextras",
-		Hostname: "test.example.com",
-	}
-
-	gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
-	if err != nil {
-		t.Fatalf("NewGenerator(, nil) failed: %v", err)
-	}
-
-	// Test default state
-	summary := gen.GetConfigSummary()
-	if summary["dry_run"].(bool) != false {
-		t.Error("Expected dry_run to be false by default")
-	}
-	if summary["verbose"].(bool) != false {
-		t.Error("Expected verbose to be false by default")
-	}
-
-	// Enable both modes
-	gen.SetDryRun(context.Background(), true)
-	gen.SetVerbose(context.Background(), true)
-
-	summary = gen.GetConfigSummary()
-	if summary["dry_run"].(bool) != true {
-		t.Error("Expected dry_run to be true after SetDryRun(true)")
-	}
-	if summary["verbose"].(bool) != true {
-		t.Error("Expected verbose to be true after SetVerbose(true)")
-	}
-
-	t.Log("Config summary correctly reports dry-run and verbose flags")
-}
-
-// TestNginxValidation tests nginx -t validation integration
-func TestNginxValidation(t *testing.T) {
-	// Create temp directories
-	tmpDir := t.TempDir()
-	templateDir := filepath.Join(tmpDir, "templates")
-	outputDir := filepath.Join(tmpDir, "output")
-
-	if err := os.MkdirAll(templateDir, 0755); err != nil {
-		t.Fatalf("Failed to create template dir: %v", err)
-	}
-	if err := os.MkdirAll(outputDir, 0755); err != nil {
-		t.Fatalf("Failed to create output dir: %v", err)
-	}
-
-	// Create a minimal valid nginx config template
-	templateContent := `worker_processes 1;
-events {
-    worker_connections 1024;
-}
-http {
-    server {
-        listen 80;
-    }
-}`
-	templatePath := filepath.Join(templateDir, "nginx.conf.template")
-	if err := os.WriteFile(templatePath, []byte(templateContent), 0644); err != nil {
-		t.Fatalf("Failed to write template: %v", err)
-	}
-
-	// Create generator
-	cfg := &config.Config{
-		BaseDir:  tmpDir,
-		Hostname: "test.example.com",
-	}
-
-	gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
-	if err != nil {
-		t.Fatalf("NewGenerator() failed: %v", err)
-	}
-
-	gen.TemplateDir = templateDir
-	gen.ConfDir = outputDir
-	gen.SetVerbose(context.Background(), true)
-
-	// Process template
-	processor := NewTemplateProcessor(gen, templateDir, outputDir)
-	if err := processor.ProcessAllTemplates(context.Background()); err != nil {
-		t.Fatalf("ProcessAllTemplates() failed: %v", err)
-	}
-
-	// Validate the generated config
-	configPath := filepath.Join(outputDir, "nginx.conf")
-	if err := processor.ValidateNginxConfig(context.Background(), configPath); err != nil {
-		// If nginx is not available, test should still pass
-		if strings.Contains(err.Error(), "not found") {
-			t.Skip("nginx binary not found, skipping validation test")
-		}
-		t.Errorf("ValidateNginxConfig() failed: %v", err)
-	}
-
-	t.Log("nginx -t validation passed (or nginx not available)")
 }
 
 // TestFullStackIntegration is the comprehensive Task 8.1 integration test.
@@ -485,7 +387,7 @@ func TestFullStackIntegration(t *testing.T) {
 	}
 
 	localConfig := &config.LocalConfig{
-		Data: config.NewConfigMapFrom(map[string]string{
+		Data: configtest.NewConfigMapFrom(map[string]string{
 			"zimbraIPMode":               "both",
 			"zimbraMailProxyPort":        "80",
 			"zimbraMailSSLProxyPort":     "443",
@@ -504,7 +406,7 @@ func TestFullStackIntegration(t *testing.T) {
 	}
 
 	globalConfig := &config.GlobalConfig{
-		Data: config.NewConfigMapFrom(map[string]string{
+		Data: configtest.NewConfigMapFrom(map[string]string{
 			"zimbraReverseProxyHttpEnabled":            "TRUE",
 			"zimbraReverseProxyMailMode":               "both",
 			"zimbraReverseProxySSLToUpstreamEnabled":   "TRUE",
@@ -519,7 +421,7 @@ func TestFullStackIntegration(t *testing.T) {
 	}
 
 	serverConfig := &config.ServerConfig{
-		Data: config.NewConfigMapFrom(map[string]string{
+		Data: configtest.NewConfigMapFrom(map[string]string{
 			"zimbraServerHostname": "mail.carbonio.example.com",
 			"zimbraMailMode":       "https",
 			"zimbraMailPort":       "8080",
@@ -693,40 +595,6 @@ func TestFullStackIntegration(t *testing.T) {
 	}
 
 	t.Log("\n✓ Full-stack integration test passed")
-}
-
-func TestNginxValidationWithInvalidConfig(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Create an invalid nginx config (missing semicolon)
-	invalidConfig := `worker_processes 1
-events {
-    worker_connections 1024;
-}`
-	configPath := filepath.Join(tmpDir, "invalid.conf")
-	if err := os.WriteFile(configPath, []byte(invalidConfig), 0644); err != nil {
-		t.Fatalf("Failed to write config: %v", err)
-	}
-
-	// Create processor
-	gen := &Generator{Verbose: true}
-	processor := NewTemplateProcessor(gen, "", tmpDir)
-
-	// Try to validate - should fail if nginx is available
-	err := processor.ValidateNginxConfig(context.Background(), configPath)
-
-	// If nginx is not available, test passes
-	if err == nil {
-		t.Log("nginx binary not found or validation not strict, test passed")
-		return
-	}
-
-	// If nginx is available, validation should fail
-	if !strings.Contains(err.Error(), "validation failed") {
-		t.Errorf("Expected validation failure, got: %v", err)
-	} else {
-		t.Logf("Correctly detected invalid config: %v", err)
-	}
 }
 
 // TestJavaProxyConfGenCompatibility tests compatibility with Java ProxyConfGen output

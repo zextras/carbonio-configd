@@ -8,6 +8,11 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/zextras/carbonio-configd/internal/config"
 )
 
 func TestParser_SimpleConditional(t *testing.T) {
@@ -137,114 +142,6 @@ func TestParser_MultipleConditionals(t *testing.T) {
 	}
 }
 
-func TestParser_NestedConditionals(t *testing.T) {
-	input := `
-SECTION test
-	IF VAR outer
-		POSTCONF outer_key outer_value
-		IF VAR inner
-			POSTCONF inner_key inner_value
-		FI
-	FI
-`
-	lexer := NewLexer(context.Background(), strings.NewReader(input))
-	parser := NewParser(lexer)
-
-	cfg, err := parser.ParseString(context.Background(), input)
-	if err != nil {
-		t.Fatalf("Parse failed: %v", err)
-	}
-
-	section := cfg.Sections["test"]
-	if section == nil {
-		t.Fatal("Section 'test' not found")
-	}
-
-	if len(section.Conditionals) != 1 {
-		t.Fatalf("Expected 1 conditional, got %d", len(section.Conditionals))
-	}
-
-	outer := section.Conditionals[0]
-	if outer.Key != "outer" {
-		t.Errorf("Expected outer key 'outer', got '%s'", outer.Key)
-	}
-
-	if val, ok := outer.Postconf["outer_key"]; !ok || val != "outer_value" {
-		t.Errorf("Expected outer_key=outer_value, got %v", val)
-	}
-
-	if len(outer.Nested) != 1 {
-		t.Fatalf("Expected 1 nested conditional, got %d", len(outer.Nested))
-	}
-
-	inner := outer.Nested[0]
-	if inner.Key != "inner" {
-		t.Errorf("Expected inner key 'inner', got '%s'", inner.Key)
-	}
-
-	if val, ok := inner.Postconf["inner_key"]; !ok || val != "inner_value" {
-		t.Errorf("Expected inner_key=inner_value, got %v", val)
-	}
-}
-
-func TestParser_MultiLevelNestedConditionals(t *testing.T) {
-	input := `
-SECTION test
-	IF VAR level1
-		POSTCONF l1_key l1_value
-		IF VAR level2
-			POSTCONF l2_key l2_value
-			IF VAR level3
-				POSTCONF l3_key l3_value
-			FI
-		FI
-	FI
-`
-	lexer := NewLexer(context.Background(), strings.NewReader(input))
-	parser := NewParser(lexer)
-
-	cfg, err := parser.ParseString(context.Background(), input)
-	if err != nil {
-		t.Fatalf("Parse failed: %v", err)
-	}
-
-	section := cfg.Sections["test"]
-	if section == nil {
-		t.Fatal("Section 'test' not found")
-	}
-
-	if len(section.Conditionals) != 1 {
-		t.Fatalf("Expected 1 conditional, got %d", len(section.Conditionals))
-	}
-
-	level1 := section.Conditionals[0]
-	if level1.Key != "level1" {
-		t.Errorf("Expected level1 key, got '%s'", level1.Key)
-	}
-
-	if len(level1.Nested) != 1 {
-		t.Fatalf("Expected 1 nested conditional at level1, got %d", len(level1.Nested))
-	}
-
-	level2 := level1.Nested[0]
-	if level2.Key != "level2" {
-		t.Errorf("Expected level2 key, got '%s'", level2.Key)
-	}
-
-	if len(level2.Nested) != 1 {
-		t.Fatalf("Expected 1 nested conditional at level2, got %d", len(level2.Nested))
-	}
-
-	level3 := level2.Nested[0]
-	if level3.Key != "level3" {
-		t.Errorf("Expected level3 key, got '%s'", level3.Key)
-	}
-
-	if val, ok := level3.Postconf["l3_key"]; !ok || val != "l3_value" {
-		t.Errorf("Expected l3_key=l3_value, got %v", val)
-	}
-}
-
 func TestParser_ConditionalPostconfd(t *testing.T) {
 	input := `SECTION mta
 	if VAR zimbraMtaEnableSmtpdPolicyd
@@ -268,76 +165,6 @@ func TestParser_ConditionalPostconfd(t *testing.T) {
 	cond := section.Conditionals[0]
 	if _, ok := cond.Postconfd["smtpd_end_of_data_restrictions"]; !ok {
 		t.Error("POSTCONFD smtpd_end_of_data_restrictions not found in conditional")
-	}
-}
-
-func TestParser_ConditionalLdap(t *testing.T) {
-	input := `SECTION ldap
-	if VAR zimbraLdapEnabled
-		LDAP server_host LOCAL ldap_url
-		LDAP timeout VAR zimbraLdapTimeout
-	fi
-`
-	cfg, err := new(parser).ParseString(context.Background(), input)
-	if err != nil {
-		t.Fatalf("Parse error: %v", err)
-	}
-
-	section := cfg.Sections["ldap"]
-	if section == nil {
-		t.Fatal("Section 'ldap' not found")
-	}
-
-	if len(section.Conditionals) != 1 {
-		t.Fatalf("Expected 1 conditional, got %d", len(section.Conditionals))
-	}
-
-	cond := section.Conditionals[0]
-	if val := cond.Ldap["server_host"]; val != "LOCAL:ldap_url" {
-		t.Errorf("Expected 'LOCAL:ldap_url', got '%s'", val)
-	}
-	// Non-LOCAL/MAPLOCAL LDAP directives are dropped (jylibs/mtaconfig.py parseLdap).
-	if val, ok := cond.Ldap["timeout"]; ok {
-		t.Errorf("VAR-typed conditional LDAP directive should be dropped, got %q", val)
-	}
-}
-
-func TestParser_ConditionalPostconf_ErrorBranch(t *testing.T) {
-	input := `SECTION test
-	IF VAR someKey
-		POSTCONF
-	FI
-`
-	p := &parser{errors: []error{}}
-	_, err := p.ParseString(context.Background(), input)
-	if err == nil {
-		t.Error("Expected error for POSTCONF with no key inside conditional")
-	}
-}
-
-func TestParser_ConditionalPostconfd_ErrorBranch(t *testing.T) {
-	input := `SECTION test
-	IF VAR someKey
-		POSTCONFD
-	FI
-`
-	p := &parser{errors: []error{}}
-	_, err := p.ParseString(context.Background(), input)
-	if err == nil {
-		t.Error("Expected error for POSTCONFD with no key inside conditional")
-	}
-}
-
-func TestParser_ConditionalLdap_ErrorBranch(t *testing.T) {
-	input := `SECTION ldap
-	IF VAR someKey
-		LDAP
-	FI
-`
-	p := &parser{errors: []error{}}
-	_, err := p.ParseString(context.Background(), input)
-	if err == nil {
-		t.Error("Expected error for LDAP with no key inside conditional")
 	}
 }
 
@@ -382,56 +209,149 @@ func TestParser_ParseConditionalHeader_MissingKey(t *testing.T) {
 	}
 }
 
-func TestParser_ParseNestedConditional_ErrorPropagation(t *testing.T) {
-	// Outer IF is valid; inner IF has an invalid condition type (LOCAL).
-	input := `SECTION test
-	IF VAR outer
-		IF LOCAL badkey
-			POSTCONF foo bar
-		FI
-	FI
+func parseConfig(t *testing.T, input string) (*config.MtaConfig, error) {
+	t.Helper()
+
+	return NewParser(NewLexer(context.Background(), strings.NewReader(""))).
+		ParseString(context.Background(), input)
+}
+
+// jylibs/mtaconfig.py load(): inside an if block only POSTCONF, POSTCONFD and
+// VAR/LOCAL lines are processed; every other line is logged and ignored.
+func TestParser_ConditionalBodyHonoursOnlyLegacyDirectives(t *testing.T) {
+	t.Parallel()
+
+	input := `SECTION mta
+	if VAR enabled
+		POSTCONF a literal
+		POSTCONF b VAR zimbraB
+		POSTCONF c MAPLOCAL zimbraC
+		POSTCONF d FILE zmconfigd/d.cf
+		POSTCONFD e LOCAL local_e
+		VAR zimbraV
+		LOCAL local_l
+		LDAP key LOCAL ldap_url
+		REWRITE conf/a.in conf/a
+		RESTART mta
+		MAPLOCAL zimbraM
+		MAPFILE zimbraF
+		PROXYGEN
+		bogus words
+	fi
 `
-	p := &parser{errors: []error{}}
-	_, err := p.ParseString(context.Background(), input)
-	if err == nil {
-		t.Error("Expected error from invalid nested conditional type")
+
+	cfg, err := parseConfig(t, input)
+	require.NoError(t, err)
+
+	section := cfg.Sections["mta"]
+	require.Len(t, section.Conditionals, 1)
+
+	cond := section.Conditionals[0]
+	assert.Equal(t, map[string]string{
+		"a": "literal",
+		"b": "VAR:zimbraB",
+		"c": "MAPLOCAL zimbraC",
+		"d": "FILE zmconfigd/d.cf",
+	}, cond.Postconf)
+	assert.Equal(t, map[string]string{"e": ""}, cond.Postconfd)
+	assert.Equal(t, map[string]string{
+		"zimbraB":        "VAR",
+		"zmconfigd/d.cf": "FILE",
+		"local_e":        "LOCAL",
+		"zimbraV":        "VAR",
+		"local_l":        "LOCAL",
+	}, cond.RequiredVars)
+
+	assert.Empty(t, section.Ldap)
+	assert.Empty(t, section.Rewrites)
+	assert.Empty(t, section.Restarts)
+	assert.Empty(t, section.RequiredVars)
+	assert.False(t, section.Proxygen)
+}
+
+// Legacy ends the block at the FIRST fi and does not support nesting: the inner
+// if header is ignored, its body is folded into the outer block, and the outer
+// fi is left over at section level, where it is skipped (legacy would hang).
+func TestParser_NestedConditionalIsFlattened(t *testing.T) {
+	t.Parallel()
+
+	input := `SECTION one
+	IF VAR outer
+		POSTCONF outer_key outer_value
+		IF VAR inner
+			POSTCONF inner_key inner_value
+		FI
+		POSTCONF after_inner after_value
+	FI
+	POSTCONF section_key section_value
+SECTION two
+	POSTCONF two_key two_value
+`
+
+	cfg, err := parseConfig(t, input)
+	require.NoError(t, err)
+
+	one := cfg.Sections["one"]
+	require.Len(t, one.Conditionals, 1)
+
+	cond := one.Conditionals[0]
+	assert.Equal(t, "outer", cond.Key)
+	assert.Equal(t, map[string]string{
+		"outer_key": "outer_value",
+		"inner_key": "inner_value",
+	}, cond.Postconf)
+
+	// Everything after the first fi is section-level.
+	assert.Equal(t, map[string]string{
+		"after_inner": "after_value",
+		"section_key": "section_value",
+	}, one.Postconf)
+	assert.Equal(t, map[string]string{"two_key": "two_value"}, cfg.Sections["two"].Postconf)
+}
+
+func TestParser_StrayFiIsSkipped(t *testing.T) {
+	t.Parallel()
+
+	input := `SECTION one
+	POSTCONF a 1
+	FI
+	POSTCONF b 2
+SECTION two
+	POSTCONF c 3
+`
+
+	cfg, err := parseConfig(t, input)
+	require.NoError(t, err)
+
+	assert.Equal(t, map[string]string{"a": "1", "b": "2"}, cfg.Sections["one"].Postconf)
+	assert.Equal(t, map[string]string{"c": "3"}, cfg.Sections["two"].Postconf)
+}
+
+func TestParser_UnterminatedConditionalIsAnError(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct{ name, input string }{
+		{"end of file", "SECTION a\n\tif VAR x\n\t\tPOSTCONF k v\n"},
+		{"next section", "SECTION a\n\tif VAR x\n\t\tPOSTCONF k v\nSECTION b\n\tPOSTCONF c d\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := parseConfig(t, tt.input)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "missing fi")
+		})
 	}
 }
 
-func TestParser_ConditionalToken_FiDepthNotZero(t *testing.T) {
-	// Three levels of nesting: outer, middle, inner.
-	// When the inner FI fires depth goes from 3→2, middle FI from 2→1, outer FI 1→0.
-	input := `SECTION test
-	IF VAR level1
-		IF VAR level2
-			IF VAR level3
-				POSTCONF deep_key deep_value
-			FI
-		FI
-	FI
-`
-	cfg, err := new(parser).ParseString(context.Background(), input)
-	if err != nil {
-		t.Fatalf("Parse error: %v", err)
-	}
-	section := cfg.Sections["test"]
-	if section == nil {
-		t.Fatal("Section 'test' not found")
-	}
-	if len(section.Conditionals) != 1 {
-		t.Fatalf("Expected 1 top-level conditional, got %d", len(section.Conditionals))
-	}
-	// Walk down to depth-3 conditional.
-	l1 := section.Conditionals[0]
-	if len(l1.Nested) != 1 {
-		t.Fatalf("Expected 1 nested at l1, got %d", len(l1.Nested))
-	}
-	l2 := l1.Nested[0]
-	if len(l2.Nested) != 1 {
-		t.Fatalf("Expected 1 nested at l2, got %d", len(l2.Nested))
-	}
-	l3 := l2.Nested[0]
-	if val, ok := l3.Postconf["deep_key"]; !ok || val != "deep_value" {
-		t.Errorf("Expected deep_key=deep_value, got %v", val)
-	}
+func TestParser_ConditionalMissingLookupKeyIsAnError(t *testing.T) {
+	t.Parallel()
+
+	_, err := parseConfig(t, "SECTION a\n\tif VAR x\n\t\tPOSTCONF k LOCALHOST\n\tfi\n")
+	require.Error(t, err)
+
+	_, err = parseConfig(t, "SECTION a\n\tif VAR x\n\t\tVAR\n\tfi\n")
+	require.Error(t, err)
 }

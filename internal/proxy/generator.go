@@ -170,6 +170,12 @@ func (g *Generator) GenerateAll(ctx context.Context) error {
 	logger.DebugContext(ctx, "Created reusable template processor",
 		"template_count", len(templates))
 
+	// Deploy per-domain certificate/key files before rendering templates that
+	// reference them (legacy ProxyConfGen.java:2224-2240).
+	if err := processor.syncDomainCerts(ctx); err != nil {
+		return fmt.Errorf("failed to sync domain certificates: %w", err)
+	}
+
 	// Process each template
 	successCount := 0
 	errorCount := 0
@@ -305,20 +311,6 @@ func (g *Generator) PrefetchUpstreamData(ctx context.Context) error {
 	return nil
 }
 
-// ProcessTemplate processes a single template file and writes the output
-// This method creates a new processor for each call (for backward compatibility)
-func (g *Generator) ProcessTemplate(ctx context.Context, templatePath, outputName string) error {
-	ctx = logger.ContextWithComponentOnce(ctx, "proxy")
-	logger.DebugContext(ctx, "ProcessTemplate called",
-		"template", templatePath,
-		"output", outputName)
-
-	// Create template processor
-	processor := NewTemplateProcessor(g, g.TemplateDir, g.IncludesDir)
-
-	return g.ProcessTemplateWithProcessor(ctx, processor, templatePath, outputName)
-}
-
 // ProcessTemplateWithProcessor processes a single template using an existing processor
 // This allows processor reuse across multiple templates for better performance
 func (g *Generator) ProcessTemplateWithProcessor(
@@ -412,116 +404,6 @@ func (g *Generator) writeFile(ctx context.Context, path string, content []byte) 
 	logger.DebugContext(ctx, "Wrote file",
 		"byte_count", len(content),
 		"path", path)
-
-	return nil
-}
-
-// CleanIncludesDir removes all generated files from includes directory
-// Used when regenerating configuration from scratch
-func (g *Generator) CleanIncludesDir(ctx context.Context) error {
-	ctx = logger.ContextWithComponentOnce(ctx, "proxy")
-	if g.DryRun {
-		logger.DebugContext(ctx, "DRY-RUN: Would clean includes directory",
-			"path", g.IncludesDir)
-
-		return nil
-	}
-
-	logger.DebugContext(ctx, "Cleaning includes directory",
-		"path", g.IncludesDir)
-
-	// Read directory
-	entries, err := os.ReadDir(g.IncludesDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil // Directory doesn't exist, nothing to clean
-		}
-
-		return fmt.Errorf("failed to read includes directory: %w", err)
-	}
-
-	// Remove each file
-	removedCount := 0
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-
-		path := filepath.Join(g.IncludesDir, entry.Name())
-		if err := os.Remove(path); err != nil {
-			logger.ErrorContext(ctx, "Failed to remove file",
-				"path", path,
-				"error", err)
-
-			continue
-		}
-
-		removedCount++
-
-		if g.Verbose {
-			logger.DebugContext(ctx, "Removed file",
-				"path", path)
-		}
-	}
-
-	logger.DebugContext(ctx, "Cleaned files from includes directory",
-		"removed_count", removedCount)
-
-	return nil
-}
-
-// ValidateTemplate validates a template file syntax without generating output
-func (g *Generator) ValidateTemplate(ctx context.Context, templatePath string) error {
-	ctx = logger.ContextWithComponentOnce(ctx, "proxy")
-	// Create template processor
-	processor := NewTemplateProcessor(g, g.TemplateDir, g.IncludesDir)
-
-	// Load template
-	tmpl, err := processor.LoadTemplate(ctx, templatePath)
-	if err != nil {
-		return fmt.Errorf("failed to load template: %w", err)
-	}
-
-	// Process template (this validates syntax)
-	_, err = processor.ProcessTemplate(ctx, tmpl)
-	if err != nil {
-		return fmt.Errorf("template validation failed: %w", err)
-	}
-
-	logger.DebugContext(ctx, "Template validation successful",
-		"template", templatePath)
-
-	return nil
-}
-
-// ValidateAllTemplates validates all discovered templates
-func (g *Generator) ValidateAllTemplates(ctx context.Context) error {
-	ctx = logger.ContextWithComponentOnce(ctx, "proxy")
-	logger.DebugContext(ctx, "Validating all templates")
-
-	templates, err := g.DiscoverTemplates(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to discover templates: %w", err)
-	}
-
-	errorCount := 0
-
-	for _, templatePath := range templates {
-		if err := g.ValidateTemplate(ctx, templatePath); err != nil {
-			logger.ErrorContext(ctx, "Validation failed",
-				"template", filepath.Base(templatePath),
-				"error", err)
-
-			errorCount++
-		}
-	}
-
-	if errorCount > 0 {
-		return fmt.Errorf("%d templates failed validation", errorCount)
-	}
-
-	logger.DebugContext(ctx, "All templates validated successfully")
 
 	return nil
 }

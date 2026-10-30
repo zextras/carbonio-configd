@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"github.com/zextras/carbonio-configd/internal/sdnotify"
 	"github.com/zextras/carbonio-configd/internal/state"
 	"os"
 	"syscall"
@@ -19,7 +20,7 @@ func TestSetupSignalHandler_SIGTERM(t *testing.T) {
 	reloadChan := make(chan struct{}, 1)
 
 	// Setup signal handler
-	SetupSignalHandler(appState, cancel, reloadChan, nil)
+	SetupSignalHandler(ctx, appState, cancel, reloadChan, nil)
 
 	// Give handler time to start
 	time.Sleep(50 * time.Millisecond)
@@ -48,16 +49,16 @@ func TestSetupSignalHandler_SIGHUP(t *testing.T) {
 	appState := &state.State{
 		SleepTimer: 100, // Set initial sleep timer
 	}
-	_, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	reloadChan := make(chan struct{}, 1)
 
-	SetupSignalHandler(appState, cancel, reloadChan, nil)
+	SetupSignalHandler(ctx, appState, cancel, reloadChan, nil)
 
 	time.Sleep(50 * time.Millisecond)
 
-	// Send SIGHUP
+	// Send SIGCHLD
 	p, err := os.FindProcess(os.Getpid())
 	if err != nil {
 		t.Fatalf("Failed to find process: %v", err)
@@ -86,12 +87,12 @@ func TestSetupSignalHandler_SIGUSR2(t *testing.T) {
 	appState := &state.State{
 		SleepTimer: 100,
 	}
-	_, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	reloadChan := make(chan struct{}, 1)
 
-	SetupSignalHandler(appState, cancel, reloadChan, nil)
+	SetupSignalHandler(ctx, appState, cancel, reloadChan, nil)
 
 	time.Sleep(50 * time.Millisecond)
 
@@ -121,12 +122,12 @@ func TestSetupSignalHandler_SIGALRM(t *testing.T) {
 	appState := &state.State{
 		SleepTimer: 100,
 	}
-	_, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	reloadChan := make(chan struct{}, 1)
 
-	SetupSignalHandler(appState, cancel, reloadChan, nil)
+	SetupSignalHandler(ctx, appState, cancel, reloadChan, nil)
 
 	time.Sleep(50 * time.Millisecond)
 
@@ -159,7 +160,7 @@ func TestSetupSignalHandler_SIGCHLD(t *testing.T) {
 
 	reloadChan := make(chan struct{}, 1)
 
-	SetupSignalHandler(appState, cancel, reloadChan, nil)
+	SetupSignalHandler(ctx, appState, cancel, reloadChan, nil)
 
 	time.Sleep(50 * time.Millisecond)
 
@@ -197,14 +198,14 @@ func TestSetupSignalHandler_ReloadChannelBlocked(t *testing.T) {
 	appState := &state.State{
 		SleepTimer: 100,
 	}
-	_, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	// Create channel with capacity 1 and fill it
 	reloadChan := make(chan struct{}, 1)
 	reloadChan <- struct{}{} // Block the channel
 
-	SetupSignalHandler(appState, cancel, reloadChan, nil)
+	SetupSignalHandler(ctx, appState, cancel, reloadChan, nil)
 
 	time.Sleep(50 * time.Millisecond)
 
@@ -310,3 +311,55 @@ func TestSleepWithContext_ContextCancelDuringReload(t *testing.T) {
 
 	// Either signal is acceptable, but should be interrupted
 }
+
+// TestDispatchSignalSafe_ShutdownPanicStillCancels: when handling SIGTERM panics
+// (here: a zero-value notifier), the daemon context must still be cancelled,
+// otherwise the consumed SIGTERM leaves the daemon unstoppable.
+func TestDispatchSignalSafe_ShutdownPanicStillCancels(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	reloadChan := make(chan struct{}, 1)
+	stop := dispatchSignalSafe(ctx, syscall.SIGTERM, state.NewState(), cancel, reloadChan, &sdnotify.Notifier{})
+
+	if !stop {
+		t.Error("dispatchSignalSafe() = false, want true after a panic on a shutdown signal")
+	}
+
+	if ctx.Err() == nil {
+		t.Error("context not cancelled after a panic while handling SIGTERM")
+	}
+}
+
+// TestDispatchSignalSafe_ReloadPanicKeepsHandlerAlive: a panic on a reload signal
+// is absorbed and the handler keeps running.
+func TestDispatchSignalSafe_ReloadPanicKeepsHandlerAlive(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// A nil state panics in SetSleepTimer.
+	stop := dispatchSignalSafe(ctx, syscall.SIGHUP, nil, cancel, make(chan struct{}, 1), nil)
+
+	if stop {
+		t.Error("dispatchSignalSafe() = true, want false: the handler must keep running after a reload panic")
+	}
+
+	if ctx.Err() != nil {
+		t.Error("context cancelled by a reload-signal panic")
+	}
+}
+
+func TestSignalNumber(t *testing.T) {
+	if got := signalNumber(syscall.SIGTERM); got != int(syscall.SIGTERM) {
+		t.Errorf("signalNumber(SIGTERM) = %d, want %d", got, int(syscall.SIGTERM))
+	}
+
+	if got := signalNumber(fakeSignal{}); got != -1 {
+		t.Errorf("signalNumber(non-syscall signal) = %d, want -1", got)
+	}
+}
+
+type fakeSignal struct{}
+
+func (fakeSignal) String() string { return "fake" }
+func (fakeSignal) Signal()        {}

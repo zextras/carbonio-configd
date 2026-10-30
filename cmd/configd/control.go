@@ -76,6 +76,8 @@ func (c *ControlRestartCmd) Run(parent *ControlCmd) error {
 		return services.RemoteHostStart(ctx, parent.Host, "all")
 	}
 
+	// Legacy parity: control.pl doRestart runs doShutdown then doStartup
+	// unconditionally; the stop result is deliberately not consulted.
 	controlStop(ctx)
 
 	if controlStart(ctx) != 0 {
@@ -95,27 +97,41 @@ func (c *ControlStatusCmd) Run(parent *ControlCmd) error {
 		return err
 	}
 
-	controlStatus(ctx)
+	// Legacy parity: control.pl:doStatus returns 1 when a service is stopped.
+	// Exit directly so stderr stays free of an "Error:" line legacy never printed.
+	exitOnStatus(ctx)
 
 	return nil
 }
+
+// exitOnStatus runs the local status report and exits with its rc when non-zero.
+func exitOnStatus(ctx context.Context) {
+	if rc := controlStatusFn(ctx); rc != 0 {
+		exitFn(rc)
+	}
+}
+
+// exitFn and controlStatusFn are overridden in tests.
+var (
+	exitFn          = os.Exit
+	controlStatusFn = controlStatus
+)
 
 type VersionCmd struct {
 	Packages bool `name:"packages" short:"V" help:"Show installed package versions"`
 }
 
+//nolint:unparam // Kong interface requires error return
 func (c *VersionCmd) Run() error {
 	initCLILogging()
 
-	version, err := os.ReadFile(basePath(".version"))
-	if err != nil {
-		fmt.Println("Carbonio Release unknown")
-	} else {
-		fmt.Printf("Carbonio Release %s\n", strings.TrimSpace(string(version)))
-	}
+	// Legacy displayVersion: `cat .version` with a missing file yields an
+	// empty release and exit 0.
+	version, _ := os.ReadFile(basePath(".version"))
+	fmt.Printf("Carbonio Release %s\n", strings.TrimSpace(string(version)))
 
 	if !c.Packages {
-		return err
+		return nil
 	}
 
 	ctx := context.Background()
@@ -164,6 +180,9 @@ func controlStart(ctx context.Context) int {
 	threshold := services.GetDiskThreshold()
 	bd := baseDir()
 
+	// CheckDiskSpace returns ok=true on error (statfs failure), matching legacy
+	// hasAvailableSpace which stays silent for unreadable/missing dirs, so the
+	// warning below can only fire with a real measured value.
 	avail, ok, _ := services.CheckDiskSpace(bd, threshold)
 	if !ok {
 		cliWarn("Disk space below threshold for %s (%dMB available, %dMB required)", bd, avail, threshold)
@@ -177,9 +196,44 @@ func controlStart(ctx context.Context) int {
 	return startEnabledServices(ctx, enabledSet, threshold)
 }
 
+// controlSvcStatusFn is overridden in tests.
+var controlSvcStatusFn = services.ServiceStatus
+
+// statusForStart reports whether name is running. A probe error (as opposed to
+// plain "not running", which is (false, nil)) must not be read as stopped: the
+// start path aborts instead of blindly starting a service that may be up.
+func statusForStart(ctx context.Context, name string) (bool, error) {
+	running, err := controlSvcStatusFn(ctx, name)
+	if err != nil {
+		cliWarn("Cannot determine status of %s: %v", name, err)
+
+		return false, fmt.Errorf("status of %s: %w", name, err)
+	}
+
+	return running, nil
+}
+
+// runningForStop reports whether name should be stopped. On a probe error the
+// service is assumed possibly running so the stop is still attempted (legacy
+// control.pl always invoked `<svc>ctl stop`; it never skipped on a failed probe).
+func runningForStop(ctx context.Context, name string) bool {
+	running, err := controlSvcStatusFn(ctx, name)
+	if err != nil {
+		cliWarn("Cannot determine status of %s: %v; attempting stop anyway", name, err)
+
+		return true
+	}
+
+	return running
+}
+
 func startBootstrapServices(ctx context.Context) error {
 	if services.IsLDAPLocal() {
-		running, _ := services.ServiceStatus(ctx, ldapServiceName)
+		running, statErr := statusForStart(ctx, ldapServiceName)
+		if statErr != nil {
+			return statErr
+		}
+
 		if !running {
 			def := services.LookupService(ldapServiceName)
 			done := cliProgress("Starting", def.DisplayName)
@@ -193,7 +247,12 @@ func startBootstrapServices(ctx context.Context) error {
 		}
 	}
 
-	if running, _ := services.ServiceStatus(ctx, componentConfigd); !running {
+	running, statErr := statusForStart(ctx, componentConfigd)
+	if statErr != nil {
+		return statErr
+	}
+
+	if !running {
 		def := services.LookupService(componentConfigd)
 		done := cliProgress("Starting", def.DisplayName)
 
@@ -260,8 +319,7 @@ func controlStop(ctx context.Context) int {
 			continue
 		}
 
-		running, _ := services.ServiceStatus(ctx, name)
-		if !running {
+		if !runningForStop(ctx, name) {
 			continue
 		}
 
@@ -279,7 +337,7 @@ func controlStop(ctx context.Context) int {
 
 	// Stop the configd daemon itself — it must be last so it can handle
 	// rewriteConfigs calls from other services during their own shutdown.
-	if running, _ := services.ServiceStatus(ctx, componentConfigd); running {
+	if runningForStop(ctx, componentConfigd) {
 		def := services.LookupService(componentConfigd)
 		done := cliProgress("Stopping", def.DisplayName)
 		stopErr := services.ServiceStop(ctx, componentConfigd)
@@ -303,8 +361,7 @@ func stopLDAPIfLocal(ctx context.Context, enabledSet map[string]bool) int {
 		return 0
 	}
 
-	running, _ := services.ServiceStatus(ctx, ldapServiceName)
-	if !running {
+	if !runningForStop(ctx, ldapServiceName) {
 		return 0
 	}
 
@@ -333,8 +390,9 @@ func stopLDAPIfLocal(ctx context.Context, enabledSet map[string]bool) int {
 // resort (LDAP and cache both unavailable) we degrade to the full registry
 // view rather than printing nothing — operators must still see something.
 //
-// Exit code: rc=1 if any displayed service is Stopped/Failed, else rc=0.
-func controlStatus(ctx context.Context) int { //nolint:unparam
+// Exit code: rc=1 if any displayed service except stats/logger is
+// Stopped/Failed or discovery failed, else rc=0 (legacy doStatus).
+func controlStatus(ctx context.Context) int {
 	cliHeader()
 
 	type discResult struct {
@@ -389,8 +447,14 @@ func controlStatus(ctx context.Context) int { //nolint:unparam
 
 	checkAdvancedStatus(ctx)
 
+	if disc.failed {
+		// Legacy: "Cannot determine services" is rc=1.
+		return 1
+	}
+
 	for _, r := range rows {
-		if !r.Running {
+		// Legacy %serviceStatusList excludes stats and logger by default.
+		if !r.Running && r.Name != "stats" && r.Name != "logger" {
 			return 1
 		}
 	}

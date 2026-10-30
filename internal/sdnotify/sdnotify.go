@@ -55,13 +55,12 @@ type Notifier struct {
 // Returns (nil, nil) if NOTIFY_SOCKET is not set, indicating sd_notify
 // should be a no-op.
 func New() (*Notifier, error) {
-	socketPath := os.Getenv("NOTIFY_SOCKET")
+	socketPath := strings.TrimSpace(os.Getenv("NOTIFY_SOCKET"))
 	if socketPath == "" {
 		return nil, nil //nolint:nilnil // nil notifier is a deliberate no-op sentinel
 	}
 
 	// systemd supports abstract sockets (prefixed with @) and filesystem sockets
-	socketPath = strings.TrimSpace(socketPath)
 	if socketPath[0] == '@' {
 		// Abstract socket: replace @ with null byte for net.UnixAddr
 		socketPath = "\x00" + socketPath[1:]

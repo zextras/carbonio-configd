@@ -60,7 +60,7 @@ func ContactService(command string, args []string, listenPort int, ipMode string
 
 	_, err = conn.Write([]byte(message))
 	if err != nil {
-		logger.ErrorContext(ctx, "Error sending message to service",
+		logger.DebugContext(ctx, "Error sending message to service",
 			"error", err)
 
 		return true
@@ -71,7 +71,7 @@ func ContactService(command string, args []string, listenPort int, ipMode string
 
 	n, err := conn.Read(buffer)
 	if err != nil {
-		logger.ErrorContext(ctx, "Error reading response from service",
+		logger.DebugContext(ctx, "Error reading response from service",
 			"error", err)
 
 		return true
@@ -80,7 +80,7 @@ func ContactService(command string, args []string, listenPort int, ipMode string
 	response := strings.TrimSpace(string(buffer[:n]))
 
 	if strings.HasPrefix(response, "ERROR") {
-		logger.ErrorContext(ctx, "Service returned error",
+		logger.DebugContext(ctx, "Service returned error",
 			"response", response)
 
 		return true

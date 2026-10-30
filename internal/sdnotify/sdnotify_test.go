@@ -390,3 +390,18 @@ func TestNew_EnvIsolation(t *testing.T) {
 		t.Error("Expected non-nil notifier after setting NOTIFY_SOCKET")
 	}
 }
+
+// TestNew_WhitespaceSocket verifies a whitespace-only NOTIFY_SOCKET is treated
+// as unset instead of panicking.
+func TestNew_WhitespaceSocket(t *testing.T) {
+	t.Setenv("NOTIFY_SOCKET", "  \t ")
+
+	n, err := New()
+	if err != nil {
+		t.Fatalf("New() unexpected error: %v", err)
+	}
+
+	if n != nil {
+		t.Fatal("New() should return nil notifier for whitespace-only NOTIFY_SOCKET")
+	}
+}

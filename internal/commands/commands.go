@@ -9,6 +9,7 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	stderrors "errors"
 	"fmt"
@@ -143,14 +144,21 @@ func (c *Command) ExecuteWithContext(ctx context.Context, args ...string) (exitC
 	t1 := time.Now()
 
 	var (
-		output string
-		err    error
-		rc     int
+		output    string
+		stderrOut string
+		err       error
+		rc        int
 	)
 
 	switch {
 	case c.Binary != "":
-		rc, output, err = c.runBinaryWithContext(ctx, args)
+		rc, output, stderrOut, err = c.runBinaryCapture(ctx, args)
+		// Legacy commands.py execute(): any rc >= 0 keeps output/error and is
+		// reported through the status; only spawn failures and death by signal
+		// (rc < 0) are errors.
+		if _, isExit := stderrors.AsType[*exec.ExitError](err); isExit && rc >= 0 {
+			err = nil
+		}
 	case c.Func != nil:
 		// Go function execution
 		output, err = c.Func(ctx, args...)
@@ -176,6 +184,8 @@ func (c *Command) ExecuteWithContext(ctx context.Context, args ...string) (exitC
 	if output == "" {
 		output = "UNKNOWN OUTPUT"
 	}
+
+	c.Error = stderrOut
 
 	if c.Error == "" {
 		if rc == 0 {
@@ -207,8 +217,19 @@ func (c *Command) ExecuteWithContext(ctx context.Context, args ...string) (exitC
 	return c.Status, c.Output, c.Error
 }
 
-// runBinaryWithContext executes a command using the structured Binary+CmdArgs pattern.
+// runBinaryWithContext executes a command using the structured Binary+CmdArgs pattern
+// and returns stdout and stderr combined. A non-zero exit is reported as an error.
 func (c *Command) runBinaryWithContext(ctx context.Context, args []string) (exitCode int, output string, err error) {
+	exitCode, stdout, stderr, err := c.runBinaryCapture(ctx, args)
+
+	return exitCode, stdout + stderr, err
+}
+
+// runBinaryCapture executes the binary and returns stdout and stderr separately,
+// plus the raw error from os/exec (an *exec.ExitError for non-zero exits).
+func (c *Command) runBinaryCapture(
+	ctx context.Context, args []string,
+) (exitCode int, stdout, stderr string, err error) {
 	cmdArgs := make([]string, 0, len(c.CmdArgs)+len(args))
 	cmdArgs = append(cmdArgs, c.CmdArgs...)
 	cmdArgs = append(cmdArgs, args...)
@@ -216,9 +237,13 @@ func (c *Command) runBinaryWithContext(ctx context.Context, args []string) (exit
 	logger.DebugContext(ctx, "Executing command",
 		"binary", c.Binary, "args", cmdArgs)
 
+	var outBuf, errBuf bytes.Buffer
+
 	cmd := exec.CommandContext(ctx, c.Binary, cmdArgs...)
-	outputBytes, cmdErr := cmd.CombinedOutput()
-	output = string(outputBytes)
+	cmd.Stdout = &outBuf
+	cmd.Stderr = &errBuf
+	cmdErr := cmd.Run()
+	stdout, stderr = outBuf.String(), errBuf.String()
 
 	if cmdErr != nil {
 		if exitErr, ok := stderrors.AsType[*exec.ExitError](cmdErr); ok {
@@ -227,10 +252,10 @@ func (c *Command) runBinaryWithContext(ctx context.Context, args []string) (exit
 			exitCode = 1
 		}
 
-		return exitCode, output, cmdErr
+		return exitCode, stdout, stderr, cmdErr
 	}
 
-	return 0, output, nil
+	return 0, stdout, stderr, nil
 }
 
 func (c *Command) String() string {

@@ -7,6 +7,7 @@ package configmgr
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 
 	"github.com/zextras/carbonio-configd/internal/config"
@@ -36,26 +37,54 @@ func (cm *ConfigManager) ParseMtaConfig(ctx context.Context, configFile string) 
 		logger.DebugContext(ctx, "Found SECTION",
 			"section_name", sectionName)
 
-		// Mirror the legacy Jython zmconfigd: skip sections whose mapped node
-		// service is not enabled, so their LDAP directives are not resolved
-		// (and later not compiled) on nodes that don't run that component.
+		// Mirror jylibs/mtaconfig.py load: a section whose mapped node service
+		// is not enabled is skipped entirely. Dropping it here keeps it out of
+		// every consumer (compare, rewrites, mapfiles, restarts, dependencies)
+		// and means no LDAP lookups are resolved for it. Deleting the current
+		// key while ranging a map is well defined.
 		if !sectionEnabledOnNode(sectionName, serviceConfig) {
-			logger.DebugContext(ctx, "Section service not enabled on node, skipping LDAP resolution",
+			logger.DebugContext(ctx, "Section service not enabled on node, dropping section",
 				"section", sectionName)
+
+			delete(mtaConfig.Sections, sectionName)
 
 			continue
 		}
 
 		cm.resolveSectionLDAP(ctx, sectionName, section)
+		cm.registerConditionalRequiredVars(ctx, section, section.Conditionals)
 		logSectionDetails(ctx, sectionName, section)
 	}
 
-	cm.State.MtaConfig = mtaConfig
+	cm.State.SetMtaConfig(mtaConfig)
 
 	logger.DebugContext(ctx, "Finished parsing MTA config file",
 		"section_count", len(mtaConfig.Sections))
 
 	return nil
+}
+
+// registerConditionalRequiredVars adds the required vars (VAR/LOCAL lines and
+// POSTCONF/POSTCONFD lookups) of the if-blocks that hold on this node to the
+// section's required vars. Legacy evaluates each if at load time and only a
+// true branch runs requiredvars(), so a variable used solely by a false branch
+// must not mark the section changed (that would restart services for no
+// effective change).
+func (cm *ConfigManager) registerConditionalRequiredVars(
+	ctx context.Context,
+	section *config.MtaConfigSection,
+	conditionals []config.Conditional,
+) {
+	for i := range conditionals {
+		cond := &conditionals[i]
+
+		holds, err := cm.CheckConditional(ctx, cond.Type, cond.Key)
+		if err != nil || holds == cond.Negated {
+			continue
+		}
+
+		maps.Copy(section.RequiredVars, cond.RequiredVars)
+	}
 }
 
 func (cm *ConfigManager) resolveSectionLDAP(ctx context.Context, sectionName string, section *config.MtaConfigSection) {

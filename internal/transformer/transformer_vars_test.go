@@ -62,7 +62,7 @@ func TestTransformVarSubstitution(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := transformer.Transform(ctx, tt.input)
+			result := mustTransform(t, transformer, ctx, tt.input)
 			if result != tt.expected {
 				t.Errorf("Transform() = %q, want %q", result, tt.expected)
 			}
@@ -100,7 +100,7 @@ func TestTransformLocalConfigSubstitution(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := transformer.Transform(ctx, tt.input)
+			result := mustTransform(t, transformer, ctx, tt.input)
 			if result != tt.expected {
 				t.Errorf("Transform() = %q, want %q", result, tt.expected)
 			}
@@ -156,7 +156,7 @@ func TestTransformEdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := transformer.Transform(ctx, tt.input)
+			result := mustTransform(t, transformer, ctx, tt.input)
 			if result != tt.expected {
 				t.Errorf("Transform() = %q, want %q", result, tt.expected)
 			}
@@ -203,7 +203,7 @@ func TestTransformPlainVariableSubstitution(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := transformer.Transform(ctx, tt.input)
+			result := mustTransform(t, transformer, ctx, tt.input)
 			if result != tt.expected {
 				t.Errorf("Transform() = %q, want %q", result, tt.expected)
 			}
@@ -266,7 +266,7 @@ func TestTransformMultiValueStaysOnOneLine(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := transformer.Transform(ctx, tt.input)
+			result := mustTransform(t, transformer, ctx, tt.input)
 			if result != tt.expected {
 				t.Errorf("Transform() = %q, want %q", result, tt.expected)
 			}
@@ -317,7 +317,7 @@ func TestLocalConfigSPLITFunction(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := transformer.Transform(ctx, tt.input)
+			result := mustTransform(t, transformer, ctx, tt.input)
 			if result != tt.expected {
 				t.Errorf("Expected %q, got %q", tt.expected, result)
 			}
@@ -384,7 +384,7 @@ func TestSpecialCharactersInValues(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := transformer.Transform(ctx, tt.input)
+			result := mustTransform(t, transformer, ctx, tt.input)
 			if result != tt.expected {
 				t.Errorf("Expected %q, got %q", tt.expected, result)
 			}
@@ -417,28 +417,23 @@ func TestNumericBoundaryValues(t *testing.T) {
 		{
 			name:     "Range with 0%",
 			input:    "%%range VAR:zero 0 100%%",
-			expected: "0\n",
+			expected: "0.0\n",
 		},
 		{
 			name:     "Range with 100%",
 			input:    "%%range VAR:hundred 0 100%%",
-			expected: "100\n",
+			expected: "100.0\n",
 		},
 		{
 			name:     "Range with negative value",
 			input:    "%%range VAR:negative 0 100%%",
-			expected: "-50\n", // Negative values are passed through the formula
-		},
-		{
-			name:     "Range with decimal fails Atoi",
-			input:    "%%range VAR:decimal 0 100%%",
-			expected: "\n", // Decimal values fail integer conversion
+			expected: "-50.0\n", // Negative values are passed through the formula
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := transformer.Transform(ctx, tt.input)
+			result := mustTransform(t, transformer, ctx, tt.input)
 			if result != tt.expected {
 				t.Errorf("Expected %q, got %q", tt.expected, result)
 			}
@@ -456,7 +451,7 @@ func TestXformLocalConfig_PerditionLdapSplit_NoURLs(t *testing.T) {
 	})
 	tr := NewTransformer(mock, nil)
 
-	got := tr.Transform(ctx, "@@PERDITION_LDAP_SPLIT plain_server@@")
+	got := mustTransform(t, tr, ctx, "@@PERDITION_LDAP_SPLIT plain_server@@")
 	want := "mailhost.example.com\n"
 	if got != want {
 		t.Errorf("PERDITION_LDAP_SPLIT no urls: got %q, want %q", got, want)
@@ -495,13 +490,17 @@ func TestXformConfigVariable_LookupError(t *testing.T) {
 	}
 }
 
-// TestLookupBooleanValue_LookupError exercises the error branch in lookupBooleanValue.
-func TestLookupBooleanValue_LookupError(t *testing.T) {
+// TestLookupTruth_LookupError: a failed lookup is the legacy None, which is
+// false, and true behind a "!" key (checkConditional negation).
+func TestLookupTruth_LookupError(t *testing.T) {
 	ctx := context.Background()
 	tr := NewTransformer(&errorConfigLookup{}, nil)
 
-	got := tr.lookupBooleanValue(ctx, "VAR", "missingkey")
-	if got != "" {
-		t.Errorf("expected empty string on lookup error, got %q", got)
+	if tr.lookupTruth(ctx, "VAR", "missingkey") {
+		t.Error("missing key must be false")
+	}
+
+	if !tr.lookupTruth(ctx, "VAR", "!missingkey") {
+		t.Error("negated missing key must be true")
 	}
 }

@@ -83,7 +83,7 @@ func bootstrapDependencies(
 		ServiceManager: serviceManager,
 		State:          appState,
 		ConfigLookup: func(key string) string {
-			if val, exists := appState.LocalConfig.Data.Get(key); exists {
+			if val, exists := appState.GetLocalConfig().Data.Get(key); exists {
 				return val
 			}
 
@@ -95,7 +95,8 @@ func bootstrapDependencies(
 }
 
 // bootstrapSystemd initializes systemd integration: signal handlers and watchdog keep-alive.
-// Returns a cancel function that should be called on shutdown.
+// Returns the buffered channel that signal handlers and network rewrite requests use to
+// wake the main loop for a configuration reload.
 func bootstrapSystemd(
 	ctx context.Context,
 	appState *state.State,
@@ -103,7 +104,7 @@ func bootstrapSystemd(
 	notifier *sdnotify.Notifier,
 ) chan struct{} {
 	reloadChan := make(chan struct{}, 1)
-	SetupSignalHandler(appState, cancel, reloadChan, notifier)
+	SetupSignalHandler(ctx, appState, cancel, reloadChan, notifier)
 
 	// Start systemd watchdog keep-alive goroutine if WATCHDOG_USEC is set.
 	// Pings at half the interval so we stay well within the WatchdogSec deadline.

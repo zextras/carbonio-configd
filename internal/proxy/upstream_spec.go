@@ -236,7 +236,7 @@ func selectByServices(byHost map[string]map[string]string, services []string) ma
 
 // getServerAttrsByHostname returns all servers indexed by zimbraServiceHostname,
 // with their full attribute maps. Result is cached on the upstream cache.
-func (g *Generator) getServerAttrsByHostname(_ context.Context) (map[string]map[string]string, error) {
+func (g *Generator) getServerAttrsByHostname(ctx context.Context) (map[string]map[string]string, error) {
 	if g.upstreamCache != nil && g.upstreamCache.serverAttrsByHost != nil {
 		return g.upstreamCache.serverAttrsByHost, nil
 	}
@@ -250,16 +250,7 @@ func (g *Generator) getServerAttrsByHostname(_ context.Context) (map[string]map[
 		return nil, fmt.Errorf("failed to query LDAP servers: %w", err)
 	}
 
-	byHost := make(map[string]map[string]string, len(serversMap))
-
-	for cn, attrs := range serversMap {
-		host := attrs[zimbraServiceHostnameAttr]
-		if host == "" {
-			host = cn
-		}
-
-		byHost[host] = attrs
-	}
+	byHost := indexServersByHost(ctx, serversMap)
 
 	if g.upstreamCache != nil {
 		g.upstreamCache.serverAttrsByHost = byHost
@@ -300,6 +291,31 @@ func (g *Generator) resolveUpstreamPortAttr(spec *upstreamSpec) string {
 	}
 
 	return spec.portAttrDefault
+}
+
+// indexServersByHost indexes servers by zimbraServiceHostname (falling back to
+// the cn). The host is spliced into "server host:port;" upstream and memcache
+// directives, so entries whose host is not a plain host token are skipped.
+func indexServersByHost(ctx context.Context, serversMap map[string]map[string]string) map[string]map[string]string {
+	byHost := make(map[string]map[string]string, len(serversMap))
+
+	for cn, attrs := range serversMap {
+		host := attrs[zimbraServiceHostnameAttr]
+		if host == "" {
+			host = cn
+		}
+
+		if !validHostToken(host) {
+			logger.ErrorContext(ctx, "Skipping server with unsafe hostname",
+				"hostname", truncateForLog(host))
+
+			continue
+		}
+
+		byHost[host] = attrs
+	}
+
+	return byHost
 }
 
 // serverHostname returns the server's zimbraServiceHostname.

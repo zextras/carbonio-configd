@@ -46,7 +46,10 @@ func TestResolveEditKeyValue_TableDriven(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			key, val := resolveEditKeyValue(tt.arg, tt.random)
+			key, val, err := resolveEditKeyValue(tt.arg, tt.random)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
 			if key != tt.wantKey {
 				t.Errorf("key = %q, want %q", key, tt.wantKey)
 			}
@@ -58,7 +61,10 @@ func TestResolveEditKeyValue_TableDriven(t *testing.T) {
 }
 
 func TestResolveEditKeyValue_Random(t *testing.T) {
-	key, val := resolveEditKeyValue("my_password", true)
+	key, val, err := resolveEditKeyValue("my_password", true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if key != "my_password" {
 		t.Errorf("key = %q, want %q", key, "my_password")
 	}
@@ -107,49 +113,41 @@ func TestLocalconfigCmd_Fields(t *testing.T) {
 	}
 }
 
-func TestApplyFilters_ShowDefaults_ReturnsNonEmpty(t *testing.T) {
+func TestSelectValues_ShowDefaults_ReturnsNonEmpty(t *testing.T) {
 	config := map[string]string{"custom_key": "custom_val"}
-	defaults := applyFilters(config, &localconfigOpts{showDefaults: true})
+
+	defaults := (&localconfigOpts{showDefaults: true}).selectValues(config)
 	if len(defaults) == 0 {
 		t.Error("expected non-empty defaults map")
 	}
+
 	if _, ok := defaults["custom_key"]; ok {
 		t.Error("defaults should not contain custom_key")
 	}
 }
 
-func TestApplyFilters_ShowChanged_ExcludesUnchanged(t *testing.T) {
-	config := map[string]string{
-		"custom_key": "custom_val",
-	}
+func TestSelectValues_ShowChanged_IncludesConfiguredUnknown(t *testing.T) {
+	config := map[string]string{"custom_key": "custom_val"}
 
-	changed := applyFilters(config, &localconfigOpts{showChanged: true})
+	changed := (&localconfigOpts{showChanged: true}).selectValues(config)
 	if changed["custom_key"] != "custom_val" {
 		t.Errorf("expected custom_key in changed set, got %v", changed)
 	}
 }
 
-func TestApplyFilters_NoFlags_ReturnsSameMap(t *testing.T) {
+func TestSelectValues_NoFlags_ReturnsConfiguredOverDefaults(t *testing.T) {
 	config := map[string]string{"a": "1", "b": "2"}
-	result := applyFilters(config, &localconfigOpts{})
-	if len(result) != len(config) {
-		t.Errorf("expected same map, got %d keys", len(result))
+
+	result := (&localconfigOpts{}).selectValues(config)
+	if result["a"] != "1" || result["b"] != "2" || len(result) < len(config) {
+		t.Errorf("unexpected result: %d keys", len(result))
 	}
 }
 
-func TestFilterKeys_EmptyConfig(t *testing.T) {
-	config := map[string]string{}
-	filtered := filterKeys(config, &localconfigOpts{keys: []string{"missing"}, quiet: true})
+func TestSelectValues_EmptyConfigMissingKey(t *testing.T) {
+	filtered := (&localconfigOpts{keys: []string{"missing"}, quiet: true}).selectValues(map[string]string{})
 	if len(filtered) != 0 {
 		t.Errorf("expected 0 keys from empty config, got %d", len(filtered))
-	}
-}
-
-func TestFilterKeys_NoKeysFilter_ReturnsAll(t *testing.T) {
-	config := map[string]string{"x": "1", "y": "2"}
-	filtered := filterKeys(config, &localconfigOpts{})
-	if len(filtered) != 2 {
-		t.Errorf("expected 2 keys, got %d", len(filtered))
 	}
 }
 
@@ -158,10 +156,14 @@ func TestWriteOutput_XMLFormat(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	writeOutput(map[string]string{"test_key": "test_val"}, &localconfigOpts{mode: "xml"})
+	err := writeOutput(map[string]string{"test_key": "test_val"}, &localconfigOpts{mode: "xml"})
 
 	w.Close()
 	os.Stdout = old
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	var buf bytes.Buffer
 	_, _ = buf.ReadFrom(r)

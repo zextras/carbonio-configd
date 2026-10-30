@@ -12,14 +12,20 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/zextras/carbonio-configd/internal/fileutil"
 	"github.com/zextras/carbonio-configd/internal/ldap"
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/redact"
 	"github.com/zextras/carbonio-configd/internal/state"
 	"github.com/zextras/carbonio-configd/internal/tracing"
 )
+
+// postconfKeyRe matches Postfix parameter names. Every key in the legacy
+// configd.cf is [A-Za-z0-9_]+ (mixed case occurs, e.g. lmtp_tls_CAfile).
+var postconfKeyRe = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
 
 // executor implements the Executor interface.
 type executor struct {
@@ -100,7 +106,7 @@ func (e *executor) ExecutePostconfBatch(ctx context.Context, ops []PostconfOpera
 		ops[i].Value = strings.Join(cleanLines, ", ")
 		logger.DebugContext(ctx, "Normalized multi-line value",
 			"key", ops[i].Key,
-			"value", ops[i].Value)
+			"value", redact.ForLog(ops[i].Key, ops[i].Value))
 	}
 
 	// Build arguments: postconf -e "key1=value1" "key2=value2" ...
@@ -108,12 +114,23 @@ func (e *executor) ExecutePostconfBatch(ctx context.Context, ops []PostconfOpera
 	args = append(args, "-e")
 
 	for _, op := range ops {
+		if !postconfKeyRe.MatchString(op.Key) {
+			logger.WarnContext(ctx, "Skipping postconf operation with invalid key",
+				"key", op.Key)
+
+			continue
+		}
+
 		arg := fmt.Sprintf("%s=%s", op.Key, op.Value)
 		args = append(args, arg)
 
 		logger.DebugContext(ctx, "Queued postconf operation",
 			"key", op.Key,
-			"value", op.Value)
+			"value", redact.ForLog(op.Key, op.Value))
+	}
+
+	if len(args) == 1 {
+		return nil
 	}
 
 	//nolint:gosec // G204: Command from trusted data
@@ -326,7 +343,7 @@ func (e *executor) ExecuteLdapWrite(ctx context.Context, op LdapOperation) error
 
 	logger.DebugContext(ctx, "Executing LDAP write",
 		"key", op.Key,
-		"value", op.Value)
+		"value", redact.ForLog(op.Key, op.Value))
 
 	// Use the existing LDAP manager's ModifyAttribute method
 	// The ldap package already has the keymap and handles DN/attr mapping internally
@@ -336,7 +353,7 @@ func (e *executor) ExecuteLdapWrite(ctx context.Context, op LdapOperation) error
 
 	logger.InfoContext(ctx, "LDAP attribute set",
 		"key", op.Key,
-		"value", op.Value)
+		"value", redact.ForLog(op.Key, op.Value))
 
 	return nil
 }

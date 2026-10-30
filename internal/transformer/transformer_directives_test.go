@@ -9,6 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/zextras/carbonio-configd/internal/state"
 	"github.com/zextras/carbonio-configd/internal/testutil"
 )
@@ -48,7 +51,7 @@ func TestTransformCommentDirective(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := transformer.Transform(ctx, tt.input)
+			result := mustTransform(t, transformer, ctx, tt.input)
 			if result != tt.expected {
 				t.Errorf("Transform() = %q, want %q", result, tt.expected)
 			}
@@ -81,7 +84,7 @@ func TestTransformListDirective(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := transformer.Transform(ctx, tt.input)
+			result := mustTransform(t, transformer, ctx, tt.input)
 			if result != tt.expected {
 				t.Errorf("Transform() = %q, want %q", result, tt.expected)
 			}
@@ -119,7 +122,7 @@ func TestTransformBinaryDirective(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := transformer.Transform(ctx, tt.input)
+			result := mustTransform(t, transformer, ctx, tt.input)
 			if result != tt.expected {
 				t.Errorf("Transform() = %q, want %q", result, tt.expected)
 			}
@@ -157,7 +160,7 @@ func TestTransformTrueFalseDirective(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := transformer.Transform(ctx, tt.input)
+			result := mustTransform(t, transformer, ctx, tt.input)
 			if result != tt.expected {
 				t.Errorf("Transform() = %q, want %q", result, tt.expected)
 			}
@@ -195,7 +198,7 @@ func TestTransformContainsDirective(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := transformer.Transform(ctx, tt.input)
+			result := mustTransform(t, transformer, ctx, tt.input)
 			if result != tt.expected {
 				t.Errorf("Transform() = %q, want %q", result, tt.expected)
 			}
@@ -233,7 +236,7 @@ func TestTransformExactDirective(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := transformer.Transform(ctx, tt.input)
+			result := mustTransform(t, transformer, ctx, tt.input)
 			if result != tt.expected {
 				t.Errorf("Transform() = %q, want %q", result, tt.expected)
 			}
@@ -258,12 +261,12 @@ func TestTransformRangeDirective(t *testing.T) {
 		{
 			name:     "Range calculation at 50%",
 			input:    "workers = %%range VAR:zimbraThreadPoolPercentage 10 100%%",
-			expected: "workers = 55\n", // (50/100) * (100-10) + 10 = 0.5 * 90 + 10 = 55
+			expected: "workers = 55.0\n", // Python 2 str(float); (50/100) * (100-10) + 10 = 0.5 * 90 + 10 = 55
 		},
 		{
 			name:     "Range calculation at 80%",
 			input:    "workers = %%range VAR:zimbraMaxThreads 20 200%%",
-			expected: "workers = 164\n", // (80/100) * (200-20) + 20 = 0.8 * 180 + 20 = 164
+			expected: "workers = 164.0\n", // Python 2 str(float); (80/100) * (200-20) + 20 = 0.8 * 180 + 20 = 164
 		},
 	}
 
@@ -272,7 +275,7 @@ func TestTransformRangeDirective(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := transformer.Transform(ctx, tt.input)
+			result := mustTransform(t, transformer, ctx, tt.input)
 			if result != tt.expected {
 				t.Errorf("Transform() = %q, want %q", result, tt.expected)
 			}
@@ -323,7 +326,7 @@ func TestTransformFreqDirective(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := transformer.Transform(ctx, tt.input)
+			result := mustTransform(t, transformer, ctx, tt.input)
 			if result != tt.expected {
 				t.Errorf("Transform() = %q, want %q", result, tt.expected)
 			}
@@ -356,7 +359,7 @@ func TestTransformExplodeDirective(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := transformer.Transform(ctx, tt.input)
+			result := mustTransform(t, transformer, ctx, tt.input)
 			if result != tt.expected {
 				t.Errorf("Transform() = %q, want %q", result, tt.expected)
 			}
@@ -400,7 +403,7 @@ func TestTransformUncommentDirective(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := transformer.Transform(ctx, tt.input)
+			result := mustTransform(t, transformer, ctx, tt.input)
 			if result != tt.expected {
 				t.Errorf("Transform() = %q, want %q", result, tt.expected)
 			}
@@ -433,14 +436,26 @@ func TestTransformCommentDirectiveWithValSet(t *testing.T) {
 			expected: "log.level = DEBUG\n",
 		},
 		{
-			name:     "Uncomment when value not in set",
+			// Legacy state.py: uncomment with a value set leaves the line active
+			// when the value is listed and comments it otherwise.
+			name:     "Uncomment adds comment when value not in set",
 			input:    "%%uncomment VAR:zimbraAuthMethod,#,basic,oauth%%auth = ldap",
+			expected: "#auth = ldap\n",
+		},
+		{
+			name:     "Uncomment when value in set",
+			input:    "%%uncomment VAR:zimbraAuthMethod,#,ldap,kerberos%%auth = ldap",
 			expected: "auth = ldap\n",
 		},
 		{
-			name:     "Uncomment adds comment when value in set",
-			input:    "%%uncomment VAR:zimbraAuthMethod,#,ldap,kerberos%%auth = ldap",
-			expected: "#auth = ldap\n",
+			name:     "Uncomment when value is the second listed value",
+			input:    "%%uncomment VAR:zimbraAuthMethod,#,kerberos,ldap%%auth = ldap",
+			expected: "auth = ldap\n",
+		},
+		{
+			name:     "Comment when value is the third listed value",
+			input:    "%%comment VAR:zimbraLogLevel,#,info,warn,debug%%log.level = DEBUG",
+			expected: "#log.level = DEBUG\n",
 		},
 	}
 
@@ -449,7 +464,7 @@ func TestTransformCommentDirectiveWithValSet(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := transformer.Transform(ctx, tt.input)
+			result := mustTransform(t, transformer, ctx, tt.input)
 			if result != tt.expected {
 				t.Errorf("Transform() = %q, want %q", result, tt.expected)
 			}
@@ -484,28 +499,8 @@ func TestInvalidDirectiveFormats(t *testing.T) {
 		},
 		// Invalid directive formats
 		{
-			name:     "Binary missing config",
-			input:    "%%binary%%",
-			expected: "\n",
-		},
-		{
-			name:     "Truefalse missing config",
-			input:    "%%truefalse%%",
-			expected: "\n",
-		},
-		{
 			name:     "List missing separator",
 			input:    "%%list VAR:test%%",
-			expected: "\n",
-		},
-		{
-			name:     "List invalid config format",
-			input:    "%%list invalidconfig |%%",
-			expected: "\n",
-		},
-		{
-			name:     "Contains missing parts",
-			input:    "%%contains VAR:test%%",
 			expected: "\n",
 		},
 		{
@@ -513,26 +508,11 @@ func TestInvalidDirectiveFormats(t *testing.T) {
 			input:    "%%exact VAR:test%%",
 			expected: "\n",
 		},
-		{
-			name:     "Range missing values",
-			input:    "%%range VAR:test%%",
-			expected: "\n",
-		},
-		{
-			name:     "Freq missing total",
-			input:    "%%freq VAR:test%%",
-			expected: "\n",
-		},
-		{
-			name:     "Explode missing config",
-			input:    "%%explode basestring%%",
-			expected: "\n",
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := transformer.Transform(ctx, tt.input)
+			result := mustTransform(t, transformer, ctx, tt.input)
 			if result != tt.expected {
 				t.Errorf("Expected %q, got %q", tt.expected, result)
 			}
@@ -579,7 +559,7 @@ func TestExplodeDirectiveRealWorld(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := transformer.Transform(ctx, tt.input)
+			result := mustTransform(t, transformer, ctx, tt.input)
 			if result != tt.expected {
 				t.Errorf("Expected %q, got %q", tt.expected, result)
 			}
@@ -635,7 +615,7 @@ func TestExactDirectiveRealWorld(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := transformer.Transform(ctx, tt.input)
+			result := mustTransform(t, transformer, ctx, tt.input)
 			if result != tt.expected {
 				t.Errorf("Expected %q, got %q", tt.expected, result)
 			}
@@ -691,7 +671,7 @@ func TestContainsDirectiveEdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := transformer.Transform(ctx, tt.input)
+			result := mustTransform(t, transformer, ctx, tt.input)
 			if result != tt.expected {
 				t.Errorf("Expected %q, got %q", tt.expected, result)
 			}
@@ -748,7 +728,7 @@ func TestListDirectiveEdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := transformer.Transform(ctx, tt.input)
+			result := mustTransform(t, transformer, ctx, tt.input)
 			if result != tt.expected {
 				t.Errorf("Expected %q, got %q", tt.expected, result)
 			}
@@ -777,11 +757,6 @@ func TestFreqDirectiveEdgeCases(t *testing.T) {
 		expected string
 	}{
 		{
-			name:     "Freq invalid format returns total",
-			input:    "%%freq VAR:invalid 3600%%",
-			expected: "3600\n",
-		},
-		{
 			name:     "Freq zero minutes returns total",
 			input:    "%%freq VAR:zero_minutes 7200%%",
 			expected: "7200\n",
@@ -795,7 +770,7 @@ func TestFreqDirectiveEdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := transformer.Transform(ctx, tt.input)
+			result := mustTransform(t, transformer, ctx, tt.input)
 			if result != tt.expected {
 				t.Errorf("Expected %q, got %q", tt.expected, result)
 			}
@@ -833,20 +808,30 @@ func TestValSetDirective(t *testing.T) {
 			expected: "log_level = debug\n",
 		},
 		{
-			name:     "Uncomment when value not in valset",
+			name:     "Uncomment adds comment when value not in valset",
 			input:    "%%uncomment VAR:mode,#,development,staging%%mode = production",
+			expected: "#mode = production\n",
+		},
+		{
+			name:     "Uncomment when value in valset",
+			input:    "%%uncomment VAR:mode,#,production,testing%%mode = production",
 			expected: "mode = production\n",
 		},
 		{
-			name:     "Uncomment adds comment when value in valset",
-			input:    "%%uncomment VAR:mode,#,production,testing%%mode = production",
+			name:     "Comment when key missing with valset",
+			input:    "%%comment VAR:absent,#,x,y%%mode = production",
 			expected: "#mode = production\n",
+		},
+		{
+			name:     "Uncomment when key missing with valset",
+			input:    "%%uncomment VAR:absent,#,x,y%%mode = production",
+			expected: "mode = production\n",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := transformer.Transform(ctx, tt.input)
+			result := mustTransform(t, transformer, ctx, tt.input)
 			if result != tt.expected {
 				t.Errorf("Expected %q, got %q", tt.expected, result)
 			}
@@ -856,138 +841,68 @@ func TestValSetDirective(t *testing.T) {
 
 // === DIRECTIVE HANDLER TESTS ===
 
-// TestHandleRangeDirective_LookupError exercises the lookup error branch.
-func TestHandleRangeDirective_LookupError(t *testing.T) {
-	ctx := context.Background()
-	tr := NewTransformer(&errorConfigLookup{}, nil)
-
-	got := tr.handleRangeDirective(ctx, "range VAR:missingkey 0 100")
-	if got != "" {
-		t.Errorf("expected empty string on range lookup error, got %q", got)
+// TestDirectiveHandlers_LookupFailure covers a key that is missing from the
+// lookup (legacy None) for every directive: contains/exact/list/explode/comment
+// render per legacy None semantics, range/freq raise (int(None)/re.sub(None)).
+func TestDirectiveHandlers_LookupFailure(t *testing.T) {
+	tests := []struct {
+		name    string
+		call    func(*Transformer, context.Context) (string, error)
+		want    string
+		wantErr bool
+	}{
+		{"range raises", func(tr *Transformer, ctx context.Context) (string, error) {
+			return tr.handleRangeDirective(ctx, "range VAR:missingkey 0 100")
+		}, "", true},
+		{"freq raises", func(tr *Transformer, ctx context.Context) (string, error) {
+			return tr.handleFreqDirective(ctx, "freq VAR:missingkey 3600")
+		}, "", true},
+		{"list renders empty", func(tr *Transformer, ctx context.Context) (string, error) {
+			return tr.handleListDirective(ctx, "list VAR:missingkey |")
+		}, "", false},
+		{"contains searches str(None)", func(tr *Transformer, ctx context.Context) (string, error) {
+			return tr.handleContainsDirective(ctx, "contains VAR:missingkey search^yes^no")
+		}, "no", false},
+		{"exact returns empty", func(tr *Transformer, ctx context.Context) (string, error) {
+			return tr.handleExactDirective(ctx, "exact VAR:missingkey word^yes^no")
+		}, "", false},
+		{"explode renders empty", func(tr *Transformer, ctx context.Context) (string, error) {
+			return tr.handleExplodeDirective(ctx, "explode base VAR:missingkey")
+		}, "", false},
+		{"comment is false", func(tr *Transformer, ctx context.Context) (string, error) {
+			return tr.handleCommentDirective(ctx, "comment VAR:anykey")
+		}, "", false},
+		{"uncomment is false", func(tr *Transformer, ctx context.Context) (string, error) {
+			return tr.handleUncommentDirective(ctx, "uncomment VAR:anykey")
+		}, "#", false},
 	}
-}
 
-// TestHandleListDirective_LookupError exercises the lookup error branch.
-func TestHandleListDirective_LookupError(t *testing.T) {
-	ctx := context.Background()
-	tr := NewTransformer(&errorConfigLookup{}, nil)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tr := NewTransformer(&errorConfigLookup{}, nil)
 
-	got := tr.handleListDirective(ctx, "list VAR:missingkey |")
-	if got != "" {
-		t.Errorf("expected empty string on list lookup error, got %q", got)
-	}
-}
+			got, err := tt.call(tr, context.Background())
+			if tt.wantErr {
+				require.ErrorIs(t, err, ErrTransform)
 
-// TestHandleContainsDirective_LookupError exercises the lookup error branch.
-func TestHandleContainsDirective_LookupError(t *testing.T) {
-	ctx := context.Background()
-	tr := NewTransformer(&errorConfigLookup{}, nil)
+				return
+			}
 
-	got := tr.handleContainsDirective(ctx, "contains VAR:missingkey search^yes^no")
-	if got != "" {
-		t.Errorf("expected empty string on contains lookup error, got %q", got)
-	}
-}
-
-// TestHandleContainsDirective_InvalidCfgTypeKey exercises the invalid type:key branch.
-func TestHandleContainsDirective_InvalidCfgTypeKey(t *testing.T) {
-	ctx := context.Background()
-	tr := NewTransformer(newMockLookup(), nil)
-
-	got := tr.handleContainsDirective(ctx, "contains nokeyformat search^yes^no")
-	if got != "" {
-		t.Errorf("expected empty string for invalid contains config key, got %q", got)
-	}
-}
-
-// TestHandleExactDirective_LookupError exercises the lookup error branch.
-func TestHandleExactDirective_LookupError(t *testing.T) {
-	ctx := context.Background()
-	tr := NewTransformer(&errorConfigLookup{}, nil)
-
-	got := tr.handleExactDirective(ctx, "exact VAR:missingkey word^yes^no")
-	if got != "" {
-		t.Errorf("expected empty string on exact lookup error, got %q", got)
-	}
-}
-
-// TestHandleExactDirective_InvalidCfgTypeKey exercises the invalid type:key branch.
-func TestHandleExactDirective_InvalidCfgTypeKey(t *testing.T) {
-	ctx := context.Background()
-	tr := NewTransformer(newMockLookup(), nil)
-
-	got := tr.handleExactDirective(ctx, "exact nokeyformat word^yes^no")
-	if got != "" {
-		t.Errorf("expected empty string for invalid exact config key, got %q", got)
-	}
-}
-
-// TestHandleFreqDirective_LookupError exercises the lookup error branch.
-func TestHandleFreqDirective_LookupError(t *testing.T) {
-	ctx := context.Background()
-	tr := NewTransformer(&errorConfigLookup{}, nil)
-
-	got := tr.handleFreqDirective(ctx, "freq VAR:missingkey 3600")
-	if got != "" {
-		t.Errorf("expected empty string on freq lookup error, got %q", got)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
 	}
 }
 
 // TestHandleFreqDirective_ValIntLessThanOne exercises the val<1 clamp branch.
 func TestHandleFreqDirective_ValIntLessThanOne(t *testing.T) {
-	ctx := context.Background()
 	mock := testutil.NewMockConfigLookupWithData(map[string]map[string]string{
 		"VAR": {"bigInterval": "100h"},
 	})
-	tr := NewTransformer(mock, nil)
 
-	got := tr.handleFreqDirective(ctx, "freq VAR:bigInterval 3")
-	if got != "1" {
-		t.Errorf("expected freq clamp to 1, got %q", got)
-	}
-}
-
-// TestHandleExplodeDirective_LookupError exercises the lookup error branch.
-func TestHandleExplodeDirective_LookupError(t *testing.T) {
-	ctx := context.Background()
-	tr := NewTransformer(&errorConfigLookup{}, nil)
-
-	got := tr.handleExplodeDirective(ctx, "explode base VAR:missingkey")
-	if got != "" {
-		t.Errorf("expected empty string on explode lookup error, got %q", got)
-	}
-}
-
-// TestResolveCommentState_InvalidFormat exercises the len(matches)<3 branch.
-func TestResolveCommentState_InvalidFormat(t *testing.T) {
-	ctx := context.Background()
-	tr := NewTransformer(newMockLookup(), nil)
-
-	got := tr.handleCommentDirective(ctx, "comment")
-	if got != "" {
-		t.Errorf("expected empty string for invalid comment format, got %q", got)
-	}
-
-	got = tr.handleUncommentDirective(ctx, "uncomment")
-	if got != "" {
-		t.Errorf("expected empty string for invalid uncomment format, got %q", got)
-	}
-}
-
-// TestResolveCommentState_LookupError exercises the err!=nil branch in resolveCommentState.
-func TestResolveCommentState_LookupError(t *testing.T) {
-	ctx := context.Background()
-	tr := NewTransformer(&errorConfigLookup{}, nil)
-
-	got := tr.handleCommentDirective(ctx, "comment VAR:anykey")
-	if got != "" {
-		t.Errorf("expected empty string when comment lookup fails (FALSE path), got %q", got)
-	}
-
-	got = tr.handleUncommentDirective(ctx, "uncomment VAR:anykey")
-	if got != "#" {
-		t.Errorf("expected \"#\" when uncomment lookup fails (empty=false path), got %q", got)
-	}
+	got, err := NewTransformer(mock, nil).handleFreqDirective(context.Background(), "freq VAR:bigInterval 3")
+	require.NoError(t, err)
+	assert.Equal(t, "1", got)
 }
 
 // TestResolveCommentState_NegateWithValSet exercises the negate + valSet branch.
@@ -998,14 +913,16 @@ func TestResolveCommentState_NegateWithValSet(t *testing.T) {
 	})
 	tr := NewTransformer(mock, nil)
 
-	got := tr.Transform(ctx, "%%comment VAR:!level,#,debug,trace%%line content")
+	got := mustTransform(t, tr, ctx, "%%comment VAR:!level,#,debug,trace%%line content")
 	want := "line content\n"
 	if got != want {
 		t.Errorf("negate+valset match: got %q, want %q", got, want)
 	}
 
-	got = tr.Transform(ctx, "%%comment VAR:!level,#,info,warn%%line content")
-	want = "#line content\n"
+	// Legacy: "!key" yields a Python bool, which is never in the string value set,
+	// so comment gets "" and uncomment gets the comment string.
+	got = mustTransform(t, tr, ctx, "%%comment VAR:!level,#,info,warn%%line content")
+	want = "line content\n"
 	if got != want {
 		t.Errorf("negate+valset no-match: got %q, want %q", got, want)
 	}
@@ -1022,13 +939,13 @@ func TestResolveCommentState_NegateNoValSet_Uncomment(t *testing.T) {
 	})
 	tr := NewTransformer(mock, nil)
 
-	got := tr.Transform(ctx, "%%uncomment VAR:!enabled%%content")
+	got := mustTransform(t, tr, ctx, "%%uncomment VAR:!enabled%%content")
 	want := "#content\n"
 	if got != want {
 		t.Errorf("uncomment negate TRUE: got %q, want %q", got, want)
 	}
 
-	got = tr.Transform(ctx, "%%uncomment VAR:!disabled%%content")
+	got = mustTransform(t, tr, ctx, "%%uncomment VAR:!disabled%%content")
 	want = "content\n"
 	if got != want {
 		t.Errorf("uncomment negate FALSE: got %q, want %q", got, want)
@@ -1046,13 +963,13 @@ func TestResolveCommentState_NegateNoValSet_Comment(t *testing.T) {
 	})
 	tr := NewTransformer(mock, nil)
 
-	got := tr.Transform(ctx, "%%comment VAR:!enabled%%content")
+	got := mustTransform(t, tr, ctx, "%%comment VAR:!enabled%%content")
 	want := "content\n"
 	if got != want {
 		t.Errorf("comment negate TRUE: got %q, want %q", got, want)
 	}
 
-	got = tr.Transform(ctx, "%%comment VAR:!disabled%%content")
+	got = mustTransform(t, tr, ctx, "%%comment VAR:!disabled%%content")
 	want = "#content\n"
 	if got != want {
 		t.Errorf("comment negate FALSE: got %q, want %q", got, want)
@@ -1064,9 +981,9 @@ func TestProcessPrefixDirective_NoClosingDelimiter(t *testing.T) {
 	ctx := context.Background()
 	tr := NewTransformer(newMockLookup(), nil)
 
-	result, handled := tr.processPrefixDirective(ctx, "%%comment VAR:key_no_close")
-	if handled {
-		t.Errorf("expected handled=false when no closing %%%%, got true")
+	result, err := tr.processPrefixDirective(ctx, "%%comment VAR:key_no_close")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if result != "%%comment VAR:key_no_close" {
 		t.Errorf("expected original line returned, got %q", result)
@@ -1136,7 +1053,7 @@ func TestProcessWrappingDirective_ContainsWithEmbeddedVar(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tr := NewTransformer(testutil.NewMockConfigLookupWithData(tt.data), st)
-			got := tr.Transform(ctx, tt.input)
+			got := mustTransform(t, tr, ctx, tt.input)
 			if tt.want != "" && got != tt.want {
 				t.Errorf("got %q, want %q", got, tt.want)
 			}
@@ -1192,7 +1109,7 @@ func TestProcessWrappingDirective_ExactWithEmbeddedVar(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tr := NewTransformer(testutil.NewMockConfigLookupWithData(tt.data), st)
-			got := tr.Transform(ctx, input)
+			got := mustTransform(t, tr, ctx, input)
 			if got != tt.want {
 				t.Errorf("got %q, want %q", got, tt.want)
 			}
@@ -1214,7 +1131,7 @@ func TestProcessInlineDirectives_Explode(t *testing.T) {
 	}
 	tr := NewTransformer(testutil.NewMockConfigLookupWithData(data), st)
 
-	got := tr.Transform(ctx, "prefix: %%explode upstream VAR:zimbraUpstreamServer%% suffix")
+	got := mustTransform(t, tr, ctx, "prefix: %%explode upstream VAR:zimbraUpstreamServer%% suffix")
 	want := "prefix: upstream server1 suffix\n"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)

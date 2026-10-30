@@ -88,40 +88,7 @@ var (
 	// has failed with a transport or protocol error and must not be reused.
 	// Callers can detect this class via errors.Is.
 	ErrLDAPUnhealthyConnection = errors.New("ldap: unhealthy connection")
-
-	// ErrLDAPParse is the sentinel for malformed LDAP command output lines.
-	// Wrap it with additional context (operation, line) for callers to
-	// classify via errors.Is.
-	ErrLDAPParse = errors.New("ldap: parse error")
 )
-
-// ParseError describes a malformed input line encountered by a loader or
-// parser. It wraps a sentinel via Unwrap so callers can use errors.Is to
-// detect parse-category failures while still accessing structured details.
-type ParseError struct {
-	Op   string // operation / source (e.g. "ldap command output")
-	Line int    // 1-based input line number if available, 0 otherwise
-	Msg  string // human-readable description of the malformed input
-	Err  error  // underlying sentinel, typically ErrLDAPParse
-}
-
-func (e *ParseError) Error() string {
-	if e.Line > 0 {
-		return fmt.Sprintf("%s: %s at line %d: %v", e.Op, e.Msg, e.Line, e.Err)
-	}
-
-	return fmt.Sprintf("%s: %s: %v", e.Op, e.Msg, e.Err)
-}
-
-// Unwrap exposes the underlying sentinel so callers can use errors.Is.
-func (e *ParseError) Unwrap() error {
-	return e.Err
-}
-
-// NewLDAPParseError creates a ParseError wrapping ErrLDAPParse.
-func NewLDAPParseError(op string, line int, msg string) error {
-	return &ParseError{Op: op, Line: line, Msg: msg, Err: ErrLDAPParse}
-}
 
 // Common error constructors
 

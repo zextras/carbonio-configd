@@ -13,11 +13,3 @@ type ProfilingArgs struct{}
 func (p *ProfilingArgs) applyTo(_ *Args) {
 	// no-op: profiling disabled at build time
 }
-
-// hasProfilingEnabled returns false when profiling support is not compiled in.
-// This function is used by conditional help text generation.
-//
-//nolint:unused // Used conditionally via build tags
-func hasProfilingEnabled() bool {
-	return false
-}

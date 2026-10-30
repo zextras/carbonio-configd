@@ -7,6 +7,7 @@ package proxy
 import (
 	"context"
 	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/config/configtest"
 	"github.com/zextras/carbonio-configd/internal/ldap"
 	"os"
 	"path/filepath"
@@ -32,7 +33,7 @@ func TestValidateAllRealTemplates(t *testing.T) {
 
 	// Create comprehensive test configuration
 	localCfg := &config.LocalConfig{
-		Data: config.NewConfigMapFrom(map[string]string{
+		Data: configtest.NewConfigMapFrom(map[string]string{
 			"zimbraIPMode":                             "both",
 			"zimbraReverseProxyAdminIPAddress":         "127.0.0.1",
 			"zimbraReverseProxyHttpEnabled":            "TRUE",
@@ -58,7 +59,7 @@ func TestValidateAllRealTemplates(t *testing.T) {
 	}
 
 	globalCfg := &config.GlobalConfig{
-		Data: config.NewConfigMapFrom(map[string]string{
+		Data: configtest.NewConfigMapFrom(map[string]string{
 			"zimbraReverseProxyHttpEnabled":            "TRUE",
 			"zimbraReverseProxyMailEnabled":            "TRUE",
 			"zimbraReverseProxyDefaultRealm":           "example.com",
@@ -73,7 +74,7 @@ func TestValidateAllRealTemplates(t *testing.T) {
 	}
 
 	serverCfg := &config.ServerConfig{
-		Data: config.NewConfigMapFrom(map[string]string{
+		Data: configtest.NewConfigMapFrom(map[string]string{
 			"zimbraServiceEnabled":           "imapd pop3d",
 			"zimbraServiceHostname":          "mail.example.com",
 			"zimbraMailPort":                 "8080",
@@ -83,7 +84,7 @@ func TestValidateAllRealTemplates(t *testing.T) {
 			"zimbraSSLCertificate":           "/opt/zextras/conf/nginx.crt",
 			"zimbraSSLPrivateKey":            "/opt/zextras/conf/nginx.key",
 		}),
-		ServiceConfig: config.NewConfigMapFrom(map[string]string{
+		ServiceConfig: configtest.NewConfigMapFrom(map[string]string{
 			"imapd": "enabled",
 			"pop3d": "enabled",
 		}),

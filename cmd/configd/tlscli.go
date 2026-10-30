@@ -7,6 +7,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	carboldap "github.com/zextras/carbonio-configd/internal/ldap"
@@ -77,10 +78,8 @@ func (c *TLSCmd) Run(cli *CLI) error {
 		ForcedConfigs:   rewriteConfigs,
 	}
 
-	fmt.Printf(
-		"Rewriting config files for %s...\n",
-		joinWithCommas(rewriteConfigs),
-	)
+	// Legacy tlsctl.sh prints this fixed text (no newline) before "done.".
+	fmt.Print("Rewriting config files for cyrus-sasl, webxml, mailboxd, service, zimbraUI, and zimbraAdmin...")
 
 	handleForcedConfigs(ctx, args, appState)
 
@@ -113,10 +112,12 @@ func applyMailMode(lc map[string]string, hostname string, mode configtls.Mode, f
 		}
 	}
 
-	fmt.Printf("Setting zimbraMailMode=%s on %s...\n", mode, hostname)
+	fmt.Printf("Attempting to set ldap config zimbraMailMode %s on host %s...", mode, hostname)
 
 	if err := configtls.SetMailMode(client, hostname, mode); err != nil {
+		fmt.Println("failed.")
 		fmt.Fprintf(os.Stderr, errFmt, err)
+
 		return fmt.Errorf("set mail mode: %w", err)
 	}
 
@@ -157,13 +158,17 @@ func validateAgainstProxies(client *carboldap.Client, hostname string, mode conf
 		return nil
 	}
 
-	// Validate against each candidate proxy until one succeeds — mirrors the
+	// Validate against the first proxy whose settings can be read — mirrors the
 	// legacy script, which broke out of its loop on the first proxy that
-	// produced both attributes. Differences here: we accept the first proxy
-	// whose settings we can read AND whose cross-constraints are satisfied.
+	// produced both attributes. Unreadable proxies are skipped; the first
+	// readable one decides: a constraint violation there is final and later
+	// proxies are not consulted.
 	var lastErr error
 
 	for _, proxy := range proxies {
+		fmt.Printf("Attempting to query proxy (%s) settings for zimbraReverseProxyMailMode "+
+			"and zimbraReverseProxySSLToUpstreamEnabled.\n", proxy)
+
 		settings, err := configtls.ReadProxySettings(client, proxy)
 		if err != nil {
 			lastErr = err
@@ -172,8 +177,8 @@ func validateAgainstProxies(client *carboldap.Client, hostname string, mode conf
 		}
 
 		fmt.Printf(
-			"Proxy %s: zimbraReverseProxyMailMode=%s, zimbraReverseProxySSLToUpstreamEnabled=%t\n",
-			proxy, settings.MailMode, settings.SSLToUpstreamTrue,
+			"On proxy (%s): zimbraReverseProxyMailMode='%s', zimbraReverseProxySSLToUpstreamEnabled='%s'\n",
+			proxy, settings.MailMode, strings.ToUpper(strconv.FormatBool(settings.SSLToUpstreamTrue)),
 		)
 
 		if err := configtls.ValidateMode(mode, settings); err != nil {
@@ -188,9 +193,4 @@ func validateAgainstProxies(client *carboldap.Client, hostname string, mode conf
 	}
 
 	return nil
-}
-
-// joinWithCommas is a small helper used in user-facing messages.
-func joinWithCommas(items []string) string {
-	return strings.Join(items, ", ")
 }

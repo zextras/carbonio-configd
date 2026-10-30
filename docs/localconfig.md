@@ -40,6 +40,45 @@ To add or change a default, edit the `lcDefaults` map in
 `internal/localconfig/lcdefaults.go` to match the corresponding `KnownKey` entry in
 `LC.java` exactly.
 
+## CLI behavior (legacy `LocalConfigCLI` parity)
+
+Source: `cmd/configd/localconfig*.go`. Reference: carbonio-mailbox `4.36.6`
+`LocalConfigCLI.java`, `LocalConfig.java`, `ConfigWriter.java`.
+
+- Dispatch order, like legacy: `-i`, `--all` (no config needed), then the config file is loaded,
+  then `-e`, `-u`, `-p`, `-l`, and finally printing.
+- A missing or unreadable config file only warns
+  (``Warning: local config file `<path>' is not readable``) and counts as empty, so `-e` creates
+  it; a malformed one is fatal (`Warning: Problem parsing local config file '<path>'`,
+  `Error: failed when reading config file`, then the parse error on a third line). A failed save
+  prints `Error: save to <path> failed` and the cause on the next line.
+- Legacy long option names (`--config`, `--path`, `--default`, `--changed`, `--show`, `--format`, ...)
+  are Kong aliases of the flags; the names Kong derived earlier (`--config-path`, `--mode`, ...) still work.
+- `-u <key>` drops the entry from the file (a known key then falls back to its default; `""` is
+  never written). A known key that is not in the file is a successful no-op; an unknown unset key
+  is `key <key> is not set`.
+- `-n` (legacy `printChanged`) lists the keys configured in the file (or the keys given), sorted,
+  and drops a known key whose *expanded configured* value equals its *raw* compiled-in default; a
+  default containing `${...}` therefore always counts as changed. A listed key with no value
+  warns `null valued key '<key>'`; `-d` warns `not a known key '<key>'` and plain print warns
+  `null valued key '<key>'`.
+- `-e`/`-u` validate every argument first and write once (`SetKeys`/`RemoveKeys`): a
+  protected key without `-f`, a malformed `key=value` or an unset key leaves the file untouched.
+- Errors go to stderr as `Error: <message>` (legacy `Logging.error`), exit status 1; `-q`
+  silences the message, not the status. Messages: `can not edit key <key>`,
+  `argument '<arg>' not in key=value form`, `insufficient arguments`, `key <key> is not set`,
+  `failed to create writer <mode>` (checked by the print branch, before the compatibility check),
+  `option 'X' can not be used with option 'Y'`, `invalid option 'X'`.
+- `-i`/`--all` print `internal/localconfig/lcdocs.go`: the `ZsMsg.properties` text of every
+  `KnownKey` (80-column wrap, `* Changes are in effect after server restart.` unless
+  `@Reloadable`). `-i` hides keys without LC.java `@Supported`. `lcdocs.go` is generated: run
+  `go generate ./internal/localconfig/` (`scripts/gen-lcdocs.py`, reads `LC.java` and
+  `store/conf/msgs/ZsMsg.properties` from a carbonio-mailbox clone at the release tag) when either changes.
+- `-l` authenticates with `zimbra_ldap_user`/`zimbra_ldap_password` and sends
+  `ReloadLocalConfigRequest` to `https://${zimbra_zmprov_default_soap_server}:${zimbra_admin_service_port}`
+  (read from the default `localconfig.xml`, not from `-c`). A refused connection prints
+  `'mailbox' service is not running`.
+
 ## Variable interpolation
 
 Source: `internal/localconfig/resolve.go` (`Interpolate`)

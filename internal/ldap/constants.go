@@ -9,14 +9,19 @@ const (
 	AttrZimbraServiceEnabled           = "zimbraServiceEnabled"
 	AttrZimbraReverseProxyLookupTarget = "zimbraReverseProxyLookupTarget"
 	attrZimbraDomainName               = "zimbraDomainName"
-	keyLDAPCommonLoglevel            = "ldap_common_loglevel"
-	keyLDAPCommonThreads             = "ldap_common_threads"
-	keyLDAPCommonToolthreads         = "ldap_common_toolthreads"
-	keyLDAPCommonRequireTLS          = "ldap_common_require_tls"
-	keyLDAPDBMaxsize                 = "ldap_db_maxsize"
-	keyLDAPDBEnvflags                = "ldap_db_envflags"
-	keyLDAPAccesslogMaxsize          = "ldap_accesslog_maxsize"
-	keyLDAPOverlaySyncprovCheckpoint = "ldap_overlay_syncprov_checkpoint"
+
+	// AttrZimbraReverseProxyClientCertMode and AttrZimbraReverseProxyClientCertCA
+	// are the per-domain client certificate attributes read by the proxy.
+	AttrZimbraReverseProxyClientCertMode = "zimbraReverseProxyClientCertMode"
+	AttrZimbraReverseProxyClientCertCA   = "zimbraReverseProxyClientCertCA"
+	keyLDAPCommonLoglevel                = "ldap_common_loglevel"
+	keyLDAPCommonThreads                 = "ldap_common_threads"
+	keyLDAPCommonToolthreads             = "ldap_common_toolthreads"
+	keyLDAPCommonRequireTLS              = "ldap_common_require_tls"
+	keyLDAPDBMaxsize                     = "ldap_db_maxsize"
+	keyLDAPDBEnvflags                    = "ldap_db_envflags"
+	keyLDAPAccesslogMaxsize              = "ldap_accesslog_maxsize"
+	keyLDAPOverlaySyncprovCheckpoint     = "ldap_overlay_syncprov_checkpoint"
 )
 
 // OpenLDAP cn=config attribute names and DNs reused across the schema map.

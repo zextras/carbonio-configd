@@ -30,7 +30,7 @@ func TestBuildReverseProxyBackends(t *testing.T) {
 					zimbraReverseProxyLookupTargetAttr: "TRUE",
 					zimbraMailModeAttr:                 "http",
 					zimbraMailPortAttr:                 "8080",
-					zimbraMailSSLPortAttr:               "8443",
+					zimbraMailSSLPortAttr:              "8443",
 				},
 			},
 			expected: []UpstreamServer{
@@ -57,7 +57,7 @@ func TestBuildReverseProxyBackends(t *testing.T) {
 					zimbraReverseProxyLookupTargetAttr: "TRUE",
 					zimbraMailModeAttr:                 "https",
 					zimbraMailPortAttr:                 "8080",
-					zimbraMailSSLPortAttr:               "8443",
+					zimbraMailSSLPortAttr:              "8443",
 				},
 			},
 			expected: []UpstreamServer{
@@ -72,7 +72,7 @@ func TestBuildReverseProxyBackends(t *testing.T) {
 					zimbraReverseProxyLookupTargetAttr: "TRUE",
 					zimbraMailModeAttr:                 "mixed",
 					zimbraMailPortAttr:                 "8080",
-					zimbraMailSSLPortAttr:               "8443",
+					zimbraMailSSLPortAttr:              "8443",
 				},
 			},
 			expected: []UpstreamServer{
@@ -87,7 +87,7 @@ func TestBuildReverseProxyBackends(t *testing.T) {
 					zimbraReverseProxyLookupTargetAttr: "TRUE",
 					zimbraMailModeAttr:                 "both",
 					zimbraMailPortAttr:                 "8080",
-					zimbraMailSSLPortAttr:               "8443",
+					zimbraMailSSLPortAttr:              "8443",
 				},
 			},
 			expected: []UpstreamServer{
@@ -102,7 +102,7 @@ func TestBuildReverseProxyBackends(t *testing.T) {
 					zimbraReverseProxyLookupTargetAttr: "TRUE",
 					zimbraMailModeAttr:                 "http",
 					zimbraMailPortAttr:                 "8080",
-					zimbraMailSSLPortAttr:               "8443",
+					zimbraMailSSLPortAttr:              "8443",
 				},
 				"server2.example.com": {
 					zimbraServiceHostnameAttr:          "server2.example.com",
@@ -115,7 +115,7 @@ func TestBuildReverseProxyBackends(t *testing.T) {
 					zimbraReverseProxyLookupTargetAttr: "TRUE",
 					zimbraMailModeAttr:                 "https",
 					zimbraMailPortAttr:                 "80",
-					zimbraMailSSLPortAttr:               "443",
+					zimbraMailSSLPortAttr:              "443",
 				},
 			},
 			expected: []UpstreamServer{
@@ -491,7 +491,7 @@ func TestGetAllReverseProxyBackendsWithServerAttrsCache(t *testing.T) {
 			zimbraReverseProxyLookupTargetAttr: "TRUE",
 			zimbraMailModeAttr:                 "http",
 			zimbraMailPortAttr:                 "8080",
-			zimbraMailSSLPortAttr:               "8443",
+			zimbraMailSSLPortAttr:              "8443",
 		},
 	}
 

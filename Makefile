@@ -28,7 +28,15 @@ BUILD_FLAGS_PROFILING=-trimpath -tags profiling $(LDFLAGS)
 BUILD_FLAGS_TRACING=-trimpath -tags tracing $(LDFLAGS)
 BUILD_FLAGS_FULL=-trimpath -tags "profiling tracing" $(LDFLAGS)
 
-.PHONY: all build clean test test-integration deps fmt lint help install
+.PHONY: all build clean test test-integration deps fmt lint help install deadcode dup dup-baseline fuzz check reuse thirdparties
+
+# REUSE compliance (same gate as the Jenkins 'REUSE Lint' stage)
+reuse:
+	reuse lint
+
+# Regenerate THIRDPARTIES exactly as the pre-commit hook / Jenkins verify do
+thirdparties:
+	bash .ci/thirdparties/thirdparties-go.sh THIRDPARTIES
 
 # Default target
 all: clean deps fmt lint test build
@@ -174,6 +182,25 @@ benchmark:
 	@echo "Running benchmarks..."
 	$(GOTEST) -bench=. -benchmem ./...
 
+# Local quality checks (not run by CI). Tools are pinned in tools/go.mod.
+# Unreachable code across all profiling/tracing tag combinations
+deadcode:
+	scripts/deadcode-check.sh
+
+# Duplication ratchet (dupl -t 100) against scripts/dup-baseline.json
+dup:
+	scripts/dup-check.sh
+
+dup-baseline:
+	scripts/dup-check.sh --update
+
+# Run every fuzz target for FUZZTIME (default 30s) each
+fuzz:
+	scripts/fuzz.sh
+
+# All local checks: lint, tests with race detector, deadcode, duplication
+check: lint test-race deadcode dup
+
 # Initialize Go module (only run once)
 init-module:
 	@echo "Initializing Go module..."
@@ -235,6 +262,11 @@ help:
 	@echo "  mocks          - Generate mocks"
 	@echo "  security       - Run security scan"
 	@echo "  benchmark      - Run benchmark tests"
+	@echo "  deadcode       - Fail on code no main package reaches (all tag combinations)"
+	@echo "  dup            - Fail when duplication (dupl -t 100) grows past scripts/dup-baseline.json"
+	@echo "  dup-baseline   - Rewrite scripts/dup-baseline.json"
+	@echo "  fuzz           - Run every fuzz target for FUZZTIME (default 30s) each"
+	@echo "  check          - lint, test-race, deadcode, dup (local only, not in CI)"
 	@echo "  update-deps    - Update dependencies"
 	@echo "  verify         - Verify dependencies"
 	@echo "  release        - Create release packages"

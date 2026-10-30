@@ -181,19 +181,22 @@ func TestThreadedStreamServerStartStop(t *testing.T) {
 		t.Fatalf("Failed to start server: %v", err)
 	}
 
-	// Give server time to start
-	time.Sleep(100 * time.Millisecond)
-
-	// Verify server is listening
-	if server.listener == nil {
-		t.Fatal("Server listener is nil after ServeForever")
+	// ServeForever binds the listener before returning, so the server must be
+	// reachable immediately.
+	conn, err := net.DialTimeout("tcp", serverAddr(server), 2*time.Second)
+	if err != nil {
+		t.Fatalf("Server not reachable after ServeForever: %v", err)
 	}
 
-	// Shutdown server
+	conn.Close()
+
 	server.Shutdown(context.Background())
 
-	// Give server time to shutdown
-	time.Sleep(100 * time.Millisecond)
+	// After Shutdown the listener is closed: dialing must fail.
+	if conn, err := net.DialTimeout("tcp", serverAddr(server), 2*time.Second); err == nil {
+		conn.Close()
+		t.Fatal("Server still accepting connections after Shutdown")
+	}
 }
 
 // TestThreadedStreamServerStatusCommand tests STATUS command over network
@@ -208,10 +211,7 @@ func TestThreadedStreamServerStatusCommand(t *testing.T) {
 	defer server.Shutdown(context.Background())
 
 	// Get actual port
-	addr := server.listener.Addr().String()
-
-	// Give server time to start
-	time.Sleep(100 * time.Millisecond)
+	addr := serverAddr(server)
 
 	// Connect to server
 	conn, err := net.Dial("tcp", addr)
@@ -255,8 +255,7 @@ func TestThreadedStreamServerRewriteCommand(t *testing.T) {
 	}
 	defer server.Shutdown(context.Background())
 
-	addr := server.listener.Addr().String()
-	time.Sleep(100 * time.Millisecond)
+	addr := serverAddr(server)
 
 	tests := []struct {
 		name          string
@@ -361,8 +360,7 @@ func TestThreadedStreamServerUnknownCommand(t *testing.T) {
 	}
 	defer server.Shutdown(context.Background())
 
-	addr := server.listener.Addr().String()
-	time.Sleep(100 * time.Millisecond)
+	addr := serverAddr(server)
 
 	// Connect to server
 	conn, err := net.Dial("tcp", addr)
@@ -406,8 +404,7 @@ func TestThreadedStreamServerConcurrentConnections(t *testing.T) {
 	}
 	defer server.Shutdown(context.Background())
 
-	addr := server.listener.Addr().String()
-	time.Sleep(100 * time.Millisecond)
+	addr := serverAddr(server)
 
 	// Number of concurrent connections
 	numConnections := 10
@@ -493,8 +490,7 @@ func TestThreadedStreamServerIPv6(t *testing.T) {
 	}
 	defer server.Shutdown(context.Background())
 
-	addr := server.listener.Addr().String()
-	time.Sleep(100 * time.Millisecond)
+	addr := serverAddr(server)
 
 	// Connect to IPv6 server
 	conn, err := net.Dial("tcp6", addr)
@@ -564,6 +560,7 @@ type errorConn struct {
 	readDone  bool
 	writeFail bool
 	closeFail bool
+	written   strings.Builder
 }
 
 func (e *errorConn) Read(b []byte) (int, error) {
@@ -580,6 +577,7 @@ func (e *errorConn) Write(b []byte) (int, error) {
 	if e.writeFail {
 		return 0, fmt.Errorf("write error")
 	}
+	e.written.Write(b)
 	return len(b), nil
 }
 
@@ -594,34 +592,6 @@ func (e *errorConn) Close() error {
 // fake conn (the embedded net.Conn is nil and would otherwise panic).
 func (e *errorConn) SetReadDeadline(time.Time) error {
 	return nil
-}
-
-// TestHandleConnectionReadError tests the read error path in handleConnection (covers server.go:136-141)
-// Triggered by a connection that is closed before sending a newline-terminated line.
-func TestHandleConnectionReadError(t *testing.T) {
-	handler := &ConfigdRequestHandler{}
-	server := NewThreadedStreamServer("127.0.0.1", 0, false, handler)
-
-	err := server.ServeForever(context.Background())
-	if err != nil {
-		t.Fatalf("Failed to start server: %v", err)
-	}
-	defer server.Shutdown(context.Background())
-
-	addr := server.listener.Addr().String()
-	time.Sleep(50 * time.Millisecond)
-
-	// Connect and immediately close without sending a newline — ReadString will get EOF
-	conn, err := net.Dial("tcp", addr)
-	if err != nil {
-		t.Fatalf("Failed to connect: %v", err)
-	}
-	// Send partial data (no newline) then close
-	_, _ = conn.Write([]byte("STAT"))
-	conn.Close()
-
-	// Give the server goroutine time to handle the error path
-	time.Sleep(100 * time.Millisecond)
 }
 
 // TestHandleConnectionWriteErrorOnEmptyCommand tests write error on the empty-command path (covers server.go:149-152)
@@ -673,8 +643,7 @@ func TestThreadedStreamServerEmptyCommand(t *testing.T) {
 	}
 	defer server.Shutdown(context.Background())
 
-	addr := server.listener.Addr().String()
-	time.Sleep(100 * time.Millisecond)
+	addr := serverAddr(server)
 
 	// Connect to server
 	conn, err := net.Dial("tcp", addr)
@@ -708,21 +677,16 @@ func TestThreadedStreamServerEmptyCommand(t *testing.T) {
 // sends a command line is closed by the read deadline, so a stalled client
 // cannot hold a goroutine open and block graceful shutdown.
 func TestThreadedStreamServerReadTimeout(t *testing.T) {
-	// Shorten the deadline for the duration of this test.
-	orig := connReadTimeout
-	connReadTimeout = 150 * time.Millisecond
-	defer func() { connReadTimeout = orig }()
-
 	handler := &ConfigdRequestHandler{}
 	server := NewThreadedStreamServer("127.0.0.1", 0, false, handler)
+	server.readTimeout = 150 * time.Millisecond
 
 	if err := server.ServeForever(context.Background()); err != nil {
 		t.Fatalf("Failed to start server: %v", err)
 	}
 	defer server.Shutdown(context.Background())
 
-	addr := server.listener.Addr().String()
-	time.Sleep(100 * time.Millisecond)
+	addr := serverAddr(server)
 
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {

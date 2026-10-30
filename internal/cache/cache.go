@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/zextras/carbonio-configd/internal/config"
@@ -26,8 +27,11 @@ import (
 type MemoryCacheEntry struct {
 	Data      any
 	Timestamp time.Time
-	Hash      string
-	TTL       int
+	// Hash is the MD5 of the JSON-encoded Data. Only entries stored by
+	// GetCachedConfigWithChangeDetection carry it; GetCachedConfig leaves it
+	// empty and previousHash derives it on demand.
+	Hash string
+	TTL  int
 }
 
 // ConfigCache represents the pure in-memory configuration caching system.
@@ -40,7 +44,7 @@ type ConfigCache struct {
 	memoryCache    map[string]*MemoryCacheEntry // In-memory cache
 	memoryCacheTTL time.Duration                // TTL for memory cache entries
 	maxMemoryItems int                          // Maximum items in memory cache
-	skipCache      bool                         // Global flag to skip caching
+	skipCache      atomic.Bool                  // Global flag to skip caching (lock-free)
 	stop           chan struct{}                // Closed by Stop() to terminate cleanup goroutine
 	stopOnce       sync.Once                    // Ensures stop is closed only once
 }
@@ -53,9 +57,9 @@ func New(parent context.Context, skipCache bool) *ConfigCache {
 		memoryCache:    make(map[string]*MemoryCacheEntry),
 		memoryCacheTTL: time.Duration(config.CacheTTL) * time.Second, // Use config TTL
 		maxMemoryItems: 20,                                           // Config daemon uses ~4-5 keys
-		skipCache:      skipCache,                                    // Set skipCache during initialization
 		stop:           make(chan struct{}),
 	}
+	cache.skipCache.Store(skipCache)
 
 	// Start cleanup goroutine for memory cache. The goroutine uses a bounded
 	// background context for its own log lines but honors both the parent
@@ -218,10 +222,7 @@ func hashPrefix(hash string) string {
 
 // SetSkipCache sets the skipCache flag
 func (cc *ConfigCache) SetSkipCache(skip bool) {
-	cc.mutex.Lock()
-	defer cc.mutex.Unlock()
-
-	cc.skipCache = skip
+	cc.skipCache.Store(skip)
 }
 
 // GetCachedConfig retrieves configuration with lightning-fast in-memory cache.
@@ -232,13 +233,12 @@ func (cc *ConfigCache) GetCachedConfig(ctx context.Context, key string, fetchFun
 	}
 
 	// Check in-memory cache first
-	if !cc.skipCache {
+	if !cc.skipCache.Load() {
 		if memEntry, found := cc.getFromMemoryCache(key); found {
 			age := time.Since(memEntry.Timestamp).Seconds()
 			logger.DebugContext(ctx, "Memory cache hit",
 				"key", key,
-				"age_seconds", age,
-				"hash_prefix", hashPrefix(memEntry.Hash))
+				"age_seconds", age)
 
 			return memEntry.Data, nil
 		}
@@ -247,25 +247,20 @@ func (cc *ConfigCache) GetCachedConfig(ctx context.Context, key string, fetchFun
 			"key", key)
 	}
 
-	// Fetch fresh data
-	logger.DebugContext(ctx, "Fetching fresh data",
-		"key", key)
-
-	freshData, err := fetchFunc()
+	freshData, err := cc.fetchFresh(ctx, key, fetchFunc)
 	if err != nil {
-		return nil, errs.WrapCache("fetch", key, err)
+		return nil, err
 	}
 
-	// Generate hash for change detection
-	newHash := cc.generateHash(freshData)
-
-	// Store in memory cache
-	if !cc.skipCache {
+	// Store in memory cache. No content hash: this path never reports
+	// change detection, and marshalling + MD5 of every stored value is
+	// measurable on large LDAP result sets. previousHash computes it on
+	// demand for entries stored here.
+	if !cc.skipCache.Load() {
 		logger.DebugContext(ctx, "Data fetched and cached",
-			"key", key,
-			"hash", hashPrefix(newHash))
+			"key", key)
 
-		cc.setMemoryCache(ctx, key, freshData, newHash)
+		cc.setMemoryCache(ctx, key, freshData, "")
 	}
 
 	return freshData, nil
@@ -281,10 +276,14 @@ func (cc *ConfigCache) GetCachedConfigWithChangeDetection(ctx context.Context, k
 		ctx = backgroundCtx()
 	}
 
-	if cc.skipCache {
-		d, ch, _, e := cc.fetchAndCache(ctx, key, fetchFunc)
+	if cc.skipCache.Load() {
+		// Nothing is stored and every fetch counts as changed: no hash needed.
+		d, e := cc.fetchFresh(ctx, key, fetchFunc)
+		if e != nil {
+			return nil, false, e
+		}
 
-		return d, ch, e
+		return d, true, nil
 	}
 
 	if memEntry, found := cc.getFromMemoryCache(key); found {
@@ -305,9 +304,19 @@ func (cc *ConfigCache) GetCachedConfigWithChangeDetection(ctx context.Context, k
 	logger.DebugContext(ctx, "Memory cache miss",
 		"key", key)
 
-	data, _, newHash, err := cc.fetchAndCache(ctx, key, fetchFunc)
+	data, err = cc.fetchFresh(ctx, key, fetchFunc)
 	if err != nil {
 		return nil, false, err
+	}
+
+	newHash := cc.generateHash(data)
+
+	if !cc.skipCache.Load() {
+		logger.DebugContext(ctx, "Data fetched and cached",
+			"key", key,
+			"hash", hashPrefix(newHash))
+
+		cc.setMemoryCache(ctx, key, data, newHash)
 	}
 
 	changed = previousHash == "" || previousHash != newHash
@@ -327,46 +336,45 @@ func (cc *ConfigCache) GetCachedConfigWithChangeDetection(ctx context.Context, k
 
 // previousHash returns the hash of the currently stored cache entry for key,
 // ignoring TTL validity (so hash comparisons survive expiry). Returns empty
-// string when no entry is present.
+// string when no entry is present. Entries stored by GetCachedConfig carry no
+// hash; it is computed here from the stored data, outside the lock.
 func (cc *ConfigCache) previousHash(key string) string {
 	cc.mutex.RLock()
-	defer cc.mutex.RUnlock()
+	entry, ok := cc.memoryCache[key]
 
-	if entry, ok := cc.memoryCache[key]; ok {
-		return entry.Hash
+	var (
+		hash string
+		data any
+	)
+
+	if ok {
+		hash, data = entry.Hash, entry.Data
 	}
 
-	return ""
+	cc.mutex.RUnlock()
+
+	if !ok {
+		return ""
+	}
+
+	if hash != "" {
+		return hash
+	}
+
+	return cc.generateHash(data)
 }
 
-// fetchAndCache is a helper function to fetch and optionally cache data.
-// Returns the freshly computed hash so callers can reuse it instead of
-// re-marshalling the same value.
-func (cc *ConfigCache) fetchAndCache(
-	ctx context.Context,
-	key string,
-	fetchFunc func() (any, error),
-) (data any, changed bool, hash string, err error) {
-	// Fetch fresh data
+// fetchFresh invokes fetchFunc and wraps its failure as a cache error.
+func (cc *ConfigCache) fetchFresh(ctx context.Context, key string, fetchFunc func() (any, error)) (any, error) {
 	logger.DebugContext(ctx, "Fetching fresh data",
 		"key", key)
 
 	freshData, err := fetchFunc()
 	if err != nil {
-		return nil, false, "", errs.WrapCache("fetch", key, err)
+		return nil, errs.WrapCache("fetch", key, err)
 	}
 
-	// Generate hash and store in cache
-	newHash := cc.generateHash(freshData)
-	if !cc.skipCache {
-		logger.DebugContext(ctx, "Data fetched and cached",
-			"key", key,
-			"hash", hashPrefix(newHash))
-
-		cc.setMemoryCache(ctx, key, freshData, newHash)
-	}
-
-	return freshData, true, newHash, nil // New data, so it's considered "changed"
+	return freshData, nil
 }
 
 // ClearCache removes all memory cache entries
