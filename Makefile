@@ -28,7 +28,7 @@ BUILD_FLAGS_PROFILING=-trimpath -tags profiling $(LDFLAGS)
 BUILD_FLAGS_TRACING=-trimpath -tags tracing $(LDFLAGS)
 BUILD_FLAGS_FULL=-trimpath -tags "profiling tracing" $(LDFLAGS)
 
-.PHONY: all build clean test test-integration deps fmt lint help install deadcode dup dup-baseline fuzz check reuse thirdparties generate generate-check
+.PHONY: all build clean test test-integration test-integration-ldap deps fmt lint help install deadcode dup dup-baseline fuzz check reuse thirdparties generate generate-check
 
 # REUSE compliance (same gate as the Jenkins 'REUSE Lint' stage)
 reuse:
@@ -102,6 +102,16 @@ test-race:
 test-integration:
 	@echo "Running integration tests..."
 	$(GOTEST) -v -tags integration ./...
+
+# Self-contained LDAP integration suite: configd loaders, plan and Execute against
+# an OpenLDAP container (needs docker or podman, plus network for the alpine image
+# and its slapd packages; skips when no container runtime is reachable). With podman
+# and no DOCKER_HOST, the rootless podman socket is used when present.
+test-integration-ldap:
+	@echo "Running LDAP container integration tests..."
+	@sock="$${XDG_RUNTIME_DIR:-/run/user/$$(id -u)}/podman/podman.sock"; \
+	if [ -z "$$DOCKER_HOST" ] && [ -S "$$sock" ]; then export DOCKER_HOST="unix://$$sock"; fi; \
+	$(GOTEST) -v -count=1 -tags integration -run '^TestOpenLDAP_' ./internal/configmgr
 
 # Run tests with coverage (all build tag combinations merged)
 test-coverage:
@@ -264,6 +274,7 @@ help:
 	@echo "  clean          - Clean build artifacts"
 	@echo "  test           - Run unit tests"
 	@echo "  test-integration - Run integration tests (requires live environment)"
+	@echo "  test-integration-ldap - Run the OpenLDAP container integration suite (docker/podman)"
 	@echo "  test-coverage  - Run tests with coverage report"
 	@echo "  deps           - Download dependencies"
 	@echo "  fmt            - Format code"
