@@ -6,6 +6,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -24,6 +25,10 @@ const (
 	serviceCliComponent = "service-cli"
 	errUnknownService   = "unknown service: %s"
 )
+
+// systemctlBin is the absolute systemctl path (no PATH lookup). Variable so
+// tests can substitute a stub.
+var systemctlBin = "/usr/bin/systemctl"
 
 // NoRewrite disables config rewriting before service start.
 var NoRewrite bool
@@ -342,7 +347,12 @@ func ServiceStatus(ctx context.Context, name string) (bool, error) {
 	if IsSystemdMode() || def.UseSystemdForStatus {
 		for _, unit := range def.SystemdUnits {
 			if err := Systemctl(ctx, "is-active", unit); err != nil {
-				return false, nil //nolint:nilerr // not-active is not an error
+				var exitErr *exec.ExitError
+				if errors.As(err, &exitErr) || errors.Is(err, ErrSystemdNotBooted) {
+					return false, nil // non-zero exit: unit inactive/failed/unknown
+				}
+
+				return false, fmt.Errorf("systemctl is-active %s: %w", unit, err)
 			}
 		}
 
@@ -434,10 +444,14 @@ func pidFromProcessName(processName string) int {
 // ServiceListStatusStream emits ServiceInfo entries on the returned channel
 // as each service's probe completes, allowing callers to render rows
 // incrementally without waiting for the full scan to finish. The channel is
-// closed when all services have been probed.
+// closed when all services have been probed. The legacy-mode ProcessName
+// probes share a single /proc snapshot taken at the first one.
 func ServiceListStatusStream(ctx context.Context) <-chan ServiceInfo {
 	names := AllServiceNames()
 	ch := make(chan ServiceInfo, len(names))
+
+	// One /proc walk serves every ProcessName probe of this listing.
+	ctx = WithProcessSnapshot(ctx)
 
 	go func() {
 		defer close(ch)
@@ -563,7 +577,8 @@ func Systemctl(ctx context.Context, action, unit string) error {
 		return ErrSystemdNotBooted
 	}
 
-	cmd := exec.CommandContext(ctx, "systemctl", action, unit)
+	// #nosec G204 — fixed binary path; action/unit come from the internal registry
+	cmd := exec.CommandContext(ctx, systemctlBin, action, unit)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {

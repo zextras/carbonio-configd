@@ -118,6 +118,16 @@ func remoteExec(ctx context.Context, host, action, service, successMsg string) e
 	return nil
 }
 
+// withDefaultSSHPort returns host unchanged when it already carries a port and
+// otherwise appends port 22, bracketing bare IPv6 literals as needed.
+func withDefaultSSHPort(host string) string {
+	if _, _, err := net.SplitHostPort(host); err == nil {
+		return host
+	}
+
+	return net.JoinHostPort(strings.Trim(host, "[]"), "22")
+}
+
 // sshConnect establishes an SSH connection to the remote host using zextras user's SSH key.
 func sshConnect(host string) (*ssh.Client, error) {
 	homeDir := os.Getenv("HOME")
@@ -157,12 +167,7 @@ func sshConnect(host string) (*ssh.Client, error) {
 		Timeout:         10 * time.Second,
 	}
 
-	// Add default SSH port if not specified
-	if !strings.Contains(host, ":") {
-		host = net.JoinHostPort(host, "22")
-	}
-
-	client, err := ssh.Dial("tcp", host, sshConfig)
+	client, err := ssh.Dial("tcp", withDefaultSSHPort(host), sshConfig)
 	if err != nil {
 		return nil, fmt.Errorf("SSH dial failed: %w", err)
 	}

@@ -129,4 +129,8 @@ So when an antivirus config change is detected, the restart sequence can expand 
 antivirus → amavis → mta (reloaded, not restarted) → opendkim.
 
 Failed restarts are retried up to `MaxFailedRestarts` times (default: 3). After that the
-service is removed from the queue and processing continues.
+service is removed from the queue and processing continues. `ProcessRestarts` then returns an
+error wrapping `ErrRestartsFailed` that lists, sorted by name, every service that was dropped or
+left queued without progress. The watchdog logs that as a failed restart and leaves the service
+untracked until a later status check sees it running (legacy parity); configmgr logs it at ERROR.
+Services with equal start order (including all those missing from `StartOrder`) restart in name order.

@@ -6,6 +6,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"testing"
 )
 
@@ -368,8 +369,8 @@ func TestProcessRestarts_FailedServiceWithNoProgress(t *testing.T) {
 	// Process restarts - should fail once and then break the loop because no progress is made
 	// The service stays in the queue because it hasn't reached MaxFailedRestarts yet
 	err := sm.ProcessRestarts(context.Background(), nil)
-	if err != nil {
-		t.Errorf("ProcessRestarts() returned error: %v", err)
+	if !errors.Is(err, ErrRestartsFailed) {
+		t.Errorf("ProcessRestarts() error = %v, want ErrRestartsFailed", err)
 	}
 
 	// Service should still be in queue (didn't reach MaxFailedRestarts)
@@ -397,8 +398,8 @@ func TestProcessRestarts_MultipleServicesOneSucceeds(t *testing.T) {
 
 	// Process restarts - both will fail on first attempt, loop breaks on no progress
 	err := sm.ProcessRestarts(context.Background(), nil)
-	if err != nil {
-		t.Errorf("ProcessRestarts() returned error: %v", err)
+	if !errors.Is(err, ErrRestartsFailed) {
+		t.Errorf("ProcessRestarts() error = %v, want ErrRestartsFailed", err)
 	}
 
 	// Both services should still be in queue

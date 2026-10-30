@@ -56,6 +56,7 @@ type Manager interface {
 	// ProcessRestarts processes all queued service restarts with dependency cascading.
 	// Handles dependency ordering and retry logic.
 	// The configLookup function is used to check if dependent services are enabled (SERVICE_* keys).
+	// Returns an error wrapping ErrRestartsFailed when any service could not be restarted.
 	ProcessRestarts(ctx context.Context, configLookup func(string) string) error
 
 	// ClearRestarts clears all queued restarts.

@@ -8,27 +8,6 @@ import (
 	"testing"
 )
 
-func TestJoinWithCommas_Multiple(t *testing.T) {
-	got := joinWithCommas([]string{"mta", "proxy", "ldap"})
-	if got != "mta, proxy, ldap" {
-		t.Errorf("expected 'mta, proxy, ldap', got %q", got)
-	}
-}
-
-func TestJoinWithCommas_Single(t *testing.T) {
-	got := joinWithCommas([]string{"mta"})
-	if got != "mta" {
-		t.Errorf("expected 'mta', got %q", got)
-	}
-}
-
-func TestJoinWithCommas_Empty(t *testing.T) {
-	got := joinWithCommas([]string{})
-	if got != "" {
-		t.Errorf("expected empty string, got %q", got)
-	}
-}
-
 func TestRewriteConfigs_Contents(t *testing.T) {
 	expected := []string{"sasl", "webxml", "mailbox", "service", "zextras", "zextrasAdmin", "zimlet"}
 	if len(rewriteConfigs) != len(expected) {

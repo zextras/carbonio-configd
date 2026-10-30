@@ -6,6 +6,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -58,6 +59,37 @@ func TestWritePostfixLDAPConfig_WritesFiles(t *testing.T) {
 		if !strings.Contains(string(data), "bind_pw =") {
 			t.Errorf("%s missing bind_pw line", name)
 		}
+	}
+}
+
+func TestWritePostfixLDAPConfig_EnforcesMode0640OnExistingFile(t *testing.T) {
+	tmp := t.TempDir()
+
+	oldConf := confPath
+	confPath = tmp
+	defer func() { confPath = oldConf }()
+
+	existing := filepath.Join(tmp, "ldap-vmm.cf")
+	if err := os.WriteFile(existing, []byte("old"), 0o666); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Chmod(existing, 0o666); err != nil {
+		t.Fatal(err)
+	}
+
+	lc := map[string]string{"ldap_url": "ldap://test", "ldap_port": "389"}
+	if err := writePostfixLDAPConfig(context.Background(), lc); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	info, err := os.Stat(existing)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if info.Mode().Perm() != 0o640 {
+		t.Errorf("ldap-vmm.cf mode = %v, want 0640", info.Mode().Perm())
 	}
 }
 
@@ -166,6 +198,46 @@ func TestBootstrapPostfixMainCf_MissingOwner(t *testing.T) {
 	err := bootstrapPostfixMainCf(context.Background(), lc)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestBootstrapPostfixMainCf_InvalidOwnerGroup(t *testing.T) {
+	for _, tc := range []struct{ owner, group string }{
+		{"-evil", "postdrop"},
+		{"postfix", "a b"},
+		{"postfix", "x=y"},
+		{"Post", "postdrop"},
+		{"postfix", "$(id)"},
+	} {
+		tmp := t.TempDir()
+
+		oldMainCf := mainCfPath
+		mainCfPath = filepath.Join(tmp, "main.cf")
+
+		// A sudo that records any invocation: it must never run.
+		marker := filepath.Join(tmp, "ran")
+		oldSudo := sudoBin
+		sudoBin = filepath.Join(tmp, "sudo")
+
+		if err := os.WriteFile(sudoBin, []byte("#!/bin/sh\ntouch "+marker+"\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		err := bootstrapPostfixMainCf(context.Background(), map[string]string{
+			"postfix_mail_owner":   tc.owner,
+			"postfix_setgid_group": tc.group,
+		})
+
+		mainCfPath = oldMainCf
+		sudoBin = oldSudo
+
+		if !errors.Is(err, errInvalidPostfixAccount) {
+			t.Errorf("%+v: err = %v, want errInvalidPostfixAccount", tc, err)
+		}
+
+		if _, statErr := os.Stat(marker); statErr == nil {
+			t.Errorf("%+v: postconf must not run for invalid names", tc)
+		}
 	}
 }
 

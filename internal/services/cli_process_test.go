@@ -18,6 +18,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 // TestHelperProcess is a re-exec target for TestKillProcess_EscalatesToSIGKILL.
@@ -49,6 +51,17 @@ func (f fakeProcEntry) Name() string               { return f.name }
 func (f fakeProcEntry) IsDir() bool                { return f.isDir }
 func (f fakeProcEntry) Type() os.FileMode          { return 0 }
 func (f fakeProcEntry) Info() (os.FileInfo, error) { return nil, errors.New("not implemented") }
+
+// matchProcEntry composes the production pieces (readProcEntry, matches,
+// isZombie) the way procSnapshot.scan does, for single-entry assertions.
+func matchProcEntry(e os.DirEntry, needle string) (int, bool) {
+	pe, ok := readProcEntry(e)
+	if !ok || !pe.matches(needle) || isZombie(pe.pid) {
+		return 0, false
+	}
+
+	return pe.pid, true
+}
 
 // TestMatchProcEntry_NotDir verifies non-directories are skipped.
 func TestMatchProcEntry_NotDir(t *testing.T) {
@@ -561,21 +574,12 @@ func TestKillProcess_EscalatesToSIGKILL(t *testing.T) {
 		t.Fatal("timeout waiting for helper READY")
 	}
 
-	for range 50 {
-		if isProcessRunning(context.Background(), needle) {
-			break
-		}
-
-		time.Sleep(20 * time.Millisecond)
-	}
-
-	origTimeout := killProcessTimeout
-	killProcessTimeout = 500 * time.Millisecond
-
-	defer func() { killProcessTimeout = origTimeout }()
+	require.Eventually(t, func() bool {
+		return isProcessRunning(context.Background(), needle)
+	}, 5*time.Second, 10*time.Millisecond, "helper never became visible in /proc")
 
 	start := time.Now()
-	if err := killProcess(context.Background(), needle); err != nil {
+	if err := killProcessWithGrace(context.Background(), needle, 500*time.Millisecond); err != nil {
 		t.Fatalf("killProcess returned error: %v", err)
 	}
 
@@ -589,15 +593,9 @@ func TestKillProcess_EscalatesToSIGKILL(t *testing.T) {
 		t.Errorf("killProcess took %v — should have escalated to SIGKILL well under this", elapsed)
 	}
 
-	for range 50 {
-		if !isProcessRunning(context.Background(), needle) {
-			return
-		}
-
-		time.Sleep(20 * time.Millisecond)
-	}
-
-	t.Error("target process survived killProcess — SIGKILL escalation failed")
+	require.Eventually(t, func() bool {
+		return !isProcessRunning(context.Background(), needle)
+	}, 2*time.Second, 10*time.Millisecond, "target process survived killProcess — SIGKILL escalation failed")
 }
 
 // TestProcessAlive_DeadPID verifies processAlive returns false for PIDs that
@@ -767,9 +765,19 @@ func TestScanProcessesByCmdline_ReadError(t *testing.T) {
 	procFSRoot = "/nonexistent-proc-dir-xyzzy/"
 	defer func() { procFSRoot = oldRoot }()
 
-	_, err := scanProcessesByCmdline("test")
-	if err != nil {
-		t.Errorf("scanProcessesByCmdline should handle /proc read errors gracefully, got %v", err)
+	// The scan lists procFSRoot (not a hard-coded /proc), so an unreadable
+	// root surfaces as an error and callers treat it as "nothing found".
+	pids, err := scanProcessesByCmdline("test")
+	if err == nil {
+		t.Error("scanProcessesByCmdline should report an unreadable procFSRoot")
+	}
+
+	if len(pids) != 0 {
+		t.Errorf("expected no pids on read error, got %v", pids)
+	}
+
+	if isProcessRunning(context.Background(), "test") {
+		t.Error("isProcessRunning must report false when procFSRoot is unreadable")
 	}
 }
 
