@@ -16,6 +16,9 @@ import (
 	configtls "github.com/zextras/carbonio-configd/internal/tls"
 )
 
+// errFmt is the "Error: <msg>" stderr line of the legacy CLI tools.
+const errFmt = "Error: %v\n"
+
 // rewriteConfigs is the set of Carbonio configs rewritten after a successful
 // mail-mode change (matches the legacy zmtlsctl script).
 var rewriteConfigs = []string{

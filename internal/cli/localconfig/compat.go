@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-only
 
-package main
+package localconfig
 
 import (
 	"fmt"
@@ -90,7 +90,7 @@ func failf(format string, args ...any) error {
 }
 
 // givenOptions lists, in declaration order, the legacy options present in c.
-func (c *LocalconfigCmd) givenOptions() []string {
+func (c *Options) givenOptions() []string {
 	present := map[string]bool{
 		optConfig:  c.ConfigPath != "",
 		optPath:    c.ShowPath,
