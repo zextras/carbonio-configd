@@ -8,7 +8,9 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/zextras/carbonio-configd/internal/cache"
 	"github.com/zextras/carbonio-configd/internal/config"
@@ -1087,6 +1089,59 @@ func TestDoConfigRewrites_WithPostconfAndLdap(t *testing.T) {
 	}
 	if len(exec.ldapOps) != 1 {
 		t.Errorf("expected 1 ldap op, got %d", len(exec.ldapOps))
+	}
+}
+
+// orderingExecutor records whether postconf started while a mapfile write was
+// still in progress.
+type orderingExecutor struct {
+	mockMtaExecutor
+	postconfStarted chan struct{}
+	overlapped      atomic.Bool
+}
+
+func (o *orderingExecutor) ExecuteMapfile(ctx context.Context, op mtaops.MapfileOperation) error {
+	select {
+	case <-o.postconfStarted:
+		o.overlapped.Store(true)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	return o.mockMtaExecutor.ExecuteMapfile(ctx, op)
+}
+
+func (o *orderingExecutor) ExecutePostconfBatch(ctx context.Context, ops []mtaops.PostconfOperation) error {
+	close(o.postconfStarted)
+
+	return o.mockMtaExecutor.ExecutePostconfBatch(ctx, ops)
+}
+
+// TestDoConfigRewrites_MapfilesBeforeOtherSteps pins the legacy order: mapped
+// files (dhparam.pem) are written before any other step runs, because proxygen
+// and rewrites read them; legacy writes them while compiling actions.
+func TestDoConfigRewrites_MapfilesBeforeOtherSteps(t *testing.T) {
+	cm, _ := newTestCMWithExecutor(t)
+	exec := &orderingExecutor{postconfStarted: make(chan struct{})}
+	cm.mtaExecutor = exec
+	cm.State.FirstRun = false
+	cm.State.GlobalConfig.Data.Set(dhParamKey, "ZGF0YQ==")
+	cm.State.MtaConfig.Sections["mta"] = &config.MtaConfigSection{
+		Name:         "mta",
+		Changed:      true,
+		RequiredVars: map[string]string{dhParamKey: configTypeMAPFILE},
+	}
+	cm.State.CurrentActions.Postconf["myhostname"] = "mail.example.com"
+
+	if err := cm.DoConfigRewrites(context.Background()); err != nil {
+		t.Fatalf("DoConfigRewrites: %v", err)
+	}
+
+	if len(exec.mapfileOps) != 1 || len(exec.postconfOps) != 1 {
+		t.Fatalf("ops: mapfile=%d postconf=%d, want 1 and 1", len(exec.mapfileOps), len(exec.postconfOps))
+	}
+
+	if exec.overlapped.Load() {
+		t.Error("postconf started before the mapped file was written")
 	}
 }
 

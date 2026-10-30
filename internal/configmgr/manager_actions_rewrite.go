@@ -28,7 +28,14 @@ func (cm *ConfigManager) DoConfigRewrites(ctx context.Context) error {
 
 	var wg sync.WaitGroup
 
-	errChan := make(chan error, 6) // Buffer matches goroutine count to prevent blocking
+	errChan := make(chan error, 6) // Buffer matches step count to prevent blocking
+
+	// Mapped files first: legacy writes them while compiling actions
+	// (state.py lookUpConfig MAPFILE), before any rewrite, and the other steps
+	// read them: proxygen enables ssl_dhparam only if dhparam.pem exists.
+	if err := cm.doMapfile(ctx); err != nil {
+		errChan <- err
+	}
 
 	// Proxygen takes longest, so launch it first.
 	cm.runStep(ctx, &wg, errChan, func(ctx context.Context) error {
@@ -38,7 +45,6 @@ func (cm *ConfigManager) DoConfigRewrites(ctx context.Context) error {
 	cm.runStep(ctx, &wg, errChan, cm.doPostconf)
 	cm.runStep(ctx, &wg, errChan, cm.doPostconfd)
 	cm.runStep(ctx, &wg, errChan, cm.doLdap)
-	cm.runStep(ctx, &wg, errChan, cm.doMapfile)
 
 	wg.Wait()
 	close(errChan)
