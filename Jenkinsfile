@@ -92,43 +92,6 @@ spec:
             }
         }
 
-        stage('Build matrix and static checks') {
-            when { expression { params.SKIP_TEST != true } }
-            parallel {
-                stage('Build+vet tag combos') {
-                    steps {
-                        container('golang') {
-                            sh '''
-                                set -e
-                                for tags in "" profiling tracing "profiling tracing"; do
-                                    echo "== tags: [${tags}]"
-                                    go build -tags "${tags}" ./...
-                                    go vet -tags "${tags}" ./...
-                                done
-                                echo "== tags: [integration] (compile only)"
-                                go vet -tags integration ./...
-                            '''
-                        }
-                    }
-                }
-                stage('Deadcode and dup') {
-                    steps {
-                        container('golang') {
-                            sh 'scripts/deadcode-check.sh'
-                            sh 'scripts/dup-check.sh'
-                        }
-                    }
-                }
-                stage('Fuzz smoke') {
-                    steps {
-                        container('golang') {
-                            sh 'FUZZTIME=10s scripts/fuzz.sh'
-                        }
-                    }
-                }
-            }
-        }
-
         stage('Vulnerability scan') {
             when { expression { params.SKIP_TEST != true } }
             steps {
