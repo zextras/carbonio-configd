@@ -147,12 +147,32 @@ func (s *State) addOrRetrieveConfig(
 	return configMap[key]
 }
 
+// setConfig unconditionally stores val (newlines converted to spaces).
+func (s *State) setConfig(ctx context.Context, configMap map[string]string, key, val, configType string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	logger.DebugContext(ctx, "Adding "+configType,
+		"key", key,
+		"value", redact.ForLog(key, val))
+
+	configMap[key] = strings.ReplaceAll(val, "\n", " ")
+}
+
 // CurPostconf adds or retrieves a postconf configuration change.
 // If val is non-empty, it is added to the current postconf map with newlines converted to spaces.
 // Returns the current value for the given key.
 func (s *State) CurPostconf(ctx context.Context, key string, val string) string {
 	ctx = logger.ContextWithComponentOnce(ctx, "state")
 	return s.addOrRetrieveConfig(ctx, s.CurrentActions.Postconf, key, val, "postconf")
+}
+
+// SetPostconf records a postconf directive, storing an empty value as well.
+// Legacy curPostconf stores any non-None value, so a bare `POSTCONF key`
+// (empty value) is kept and later reset to empty by postconf -e.
+func (s *State) SetPostconf(ctx context.Context, key, val string) {
+	ctx = logger.ContextWithComponentOnce(ctx, "state")
+	s.setConfig(ctx, s.CurrentActions.Postconf, key, val, "postconf")
 }
 
 // ClearPostconf clears all pending postconf changes.
@@ -169,6 +189,13 @@ func (s *State) ClearPostconf() {
 func (s *State) CurPostconfd(ctx context.Context, key string, val string) string {
 	ctx = logger.ContextWithComponentOnce(ctx, "state")
 	return s.addOrRetrieveConfig(ctx, s.CurrentActions.Postconfd, key, val, "postconfd")
+}
+
+// SetPostconfd records a postconfd directive; see SetPostconf for why empty
+// values are stored.
+func (s *State) SetPostconfd(ctx context.Context, key, val string) {
+	ctx = logger.ContextWithComponentOnce(ctx, "state")
+	s.setConfig(ctx, s.CurrentActions.Postconfd, key, val, "postconfd")
 }
 
 // ClearPostconfd clears all pending postconfd changes.

@@ -171,13 +171,13 @@ func (cm *ConfigManager) compileSectionActions(
 	logger.DebugContext(ctx, "Section changed, compiling postconf", "section", sn)
 
 	for postconfKey, postconfVal := range section.Postconf {
-		cm.State.CurPostconf(ctx, postconfKey, postconfVal)
+		cm.State.SetPostconf(ctx, postconfKey, postconfVal)
 	}
 
 	logger.DebugContext(ctx, "Section changed, compiling postconfd", "section", sn)
 
 	for postconfdKey, postconfdVal := range section.Postconfd {
-		cm.State.CurPostconfd(ctx, postconfdKey, postconfdVal)
+		cm.State.SetPostconfd(ctx, postconfdKey, postconfdVal)
 	}
 
 	if section.Proxygen {

@@ -594,3 +594,26 @@ func TestConfigManager_Comparator(t *testing.T) {
 		t.Fatal("Comparator() returned nil, expected a valid Comparator instance")
 	}
 }
+
+// TestProcessConditionals_EmptyPostconfOverrides mirrors configd.cf's
+// `POSTCONF header_checks VAR ...` followed by a bare `POSTCONF header_checks`
+// inside a true conditional: legacy stores the empty value (jylibs/state.py
+// curPostconf stores any non-None value), so it overrides the earlier one.
+func TestProcessConditionals_EmptyPostconfOverrides(t *testing.T) {
+	cm := newTestConfigManager(t)
+	cm.State.ServerConfig.ServiceConfig.Set("imapd", "TRUE")
+	cm.State.SetPostconf(context.Background(), "header_checks", "VAR:zimbraMtaHeaderChecks")
+
+	cm.processConditionals(context.Background(), []config.Conditional{
+		{
+			Type:     "SERVICE",
+			Key:      "imapd",
+			Postconf: map[string]string{"header_checks": ""},
+		},
+	})
+
+	val, exists := cm.State.CurrentActions.Postconf["header_checks"]
+	if !exists || val != "" {
+		t.Errorf("header_checks = %q (exists=%v), want stored empty value", val, exists)
+	}
+}

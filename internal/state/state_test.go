@@ -1467,3 +1467,23 @@ func TestState_MultipleOperations(t *testing.T) {
 		t.Error("Changed section should trigger rewrite")
 	}
 }
+
+// TestState_SetPostconf_EmptyValue verifies empty values are stored, as in
+// legacy curPostconf/curPostconfd (only None means "retrieve").
+func TestState_SetPostconf_EmptyValue(t *testing.T) {
+	s := NewState()
+	ctx := context.Background()
+
+	s.SetPostconf(ctx, "header_checks", "pcre:/x")
+	s.SetPostconf(ctx, "header_checks", "")
+
+	if v, ok := s.CurrentActions.Postconf["header_checks"]; !ok || v != "" {
+		t.Errorf("postconf = %q ok=%v, want stored empty", v, ok)
+	}
+
+	s.SetPostconfd(ctx, "removed", "")
+
+	if _, ok := s.CurrentActions.Postconfd["removed"]; !ok {
+		t.Error("postconfd empty value not stored")
+	}
+}

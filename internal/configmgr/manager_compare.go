@@ -56,11 +56,11 @@ func (cm *ConfigManager) processConditionals(ctx context.Context, conditionals [
 
 		// Process directives in this conditional block
 		for postconfKey, postconfVal := range cond.Postconf {
-			cm.State.CurPostconf(ctx, postconfKey, postconfVal)
+			cm.State.SetPostconf(ctx, postconfKey, postconfVal)
 		}
 
 		for postconfdKey, postconfdVal := range cond.Postconfd {
-			cm.State.CurPostconfd(ctx, postconfdKey, postconfdVal)
+			cm.State.SetPostconfd(ctx, postconfdKey, postconfdVal)
 		}
 	}
 }

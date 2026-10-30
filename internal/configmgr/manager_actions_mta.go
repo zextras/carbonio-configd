@@ -98,7 +98,7 @@ func (cm *ConfigManager) doPostconf(ctx context.Context) error {
 	cm.State.ClearPostconf()
 
 	for key, valueSpec := range pending {
-		cm.State.CurPostconf(ctx, key, valueSpec)
+		cm.State.SetPostconf(ctx, key, valueSpec)
 	}
 
 	if len(errs) > 0 {
