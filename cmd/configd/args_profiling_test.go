@@ -7,148 +7,90 @@
 package main
 
 import (
-	"flag"
-	"os"
 	"testing"
+
+	"github.com/alecthomas/kong"
 )
 
-// TestParseArgs_CPUProfile tests the -cpuprofile flag (requires profiling build tag)
-func TestParseArgs_CPUProfile(t *testing.T) {
-	oldArgs := os.Args
-	oldCommandLine := flag.CommandLine
-	defer func() {
-		os.Args = oldArgs
-		flag.CommandLine = oldCommandLine
-	}()
+// parseCLIArgs parses argv (without the program name) through the Kong CLI and
+// returns the resulting CLI and its Args conversion. Callers pass a trivial
+// subcommand so that Kong's required-command check is satisfied.
+func parseCLIArgs(t *testing.T, argv ...string) (*CLI, *Args) {
+	t.Helper()
 
-	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
-	os.Args = []string{"configd", "-cpuprofile=cpu.prof"}
+	cli := &CLI{}
 
-	args := ParseArgs()
+	parser, err := kong.New(cli, kong.Vars{"version": "test"})
+	if err != nil {
+		t.Fatalf("kong.New failed: %v", err)
+	}
 
+	if _, err := parser.Parse(argv); err != nil {
+		t.Fatalf("Parse(%v) failed: %v", argv, err)
+	}
+
+	return cli, cli.toArgs()
+}
+
+func TestCLI_CPUProfile(t *testing.T) {
+	_, args := parseCLIArgs(t, "--cpuprofile=cpu.prof", "release")
 	if args.CPUProfile != "cpu.prof" {
 		t.Errorf("Expected CPUProfile='cpu.prof', got %s", args.CPUProfile)
 	}
 }
 
-// TestParseArgs_MemProfile tests the -memprofile flag (requires profiling build tag)
-func TestParseArgs_MemProfile(t *testing.T) {
-	oldArgs := os.Args
-	oldCommandLine := flag.CommandLine
-	defer func() {
-		os.Args = oldArgs
-		flag.CommandLine = oldCommandLine
-	}()
-
-	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
-	os.Args = []string{"configd", "-memprofile=mem.prof"}
-
-	args := ParseArgs()
-
+func TestCLI_MemProfile(t *testing.T) {
+	_, args := parseCLIArgs(t, "--memprofile=mem.prof", "release")
 	if args.MemProfile != "mem.prof" {
 		t.Errorf("Expected MemProfile='mem.prof', got %s", args.MemProfile)
 	}
 }
 
-// TestParseArgs_Trace tests the -trace flag (requires profiling build tag)
-func TestParseArgs_Trace(t *testing.T) {
-	oldArgs := os.Args
-	oldCommandLine := flag.CommandLine
-	defer func() {
-		os.Args = oldArgs
-		flag.CommandLine = oldCommandLine
-	}()
-
-	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
-	os.Args = []string{"configd", "-trace=trace.out"}
-
-	args := ParseArgs()
-
+func TestCLI_Trace(t *testing.T) {
+	_, args := parseCLIArgs(t, "--trace=trace.out", "release")
 	if args.Trace != "trace.out" {
 		t.Errorf("Expected Trace='trace.out', got %s", args.Trace)
 	}
 }
 
-// TestParseArgs_ProfileDuration tests the -profile-duration flag (requires profiling build tag)
-func TestParseArgs_ProfileDuration(t *testing.T) {
-	oldArgs := os.Args
-	oldCommandLine := flag.CommandLine
-	defer func() {
-		os.Args = oldArgs
-		flag.CommandLine = oldCommandLine
-	}()
-
-	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
-	os.Args = []string{"configd", "-profile-duration=30"}
-
-	args := ParseArgs()
-
+func TestCLI_ProfileDuration(t *testing.T) {
+	_, args := parseCLIArgs(t, "--profile-duration=30", "release")
 	if args.ProfileDuration != 30 {
 		t.Errorf("Expected ProfileDuration=30, got %d", args.ProfileDuration)
 	}
 }
 
-// TestParseArgs_EnableTracing tests the -enable-tracing flag (requires tracing build tag)
-func TestParseArgs_EnableTracing(t *testing.T) {
-	oldArgs := os.Args
-	oldCommandLine := flag.CommandLine
-	defer func() {
-		os.Args = oldArgs
-		flag.CommandLine = oldCommandLine
-	}()
+func TestCLI_Once(t *testing.T) {
+	_, args := parseCLIArgs(t, "--once", "release")
+	if !args.Once {
+		t.Error("Once should be true")
+	}
+}
 
-	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
-	os.Args = []string{"configd", "-enable-tracing"}
-
-	args := ParseArgs()
-
+func TestCLI_EnableTracing(t *testing.T) {
+	_, args := parseCLIArgs(t, "--enable-tracing", "release")
 	if !args.EnableTracing {
 		t.Error("EnableTracing should be true")
 	}
 }
 
-// TestParseArgs_TracingOutput tests the -tracing-output flag (requires tracing build tag)
-func TestParseArgs_TracingOutput(t *testing.T) {
-	oldArgs := os.Args
-	oldCommandLine := flag.CommandLine
-	defer func() {
-		os.Args = oldArgs
-		flag.CommandLine = oldCommandLine
-	}()
-
-	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
-	os.Args = []string{"configd", "-tracing-output=custom-trace.json"}
-
-	args := ParseArgs()
-
+func TestCLI_TracingOutput(t *testing.T) {
+	_, args := parseCLIArgs(t, "--tracing-output=custom-trace.json", "release")
 	if args.TracingOutput != "custom-trace.json" {
 		t.Errorf("Expected TracingOutput='custom-trace.json', got %s", args.TracingOutput)
 	}
 }
 
-// TestParseArgs_MultipleFlags_Profiling tests multiple flags including profiling/tracing flags
-func TestParseArgs_MultipleFlags_Profiling(t *testing.T) {
-	oldArgs := os.Args
-	oldCommandLine := flag.CommandLine
-	defer func() {
-		os.Args = oldArgs
-		flag.CommandLine = oldCommandLine
-	}()
-
-	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
-	os.Args = []string{
-		"configd",
-		"-cpuprofile=cpu.prof",
-		"-memprofile=mem.prof",
-		"-profile-duration=60",
-		"-enable-tracing",
-		"-tracing-output=trace.json",
-		"-disable-restarts",
-		"mta",
-		"proxy",
-	}
-
-	args := ParseArgs()
+func TestCLI_MultipleFlags_Profiling(t *testing.T) {
+	_, args := parseCLIArgs(t,
+		"--cpuprofile=cpu.prof",
+		"--memprofile=mem.prof",
+		"--profile-duration=60",
+		"--enable-tracing",
+		"--tracing-output=trace.json",
+		"--disable-restarts",
+		"release",
+	)
 
 	if args.CPUProfile != "cpu.prof" {
 		t.Errorf("Expected CPUProfile='cpu.prof', got %s", args.CPUProfile)
@@ -173,47 +115,22 @@ func TestParseArgs_MultipleFlags_Profiling(t *testing.T) {
 	if !args.DisableRestarts {
 		t.Error("DisableRestarts should be true")
 	}
-
-	expectedConfigs := []string{"mta", "proxy"}
-	if len(args.ForcedConfigs) != len(expectedConfigs) {
-		t.Errorf("Expected %d configs, got %d", len(expectedConfigs), len(args.ForcedConfigs))
-	}
-
-	for i, expected := range expectedConfigs {
-		if args.ForcedConfigs[i] != expected {
-			t.Errorf("Config at %d: expected %s, got %s", i, expected, args.ForcedConfigs[i])
-		}
-	}
 }
 
-// TestParseArgs_Defaults_Profiling tests default values when profiling/tracing are enabled
-func TestParseArgs_Defaults_Profiling(t *testing.T) {
-	oldArgs := os.Args
-	oldCommandLine := flag.CommandLine
-	defer func() {
-		os.Args = oldArgs
-		flag.CommandLine = oldCommandLine
-	}()
+func TestCLI_Defaults_Profiling(t *testing.T) {
+	_, args := parseCLIArgs(t, "release")
 
-	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
-	os.Args = []string{"configd"}
-
-	args := ParseArgs()
-
-	if args.CPUProfile != "" {
-		t.Errorf("CPUProfile should be empty, got %s", args.CPUProfile)
-	}
-
-	if args.MemProfile != "" {
-		t.Errorf("MemProfile should be empty, got %s", args.MemProfile)
-	}
-
-	if args.Trace != "" {
-		t.Errorf("Trace should be empty, got %s", args.Trace)
+	if args.CPUProfile != "" || args.MemProfile != "" || args.Trace != "" {
+		t.Errorf("profile outputs should be empty, got cpu=%q mem=%q trace=%q",
+			args.CPUProfile, args.MemProfile, args.Trace)
 	}
 
 	if args.ProfileDuration != 0 {
 		t.Errorf("ProfileDuration should be 0, got %d", args.ProfileDuration)
+	}
+
+	if args.Once {
+		t.Error("Once should be false by default")
 	}
 
 	if args.EnableTracing {

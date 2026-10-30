@@ -61,3 +61,16 @@ func TestValidateProfilingConfig_Delegation(t *testing.T) {
 		t.Errorf("ValidateProfilingConfig delegation returned unexpected error: %v", err)
 	}
 }
+
+func TestNoopProfiling(t *testing.T) {
+	p := &ProfilingConfig{}
+	if err := StartProfiling(p); err != nil {
+		t.Fatalf("expected nil profiling start error, got %v", err)
+	}
+
+	if err := ValidateProfilingConfig(p); err != nil {
+		t.Fatalf("expected nil profiling validation error, got %v", err)
+	}
+
+	StopProfiling(p)
+}

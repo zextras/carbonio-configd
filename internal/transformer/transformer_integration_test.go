@@ -67,20 +67,18 @@ permit
 `
 
 	// Setup mock config with typical values
-	mock := &mockConfigLookup{
-		data: map[string]map[string]string{
-			"VAR": {
-				"zimbraMtaRestriction": "reject_invalid_helo_hostname reject_non_fqdn_helo_hostname " +
-					"reject_unknown_sender_domain check_client_access lmdb:/opt/zextras/conf/postfix_blacklist " +
-					"check_recipient_access lmdb:/opt/zextras/conf/postfix_recipient_access reject",
-				"zimbraServiceEnabled":         "cbpolicyd antivirus antispam",
-				"zimbraMtaRestrictionRBLs":     "bl.spamcop.net zen.spamhaus.org",
-				"zimbraMtaRestrictionRHSBLCs":  "rhsbl.example.com",
-				"zimbraMtaRestrictionRHSBLRCs": "",
-				"zimbraMtaRestrictionRHSBLSs":  "rhsbl.sender.example.com",
-			},
+	mock := testutil.NewMockConfigLookupWithData(map[string]map[string]string{
+		"VAR": {
+			"zimbraMtaRestriction": "reject_invalid_helo_hostname reject_non_fqdn_helo_hostname " +
+				"reject_unknown_sender_domain check_client_access lmdb:/opt/zextras/conf/postfix_blacklist " +
+				"check_recipient_access lmdb:/opt/zextras/conf/postfix_recipient_access reject",
+			"zimbraServiceEnabled":         "cbpolicyd antivirus antispam",
+			"zimbraMtaRestrictionRBLs":     "bl.spamcop.net zen.spamhaus.org",
+			"zimbraMtaRestrictionRHSBLCs":  "rhsbl.example.com",
+			"zimbraMtaRestrictionRHSBLRCs": "",
+			"zimbraMtaRestrictionRHSBLSs":  "rhsbl.sender.example.com",
 		},
-	}
+	})
 
 	st := &state.State{}
 	transformer := NewTransformer(mock, st)
@@ -160,24 +158,22 @@ $enable_dkim_verification = %%binary VAR:zimbraAmavisEnableDKIMVerification%%;
 `
 
 	// Setup mock config
-	mock := &mockConfigLookup{
-		data: map[string]map[string]string{
-			"VAR": {
-				"carbonioAmavisDisableVirusCheck":    "FALSE",
-				"zimbraAmavisMaxServers":             "5",
-				"zimbraAmavisLogLevel":               "2",
-				"zimbraAmavisEnableDKIMVerification": "TRUE",
-				"zimbraMtaMyNetworks":                "127.0.0.0/8 10.0.0.0/8 172.16.0.0/12",
-			},
-			"SERVICE": {
-				"antispam": "TRUE",
-			},
-			"LOCAL": {
-				"ldap_url":                "ldap://ldap1.example.com:389 ldap://ldap2.example.com:389",
-				"ldap_starttls_supported": "1",
-			},
+	mock := testutil.NewMockConfigLookupWithData(map[string]map[string]string{
+		"VAR": {
+			"carbonioAmavisDisableVirusCheck":    "FALSE",
+			"zimbraAmavisMaxServers":             "5",
+			"zimbraAmavisLogLevel":               "2",
+			"zimbraAmavisEnableDKIMVerification": "TRUE",
+			"zimbraMtaMyNetworks":                "127.0.0.0/8 10.0.0.0/8 172.16.0.0/12",
 		},
-	}
+		"SERVICE": {
+			"antispam": "TRUE",
+		},
+		"LOCAL": {
+			"ldap_url":                "ldap://ldap1.example.com:389 ldap://ldap2.example.com:389",
+			"ldap_starttls_supported": "1",
+		},
+	})
 
 	st := &state.State{}
 	transformer := NewTransformer(mock, st)
@@ -228,19 +224,17 @@ set $mynetworks "%%list VAR:zimbraMtaMyNetworks ,%%";
 `
 
 	// Setup mock config
-	mock := &mockConfigLookup{
-		data: map[string]map[string]string{
-			"VAR": {
-				"zimbraMailHost":                         "mail1.example.com mail2.example.com mail3.example.com",
-				"zimbraMailProxyPort":                    "8080",
-				"zimbraReverseProxySSLToUpstreamEnabled": "TRUE",
-				"zimbraMtaRelayHost":                     "relay.example.com",
-				"zimbraMtaRelayTLS":                      "TRUE",
-				"zimbraMtaMyNetworks":                    "127.0.0.0/8 10.0.0.0/8 172.16.0.0/12",
-				"zimbraMtaRestriction":                   "reject_invalid_hostname permit_mynetworks",
-			},
+	mock := testutil.NewMockConfigLookupWithData(map[string]map[string]string{
+		"VAR": {
+			"zimbraMailHost":                         "mail1.example.com mail2.example.com mail3.example.com",
+			"zimbraMailProxyPort":                    "8080",
+			"zimbraReverseProxySSLToUpstreamEnabled": "TRUE",
+			"zimbraMtaRelayHost":                     "relay.example.com",
+			"zimbraMtaRelayTLS":                      "TRUE",
+			"zimbraMtaMyNetworks":                    "127.0.0.0/8 10.0.0.0/8 172.16.0.0/12",
+			"zimbraMtaRestriction":                   "reject_invalid_hostname permit_mynetworks",
 		},
-	}
+	})
 
 	st := &state.State{}
 	transformer := NewTransformer(mock, st)
@@ -295,18 +289,16 @@ func TestNestedDirectivesIntegration(t *testing.T) {
 `
 
 	// Setup mock config
-	mock := &mockConfigLookup{
-		data: map[string]map[string]string{
-			"VAR": {
-				"enableFeature":  "TRUE",
-				"featureValue":   "enabled_value",
-				"disableFeature": "TRUE",
-				"disabledValue":  "should_be_commented",
-				"binaryFeature":  "TRUE",
-				"binaryOption":   "TRUE",
-			},
+	mock := testutil.NewMockConfigLookupWithData(map[string]map[string]string{
+		"VAR": {
+			"enableFeature":  "TRUE",
+			"featureValue":   "enabled_value",
+			"disableFeature": "TRUE",
+			"disabledValue":  "should_be_commented",
+			"binaryFeature":  "TRUE",
+			"binaryOption":   "TRUE",
 		},
-	}
+	})
 
 	st := &state.State{}
 	transformer := NewTransformer(mock, st)
@@ -361,24 +353,22 @@ set $trusted_nets "%%list VAR:zimbraMtaMyNetworks ,%%";
 `
 
 	// Setup mock config with typical production values
-	mock := &mockConfigLookup{
-		data: map[string]map[string]string{
-			"VAR": {
-				"zimbraMailProxyPort":            "8443",
-				"zimbraReverseProxySSLEnabled":   "TRUE",
-				"zimbraReverseProxySSLProtocols": "TLSv1.2 TLSv1.3",
-				"zimbraMailHost":                 "mail1.prod.example.com mail2.prod.example.com mail3.prod.example.com",
-				"zimbraMtaRestriction":           "reject_invalid_hostname check_policy_service unix:private/policy",
-				"zimbraMtaRestrictionRBLs":       "zen.spamhaus.org bl.spamcop.net dnsbl.sorbs.net",
-				"zimbraDebugMode":                "FALSE",
-				"zimbraProxyCacheEnabled":        "TRUE",
-				"zimbraMtaMyNetworks":            "127.0.0.0/8 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16",
-			},
-			"LOCAL": {
-				"hostname": "mailproxy.prod.example.com",
-			},
+	mock := testutil.NewMockConfigLookupWithData(map[string]map[string]string{
+		"VAR": {
+			"zimbraMailProxyPort":            "8443",
+			"zimbraReverseProxySSLEnabled":   "TRUE",
+			"zimbraReverseProxySSLProtocols": "TLSv1.2 TLSv1.3",
+			"zimbraMailHost":                 "mail1.prod.example.com mail2.prod.example.com mail3.prod.example.com",
+			"zimbraMtaRestriction":           "reject_invalid_hostname check_policy_service unix:private/policy",
+			"zimbraMtaRestrictionRBLs":       "zen.spamhaus.org bl.spamcop.net dnsbl.sorbs.net",
+			"zimbraDebugMode":                "FALSE",
+			"zimbraProxyCacheEnabled":        "TRUE",
+			"zimbraMtaMyNetworks":            "127.0.0.0/8 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16",
 		},
-	}
+		"LOCAL": {
+			"hostname": "mailproxy.prod.example.com",
+		},
+	})
 
 	st := &state.State{}
 	transformer := NewTransformer(mock, st)
@@ -452,15 +442,13 @@ server {
 # End
 `
 
-	mock := &mockConfigLookup{
-		data: map[string]map[string]string{
-			"VAR": {
-				"port":     "8080",
-				"hostname": "example.com",
-				"rbls":     "rbl1.com rbl2.com",
-			},
+	mock := testutil.NewMockConfigLookupWithData(map[string]map[string]string{
+		"VAR": {
+			"port":     "8080",
+			"hostname": "example.com",
+			"rbls":     "rbl1.com rbl2.com",
 		},
-	}
+	})
 
 	st := &state.State{}
 	transformer := NewTransformer(mock, st)

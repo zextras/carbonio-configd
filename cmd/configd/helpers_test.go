@@ -94,26 +94,6 @@ func TestFilterKeys(t *testing.T) {
 	}
 }
 
-func TestNoopProfilingAndTracing(t *testing.T) {
-	p := &ProfilingConfig{}
-	if err := StartProfiling(p); err != nil {
-		t.Fatalf("expected nil profiling start error, got %v", err)
-	}
-	if err := ValidateProfilingConfig(p); err != nil {
-		t.Fatalf("expected nil profiling validation error, got %v", err)
-	}
-	StopProfiling(p)
-
-	tr := &TracingConfig{}
-	if err := ValidateTracingConfig(tr); err != nil {
-		t.Fatalf("expected nil tracing validation error, got %v", err)
-	}
-	if err := StartTracing(tr); err != nil {
-		t.Fatalf("expected nil tracing start error, got %v", err)
-	}
-	StopTracing(tr)
-}
-
 func TestCLIToArgs(t *testing.T) {
 	cli := &CLI{DisableRestarts: true}
 	args := cli.toArgs()
