@@ -45,8 +45,8 @@ func milterJavaArgs(lc map[string]string) []string {
 
 	log4jFile := confPath + "/milter.log4j.properties"
 
-	args := []string{"-client"}
-	args = append(args, strings.Fields(javaOpts)...)
+	args := append(javaPreviewArgs(), "-client")
+	args = append(args, withoutPreviewArgs(strings.Fields(javaOpts))...)
 
 	return append(args,
 		"-Dzimbra.home="+basePath,
