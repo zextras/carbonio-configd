@@ -8,12 +8,14 @@ package template
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/zextras/carbonio-configd/internal/fileutil"
 	"github.com/zextras/carbonio-configd/internal/logger"
@@ -23,6 +25,10 @@ import (
 )
 
 const warnCloseTempFile = "Failed to close temp file"
+
+// ErrPathEscapesBaseDir is returned when a REWRITE source or target is not a
+// local path relative to the rewriter base directory.
+var ErrPathEscapesBaseDir = errors.New("path escapes base directory")
 
 // Rewriter handles template file generation from .in files using REWRITE directives.
 type Rewriter struct {
@@ -70,17 +76,24 @@ func (r *Rewriter) scanAndWrite(ctx context.Context, sourceFile, tmpFile *os.Fil
 }
 
 // atomicReplace chmod-s tmpPath then renames it to targetPath.
-// Falls back to copy+delete when rename crosses filesystems.
+// Falls back to copy+delete only when rename fails with EXDEV.
 func atomicReplace(ctx context.Context, tmpPath, targetPath string, fileMode os.FileMode) error {
 	if err := os.Chmod(tmpPath, fileMode); err != nil {
 		return fmt.Errorf("failed to set file mode %o: %w", fileMode, err)
 	}
 
-	if err := os.Rename(tmpPath, targetPath); err == nil {
+	err := os.Rename(tmpPath, targetPath)
+	if err == nil {
 		return nil
 	}
 
-	logger.DebugContext(ctx, "Rename failed, falling back to copy")
+	// Only a cross-device rename is recoverable by copying; any other error
+	// (EACCES, ENOENT, EISDIR, ...) must surface instead of being retried.
+	if !errors.Is(err, syscall.EXDEV) {
+		return fmt.Errorf("failed to rename temporary file to target: %w", err)
+	}
+
+	logger.DebugContext(ctx, "Rename crossed filesystems, falling back to copy")
 
 	if err := fileutil.CopyFile(ctx, tmpPath, targetPath); err != nil {
 		return fmt.Errorf("failed to copy temporary file to target: %w", err)
@@ -116,9 +129,19 @@ func (r *Rewriter) RewriteConfig(ctx context.Context, source, target, mode strin
 		mode = "0440"
 	}
 
-	fileMode, err := strconv.ParseUint(mode, 8, 32)
+	parsedMode, err := strconv.ParseUint(mode, 8, 32)
 	if err != nil {
 		return fmt.Errorf("invalid file mode %s: %w", mode, err)
+	}
+
+	// Rewritten configs never need setuid/setgid/sticky (no legacy configd.cf
+	// entry uses them); keep permission bits only.
+	fileMode := parsedMode & 0o777
+
+	// Every legacy configd.cf REWRITE path is relative to BaseDir; refuse
+	// anything that would escape it.
+	if !filepath.IsLocal(source) || !filepath.IsLocal(target) {
+		return fmt.Errorf("%w: source=%q target=%q", ErrPathEscapesBaseDir, source, target)
 	}
 
 	sourcePath := filepath.Join(r.BaseDir, source)

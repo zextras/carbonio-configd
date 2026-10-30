@@ -29,7 +29,7 @@ func TestNew(t *testing.T) {
 			t.Fatal("Expected memoryCache to be initialized")
 		}
 
-		if cache.skipCache {
+		if cache.skipCache.Load() {
 			t.Error("Expected skipCache to be false")
 		}
 
@@ -43,7 +43,7 @@ func TestNew(t *testing.T) {
 		cache := New(ctx, true)
 		defer cache.Stop()
 
-		if !cache.skipCache {
+		if !cache.skipCache.Load() {
 			t.Error("Expected skipCache to be true")
 		}
 	})
@@ -75,19 +75,19 @@ func TestSetSkipCache(t *testing.T) {
 	defer cache.Stop()
 
 	// Initially false
-	if cache.skipCache {
+	if cache.skipCache.Load() {
 		t.Error("Expected skipCache to be false initially")
 	}
 
 	// Set to true
 	cache.SetSkipCache(true)
-	if !cache.skipCache {
+	if !cache.skipCache.Load() {
 		t.Error("Expected skipCache to be true after SetSkipCache(true)")
 	}
 
 	// Set back to false
 	cache.SetSkipCache(false)
-	if cache.skipCache {
+	if cache.skipCache.Load() {
 		t.Error("Expected skipCache to be false after SetSkipCache(false)")
 	}
 }
@@ -869,9 +869,9 @@ func TestGetCachedConfigWithChangeDetection_ChangedAfterExpiry(t *testing.T) {
 	}
 }
 
-// TestFetchAndCache_SkipCacheEnabled exercises the skipCache=true path inside
-// fetchAndCache (data fetched but not stored).
-func TestFetchAndCache_SkipCacheEnabled(t *testing.T) {
+// TestChangeDetection_SkipCacheEnabled exercises the skipCache=true path of
+// GetCachedConfigWithChangeDetection (data fetched but not stored).
+func TestChangeDetection_SkipCacheEnabled(t *testing.T) {
 	ctx := context.Background()
 	cache := New(ctx, true) // skipCache=true
 	defer cache.Stop()
@@ -883,7 +883,7 @@ func TestFetchAndCache_SkipCacheEnabled(t *testing.T) {
 	}
 
 	// With skipCache the entry is never stored; each call fetches fresh.
-	data, changed, _, err := cache.fetchAndCache(ctx, "skip_key", fetchFunc)
+	data, changed, err := cache.GetCachedConfigWithChangeDetection(ctx, "skip_key", fetchFunc)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -891,12 +891,136 @@ func TestFetchAndCache_SkipCacheEnabled(t *testing.T) {
 		t.Errorf("Expected 'data', got %v", data)
 	}
 	if !changed {
-		t.Error("Expected changed=true from fetchAndCache")
+		t.Error("Expected changed=true when skipCache=true")
 	}
 
 	// Verify nothing was stored.
 	_, found := cache.getFromMemoryCache("skip_key")
 	if found {
 		t.Error("Expected no cache entry when skipCache=true")
+	}
+}
+
+// TestSkipCache_ConcurrentAccess exercises SetSkipCache against readers; run with -race.
+func TestSkipCache_ConcurrentAccess(t *testing.T) {
+	cache := New(context.Background(), false)
+	defer cache.Stop()
+
+	fetch := func() (any, error) { return "v", nil }
+
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+
+		for i := range 200 {
+			cache.SetSkipCache(i%2 == 0)
+		}
+	}()
+
+	for range 200 {
+		if _, err := cache.GetCachedConfig(context.Background(), "k", fetch); err != nil {
+			t.Fatal(err)
+		}
+
+		if _, _, err := cache.GetCachedConfigWithChangeDetection(context.Background(), "k2", fetch); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	<-done
+}
+
+// TestGetCachedConfig_StoresNoHash pins that the plain cache path no longer
+// pays for JSON marshalling + MD5 on every store.
+func TestGetCachedConfig_StoresNoHash(t *testing.T) {
+	cache := New(context.Background(), false)
+	defer cache.Stop()
+
+	if _, err := cache.GetCachedConfig(context.Background(), "k", func() (any, error) {
+		return map[string]string{"a": "b"}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	entry, found := cache.getFromMemoryCache("k")
+	if !found {
+		t.Fatal("expected entry to be cached")
+	}
+
+	if entry.Hash != "" {
+		t.Errorf("GetCachedConfig stored hash %q, want none", entry.Hash)
+	}
+}
+
+// TestChangeDetection_AfterPlainStore verifies that an entry stored without a
+// hash by GetCachedConfig still yields the same change-detection verdicts as
+// one stored with a hash: the previous hash is derived from the stored data.
+func TestChangeDetection_AfterPlainStore(t *testing.T) {
+	tests := []struct {
+		name        string
+		fresh       any
+		wantChanged bool
+	}{
+		{"same content is unchanged", map[string]string{"a": "b"}, false},
+		{"different content is changed", map[string]string{"a": "c"}, true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			cache := New(ctx, false)
+
+			defer cache.Stop()
+
+			if _, err := cache.GetCachedConfig(ctx, "k", func() (any, error) {
+				return map[string]string{"a": "b"}, nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+
+			cache.mutex.Lock()
+			cache.memoryCache["k"].Timestamp = time.Now().Add(-2 * time.Hour)
+			cache.memoryCache["k"].TTL = 1
+			cache.mutex.Unlock()
+
+			_, changed, err := cache.GetCachedConfigWithChangeDetection(ctx, "k", func() (any, error) {
+				return tc.fresh, nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if changed != tc.wantChanged {
+				t.Errorf("changed = %v, want %v", changed, tc.wantChanged)
+			}
+
+			entry, found := cache.getFromMemoryCache("k")
+			if !found || entry.Hash == "" {
+				t.Errorf("change detection must store a hash, got found=%v hash=%q", found, entry.Hash)
+			}
+		})
+	}
+}
+
+func BenchmarkCache_GetCachedConfig_StoreLargeValue(b *testing.B) {
+	ctx := b.Context()
+	cache := New(ctx, false)
+
+	defer cache.Stop()
+
+	large := make(map[string]string, 2000)
+	for i := range 2000 {
+		large[fmt.Sprintf("zimbraAttribute%d", i)] = "value-of-a-typical-ldap-attribute-entry"
+	}
+
+	fetch := func() (any, error) { return large, nil }
+
+	for b.Loop() {
+		_ = cache.ClearCache()
+
+		if _, err := cache.GetCachedConfig(ctx, "large", fetch); err != nil {
+			b.Fatal(err)
+		}
 	}
 }

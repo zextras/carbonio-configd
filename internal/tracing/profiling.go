@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"runtime/pprof"
 	"runtime/trace"
+	"sync"
 	"time"
 )
 
@@ -29,9 +30,17 @@ type profilingState struct {
 	cpuFile   *os.File
 	traceFile *os.File
 	startTime time.Time
+	// cancel is closed when the session stops so the auto-stop timer
+	// goroutine exits instead of lingering for ProfileDuration.
+	cancel chan struct{}
 }
 
-var activeProfilingState *profilingState
+// profilingMu guards activeProfilingState and serializes Start/Stop so the
+// auto-stop timer cannot race an explicit StopProfiling at shutdown.
+var (
+	profilingMu          sync.Mutex
+	activeProfilingState *profilingState
+)
 
 // StartProfiling initializes profiling based on configuration.
 // Returns an error if profiling cannot be started.
@@ -40,8 +49,12 @@ func StartProfiling(config *ProfilingConfig) error {
 		return nil
 	}
 
+	profilingMu.Lock()
+	defer profilingMu.Unlock()
+
 	activeProfilingState = &profilingState{
 		startTime: time.Now(),
+		cancel:    make(chan struct{}),
 	}
 
 	// Start CPU profiling if requested
@@ -65,39 +78,68 @@ func StartProfiling(config *ProfilingConfig) error {
 
 	// Schedule automatic stop if ProfileDuration is set
 	if config.ProfileDuration > 0 {
-		go func() {
-			time.Sleep(config.ProfileDuration)
-			StopProfiling(config)
-		}()
+		go autoStop(activeProfilingState, config)
 	}
 
 	return nil
 }
 
+// autoStop stops the given profiling session after config.ProfileDuration
+// unless the session is stopped earlier. It never touches a newer session.
+func autoStop(state *profilingState, config *ProfilingConfig) {
+	timer := time.NewTimer(config.ProfileDuration)
+	defer timer.Stop()
+
+	select {
+	case <-state.cancel:
+	case <-timer.C:
+		profilingMu.Lock()
+		defer profilingMu.Unlock()
+
+		if activeProfilingState == state {
+			stopLocked(config)
+		}
+	}
+}
+
 // StopProfiling stops all active profiling and writes profiles to disk.
+// It is idempotent and safe to call concurrently.
 func StopProfiling(config *ProfilingConfig) {
-	if activeProfilingState == nil {
+	profilingMu.Lock()
+	defer profilingMu.Unlock()
+
+	stopLocked(config)
+}
+
+// stopLocked implements StopProfiling; profilingMu must be held.
+func stopLocked(config *ProfilingConfig) {
+	state := activeProfilingState
+	if state == nil {
 		return
 	}
 
+	activeProfilingState = nil
+
+	if state.cancel != nil {
+		close(state.cancel)
+	}
+
 	// Stop CPU profiling
-	if activeProfilingState.cpuFile != nil {
+	if state.cpuFile != nil {
 		pprof.StopCPUProfile()
-		activeProfilingState.cpuFile.Close()
+		state.cpuFile.Close()
 	}
 
 	// Stop trace profiling
-	if activeProfilingState.traceFile != nil {
+	if state.traceFile != nil {
 		trace.Stop()
-		activeProfilingState.traceFile.Close()
+		state.traceFile.Close()
 	}
 
 	// Write memory profile if requested
-	if config.MemProfilePath != "" {
+	if config != nil && config.MemProfilePath != "" {
 		_ = writeMemProfile(config.MemProfilePath)
 	}
-
-	activeProfilingState = nil
 }
 
 // ValidateProfilingConfig validates profiling configuration.
