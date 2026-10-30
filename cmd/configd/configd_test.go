@@ -244,6 +244,30 @@ func TestEnsureZextrasPerlEnv_PerlNotAvailable(t *testing.T) {
 	}
 }
 
+// TestListenerAddress pins the legacy listener defaults: port 7171 over IPv4
+// unless localconfig sets zmconfigd_listen_port / zimbraIPMode.
+func TestListenerAddress(t *testing.T) {
+	tests := []struct {
+		name     string
+		lc       map[string]string
+		wantPort int
+		wantMode string
+	}{
+		{"defaults", map[string]string{}, 7171, ipModeIPv4},
+		{"unparsable port", map[string]string{"zmconfigd_listen_port": "x"}, 7171, ipModeIPv4},
+		{"configured", map[string]string{"zmconfigd_listen_port": "7172", "zimbraIPMode": "ipv6"}, 7172, "ipv6"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			port, mode := listenerAddress(tt.lc)
+			if port != tt.wantPort || mode != tt.wantMode {
+				t.Errorf("listenerAddress = (%d, %q), want (%d, %q)", port, mode, tt.wantPort, tt.wantMode)
+			}
+		})
+	}
+}
+
 // TestRewriteViaDaemon covers the legacy configrewrite contract: a reachable
 // daemon gets the REWRITE request and nothing runs in-process; an unreachable
 // or failing daemon falls back to a standalone rewrite whose exit code is
