@@ -11,7 +11,6 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
-	"time"
 )
 
 // TestInitStructuredLogging tests initialization of structured logger
@@ -63,16 +62,12 @@ func TestStructuredLoggingWithContext(t *testing.T) {
 
 	ctx := context.Background()
 	ctx = ContextWithComponent(ctx, "test_component")
-	ctx = ContextWithOperation(ctx, "test_operation")
 
 	InfoContext(ctx, "test message")
 
 	output := buf.String()
 	if !strings.Contains(output, "test_component") {
 		t.Errorf("Expected output to contain component, got: %s", output)
-	}
-	if !strings.Contains(output, "test_operation") {
-		t.Errorf("Expected output to contain operation, got: %s", output)
 	}
 	if !strings.Contains(output, "test message") {
 		t.Errorf("Expected output to contain message, got: %s", output)
@@ -91,69 +86,14 @@ func TestCorrelationID(t *testing.T) {
 	InitStructuredLogging(cfg)
 
 	ctx := context.Background()
-	ctx = NewCorrelationID(ctx)
-
-	correlationID := CorrelationIDFromContext(ctx)
-	if correlationID == "" {
-		t.Error("Expected non-empty correlation ID")
-	}
+	correlationID := "corr-test-123"
+	ctx = ContextWithCorrelationID(ctx, correlationID)
 
 	InfoContext(ctx, "test with correlation")
 
 	output := buf.String()
 	if !strings.Contains(output, correlationID) {
 		t.Errorf("Expected output to contain correlation ID %s, got: %s", correlationID, output)
-	}
-}
-
-// TestTimer tests operation timing
-func TestTimer(t *testing.T) {
-	buf := &bytes.Buffer{}
-	cfg := &Config{
-		Format:    FormatJSON,
-		Level:     slog.LevelInfo,
-		Output:    buf,
-		AddSource: false,
-	}
-	InitStructuredLogging(cfg)
-
-	ctx := context.Background()
-	timer := StartTimer(ctx, "test operation completed")
-
-	// Simulate some work
-	time.Sleep(10 * time.Millisecond)
-
-	timer.End()
-
-	output := buf.String()
-	if !strings.Contains(output, "duration_ms") {
-		t.Errorf("Expected output to contain duration_ms, got: %s", output)
-	}
-	if !strings.Contains(output, "test operation completed") {
-		t.Errorf("Expected output to contain message, got: %s", output)
-	}
-
-	// Parse JSON - get the last line (most recent log entry)
-	lines := strings.Split(strings.TrimSpace(output), "\n")
-	lastLine := lines[len(lines)-1]
-
-	var logEntry map[string]interface{}
-	if err := json.Unmarshal([]byte(lastLine), &logEntry); err != nil {
-		t.Fatalf("Failed to parse JSON output: %v", err)
-	}
-
-	durationVal, ok := logEntry["duration_ms"]
-	if !ok {
-		t.Error("Expected duration_ms field in JSON output")
-	}
-
-	// Check that duration is numeric and reasonable
-	duration, ok := durationVal.(float64)
-	if !ok {
-		t.Errorf("Expected duration_ms to be numeric, got %T", durationVal)
-	}
-	if duration < 10 || duration > 100 {
-		t.Errorf("Expected duration between 10-100ms, got %f", duration)
 	}
 }
 
@@ -253,47 +193,6 @@ func TestStructuredLoggingAPI(t *testing.T) {
 	}
 }
 
-// TestContextWithFields tests adding multiple fields to context
-func TestContextWithFields(t *testing.T) {
-	buf := &bytes.Buffer{}
-	cfg := &Config{
-		Format:    FormatJSON,
-		Level:     slog.LevelInfo,
-		Output:    buf,
-		AddSource: false,
-	}
-	InitStructuredLogging(cfg)
-
-	ctx := context.Background()
-	ctx = ContextWithFields(ctx,
-		"field1", "value1",
-		"field2", 123,
-		"field3", true,
-	)
-
-	InfoContext(ctx, "test with fields")
-
-	output := buf.String()
-	// Parse JSON - get the last line (most recent log entry)
-	lines := strings.Split(strings.TrimSpace(output), "\n")
-	lastLine := lines[len(lines)-1]
-
-	var logEntry map[string]interface{}
-	if err := json.Unmarshal([]byte(lastLine), &logEntry); err != nil {
-		t.Fatalf("Failed to parse JSON output: %v", err)
-	}
-
-	if logEntry["field1"] != "value1" {
-		t.Errorf("Expected field1='value1', got %v", logEntry["field1"])
-	}
-	if logEntry["field2"] != float64(123) {
-		t.Errorf("Expected field2=123, got %v", logEntry["field2"])
-	}
-	if logEntry["field3"] != true {
-		t.Errorf("Expected field3=true, got %v", logEntry["field3"])
-	}
-}
-
 // TestDefaultConfig verifies DefaultConfig returns a non-nil config with expected fields.
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
@@ -351,25 +250,9 @@ func TestContextWithCorrelationID_EmptyID(t *testing.T) {
 	buf := &bytes.Buffer{}
 	InitStructuredLogging(&Config{Format: FormatJSON, Level: slog.LevelInfo, Output: buf})
 	ctx := ContextWithCorrelationID(context.Background(), "")
-	id := CorrelationIDFromContext(ctx)
-	if id == "" {
-		t.Error("expected a generated UUID correlation ID, got empty string")
-	}
-}
-
-// TestCorrelationIDFromContext_NilContext verifies CorrelationIDFromContext(nil) returns "".
-func TestCorrelationIDFromContext_NilContext(t *testing.T) {
-	id := CorrelationIDFromContext(context.TODO())
-	if id != "" {
-		t.Errorf("expected empty string, got %q", id)
-	}
-}
-
-// TestCorrelationIDFromContext_NoID verifies CorrelationIDFromContext returns "" when no ID is set.
-func TestCorrelationIDFromContext_NoID(t *testing.T) {
-	id := CorrelationIDFromContext(context.Background())
-	if id != "" {
-		t.Errorf("expected empty string, got %q", id)
+	InfoContext(ctx, "generated id")
+	if !strings.Contains(buf.String(), "correlation_id") {
+		t.Errorf("expected a generated correlation_id field, got: %s", buf.String())
 	}
 }
 
@@ -412,32 +295,5 @@ func TestInitStructuredLogging_AddSource_StripsModulePrefix(t *testing.T) {
 	got2 := result2.Value.Any().(*slog.Source).File
 	if got2 != "/absolute/path/file.go" {
 		t.Errorf("expected unchanged path, got %q", got2)
-	}
-}
-
-// TestTimerWithError tests timer with error handling
-func TestTimerWithError(t *testing.T) {
-	buf := &bytes.Buffer{}
-	cfg := &Config{
-		Format:    FormatJSON,
-		Level:     slog.LevelInfo,
-		Output:    buf,
-		AddSource: false,
-	}
-	InitStructuredLogging(cfg)
-
-	ctx := context.Background()
-	timer := StartTimer(ctx, "operation failed")
-
-	// Simulate error
-	err := bytes.ErrTooLarge
-	timer.EndWithError(err)
-
-	output := buf.String()
-	if !strings.Contains(output, "error") {
-		t.Errorf("Expected output to contain error field, got: %s", output)
-	}
-	if !strings.Contains(output, "duration_ms") {
-		t.Errorf("Expected output to contain duration_ms, got: %s", output)
 	}
 }

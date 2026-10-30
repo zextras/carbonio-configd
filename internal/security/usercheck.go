@@ -51,8 +51,3 @@ func MustCheckUserPermissions() error {
 // exercise both the zextras and non-zextras branches regardless of the user
 // actually running the test binary.
 var currentUserFn = user.Current
-
-// getCurrentUser returns the current user information.
-func getCurrentUser() (*user.User, error) {
-	return currentUserFn()
-}

@@ -168,41 +168,6 @@ func TestMustCheckUserPermissions_StderrFormat(t *testing.T) {
 	}
 }
 
-func TestGetCurrentUser(t *testing.T) {
-	user, err := getCurrentUser()
-	if err != nil {
-		t.Fatalf("getCurrentUser() error = %v", err)
-	}
-
-	if user == nil {
-		t.Fatal("getCurrentUser() returned nil user")
-	}
-
-	if user.Username == "" {
-		t.Error("getCurrentUser() returned user with empty username")
-	}
-
-	t.Logf("Current user: %s (UID: %s, GID: %s)", user.Username, user.Uid, user.Gid)
-}
-
-func TestGetCurrentUser_Fields(t *testing.T) {
-	user, err := getCurrentUser()
-	if err != nil {
-		t.Fatalf("getCurrentUser() failed: %v", err)
-	}
-
-	// Verify all expected fields are populated
-	if user.Uid == "" {
-		t.Error("getCurrentUser() returned user with empty Uid")
-	}
-	if user.Gid == "" {
-		t.Error("getCurrentUser() returned user with empty Gid")
-	}
-	if user.HomeDir == "" {
-		t.Error("getCurrentUser() returned user with empty HomeDir")
-	}
-}
-
 func TestRequiredUserConstant(t *testing.T) {
 	// Verify the required user constant is set correctly
 	if RequiredUser != "zextras" {

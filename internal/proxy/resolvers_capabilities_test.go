@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/config/configtest"
 )
 
 // TestResolvePOP3Capabilities tests all branches of resolvePOP3Capabilities
@@ -21,31 +22,31 @@ func TestResolvePOP3Capabilities(t *testing.T) {
 	}{
 		{
 			name:       "no attribute returns defaults",
-			globalData: config.NewConfigMapFrom(map[string]string{}),
+			globalData: configtest.NewConfigMapFrom(map[string]string{}),
 			expected:   defaultPOP3Capabilities,
 		},
 		{
 			name:       "custom single capability",
-			globalData: config.NewConfigMapFrom(map[string]string{"zimbraReverseProxyPop3EnabledCapability": "TOP"}),
+			globalData: configtest.NewConfigMapFrom(map[string]string{"zimbraReverseProxyPop3EnabledCapability": "TOP"}),
 			expected:   []string{"TOP"},
 		},
 		{
 			name: "custom multi-line capabilities",
-			globalData: config.NewConfigMapFrom(map[string]string{
+			globalData: configtest.NewConfigMapFrom(map[string]string{
 				"zimbraReverseProxyPop3EnabledCapability": "TOP\nUIDL\nUSER",
 			}),
 			expected: []string{"TOP", "UIDL", "USER"},
 		},
 		{
 			name: "capability with spaces (like pop3ExpireCapability)",
-			globalData: config.NewConfigMapFrom(map[string]string{
+			globalData: configtest.NewConfigMapFrom(map[string]string{
 				"zimbraReverseProxyPop3EnabledCapability": "EXPIRE 31 USER\nTOP",
 			}),
 			expected: []string{"EXPIRE 31 USER", "TOP"},
 		},
 		{
 			name: "empty lines are filtered",
-			globalData: config.NewConfigMapFrom(map[string]string{
+			globalData: configtest.NewConfigMapFrom(map[string]string{
 				"zimbraReverseProxyPop3EnabledCapability": "TOP\n\nUIDL\n",
 			}),
 			expected: []string{"TOP", "UIDL"},
@@ -95,19 +96,19 @@ func TestResolveIMAPCapabilities(t *testing.T) {
 	}{
 		{
 			name:           "no attribute returns defaults",
-			globalData:     config.NewConfigMapFrom(map[string]string{}),
+			globalData:     configtest.NewConfigMapFrom(map[string]string{}),
 			expectDefaults: true,
 		},
 		{
 			name: "custom capabilities from config",
-			globalData: config.NewConfigMapFrom(map[string]string{
+			globalData: configtest.NewConfigMapFrom(map[string]string{
 				"zimbraReverseProxyImapEnabledCapability": "IMAP4rev1 IDLE",
 			}),
 			expectContains: "IMAP4rev1",
 		},
 		{
 			name: "comma-separated capabilities",
-			globalData: config.NewConfigMapFrom(map[string]string{
+			globalData: configtest.NewConfigMapFrom(map[string]string{
 				"zimbraReverseProxyImapEnabledCapability": "IMAP4rev1,IDLE,NAMESPACE",
 			}),
 			expectContains: "IMAP4rev1",
@@ -215,7 +216,7 @@ func TestFormatPOP3Capabilities(t *testing.T) {
 // TestResolvePOP3Capabilities_WhitespaceOnly tests resolvePOP3Capabilities with whitespace-only input
 func TestResolvePOP3Capabilities_WhitespaceOnly(t *testing.T) {
 	g := &Generator{
-		GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMapFrom(map[string]string{
+		GlobalConfig: &config.GlobalConfig{Data: configtest.NewConfigMapFrom(map[string]string{
 			"zimbraReverseProxyPop3EnabledCapability": "\n\n\n",
 		})},
 	}

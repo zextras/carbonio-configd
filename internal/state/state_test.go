@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/config/configtest"
 	"os"
 	"path/filepath"
 	"sync"
@@ -829,10 +830,10 @@ func TestState_GetCurrentRewriteKeys(t *testing.T) {
 func TestState_SetConfigs(t *testing.T) {
 	s := NewState()
 
-	lc := &config.LocalConfig{Data: config.NewConfigMapFrom(map[string]string{"key": "val"})}
-	gc := &config.GlobalConfig{Data: config.NewConfigMapFrom(map[string]string{"gkey": "gval"})}
-	mc := &config.MiscConfig{Data: config.NewConfigMapFrom(map[string]string{"mkey": "mval"})}
-	sc := &config.ServerConfig{Data: config.NewConfigMapFrom(map[string]string{}), ServiceConfig: config.NewConfigMapFrom(map[string]string{})}
+	lc := &config.LocalConfig{Data: configtest.NewConfigMapFrom(map[string]string{"key": "val"})}
+	gc := &config.GlobalConfig{Data: configtest.NewConfigMapFrom(map[string]string{"gkey": "gval"})}
+	mc := &config.MiscConfig{Data: configtest.NewConfigMapFrom(map[string]string{"mkey": "mval"})}
+	sc := &config.ServerConfig{Data: configtest.NewConfigMapFrom(map[string]string{}), ServiceConfig: configtest.NewConfigMapFrom(map[string]string{})}
 	mtac := &config.MtaConfig{Sections: map[string]*config.MtaConfigSection{}}
 
 	s.SetConfigs(lc, gc, mc, sc, mtac)

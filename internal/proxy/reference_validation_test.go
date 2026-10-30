@@ -7,6 +7,7 @@ package proxy
 import (
 	"context"
 	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/config/configtest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -54,7 +55,7 @@ func TestReferenceValidation(t *testing.T) {
 	}
 
 	localConfig := &config.LocalConfig{
-		Data: config.NewConfigMapFrom(map[string]string{
+		Data: configtest.NewConfigMapFrom(map[string]string{
 			"zimbraIPMode":               "both",
 			"zimbraMailProxyPort":        "80",
 			"zimbraMailSSLProxyPort":     "443",
@@ -73,7 +74,7 @@ func TestReferenceValidation(t *testing.T) {
 	}
 
 	globalConfig := &config.GlobalConfig{
-		Data: config.NewConfigMapFrom(map[string]string{
+		Data: configtest.NewConfigMapFrom(map[string]string{
 			"zimbraReverseProxyHttpEnabled":            "TRUE",
 			"zimbraReverseProxyMailMode":               "both",
 			"zimbraReverseProxySSLToUpstreamEnabled":   "TRUE",
@@ -87,7 +88,7 @@ func TestReferenceValidation(t *testing.T) {
 	}
 
 	serverConfig := &config.ServerConfig{
-		Data: config.NewConfigMapFrom(map[string]string{
+		Data: configtest.NewConfigMapFrom(map[string]string{
 			"zimbraServerHostname": "mail.example.com",
 			"zimbraMailMode":       "https",
 			"zimbraMailPort":       "8080",
@@ -297,7 +298,7 @@ func TestReferenceOutputStructure(t *testing.T) {
 
 	gen := &Generator{
 		Config:       baseConfig,
-		LocalConfig:  &config.LocalConfig{Data: config.NewConfigMapFrom(map[string]string{})},
+		LocalConfig:  &config.LocalConfig{Data: configtest.NewConfigMapFrom(map[string]string{})},
 		GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMap()},
 		ServerConfig: &config.ServerConfig{Data: config.NewConfigMap()},
 		LdapClient:   nil,

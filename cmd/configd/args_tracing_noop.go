@@ -13,11 +13,3 @@ type TracingArgs struct{}
 func (p *TracingArgs) applyTo(_ *Args) {
 	// no-op: tracing disabled at build time
 }
-
-// hasTracingEnabled returns false when tracing support is not compiled in.
-// This function is used by conditional help text generation.
-//
-//nolint:unused // Used conditionally via build tags
-func hasTracingEnabled() bool {
-	return false
-}

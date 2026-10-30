@@ -373,40 +373,6 @@ func TestLDAPSentinels(t *testing.T) {
 	}
 }
 
-// TestParseError verifies ParseError wraps the sentinel and exposes context.
-func TestParseError(t *testing.T) {
-	err := NewLDAPParseError("ldap command output", 42, "missing colon")
-
-	if !errors.Is(err, ErrLDAPParse) {
-		t.Error("expected ParseError to satisfy errors.Is(ErrLDAPParse)")
-	}
-
-	var pe *ParseError
-	if !errors.As(err, &pe) {
-		t.Fatalf("expected errors.As to bind ParseError, got %v", err)
-	}
-
-	if pe.Line != 42 || pe.Op == "" || pe.Msg == "" {
-		t.Errorf("ParseError context missing: %+v", pe)
-	}
-
-	// Message should contain both op and line.
-	msg := pe.Error()
-	if !containsAll(msg, "ldap command output", "line 42", "missing colon") {
-		t.Errorf("ParseError message missing context: %q", msg)
-	}
-}
-
-func containsAll(s string, subs ...string) bool {
-	for _, sub := range subs {
-		if !contains(s, sub) {
-			return false
-		}
-	}
-
-	return true
-}
-
 func contains(s, sub string) bool {
 	return len(sub) == 0 || (len(s) >= len(sub) && indexOf(s, sub) >= 0)
 }

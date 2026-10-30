@@ -146,7 +146,7 @@ func TestConfig_SetVals(t *testing.T) {
 		{
 			name: "set LDAP master configuration",
 			localConfig: &LocalConfig{
-				Data: NewConfigMapFrom(map[string]string{
+				Data: testConfigMap(map[string]string{
 					"ldap_is_master":         "TRUE",
 					"ldap_root_password":     "secret123",
 					"ldap_master_url":        "ldap://master.example.com",
@@ -171,7 +171,7 @@ func TestConfig_SetVals(t *testing.T) {
 		{
 			name: "set configd intervals",
 			localConfig: &LocalConfig{
-				Data: NewConfigMapFrom(map[string]string{
+				Data: testConfigMap(map[string]string{
 					"zmconfigd_interval":          "600",
 					"zmconfigd_watchdog_interval": "180",
 				}),
@@ -188,7 +188,7 @@ func TestConfig_SetVals(t *testing.T) {
 		{
 			name: "set boolean flags",
 			localConfig: &LocalConfig{
-				Data: NewConfigMapFrom(map[string]string{
+				Data: testConfigMap(map[string]string{
 					"zmconfigd_debug":                  "TRUE",
 					"zmconfigd_watchdog":               "FALSE",
 					"zmconfigd_skip_idle_polls":        "FALSE",
@@ -213,7 +213,7 @@ func TestConfig_SetVals(t *testing.T) {
 		{
 			name: "set watchdog services",
 			localConfig: &LocalConfig{
-				Data: NewConfigMapFrom(map[string]string{
+				Data: testConfigMap(map[string]string{
 					"zmconfigd_watchdog_services": "antivirus antispam ldap",
 				}),
 			},
@@ -232,7 +232,7 @@ func TestConfig_SetVals(t *testing.T) {
 		{
 			name: "case insensitive boolean parsing",
 			localConfig: &LocalConfig{
-				Data: NewConfigMapFrom(map[string]string{
+				Data: testConfigMap(map[string]string{
 					"ldap_is_master":            "true",
 					"ldap_starttls_required":    "false",
 					"zmconfigd_watchdog":        "False",
@@ -257,7 +257,7 @@ func TestConfig_SetVals(t *testing.T) {
 		{
 			name: "invalid interval values ignored",
 			localConfig: &LocalConfig{
-				Data: NewConfigMapFrom(map[string]string{
+				Data: testConfigMap(map[string]string{
 					"zmconfigd_interval":          "invalid",
 					"zmconfigd_watchdog_interval": "not-a-number",
 					"zmconfigd_log_level":         "abc",
@@ -279,7 +279,7 @@ func TestConfig_SetVals(t *testing.T) {
 		{
 			name: "empty string values",
 			localConfig: &LocalConfig{
-				Data: NewConfigMapFrom(map[string]string{
+				Data: testConfigMap(map[string]string{
 					"zmconfigd_interval":          "",
 					"zmconfigd_watchdog_interval": "",
 				}),
@@ -485,4 +485,15 @@ func TestMtaConfig(t *testing.T) {
 	if mc.Sections["main"].Name != "main" {
 		t.Errorf("Sections[main].Name = %v, want main", mc.Sections["main"].Name)
 	}
+}
+
+// testConfigMap returns a ConfigMap populated with the entries of src.
+func testConfigMap(src map[string]string) *ConfigMap {
+	cm := NewConfigMap()
+
+	for k, v := range src {
+		cm.Set(k, v)
+	}
+
+	return cm
 }

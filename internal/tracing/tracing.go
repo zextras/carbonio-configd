@@ -132,14 +132,6 @@ func (t *Tracer) GetSpans() []*Span {
 	return spans
 }
 
-// Clear removes all recorded spans.
-func (t *Tracer) Clear() {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.spans = make([]*Span, 0, 1000)
-	t.spanSeq = 0
-}
-
 // ExportJSON exports spans to JSON format.
 func (t *Tracer) ExportJSON(w io.Writer) error {
 	spans := t.GetSpans()
@@ -300,21 +292,6 @@ func EndSpan(span *Span) {
 // GetSpans returns all spans from the default tracer.
 func GetSpans() []*Span {
 	return DefaultTracer.GetSpans()
-}
-
-// Clear clears all spans from the default tracer.
-func Clear() {
-	DefaultTracer.Clear()
-}
-
-// ExportJSON exports spans to JSON using the default tracer.
-func ExportJSON(w io.Writer) error {
-	return DefaultTracer.ExportJSON(w)
-}
-
-// ExportTimeline exports spans as timeline using the default tracer.
-func ExportTimeline(w io.Writer) error {
-	return DefaultTracer.ExportTimeline(w)
 }
 
 // ExportToFile exports spans to file using the default tracer.

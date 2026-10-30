@@ -33,9 +33,3 @@ func ValidateProfilingConfig(config *ProfilingConfig) error {
 	// Profiling is disabled at build time (!profiling tag); no config to validate.
 	return nil
 }
-
-// GenerateProfilePath is a no-op when profiling is disabled.
-func GenerateProfilePath(baseDir, profileType string) string {
-	// Profiling is disabled at build time (!profiling tag); no path to generate.
-	return ""
-}

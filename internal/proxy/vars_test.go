@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/config/configtest"
 	"github.com/zextras/carbonio-configd/internal/proxy"
 )
 
@@ -21,13 +22,13 @@ func TestVariableResolutionFromGlobalConfig(t *testing.T) {
 	}
 
 	localCfg := &config.LocalConfig{
-		Data: config.NewConfigMapFrom(map[string]string{
+		Data: configtest.NewConfigMapFrom(map[string]string{
 			"zimbraIPMode": "both",
 		}),
 	}
 
 	globalCfg := &config.GlobalConfig{
-		Data: config.NewConfigMapFrom(map[string]string{
+		Data: configtest.NewConfigMapFrom(map[string]string{
 			"zimbraReverseProxyWorkerProcesses":   "8",
 			"zimbraReverseProxyWorkerConnections": "20480",
 			"zimbraReverseProxyLogLevel":          "warn",

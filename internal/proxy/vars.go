@@ -281,13 +281,3 @@ func (g *Generator) ResolveAllVariables(ctx context.Context) error {
 
 	return nil
 }
-
-// GetVariable retrieves a variable by keyword
-func (g *Generator) GetVariable(keyword string) (*Variable, error) {
-	v, ok := g.Variables[keyword]
-	if !ok {
-		return nil, fmt.Errorf("variable %s not found", keyword)
-	}
-
-	return v, nil
-}

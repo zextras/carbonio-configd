@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/config/configtest"
 )
 
 // TestResolveIPMode tests IP mode resolution
@@ -64,7 +65,7 @@ func TestResolveIPMode(t *testing.T) {
 			// Create generator with test config
 			g := &Generator{
 				LocalConfig: &config.LocalConfig{
-					Data: config.NewConfigMapFrom(map[string]string{
+					Data: configtest.NewConfigMapFrom(map[string]string{
 						"zimbraIPMode": tt.ipMode,
 					}),
 				},
@@ -92,38 +93,38 @@ func TestResolveStrictServerName(t *testing.T) {
 	}{
 		{
 			name:       "server config true enables strict server name",
-			serverData: config.NewConfigMapFrom(map[string]string{"zimbraReverseProxyStrictServerNameEnabled": "TRUE"}),
-			globalData: config.NewConfigMapFrom(map[string]string{}),
+			serverData: configtest.NewConfigMapFrom(map[string]string{"zimbraReverseProxyStrictServerNameEnabled": "TRUE"}),
+			globalData: configtest.NewConfigMapFrom(map[string]string{}),
 			expected:   "",
 		},
 		{
 			name:       "server config false disables strict server name",
-			serverData: config.NewConfigMapFrom(map[string]string{"zimbraReverseProxyStrictServerNameEnabled": "FALSE"}),
-			globalData: config.NewConfigMapFrom(map[string]string{}),
+			serverData: configtest.NewConfigMapFrom(map[string]string{"zimbraReverseProxyStrictServerNameEnabled": "FALSE"}),
+			globalData: configtest.NewConfigMapFrom(map[string]string{}),
 			expected:   "#",
 		},
 		{
 			name:       "global config true enables strict server name when server not set",
-			serverData: config.NewConfigMapFrom(map[string]string{}),
-			globalData: config.NewConfigMapFrom(map[string]string{"zimbraReverseProxyStrictServerNameEnabled": "TRUE"}),
+			serverData: configtest.NewConfigMapFrom(map[string]string{}),
+			globalData: configtest.NewConfigMapFrom(map[string]string{"zimbraReverseProxyStrictServerNameEnabled": "TRUE"}),
 			expected:   "",
 		},
 		{
 			name:       "global config false disables strict server name when server not set",
-			serverData: config.NewConfigMapFrom(map[string]string{}),
-			globalData: config.NewConfigMapFrom(map[string]string{"zimbraReverseProxyStrictServerNameEnabled": "FALSE"}),
+			serverData: configtest.NewConfigMapFrom(map[string]string{}),
+			globalData: configtest.NewConfigMapFrom(map[string]string{"zimbraReverseProxyStrictServerNameEnabled": "FALSE"}),
 			expected:   "#",
 		},
 		{
 			name:       "server config takes precedence over global config",
-			serverData: config.NewConfigMapFrom(map[string]string{"zimbraReverseProxyStrictServerNameEnabled": "TRUE"}),
-			globalData: config.NewConfigMapFrom(map[string]string{"zimbraReverseProxyStrictServerNameEnabled": "FALSE"}),
+			serverData: configtest.NewConfigMapFrom(map[string]string{"zimbraReverseProxyStrictServerNameEnabled": "TRUE"}),
+			globalData: configtest.NewConfigMapFrom(map[string]string{"zimbraReverseProxyStrictServerNameEnabled": "FALSE"}),
 			expected:   "",
 		},
 		{
 			name:       "attribute not found defaults to disabled",
-			serverData: config.NewConfigMapFrom(map[string]string{}),
-			globalData: config.NewConfigMapFrom(map[string]string{}),
+			serverData: configtest.NewConfigMapFrom(map[string]string{}),
+			globalData: configtest.NewConfigMapFrom(map[string]string{}),
 			expected:   "#",
 		},
 	}
@@ -149,7 +150,7 @@ func TestResolveStrictServerName(t *testing.T) {
 func TestResolveStrictServerNamePrefix(t *testing.T) {
 	t.Run("returns empty string on error (no config)", func(t *testing.T) {
 		g := &Generator{
-			ServerConfig: &config.ServerConfig{Data: config.NewConfigMapFrom(map[string]string{})},
+			ServerConfig: &config.ServerConfig{Data: configtest.NewConfigMapFrom(map[string]string{})},
 			GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMap()},
 		}
 		prefix := g.resolveStrictServerNamePrefix(context.Background())
@@ -161,7 +162,7 @@ func TestResolveStrictServerNamePrefix(t *testing.T) {
 	t.Run("returns string from resolveStrictServerName when enabled", func(t *testing.T) {
 		g := &Generator{
 			ServerConfig: &config.ServerConfig{
-				Data: config.NewConfigMapFrom(map[string]string{"zimbraReverseProxyStrictServerNameEnabled": "TRUE"}),
+				Data: configtest.NewConfigMapFrom(map[string]string{"zimbraReverseProxyStrictServerNameEnabled": "TRUE"}),
 			},
 			GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMap()},
 		}
@@ -175,7 +176,7 @@ func TestResolveStrictServerNamePrefix(t *testing.T) {
 	t.Run("returns hash string when disabled", func(t *testing.T) {
 		g := &Generator{
 			ServerConfig: &config.ServerConfig{
-				Data: config.NewConfigMapFrom(map[string]string{"zimbraReverseProxyStrictServerNameEnabled": "FALSE"}),
+				Data: configtest.NewConfigMapFrom(map[string]string{"zimbraReverseProxyStrictServerNameEnabled": "FALSE"}),
 			},
 			GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMap()},
 		}
@@ -200,7 +201,7 @@ func TestResolveListenAddressesNoAddresses(t *testing.T) {
 	// With nil LdapClient, collectVirtualIPAddresses returns nil → empty map → return prefix
 	g := &Generator{
 		LdapClient:   nil,
-		ServerConfig: &config.ServerConfig{Data: config.NewConfigMapFrom(map[string]string{})},
+		ServerConfig: &config.ServerConfig{Data: configtest.NewConfigMapFrom(map[string]string{})},
 		GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMap()},
 		Variables:    map[string]*Variable{},
 	}
@@ -218,7 +219,7 @@ func TestResolveListenAddressesNoAddresses(t *testing.T) {
 func TestResolveListenAddressesWithDomainProvider(t *testing.T) {
 	g := &Generator{
 		LdapClient:   nil,
-		ServerConfig: &config.ServerConfig{Data: config.NewConfigMapFrom(map[string]string{})},
+		ServerConfig: &config.ServerConfig{Data: configtest.NewConfigMapFrom(map[string]string{})},
 		GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMap()},
 		Variables: map[string]*Variable{
 			"web.https.port": {Keyword: "web.https.port", Value: 443},
@@ -291,7 +292,7 @@ func TestFormatListenDirectives(t *testing.T) {
 func TestGetIPMode_LocalConfig(t *testing.T) {
 	t.Run("falls back to LocalConfig when GlobalConfig missing", func(t *testing.T) {
 		g := &Generator{
-			LocalConfig: &config.LocalConfig{Data: config.NewConfigMapFrom(map[string]string{
+			LocalConfig: &config.LocalConfig{Data: configtest.NewConfigMapFrom(map[string]string{
 				"zimbraIPMode": "IPv6",
 			})},
 		}
@@ -303,7 +304,7 @@ func TestGetIPMode_LocalConfig(t *testing.T) {
 
 	t.Run("returns both when neither config has the key", func(t *testing.T) {
 		g := &Generator{
-			LocalConfig:  &config.LocalConfig{Data: config.NewConfigMapFrom(map[string]string{})},
+			LocalConfig:  &config.LocalConfig{Data: configtest.NewConfigMapFrom(map[string]string{})},
 			GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMap()},
 		}
 		mode := g.getIPMode()

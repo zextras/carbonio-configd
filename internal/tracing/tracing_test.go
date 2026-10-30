@@ -623,50 +623,6 @@ func TestTracer_ExportToFile_UnsupportedFormat(t *testing.T) {
 	}
 }
 
-func TestGlobalExportJSON(t *testing.T) {
-	Clear()
-	Enable()
-
-	span := StartSpan("export-test")
-	time.Sleep(1 * time.Millisecond)
-	EndSpan(span)
-
-	var buf bytes.Buffer
-	err := ExportJSON(&buf)
-	if err != nil {
-		t.Fatalf("ExportJSON failed: %v", err)
-	}
-
-	output := buf.String()
-	if !strings.Contains(output, "export-test") {
-		t.Error("Exported JSON should contain span name")
-	}
-
-	Clear()
-}
-
-func TestGlobalExportTimeline(t *testing.T) {
-	Clear()
-	Enable()
-
-	span := StartSpan("timeline-test")
-	time.Sleep(1 * time.Millisecond)
-	EndSpan(span)
-
-	var buf bytes.Buffer
-	err := ExportTimeline(&buf)
-	if err != nil {
-		t.Fatalf("ExportTimeline failed: %v", err)
-	}
-
-	output := buf.String()
-	if !strings.Contains(output, "timeline-test") {
-		t.Error("Timeline should contain span name")
-	}
-
-	Clear()
-}
-
 func TestGlobalExportToFile(t *testing.T) {
 	Clear()
 	Enable()

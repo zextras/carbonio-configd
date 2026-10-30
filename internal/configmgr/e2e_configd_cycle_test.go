@@ -225,7 +225,7 @@ func TestE2E_ConfigdCycleWithProxy(t *testing.T) {
 
 	t.Run("Watchdog_Service_Tracking", func(t *testing.T) {
 		// Enable proxy in watchdog
-		wd.SetServiceEnabled(context.Background(), "proxy", true)
+		wd.UpdateServiceList(context.Background(), []string{"proxy"})
 
 		if !wd.IsServiceEnabled("proxy") {
 			t.Error("Proxy not enabled in watchdog")
@@ -251,11 +251,6 @@ func TestE2E_ConfigdCycleWithProxy(t *testing.T) {
 		// This test validates watchdog can detect service failures
 		// In production, watchdog would call serviceManager.IsRunning()
 		// which would check systemd status
-
-		// Verify watchdog is not started yet
-		if wd.IsEnabled() {
-			t.Error("Watchdog should not be running yet")
-		}
 
 		// Verify service is tracked
 		if !wd.IsServiceTracked("proxy") {

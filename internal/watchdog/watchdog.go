@@ -170,27 +170,6 @@ func (w *Watchdog) Stop(ctx context.Context) {
 	<-w.runningChan // Wait for run() to finish
 }
 
-// IsEnabled returns whether the watchdog is currently active.
-func (w *Watchdog) IsEnabled() bool {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	return w.enabled
-}
-
-// SetServiceEnabled sets whether a specific service should be monitored by watchdog.
-func (w *Watchdog) SetServiceEnabled(ctx context.Context, service string, enabled bool) {
-	ctx = logger.ContextWithComponentOnce(ctx, "watchdog")
-
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	w.ServiceEnabled[service] = enabled
-	logger.DebugContext(ctx, "Watchdog monitoring status changed",
-		"service", service,
-		"enabled", enabled)
-}
-
 // IsServiceEnabled returns whether a service is monitored by watchdog.
 func (w *Watchdog) IsServiceEnabled(service string) bool {
 	w.mu.Lock()

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/config/configtest"
 )
 
 // TestLoadLocalConfigWithRetry_Success tests successful local config loading
@@ -160,7 +160,7 @@ func TestPostProcessLocalConfig(t *testing.T) {
 	cm := newTestConfigManager(t)
 
 	// Set up test data with ldap_url
-	cm.State.LocalConfig.Data = config.NewConfigMapFrom(map[string]string{
+	cm.State.LocalConfig.Data = configtest.NewConfigMapFrom(map[string]string{
 		"ldap_url": "ldap://server1:389 ldap://server2:389",
 	})
 
@@ -199,7 +199,7 @@ func TestPostProcessLocalConfig_DefaultPort(t *testing.T) {
 
 	cm := newTestConfigManager(t)
 
-	cm.State.LocalConfig.Data = config.NewConfigMapFrom(map[string]string{
+	cm.State.LocalConfig.Data = configtest.NewConfigMapFrom(map[string]string{
 		"some_key": "some_value",
 	})
 
@@ -220,7 +220,7 @@ func TestPostProcessLocalConfig_NoLDAPUrl(t *testing.T) {
 
 	cm := newTestConfigManager(t)
 
-	cm.State.LocalConfig.Data = config.NewConfigMapFrom(map[string]string{
+	cm.State.LocalConfig.Data = configtest.NewConfigMapFrom(map[string]string{
 		"key1": "value1",
 	})
 

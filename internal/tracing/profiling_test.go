@@ -79,29 +79,6 @@ func TestValidateProfilingConfig_AllPaths(t *testing.T) {
 	}
 }
 
-func TestGenerateProfilePath(t *testing.T) {
-	baseDir := "/tmp/profiles"
-	profileType := "cpu"
-	path := GenerateProfilePath(baseDir, profileType)
-
-	if !strings.HasPrefix(path, baseDir) {
-		t.Errorf("expected path to start with %s, got %s", baseDir, path)
-	}
-	if !strings.Contains(path, "cpu-") {
-		t.Errorf("expected path to contain 'cpu-', got %s", path)
-	}
-	if !strings.HasSuffix(path, ".prof") {
-		t.Errorf("expected path to end with .prof, got %s", path)
-	}
-}
-
-func TestGenerateProfilePath_MemType(t *testing.T) {
-	path := GenerateProfilePath("/tmp", "mem")
-	if !strings.Contains(path, "mem-") {
-		t.Errorf("expected path to contain 'mem-', got %s", path)
-	}
-}
-
 func TestStartProfiling_Nil(t *testing.T) {
 	err := StartProfiling(nil)
 	if err != nil {

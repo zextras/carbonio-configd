@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/config/configtest"
 	"github.com/zextras/carbonio-configd/internal/ldap"
 )
 
@@ -187,7 +188,7 @@ func TestMakeUpstreamResolver_AttrList(t *testing.T) {
 			zimbraMailPortAttr:                 "8080",
 		},
 	})
-	gen.GlobalConfig = &config.GlobalConfig{Data: config.NewConfigMapFrom(map[string]string{
+	gen.GlobalConfig = &config.GlobalConfig{Data: configtest.NewConfigMapFrom(map[string]string{
 		"zimbraReverseProxyUpstreamEwsServers": "ews-srv.example.com",
 	})}
 

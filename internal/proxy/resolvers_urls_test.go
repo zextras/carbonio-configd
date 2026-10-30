@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/config/configtest"
 )
 
 // TestMakeLoginURLResolver tests all branches of makeLoginURLResolver
@@ -24,13 +25,13 @@ func TestMakeLoginURLResolver(t *testing.T) {
 		{
 			name:       "returns staticLoginPath when key not in config",
 			configKey:  "zimbraWebClientLoginURL",
-			globalData: config.NewConfigMapFrom(map[string]string{}),
+			globalData: configtest.NewConfigMapFrom(map[string]string{}),
 			expected:   staticLoginPath,
 		},
 		{
 			name:      "returns custom URL from config",
 			configKey: "zimbraWebClientLoginURL",
-			globalData: config.NewConfigMapFrom(map[string]string{
+			globalData: configtest.NewConfigMapFrom(map[string]string{
 				"zimbraWebClientLoginURL": "https://custom.example.com/login",
 			}),
 			expected: "https://custom.example.com/login",
@@ -65,13 +66,13 @@ func TestMakeLogoutRedirectResolver(t *testing.T) {
 		{
 			name:       "returns return 307 path when key not in config",
 			configKey:  "zimbraWebClientLogoutURL",
-			globalData: config.NewConfigMapFrom(map[string]string{}),
+			globalData: configtest.NewConfigMapFrom(map[string]string{}),
 			expected:   nginxReturn307Path,
 		},
 		{
 			name:      "returns return 200 when key is set in config",
 			configKey: "zimbraWebClientLogoutURL",
-			globalData: config.NewConfigMapFrom(map[string]string{
+			globalData: configtest.NewConfigMapFrom(map[string]string{
 				"zimbraWebClientLogoutURL": "https://custom.example.com/logout",
 			}),
 			expected: nginxReturn200,
@@ -116,7 +117,7 @@ func TestResolveErrorPages(t *testing.T) {
 
 	t.Run("uses custom error handler URL when configured", func(t *testing.T) {
 		g := &Generator{
-			GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMapFrom(map[string]string{
+			GlobalConfig: &config.GlobalConfig{Data: configtest.NewConfigMapFrom(map[string]string{
 				"zimbraReverseProxyErrorHandlerURL": "/error-handler",
 			})},
 		}

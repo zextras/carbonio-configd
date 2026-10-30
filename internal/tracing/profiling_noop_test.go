@@ -58,17 +58,3 @@ func TestNoop_ValidateProfilingConfig_NilConfig(t *testing.T) {
 		t.Errorf("noop ValidateProfilingConfig(nil) should return nil, got: %v", err)
 	}
 }
-
-func TestNoop_GenerateProfilePath_ReturnsEmpty(t *testing.T) {
-	path := GenerateProfilePath("/tmp", "cpu")
-	if path != "" {
-		t.Errorf("noop GenerateProfilePath should return empty string, got: %s", path)
-	}
-}
-
-func TestNoop_GenerateProfilePath_AnyArgs(t *testing.T) {
-	path := GenerateProfilePath("", "")
-	if path != "" {
-		t.Errorf("noop GenerateProfilePath should return empty string, got: %s", path)
-	}
-}

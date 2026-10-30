@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/config/configtest"
 )
 
 // TestProcessIPModeConfig tests IP mode configuration processing
@@ -81,7 +81,7 @@ func TestProcessIPModeConfig(t *testing.T) {
 			data := map[string]string{
 				"zimbraIPMode": tt.ipMode,
 			}
-			cm.State.ServerConfig.Data = config.NewConfigMapFrom(data)
+			cm.State.ServerConfig.Data = configtest.NewConfigMapFrom(data)
 
 			processIPModeConfigForData(data)
 			cm.State.ServerConfig.Data.Replace(data)
@@ -104,7 +104,7 @@ func TestProcessIPModeConfig_NoIPMode(t *testing.T) {
 	cm := newTestConfigManager(t)
 
 	data := map[string]string{"someKey": "someValue"}
-	cm.State.ServerConfig.Data = config.NewConfigMapFrom(data)
+	cm.State.ServerConfig.Data = configtest.NewConfigMapFrom(data)
 
 	processIPModeConfigForData(data)
 	cm.State.ServerConfig.Data.Replace(data)
@@ -462,7 +462,7 @@ func TestProcessMilterConfig(t *testing.T) {
 			for k, v := range tt.input {
 				data[k] = v
 			}
-			cm.State.ServerConfig.Data = config.NewConfigMapFrom(data)
+			cm.State.ServerConfig.Data = configtest.NewConfigMapFrom(data)
 
 			processMilterConfigForData(data)
 			cm.State.ServerConfig.Data.Replace(data)

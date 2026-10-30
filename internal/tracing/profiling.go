@@ -127,13 +127,6 @@ func ValidateProfilingConfig(config *ProfilingConfig) error {
 	return nil
 }
 
-// GenerateProfilePath generates a profile file path with timestamp.
-func GenerateProfilePath(baseDir, profileType string) string {
-	timestamp := time.Now().Format("20060102-150405")
-	filename := fmt.Sprintf("%s-%s.prof", profileType, timestamp)
-	return filepath.Join(baseDir, filename)
-}
-
 func startCPUProfile(path string) error {
 	if err := ensureDir(path); err != nil {
 		return err
