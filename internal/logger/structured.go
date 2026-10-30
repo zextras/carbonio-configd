@@ -26,6 +26,7 @@ type contextKey string
 const (
 	loggerContextKey    contextKey = "logger"
 	componentContextKey contextKey = "component"
+	exitContextKey      contextKey = "exit"
 )
 
 // Standard field names for structured logging
@@ -251,15 +252,19 @@ func ErrorContext(ctx context.Context, msg string, args ...any) {
 	logWithCaller(ctx, slog.LevelError, msg, args...)
 }
 
-// FatalContext logs a fatal error with context and exits
+// FatalContext logs a fatal error with context and exits the process with
+// status 1, unless ctx carries an exit function under exitContextKey (tests intercept the
+// exit that way instead of killing the test binary).
 func FatalContext(ctx context.Context, msg string, args ...any) {
 	logWithCaller(ctx, slog.LevelError, msg, args...)
-	exitFunc(1)
-}
 
-// exitFunc performs the process exit in FatalContext. It is a variable so
-// tests can intercept the exit instead of killing the test binary.
-var exitFunc = os.Exit
+	exit := os.Exit
+	if fn, ok := ctx.Value(exitContextKey).(func(int)); ok {
+		exit = fn
+	}
+
+	exit(1)
+}
 
 // IsDebug returns true when the logger in ctx has debug level enabled.
 // Use this to guard expensive debug log argument construction in hot paths.

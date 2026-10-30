@@ -11,15 +11,20 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// ContextWithExit returns a context whose FatalContext calls exit instead of
+// os.Exit, so the test can intercept the exit without killing the test binary.
+func ContextWithExit(ctx context.Context, exit func(code int)) context.Context {
+	return context.WithValue(ctx, exitContextKey, exit)
+}
+
 func TestFatalContext_ExitsWithCode1(t *testing.T) {
+	t.Parallel()
+
 	var gotCode int
 
-	prev := exitFunc
-	exitFunc = func(code int) { gotCode = code }
+	ctx := ContextWithExit(context.Background(), func(code int) { gotCode = code })
 
-	t.Cleanup(func() { exitFunc = prev })
-
-	FatalContext(context.Background(), "fatal test message", "key", "value")
+	FatalContext(ctx, "fatal test message", "key", "value")
 	assert.Equal(t, 1, gotCode)
 }
 
