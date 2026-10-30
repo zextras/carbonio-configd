@@ -13,7 +13,9 @@ import (
 
 // loadSink receives the data a loader produced. The loaders never write the
 // shared state themselves: during a cycle they fill a stagedLoad that is
-// published as one snapshot once every loader succeeded.
+// applied as one snapshot update once the attempt ended: the parts of the
+// loaders that succeeded replace the published ones, the parts of the loaders
+// that failed keep their previous value (jylibs/state.py semantics).
 type loadSink interface {
 	setLocal(data map[string]string)
 	setGlobal(data map[string]string)
@@ -26,6 +28,8 @@ type loadSink interface {
 type stagedLoad struct {
 	mu    sync.Mutex
 	parts snapshot.Parts
+	// set records which parts a loader delivered.
+	local, global, misc, server bool
 }
 
 func (s *stagedLoad) setLocal(data map[string]string) {
@@ -33,6 +37,7 @@ func (s *stagedLoad) setLocal(data map[string]string) {
 	defer s.mu.Unlock()
 
 	s.parts.Local = data
+	s.local = true
 }
 
 func (s *stagedLoad) setGlobal(data map[string]string) {
@@ -40,6 +45,7 @@ func (s *stagedLoad) setGlobal(data map[string]string) {
 	defer s.mu.Unlock()
 
 	s.parts.Global = data
+	s.global = true
 }
 
 func (s *stagedLoad) setMisc(data map[string]string) {
@@ -47,6 +53,7 @@ func (s *stagedLoad) setMisc(data map[string]string) {
 	defer s.mu.Unlock()
 
 	s.parts.Misc = data
+	s.misc = true
 }
 
 func (s *stagedLoad) setServer(data, services map[string]string) {
@@ -55,15 +62,40 @@ func (s *stagedLoad) setServer(data, services map[string]string) {
 
 	s.parts.Server = data
 	s.parts.Services = services
+	s.server = true
 }
 
-// snapshot builds the snapshot of the staged parts. It copies them, so a
-// loader still running (and later discarded) cannot alter the result.
-func (s *stagedLoad) snapshot() *snapshot.Snapshot {
+// apply returns old with the parts a loader delivered replaced, in a single
+// new snapshot. The parts are copied, so a loader still running (and later
+// discarded) cannot alter the result. The observed lookups of old no longer
+// describe the new data and are dropped. With nothing delivered it returns old.
+func (s *stagedLoad) apply(old *snapshot.Snapshot) *snapshot.Snapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	return snapshot.New(s.parts)
+	if !s.local && !s.global && !s.misc && !s.server {
+		return old
+	}
+
+	out := old
+
+	if s.local {
+		out = out.WithLocal(s.parts.Local)
+	}
+
+	if s.global {
+		out = out.WithGlobal(s.parts.Global)
+	}
+
+	if s.misc {
+		out = out.WithMisc(s.parts.Misc)
+	}
+
+	if s.server {
+		out = out.WithServer(s.parts.Server, s.parts.Services)
+	}
+
+	return out.WithObserved(nil)
 }
 
 // stateSink patches the published snapshot in place. It serves a loader that

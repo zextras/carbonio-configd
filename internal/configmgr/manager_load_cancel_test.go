@@ -221,16 +221,16 @@ func TestLoadAllConfigs_PublishesOneSnapshotOnSuccess(t *testing.T) {
 	}
 }
 
-// TestLoadAllConfigs_PartialFailureKeepsOldSnapshot: when one loader fails, no
-// part of the attempt is published (previously the partial data was); the
-// error is returned and the old snapshot stays in place.
-func TestLoadAllConfigs_PartialFailureKeepsOldSnapshot(t *testing.T) {
+// TestLoadAllConfigs_PartialFailurePublishesSuccessfulParts: when one loader
+// fails, the parts of the loaders that succeeded are published and the failed
+// loader's part keeps its previous value, as in the legacy zmconfigd (each
+// config object is replaced only when its own load succeeds). The error is
+// still returned, so the cycle is skipped.
+func TestLoadAllConfigs_PartialFailurePublishesSuccessfulParts(t *testing.T) {
 	cm := newTestConfigManager(t)
 	setLocal(cm, map[string]string{"old": "value"})
-	setGlobal(cm, map[string]string{"oldGlobal": "value"})
+	setServer(cm, map[string]string{"oldServer": "value"}, enabled("proxy"))
 	loadAllFixture(cm, errors.New("ldap down"))
-
-	before := cm.State.Snapshot()
 
 	if err := cm.LoadAllConfigsWithRetry(context.Background(), 1); err == nil {
 		t.Fatal("LoadAllConfigs error = nil, want the server loader failure")
@@ -238,19 +238,27 @@ func TestLoadAllConfigs_PartialFailureKeepsOldSnapshot(t *testing.T) {
 
 	after := cm.State.Snapshot()
 
-	if after != before {
-		t.Error("a snapshot was published although a loader failed")
+	if got := valueOrEmpty(after.Local("local_key")); got != "new" {
+		t.Errorf("local_key = %q, want the new local config", got)
 	}
 
-	if got := valueOrEmpty(after.Local("old")); got != "value" {
-		t.Errorf("old local key = %q, want value", got)
+	if _, ok := after.Local("old"); ok {
+		t.Error("stale local key survived although the local loader succeeded")
 	}
 
-	if _, ok := after.Local("local_key"); ok {
-		t.Error("local data of the failed attempt was published")
+	if got := valueOrEmpty(after.Global("zimbraGlobalKey")); got != "new" {
+		t.Errorf("zimbraGlobalKey = %q, want the new global config", got)
 	}
 
-	if _, ok := after.Global("zimbraGlobalKey"); ok {
-		t.Error("global data of the failed attempt was published")
+	if got := valueOrEmpty(after.Misc("garpu")); got != "new-misc" {
+		t.Errorf("garpu = %q, want the new misc config", got)
+	}
+
+	if got := valueOrEmpty(after.Server("oldServer")); got != "value" {
+		t.Errorf("oldServer = %q, want the previous server config", got)
+	}
+
+	if !after.ServiceEnabled("proxy") {
+		t.Error("previous service enablement was lost although the server loader failed")
 	}
 }

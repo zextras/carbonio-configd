@@ -212,8 +212,9 @@ func (cm *ConfigManager) LoadAllConfigsWithRetry(ctx context.Context, maxRetries
 			}
 		}
 
-		// Every attempt stages its results; they are published as one
-		// snapshot only when all loaders succeeded.
+		// Every attempt stages its results; whatever the loaders delivered
+		// is published as one snapshot even when another loader failed, as
+		// the legacy zmconfigd keeps each config's previous value on failure.
 		stage := &stagedLoad{}
 
 		timedOut, errors, ctxErr := runLoadAttempt(withStage(ctx, stage), cm.env.Clock, loadFuncs, threadWaitTime)
@@ -221,10 +222,11 @@ func (cm *ConfigManager) LoadAllConfigsWithRetry(ctx context.Context, maxRetries
 			return ctxErr
 		}
 
+		cm.State.UpdateSnapshot(stage.apply)
+
 		shouldRetry, err := evaluateLoadResult(timedOut, errors, attempt, maxRetries, threadWaitTime)
 		if !shouldRetry {
 			if err == nil {
-				cm.State.Publish(stage.snapshot())
 				logger.DebugContext(ctx, "All configs fetched")
 			}
 
