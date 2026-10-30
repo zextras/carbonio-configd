@@ -143,6 +143,28 @@ func mailboxJavaBinary(ctx context.Context, lc map[string]string) (string, error
 	return javaBin, nil
 }
 
+// javaPreviewArgs returns the JVM flags required by mailbox jars compiled with
+// Java preview features (class file version 65.65535). Mirrors the legacy
+// zmmailboxdctl / zmmilterctl launchers.
+func javaPreviewArgs() []string {
+	return []string{"--enable-preview", "--enable-native-access=ALL-UNNAMED"}
+}
+
+// withoutPreviewArgs drops the flags emitted by javaPreviewArgs from opts, so
+// localconfig options that already carry them do not duplicate them.
+func withoutPreviewArgs(opts []string) []string {
+	out := opts[:0:0]
+	for _, o := range opts {
+		if o == "--enable-preview" || strings.HasPrefix(o, "--enable-native-access=") {
+			continue
+		}
+
+		out = append(out, o)
+	}
+
+	return out
+}
+
 func mailboxJavaArgs(lc map[string]string) []string {
 	javaXms := lc["mailboxd_java_heap_size"]
 	if javaXms == "" {
@@ -178,10 +200,8 @@ func mailboxJavaArgs(lc map[string]string) []string {
 		javaOpts = strings.TrimSpace(javaOpts + " -Dlog4j.configurationFile=" + log4jProps)
 	}
 
-	args := []string{"-Dfile.encoding=UTF-8"}
-	if javaOpts != "" {
-		args = append(args, strings.Fields(javaOpts)...)
-	}
+	args := append(javaPreviewArgs(), "-Dfile.encoding=UTF-8")
+	args = append(args, withoutPreviewArgs(strings.Fields(javaOpts))...)
 
 	return append(args,
 		"-Xms"+javaXms+"m",

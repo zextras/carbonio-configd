@@ -122,10 +122,7 @@ func TestMailboxJavaArgs_DefaultHeapAndStack(t *testing.T) {
 	// Must contain default thread stack
 	assertContainsPrefix(t, args, "-Xss")
 
-	// UTF-8 encoding flag must be first
-	if len(args) == 0 || args[0] != "-Dfile.encoding=UTF-8" {
-		t.Errorf("expected first arg to be -Dfile.encoding=UTF-8, got %v", args)
-	}
+	assertContains(t, args, "-Dfile.encoding=UTF-8")
 
 	// Must end with the main class
 	assertContains(t, args, "com.zextras.mailbox.Mailbox")
@@ -232,7 +229,55 @@ func TestMailboxJavaArgs_ContainsCpAndMainClass(t *testing.T) {
 	assertContains(t, args, "com.zextras.mailbox.Mailbox")
 }
 
+func TestMailboxJavaArgs_PreviewFlagsOnceBeforeMainClass(t *testing.T) {
+	for name, opts := range map[string]string{
+		"absent":  "",
+		"present": "--enable-preview --enable-native-access=ALL-UNNAMED -Xss512k",
+	} {
+		t.Run(name, func(t *testing.T) {
+			assertPreviewFlagsOnce(t, mailboxJavaArgs(map[string]string{"mailboxd_java_options": opts}),
+				"com.zextras.mailbox.Mailbox")
+		})
+	}
+}
+
 // --- milterJavaArgs ---
+
+func TestMilterJavaArgs_PreviewFlagsOnceBeforeMainClass(t *testing.T) {
+	for name, opts := range map[string]string{
+		"absent":  "-Xmx256m",
+		"present": "--enable-preview -Xmx256m --enable-native-access=ALL-UNNAMED",
+	} {
+		t.Run(name, func(t *testing.T) {
+			assertPreviewFlagsOnce(t, milterJavaArgs(map[string]string{"zimbra_zmjava_options": opts}),
+				"com.zimbra.cs.milter.MilterServer")
+		})
+	}
+}
+
+// assertPreviewFlagsOnce checks each preview flag appears exactly once and
+// precedes the main class (JVM options after it would be program arguments).
+func assertPreviewFlagsOnce(t *testing.T, args []string, mainClass string) {
+	t.Helper()
+	mainIdx := -1
+	for i, a := range args {
+		if a == mainClass {
+			mainIdx = i
+		}
+	}
+	for _, flag := range []string{"--enable-preview", "--enable-native-access=ALL-UNNAMED"} {
+		count, idx := 0, -1
+		for i, a := range args {
+			if a == flag {
+				count++
+				idx = i
+			}
+		}
+		if count != 1 || idx > mainIdx {
+			t.Errorf("%s: want once before %s, got count=%d in %v", flag, mainClass, count, args)
+		}
+	}
+}
 
 func TestMilterJavaArgs_DefaultJavaOpts(t *testing.T) {
 	if testing.Short() {
@@ -241,10 +286,7 @@ func TestMilterJavaArgs_DefaultJavaOpts(t *testing.T) {
 	lc := map[string]string{}
 	args := milterJavaArgs(lc)
 
-	// First arg must be -client
-	if len(args) == 0 || args[0] != "-client" {
-		t.Errorf("expected first arg -client, got %v", args)
-	}
+	assertContains(t, args, "-client")
 
 	// Must contain -Xmx256m from defaults
 	assertContains(t, args, "-Xmx256m")
