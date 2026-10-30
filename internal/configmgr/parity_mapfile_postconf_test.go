@@ -88,6 +88,31 @@ func TestDoMapfileSection_PassesConfiguredData(t *testing.T) {
 	assert.Equal(t, "ZGF0YQ==", exec.mapfileOps[0].Base64Data)
 }
 
+// TestDoMapfileSection_EncodesRawNativeValue covers the native LDAP client,
+// which returns the raw attribute bytes (the DH PEM) instead of zmprov's
+// "attr:: <base64>" payload: the operation must still carry valid base64 of
+// exactly those bytes, or the executor fails and the rewrite cycle aborts.
+func TestDoMapfileSection_EncodesRawNativeValue(t *testing.T) {
+	const pem = "-----BEGIN DH PARAMETERS-----\nMIIBCAKCAQEA\n-----END DH PARAMETERS-----"
+
+	cm, exec := newTestCMWithExecutor(t)
+	cm.State.FirstRun = false
+	cm.State.GlobalConfig.Data.Set(dhParamKey, pem)
+
+	section := &config.MtaConfigSection{
+		Name:         "mta",
+		Changed:      true,
+		RequiredVars: map[string]string{dhParamKey: configTypeMAPFILE},
+	}
+
+	require.Empty(t, cm.doMapfileSection(context.Background(), section))
+	require.Len(t, exec.mapfileOps, 1)
+
+	decoded, err := base64.StdEncoding.DecodeString(exec.mapfileOps[0].Base64Data)
+	require.NoError(t, err)
+	assert.Equal(t, pem, string(decoded))
+}
+
 // TestCompareKeys_EmptyValueSteadyState pins that a defined-but-empty value never
 // reports a change once recorded as absent.
 func TestCompareKeys_EmptyValueSteadyState(t *testing.T) {

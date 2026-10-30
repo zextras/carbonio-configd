@@ -6,6 +6,7 @@ package configmgr
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"strings"
 
@@ -272,7 +273,7 @@ func (cm *ConfigManager) doMapfileSection(ctx context.Context, section *config.M
 		if !op.IsLocal {
 			// Without the configured value the executor would treat the key as
 			// unset and delete the mapped file.
-			op.Base64Data, _ = cm.lookupVarKey(op.Key)
+			op.Base64Data = cm.mappedFileBase64(op.Key)
 		}
 
 		if err := cm.mtaExecutor.ExecuteMapfile(ctx, op); err != nil {
@@ -326,10 +327,27 @@ func (cm *ConfigManager) doMapfile(ctx context.Context) error {
 // file is written when missing or different and removed when the value is
 // unset. It never reports a change, so a restored file does not restart anything.
 func (cm *ConfigManager) SyncMappedFile(ctx context.Context, key string) error {
-	base64Data, _ := cm.lookupVarKey(key)
-
 	return cm.mtaExecutor.ExecuteMapfile(ctx, mtaops.MapfileOperation{
 		Key:        key,
-		Base64Data: base64Data,
+		Base64Data: cm.mappedFileBase64(key),
 	})
+}
+
+// mappedFileBase64 returns the configured value of a MAPFILE key base64-encoded,
+// as MapfileOperation expects. zmprov text output carries binary attributes as
+// "attr:: <base64>" and the loader keeps that payload verbatim (legacy
+// lookUpConfig b64decodes it), while the native LDAP client returns the raw
+// bytes (e.g. the PEM of zimbraSSLDHParam), which must be encoded first. Raw PEM
+// is never valid base64 ('-', newlines), so the two forms cannot be confused.
+func (cm *ConfigManager) mappedFileBase64(key string) string {
+	val, _ := cm.lookupVarKey(key)
+	if val == "" {
+		return ""
+	}
+
+	if _, err := base64.StdEncoding.DecodeString(val); err == nil {
+		return val
+	}
+
+	return base64.StdEncoding.EncodeToString([]byte(val))
 }
