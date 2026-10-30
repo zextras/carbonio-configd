@@ -47,23 +47,8 @@ func ParseServerInheritedAttrs(r io.Reader) ([]string, error) {
 			return nil, fmt.Errorf("parse attrs xml: %w", err)
 		}
 
-		start, ok := tok.(xml.StartElement)
-		if !ok || start.Name.Local != "attr" {
-			continue
-		}
-
-		var name, flags string
-
-		for _, a := range start.Attr {
-			switch a.Name.Local {
-			case "name":
-				name = a.Value
-			case "flags":
-				flags = a.Value
-			}
-		}
-
-		if name == "" || !slices.Contains(strings.Split(flags, ","), flagServerInherited) {
+		name, ok := serverInheritedName(tok)
+		if !ok {
 			continue
 		}
 
@@ -72,6 +57,32 @@ func ParseServerInheritedAttrs(r io.Reader) ([]string, error) {
 			names = append(names, name)
 		}
 	}
+}
+
+// serverInheritedName returns the name of an <attr> start element flagged
+// serverInherited; ok is false for any other token.
+func serverInheritedName(tok xml.Token) (name string, ok bool) {
+	start, isStart := tok.(xml.StartElement)
+	if !isStart || start.Name.Local != "attr" {
+		return "", false
+	}
+
+	var flags string
+
+	for _, a := range start.Attr {
+		switch a.Name.Local {
+		case "name":
+			name = a.Value
+		case "flags":
+			flags = a.Value
+		}
+	}
+
+	if name == "" || !slices.Contains(strings.Split(flags, ","), flagServerInherited) {
+		return "", false
+	}
+
+	return name, true
 }
 
 // attrsFileCache memoises the serverInherited attribute list per schema file,

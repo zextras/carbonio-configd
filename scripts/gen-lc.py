@@ -156,20 +156,26 @@ def render(entries, tag):
     return "".join(out)
 
 
+def literal_end(src, i):
+    """Index just past the string/char literal opening at src[i]."""
+    quote, j = src[i], i + 1
+    while src[j] != quote:
+        j += 2 if src[j] == "\\" else 1
+    return j + 1
+
+
 def java_strip_comments(src):
     """Drop // and /* */ comments, leaving string/char literals untouched."""
     out, i, n = [], 0, len(src)
     while i < n:
         c = src[i]
         if c in "\"'":
-            j = i + 1
-            while src[j] != c:
-                j += 2 if src[j] == "\\" else 1
-            out.append(src[i:j + 1])
-            i = j + 1
+            j = literal_end(src, i)
+            out.append(src[i:j])
+            i = j
         elif src.startswith("//", i):
-            while i < n and src[i] != "\n":
-                i += 1
+            i = src.find("\n", i)
+            i = n if i < 0 else i
         elif src.startswith("/*", i):
             i = src.index("*/", i + 2) + 2
             out.append(" ")
@@ -209,13 +215,40 @@ def parse_constants(java, pattern):
     return env
 
 
-TOKEN = re.compile(r'''\s*(?:
-    (?P<str>"(?:[^"\\]|\\.)*")
-  | (?P<num>\d+(?:\.\d+)?[LlFfDd]?)
-  | (?P<enum>[A-Za-z_]\w*\.\w+\.toString\(\))
-  | (?P<id>[A-Za-z_]\w*(?:\.[A-Z_]\w*)?)
-  | (?P<op>[-+*/()])
-)''', re.X)
+TOKEN_PARTS = [
+    ("str", r'"(?:[^"\\]|\\.)*"'),
+    ("num", r"\d+(?:\.\d+)?[LlFfDd]?"),
+    ("enum", r"[A-Za-z_]\w*\.\w+\.toString\(\)"),
+    ("id", r"[A-Za-z_]\w*(?:\.[A-Z_]\w*)?"),
+    ("op", r"[-+*/()]"),
+]
+TOKEN = re.compile(r"\s*(?:" + "|".join(f"(?P<{name}>{pat})" for name, pat in TOKEN_PARTS) + ")")
+
+ID_LITERALS = {"true": "True", "false": "False", "null": "''", "Integer.MAX_VALUE": "2147483647"}
+
+
+def translate_id(tok, expr, strings, consts):
+    """Python source for a Java identifier in a KnownKey default."""
+    if tok in ID_LITERALS:
+        return ID_LITERALS[tok]
+    if tok.startswith("Constants."):
+        return str(consts[tok.split(".")[1]])
+    if tok in strings:
+        return repr(strings[tok])
+    raise ValueError(f"unknown identifier {tok!r} in {expr!r}")
+
+
+def translate_token(kind, tok, expr, strings, consts):
+    """Python source for one Java token in a KnownKey default."""
+    if kind == "str":
+        return repr(java_string(tok))
+    if kind == "num":
+        return tok.rstrip("LlFfDd") if "." not in tok else repr(float(tok.rstrip("FfDd")))
+    if kind == "enum":
+        return repr(tok.split(".")[1])
+    if kind == "id":
+        return translate_id(tok, expr, strings, consts)
+    return tok
 
 
 def eval_default(expr, strings, consts):
@@ -234,28 +267,7 @@ def eval_default(expr, strings, consts):
             raise ValueError(f"unsupported default expression: {expr!r}")
         pos = m.end()
         kind = m.lastgroup
-        tok = m.group(kind).strip()
-        if kind == "str":
-            parts.append(repr(java_string(tok)))
-        elif kind == "num":
-            parts.append(tok.rstrip("LlFfDd") if "." not in tok else repr(float(tok.rstrip("FfDd"))))
-        elif kind == "enum":
-            parts.append(repr(tok.split(".")[1]))
-        elif kind == "id":
-            if tok in ("true", "false"):
-                parts.append(tok.capitalize())
-            elif tok == "null":
-                parts.append("''")
-            elif tok == "Integer.MAX_VALUE":
-                parts.append("2147483647")
-            elif tok.startswith("Constants."):
-                parts.append(str(consts[tok.split(".")[1]]))
-            elif tok in strings:
-                parts.append(repr(strings[tok]))
-            else:
-                raise ValueError(f"unknown identifier {tok!r} in {expr!r}")
-        else:
-            parts.append(tok)
+        parts.append(translate_token(kind, m.group(kind).strip(), expr, strings, consts))
     val = eval(" ".join(parts), {"__builtins__": {}})
     if isinstance(val, bool):
         return "true" if val else "false"
