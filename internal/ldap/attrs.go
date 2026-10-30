@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -17,11 +16,12 @@ import (
 	"time"
 
 	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
-// attrsDir is the directory holding the attribute schema files the Java
+// defaultAttrsDir is the directory holding the attribute schema files the Java
 // AttributeManager loads (every *.xml in it, attrs.xml included).
-var attrsDir = filepath.Join(config.ZextrasBase, "conf", "attrs")
+const defaultAttrsDir = config.ZextrasBase + "/conf/attrs"
 
 // flagServerInherited is the attrs.xml flag marking an attribute whose value
 // on a server entry defaults to the global config value.
@@ -101,8 +101,8 @@ type attrsFileEntry struct {
 // serverInheritedAttrs returns the serverInherited attribute names from every
 // *.xml file in dir. An unreadable or malformed schema is an error, as the
 // legacy AttributeManager aborts zmprov in that case.
-func (c *attrsFileCache) serverInheritedAttrs(dir string) ([]string, error) {
-	paths, err := filepath.Glob(filepath.Join(dir, "*.xml"))
+func (c *attrsFileCache) serverInheritedAttrs(fsys sys.FS, dir string) ([]string, error) {
+	paths, err := fsys.Glob(filepath.Join(dir, "*.xml"))
 	if err != nil {
 		return nil, fmt.Errorf("list attrs files: %w", err)
 	}
@@ -123,7 +123,7 @@ func (c *attrsFileCache) serverInheritedAttrs(dir string) ([]string, error) {
 	var all []string
 
 	for _, p := range paths {
-		names, err := c.load(p)
+		names, err := c.load(fsys, p)
 		if err != nil {
 			return nil, err
 		}
@@ -134,8 +134,8 @@ func (c *attrsFileCache) serverInheritedAttrs(dir string) ([]string, error) {
 	return all, nil
 }
 
-func (c *attrsFileCache) load(path string) ([]string, error) {
-	fi, err := os.Stat(path)
+func (c *attrsFileCache) load(fsys sys.FS, path string) ([]string, error) {
+	fi, err := fsys.Stat(path)
 	if err != nil {
 		return nil, fmt.Errorf("stat attrs file: %w", err)
 	}
@@ -145,7 +145,7 @@ func (c *attrsFileCache) load(path string) ([]string, error) {
 	}
 
 	//nolint:gosec // G304: path is a fixed schema directory entry
-	f, err := os.Open(path)
+	f, err := fsys.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open attrs file: %w", err)
 	}

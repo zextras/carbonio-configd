@@ -20,6 +20,7 @@ import (
 	errs "github.com/zextras/carbonio-configd/internal/errors"
 	"github.com/zextras/carbonio-configd/internal/intern"
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // Client represents a connection pool to the LDAP server.
@@ -61,11 +62,16 @@ type Client struct {
 	// searchFn, when non-nil, replaces the network Search round-trip for the
 	// high-level getters. Production leaves it nil; tests inject a stub so
 	// GetGlobalConfig, GetDomain, etc. can be exercised without a live server
-	// (same spirit as the defaultDial seam used by the failover tests).
+	// (same spirit as the dial seam used by the failover tests).
 	searchFn func(baseDN, filter string, attributes []string, scope int) (*ldap.SearchResult, error)
 
-	// attrsDir is the directory of attrs xml schema files; empty means the
-	// package default. attrsCache memoises their serverInherited flags.
+	// dial, when non-nil, replaces ldap.DialURL for connect-time dialing so the
+	// failover tests can run without a network listener.
+	dial dialFn
+
+	// fs reads the attrs xml schema files. attrsDir is their directory (empty
+	// means defaultAttrsDir); attrsCache memoises their serverInherited flags.
+	fs         sys.FS
 	attrsDir   string
 	attrsCache attrsFileCache
 }
@@ -99,6 +105,7 @@ type ClientConfig struct {
 	OpTimeout     time.Duration // Per-request timeout for search/modify (default: 30s)
 	TLSConfig     *tls.Config   // TLS configuration (optional)
 	StartTLS      bool          // Upgrade ldap:// connections with StartTLS (default: true)
+	FS            sys.FS        // Filesystem the attrs schema is read from (default: sys.RealFS)
 }
 
 // defaultDialTimeout bounds a single LDAP dial attempt when
@@ -139,6 +146,10 @@ func NewClient(config *ClientConfig) (*Client, error) {
 		config.OpTimeout = defaultOpTimeout
 	}
 
+	if config.FS == nil {
+		config.FS = sys.RealFS{}
+	}
+
 	var tlsConfig *tls.Config
 	if config.TLSConfig != nil {
 		tlsConfig = config.TLSConfig
@@ -166,6 +177,7 @@ func NewClient(config *ClientConfig) (*Client, error) {
 		dialTimeout:   config.DialTimeout,
 		opTimeout:     config.OpTimeout,
 		tlsConfig:     tlsConfig,
+		fs:            config.FS,
 		pool:          make([]*ldap.Conn, 0, config.PoolSize),
 		closed:        make(chan struct{}),
 	}
@@ -216,7 +228,7 @@ func (c *Client) returnConnection(conn *ldap.Conn) {
 // StartTLS (when applicable), and bind successfully. Per-URL failures are
 // emitted at WARN so an operator can pinpoint a misconfigured entry even
 // when the overall connection succeeds (CO-3565). Dialing shares the
-// defaultDial seam (urls.go) also used by DialFirstReachable.
+// dialFn seam also used by DialFirstReachable.
 func (c *Client) connect() (*ldap.Conn, error) {
 	ctx := logger.ContextWithComponentOnce(context.Background(), "ldap")
 
@@ -237,13 +249,18 @@ func (c *Client) connect() (*ldap.Conn, error) {
 }
 
 // dialAndBind performs the full dial+StartTLS+bind sequence for a single URL
-// using the shared defaultDial seam. Returns a bound connection on success;
+// using the dial seam (ldap.DialURL unless a test replaced it). Returns a bound connection on success;
 // on any failure it closes any partial connection and returns the wrapped
 // error so connect can fail over to the next URL.
 func (c *Client) dialAndBind(url string) (*ldap.Conn, error) {
 	dialer := ldap.DialWithDialer(&net.Dialer{Timeout: c.dialTimeout})
 
-	conn, err := defaultDial(url, dialer, ldap.DialWithTLSConfig(c.tlsConfig))
+	dial := c.dial
+	if dial == nil {
+		dial = ldap.DialURL
+	}
+
+	conn, err := dial(url, dialer, ldap.DialWithTLSConfig(c.tlsConfig))
 	if err != nil {
 		return nil, fmt.Errorf("dial: %w", err)
 	}
@@ -631,10 +648,10 @@ func (c *Client) GetServerConfig(hostname string) (map[string]string, error) {
 
 	dir := c.attrsDir
 	if dir == "" {
-		dir = attrsDir
+		dir = defaultAttrsDir
 	}
 
-	inherited, err := c.attrsCache.serverInheritedAttrs(dir)
+	inherited, err := c.attrsCache.serverInheritedAttrs(c.fs, dir)
 	if err != nil {
 		return nil, fmt.Errorf("server %s inherited attributes: %w", hostname, err)
 	}

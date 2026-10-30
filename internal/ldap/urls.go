@@ -100,14 +100,10 @@ func (a *AggregateDialError) Is(target error) bool {
 	return false
 }
 
-// dialFn is the dialer signature used by DialFirstReachable. It exists so
-// unit tests can stub out the real go-ldap dial call without standing up a
-// network listener.
+// dialFn is the dialer signature used by DialFirstReachable and Client. It
+// exists so unit tests can stub out the real go-ldap dial call without
+// standing up a network listener; production uses ldap.DialURL.
 type dialFn func(url string, opts ...ldap.DialOpt) (*ldap.Conn, error)
-
-// defaultDial is the production dialer; tests override dialURL via package
-// vars in client.go to inject deterministic behaviour.
-var defaultDial dialFn = ldap.DialURL
 
 // DialFirstReachable iterates urls in order and returns the first
 // successfully dialed connection together with the URL that produced it.
@@ -129,6 +125,18 @@ func DialFirstReachable(
 	urls []string,
 	opts ...ldap.DialOpt,
 ) (*ldap.Conn, string, error) {
+	return dialFirstReachable(ctx, ldap.DialURL, urls, opts...)
+}
+
+// dialFirstReachable is DialFirstReachable over an explicit dialer.
+//
+//nolint:ireturn // returning the concrete *ldap.Conn from go-ldap is intended
+func dialFirstReachable(
+	ctx context.Context,
+	dial dialFn,
+	urls []string,
+	opts ...ldap.DialOpt,
+) (*ldap.Conn, string, error) {
 	if len(urls) == 0 {
 		return nil, "", &AggregateDialError{Errors: []error{
 			errors.New("no LDAP URLs configured"),
@@ -144,7 +152,7 @@ func DialFirstReachable(
 			return nil, "", agg
 		}
 
-		conn, err := defaultDial(u, opts...)
+		conn, err := dial(u, opts...)
 		if err == nil {
 			return conn, u, nil
 		}
