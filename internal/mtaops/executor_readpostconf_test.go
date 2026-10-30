@@ -213,3 +213,24 @@ func TestExecutor_ReadPostconf_InvalidKey(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizePostconfValue(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct{ name, in, want string }{
+		{"single value untouched", "  keep  spaces ", "  keep  spaces "},
+		{"multi value", "resource\nsoftware", "resource, software"},
+		{"trims and drops empty entries", " a \n\n b\n", "a, b"},
+		{"already joined", "a, b", "a, b"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := NormalizePostconfValue(tt.in); got != tt.want {
+				t.Errorf("NormalizePostconfValue(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}

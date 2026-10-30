@@ -59,6 +59,26 @@ func mappedFilePaths(baseDir string) map[string]string {
 	return paths
 }
 
+// NormalizePostconfValue returns the value `postconf -e` is given for value:
+// a multi-value attribute (newline-separated) is split on newlines, trimmed,
+// stripped of empty entries and rejoined with ", ". Values without a newline
+// are returned unchanged. The read-only plan uses it to predict main.cf.
+func NormalizePostconfValue(value string) string {
+	if !strings.Contains(value, "\n") {
+		return value
+	}
+
+	var clean []string
+
+	for line := range strings.SplitSeq(value, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			clean = append(clean, line)
+		}
+	}
+
+	return strings.Join(clean, ", ")
+}
+
 // ExecutePostconf executes a postconf -e operation.
 func (e *executor) ExecutePostconf(ctx context.Context, op PostconfOperation) error {
 	ctx = logger.ContextWithComponentOnce(ctx, "mtaops")
@@ -93,19 +113,7 @@ func (e *executor) ExecutePostconfBatch(ctx context.Context, ops []PostconfOpera
 			continue
 		}
 
-		// Convert newlines to comma-separated format
-		lines := strings.Split(ops[i].Value, "\n")
-
-		var cleanLines []string
-
-		for _, line := range lines {
-			line = strings.TrimSpace(line)
-			if line != "" {
-				cleanLines = append(cleanLines, line)
-			}
-		}
-
-		ops[i].Value = strings.Join(cleanLines, ", ")
+		ops[i].Value = NormalizePostconfValue(ops[i].Value)
 		logger.DebugContext(ctx, "Normalized multi-line value",
 			"key", ops[i].Key,
 			"value", redact.ForLog(ops[i].Key, ops[i].Value))

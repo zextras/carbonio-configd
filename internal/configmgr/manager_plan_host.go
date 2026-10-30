@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/mtaops"
 	"github.com/zextras/carbonio-configd/internal/plan"
 	"github.com/zextras/carbonio-configd/internal/redact"
 	"github.com/zextras/carbonio-configd/internal/state"
@@ -251,7 +252,7 @@ func (cm *ConfigManager) postconfDrift(ctx context.Context, p *plan.Postconf) (s
 		return "value cannot be resolved: " + err.Error(), nil //nolint:nilerr // Execute would fail on it too
 	}
 
-	want := normalizePostconfBool(p.Value, resolved)
+	want := mtaops.NormalizePostconfValue(normalizePostconfBool(p.Value, resolved))
 
 	have, _, err := cm.mtaExecutor.ReadPostconf(ctx, p.Key, false)
 	if err != nil {

@@ -181,6 +181,48 @@ func TestPlanHost_InSyncHostIsEmptyExceptLdap(t *testing.T) {
 	f.assertReadOnlyReads(t)
 }
 
+// TestPlanHost_MultiValuedPostconf pins that plan predicts main.cf with the
+// transformation the postconf executor applies: a multi-valued attribute
+// (newline-joined in the config map) is written as "a, b", and postconf may
+// wrap a long value over indented continuation lines.
+func TestPlanHost_MultiValuedPostconf(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		hostReply string
+		wantDrift bool
+	}{
+		{"written as the executor writes it", "resource, software\n", false},
+		{"wrapped by postconf", "resource,\n    software\n", false},
+		{"stale value", "resource\n", true},
+		{"separator the executor does not write", "resource software\n", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			f := newPlanHostFixture(t)
+			f.syncHost()
+
+			f.cm.State.MtaConfig.Sections["mta"].Postconf["notify_classes"] = "VAR:zimbraMtaNotifyClasses"
+			f.cm.State.UpdateSnapshot(func(s *snapshot.Snapshot) *snapshot.Snapshot {
+				g := s.GlobalMap()
+				g["zimbraMtaNotifyClasses"] = "resource\nsoftware"
+
+				return s.WithGlobal(g)
+			})
+			f.fakes.Exec.OnCmdline(planHostBase+"/common/sbin/postconf -h notify_classes", systest.Reply(tt.hostReply))
+
+			pl, err := f.cm.PlanHost(context.Background(), nil)
+			require.NoError(t, err)
+
+			assert.Equal(t, tt.wantDrift, len(pl.Postconf) > 0, "postconf: %+v", pl.Postconf)
+		})
+	}
+}
+
 func TestPlanHost_UnknownSection(t *testing.T) {
 	t.Parallel()
 
