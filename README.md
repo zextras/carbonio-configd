@@ -45,6 +45,7 @@ internal/
   sdnotify/          Pure-Go sd_notify (no CGo, no external deps)
   security/          User permission checks
   services/          Service lifecycle management (systemctl + zm*ctl)
+  shadow/            Side-effect-free cycle for QA nodes (configd shadow)
   state/             Global state tracking
   systemd/           systemd target detection
   template/          Config file template rewriting
@@ -139,6 +140,60 @@ Limitations:
   proxy files themselves are not rendered by `plan`.
 - Restarts shown are those the drifted sections would trigger. The running daemon restarts
   services only on variable changes, and a forced rewrite (`configd rewrite`) never restarts.
+
+### Shadow mode (QA nodes)
+
+`configd shadow [--shadow-dir DIR] [--single-cycle]` runs the normal daemon cycle (load,
+snapshot, plan) on the poll interval **next to a real configd** (the legacy Jython `zmconfigd` or
+another Go release) without any side effect: it writes no file, runs no command (no `postconf`,
+no LDAP write, no restart), takes no watchdog action, does not listen on 7171 (the real daemon
+owns it) and sends no `sd_notify`. It exists to compare what this build *would* do with what the
+node's real configd actually does.
+
+```bash
+# as the zextras user, on the QA node, while the real configd keeps running
+configd shadow --shadow-dir /opt/zextras/data/tmp/shadow
+
+# one cycle and exit (status 1 if the cycle failed), e.g. from a script
+configd shadow --single-cycle --shadow-dir /tmp/shadow
+```
+
+Each cycle logs one INFO line per planned action, message `Shadow plan`, with the `action`
+(`mapfile`, `rewrite`, `postconf`, `postconfd`, `ldap`, `proxygen`, `restart`/`stop`/`start`), its
+`subject`, the `sections` and the `reasons`, then a `Shadow cycle completed` summary:
+
+```
+level=INFO msg="Shadow plan" cycle=1 action=rewrite subject="conf/nginx.conf.in -> conf/nginx.conf" sections=[proxy] reasons="[first run: section proxy rendered for the first time]"
+level=INFO msg="Shadow cycle completed" cycle=1 first_run=true actions=212 report_dir=/opt/zextras/data/tmp/shadow ...
+```
+
+The first cycle is the "first run": every enabled section is planned. Later cycles plan what
+the daemon would do on a variable change, so a quiet node logs no `Shadow plan` line. Values of
+secret keys are redacted in the log and in the plan files.
+
+With `--shadow-dir DIR` (created `0700`, files `0600`, since rendered files can hold credentials):
+
+| Path | Content |
+|---|---|
+| `DIR/rendered/<target>` | the would-be file of every planned `rewrite`, laid out like the install tree (`DIR/rendered/conf/nginx.conf` is what `/opt/zextras/conf/nginx.conf` would be); the latest render wins |
+| `DIR/plan-latest.json` | the plan of the last cycle (the `configd plan --json` format), empty or not |
+| `DIR/plans/plan-<UTC time>-<cycle>.json` | the plan of every cycle whose plan is **not empty** (empty ones would grow the directory forever) |
+
+Diff the would-be files against the live ones:
+
+```bash
+cd /opt/zextras/data/tmp/shadow/rendered
+find . -type f | while read -r f; do diff -u "/opt/zextras/$f" "$f"; done
+```
+
+`DIR` must not be, or contain, the install tree (`/opt/zextras`); `configd shadow` refuses it.
+`--cpuprofile`, `--memprofile`, `--trace` and `--enable-tracing` are refused too: their output
+files would be side effects. Send `SIGHUP` to run the next cycle at once, `SIGTERM`/`SIGINT` to stop.
+
+Limits: the generated proxy files (`proxygen`) and the mapped files (`mapfile`) are listed in
+the plan but not rendered into `DIR`; LDAP `cn=config` writes are listed, never read back.
+Because nothing is executed, a shadow cycle plans against the previous *snapshot*, not against
+the files on disk: use `configd plan` to compare the host itself with the configuration.
 
 ### Flags
 

@@ -182,6 +182,49 @@ Load ─► Snapshot ─► Observe ─► Plan ─► Execute ─► ApplyResta
 When every service looks disabled `Compute` returns `plan.ErrAllServicesDisabled`; nothing is
 consumed, the previous snapshot stays the baseline and the requested sections stay queued.
 
+## Shadow mode
+
+`configd shadow` (`cmd/configd/shadow.go`, `internal/shadow`) runs Load, Snapshot and Plan on the
+poll interval next to a real configd, and never Execute or ApplyRestarts. It is meant for QA
+nodes: the plans and rendered files of this build are compared with what the legacy daemon, or
+the previous Go release, actually does. Usage is in the README.
+
+Side-effect freedom is enforced structurally, in three layers:
+
+1. **No wiring.** The shadow command builds no listener, no watchdog, no restart policy run and no
+   `sd_notify` notifier, and calls neither `Execute` nor `ApplyRestarts`. The only signal handling is
+   `SetupSignalHandler` with a nil notifier (SIGHUP wakes the loop, SIGTERM stops it).
+2. **A read-only `sys.System`.** The `ConfigManager` is built on `sys.ReadOnly(env)`
+   (`internal/sys/readonly.go`). Its `FS` passes the reads (`ReadFile`, `Open`, `OpenFile` without
+   a write flag, `Stat`, `ReadDir`, `WalkDir`, `Glob`, `Readlink`, `AvailBytes`) and refuses
+   every mutation, its `Exec` refuses every command, its `Proc` passes the process-table reads and
+   refuses signals. Each refusal is an error wrapping `sys.ErrReadOnly` that names the operation
+   and target, never the command arguments (they may carry secrets). The wrappers forward
+   method by method instead of embedding the interfaces, so a method added to `sys.FS` or
+   `sys.Proc` does not compile until it is classified as read or write.
+3. **A separate writable filesystem for the report.** The report directory is written through
+   its own `sys.FS` that only `internal/shadow` holds, never through the read-only one, and
+   `shadow.New` refuses a directory that is, or contains, the install tree. Rendered targets are
+   cleaned as absolute paths before joining the directory, so a `..` in `configd.cf` cannot leave it.
+
+`cmd/configd/shadow_test.go` pins this with the recording fakes: a shadow cycle on
+`sys.ReadOnly(systest.New().System())` leaves the recorder empty (every `exec`, `fs.*` and
+`proc.signal` op would be recorded if it got through), and running `ConfigManager.Execute` on the
+same system fails with `sys.ErrReadOnly` and still records nothing.
+
+Outside `sys` (see the boundary above): the LDAP connection (read-only queries during Load), the
+log output on stderr and the signal registration. LDAP writes happen only in `Execute`, which a
+shadow cycle never calls.
+
+There is no per-subsystem cutover flag (proxy, MTA, watchdog) falling back to the legacy
+implementation. On the releases that ship this daemon the legacy implementation is gone: the
+native-configd migration of carbonio-core (CO-3358) removes the Jython `libexec/zmconfigd`,
+`jylibs` and `zmpython`, and turns `zmproxyconfgen` into a wrapper around `configd proxy gen`.
+Only nodes still on the pre-migration packages carry them, and even there the Jython daemon
+cannot be partitioned by section (it owns the whole cycle and port 7171; a forced run per
+section starts a JVM and never restarts services). Shadow mode is the safety net instead;
+rolling back is installing the previous package.
+
 ## Package map
 
 | Package | Role |
@@ -193,4 +236,5 @@ consumed, the previous snapshot stays the baseline and the requested sections st
 | `internal/restart` | Restart policy: enabled-only, debounce, max failed restarts |
 | `internal/services` | Service registry and manager (start order, retries, MTA reload) |
 | `internal/cli/plancmd` | `configd plan` command |
-| `internal/sys` | Side-effect boundary (exec, fs, proc, clock) |
+| `internal/shadow` | `configd shadow`: side-effect-free Load/Plan cycle with a plan log and an optional report directory |
+| `internal/sys` | Side-effect boundary (exec, fs, proc, clock); `sys.ReadOnly` is its mutation-refusing wrapper |
