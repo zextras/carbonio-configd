@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<attrs group="ZimbraAttrType" groupid="1">
+<attr id="220" name="zimbraServiceEnabled" type="string" max="256" cardinality="multi" optionalIn="server">
+  <desc>services that are enabled on this server</desc>
+</attr>
+<attr id="311" name="zimbraMtaMyNetworks" type="astring" max="10240" cardinality="multi" optionalIn="globalConfig,server" flags="serverInherited" requiresRestart="mta">
+  <desc>value of postfix mynetworks</desc>
+</attr>
+
+<attr id="1114" name="zimbraMilterBindPort" type="port" cardinality="single" optionalIn="globalConfig,server" flags="serverInherited" callback="CheckPortConflict" requiresRestart="mta" since="7.0.0">
+  <globalConfigValue>7026</globalConfigValue>
+  <desc>port number on which milter server should listen</desc>
+</attr>
+
+<attr id="1115" name="zimbraMilterBindAddress" type="string" max="128" cardinality="multi" optionalIn="server" requiresRestart="mta" since="7.0.0">
+  <desc>interface address on which milter server should listen; if not specified, binds to 127.0.0.1</desc>
+</attr>
+  
+<attr id="1116" name="zimbraMilterServerEnabled" type="boolean" cardinality="single" optionalIn="globalConfig,server" flags="serverInherited" requiresRestart="mta" since="7.0.0">
+  <globalConfigValue>TRUE</globalConfigValue>
+  <desc>whether milter server is enabled for a given server</desc>
+</attr>
+
+<attr id="1117" name="zimbraMailPurgeUseChangeDateForSpam" type="boolean" cardinality="single" optionalIn="account,cos" flags="accountInherited" since="7.0.0">
+  <defaultCOSValue>TRUE</defaultCOSValue>
+  <desc>
+    If TRUE, a message is purged from Spam based on the date that it was moved
+    to the Spam folder.  If FALSE, a message is purged from Spam based on the
+    date that it was added to the mailbox.
+  </desc>
+</attr>
+
+</attrs>

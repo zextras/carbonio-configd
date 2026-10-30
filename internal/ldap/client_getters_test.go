@@ -6,6 +6,7 @@ package ldap
 
 import (
 	"errors"
+	"path/filepath"
 	"testing"
 
 	"github.com/go-ldap/ldap/v3"
@@ -79,23 +80,83 @@ func TestGetGlobalConfig_NotFound(t *testing.T) {
 	assert.Contains(t, err.Error(), "global config not found")
 }
 
+// newServerGetterTestClient stubs both the server entry and cn=config lookups
+// and points the schema at the real attrs.xml excerpt in testdata.
+func newServerGetterTestClient(server, global *ldap.Entry) *Client {
+	c := &Client{baseDN: defaultBaseDN, attrsDir: filepath.Join("testdata", "attrs")}
+	c.searchFn = func(baseDN, _ string, _ []string, _ int) (*ldap.SearchResult, error) {
+		if baseDN == "cn=config,cn=zimbra" {
+			return &ldap.SearchResult{Entries: []*ldap.Entry{global}}, nil
+		}
+
+		if server == nil {
+			return &ldap.SearchResult{}, nil
+		}
+
+		return &ldap.SearchResult{Entries: []*ldap.Entry{server}}, nil
+	}
+
+	return c
+}
+
 func TestGetServerConfig(t *testing.T) {
-	result := &ldap.SearchResult{Entries: []*ldap.Entry{
+	c := newServerGetterTestClient(
 		entryWithAttrs("cn=mail.example.com,cn=servers,cn=zimbra", map[string][]string{
 			"zimbraServiceEnabled": {"proxy", "mta"},
 		}),
-	}}
-	c, rec := newGetterTestClient(result, nil)
+		entryWithAttrs("cn=config,cn=zimbra", map[string][]string{"cn": {"config"}}),
+	)
 
 	cfg, err := c.GetServerConfig("mail.example.com")
 	require.NoError(t, err)
 	// Multi-valued attributes are newline-joined by entryToMap.
 	assert.Equal(t, "proxy\nmta", cfg["zimbraServiceEnabled"])
-	assert.Equal(t, "cn=mail.example.com,cn=servers,cn=zimbra", rec.baseDN)
+}
+
+// TestGetServerConfig_InheritsGlobal pins zmprov gs parity: serverInherited
+// attributes missing on the server come from global config, own values win,
+// and attributes not flagged serverInherited are never inherited.
+func TestGetServerConfig_InheritsGlobal(t *testing.T) {
+	c := newServerGetterTestClient(
+		entryWithAttrs("cn=mail.example.com,cn=servers,cn=zimbra", map[string][]string{
+			"zimbraMilterBindPort": {"9999"},
+			"zimbraMtaMyNetworks":  nil,
+		}),
+		entryWithAttrs("cn=config,cn=zimbra", map[string][]string{
+			"zimbraMilterServerEnabled":           {"TRUE"},
+			"zimbraMilterBindPort":                {"7026"},
+			"zimbraMtaMyNetworks":                 {"127.0.0.0/8", "10.0.0.0/8"},
+			"zimbraMilterBindAddress":             {"127.0.0.1"},
+			"zimbraMailPurgeUseChangeDateForSpam": {"TRUE"},
+			"zimbraServiceEnabled":                {"mta"},
+		}),
+	)
+
+	cfg, err := c.GetServerConfig("mail.example.com")
+	require.NoError(t, err)
+
+	assert.Equal(t, "TRUE", cfg["zimbraMilterServerEnabled"], "missing serverInherited attr inherited")
+	assert.Equal(t, "9999", cfg["zimbraMilterBindPort"], "server value wins")
+	assert.Equal(t, "127.0.0.0/8\n10.0.0.0/8", cfg["zimbraMtaMyNetworks"], "multi-valued inherited")
+	assert.NotContains(t, cfg, "zimbraMilterBindAddress", "not flagged serverInherited")
+	assert.NotContains(t, cfg, "zimbraMailPurgeUseChangeDateForSpam", "accountInherited is not server inherited")
+	assert.NotContains(t, cfg, "zimbraServiceEnabled", "not flagged serverInherited")
+}
+
+func TestGetServerConfig_SchemaUnreadable(t *testing.T) {
+	c := newServerGetterTestClient(
+		entryWithAttrs("cn=m,cn=servers,cn=zimbra", map[string][]string{"cn": {"m"}}),
+		entryWithAttrs("cn=config,cn=zimbra", map[string][]string{"cn": {"config"}}),
+	)
+	c.attrsDir = t.TempDir()
+
+	_, err := c.GetServerConfig("m")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "inherited attributes")
 }
 
 func TestGetServerConfig_NotFound(t *testing.T) {
-	c, _ := newGetterTestClient(&ldap.SearchResult{}, nil)
+	c := newServerGetterTestClient(nil, entryWithAttrs("cn=config,cn=zimbra", nil))
 
 	_, err := c.GetServerConfig("ghost.example.com")
 	require.Error(t, err)

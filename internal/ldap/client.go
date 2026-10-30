@@ -63,6 +63,11 @@ type Client struct {
 	// GetGlobalConfig, GetDomain, etc. can be exercised without a live server
 	// (same spirit as the defaultDial seam used by the failover tests).
 	searchFn func(baseDN, filter string, attributes []string, scope int) (*ldap.SearchResult, error)
+
+	// attrsDir is the directory of attrs xml schema files; empty means the
+	// package default. attrsCache memoises their serverInherited flags.
+	attrsDir   string
+	attrsCache attrsFileCache
 }
 
 // defaultBaseDN is the default LDAP Base DN used when ClientConfig.BaseDN
@@ -611,11 +616,63 @@ func (c *Client) GetGlobalConfig() (map[string]string, error) {
 	return entryToMap(result.Entries[0]), nil
 }
 
-// GetServerConfig retrieves configuration for a specific server.
-// Returns a map of attribute name to value, matching zmprov gs output format.
+// GetServerConfig retrieves configuration for a specific server, matching
+// `zmprov -l gs`: the server entry's own attributes plus, for every attribute
+// flagged serverInherited in the attrs xml schema, the global config value
+// when the server entry does not set it (Config.getServerDefaults applied by
+// Entry.getAttrs in the Java provisioning layer).
 func (c *Client) GetServerConfig(hostname string) (map[string]string, error) {
 	dn := fmt.Sprintf("cn=%s,cn=servers,%s", ldap.EscapeDN(hostname), c.baseDN)
-	return c.getEntityConfig(dn, ldapFilterAllObjects, ldap.ScopeBaseObject, "server", hostname)
+
+	server, err := c.getEntityConfig(dn, ldapFilterAllObjects, ldap.ScopeBaseObject, "server", hostname)
+	if err != nil {
+		return nil, err
+	}
+
+	dir := c.attrsDir
+	if dir == "" {
+		dir = attrsDir
+	}
+
+	inherited, err := c.attrsCache.serverInheritedAttrs(dir)
+	if err != nil {
+		return nil, fmt.Errorf("server %s inherited attributes: %w", hostname, err)
+	}
+
+	global, err := c.GetGlobalConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	applyServerInherited(server, global, inherited)
+
+	return server, nil
+}
+
+// applyServerInherited copies each inherited attribute present in global into
+// server unless server already sets it. Attribute names compare
+// case-insensitively, as LDAP attribute names do.
+func applyServerInherited(server, global map[string]string, inherited []string) {
+	have := make(map[string]struct{}, len(server))
+	for k := range server {
+		have[strings.ToLower(k)] = struct{}{}
+	}
+
+	byLower := make(map[string]string, len(global))
+	for k, v := range global {
+		byLower[strings.ToLower(k)] = v
+	}
+
+	for _, name := range inherited {
+		lower := strings.ToLower(name)
+		if _, ok := have[lower]; ok {
+			continue
+		}
+
+		if v, ok := byLower[lower]; ok {
+			server[intern.Attr(name)] = v
+		}
+	}
 }
 
 // GetAllServers retrieves all servers from LDAP.

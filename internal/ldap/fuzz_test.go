@@ -5,6 +5,8 @@
 package ldap
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"unicode"
@@ -50,6 +52,48 @@ func FuzzParseURLs(f *testing.F) {
 
 		if joined := strings.Join(got, " "); joined != want {
 			t.Fatalf("entries %q do not reproduce input %q", got, raw)
+		}
+	})
+}
+
+// FuzzParseServerInheritedAttrs feeds arbitrary attrs.xml content to the
+// schema parser.
+//
+// Invariants: never panics; on success every name is non-empty and unique.
+func FuzzParseServerInheritedAttrs(f *testing.F) {
+	seed, err := os.ReadFile(filepath.Join("testdata", "attrs", "attrs.xml"))
+	if err != nil {
+		f.Fatal(err)
+	}
+
+	for _, s := range []string{
+		string(seed),
+		"",
+		`<attrs><attr name="a" flags="serverInherited"/></attrs>`,
+		`<attrs><attr name="a" flags="x, serverInherited"><attr name="a" flags="serverInherited"/></attr>`,
+		`<attr name="" flags="serverInherited">`,
+		`<!-- <attr name="{name}" flags="serverInherited"> --><attrs>`,
+	} {
+		f.Add(s)
+	}
+
+	f.Fuzz(func(t *testing.T, doc string) {
+		names, err := ParseServerInheritedAttrs(strings.NewReader(doc))
+		if err != nil {
+			return
+		}
+
+		seen := make(map[string]struct{}, len(names))
+		for _, n := range names {
+			if n == "" {
+				t.Fatal("empty attribute name returned")
+			}
+
+			if _, dup := seen[n]; dup {
+				t.Fatalf("duplicate attribute name %q", n)
+			}
+
+			seen[n] = struct{}{}
 		}
 	})
 }
