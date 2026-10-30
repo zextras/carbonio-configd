@@ -89,7 +89,8 @@ func ServiceStart(ctx context.Context, name string) error {
 	}
 
 	if running {
-		logger.DebugContext(ctx, "Service already running, skipping start", "service", name)
+		logger.InfoContext(ctx, "Service already running, skipping start",
+			"service", name, "pid", RunningPID(def))
 
 		return nil
 	}

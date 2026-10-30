@@ -48,7 +48,11 @@ type ServiceDef struct {
 	// This is the preferred method — faster and more reliable than /proc cmdline scan.
 	PidFile string
 	// ProcessName is the fallback for status detection when PidFile is not set.
-	// Used for /proc cmdline/comm scanning.
+	// Used for /proc cmdline/comm scanning: it is matched as a substring of
+	// /proc/<pid>/cmdline for status, pid lookup and stop, so use the full
+	// binary path like the legacy pidof / pgrep -f patterns. A bare name also
+	// matches unrelated processes, e.g. "consul connect envoy -sidecar-for
+	// carbonio-memcached" for "memcached".
 	ProcessName string
 	// Dependencies are services that must be started before this one
 	Dependencies []string
@@ -168,7 +172,7 @@ var Registry = map[string]*ServiceDef{
 		SystemdUnits: []string{"carbonio-memcached.service"},
 		BinaryPath:   commonPath + "/bin/memcached",
 		BinaryArgs:   []string{"-d", "-U", "0", "-l", "127.0.1.1,127.0.0.1", "-p", "11211"},
-		ProcessName:  svcMemcached,
+		ProcessName:  commonPath + "/bin/memcached",
 	},
 	svcCbpolicyd: {
 		Name:          svcCbpolicyd,
@@ -177,7 +181,7 @@ var Registry = map[string]*ServiceDef{
 		BinaryPath:    commonPath + "/bin/cbpolicyd",
 		BinaryArgs:    []string{"--config", confPath + "/cbpolicyd.conf"},
 		PidFile:       pidDir + "/cbpolicyd.pid",
-		ProcessName:   svcCbpolicyd,
+		ProcessName:   commonPath + "/bin/cbpolicyd",
 		ConfigRewrite: []string{svcCbpolicyd},
 		PreStart:      []Hook{cbpolicydInitDB},
 	},
@@ -196,7 +200,7 @@ var Registry = map[string]*ServiceDef{
 		BinaryPath:   commonPath + "/sbin/opendkim",
 		BinaryArgs:   []string{"-f", "-x", confPath + "/opendkim.conf", "-u", userZextras},
 		PidFile:      pidDir + "/opendkim.pid",
-		ProcessName:  svcOpendkim,
+		ProcessName:  commonPath + "/sbin/opendkim",
 		UseSDNotify:  true,
 	},
 	svcFreshclam: {
@@ -211,7 +215,7 @@ var Registry = map[string]*ServiceDef{
 		Detached:    true,
 		UseSDNotify: true,
 		PidFile:     pidDir + "/freshclam.pid",
-		ProcessName: svcFreshclam,
+		ProcessName: commonPath + "/bin/freshclam",
 	},
 	svcSaslauthd: {
 		Name:          svcSaslauthd,
@@ -220,7 +224,7 @@ var Registry = map[string]*ServiceDef{
 		BinaryPath:    commonPath + "/sbin/saslauthd",
 		BinaryArgs:    []string{"-r", "-a", saslMechZimbra},
 		PidFile:       pidDir + "/saslauthd.pid",
-		ProcessName:   svcSaslauthd,
+		ProcessName:   commonPath + "/sbin/saslauthd",
 		ConfigRewrite: []string{svcSasl},
 	},
 	svcMilter: {
@@ -249,7 +253,7 @@ var Registry = map[string]*ServiceDef{
 		BinaryArgs:    []string{"--config-file=" + confPath + "/clamd.conf"},
 		Detached:      true,
 		PidFile:       pidDir + "/clamd.pid",
-		ProcessName:   "clamd",
+		ProcessName:   commonPath + "/sbin/clamd",
 		UseSDNotify:   true,
 		ConfigRewrite: []string{svcAntivirus},
 		PreStart:      []Hook{clamdDirInit},
@@ -315,7 +319,7 @@ var Registry = map[string]*ServiceDef{
 		DisplayName:  "directory server",
 		SystemdUnits: []string{unitOpenldap},
 		PidFile:      pidDir + "/slapd.pid",
-		ProcessName:  "slapd",
+		ProcessName:  commonPath + "/libexec/slapd",
 		// slapd is built without libsystemd and never emits sd_notify
 		// (READY=1 / STOPPING=1). Readiness is determined by an active LDAP
 		// probe in ldapCustomStart instead; leave UseSDNotify false so the
