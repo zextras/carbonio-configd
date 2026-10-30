@@ -35,9 +35,11 @@ const (
 	// Note: serviceMTA = "mta" is defined in manager.go:128 and is the canonical MTA constant
 )
 
-// serviceDiscoverBinary is the service-discover daemon (its real name ends in
-// "d"), the identity of its process.
-const serviceDiscoverBinary = "/usr/bin/service-discoverd" //nolint:misspell // actual binary name
+// serviceDiscoverIdentity is the process identity of the service-discover
+// daemon: the consul agent running with the service-discover config dir (an
+// identity with required arguments, see procEntry.matches). The binary alone
+// would also match the "consul connect envoy -sidecar-for" sidecars.
+const serviceDiscoverIdentity = "/usr/bin/consul agent /etc/zextras/service-discover"
 
 // Logical service-group identifiers.
 const (

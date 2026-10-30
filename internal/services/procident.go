@@ -138,14 +138,50 @@ func commName(name string) string {
 	return base
 }
 
-// matches reports whether the entry is a process of the given identity name.
-// See the package-level notes above for the three tiers.
+// matches reports whether the entry is a process of the given identity. An
+// identity is a program name (see the package-level notes above for the three
+// tiers) optionally followed by space-separated required arguments, for a
+// binary shared with unrelated processes: "/usr/bin/consul agent
+// /etc/zextras/service-discover" is the consul agent of that config dir, not
+// the "consul connect envoy" sidecars. Every required argument must be an argv
+// token (or the value of a -flag=value token); a trailing slash is ignored.
+func (p procEntry) matches(identity string) bool {
+	prog, required, _ := strings.Cut(identity, " ")
+
+	if !p.matchesProgram(prog) {
+		return false
+	}
+
+	for want := range strings.FieldsSeq(required) {
+		if !slices.ContainsFunc(p.argv, func(tok string) bool { return argMatches(want, tok) }) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// argMatches reports whether argv token tok is, or carries as -flag=value, the
+// required argument want. Trailing slashes are not significant.
+func argMatches(want, tok string) bool {
+	want = strings.TrimRight(want, "/")
+
+	if nameMatches(want, strings.TrimRight(tok, "/")) {
+		return true
+	}
+
+	_, value, ok := strings.Cut(tok, "=")
+
+	return ok && nameMatches(want, strings.TrimRight(value, "/"))
+}
+
+// matchesProgram is the program-name part of matches.
 //
 // argv is authoritative when present: a negative argv verdict must NOT fall
 // through to comm, because the 15-char comm truncation collides unrelated
 // processes. Example: service-discover-wrapper.sh has comm="service-discove",
-// a prefix of the daemon binary's name (serviceDiscoverBinary).
-func (p procEntry) matches(name string) bool {
+// a prefix of the name of the daemon binary the wrapper fronts.
+func (p procEntry) matchesProgram(name string) bool {
 	if name == "" {
 		return false
 	}

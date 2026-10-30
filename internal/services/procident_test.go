@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -50,7 +51,7 @@ func TestProcEntryMatches(t *testing.T) {
 	const (
 		clamd   = "/opt/zextras/common/sbin/clamd"
 		nginx   = "/opt/zextras/common/sbin/nginx"
-		discovd = serviceDiscoverBinary
+		discovd = "/usr/bin/service-discoverd" //nolint:misspell // a binary name, for the comm-truncation case
 	)
 
 	for _, tc := range []struct {
@@ -102,6 +103,16 @@ func TestProcEntryMatches(t *testing.T) {
 			argv: []string{"/bin/bash", "/usr/bin/service-discover-wrapper.sh", "-sidecar-for", "carbonio-x"},
 			comm: "service-discove",
 		}, discovd, false},
+		{"identity with required args: agent of the config dir", procEntry{
+			argv: []string{"/usr/bin/consul", "agent", "-config-dir", "/etc/zextras/service-discover/"},
+		}, "/usr/bin/consul agent /etc/zextras/service-discover", true},
+		{"identity with required args: sidecar lacks them", procEntry{
+			argv: []string{"/usr/bin/consul", "connect", "envoy", "-sidecar-for", "carbonio-mta"},
+		}, "/usr/bin/consul agent /etc/zextras/service-discover", false},
+		{"identity with required args: other config dir", procEntry{
+			argv: []string{"/usr/bin/consul", "agent", "-config-dir", "/etc/other"},
+		}, "/usr/bin/consul agent /etc/zextras/service-discover", false},
+		{"identity with required args: empty argv", procEntry{comm: "consul"}, "/usr/bin/consul agent", false},
 		{"empty identity matches nothing", procEntry{argv: []string{"x"}, comm: "x"}, "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -376,4 +387,100 @@ func TestGracefulStop_StalePidfileStillStopsRunningService(t *testing.T) {
 	assert.False(t, processAlive(target))
 	assert.True(t, processAlive(unrelated))
 	assert.NoFileExists(t, pidFile)
+}
+
+// Real argv forms captured from a running carbonio container (ps -eo args,
+// NUL-separated here): every registry identity must find its own process and
+// ignore the sidecar noise around it, in particular the consul agent of
+// service-discover versus the "consul connect envoy" sidecar machinery.
+func TestRunningPID_RealContainerArgvForms(t *testing.T) {
+	_, add := fakeProcFS(t)
+
+	argv := func(args ...string) string { return strings.Join(args, "\x00") + "\x00" }
+
+	// Sidecar noise that mentions services and shares binaries.
+	add(14296, argv("/bin/bash", "/usr/bin/service-discover-wrapper.sh", "-token-file",
+		"/etc/carbonio/mta/service-discover/token", "-admin-bind", "localhost:0", "-sidecar-for", "carbonio-mta"),
+		"service-discove", false)
+	add(14298, argv("/usr/bin/envoy", "--config-path", "/tmp/envoy-1-bootstrap.json", "--disable-hot-restart"),
+		"envoy", false)
+	add(14319, "", "consul", false) // zombie consul sidecar: empty argv, comm "consul"
+	add(14320, argv("/usr/bin/consul", "connect", "envoy", "-sidecar-for", "carbonio-memcached",
+		"-config-dir", "/etc/zextras/service-discover/"), "consul", false)
+	add(14201, argv("/usr/bin/carbonio-prometheus-openldap-exporter"), "carbonio-prometh", false)
+
+	// The services.
+	add(13799, argv("/usr/bin/consul", "agent", "-bootstrap-expect", "1", "-config-dir",
+		"/etc/zextras/service-discover/", "-server", "-retry-join=carbonio.carbonio-system.svc.cluster.local"),
+		"consul", false)
+	add(114005, argv("/opt/zextras/common/libexec/slapd", "-l", "LOCAL0", "-h",
+		"ldap://carbonio.carbonio-system.svc.cluster.local:389 ldapi:///", "-F", "/opt/zextras/data/ldap/config"),
+		"slapd", false)
+	add(116048, argv("/opt/zextras/common/bin/java", "--enable-preview", "-Dzimbra.config=/opt/zextras/conf/localconfig.xml",
+		"-cp", "/opt/zextras/mailbox/jars/mailbox.jar:/opt/zextras/mailbox/jars/*", "com.zextras.mailbox.Mailbox"),
+		"java", false)
+	add(116337, argv("/opt/zextras/common/bin/memcached", "-d", "-U", "0", "-l", "127.0.1.1,127.0.0.1", "-p", "11211"),
+		"memcached", false)
+	add(116364, "nginx: master process /opt/zextras/common/sbin/nginx -c /opt/zextras/conf/nginx.conf\x00",
+		"nginx", false)
+	add(116365, "nginx: worker process\x00", "nginx", false)
+	add(116403, argv("/usr/bin/perl", "-T", "/opt/zextras/common/sbin/amavis-mc"), "amavis-mc", false)
+	add(116422, "/opt/zextras/common/sbin/amavisd (master)\x00", "amavisd", false)
+	add(116423, "/opt/zextras/common/sbin/amavisd (virgin child)\x00", "amavisd", false)
+	add(116496, argv("/opt/zextras/common/sbin/clamd", "--config-file=/opt/zextras/conf/clamd.conf"), "clamd", false)
+	add(116534, argv("/opt/zextras/common/bin/freshclam", "--config-file=/opt/zextras/conf/freshclam.conf",
+		"--quiet", "--daemon", "--checks=12"), "freshclam", false)
+	add(116538, argv("/opt/zextras/common/sbin/opendkim", "-x", "/opt/zextras/conf/opendkim.conf", "-u", "zextras"),
+		"opendkim", false)
+	add(116562, argv("/opt/zextras/common/lib/jvm/java/bin/java", "-client", "-Dzimbra.home=/opt/zextras",
+		"-classpath", "/opt/zextras/lib/ext/*", "com.zimbra.cs.milter.MilterServer"), "java", false)
+	add(116657, argv("/opt/zextras/common/sbin/saslauthd", "-r", "-a", "zimbra"), "saslauthd", false)
+	add(116775, argv("/opt/zextras/common/libexec/master", "-w"), "master", false)
+	add(116776, argv("pickup", "-l", "-t", "unix", "-u"), "pickup", false)
+	add(116824, argv("/usr/bin/perl", "-w", "/opt/zextras/libexec/zmstat-proc"), "zmstat-proc", false)
+	add(117319, argv("sudo", "/opt/zextras/libexec/zmstat-fd"), "sudo", false)
+	add(117557, argv("/usr/bin/iostat", "-d", "-k", "-x", "30"), "iostat", false)
+
+	for _, tc := range []struct {
+		service string
+		pid     int
+	}{
+		{svcServiceDiscover, 13799},
+		{svcLdap, 114005},
+		{svcMailbox, 116048},
+		{svcMemcached, 116337},
+		{svcProxy, 116364},
+		{svcAmavis, 116422},
+		{svcAntispam, 116422},
+		{svcAntivirus, 116496},
+		{svcFreshclam, 116534},
+		{svcOpendkim, 116538},
+		{svcMilter, 116562},
+		{svcSaslauthd, 116657},
+		{serviceMTA, 116775},
+		{svcStats, 116824},
+		{svcCbpolicyd, 0}, // not running in the capture
+	} {
+		def := *LookupService(tc.service)
+		def.PidFile = "" // identity only; pidfile validation is covered separately
+
+		assert.Equal(t, tc.pid, RunningPID(context.Background(), &def), tc.service)
+	}
+}
+
+// The consul sidecar and its zombies must not be taken for the service-discover
+// agent, even though they share its binary and config dir.
+func TestRunningPID_ServiceDiscoverIgnoresConsulSidecars(t *testing.T) {
+	_, add := fakeProcFS(t)
+	add(14319, "", "consul", false)
+	add(14320, "/usr/bin/consul\x00connect\x00envoy\x00-sidecar-for\x00carbonio-mta\x00"+
+		"-config-dir\x00/etc/zextras/service-discover/\x00", "consul", false)
+	add(14321, "/bin/bash\x00/usr/bin/service-discover-wrapper.sh\x00-sidecar-for\x00carbonio-mta\x00",
+		"service-discove", false)
+
+	def := LookupService(svcServiceDiscover)
+	assert.Zero(t, RunningPID(context.Background(), def))
+
+	add(13799, "/usr/bin/consul\x00agent\x00-config-dir=/etc/zextras/service-discover\x00-server\x00", "consul", false)
+	assert.Equal(t, 13799, RunningPID(context.Background(), def), "-flag=value form, no trailing slash")
 }

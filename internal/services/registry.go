@@ -56,7 +56,10 @@ type ServiceDef struct {
 	// argv token — the script path of a perl service, the retitled
 	// "nginx: master process <path>"), a glob over a whole path
 	// ("/opt/zextras/libexec/zmstat-*"), or a slash-less name such as a Java
-	// main class or "amavisd" (compared with each token and its basename). A
+	// main class or "amavisd" (compared with each token and its basename). For
+	// a binary shared with unrelated processes the program may be followed by
+	// required arguments, all of which must be argv tokens:
+	// "/usr/bin/consul agent /etc/zextras/service-discover". A
 	// process that merely mentions the service — "tail -f .../clamd.log",
 	// "consul connect envoy -sidecar-for carbonio-memcached" — is not matched.
 	ProcessName string
@@ -354,7 +357,7 @@ var Registry = map[string]*ServiceDef{
 		Name:                svcServiceDiscover,
 		DisplayName:         "service discover",
 		SystemdUnits:        []string{"service-discover.service"},
-		ProcessName:         serviceDiscoverBinary,
+		ProcessName:         serviceDiscoverIdentity,
 		ExternallyManaged:   true,
 		UseSystemdForStatus: true,
 	},
