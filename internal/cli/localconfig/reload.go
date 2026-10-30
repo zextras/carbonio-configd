@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-only
 
-package main
+package localconfig
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 	"net"
 	"syscall"
 
-	"github.com/zextras/carbonio-configd/internal/localconfig"
+	lcfg "github.com/zextras/carbonio-configd/internal/localconfig"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/zxadmin"
 )
@@ -26,7 +26,7 @@ const (
 // admin SOAP endpoint (legacy LocalConfigCLI.reload). Like the legacy tool, the
 // target host/port and credentials come from the node's own localconfig.xml
 // (LC), not from -c, and no other option is checked against -l.
-func (o *localconfigOpts) runReload() error {
+func (o *localconfigOpts) runReload(ctx context.Context) error {
 	// The zxadmin client logs every failure; legacy prints only the final
 	// error, so keep the library diagnostics off the CLI's stderr.
 	logger.InitStructuredLogging(&logger.Config{
@@ -35,22 +35,22 @@ func (o *localconfigOpts) runReload() error {
 		Output: io.Discard,
 	})
 
-	cfg, err := loadNodeConfig()
+	cfg, err := loadNodeConfig(o.nodeConfigPath)
 	if err != nil {
 		return err
 	}
 
-	return reloadLocalConfig(context.Background(), cfg)
+	return reloadLocalConfig(ctx, cfg)
 }
 
 // loadNodeConfig loads the default localconfig.xml with defaults and variables
 // resolved. A missing file is not an error (legacy only warns and uses defaults).
-func loadNodeConfig() (map[string]string, error) {
-	cfg, err := localconfig.LoadResolvedConfigFromFile(basePath("conf", "localconfig.xml"))
+func loadNodeConfig(path string) (map[string]string, error) {
+	cfg, err := lcfg.LoadResolvedConfigFromFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		cfg = make(map[string]string)
-		localconfig.MergeDefaults(cfg)
-		localconfig.Interpolate(cfg)
+		lcfg.MergeDefaults(cfg)
+		lcfg.Interpolate(cfg)
 
 		return cfg, nil
 	}

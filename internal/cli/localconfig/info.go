@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-only
 
-package main
+package localconfig
 
 import (
 	"fmt"
@@ -10,7 +10,7 @@ import (
 	"strings"
 	"unicode/utf16"
 
-	"github.com/zextras/carbonio-configd/internal/localconfig"
+	lcfg "github.com/zextras/carbonio-configd/internal/localconfig"
 )
 
 // docWrapWidth is the column limit of LocalConfig.fmt in the legacy tool.
@@ -46,17 +46,17 @@ func (o *localconfigOpts) warnWriter() io.Writer {
 // skipped keys too, exactly like the legacy loop index.
 func printDoc(w *strings.Builder, warn io.Writer, keys []string, printUnsupported bool) {
 	if len(keys) == 0 {
-		keys = localconfig.KnownKeys()
+		keys = lcfg.KnownKeys()
 	}
 
 	for i, key := range keys {
-		if !localconfig.IsKnownKey(key) {
+		if !lcfg.IsKnownKey(key) {
 			_, _ = fmt.Fprintf(warn, "Warning: '%s' is not a known key\n", key)
 
 			continue
 		}
 
-		doc, ok := localconfig.LookupDoc(key)
+		doc, ok := lcfg.LookupDoc(key)
 		if !ok || (!doc.Supported && !printUnsupported) {
 			continue
 		}

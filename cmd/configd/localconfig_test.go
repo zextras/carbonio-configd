@@ -5,77 +5,16 @@
 package main
 
 import (
-	"bytes"
-	"os"
 	"testing"
+
+	"github.com/alecthomas/kong"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
-
-func TestResolveEditKeyValue_TableDriven(t *testing.T) {
-	tests := []struct {
-		name      string
-		arg       string
-		random    bool
-		wantKey   string
-		wantValue string
-	}{
-		{
-			name:      "simple key=value",
-			arg:       "smtp_port=587",
-			wantKey:   "smtp_port",
-			wantValue: "587",
-		},
-		{
-			name:      "value with embedded equals",
-			arg:       "java_opts=-Xmx=512m",
-			wantKey:   "java_opts",
-			wantValue: "-Xmx=512m",
-		},
-		{
-			name:      "empty value after equals",
-			arg:       "unset_key=",
-			wantKey:   "unset_key",
-			wantValue: "",
-		},
-		{
-			name:      "value with special chars",
-			arg:       "ldap_url=ldap://host:389 ldap://host2:389",
-			wantKey:   "ldap_url",
-			wantValue: "ldap://host:389 ldap://host2:389",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			key, val, err := resolveEditKeyValue(tt.arg, tt.random)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if key != tt.wantKey {
-				t.Errorf("key = %q, want %q", key, tt.wantKey)
-			}
-			if !tt.random && val != tt.wantValue {
-				t.Errorf("value = %q, want %q", val, tt.wantValue)
-			}
-		})
-	}
-}
-
-func TestResolveEditKeyValue_Random(t *testing.T) {
-	key, val, err := resolveEditKeyValue("my_password", true)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if key != "my_password" {
-		t.Errorf("key = %q, want %q", key, "my_password")
-	}
-	if len(val) == 0 {
-		t.Error("expected non-empty random password")
-	}
-}
 
 func TestLocalconfigCmd_Fields(t *testing.T) {
 	cmd := &LocalconfigCmd{
-		Mode:          modeExport,
+		Mode:          "export",
 		ConfigPath:    "/tmp/lc.xml",
 		Quiet:         true,
 		ShowPath:      true,
@@ -90,8 +29,8 @@ func TestLocalconfigCmd_Fields(t *testing.T) {
 		KeyArgs:       []string{"key2"},
 	}
 
-	if cmd.Mode != modeExport {
-		t.Errorf("Mode = %q, want %q", cmd.Mode, modeExport)
+	if cmd.Mode != "export" {
+		t.Errorf("Mode = %q, want %q", cmd.Mode, "export")
 	}
 	if cmd.ConfigPath != "/tmp/lc.xml" {
 		t.Errorf("ConfigPath = %q, want %q", cmd.ConfigPath, "/tmp/lc.xml")
@@ -113,62 +52,61 @@ func TestLocalconfigCmd_Fields(t *testing.T) {
 	}
 }
 
-func TestSelectValues_ShowDefaults_ReturnsNonEmpty(t *testing.T) {
-	config := map[string]string{"custom_key": "custom_val"}
+func TestLegacyLongOptionNames(t *testing.T) {
+	parse := func(t *testing.T, argv ...string) *LocalconfigCmd {
+		t.Helper()
 
-	defaults := (&localconfigOpts{showDefaults: true}).selectValues(config)
-	if len(defaults) == 0 {
-		t.Error("expected non-empty defaults map")
+		cli := &CLI{}
+		parser, err := kong.New(cli, kong.Vars{"version": "test"})
+		require.NoError(t, err)
+
+		_, err = parser.Parse(append([]string{"localconfig"}, argv...))
+		require.NoError(t, err, argv)
+
+		return &cli.Localconfig
 	}
 
-	if _, ok := defaults["custom_key"]; ok {
-		t.Error("defaults should not contain custom_key")
-	}
+	legacy := parse(t, "--config", "/x.xml", "--format", "xml", "--show", "--changed", "--quiet", "--expand", "k")
+	assert.Equal(t, "/x.xml", legacy.ConfigPath)
+	assert.Equal(t, "xml", legacy.Mode)
+	assert.True(t, legacy.ShowPasswords)
+	assert.True(t, legacy.ShowChanged)
+	assert.True(t, legacy.Quiet)
+	assert.True(t, legacy.Expand)
+	assert.Equal(t, []string{"k"}, legacy.KeyArgs)
+
+	assert.True(t, parse(t, "--path").ShowPath)
+	assert.True(t, parse(t, "--default").ShowDefaults)
+	assert.True(t, parse(t, "--edit", "a=1").Edit)
+	assert.True(t, parse(t, "--unset", "a").Unset)
+	assert.True(t, parse(t, "--random", "--edit", "a").Random)
+	assert.True(t, parse(t, "--force", "--edit", "a=1").Force)
+	assert.True(t, parse(t, "--info").Info)
+	assert.True(t, parse(t, "--all").All)
+	assert.True(t, parse(t, "--reload").Reload)
+	assert.Equal(t, "xml", parse(t, "--format=xml").Mode)
+	assert.Equal(t, "/y.xml", parse(t, "--config=/y.xml").ConfigPath)
+
+	// The names Kong derived before the aliases keep working.
+	current := parse(t, "--config-path", "/z.xml", "--mode", "shell", "--show-passwords", "--show-changed",
+		"--show-path", "--show-defaults")
+	assert.Equal(t, "/z.xml", current.ConfigPath)
+	assert.Equal(t, "shell", current.Mode)
+	assert.True(t, current.ShowPasswords)
+	assert.True(t, current.ShowChanged)
+	assert.True(t, current.ShowPath)
+	assert.True(t, current.ShowDefaults)
 }
 
-func TestSelectValues_ShowChanged_IncludesConfiguredUnknown(t *testing.T) {
-	config := map[string]string{"custom_key": "custom_val"}
+func TestLocalconfigCmd_Options(t *testing.T) {
+	t.Setenv("CARBONIO_BASE_DIR", "/base")
 
-	changed := (&localconfigOpts{showChanged: true}).selectValues(config)
-	if changed["custom_key"] != "custom_val" {
-		t.Errorf("expected custom_key in changed set, got %v", changed)
-	}
-}
+	cmd := &LocalconfigCmd{ConfigPath: "/x.xml", Key: []string{"a"}, KeyArgs: []string{"b=1"}, Edit: true}
+	opts := cmd.options([]string{"configd", "localconfig", "-e"})
 
-func TestSelectValues_NoFlags_ReturnsConfiguredOverDefaults(t *testing.T) {
-	config := map[string]string{"a": "1", "b": "2"}
-
-	result := (&localconfigOpts{}).selectValues(config)
-	if result["a"] != "1" || result["b"] != "2" || len(result) < len(config) {
-		t.Errorf("unexpected result: %d keys", len(result))
-	}
-}
-
-func TestSelectValues_EmptyConfigMissingKey(t *testing.T) {
-	filtered := (&localconfigOpts{keys: []string{"missing"}, quiet: true}).selectValues(map[string]string{})
-	if len(filtered) != 0 {
-		t.Errorf("expected 0 keys from empty config, got %d", len(filtered))
-	}
-}
-
-func TestWriteOutput_XMLFormat(t *testing.T) {
-	old := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	err := writeOutput(map[string]string{"test_key": "test_val"}, &localconfigOpts{mode: "xml"})
-
-	w.Close()
-	os.Stdout = old
-
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	var buf bytes.Buffer
-	_, _ = buf.ReadFrom(r)
-	out := buf.String()
-	if out == "" {
-		t.Error("expected non-empty XML output")
-	}
+	assert.Equal(t, "/x.xml", opts.ConfigPath)
+	assert.Equal(t, "/base/conf/localconfig.xml", opts.DefaultPath)
+	assert.Equal(t, []string{"a", "b=1"}, opts.Keys)
+	assert.Equal(t, []string{"configd", "localconfig", "-e"}, opts.Args)
+	assert.True(t, opts.Edit)
 }
