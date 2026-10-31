@@ -11,6 +11,7 @@ import (
 
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/ldap"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // TestBuildReverseProxyBackends tests filtering/building of reverse proxy
@@ -169,7 +170,7 @@ func TestBuildReverseProxyBackends(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			g := &Generator{}
+			g := &Generator{env: sys.Real()}
 			result := buildReverseProxyBackends(tt.byHost, g.buildUpstreamServer)
 
 			if len(result) != len(tt.expected) {
@@ -239,7 +240,7 @@ func TestBuildUpstreamServer(t *testing.T) {
 		},
 	}
 
-	g := &Generator{}
+	g := &Generator{env: sys.Real()}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -254,7 +255,7 @@ func TestBuildUpstreamServer(t *testing.T) {
 
 // TestBuildUpstreamServerSSL tests buildUpstreamServerSSL always uses SSL port
 func TestBuildUpstreamServerSSL(t *testing.T) {
-	g := &Generator{}
+	g := &Generator{env: sys.Real()}
 	attrs := map[string]string{
 		zimbraMailModeAttr:    "http", // even with http mode, SSL method uses SSL port
 		zimbraMailPortAttr:    "8080",
@@ -445,6 +446,7 @@ func TestGetAllReverseProxyBackendsByPopulatedCache(t *testing.T) {
 	cached := []UpstreamServer{{Host: "backend.example.com", Port: 8080}}
 
 	g := &Generator{
+		env: sys.Real(),
 		upstreamCache: &upstreamQueryCache{
 			backendsPopulated:    true,
 			reverseProxyBackends: cached,
@@ -466,6 +468,7 @@ func TestGetAllReverseProxyBackendsBySSLPopulatedCache(t *testing.T) {
 	cached := []UpstreamServer{{Host: "ssl-backend.example.com", Port: 8443}}
 
 	g := &Generator{
+		env: sys.Real(),
 		upstreamCache: &upstreamQueryCache{
 			backendsSSLPopulated:    true,
 			reverseProxyBackendsSSL: cached,
@@ -496,6 +499,7 @@ func TestGetAllReverseProxyBackendsWithServerAttrsCache(t *testing.T) {
 	}
 
 	g := &Generator{
+		env: sys.Real(),
 		upstreamCache: &upstreamQueryCache{
 			serverAttrsByHost: byHost,
 		},
@@ -529,6 +533,7 @@ func TestGetAllReverseProxyBackendsNoServersUseFallback(t *testing.T) {
 		},
 	}
 	g := &Generator{
+		env: sys.Real(),
 		upstreamCache: &upstreamQueryCache{
 			serverAttrsByHost: byHost,
 		},
@@ -548,6 +553,7 @@ func TestGetAllReverseProxyBackendsNoServersUseFallback(t *testing.T) {
 // is empty and no native LDAP client is available.
 func TestGetAllReverseProxyBackendsByNilLdap(t *testing.T) {
 	g := &Generator{
+		env:           sys.Real(),
 		upstreamCache: &upstreamQueryCache{},
 		LdapClient:    nil,
 	}
@@ -562,6 +568,7 @@ func TestGetAllMemcachedServersCacheHit(t *testing.T) {
 	ctx := context.Background()
 	expected := []MemcacheServer{{Hostname: "mc.example.com", Port: 11211}}
 	g := &Generator{
+		env: sys.Real(),
 		upstreamCache: &upstreamQueryCache{
 			memcachedPopulated: true,
 			memcachedServers:   expected,
@@ -588,6 +595,7 @@ func TestGetAllMemcachedServersWithServerAttrsCache(t *testing.T) {
 		},
 	}
 	g := &Generator{
+		env: sys.Real(),
 		upstreamCache: &upstreamQueryCache{
 			serverAttrsByHost: byHost,
 		},
@@ -608,6 +616,7 @@ func TestGetAllMemcachedServersWithServerAttrsCache(t *testing.T) {
 func TestGetAllMemcachedServersCacheMissNilLdap(t *testing.T) {
 	ctx := context.Background()
 	g := &Generator{
+		env:           sys.Real(),
 		upstreamCache: &upstreamQueryCache{},
 		LdapClient:    nil,
 	}
@@ -621,6 +630,7 @@ func TestGetAllMemcachedServersCacheMissNilLdap(t *testing.T) {
 func TestGetAllMemcachedServersNilCache(t *testing.T) {
 	ctx := context.Background()
 	g := &Generator{
+		env:           sys.Real(),
 		upstreamCache: nil,
 		LdapClient:    nil,
 	}
@@ -634,6 +644,7 @@ func TestGetAllMemcachedServersNilCache(t *testing.T) {
 // error path for getAllReverseProxyBackendsBy.
 func TestGetAllReverseProxyBackendsByNilLdapAndCache(t *testing.T) {
 	g := &Generator{
+		env:           sys.Real(),
 		upstreamCache: nil,
 		LdapClient:    nil,
 	}
@@ -650,6 +661,7 @@ func TestGetAllReverseProxyBackendsByLDAPQueryError(t *testing.T) {
 	l.NativeClient = new(ldap.Client) // zero-value: no URLs → query fails
 
 	g := &Generator{
+		env:           sys.Real(),
 		upstreamCache: &upstreamQueryCache{},
 		LdapClient:    l,
 	}
@@ -666,7 +678,7 @@ func TestGetAllReverseProxyBackendsByLDAPQueryError(t *testing.T) {
 // Both request orders are exercised explicitly so the test is order-independent.
 func TestGetAllReverseProxyBackends_PlainAndSSLIndependent(t *testing.T) {
 	newGen := func() *Generator {
-		return &Generator{upstreamCache: &upstreamQueryCache{
+		return &Generator{env: sys.Real(), upstreamCache: &upstreamQueryCache{
 			serverAttrsByHost: map[string]map[string]string{
 				"backend.example.com": {
 					zimbraServiceHostnameAttr:          "backend.example.com",
@@ -703,7 +715,7 @@ func TestGetAllReverseProxyBackends_PlainAndSSLIndependent(t *testing.T) {
 // TestGetAllReverseProxyBackends_EmptyCachedFallsBack verifies a cached empty list
 // yields the same localhost fallback as the first (uncached) call.
 func TestGetAllReverseProxyBackends_EmptyCachedFallsBack(t *testing.T) {
-	g := &Generator{upstreamCache: &upstreamQueryCache{
+	g := &Generator{env: sys.Real(), upstreamCache: &upstreamQueryCache{
 		serverAttrsByHost: map[string]map[string]string{},
 	}}
 

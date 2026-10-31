@@ -25,8 +25,10 @@ Manages service configurations by monitoring LDAP for changes, generating config
 ## Project Structure
 
 ```
-cmd/configd/         Main entry point and daemon loop
+cmd/configd/         Main entry point, Kong flag structs and daemon loop
 internal/
+  cli/               One package per subcommand: Run(ctx, stdout, stderr, opts) int
+                     (cliutil = shared console/logging/permission helpers)
   cache/             In-memory config cache (intra-loop dedup)
   commands/          External command wrappers
   config/            Application configuration and types
@@ -43,6 +45,7 @@ internal/
   sdnotify/          Pure-Go sd_notify (no CGo, no external deps)
   security/          User permission checks
   services/          Service lifecycle management (systemctl + zm*ctl)
+  shadow/            Side-effect-free cycle for QA nodes (configd shadow)
   state/             Global state tracking
   systemd/           systemd target detection
   template/          Config file template rewriting
@@ -108,6 +111,90 @@ configd rewrite proxy mta
 # Replaces: echo "REWRITE proxy mta" | netcat -w 120 localhost 7171
 ```
 
+### Plan subcommand (dry run)
+
+`configd plan [sections...] [--json]` shows what a rewrite would change on this host and why,
+without changing anything. It loads the configuration like a forced rewrite, renders the
+templates in memory, reads Postfix with `postconf -h` / `postconf -n`, compares everything with
+the files on disk and prints one line per action with its reasons (or JSON with `--json`).
+Every entry's reason is the host drift found. Without arguments all sections are evaluated; with arguments only the named ones.
+
+```
+$ configd plan mta
+rewrite      conf/postfix/master.cf.in -> conf/postfix/master.cf
+    because: drift: /opt/zextras/conf/postfix/master.cf content differs from the rendered template
+postconf -e  smtpd_tls_loglevel=1
+    because: drift: main.cf smtpd_tls_loglevel = "0" would become "1"
+restart      mta
+    because: drift: configuration of section mta would change
+```
+
+(Output is illustrative; with nothing to do it prints `No changes.`)
+
+Exit codes: `0` no changes, `1` changes would be made, `2` error.
+
+Limitations:
+
+- LDAP `cn=config` attributes cannot be read back, so planned `ldap` writes are always listed.
+- `proxygen` is listed only when another action of one of its sections drifted; the generated
+  proxy files themselves are not rendered by `plan`.
+- Restarts shown are those the drifted sections would trigger. The running daemon restarts
+  services only on variable changes, and a forced rewrite (`configd rewrite`) never restarts.
+
+### Shadow mode (QA nodes)
+
+`configd shadow [--shadow-dir DIR] [--single-cycle]` runs the normal daemon cycle (load,
+snapshot, plan) on the poll interval **next to a real configd** (the legacy Jython `zmconfigd` or
+another Go release) without any side effect: it writes no file, runs no command (no `postconf`,
+no LDAP write, no restart), takes no watchdog action, does not listen on 7171 (the real daemon
+owns it) and sends no `sd_notify`. It exists to compare what this build *would* do with what the
+node's real configd actually does.
+
+```bash
+# as the zextras user, on the QA node, while the real configd keeps running
+configd shadow --shadow-dir /opt/zextras/data/tmp/shadow
+
+# one cycle and exit (status 1 if the cycle failed), e.g. from a script
+configd shadow --single-cycle --shadow-dir /tmp/shadow
+```
+
+Each cycle logs one INFO line per planned action, message `Shadow plan`, with the `action`
+(`mapfile`, `rewrite`, `postconf`, `postconfd`, `ldap`, `proxygen`, `restart`/`stop`/`start`), its
+`subject`, the `sections` and the `reasons`, then a `Shadow cycle completed` summary:
+
+```
+level=INFO msg="Shadow plan" cycle=1 action=rewrite subject="conf/nginx.conf.in -> conf/nginx.conf" sections=[proxy] reasons="[first run: section proxy rendered for the first time]"
+level=INFO msg="Shadow cycle completed" cycle=1 first_run=true actions=212 report_dir=/opt/zextras/data/tmp/shadow ...
+```
+
+The first cycle is the "first run": every enabled section is planned. Later cycles plan what
+the daemon would do on a variable change, so a quiet node logs no `Shadow plan` line. Values of
+secret keys are redacted in the log and in the plan files.
+
+With `--shadow-dir DIR` (created `0700`, files `0600`, since rendered files can hold credentials):
+
+| Path | Content |
+|---|---|
+| `DIR/rendered/<target>` | the would-be file of every planned `rewrite`, laid out like the install tree (`DIR/rendered/conf/nginx.conf` is what `/opt/zextras/conf/nginx.conf` would be); the latest render wins |
+| `DIR/plan-latest.json` | the plan of the last cycle (the `configd plan --json` format), empty or not |
+| `DIR/plans/plan-<UTC time>-<cycle>.json` | the plan of every cycle whose plan is **not empty** (empty ones would grow the directory forever) |
+
+Diff the would-be files against the live ones:
+
+```bash
+cd /opt/zextras/data/tmp/shadow/rendered
+find . -type f | while read -r f; do diff -u "/opt/zextras/$f" "$f"; done
+```
+
+`DIR` must not be, or contain, the install tree (`/opt/zextras`); `configd shadow` refuses it.
+`--cpuprofile`, `--memprofile`, `--trace` and `--enable-tracing` are refused too: their output
+files would be side effects. Send `SIGHUP` to run the next cycle at once, `SIGTERM`/`SIGINT` to stop.
+
+Limits: the generated proxy files (`proxygen`) and the mapped files (`mapfile`) are listed in
+the plan but not rendered into `DIR`; LDAP `cn=config` writes are listed, never read back.
+Because nothing is executed, a shadow cycle plans against the previous *snapshot*, not against
+the files on disk: use `configd plan` to compare the host itself with the configuration.
+
 ### Flags
 
 ```
@@ -141,6 +228,13 @@ Like the legacy daemon, every poll reloads LDAP and localconfig, so changes made
 `zmconfigd_skip_idle_polls=TRUE` skips the config-load phase when no REWRITE events have
 been received since the last cycle; changes made only in LDAP then wait for a REWRITE
 request or SIGHUP, which always forces a full cycle.
+
+To apply LDAP changes without waiting for the interval, set
+`zmconfigd_ldap_change_trigger=TRUE` (off by default): a watcher polls the global config,
+server and domain entries a cycle reads and starts a full cycle as soon as one changes. The
+interval poll keeps running as the safety net. See
+[docs/architecture.md](docs/architecture.md#ldap-change-detection-opt-in) and
+[docs/localconfig.md](docs/localconfig.md#configd-only-keys-not-in-the-defaults-registry).
 
 ### Localconfig subcommand
 

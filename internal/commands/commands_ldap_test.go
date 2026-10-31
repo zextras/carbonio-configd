@@ -35,65 +35,36 @@ func (s *stubProvisioningLDAP) GetAllServersWithAttributes() (map[string]map[str
 	return s.allServers, s.err
 }
 
-func TestGetServer_WithStub(t *testing.T) {
-	e := &CommandExecutor{ldapClient: &stubProvisioningLDAP{
-		serverConfig: map[string]string{"zimbraServiceHostname": "mail.example.com"},
-	}}
+func TestServerAttrs_WithStub(t *testing.T) {
+	want := map[string]string{"zimbraServiceHostname": "mail.example.com", "zimbraServiceEnabled": "proxy\nmta"}
+	e := &CommandExecutor{ldapClient: &stubProvisioningLDAP{serverConfig: want}}
 
-	out, err := e.getserver(context.Background(), "mail.example.com")
+	got, err := e.ServerAttrs(context.Background(), "mail.example.com")
 	require.NoError(t, err)
-	assert.Contains(t, out, "zimbraServiceHostname: mail.example.com")
+	assert.Equal(t, want, got)
 }
 
-func TestGetServer_LDAPError(t *testing.T) {
+func TestServerAttrs_LDAPError(t *testing.T) {
 	e := &CommandExecutor{ldapClient: &stubProvisioningLDAP{err: errors.New("boom")}}
 
-	_, err := e.getserver(context.Background(), "mail.example.com")
+	_, err := e.ServerAttrs(context.Background(), "mail.example.com")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "native LDAP query failed")
+	assert.Contains(t, err.Error(), "native LDAP query failed for server mail.example.com")
 }
 
-func TestGetServerEnabled_WithServices(t *testing.T) {
-	e := &CommandExecutor{ldapClient: &stubProvisioningLDAP{
-		serverConfig: map[string]string{"zimbraServiceEnabled": "proxy\nmta"},
-	}}
+func TestGlobalAttrs_WithStub(t *testing.T) {
+	want := map[string]string{"zimbraSmtpHostname": "smtp.example.com"}
+	e := &CommandExecutor{ldapClient: &stubProvisioningLDAP{globalConfig: want}}
 
-	out, err := e.getserverenabled(context.Background(), "mail.example.com")
+	got, err := e.GlobalAttrs(context.Background())
 	require.NoError(t, err)
-	assert.Equal(t, "zimbraServiceEnabled: proxy\nmta\n", out)
+	assert.Equal(t, want, got)
 }
 
-func TestGetServerEnabled_NoServices(t *testing.T) {
-	e := &CommandExecutor{ldapClient: &stubProvisioningLDAP{
-		serverConfig: map[string]string{"cn": "mail"},
-	}}
-
-	out, err := e.getserverenabled(context.Background(), "mail.example.com")
-	require.NoError(t, err)
-	assert.Empty(t, out)
-}
-
-func TestGetServerEnabled_LDAPError(t *testing.T) {
+func TestGlobalAttrs_LDAPError(t *testing.T) {
 	e := &CommandExecutor{ldapClient: &stubProvisioningLDAP{err: errors.New("boom")}}
 
-	_, err := e.getserverenabled(context.Background(), "mail.example.com")
-	require.Error(t, err)
-}
-
-func TestGetGlobal_WithStub(t *testing.T) {
-	e := &CommandExecutor{ldapClient: &stubProvisioningLDAP{
-		globalConfig: map[string]string{"zimbraSmtpHostname": "smtp.example.com"},
-	}}
-
-	out, err := e.getglobal(context.Background())
-	require.NoError(t, err)
-	assert.Contains(t, out, "zimbraSmtpHostname: smtp.example.com")
-}
-
-func TestGetGlobal_LDAPError(t *testing.T) {
-	e := &CommandExecutor{ldapClient: &stubProvisioningLDAP{err: errors.New("boom")}}
-
-	_, err := e.getglobal(context.Background())
+	_, err := e.GlobalAttrs(context.Background())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "native LDAP query failed for global config")
 }
@@ -200,13 +171,10 @@ func TestLDAPCommands_NilClient(t *testing.T) {
 	e := NewCommandExecutor(nil)
 	ctx := context.Background()
 
-	_, err := e.getserver(ctx, "h")
+	_, err := e.ServerAttrs(ctx, "h")
 	assert.ErrorContains(t, err, errLDAPNotInitialized)
 
-	_, err = e.getserverenabled(ctx, "h")
-	assert.ErrorContains(t, err, errLDAPNotInitialized)
-
-	_, err = e.getglobal(ctx)
+	_, err = e.GlobalAttrs(ctx)
 	assert.ErrorContains(t, err, errLDAPNotInitialized)
 
 	_, err = e.garpu(ctx)

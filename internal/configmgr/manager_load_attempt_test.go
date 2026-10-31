@@ -7,16 +7,34 @@ package configmgr
 import (
 	"context"
 	"errors"
+	"runtime"
 	"testing"
 	"time"
+
+	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
 
 const loadTestDeadline = 10 * time.Second
 
+// awaitWaiters spins until the code under test is parked on the fake clock.
+func awaitWaiters(clock *systest.Clock) {
+	deadline := time.Now().Add(loadTestDeadline)
+
+	for clock.Waiters() == 0 {
+		if time.Now().After(deadline) {
+			panic("code under test never parked on the fake clock")
+		}
+
+		runtime.Gosched()
+	}
+}
+
 // runLoadAttemptAsync runs runLoadAttempt in a goroutine so a regression that
-// blocks on a hung loader fails the test instead of hanging it.
+// blocks on a hung loader fails the test instead of hanging it. When fireAfter
+// is non-zero it waits for each of the two attempt timers to be armed and
+// advances the fake clock by fireAfter, expiring the attempt deadline.
 func runLoadAttemptAsync(
-	ctx context.Context, loadFuncs []loadFunc, timeout time.Duration,
+	ctx context.Context, clock *systest.Clock, loadFuncs []loadFunc, timeout, fireAfter time.Duration,
 ) (timedOut bool, errs []error, ctxErr error) {
 	type result struct {
 		timedOut bool
@@ -27,9 +45,17 @@ func runLoadAttemptAsync(
 	ch := make(chan result, 1)
 
 	go func() {
-		to, e, c := runLoadAttempt(ctx, loadFuncs, timeout)
+		to, e, c := runLoadAttempt(ctx, clock, loadFuncs, timeout)
 		ch <- result{to, e, c}
 	}()
+
+	if fireAfter > 0 {
+		// Legacy two-stage wait: join(timeout), then once more.
+		for range 2 {
+			awaitWaiters(clock)
+			clock.Advance(fireAfter)
+		}
+	}
 
 	select {
 	case r := <-ch:
@@ -42,6 +68,9 @@ func runLoadAttemptAsync(
 // TestRunLoadAttempt_HungLoaderTimesOut: a loader that ignores its context must
 // neither hang the caller nor keep a live (uncancelled) context.
 func TestRunLoadAttempt_HungLoaderTimesOut(t *testing.T) {
+	t.Parallel()
+
+	clock := systest.NewClock(nil)
 	release := make(chan struct{})
 	t.Cleanup(func() { close(release) })
 
@@ -57,7 +86,7 @@ func TestRunLoadAttempt_HungLoaderTimesOut(t *testing.T) {
 		}},
 	}
 
-	timedOut, errs, ctxErr := runLoadAttemptAsync(context.Background(), loadFuncs, 20*time.Millisecond)
+	timedOut, errs, ctxErr := runLoadAttemptAsync(context.Background(), clock, loadFuncs, 20*time.Millisecond, 20*time.Millisecond)
 	if ctxErr != nil {
 		t.Fatalf("ctxErr = %v, want nil", ctxErr)
 	}
@@ -85,6 +114,8 @@ func TestRunLoadAttempt_HungLoaderTimesOut(t *testing.T) {
 // TestRunLoadAttempt_ParentCancelDoesNotWaitForLoaders: shutdown must not wait
 // for a loader that is stuck.
 func TestRunLoadAttempt_ParentCancelDoesNotWaitForLoaders(t *testing.T) {
+	t.Parallel()
+
 	release := make(chan struct{})
 	t.Cleanup(func() { close(release) })
 
@@ -105,7 +136,7 @@ func TestRunLoadAttempt_ParentCancelDoesNotWaitForLoaders(t *testing.T) {
 		cancel()
 	}()
 
-	timedOut, _, ctxErr := runLoadAttemptAsync(ctx, loadFuncs, time.Hour)
+	timedOut, _, ctxErr := runLoadAttemptAsync(ctx, systest.NewClock(nil), loadFuncs, time.Hour, 0)
 	if !errors.Is(ctxErr, context.Canceled) {
 		t.Errorf("ctxErr = %v, want context.Canceled", ctxErr)
 	}
@@ -118,6 +149,8 @@ func TestRunLoadAttempt_ParentCancelDoesNotWaitForLoaders(t *testing.T) {
 // TestRunLoadAttempt_ErrorsInLoaderOrder: errors are reported in loadFuncs
 // order regardless of completion order.
 func TestRunLoadAttempt_ErrorsInLoaderOrder(t *testing.T) {
+	t.Parallel()
+
 	slowDone := make(chan struct{})
 
 	loadFuncs := []loadFunc{
@@ -133,7 +166,7 @@ func TestRunLoadAttempt_ErrorsInLoaderOrder(t *testing.T) {
 		}},
 	}
 
-	timedOut, errs, ctxErr := runLoadAttemptAsync(context.Background(), loadFuncs, time.Minute)
+	timedOut, errs, ctxErr := runLoadAttemptAsync(context.Background(), systest.NewClock(nil), loadFuncs, time.Minute, 0)
 	if timedOut || ctxErr != nil {
 		t.Fatalf("timedOut=%v ctxErr=%v, want false/nil", timedOut, ctxErr)
 	}
@@ -147,28 +180,11 @@ func TestRunLoadAttempt_ErrorsInLoaderOrder(t *testing.T) {
 	}
 }
 
-// TestSleepCtx_CancelInterruptsSleep: a cancelled context ends the backoff early.
-func TestSleepCtx_CancelInterruptsSleep(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	done := make(chan error, 1)
-
-	go func() { done <- sleepCtx(ctx, time.Hour) }()
-
-	select {
-	case err := <-done:
-		if !errors.Is(err, context.Canceled) {
-			t.Errorf("sleepCtx err = %v, want context.Canceled", err)
-		}
-	case <-time.After(loadTestDeadline):
-		t.Fatal("sleepCtx did not return after cancellation")
-	}
-}
-
 // TestRetryWithBackoff_CancelDuringBackoff: cancelling while waiting between
 // attempts must abort without running another attempt.
 func TestRetryWithBackoff_CancelDuringBackoff(t *testing.T) {
+	t.Parallel()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	calls := 0
 
@@ -177,7 +193,7 @@ func TestRetryWithBackoff_CancelDuringBackoff(t *testing.T) {
 	done := make(chan res, 1)
 
 	go func() {
-		_, err := retryWithBackoff(ctx, "op", 3, func() (int, error) {
+		_, err := retryWithBackoff(ctx, systest.NewClock(nil), "op", 3, func() (int, error) {
 			calls++
 
 			cancel() // cancelled before the first backoff sleep starts

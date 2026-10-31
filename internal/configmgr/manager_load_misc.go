@@ -64,7 +64,7 @@ func (cm *ConfigManager) LoadMiscConfig(ctx context.Context) error {
 		return fmt.Errorf("misc config load cancelled before publish: %w", err)
 	}
 
-	cm.State.MiscConfig.Data.Replace(published)
+	cm.sink(ctx).setMisc(published)
 
 	dt := time.Since(t1)
 	logger.DebugContext(ctx, "Miscconfig loaded",
@@ -187,7 +187,7 @@ func (cm *ConfigManager) loadGlobalConfigWithRetry(ctx context.Context, maxRetri
 		return fmt.Errorf("global config load cancelled before publish: %w", err)
 	}
 
-	cm.State.GlobalConfig.Data.Replace(configData)
+	cm.sink(ctx).setGlobal(configData)
 
 	dt := time.Since(t1)
 	logger.DebugContext(ctx, "GlobalConfig loaded",
@@ -205,14 +205,11 @@ func (cm *ConfigManager) cachedGlobalConfig(ctx context.Context, maxRetries int)
 
 // fetchGlobalConfig fetches fresh global config from LDAP (cache miss path)
 func (cm *ConfigManager) fetchGlobalConfig(ctx context.Context, maxRetries int) (map[string]string, error) {
-	return retryWithBackoff(ctx, "GlobalConfig", maxRetries, func() (map[string]string, error) {
-		output, err := cm.executeLDAPCommand(ctx, "gacf")
+	return retryWithBackoff(ctx, cm.env.Clock, "GlobalConfig", maxRetries, func() (map[string]string, error) {
+		configData, err := cm.fetchGlobalAttrs(ctx)
 		if err != nil {
 			return nil, err
 		}
-
-		// Parse LDAP attribute output (key: value format)
-		configData := parseLDAPCommandOutput(output)
 
 		// Post-processing: Set zimbraQuarantineBannedItems based on conditions
 		if configData["zimbraMtaBlockedExtensionWarnRecipient"] == constTRUE &&

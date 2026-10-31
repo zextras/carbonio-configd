@@ -10,26 +10,33 @@ import (
 	"strings"
 )
 
+// milterMainClass is the JVM main class of the milter: the last argument
+// milterJavaArgs hands to java, and the identity (ServiceDef.ProcessName)
+// under which the running JVM is recognised — legacy zmmilterctl's
+// `pgrep -f '/opt/zextras/.*/java.*milter.MilterServer'`, as an exact argv
+// token.
+const milterMainClass = "com.zimbra.cs.milter.MilterServer"
+
 // milterCustomStart builds and executes the Java command for MilterServer.
 // Reuses mailboxJavaBinary for Java path discovery. The milter is a lightweight
 // Java process sharing the mailbox classpath but running a different main class.
-func milterCustomStart(ctx context.Context, _ *ServiceDef) error {
-	lc, err := loadConfig()
+func (c *Controller) milterCustomStart(ctx context.Context, _ *ServiceDef) error {
+	lc, err := c.loadConfig()
 	if err != nil {
 		return fmt.Errorf("failed to load localconfig: %w", err)
 	}
 
-	javaBin, err := mailboxJavaBinary(ctx, lc)
+	javaBin, err := c.mailboxJavaBinary(ctx, lc)
 	if err != nil {
 		return err
 	}
 
-	return startJavaDetached(ctx, "milter", javaBin, logPath+"/milter.out", milterJavaArgs(lc))
+	return c.startJavaDetached(ctx, "milter", javaBin, c.p.log+"/milter.out", c.milterJavaArgs(lc))
 }
 
 // milterJavaArgs builds JVM arguments for MilterServer.
 // Mirrors the legacy milterctl.sh / carbonio-milter.service command.
-func milterJavaArgs(lc map[string]string) []string {
+func (c *Controller) milterJavaArgs(lc map[string]string) []string {
 	javaOpts := lc["zimbra_zmjava_options"]
 	if javaOpts == "" {
 		javaOpts = "-Xmx256m" +
@@ -38,22 +45,22 @@ func milterJavaArgs(lc map[string]string) []string {
 			" -Djava.net.preferIPv4Stack=true"
 	}
 
-	libPath := lc["zimbra_zmjava_java_library_path"]
-	if libPath == "" {
-		libPath = basePath + "/lib"
+	javaLibPath := lc["zimbra_zmjava_java_library_path"]
+	if javaLibPath == "" {
+		javaLibPath = c.p.base + "/lib"
 	}
 
-	log4jFile := confPath + "/milter.log4j.properties"
+	log4jFile := c.p.conf + "/milter.log4j.properties"
 
 	args := append(javaPreviewArgs(), "-client")
 	args = append(args, withoutPreviewArgs(strings.Fields(javaOpts))...)
 
 	return append(args,
-		"-Dzimbra.home="+basePath,
-		"-Djava.library.path="+libPath,
-		"-classpath", mailboxPath+"/jars/*:"+confPath,
+		"-Dzimbra.home="+c.p.base,
+		"-Djava.library.path="+javaLibPath,
+		"-classpath", c.p.mailbox+"/jars/*:"+c.p.conf,
 		"-Dlog4j.configurationFile=file:"+log4jFile,
-		"-Dzimbra.config="+confPath+"/localconfig.xml",
-		"com.zimbra.cs.milter.MilterServer",
+		"-Dzimbra.config="+c.p.conf+"/localconfig.xml",
+		milterMainClass,
 	)
 }

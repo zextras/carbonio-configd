@@ -12,6 +12,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/services"
 	"github.com/zextras/carbonio-configd/internal/state"
+	"github.com/zextras/carbonio-configd/internal/sys/systest"
 	"github.com/zextras/carbonio-configd/internal/watchdog"
 )
 
@@ -83,9 +84,15 @@ func TestMainLoopActionTrigger_TriggerRewrite_EmptyConfigs(t *testing.T) {
 	}
 }
 
+// newFakeServiceManager builds a ServiceManager on fake host fakes: the tests
+// using it only exercise bookkeeping and never reach a service.
+func newFakeServiceManager() *services.ServiceManager {
+	return services.NewServiceManager(services.NewController(systest.New().System()))
+}
+
 func TestBuildServiceDependencies_NilSections(t *testing.T) {
 	ctx := context.Background()
-	sm := services.NewServiceManager()
+	sm := newFakeServiceManager()
 	appState := state.NewState()
 	// MtaConfig.Sections is initialized to empty map by NewState, set nil to test guard
 	appState.MtaConfig.Sections = nil
@@ -95,7 +102,7 @@ func TestBuildServiceDependencies_NilSections(t *testing.T) {
 
 func TestBuildServiceDependencies_WithDeps(t *testing.T) {
 	ctx := context.Background()
-	sm := services.NewServiceManager()
+	sm := newFakeServiceManager()
 	appState := state.NewState()
 
 	appState.MtaConfig.Sections["mta"] = &config.MtaConfigSection{
@@ -111,7 +118,7 @@ func TestBuildServiceDependencies_WithDeps(t *testing.T) {
 
 func TestBuildServiceDependencies_EmptySections(t *testing.T) {
 	ctx := context.Background()
-	sm := services.NewServiceManager()
+	sm := newFakeServiceManager()
 	appState := state.NewState()
 	// Empty sections — no deps to set
 	buildServiceDependencies(ctx, sm, appState)
@@ -120,34 +127,38 @@ func TestBuildServiceDependencies_EmptySections(t *testing.T) {
 func TestUpdateWatchdogServices_EmptyList(t *testing.T) {
 	ctx := context.Background()
 	appState := state.NewState()
+	tracked := map[string]string{}
 	mainCfg, _ := config.NewConfig()
 	mainCfg.WdList = []string{}
 
 	wd := watchdog.NewWatchdog(watchdog.Config{
 		CheckInterval:  0,
-		ServiceManager: services.NewServiceManager(),
+		ServiceManager: newFakeServiceManager(),
 		State:          appState,
+		Clock:          systest.New().Clock,
 		ConfigLookup:   func(_ string) string { return "" },
 	})
 
 	// Must not panic; defaults to ["antivirus"]
-	updateWatchdogServices(ctx, wd, appState, mainCfg)
+	updateWatchdogServices(ctx, wd, tracked, mainCfg)
 }
 
 func TestUpdateWatchdogServices_WithList(t *testing.T) {
 	ctx := context.Background()
 	appState := state.NewState()
+	tracked := map[string]string{}
 	mainCfg, _ := config.NewConfig()
 	mainCfg.WdList = []string{"antivirus", "mta"}
 
 	wd := watchdog.NewWatchdog(watchdog.Config{
 		CheckInterval:  0,
-		ServiceManager: services.NewServiceManager(),
+		ServiceManager: newFakeServiceManager(),
 		State:          appState,
+		Clock:          systest.New().Clock,
 		ConfigLookup:   func(_ string) string { return "" },
 	})
 
-	updateWatchdogServices(ctx, wd, appState, mainCfg)
+	updateWatchdogServices(ctx, wd, tracked, mainCfg)
 }
 
 func TestUpdateWatchdogServices_ServiceInWatchdogList(t *testing.T) {
@@ -156,17 +167,22 @@ func TestUpdateWatchdogServices_ServiceInWatchdogList(t *testing.T) {
 	mainCfg, _ := config.NewConfig()
 	mainCfg.WdList = []string{"antivirus"}
 
-	// Add a service to CurrentActions so we exercise the slices.Contains path
-	appState.CurrentActions.Services["antivirus"] = "running"
+	// Add a service to the plan's tracked set so we exercise the slices.Contains path
+	tracked := map[string]string{"antivirus": "running"}
 
 	wd := watchdog.NewWatchdog(watchdog.Config{
 		CheckInterval:  0,
-		ServiceManager: services.NewServiceManager(),
+		ServiceManager: newFakeServiceManager(),
 		State:          appState,
+		Clock:          systest.New().Clock,
 		ConfigLookup:   func(_ string) string { return "" },
 	})
 
-	updateWatchdogServices(ctx, wd, appState, mainCfg)
+	updateWatchdogServices(ctx, wd, tracked, mainCfg)
+
+	if !wd.IsServiceTracked("antivirus") {
+		t.Error("expected antivirus, present in plan.Tracked and the watchdog list, to be tracked")
+	}
 }
 
 func TestMainLoopActionTrigger_TriggerRewrite_ChannelBlocked(t *testing.T) {

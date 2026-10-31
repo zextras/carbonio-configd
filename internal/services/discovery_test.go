@@ -14,6 +14,8 @@ import (
 )
 
 func TestMapLDAPServiceToRegistry(t *testing.T) {
+	t.Parallel()
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -39,6 +41,8 @@ func TestMapLDAPServiceToRegistry(t *testing.T) {
 }
 
 func TestLegacyServiceFiltering(t *testing.T) {
+	t.Parallel()
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -60,12 +64,13 @@ func TestLegacyServiceFiltering(t *testing.T) {
 }
 
 func TestCacheReadWrite(t *testing.T) {
+	t.Parallel()
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	// Use a temp dir for cache
 	dir := t.TempDir()
-	origCache := cacheFile
 
 	// Override cache path for test (we can't reassign the const, so test the functions directly)
 	testCache := filepath.Join(dir, ".zmcontrol.cache")
@@ -95,8 +100,6 @@ func TestCacheReadWrite(t *testing.T) {
 	if lines[0] != "mta" {
 		t.Errorf("expected first service 'mta', got %q", lines[0])
 	}
-
-	_ = origCache // reference to avoid unused
 }
 
 func splitCacheLines(data string) []string {
@@ -123,17 +126,25 @@ func splitCacheLines(data string) []string {
 }
 
 func TestIsLDAPLocal_NoConfig(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	// Without localconfig.xml, should return false (not crash)
-	result := IsLDAPLocal()
+	result := ctl.IsLDAPLocal()
 	// Just verify it doesn't panic — result depends on environment
 	_ = result
 }
 
 // TestReadCache_Success verifies readCache reads a valid cache file.
 func TestReadCache_Success(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -147,18 +158,15 @@ func TestReadCache_Success(t *testing.T) {
 		t.Fatalf("failed to write test cache: %v", err)
 	}
 
-	orig := cacheFile
-	cacheFile = testCache
+	ctl.p.cacheFile = testCache
 
-	defer func() { cacheFile = orig }()
-
-	got, err := readCache(context.Background())
+	got, err := ctl.readCache(context.Background())
 	if err != nil {
-		t.Fatalf("readCache() returned error: %v", err)
+		t.Fatalf("ctl.readCache() returned error: %v", err)
 	}
 
 	if len(got) != len(services) {
-		t.Fatalf("readCache() returned %d services, want %d", len(got), len(services))
+		t.Fatalf("ctl.readCache() returned %d services, want %d", len(got), len(services))
 	}
 
 	for i, s := range services {
@@ -170,6 +178,10 @@ func TestReadCache_Success(t *testing.T) {
 
 // TestReadCache_EmptyLines verifies readCache skips blank lines.
 func TestReadCache_EmptyLines(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -181,40 +193,42 @@ func TestReadCache_EmptyLines(t *testing.T) {
 		t.Fatalf("failed to write test cache: %v", err)
 	}
 
-	orig := cacheFile
-	cacheFile = testCache
+	ctl.p.cacheFile = testCache
 
-	defer func() { cacheFile = orig }()
-
-	got, err := readCache(context.Background())
+	got, err := ctl.readCache(context.Background())
 	if err != nil {
-		t.Fatalf("readCache() returned error: %v", err)
+		t.Fatalf("ctl.readCache() returned error: %v", err)
 	}
 
 	// Should have 3 non-empty services (mta, proxy, ldap)
 	if len(got) != 3 {
-		t.Errorf("readCache() returned %d services, want 3 (blank lines skipped): %v", len(got), got)
+		t.Errorf("ctl.readCache() returned %d services, want 3 (blank lines skipped): %v", len(got), got)
 	}
 }
 
 // TestReadCache_MissingFile verifies readCache returns error when file is absent.
 func TestReadCache_MissingFile(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	orig := cacheFile
-	cacheFile = "/nonexistent/path/.zmcontrol.cache"
+	ctl.p.cacheFile = "/nonexistent/path/.zmcontrol.cache"
 
-	defer func() { cacheFile = orig }()
-
-	_, err := readCache(context.Background())
+	_, err := ctl.readCache(context.Background())
 	if err == nil {
-		t.Error("readCache() should return error when cache file is missing")
+		t.Error("ctl.readCache() should return error when cache file is missing")
 	}
 }
 
 // TestReadCache_SingleService verifies readCache handles a single-entry cache.
 func TestReadCache_SingleService(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -225,36 +239,34 @@ func TestReadCache_SingleService(t *testing.T) {
 		t.Fatalf("failed to write test cache: %v", err)
 	}
 
-	orig := cacheFile
-	cacheFile = testCache
+	ctl.p.cacheFile = testCache
 
-	defer func() { cacheFile = orig }()
-
-	got, err := readCache(context.Background())
+	got, err := ctl.readCache(context.Background())
 	if err != nil {
-		t.Fatalf("readCache() returned error: %v", err)
+		t.Fatalf("ctl.readCache() returned error: %v", err)
 	}
 
 	if len(got) != 1 || got[0] != "ldap" {
-		t.Errorf("readCache() = %v, want [ldap]", got)
+		t.Errorf("ctl.readCache() = %v, want [ldap]", got)
 	}
 }
 
 // TestWriteCache_Success verifies writeCache writes correct content.
 func TestWriteCache_Success(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	dir := t.TempDir()
 	testCache := filepath.Join(dir, ".zmcontrol.cache")
 
-	orig := cacheFile
-	cacheFile = testCache
-
-	defer func() { cacheFile = orig }()
+	ctl.p.cacheFile = testCache
 
 	services := []string{"mta", "proxy", "ldap"}
-	writeCache(context.Background(), services)
+	ctl.writeCache(context.Background(), services)
 
 	data, err := os.ReadFile(testCache)
 	if err != nil {
@@ -263,24 +275,25 @@ func TestWriteCache_Success(t *testing.T) {
 
 	expected := "mta\nproxy\nldap\n"
 	if string(data) != expected {
-		t.Errorf("writeCache() wrote %q, want %q", string(data), expected)
+		t.Errorf("ctl.writeCache() wrote %q, want %q", string(data), expected)
 	}
 }
 
 // TestWriteCache_Empty verifies writeCache handles empty service list.
 func TestWriteCache_Empty(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	dir := t.TempDir()
 	testCache := filepath.Join(dir, ".zmcontrol.cache")
 
-	orig := cacheFile
-	cacheFile = testCache
+	ctl.p.cacheFile = testCache
 
-	defer func() { cacheFile = orig }()
-
-	writeCache(context.Background(), []string{})
+	ctl.writeCache(context.Background(), []string{})
 
 	data, err := os.ReadFile(testCache)
 	if err != nil {
@@ -289,43 +302,45 @@ func TestWriteCache_Empty(t *testing.T) {
 
 	// Empty slice joined = "" + "\n"
 	if string(data) != "\n" {
-		t.Errorf("writeCache() with empty slice wrote %q, want newline", string(data))
+		t.Errorf("ctl.writeCache() with empty slice wrote %q, want newline", string(data))
 	}
 }
 
 // TestWriteCache_UnwritablePath verifies writeCache does not panic on write failure.
 func TestWriteCache_UnwritablePath(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	orig := cacheFile
-	cacheFile = "/nonexistent/dir/.zmcontrol.cache"
-
-	defer func() { cacheFile = orig }()
+	ctl.p.cacheFile = "/nonexistent/dir/.zmcontrol.cache"
 
 	// Should not panic — just logs a warning
-	writeCache(context.Background(), []string{"mta"})
+	ctl.writeCache(context.Background(), []string{"mta"})
 }
 
 // TestWriteReadCache_RoundTrip verifies write then read returns the same services.
 func TestWriteReadCache_RoundTrip(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	dir := t.TempDir()
 	testCache := filepath.Join(dir, ".zmcontrol.cache")
 
-	orig := cacheFile
-	cacheFile = testCache
-
-	defer func() { cacheFile = orig }()
+	ctl.p.cacheFile = testCache
 
 	services := []string{"ldap", "mailbox", "mta", "proxy", "zmconfigd"}
-	writeCache(context.Background(), services)
+	ctl.writeCache(context.Background(), services)
 
-	got, err := readCache(context.Background())
+	got, err := ctl.readCache(context.Background())
 	if err != nil {
-		t.Fatalf("readCache() returned error: %v", err)
+		t.Fatalf("ctl.readCache() returned error: %v", err)
 	}
 
 	if len(got) != len(services) {
@@ -341,25 +356,30 @@ func TestWriteReadCache_RoundTrip(t *testing.T) {
 
 // TestCarbonioCATLSConfig_MissingCA verifies fallback when CA file is absent.
 func TestCarbonioCATLSConfig_MissingCA(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	dir := t.TempDir()
 
-	orig := confPath
-	confPath = dir
-
-	defer func() { confPath = orig }()
+	ctl.p.conf = dir
 
 	// No ca/ca.pem created — should return nil
-	cfg := carbonioCATLSConfig()
+	cfg := ctl.carbonioCATLSConfig()
 	if cfg != nil {
-		t.Error("carbonioCATLSConfig() should return nil when CA file is missing")
+		t.Error("ctl.carbonioCATLSConfig() should return nil when CA file is missing")
 	}
 }
 
 // TestCarbonioCATLSConfig_ValidCA verifies TLS config is returned with valid PEM.
 func TestCarbonioCATLSConfig_ValidCA(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -387,97 +407,98 @@ AAAAAAAAAAAAwIDAQABMA0GCSqGSIb3DQEBCwUAA4IBAQCabc123fakefakefake
 		t.Fatalf("failed to write CA PEM: %v", err)
 	}
 
-	orig := confPath
-	confPath = dir
-
-	defer func() { confPath = orig }()
+	ctl.p.conf = dir
 
 	// Even if the PEM is not a valid certificate, AppendCertsFromPEM will
 	// silently ignore it. The important thing is the function reads the file
 	// and returns a non-nil *tls.Config.
-	cfg := carbonioCATLSConfig()
+	cfg := ctl.carbonioCATLSConfig()
 	// With an invalid PEM cert the pool will be empty but cfg is still returned non-nil.
 	if cfg == nil {
-		t.Error("carbonioCATLSConfig() should return non-nil config when CA file exists")
+		t.Error("ctl.carbonioCATLSConfig() should return non-nil config when CA file exists")
 	}
 }
 
 // TestIsLDAPLocal_HostnameInURL verifies true when hostname appears in ldap_url.
 func TestIsLDAPLocal_HostnameInURL(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	old := loadConfig
-	loadConfig = func() (map[string]string, error) {
+	ctl.loadConfig = func() (map[string]string, error) {
 		return map[string]string{
 			"zimbra_server_hostname": "mail01.example.com",
-			"ldap_url":              "ldap://mail01.example.com:389",
+			"ldap_url":               "ldap://mail01.example.com:389",
 		}, nil
 	}
 
-	defer func() { loadConfig = old }()
-
-	if !IsLDAPLocal() {
-		t.Error("IsLDAPLocal() = false, want true when hostname is in ldap_url")
+	if !ctl.IsLDAPLocal() {
+		t.Error("ctl.IsLDAPLocal() = false, want true when hostname is in ldap_url")
 	}
 }
 
 // TestIsLDAPLocal_HostnameNotInURL verifies false when hostname is absent from ldap_url.
 func TestIsLDAPLocal_HostnameNotInURL(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	old := loadConfig
-	loadConfig = func() (map[string]string, error) {
+	ctl.loadConfig = func() (map[string]string, error) {
 		return map[string]string{
 			"zimbra_server_hostname": "mail01.example.com",
-			"ldap_url":              "ldap://ldap-master.example.com:389",
+			"ldap_url":               "ldap://ldap-master.example.com:389",
 		}, nil
 	}
 
-	defer func() { loadConfig = old }()
-
-	if IsLDAPLocal() {
-		t.Error("IsLDAPLocal() = true, want false when hostname is not in ldap_url")
+	if ctl.IsLDAPLocal() {
+		t.Error("ctl.IsLDAPLocal() = true, want false when hostname is not in ldap_url")
 	}
 }
 
 // TestIsLDAPLocal_EmptyHostname verifies behavior when hostname is empty.
 func TestIsLDAPLocal_EmptyHostname(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	old := loadConfig
-	loadConfig = func() (map[string]string, error) {
+	ctl.loadConfig = func() (map[string]string, error) {
 		return map[string]string{
 			"zimbra_server_hostname": "",
-			"ldap_url":              "ldap://ldap-master.example.com:389",
+			"ldap_url":               "ldap://ldap-master.example.com:389",
 		}, nil
 	}
 
-	defer func() { loadConfig = old }()
-
 	// strings.Contains(anyString, "") returns true
-	if !IsLDAPLocal() {
-		t.Error("IsLDAPLocal() = false, want true (empty hostname is contained in any string)")
+	if !ctl.IsLDAPLocal() {
+		t.Error("ctl.IsLDAPLocal() = false, want true (empty hostname is contained in any string)")
 	}
 }
 
-// TestDiscoverEnabledServices_LoadConfigFails verifies error when loadConfig fails.
+// TestDiscoverEnabledServices_LoadConfigFails verifies error when ctl.loadConfig fails.
 func TestDiscoverEnabledServices_LoadConfigFails(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	old := loadConfig
-	loadConfig = func() (map[string]string, error) {
+	ctl.loadConfig = func() (map[string]string, error) {
 		return nil, fmt.Errorf("no localconfig.xml")
 	}
 
-	defer func() { loadConfig = old }()
-
-	_, err := DiscoverEnabledServices(context.Background())
+	_, err := ctl.DiscoverEnabledServices(context.Background())
 	if err == nil {
-		t.Fatal("expected error when loadConfig fails")
+		t.Fatal("expected error when ctl.loadConfig fails")
 	}
 
 	if !strings.Contains(err.Error(), "failed to load localconfig") {
@@ -487,19 +508,20 @@ func TestDiscoverEnabledServices_LoadConfigFails(t *testing.T) {
 
 // TestDiscoverEnabledServices_EmptyHostname verifies error when hostname is not set.
 func TestDiscoverEnabledServices_EmptyHostname(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	old := loadConfig
-	loadConfig = func() (map[string]string, error) {
+	ctl.loadConfig = func() (map[string]string, error) {
 		return map[string]string{
 			"ldap_url": "ldap://localhost:389",
 		}, nil
 	}
 
-	defer func() { loadConfig = old }()
-
-	_, err := DiscoverEnabledServices(context.Background())
+	_, err := ctl.DiscoverEnabledServices(context.Background())
 	if err == nil {
 		t.Fatal("expected error when hostname is empty")
 	}
@@ -511,6 +533,10 @@ func TestDiscoverEnabledServices_EmptyHostname(t *testing.T) {
 
 // TestCarbonioCATLSConfig_ValidPEM verifies TLS config with a parseable PEM block.
 func TestCarbonioCATLSConfig_ValidPEM(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -526,18 +552,15 @@ func TestCarbonioCATLSConfig_ValidPEM(t *testing.T) {
 		t.Fatalf("failed to write CA file: %v", err)
 	}
 
-	orig := confPath
-	confPath = dir
+	ctl.p.conf = dir
 
-	defer func() { confPath = orig }()
-
-	cfg := carbonioCATLSConfig()
+	cfg := ctl.carbonioCATLSConfig()
 	if cfg == nil {
-		t.Error("carbonioCATLSConfig() should return non-nil *tls.Config when the file is readable")
+		t.Error("ctl.carbonioCATLSConfig() should return non-nil *tls.Config when the file is readable")
 		return
 	}
 
 	if cfg.MinVersion == 0 {
-		t.Error("carbonioCATLSConfig() should set MinVersion")
+		t.Error("ctl.carbonioCATLSConfig() should set MinVersion")
 	}
 }

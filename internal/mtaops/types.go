@@ -8,9 +8,14 @@ package mtaops
 
 import (
 	"context"
+	"errors"
 
-	"github.com/zextras/carbonio-configd/internal/state"
+	"github.com/zextras/carbonio-configd/internal/snapshot"
 )
+
+// ErrInvalidPostconfKey is returned by ReadPostconf for a key that is not a
+// valid Postfix parameter name.
+var ErrInvalidPostconfKey = errors.New("invalid postconf key")
 
 // PostconfOperation represents a Postfix postconf command to execute.
 type PostconfOperation struct {
@@ -56,10 +61,18 @@ type Executor interface {
 
 	// ExecuteLdapWrite executes an LDAP cn=config write operation
 	ExecuteLdapWrite(ctx context.Context, op LdapOperation) error
+
+	// ReadPostconf reads a Postfix parameter without modifying anything. With
+	// explicitOnly false it returns the effective value (defaults included) and
+	// set is always true; with explicitOnly true it returns the value only when
+	// main.cf defines key explicitly (set=false otherwise, set=true with an empty
+	// value for an explicitly empty parameter). A failing postconf is an error.
+	ReadPostconf(ctx context.Context, key string, explicitOnly bool) (value string, set bool, err error)
 }
 
-// OperationResolver resolves directive values from state.
+// OperationResolver resolves directive values from a configuration snapshot.
 type OperationResolver interface {
-	// ResolveValue resolves a value based on type (VAR, LOCAL, FILE, MAPLOCAL, or literal)
-	ResolveValue(ctx context.Context, valueType, key string, state *state.State) (string, error)
+	// ResolveValue resolves a value based on type (VAR, LOCAL, FILE, MAPLOCAL, or literal).
+	// A nil snapshot behaves as an empty configuration.
+	ResolveValue(ctx context.Context, valueType, key string, snap *snapshot.Snapshot) (string, error)
 }

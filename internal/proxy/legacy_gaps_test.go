@@ -15,12 +15,15 @@ import (
 
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/ldap"
+	"github.com/zextras/carbonio-configd/internal/sys"
+	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
 
 func newConfigGenerator(t *testing.T, global, server map[string]string) *Generator {
 	t.Helper()
 
 	g := &Generator{
+		env:          sys.Real(),
 		ConfDir:      t.TempDir(),
 		WorkingDir:   t.TempDir(),
 		GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMap()},
@@ -55,7 +58,7 @@ func TestLoadDomains_GatedByPerVirtualHostname(t *testing.T) {
 
 	g := newConfigGenerator(t, map[string]string{perVirtualHostnameAttr: "FALSE"}, nil)
 	g.LdapClient = &ldap.Ldap{NativeClient: &ldap.Client{}}
-	tp := NewTemplateProcessor(g, t.TempDir(), t.TempDir())
+	tp := NewTemplateProcessor(g, g.env.FS, t.TempDir(), t.TempDir())
 
 	domains, err := tp.loadDomains(context.Background())
 	require.NoError(t, err)
@@ -67,7 +70,7 @@ func TestSyncDomainCerts_GateOffDeletesAllDomainCertFiles(t *testing.T) {
 
 	g := newConfigGenerator(t, map[string]string{perVirtualHostnameAttr: "FALSE"}, nil)
 	g.LdapClient = &ldap.Ldap{NativeClient: &ldap.Client{}}
-	tp := NewTemplateProcessor(g, t.TempDir(), t.TempDir())
+	tp := NewTemplateProcessor(g, g.env.FS, t.TempDir(), t.TempDir())
 
 	dir := g.domainCertsDir()
 	require.NoError(t, os.MkdirAll(dir, 0o755))
@@ -95,7 +98,7 @@ func TestSyncClientCA_WritesOnlyWhenChanged(t *testing.T) {
 	t.Parallel()
 
 	g := newConfigGenerator(t, map[string]string{clientCertCAAttr: "GLOBAL"}, nil)
-	tp := NewTemplateProcessor(g, t.TempDir(), t.TempDir())
+	tp := NewTemplateProcessor(g, g.env.FS, t.TempDir(), t.TempDir())
 	ctx := context.Background()
 	path := filepath.Join(g.ConfDir, clientCertCAFilename)
 
@@ -127,17 +130,17 @@ func TestSyncClientCA_EmptyCA(t *testing.T) {
 	ctx := context.Background()
 
 	g := newConfigGenerator(t, nil, nil)
-	tp := NewTemplateProcessor(g, t.TempDir(), t.TempDir())
+	tp := NewTemplateProcessor(g, g.env.FS, t.TempDir(), t.TempDir())
 	require.NoError(t, tp.syncClientCA(ctx, nil))
 	assert.Equal(t, false, g.Variables["ssl.clientcertca.enabled"].Value)
 	assert.NoFileExists(t, filepath.Join(g.ConfDir, clientCertCAFilename))
 
 	g = newConfigGenerator(t, map[string]string{"zimbraReverseProxyClientCertMode": "on"}, nil)
-	tp = NewTemplateProcessor(g, t.TempDir(), t.TempDir())
+	tp = NewTemplateProcessor(g, g.env.FS, t.TempDir(), t.TempDir())
 	require.ErrorIs(t, tp.syncClientCA(ctx, nil), errClientCAMissing)
 
 	g = newConfigGenerator(t, nil, nil)
-	tp = NewTemplateProcessor(g, t.TempDir(), t.TempDir())
+	tp = NewTemplateProcessor(g, g.env.FS, t.TempDir(), t.TempDir())
 	require.ErrorIs(t, tp.syncClientCA(ctx, []DomainInfo{{Name: "a.com", ClientCertMode: "optional"}}),
 		errClientCAMissing)
 	require.NoError(t, tp.syncClientCA(ctx, []DomainInfo{{Name: "a.com", ClientCertMode: "optional_no_ca"}}))
@@ -148,7 +151,7 @@ func TestSetDomainClientCertVariables(t *testing.T) {
 
 	g := newConfigGenerator(t, nil, nil)
 	g.Variables["web.sso.certauth.enabled"] = &Variable{Keyword: "web.sso.certauth.enabled", Value: false}
-	tp := NewTemplateProcessor(g, t.TempDir(), t.TempDir())
+	tp := NewTemplateProcessor(g, g.env.FS, t.TempDir(), t.TempDir())
 
 	tp.setDomainVariables(&DomainInfo{Name: "a.com", ClientCertMode: "on", ClientCertCA: "CA"})
 	assert.Equal(t, "on", g.Variables["ssl.clientcertmode"].Value)
@@ -169,62 +172,75 @@ func TestSetDomainClientCertVariables(t *testing.T) {
 	assert.Equal(t, false, g.Variables["web.sso.certauth.enabled"].Value)
 }
 
-// writeFakeCertbot installs a certbot stand-in recording its argv.
-func writeFakeCertbot(t *testing.T, g *Generator) string {
+// newCertbotGenerator returns a generator whose host boundary is an in-memory
+// filesystem and a scripted command runner, with WorkingDir /opt/zextras.
+func newCertbotGenerator(t *testing.T) (*Generator, *systest.Fakes) {
 	t.Helper()
 
-	require.NoError(t, os.MkdirAll(filepath.Dir(g.certbotBinary()), 0o755))
+	f := systest.New()
+	g := newConfigGenerator(t, nil, nil)
+	g.env = f.System()
+	g.WorkingDir = "/opt/zextras"
+	g.ConfDir = "/opt/zextras/conf"
 
-	argsFile := filepath.Join(t.TempDir(), "args")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + argsFile + "\n"
-	require.NoError(t, os.WriteFile(g.certbotBinary(), []byte(script), 0o755)) //nolint:gosec // test script
-
-	return argsFile
+	return g, f
 }
 
-func mkCertbotLive(t *testing.T, g *Generator, name string, files map[string]string) {
+// mkCertbotLive creates live/<name> in the fake filesystem holding files.
+func mkCertbotLive(t *testing.T, g *Generator, f *systest.Fakes, name string, files map[string]string) {
 	t.Helper()
 
-	dir := filepath.Join(g.certbotLiveDir(), name)
-	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, g.env.FS.MkdirAll(g.certbotLiveDir(), 0o755))
 
-	for f, c := range files {
-		require.NoError(t, os.WriteFile(filepath.Join(dir, f), []byte(c), 0o600))
+	dir := filepath.Join(g.certbotLiveDir(), name)
+	f.FS.PutDir(dir, 0o755)
+
+	for file, c := range files {
+		f.FS.Put(filepath.Join(dir, file), []byte(c), 0o600)
 	}
 }
 
 func TestDeleteCertbotConfigs_ArgvAndSubstringRetention(t *testing.T) {
 	t.Parallel()
 
-	g := newConfigGenerator(t, nil, nil)
-	tp := NewTemplateProcessor(g, t.TempDir(), t.TempDir())
-	argsFile := writeFakeCertbot(t, g)
+	g, f := newCertbotGenerator(t)
+	tp := NewTemplateProcessor(g, g.env.FS, "/tpl", "/out")
 
 	for _, n := range []string{"keep.com", "sub.keep.com", "gone.com", "-evil", "also-gone.org"} {
-		mkCertbotLive(t, g, n, nil)
+		mkCertbotLive(t, g, f, n, nil)
 	}
 
 	tp.deleteCertbotConfigs(context.Background(), []DomainInfo{{Name: "keep.com"}})
 
-	got, err := os.ReadFile(argsFile)
-	require.NoError(t, err)
-	// os.ReadDir order is sorted; "sub.keep.com" contains "keep.com" so it stays.
-	assert.Equal(t, "delete\nalso-gone.org\ngone.com\n", string(got))
+	// ReadDir order is sorted; "sub.keep.com" contains "keep.com" so it stays.
+	assert.Equal(t, []string{"/opt/zextras/libexec/certbot delete also-gone.org gone.com"}, f.Exec.Lines())
 }
 
 func TestDeleteCertbotConfigs_NoStaleOrDryRunDoesNotExec(t *testing.T) {
 	t.Parallel()
 
-	g := newConfigGenerator(t, nil, nil)
-	tp := NewTemplateProcessor(g, t.TempDir(), t.TempDir())
-	argsFile := writeFakeCertbot(t, g)
+	g, f := newCertbotGenerator(t)
+	tp := NewTemplateProcessor(g, g.env.FS, "/tpl", "/out")
 
 	tp.deleteCertbotConfigs(context.Background(), nil)
-	mkCertbotLive(t, g, "gone.com", nil)
+	mkCertbotLive(t, g, f, "gone.com", nil)
 
 	g.DryRun = true
 	tp.deleteCertbotConfigs(context.Background(), nil)
-	assert.NoFileExists(t, argsFile)
+	assert.Empty(t, f.Exec.Lines())
+}
+
+func TestDeleteCertbotConfigs_FailureIsLoggedNotReturned(t *testing.T) {
+	t.Parallel()
+
+	g, f := newCertbotGenerator(t)
+	tp := NewTemplateProcessor(g, g.env.FS, "/tpl", "/out")
+	mkCertbotLive(t, g, f, "gone.com", nil)
+	f.Exec.OnPath(g.certbotBinary(), systest.Fail(1, "boom"))
+
+	tp.deleteCertbotConfigs(context.Background(), nil)
+
+	assert.Equal(t, []string{"/opt/zextras/libexec/certbot delete gone.com"}, f.Exec.Lines())
 }
 
 func TestSaveCertbotPairsToLDAP(t *testing.T) {
@@ -232,10 +248,10 @@ func TestSaveCertbotPairsToLDAP(t *testing.T) {
 
 	ctx := context.Background()
 
-	g := newConfigGenerator(t, nil, nil)
-	tp := NewTemplateProcessor(g, t.TempDir(), t.TempDir())
-	mkCertbotLive(t, g, "le.com", map[string]string{certbotFullchainName: "FULL", certbotPrivkeyName: "PRIV"})
-	mkCertbotLive(t, g, "partial.com", map[string]string{certbotFullchainName: "FULL"})
+	g, f := newCertbotGenerator(t)
+	tp := NewTemplateProcessor(g, g.env.FS, "/tpl", "/out")
+	mkCertbotLive(t, g, f, "le.com", map[string]string{certbotFullchainName: "FULL", certbotPrivkeyName: "PRIV"})
+	mkCertbotLive(t, g, f, "partial.com", map[string]string{certbotFullchainName: "FULL"})
 
 	// Unchanged values: no LDAP write needed (no client configured) and no error.
 	domains, err := tp.saveCertbotPairsToLDAP(ctx, []DomainInfo{
@@ -256,4 +272,28 @@ func TestSaveCertbotPairsToLDAP(t *testing.T) {
 	g.DryRun = true
 	_, err = tp.saveCertbotPairsToLDAP(ctx, []DomainInfo{{Name: "le.com", SSLCertificate: "OLD"}})
 	require.NoError(t, err)
+}
+
+func TestGeneratorWriteSideEffectsThroughFS(t *testing.T) {
+	t.Parallel()
+
+	g, f := newCertbotGenerator(t)
+	g.IncludesDir = "/opt/zextras/conf/nginx/includes"
+	ctx := context.Background()
+
+	require.NoError(t, g.ensureIncludesDir(ctx))
+	require.NoError(t, g.writeFile(ctx, "/opt/zextras/conf/nginx/includes/a.conf", []byte("a")))
+	require.NoError(t, writeIfChanged(ctx, g.env.FS, "/opt/zextras/conf/domaincerts/x.crt", "PEM"))
+	// Unchanged content with the right mode is not rewritten.
+	require.NoError(t, writeIfChanged(ctx, g.env.FS, "/opt/zextras/conf/domaincerts/x.crt", "PEM"))
+
+	assert.Equal(t, []string{
+		"fs.mkdir /opt/zextras/conf/nginx/includes mode=0755",
+		"fs.write-atomic /opt/zextras/conf/nginx/includes/a.conf mode=0640",
+		"fs.write-atomic /opt/zextras/conf/domaincerts/x.crt mode=0640",
+	}, f.Rec.Strings())
+
+	g.DryRun = true
+	require.NoError(t, g.writeFile(ctx, "/opt/zextras/conf/nginx/includes/b.conf", []byte("b")))
+	assert.False(t, f.FS.Exists("/opt/zextras/conf/nginx/includes/b.conf"))
 }

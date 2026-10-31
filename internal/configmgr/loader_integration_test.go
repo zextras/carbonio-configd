@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/ldap"
+	"github.com/zextras/carbonio-configd/internal/snapshot"
 	"github.com/zextras/carbonio-configd/internal/state"
 	"os"
 	"path/filepath"
@@ -31,7 +32,7 @@ func TestConfigLoader_RetryLogic(t *testing.T) {
 	mainCfg.Hostname = "test-host.example.com"
 	appState := state.NewState()
 	ldapClient := ldap.NewLdap(context.Background(), mainCfg)
-	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil)
+	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv())
 
 	t.Run("LocalConfig retry on failure", func(t *testing.T) {
 		// This will fail in test environment (no zmlocalconfig binary)
@@ -85,11 +86,12 @@ func TestConfigLoader_TimeoutHandling(t *testing.T) {
 	appState := state.NewState()
 
 	// Set a very short timeout for testing
-	appState.LocalConfig.Data = config.NewConfigMap()
-	appState.LocalConfig.Data.Set("ldap_read_timeout", "100") // 100ms
+	appState.UpdateSnapshot(func(s *snapshot.Snapshot) *snapshot.Snapshot {
+		return s.WithLocal(map[string]string{"ldap_read_timeout": "100"}) // 100ms
+	})
 
 	ldapClient := ldap.NewLdap(context.Background(), mainCfg)
-	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil)
+	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv())
 
 	t.Run("Timeout detection", func(t *testing.T) {
 		err := cm.LoadAllConfigs(context.Background())
@@ -142,26 +144,34 @@ func TestConfigLoader_CompareWithReference(t *testing.T) {
 	mainCfg.Hostname = "test-host.example.com"
 	appState := state.NewState()
 	ldapClient := ldap.NewLdap(context.Background(), mainCfg)
-	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil)
+	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv())
 
 	if err := cm.LoadAllConfigs(context.Background()); err != nil {
 		t.Fatalf("Failed to load configs: %v", err)
 	}
 
 	t.Run("Compare LocalConfig", func(t *testing.T) {
-		compareConfigs(t, "LocalConfig", reference.LocalConfig, cm.State.LocalConfig.Data.Snapshot())
+		compareConfigs(t, "LocalConfig", reference.LocalConfig, cm.State.Snapshot().LocalMap())
 	})
 
 	t.Run("Compare GlobalConfig", func(t *testing.T) {
-		compareConfigs(t, "GlobalConfig", reference.GlobalConfig, cm.State.GlobalConfig.Data.Snapshot())
+		compareConfigs(t, "GlobalConfig", reference.GlobalConfig, cm.State.Snapshot().GlobalMap())
 	})
 
 	t.Run("Compare ServerConfig", func(t *testing.T) {
-		compareConfigs(t, "ServerConfig", reference.ServerConfig, cm.State.ServerConfig.Data.Snapshot())
+		compareConfigs(t, "ServerConfig", reference.ServerConfig, cm.State.Snapshot().ServerMap())
 	})
 
 	t.Run("Compare MiscConfig", func(t *testing.T) {
-		compareConfigs(t, "MiscConfig", reference.MiscConfig, cm.State.MiscConfig.Data.Snapshot())
+		// The snapshot exposes misc values by key only: compare the reference keys.
+		actual := make(map[string]string, len(reference.MiscConfig))
+		for key := range reference.MiscConfig {
+			if val, ok := cm.State.Snapshot().Misc(key); ok {
+				actual[key] = val
+			}
+		}
+
+		compareConfigs(t, "MiscConfig", reference.MiscConfig, actual)
 	})
 }
 
@@ -219,7 +229,7 @@ func TestConfigLoader_PostProcessing(t *testing.T) {
 	mainCfg.Hostname = "test-host.example.com"
 	appState := state.NewState()
 	ldapClient := ldap.NewLdap(context.Background(), mainCfg)
-	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil)
+	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv())
 
 	t.Run("SSL protocol sorting", func(t *testing.T) {
 		// Simulate unsorted SSL protocols
@@ -303,11 +313,10 @@ func TestConfigLoader_PostProcessing(t *testing.T) {
 	})
 
 	t.Run("OpenDKIM URI derivation", func(t *testing.T) {
-		cm.State.LocalConfig.Data = config.NewConfigMap()
-		cm.State.LocalConfig.Data.Set("ldap_url", "ldap://ldap1.example.com:389 ldap://ldap2.example.com:389")
+		setLocal(cm, map[string]string{"ldap_url": "ldap://ldap1.example.com:389 ldap://ldap2.example.com:389"})
 
 		// Re-run the LocalConfig post-processing logic (simplified)
-		ldapURL := cm.State.LocalConfig.Data.GetOr("ldap_url", "")
+		ldapURL, _ := cm.State.Snapshot().Local("ldap_url")
 		urls := []string{"ldap://ldap1.example.com:389", "ldap://ldap2.example.com:389"}
 
 		var signingTableURIs []string

@@ -9,26 +9,16 @@ import (
 	"time"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
-// sleepCtx waits for d or until ctx is cancelled, whichever comes first.
-// It returns ctx.Err() when cancelled so callers abort instead of sleeping on.
-func sleepCtx(ctx context.Context, d time.Duration) error {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
-}
-
 // retryWithBackoff executes fn up to maxRetries times with linear backoff.
-// On each failed attempt it logs the error and sleeps for attempt * 1s (aborting early if ctx is cancelled).
+// On each failed attempt it logs the error and sleeps for attempt * 1s on clock
+// (aborting early if ctx is cancelled, returning ctx.Err()).
 // If all attempts fail, it logs a warning and returns the last error.
-func retryWithBackoff[T any](ctx context.Context, name string, maxRetries int, fn func() (T, error)) (T, error) {
+func retryWithBackoff[T any](
+	ctx context.Context, clock sys.Clock, name string, maxRetries int, fn func() (T, error),
+) (T, error) {
 	var (
 		lastErr error
 		zero    T
@@ -45,7 +35,7 @@ func retryWithBackoff[T any](ctx context.Context, name string, maxRetries int, f
 				"attempt", attempt,
 				"max_retries", maxRetries)
 
-			if err := sleepCtx(ctx, time.Duration(attempt)*time.Second); err != nil {
+			if err := clock.Sleep(ctx, time.Duration(attempt)*time.Second); err != nil {
 				return zero, err
 			}
 		}

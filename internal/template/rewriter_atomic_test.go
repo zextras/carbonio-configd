@@ -6,65 +6,95 @@ package template
 
 import (
 	"context"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/zextras/carbonio-configd/internal/state"
+	"github.com/zextras/carbonio-configd/internal/sys"
+	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
 
+const fakeBase = "/opt/zextras"
+
+func newFakeRewriter() (*Rewriter, *systest.Fakes) {
+	fakes := systest.New()
+
+	return NewRewriter(fakeBase, newMockLookup(), fakes.System()), fakes
+}
+
 func TestAtomicReplace_RenameSameFilesystem(t *testing.T) {
-	dir := t.TempDir()
-	tmpPath := filepath.Join(dir, "config.tmp")
-	targetPath := filepath.Join(dir, "config")
-	require.NoError(t, os.WriteFile(tmpPath, []byte("content"), 0o600))
+	t.Parallel()
 
-	require.NoError(t, atomicReplace(context.Background(), tmpPath, targetPath, 0o440))
+	r, fakes := newFakeRewriter()
+	tmpPath := filepath.Join(fakeBase, "config.tmp")
+	targetPath := filepath.Join(fakeBase, "config")
+	fakes.FS.Put(tmpPath, []byte("content"), 0o600)
 
-	info, err := os.Stat(targetPath)
-	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0o440), info.Mode().Perm())
+	require.NoError(t, r.atomicReplace(context.Background(), tmpPath, targetPath, 0o440))
 
-	_, err = os.Stat(tmpPath)
-	assert.True(t, os.IsNotExist(err), "tmp file must be gone after rename")
+	mode, ok := fakes.FS.Mode(targetPath)
+	require.True(t, ok)
+	assert.Equal(t, os.FileMode(0o440), mode.Perm())
+	assert.False(t, fakes.FS.Exists(tmpPath), "tmp file must be gone after rename")
+	assert.Equal(t, []string{
+		"fs.chmod " + tmpPath + " mode=0440",
+		"fs.rename " + tmpPath + " -> " + targetPath,
+	}, fakes.Rec.Strings())
 }
 
 func TestAtomicReplace_ChmodFailure(t *testing.T) {
-	err := atomicReplace(context.Background(), filepath.Join(t.TempDir(), "ghost"), "/tmp/never", 0o440)
+	t.Parallel()
+
+	r, fakes := newFakeRewriter()
+
+	err := r.atomicReplace(context.Background(), filepath.Join(fakeBase, "ghost"), "/tmp/never", 0o440)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to set file mode")
+	assert.Equal(t, []string{"fs.chmod " + filepath.Join(fakeBase, "ghost") + " mode=0440"},
+		fakes.Rec.Strings(), "a failed chmod must not be followed by a rename")
 }
 
 func TestAtomicReplace_CrossFilesystemFallback(t *testing.T) {
-	if st, err := os.Stat("/dev/shm"); err != nil || !st.IsDir() {
-		t.Skip("/dev/shm not available; cannot force a cross-filesystem rename")
+	t.Parallel()
+
+	r, fakes := newFakeRewriter()
+	tmpPath := filepath.Join(fakeBase, "config.tmp")
+	targetPath := filepath.Join(fakeBase, "config")
+	fakes.FS.Put(tmpPath, []byte("content"), 0o600)
+	fakes.FS.Fail = func(op, path string) error {
+		if op == "Rename" {
+			return &os.LinkError{Op: "rename", Old: path, New: targetPath, Err: syscall.EXDEV}
+		}
+
+		return nil
 	}
 
-	shmDir, err := os.MkdirTemp("/dev/shm", "configd-test-")
-	require.NoError(t, err)
+	require.NoError(t, r.atomicReplace(context.Background(), tmpPath, targetPath, 0o440))
 
-	t.Cleanup(func() { _ = os.RemoveAll(shmDir) })
-
-	tmpPath := filepath.Join(t.TempDir(), "config.tmp")
-	targetPath := filepath.Join(shmDir, "config")
-	require.NoError(t, os.WriteFile(tmpPath, []byte("content"), 0o600))
-
-	err = atomicReplace(context.Background(), tmpPath, targetPath, 0o440)
-	if err != nil {
-		// Same-filesystem setups (e.g. TMPDIR on /dev/shm) take the plain
-		// rename path; only assert when the fallback actually ran.
-		t.Skipf("environment did not force the fallback: %v", err)
-	}
-
-	data, err := os.ReadFile(targetPath)
-	require.NoError(t, err)
+	data, ok := fakes.FS.Data(targetPath)
+	require.True(t, ok)
 	assert.Equal(t, "content", string(data))
+	assert.False(t, fakes.FS.Exists(tmpPath), "tmp file must be removed after the copy")
+
+	mode, _ := fakes.FS.Mode(targetPath)
+	assert.Equal(t, os.FileMode(0o440), mode.Perm())
+	assert.Equal(t, []string{
+		"fs.chmod " + tmpPath + " mode=0440",
+		"fs.rename " + tmpPath + " -> " + targetPath, // attempted, fails with EXDEV
+		"fs.copy " + tmpPath + " -> " + targetPath,
+		"fs.chmod " + targetPath + " mode=0440",
+		"fs.remove " + tmpPath,
+	}, fakes.Rec.Strings())
 }
 
 func TestScanAndWrite_FlushFailure(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	src, err := os.CreateTemp(dir, "src")
 	require.NoError(t, err)
@@ -80,36 +110,38 @@ func TestScanAndWrite_FlushFailure(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, closed.Close())
 
-	r := NewRewriter(dir, nil, nil)
+	r := NewRewriter(dir, nil, sys.Real())
 	err = r.scanAndWrite(context.Background(), src, closed)
 	require.Error(t, err, "writing through a closed file must fail")
 }
 
 func TestAtomicReplace_NonEXDEVRenameErrorDoesNotCopy(t *testing.T) {
-	dir := t.TempDir()
-	tmpPath := filepath.Join(dir, "config.tmp")
-	// Target is a non-empty directory: rename fails with EISDIR/ENOTEMPTY,
-	// which must not trigger the copy fallback.
-	targetPath := filepath.Join(dir, "config")
-	require.NoError(t, os.MkdirAll(filepath.Join(targetPath, "sub"), 0o755))
-	require.NoError(t, os.WriteFile(tmpPath, []byte("content"), 0o600))
+	t.Parallel()
 
-	err := atomicReplace(context.Background(), tmpPath, targetPath, 0o440)
+	r, fakes := newFakeRewriter()
+	tmpPath := filepath.Join(fakeBase, "config.tmp")
+	targetPath := filepath.Join(fakeBase, "config")
+	fakes.FS.Put(tmpPath, []byte("content"), 0o600)
+	fakes.FS.Fail = func(op, path string) error {
+		if op == "Rename" {
+			return &fs.PathError{Op: "rename", Path: path, Err: syscall.EISDIR}
+		}
+
+		return nil
+	}
+
+	err := r.atomicReplace(context.Background(), tmpPath, targetPath, 0o440)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to rename temporary file")
-
-	info, statErr := os.Stat(targetPath)
-	require.NoError(t, statErr)
-	assert.True(t, info.IsDir(), "target must be untouched")
+	assert.NotContains(t, fakes.Rec.Strings(), "fs.copy "+tmpPath+" -> "+targetPath, "no copy fallback")
+	assert.False(t, fakes.FS.Exists(targetPath), "target must be untouched")
 }
 
 func TestRewriteConfig_RejectsPathEscape(t *testing.T) {
-	base := t.TempDir()
-	rewriter := NewRewriter(base, newMockLookup(), &state.State{})
+	t.Parallel()
 
-	outside := filepath.Join(filepath.Dir(base), "escaped.conf")
-
-	require.NoError(t, os.WriteFile(filepath.Join(base, "a.in"), []byte("x"), 0o644))
+	rewriter, fakes := newFakeRewriter()
+	fakes.FS.Put(filepath.Join(fakeBase, "a.in"), []byte("x"), 0o644)
 
 	for _, tc := range []struct{ source, target string }{
 		{"a.in", "../escaped.conf"},
@@ -121,18 +153,18 @@ func TestRewriteConfig_RejectsPathEscape(t *testing.T) {
 		require.ErrorIs(t, err, ErrPathEscapesBaseDir, "%+v", tc)
 	}
 
-	_, err := os.Stat(outside)
-	assert.True(t, os.IsNotExist(err))
+	assert.Empty(t, fakes.Rec.Strings(), "a rejected path must not touch the filesystem")
 }
 
 func TestRewriteConfig_MasksSpecialModeBits(t *testing.T) {
-	base := t.TempDir()
-	rewriter := NewRewriter(base, newMockLookup(), &state.State{})
+	t.Parallel()
 
-	require.NoError(t, os.WriteFile(filepath.Join(base, "a.in"), []byte("x"), 0o644))
+	rewriter, fakes := newFakeRewriter()
+	fakes.FS.Put(filepath.Join(fakeBase, "a.in"), []byte("x"), 0o644)
+
 	require.NoError(t, rewriter.RewriteConfig(context.Background(), "a.in", "a.conf", "4755"))
 
-	info, err := os.Stat(filepath.Join(base, "a.conf"))
-	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0o755), info.Mode(), "setuid bit must be dropped")
+	mode, ok := fakes.FS.Mode(filepath.Join(fakeBase, "a.conf"))
+	require.True(t, ok)
+	assert.Equal(t, os.FileMode(0o755), mode, "setuid bit must be dropped")
 }

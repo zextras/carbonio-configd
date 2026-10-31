@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -20,6 +21,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
 
 // TestHelperProcess is a re-exec target for TestKillProcess_EscalatesToSIGKILL.
@@ -41,61 +44,28 @@ func TestHelperProcess(t *testing.T) {
 	}
 }
 
-// fakeProcEntry is a helper that implements os.DirEntry for testing matchProcEntry.
-type fakeProcEntry struct {
-	name  string
-	isDir bool
-}
-
-func (f fakeProcEntry) Name() string               { return f.name }
-func (f fakeProcEntry) IsDir() bool                { return f.isDir }
-func (f fakeProcEntry) Type() os.FileMode          { return 0 }
-func (f fakeProcEntry) Info() (os.FileInfo, error) { return nil, errors.New("not implemented") }
-
-// matchProcEntry composes the production pieces (readProcEntry, matches,
-// isZombie) the way procSnapshot.scan does, for single-entry assertions.
-func matchProcEntry(e os.DirEntry, needle string) (int, bool) {
-	pe, ok := readProcEntry(e)
-	if !ok || !pe.matches(needle) || isZombie(pe.pid) {
+// matchProcEntry composes the production pieces (Proc.Entry, entryMatches,
+// Proc.Zombie) the way procSnapshot.scan does, for single-entry assertions.
+func matchProcEntry(ctl *Controller, pid int, needle string) (int, bool) {
+	pe, ok := ctl.env.Proc.Entry(pid)
+	if !ok || !entryMatches(&pe, needle) || ctl.env.Proc.Zombie(pe.PID) {
 		return 0, false
 	}
 
-	return pe.pid, true
-}
-
-// TestMatchProcEntry_NotDir verifies non-directories are skipped.
-func TestMatchProcEntry_NotDir(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	e := fakeProcEntry{name: "12345", isDir: false}
-	_, ok := matchProcEntry(e, "anything")
-	if ok {
-		t.Error("expected false for non-directory entry")
-	}
-}
-
-// TestMatchProcEntry_NotNumeric verifies non-numeric dir names are skipped.
-func TestMatchProcEntry_NotNumeric(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	e := fakeProcEntry{name: "net", isDir: true}
-	_, ok := matchProcEntry(e, "anything")
-	if ok {
-		t.Error("expected false for non-numeric directory name")
-	}
+	return pe.PID, true
 }
 
 // TestMatchProcEntry_ZombieSkipped verifies zombie processes are skipped.
 func TestMatchProcEntry_ZombieSkipped(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	tmpDir := t.TempDir()
-	oldRoot := procFSRoot
-	procFSRoot = tmpDir + "/"
-	defer func() { procFSRoot = oldRoot }()
+	ctl.useProcRoot(tmpDir + "/")
 
 	pid := 99999
 	procDir := filepath.Join(tmpDir, strconv.Itoa(pid))
@@ -109,21 +79,22 @@ func TestMatchProcEntry_ZombieSkipped(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	e := fakeProcEntry{name: strconv.Itoa(pid), isDir: true}
-	_, ok := matchProcEntry(e, "myneedle")
+	_, ok := matchProcEntry(ctl, pid, "myneedle")
 	if ok {
 		t.Error("expected false for zombie process")
 	}
 }
 
 func TestMatchProcEntry_FallbackComm(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	tmpDir := t.TempDir()
-	oldRoot := procFSRoot
-	procFSRoot = tmpDir + "/"
-	defer func() { procFSRoot = oldRoot }()
+	ctl.useProcRoot(tmpDir + "/")
 
 	uid := os.Getuid()
 	writeProc := func(pid int, cmdline, comm string) {
@@ -144,29 +115,31 @@ func TestMatchProcEntry_FallbackComm(t *testing.T) {
 	}
 
 	writeProc(88888, "", "nginx")
-	if pid, ok := matchProcEntry(fakeProcEntry{name: "88888", isDir: true}, "nginx"); !ok || pid != 88888 {
+	if pid, ok := matchProcEntry(ctl, 88888, "nginx"); !ok || pid != 88888 {
 		t.Errorf("exact comm match on empty cmdline should succeed: got pid=%d ok=%v", pid, ok)
 	}
 
-	if _, ok := matchProcEntry(fakeProcEntry{name: "88888", isDir: true}, "nginx-worker"); ok {
+	if _, ok := matchProcEntry(ctl, 88888, "nginx-worker"); ok {
 		t.Error("comm='nginx' must NOT match longer needle 'nginx-worker' via substring fallback")
 	}
 
 	writeProc(77777, "/bin/bash /usr/bin/service-discover-wrapper.sh -sidecar-for carbonio-proxy", "service-discove")
-	if _, ok := matchProcEntry(fakeProcEntry{name: "77777", isDir: true}, "service-discovered"); ok {
+	if _, ok := matchProcEntry(ctl, 77777, "service-discovered"); ok {
 		t.Error("wrapper cmdline must not match service-discovered via reversed comm substring (regression)")
 	}
 }
 
 // TestMatchProcEntry_NoMatch verifies non-matching cmdline/comm returns false.
 func TestMatchProcEntry_NoMatch(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	tmpDir := t.TempDir()
-	oldRoot := procFSRoot
-	procFSRoot = tmpDir + "/"
-	defer func() { procFSRoot = oldRoot }()
+	ctl.useProcRoot(tmpDir + "/")
 
 	uid := os.Getuid()
 	pid := 77777
@@ -185,8 +158,7 @@ func TestMatchProcEntry_NoMatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	e := fakeProcEntry{name: strconv.Itoa(pid), isDir: true}
-	_, ok := matchProcEntry(e, "doesnotmatch")
+	_, ok := matchProcEntry(ctl, pid, "doesnotmatch")
 	if ok {
 		t.Error("expected false for non-matching process")
 	}
@@ -194,13 +166,15 @@ func TestMatchProcEntry_NoMatch(t *testing.T) {
 
 // TestIsZombie_NotZombie verifies non-zombie status returns false.
 func TestIsZombie_NotZombie(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	tmpDir := t.TempDir()
-	oldRoot := procFSRoot
-	procFSRoot = tmpDir + "/"
-	defer func() { procFSRoot = oldRoot }()
+	ctl.useProcRoot(tmpDir + "/")
 
 	pid := 11111
 	procDir := filepath.Join(tmpDir, strconv.Itoa(pid))
@@ -211,20 +185,22 @@ func TestIsZombie_NotZombie(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if isZombie(pid) {
+	if ctl.env.Proc.Zombie(pid) {
 		t.Error("expected isZombie=false for sleeping process")
 	}
 }
 
 // TestIsZombie_IsZombie verifies zombie state returns true.
 func TestIsZombie_IsZombie(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	tmpDir := t.TempDir()
-	oldRoot := procFSRoot
-	procFSRoot = tmpDir + "/"
-	defer func() { procFSRoot = oldRoot }()
+	ctl.useProcRoot(tmpDir + "/")
 
 	pid := 22222
 	procDir := filepath.Join(tmpDir, strconv.Itoa(pid))
@@ -235,27 +211,33 @@ func TestIsZombie_IsZombie(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !isZombie(pid) {
+	if !ctl.env.Proc.Zombie(pid) {
 		t.Error("expected isZombie=true for zombie process")
 	}
 }
 
 // TestIsZombie_UnreadableStatus verifies missing status file returns false (assume alive).
 func TestIsZombie_UnreadableStatus(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	oldRoot := procFSRoot
-	procFSRoot = "/nonexistent-proc-root-xyz/"
-	defer func() { procFSRoot = oldRoot }()
+	ctl.useProcRoot("/nonexistent-proc-root-xyz/")
 
-	if isZombie(99999) {
+	if ctl.env.Proc.Zombie(99999) {
 		t.Error("expected isZombie=false when status file is unreadable")
 	}
 }
 
 // TestIsRunningByPidFile_ValidRunningPid verifies a pidfile pointing to ourself returns true.
 func TestIsRunningByPidFile_ValidRunningPid(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -266,7 +248,7 @@ func TestIsRunningByPidFile_ValidRunningPid(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	running, ok := isRunningByPidFile(pidFile)
+	running, ok := ctl.isRunningByPidFile(pidFile)
 	if !ok {
 		t.Fatal("expected ok=true for readable pidfile")
 	}
@@ -277,10 +259,14 @@ func TestIsRunningByPidFile_ValidRunningPid(t *testing.T) {
 
 // TestIsRunningByPidFile_MissingFile verifies missing pidfile returns ok=false.
 func TestIsRunningByPidFile_MissingFile(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	_, ok := isRunningByPidFile("/nonexistent/path/test.pid")
+	_, ok := ctl.isRunningByPidFile("/nonexistent/path/test.pid")
 	if ok {
 		t.Error("expected ok=false for missing pidfile")
 	}
@@ -288,6 +274,10 @@ func TestIsRunningByPidFile_MissingFile(t *testing.T) {
 
 // TestIsRunningByPidFile_EmptyFile verifies empty pidfile returns ok=false.
 func TestIsRunningByPidFile_EmptyFile(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -297,7 +287,7 @@ func TestIsRunningByPidFile_EmptyFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, ok := isRunningByPidFile(pidFile)
+	_, ok := ctl.isRunningByPidFile(pidFile)
 	if ok {
 		t.Error("expected ok=false for empty pidfile")
 	}
@@ -305,6 +295,10 @@ func TestIsRunningByPidFile_EmptyFile(t *testing.T) {
 
 // TestIsRunningByPidFile_InvalidPid verifies corrupt pidfile returns ok=false.
 func TestIsRunningByPidFile_InvalidPid(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -314,7 +308,7 @@ func TestIsRunningByPidFile_InvalidPid(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, ok := isRunningByPidFile(pidFile)
+	_, ok := ctl.isRunningByPidFile(pidFile)
 	if ok {
 		t.Error("expected ok=false for corrupt pidfile")
 	}
@@ -322,6 +316,10 @@ func TestIsRunningByPidFile_InvalidPid(t *testing.T) {
 
 // TestIsRunningByPidFile_ZeroPid verifies pidfile with pid=0 returns ok=false.
 func TestIsRunningByPidFile_ZeroPid(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -331,7 +329,7 @@ func TestIsRunningByPidFile_ZeroPid(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, ok := isRunningByPidFile(pidFile)
+	_, ok := ctl.isRunningByPidFile(pidFile)
 	if ok {
 		t.Error("expected ok=false for pid=0")
 	}
@@ -339,6 +337,10 @@ func TestIsRunningByPidFile_ZeroPid(t *testing.T) {
 
 // TestIsRunningByPidFile_MultiLinePid verifies only the first line is used.
 func TestIsRunningByPidFile_MultiLinePid(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -350,7 +352,7 @@ func TestIsRunningByPidFile_MultiLinePid(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	running, ok := isRunningByPidFile(pidFile)
+	running, ok := ctl.isRunningByPidFile(pidFile)
 	if !ok {
 		t.Fatal("expected ok=true for readable multi-line pidfile")
 	}
@@ -361,6 +363,10 @@ func TestIsRunningByPidFile_MultiLinePid(t *testing.T) {
 
 // TestIsRunningByPidFile_DeadPid verifies a pidfile with a nonexistent PID returns (false, true).
 func TestIsRunningByPidFile_DeadPid(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -372,16 +378,14 @@ func TestIsRunningByPidFile_DeadPid(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldRoot := procFSRoot
-	procFSRoot = fakeProcDir + "/"
-	defer func() { procFSRoot = oldRoot }()
+	ctl.useProcRoot(fakeProcDir + "/")
 
 	// Write a valid non-zero PID that won't have an entry in our fake /proc
 	if err := os.WriteFile(pidFile, []byte("2147483647\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	running, ok := isRunningByPidFile(pidFile)
+	running, ok := ctl.isRunningByPidFile(pidFile)
 	if !ok {
 		t.Fatal("expected ok=true for valid (but dead) pid")
 	}
@@ -390,25 +394,31 @@ func TestIsRunningByPidFile_DeadPid(t *testing.T) {
 	}
 }
 
-// TestScanProcessesByCmdline_NoMatch verifies that a highly unique needle returns
+// TestScanProcesses_NoMatch verifies that a highly unique needle returns
 // no matches against the real /proc filesystem.
-// Note: scanProcessesByCmdline reads /proc directly; procFSRoot only affects
-// the per-entry file reads inside matchProcEntry.
-func TestScanProcessesByCmdline_NoMatch(t *testing.T) {
+func TestScanProcesses_NoMatch(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	pids, err := scanProcessesByCmdline("carbonio-configd-unique-needle-xyzzy-no-match-99999")
+	pids, err := ctl.scanProcesses("carbonio-configd-unique-needle-xyzzy-no-match-99999")
 	if err != nil {
-		t.Fatalf("scanProcessesByCmdline returned error: %v", err)
+		t.Fatalf("scanProcesses returned error: %v", err)
 	}
 	if len(pids) != 0 {
 		t.Errorf("expected no pids for unique needle, got %v", pids)
 	}
 }
 
-// TestScanProcessesByCmdline_SelfMatch verifies that our own process cmdline is found.
-func TestScanProcessesByCmdline_SelfMatch(t *testing.T) {
+// TestScanProcesses_SelfMatch verifies that our own process cmdline is found.
+func TestScanProcesses_SelfMatch(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -432,9 +442,9 @@ func TestScanProcessesByCmdline_SelfMatch(t *testing.T) {
 		t.Skip("could not determine needle from cmdline")
 	}
 
-	pids, err := scanProcessesByCmdline(needle)
+	pids, err := ctl.scanProcesses(needle)
 	if err != nil {
-		t.Fatalf("scanProcessesByCmdline returned error: %v", err)
+		t.Fatalf("scanProcesses returned error: %v", err)
 	}
 	found := false
 	for _, pid := range pids {
@@ -451,13 +461,15 @@ func TestScanProcessesByCmdline_SelfMatch(t *testing.T) {
 
 // TestIsZombie_NoStateLine verifies that a status file without a State line returns false.
 func TestIsZombie_NoStateLine(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	tmpDir := t.TempDir()
-	oldRoot := procFSRoot
-	procFSRoot = tmpDir + "/"
-	defer func() { procFSRoot = oldRoot }()
+	ctl.useProcRoot(tmpDir + "/")
 
 	pid := 33333
 	procDir := filepath.Join(tmpDir, strconv.Itoa(pid))
@@ -469,7 +481,7 @@ func TestIsZombie_NoStateLine(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if isZombie(pid) {
+	if ctl.env.Proc.Zombie(pid) {
 		t.Error("expected isZombie=false when no State line present")
 	}
 }
@@ -477,13 +489,15 @@ func TestIsZombie_NoStateLine(t *testing.T) {
 // TestIsProcessRunning_SelfExcluded verifies isProcessRunning returns false when only
 // the current process matches (self-exclusion).
 func TestIsProcessRunning_SelfExcluded(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	tmpDir := t.TempDir()
-	oldRoot := procFSRoot
-	procFSRoot = tmpDir + "/"
-	defer func() { procFSRoot = oldRoot }()
+	ctl.useProcRoot(tmpDir + "/")
 
 	uid := os.Getuid()
 	self := os.Getpid()
@@ -503,7 +517,7 @@ func TestIsProcessRunning_SelfExcluded(t *testing.T) {
 
 	// isProcessRunning excludes self and parent — only self matches → returns false
 	ctx := context.Background()
-	running := isProcessRunning(ctx, "uniqueneedle123")
+	running := ctl.pidFromProcessName(ctx, "uniqueneedle123") > 0
 	if running {
 		t.Error("expected isProcessRunning=false when only self matches")
 	}
@@ -512,11 +526,15 @@ func TestIsProcessRunning_SelfExcluded(t *testing.T) {
 // TestIsProcessRunning_NoMatchInRealProc verifies isProcessRunning returns false when
 // no process in /proc matches a highly unlikely needle string.
 func TestIsProcessRunning_NoMatchInRealProc(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	// Use a needle so unique it cannot possibly appear in any real process cmdline.
-	running := isProcessRunning(context.Background(), "carbonio-configd-test-unique-needle-xyzzy-12345")
+	running := ctl.pidFromProcessName(context.Background(), "carbonio-configd-test-unique-needle-xyzzy-12345") > 0
 	if running {
 		t.Error("expected isProcessRunning=false for needle that matches nothing in /proc")
 	}
@@ -527,6 +545,10 @@ func TestIsProcessRunning_NoMatchInRealProc(t *testing.T) {
 // terminated by killProcess, which now escalates to SIGKILL after the grace
 // period. Uses a shell process that explicitly ignores SIGTERM.
 func TestKillProcess_EscalatesToSIGKILL(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: spawns a real subprocess")
 	}
@@ -575,11 +597,13 @@ func TestKillProcess_EscalatesToSIGKILL(t *testing.T) {
 	}
 
 	require.Eventually(t, func() bool {
-		return isProcessRunning(context.Background(), needle)
+		return ctl.pidFromProcessName(context.Background(), needle) > 0
 	}, 5*time.Second, 10*time.Millisecond, "helper never became visible in /proc")
 
+	ctl.killTimeout = 500 * time.Millisecond
+
 	start := time.Now()
-	if err := killProcessWithGrace(context.Background(), needle, 500*time.Millisecond); err != nil {
+	if err := ctl.killProcess(context.Background(), needle); err != nil {
 		t.Fatalf("killProcess returned error: %v", err)
 	}
 
@@ -594,7 +618,7 @@ func TestKillProcess_EscalatesToSIGKILL(t *testing.T) {
 	}
 
 	require.Eventually(t, func() bool {
-		return !isProcessRunning(context.Background(), needle)
+		return ctl.pidFromProcessName(context.Background(), needle) == 0
 	}, 2*time.Second, 10*time.Millisecond, "target process survived killProcess — SIGKILL escalation failed")
 }
 
@@ -602,49 +626,63 @@ func TestKillProcess_EscalatesToSIGKILL(t *testing.T) {
 // cannot possibly exist. Guards against a false-positive wait that would
 // block killProcess indefinitely.
 func TestProcessAlive_DeadPID(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: walks /proc")
 	}
 
-	if processAlive(999999999) {
+	if ctl.processAlive(999999999) {
 		t.Error("expected processAlive=false for impossible PID 999999999")
 	}
 }
 
 func TestProcessAlive_Self(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: reads /proc")
 	}
 	self := os.Getpid()
-	if !processAlive(self) {
+	if !ctl.processAlive(self) {
 		t.Error("expected processAlive=true for own PID")
 	}
 }
 
 func TestStartService_SystemdMode(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	orig := isSystemdModeFn
-	defer func() { isSystemdModeFn = orig }()
+	t.Parallel()
 
-	isSystemdModeFn = func() bool { return true }
+	ctl, f := newFakeController(t)
+	ctl.pinMode(true)
+	f.Exec.OnPath(systemctlBin, systest.Fail(5, "Unit carbonio-test-systemd.service not found."))
 
 	def := &ServiceDef{
 		Name:         "test-systemd-start",
 		DisplayName:  "Test Systemd",
 		SystemdUnits: []string{"carbonio-test-systemd.service"},
 	}
-	Registry["test-systemd-start"] = def
-	defer delete(Registry, "test-systemd-start")
+	ctl.registry["test-systemd-start"] = def
 
-	err := startService(context.Background(), "test-systemd-start", def)
+	err := ctl.startService(context.Background(), "test-systemd-start", def)
 	if err == nil {
 		t.Error("expected error for non-existent systemd unit")
+	}
+
+	want := []string{systemctlBin + " start carbonio-test-systemd.service"}
+	if got := f.Exec.Lines(); !slices.Equal(got, want) {
+		t.Errorf("commands = %q, want %q", got, want)
 	}
 }
 
 func TestStartWithoutSystemd_CustomStartError(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -656,7 +694,7 @@ func TestStartWithoutSystemd_CustomStartError(t *testing.T) {
 		},
 	}
 
-	err := startWithoutSystemd(context.Background(), "test-custom-err", def)
+	err := ctl.startWithoutSystemd(context.Background(), "test-custom-err", def)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -666,6 +704,10 @@ func TestStartWithoutSystemd_CustomStartError(t *testing.T) {
 }
 
 func TestStartWithoutSystemd_ProcessNameOnly(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -674,33 +716,40 @@ func TestStartWithoutSystemd_ProcessNameOnly(t *testing.T) {
 		ProcessName: "some-process",
 	}
 
-	err := startWithoutSystemd(context.Background(), "test-proc-only", def)
+	err := ctl.startWithoutSystemd(context.Background(), "test-proc-only", def)
 	if err != nil {
 		t.Errorf("expected nil for process-name-only service, got %v", err)
 	}
 }
 
 func TestKillByPIDWithGroupAndSudo_DeadPID(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	result := killByPIDWithGroupAndSudo(context.Background(), 99999999)
+	result := ctl.killByPIDWithGroupAndSudo(context.Background(), 99999999)
 	if !result {
 		t.Error("expected true for already-dead PID")
 	}
 }
 
 func TestWaitAndEscalate_NoPids(t *testing.T) {
-	waitAndEscalate(context.Background(), []int{}, 100*time.Millisecond)
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	ctl.waitAndEscalate(context.Background(), []int{}, 100*time.Millisecond)
 }
 
 func TestStopService_SystemdMode(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	orig := isSystemdModeFn
-	defer func() { isSystemdModeFn = orig }()
-	isSystemdModeFn = func() bool { return true }
+	t.Parallel()
+
+	ctl, f := newFakeController(t)
+	ctl.pinMode(true)
+	f.Exec.OnPath(systemctlBin, systest.Fail(5, "Unit carbonio-test-stop.service not loaded."))
 
 	def := &ServiceDef{
 		Name:         "test-systemd-stop",
@@ -708,26 +757,39 @@ func TestStopService_SystemdMode(t *testing.T) {
 		SystemdUnits: []string{"carbonio-test-stop.service"},
 	}
 
-	err := stopService(context.Background(), "test-systemd-stop", def)
+	err := ctl.stopService(context.Background(), "test-systemd-stop", def)
 	if err == nil {
 		t.Error("expected error for non-existent systemd unit")
+	}
+
+	want := []string{systemctlBin + " stop carbonio-test-stop.service"}
+	if got := f.Exec.Lines(); !slices.Equal(got, want) {
+		t.Errorf("commands = %q, want %q", got, want)
 	}
 }
 
 func TestStartDirect_BinaryNotFound(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	def := &ServiceDef{
 		Name:       "test-nobin",
 		BinaryPath: "/nonexistent/binary/that/does/not/exist",
 		BinaryArgs: []string{"--test"},
 	}
 
-	err := startDirect(context.Background(), "test-nobin", def)
+	err := ctl.startDirect(context.Background(), "test-nobin", def)
 	if err == nil {
 		t.Error("expected error for missing binary")
 	}
 }
 
 func TestStartDirect_NonDaemon(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	tmp := t.TempDir()
 	script := filepath.Join(tmp, "testbin")
 	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
@@ -740,65 +802,76 @@ func TestStartDirect_NonDaemon(t *testing.T) {
 		BinaryArgs: []string{},
 	}
 
-	err := startDirect(context.Background(), "test-direct", def)
+	err := ctl.startDirect(context.Background(), "test-direct", def)
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
 
 func TestKillProcessGroup_Real(t *testing.T) {
-	err := killProcessGroup(-999999999, syscall.SIGTERM)
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	err := ctl.killProcessGroup(-999999999, syscall.SIGTERM)
 	if err == nil {
 		t.Error("expected error for nonexistent group")
 	}
 }
 
 func TestSudoKill_NonexistentProcess(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	sudoKill(context.Background(), 999999999, "TERM", false)
+	ctl.sudoKill(context.Background(), 999999999, "TERM", false)
 }
 
-func TestScanProcessesByCmdline_ReadError(t *testing.T) {
-	oldRoot := procFSRoot
-	procFSRoot = "/nonexistent-proc-dir-xyzzy/"
-	defer func() { procFSRoot = oldRoot }()
+func TestScanProcesses_ReadError(t *testing.T) {
+	t.Parallel()
 
-	// The scan lists procFSRoot (not a hard-coded /proc), so an unreadable
+	ctl := newRealController(t)
+
+	ctl.useProcRoot("/nonexistent-proc-dir-xyzzy/")
+
+	// The scan lists the Controller's proc root, so an unreadable
 	// root surfaces as an error and callers treat it as "nothing found".
-	pids, err := scanProcessesByCmdline("test")
+	pids, err := ctl.scanProcesses("test")
 	if err == nil {
-		t.Error("scanProcessesByCmdline should report an unreadable procFSRoot")
+		t.Error("scanProcesses should report an unreadable proc root")
 	}
 
 	if len(pids) != 0 {
 		t.Errorf("expected no pids on read error, got %v", pids)
 	}
 
-	if isProcessRunning(context.Background(), "test") {
-		t.Error("isProcessRunning must report false when procFSRoot is unreadable")
+	if ctl.pidFromProcessName(context.Background(), "test") > 0 {
+		t.Error("isProcessRunning must report false when the proc root is unreadable")
 	}
 }
 
 func TestProcessAlive_SelfIsAlive(t *testing.T) {
-	if !processAlive(os.Getpid()) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	if !ctl.processAlive(os.Getpid()) {
 		t.Error("expected processAlive=true for own PID")
 	}
 }
 
-func TestDetachSysProcAttr(t *testing.T) {
-	attr := detachedSysProcAttr()
-	if attr == nil {
-		t.Error("expected non-nil SysProcAttr")
-	}
-}
-
 func TestStartWithoutSystemd_NoLauncher(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	def := &ServiceDef{
 		Name: "test-no-launcher",
 	}
-	err := startWithoutSystemd(context.Background(), "test-no-launcher", def)
+	err := ctl.startWithoutSystemd(context.Background(), "test-no-launcher", def)
 	if err == nil {
 		t.Error("expected error for service with no launcher")
 	}
@@ -808,6 +881,10 @@ func TestStartWithoutSystemd_NoLauncher(t *testing.T) {
 }
 
 func TestStartDirect_NeedsRootNonRoot(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if os.Getuid() == 0 {
 		t.Skip("running as root, NeedsRoot path differs")
 	}
@@ -823,13 +900,17 @@ func TestStartDirect_NeedsRootNonRoot(t *testing.T) {
 		NeedsRoot:  true,
 	}
 
-	err := startDirect(context.Background(), "test-root-svc", def)
+	err := ctl.startDirect(context.Background(), "test-root-svc", def)
 	if err != nil {
 		t.Logf("startDirect with NeedsRoot: %v (expected - sudo may fail)", err)
 	}
 }
 
 func TestStartDirect_SDNotifyTimeout(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: uses subprocess")
 	}
@@ -848,7 +929,7 @@ func TestStartDirect_SDNotifyTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 
-	err := startDirect(ctx, "test-sdnotify-direct", def)
+	err := ctl.startDirect(ctx, "test-sdnotify-direct", def)
 	if err == nil {
 		t.Log("startDirect with SDNotify succeeded (unexpected)")
 	} else {
@@ -857,6 +938,10 @@ func TestStartDirect_SDNotifyTimeout(t *testing.T) {
 }
 
 func TestStartDetached_LogFilePath(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	tmp := t.TempDir()
 	script := filepath.Join(tmp, "daemon")
 	if err := os.WriteFile(script, []byte("#!/bin/sh\nsleep 5\n"), 0o755); err != nil {
@@ -870,24 +955,25 @@ func TestStartDetached_LogFilePath(t *testing.T) {
 		LogFile:    logFile,
 	}
 
-	err := startDetached(context.Background(), "test-detached-logfile", def)
+	err := ctl.startDetached(context.Background(), "test-detached-logfile", def)
 	if err != nil {
 		t.Fatalf("startDetached with LogFile: %v", err)
 	}
 }
 
 func TestStartDetached_DefaultLogFile(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	tmp := t.TempDir()
 	script := filepath.Join(tmp, "daemon")
 	if err := os.WriteFile(script, []byte("#!/bin/sh\nsleep 5\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	oldBase := basePath
-	basePath = tmp
-	defer func() { basePath = oldBase }()
-
 	logDir := filepath.Join(tmp, "log")
+	ctl.p.log = logDir
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -897,23 +983,31 @@ func TestStartDetached_DefaultLogFile(t *testing.T) {
 		BinaryPath: script,
 	}
 
-	err := startDetached(context.Background(), "test-detached-default", def)
+	err := ctl.startDetached(context.Background(), "test-detached-default", def)
 	if err != nil {
 		t.Fatalf("startDetached default log path: %v", err)
 	}
 }
 
 func TestStopWithoutSystemd_NoLauncher(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	def := &ServiceDef{
 		Name: "test-no-process-name",
 	}
-	err := stopWithoutSystemd(context.Background(), "test-no-process-name", def)
+	err := ctl.stopWithoutSystemd(context.Background(), "test-no-process-name", def)
 	if err == nil {
 		t.Error("expected error for service with no ProcessName")
 	}
 }
 
 func TestStopWithoutSystemd_CustomStopErr(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	wantErr := fmt.Errorf("custom stop failed")
 	def := &ServiceDef{
 		Name: "test-custom-stop-err",
@@ -921,20 +1015,28 @@ func TestStopWithoutSystemd_CustomStopErr(t *testing.T) {
 			return wantErr
 		},
 	}
-	err := stopWithoutSystemd(context.Background(), "test-custom-stop-err", def)
+	err := ctl.stopWithoutSystemd(context.Background(), "test-custom-stop-err", def)
 	if !errors.Is(err, wantErr) {
 		t.Errorf("expected custom stop error, got %v", err)
 	}
 }
 
 func TestKillProcess_NoTarget(t *testing.T) {
-	err := killProcess(context.Background(), "carbonio-nonexistent-needle-xyzzy-12345")
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	err := ctl.killProcess(context.Background(), "carbonio-nonexistent-needle-xyzzy-12345")
 	if err != nil {
 		t.Errorf("killProcess should succeed with no targets, got %v", err)
 	}
 }
 
 func TestStartDetached_SpawnAndRelease(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("spawns a short-lived detached child")
 	}
@@ -951,13 +1053,17 @@ func TestStartDetached_SpawnAndRelease(t *testing.T) {
 		LogFile:    logFile,
 	}
 
-	err := startDetached(context.Background(), "test-det-spawn", def)
+	err := ctl.startDetached(context.Background(), "test-det-spawn", def)
 	if err != nil {
 		t.Fatalf("startDetached: %v", err)
 	}
 }
 
 func TestStartDirect_OutputCaptured(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	tmp := t.TempDir()
 	script := filepath.Join(tmp, "failbin")
 	if err := os.WriteFile(script, []byte("#!/bin/sh\necho 'startup failed'\nexit 1\n"), 0o755); err != nil {
@@ -969,7 +1075,7 @@ func TestStartDirect_OutputCaptured(t *testing.T) {
 		BinaryPath: script,
 	}
 
-	err := startDirect(context.Background(), "test-direct-fail", def)
+	err := ctl.startDirect(context.Background(), "test-direct-fail", def)
 	if err == nil {
 		t.Error("expected error from failing binary")
 	}
@@ -979,56 +1085,68 @@ func TestStartDirect_OutputCaptured(t *testing.T) {
 }
 
 func TestStopWithoutSystemd_WithUseSDNotify(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	def := &ServiceDef{
 		Name:        "test-sd-notify-stop",
 		ProcessName: "nonexistent-sd-notify-proc-xyz",
 		UseSDNotify: true,
 	}
-	Registry["test-sd-notify-stop"] = def
-	defer delete(Registry, "test-sd-notify-stop")
+	ctl.registry["test-sd-notify-stop"] = def
+	defer delete(ctl.registry, "test-sd-notify-stop")
 
-	orig := isSystemdModeFn
-	defer func() { isSystemdModeFn = orig }()
-	isSystemdModeFn = func() bool { return false }
+	ctl.pinMode(false)
 
-	err := stopWithoutSystemd(context.Background(), "test-sd-notify-stop", def)
+	err := ctl.stopWithoutSystemd(context.Background(), "test-sd-notify-stop", def)
 	// Process doesn't exist, killProcess returns nil
 	_ = err
 }
 
 func TestKillProcessGroup_NoSuchGroup(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	// Use a PGID that cannot exist to exercise the ESRCH path without
 	// risking real signals to the user's processes. Never pass 1 or -1 —
 	// syscall.Kill(-1, sig) broadcasts to every process the user owns,
 	// which will tear down the user's graphical session.
-	err := killProcessGroup(999999990, syscall.SIGTERM)
+	err := ctl.killProcessGroup(999999990, syscall.SIGTERM)
 	if err == nil {
 		t.Error("expected error for nonexistent process group")
 	}
 }
 
 func TestSignalPID_NoSuchProcess(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	// Use a PID we know is not alive. Never signal os.Getpid() — that kills
 	// the test binary itself.
-	signalPID(999999990, syscall.SIGTERM)
-	signalPID(999999991, syscall.SIGUSR1)
+	ctl.signalPID(999999990, syscall.SIGTERM)
+	ctl.signalPID(999999991, syscall.SIGUSR1)
 }
 
 func TestMailboxCustomStart_AppserverDBFail(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 
-	oldLC := loadConfig
-	loadConfig = func() (map[string]string, error) {
+	ctl.loadConfig = func() (map[string]string, error) {
 		return nil, fmt.Errorf("test config error")
 	}
-	defer func() { loadConfig = oldLC }()
 
 	def := &ServiceDef{Name: "mailbox"}
-	err := mailboxCustomStart(context.Background(), def)
+	err := ctl.mailboxCustomStart(context.Background(), def)
 	if err == nil {
-		t.Fatal("expected error when loadConfig fails")
+		t.Fatal("expected error when ctl.loadConfig fails")
 	}
 	if !strings.Contains(err.Error(), "failed to load localconfig") {
 		t.Errorf("unexpected error: %v", err)
@@ -1036,24 +1154,13 @@ func TestMailboxCustomStart_AppserverDBFail(t *testing.T) {
 }
 
 func TestMtaIsRunning_NotRunning(t *testing.T) {
-	tmp := t.TempDir()
-	oldSudo := sudoBin
-	sudoBin = filepath.Join(tmp, "sudo")
-	defer func() { sudoBin = oldSudo }()
+	t.Parallel()
 
-	fakeSudo := "#!/bin/sh\nexit 1\n"
-	if err := os.WriteFile(sudoBin, []byte(fakeSudo), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	ctl, f := newFakeController(t)
 
-	oldPostfix := postfixBin
-	postfixBin = filepath.Join(tmp, "postfix")
-	if err := os.WriteFile(postfixBin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { postfixBin = oldPostfix }()
+	f.Exec.OnPath(sudoBin, systest.Fail(1, ""))
 
-	if mtaIsRunning(context.Background()) {
+	if ctl.mtaIsRunning(context.Background()) {
 		t.Error("expected mtaIsRunning=false with failing sudo")
 	}
 }

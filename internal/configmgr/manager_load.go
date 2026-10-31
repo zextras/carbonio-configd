@@ -5,7 +5,6 @@
 package configmgr
 
 import (
-	"bufio"
 	"cmp"
 	"context"
 	"fmt"
@@ -19,6 +18,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/commands"
 	"github.com/zextras/carbonio-configd/internal/intern"
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/sys"
 	"github.com/zextras/carbonio-configd/internal/tracing"
 )
 
@@ -46,8 +46,8 @@ const (
 )
 
 // awaitLoaders waits until all loaders are done, the timeout elapses or ctx is cancelled.
-func awaitLoaders(ctx context.Context, done <-chan struct{}, timeout time.Duration) loadWait {
-	timer := time.NewTimer(timeout)
+func awaitLoaders(ctx context.Context, clock sys.Clock, done <-chan struct{}, timeout time.Duration) loadWait {
+	timer := clock.NewTimer(timeout)
 	defer timer.Stop()
 
 	select {
@@ -55,7 +55,7 @@ func awaitLoaders(ctx context.Context, done <-chan struct{}, timeout time.Durati
 		return loadWaitCancelled
 	case <-done:
 		return loadWaitDone
-	case <-timer.C:
+	case <-timer.C():
 		return loadWaitTimedOut
 	}
 }
@@ -81,6 +81,7 @@ func logPendingLoaders(ctx context.Context, loadFuncs []loadFunc, results []load
 // Results of loaders still running at timeout are discarded.
 func runLoadAttempt(
 	ctx context.Context,
+	clock sys.Clock,
 	loadFuncs []loadFunc,
 	timeout time.Duration,
 ) (timedOut bool, errs []error, ctxErr error) {
@@ -121,7 +122,7 @@ func runLoadAttempt(
 		close(done)
 	}()
 
-	switch awaitLoaders(ctx, done, timeout) {
+	switch awaitLoaders(ctx, clock, done, timeout) {
 	case loadWaitCancelled:
 		logger.InfoContext(ctx, "Configuration loading cancelled by shutdown signal")
 
@@ -130,7 +131,7 @@ func runLoadAttempt(
 		logger.ErrorContext(ctx, "Configuration loading timed out", "timeout", timeout)
 		logPendingLoaders(ctx, loadFuncs, results, "Thread still alive, waiting", "wait_seconds", int(timeout.Seconds()))
 
-		switch awaitLoaders(ctx, done, timeout) {
+		switch awaitLoaders(ctx, clock, done, timeout) {
 		case loadWaitCancelled:
 			logger.InfoContext(ctx, "Configuration loading cancelled during retry wait")
 
@@ -189,13 +190,13 @@ func (cm *ConfigManager) LoadAllConfigsWithRetry(ctx context.Context, maxRetries
 
 	cm.State.ClearFileCache(ctx)
 
-	threadWaitTime := parseLDAPReadTimeout(cm.State.GetLocalConfig().Data.Snapshot())
+	threadWaitTime := parseLDAPReadTimeout(cm.State.Snapshot().LocalMap())
 
 	loadFuncs := []loadFunc{
-		{"lc", cm.LoadLocalConfig},  // Thread name matches Python
-		{"gc", cm.LoadGlobalConfig}, // Thread name matches Python
-		{"mc", cm.LoadMiscConfig},   // Thread name matches Python
-		{"sc", cm.LoadServerConfig}, // Thread name matches Python
+		cm.countFailures("lc", cm.LoadLocalConfig),  // Thread name matches Python
+		cm.countFailures("gc", cm.LoadGlobalConfig), // Thread name matches Python
+		cm.countFailures("mc", cm.LoadMiscConfig),   // Thread name matches Python
+		cm.countFailures("sc", cm.LoadServerConfig), // Thread name matches Python
 	}
 
 	var lastErr error
@@ -206,15 +207,26 @@ func (cm *ConfigManager) LoadAllConfigsWithRetry(ctx context.Context, maxRetries
 				"attempt", attempt,
 				"max_retries", maxRetries)
 
-			if err := sleepCtx(ctx, 2*time.Second); err != nil {
+			if err := cm.env.Clock.Sleep(ctx, 2*time.Second); err != nil {
 				return err
 			}
 		}
 
-		timedOut, errors, ctxErr := runLoadAttempt(ctx, loadFuncs, threadWaitTime)
+		// Every attempt stages its results; whatever the loaders delivered
+		// is published as one snapshot even when another loader failed, as
+		// the legacy zmconfigd keeps each config's previous value on failure.
+		stage := &stagedLoad{}
+
+		timedOut, errors, ctxErr := runLoadAttempt(withStage(ctx, stage), cm.env.Clock, loadFuncs, threadWaitTime)
 		if ctxErr != nil {
 			return ctxErr
 		}
+
+		if timedOut {
+			cm.metrics.LoadFailed("timeout")
+		}
+
+		cm.State.UpdateSnapshot(stage.apply)
 
 		shouldRetry, err := evaluateLoadResult(timedOut, errors, attempt, maxRetries, threadWaitTime)
 		if !shouldRetry {
@@ -229,6 +241,19 @@ func (cm *ConfigManager) LoadAllConfigsWithRetry(ctx context.Context, maxRetries
 	}
 
 	return lastErr
+}
+
+// countFailures wraps a loader so that a failure (other than the shutdown
+// cancelling it) is counted in the metrics under the loader's name.
+func (cm *ConfigManager) countFailures(name string, fn func(context.Context) error) loadFunc {
+	return loadFunc{name: name, fn: func(ctx context.Context) error {
+		err := fn(ctx)
+		if err != nil && ctx.Err() == nil {
+			cm.metrics.LoadFailed(name)
+		}
+
+		return err
+	}}
 }
 
 func parseLDAPReadTimeout(localConfigData map[string]string) time.Duration {
@@ -313,25 +338,42 @@ func loadConfigWithCache[T any](
 	return typed, nil
 }
 
-// executeLDAPCommand runs a registered LDAP command by name and validates the
-// result, consolidating the cmd-nil / rc!=0 / empty-output checks that
-// fetchGlobalConfig and fetchServerConfig used to duplicate.
-func (cm *ConfigManager) executeLDAPCommand(ctx context.Context, cmdName string, args ...string) (string, error) {
-	cmd := cm.CommandRegistry.Commands[cmdName]
-	if cmd == nil {
-		return "", fmt.Errorf("%s command not available (LDAP commands not registered)", cmdName)
+// fetchServerAttrs returns the server's LDAP attributes via the registry,
+// failing like the former gs command did when none are available.
+func (cm *ConfigManager) fetchServerAttrs(ctx context.Context) (map[string]string, error) {
+	if cm.CommandRegistry.ServerAttrs == nil {
+		return nil, fmt.Errorf("gs command not available (LDAP commands not registered)")
 	}
 
-	rc, output, errMsg := cmd.Execute(ctx, args...)
-	if rc != 0 {
-		return "", fmt.Errorf("%s command failed with rc=%d: %s", cmdName, rc, errMsg)
+	attrs, err := cm.CommandRegistry.ServerAttrs(ctx, cm.mainConfig.Hostname)
+	if err != nil {
+		return nil, err
 	}
 
-	if output == "" {
-		return "", fmt.Errorf("no data returned from %s", cmdName)
+	if len(attrs) == 0 {
+		return nil, fmt.Errorf("no data returned from gs")
 	}
 
-	return output, nil
+	return normalizeLDAPAttrs(attrs), nil
+}
+
+// fetchGlobalAttrs returns the global LDAP attributes via the registry,
+// failing like the former gacf command did when none are available.
+func (cm *ConfigManager) fetchGlobalAttrs(ctx context.Context) (map[string]string, error) {
+	if cm.CommandRegistry.GlobalAttrs == nil {
+		return nil, fmt.Errorf("gacf command not available (LDAP commands not registered)")
+	}
+
+	attrs, err := cm.CommandRegistry.GlobalAttrs(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(attrs) == 0 {
+		return nil, fmt.Errorf("no data returned from gacf")
+	}
+
+	return normalizeLDAPAttrs(attrs), nil
 }
 
 // processCommonSSLConfig applies the standard SSL post-processing (sort + XML)
@@ -369,43 +411,26 @@ func processSortedSSLConfigForTarget(configData map[string]string, key string) {
 	}
 }
 
-// parseLDAPCommandOutput parses the output of zmprov commands (key: value format)
-// Handles multi-value attributes by concatenating with newlines.
-// Handles base64-encoded values (key:: base64value) by preserving the base64 string.
-func parseLDAPCommandOutput(output string) map[string]string {
-	configData := make(map[string]string)
-	scanner := bufio.NewScanner(strings.NewReader(output))
+// normalizeLDAPAttrs returns a fresh config map from LDAP attributes
+// (multi-valued attributes already joined with newlines). Each value line is
+// trimmed of surrounding whitespace, matching the zmprov-text round trip this
+// replaces, and attribute names are interned.
+func normalizeLDAPAttrs(attrs map[string]string) map[string]string {
+	configData := make(map[string]string, len(attrs))
 
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		// LDAP output format: "key: value" or "key:: base64value".
-		// The separator is the first colon; values may contain colons
-		// (URLs, IPv6 addresses such as [::1]/128), so "::" only marks
-		// base64 when it immediately follows the attribute name.
-		rawKey, rest, found := strings.Cut(line, ":")
-		if !found {
-			continue
-		}
-
-		key := intern.Attr(strings.TrimSpace(rawKey))
-
-		if b64, isB64 := strings.CutPrefix(rest, ":"); isB64 {
-			// Store base64-encoded value as-is (will be decoded by executor)
-			configData[key] = strings.TrimSpace(b64)
+	for key, value := range attrs {
+		if !strings.Contains(value, "\n") {
+			configData[intern.Attr(strings.TrimSpace(key))] = strings.TrimSpace(value)
 
 			continue
 		}
 
-		value := strings.TrimSpace(rest)
-		// Handle multi-value attributes by concatenating with newlines
-		if existingValue, exists := configData[key]; exists {
-			configData[key] = existingValue + "\n" + value
-		} else {
-			configData[key] = value
+		lines := strings.Split(value, "\n")
+		for i, line := range lines {
+			lines[i] = strings.TrimSpace(line)
 		}
+
+		configData[intern.Attr(strings.TrimSpace(key))] = strings.Join(lines, "\n")
 	}
 
 	return configData

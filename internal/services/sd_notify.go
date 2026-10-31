@@ -9,70 +9,52 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"os"
-	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/sdnotify"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
-
-// notifySocketDir is the directory for sd_notify sockets. Overridden in
-// tests to use a writable temp directory.
-var notifySocketDir = pidDir
-
-// sdNotifySocketPath returns the NOTIFY_SOCKET path used for a service. The
-// path is service-addressable (not per-invocation) so the stop-side listener
-// can recreate it and receive STOPPING=1 datagrams from the daemon that was
-// started by an earlier, already-exited configd CLI invocation.
-func sdNotifySocketPath(service string) string {
-	return fmt.Sprintf("%s/notify-%s.sock", notifySocketDir, service)
-}
 
 // startWithSDNotify starts cmd and waits for the process to signal readiness via
 // the sd_notify protocol (READY=1 datagram). It:
-//  1. Creates a Unix datagram socket at pidDir/notify-<service>.sock
+//  1. Creates a Unix datagram socket at c.p.run/notify-<service>.sock
 //  2. Injects NOTIFY_SOCKET into the child environment (overriding any inherited value)
 //  3. Starts the process
 //  4. Blocks until READY=1 is received or the 30-second timeout expires
 //
-// After this function returns (success or failure), cmd.Process is set if the
-// process was launched, so callers can still write a PID file.
+// After this function returns (success or failure of the readiness wait) the
+// started process is returned, so callers can still release it or write a PID
+// file; it is nil only when the process could not be started.
 //
 // This mirrors systemd's Type=notify readiness detection for the legacy
 // (non-systemd) control path.
-func startWithSDNotify(ctx context.Context, cmd *exec.Cmd, service string) error {
-	socketPath := sdNotifySocketPath(service)
+func (c *Controller) startWithSDNotify(ctx context.Context, cmd *sys.Cmd, service string) (sys.Process, error) {
+	socketPath := c.p.sdNotifySocket(service)
 
 	// A stale socket from a previous configd invocation would make
 	// ListenUnixgram fail with EADDRINUSE; the start-side owns the path so
 	// clearing it here is safe.
-	_ = os.Remove(socketPath)
+	_ = c.env.FS.Remove(socketPath)
 
 	conn, err := net.ListenUnixgram(socketFamilyUnixgram, &net.UnixAddr{Name: socketPath, Net: socketFamilyUnixgram})
 	if err != nil {
-		return fmt.Errorf("create notify socket for %s: %w", service, err)
+		return nil, fmt.Errorf("create notify socket for %s: %w", service, err)
 	}
 
 	defer func() {
 		_ = conn.Close()
-		_ = os.Remove(socketPath)
+		_ = c.env.FS.Remove(socketPath)
 	}()
 
-	env := make([]string, 0, len(os.Environ())+1)
+	// Env is layered over the inherited environment and replaces any
+	// inherited NOTIFY_SOCKET.
+	cmd.Env = append(cmd.Env, "NOTIFY_SOCKET="+socketPath)
 
-	for _, e := range os.Environ() {
-		if !strings.HasPrefix(e, "NOTIFY_SOCKET=") {
-			env = append(env, e)
-		}
-	}
-
-	env = append(env, "NOTIFY_SOCKET="+socketPath)
-	cmd.Env = env
-
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start %s: %w", service, err)
+	proc, err := c.env.Exec.Start(ctx, cmd)
+	if err != nil {
+		return nil, fmt.Errorf("start %s: %w", service, err)
 	}
 
 	// Watch for early child exit so we fail fast instead of burning the full
@@ -80,10 +62,13 @@ func startWithSDNotify(ctx context.Context, cmd *exec.Cmd, service string) error
 	// listener because a previous instance has not released the port/socket).
 	exited := make(chan error, 1)
 
-	go func() { exited <- cmd.Wait() }()
+	go func() { exited <- proc.Wait() }()
 
-	return waitForSDNotify(ctx, conn, service, exited)
+	return proc, c.waitForSDNotify(ctx, conn, service, exited)
 }
+
+// sdNotifyReadyTimeout bounds how long startWithSDNotify waits for READY=1.
+const sdNotifyReadyTimeout = 30 * time.Second
 
 // awaitSDNotifyStopping opens the service's persistent notify socket and
 // waits for a STOPPING=1 datagram from the daemon, logging the observation
@@ -95,13 +80,13 @@ func startWithSDNotify(ctx context.Context, cmd *exec.Cmd, service string) error
 // Best effort: if the socket cannot be opened (another observer racing,
 // filesystem perms) we return silently. The shutdown still proceeds via
 // killProcess.
-func awaitSDNotifyStopping(ctx context.Context, service string) {
-	socketPath := sdNotifySocketPath(service)
+func (c *Controller) awaitSDNotifyStopping(ctx context.Context, service string) {
+	socketPath := c.p.sdNotifySocket(service)
 	// Drop any stale file left by the start-side's defer before the daemon
 	// had a chance to call sendmsg — stale inodes would rebind to an old
 	// sender lineage. The daemon's address is path-based, so recreating is
 	// transparent to it.
-	_ = os.Remove(socketPath)
+	_ = c.env.FS.Remove(socketPath)
 
 	conn, err := net.ListenUnixgram(socketFamilyUnixgram, &net.UnixAddr{Name: socketPath, Net: socketFamilyUnixgram})
 	if err != nil {
@@ -113,7 +98,7 @@ func awaitSDNotifyStopping(ctx context.Context, service string) {
 
 	defer func() {
 		_ = conn.Close()
-		_ = os.Remove(socketPath)
+		_ = c.env.FS.Remove(socketPath)
 	}()
 
 	buf := make([]byte, 512)
@@ -143,8 +128,10 @@ func awaitSDNotifyStopping(ctx context.Context, service string) {
 // waitForSDNotify reads datagrams from conn until READY=1 is received,
 // the context is cancelled, or 30 seconds elapse. A 1-second read deadline
 // is used per iteration so context cancellation is checked regularly.
-func waitForSDNotify(ctx context.Context, conn *net.UnixConn, service string, exited <-chan error) error {
-	deadline := time.Now().Add(30 * time.Second)
+func (c *Controller) waitForSDNotify(
+	ctx context.Context, conn *net.UnixConn, service string, exited <-chan error,
+) error {
+	deadline := c.env.Clock.Now().Add(sdNotifyReadyTimeout)
 	buf := make([]byte, 512)
 
 	for {
@@ -169,7 +156,7 @@ func waitForSDNotify(ctx context.Context, conn *net.UnixConn, service string, ex
 			continue
 		}
 
-		if time.Now().After(deadline) {
+		if c.env.Clock.Now().After(deadline) {
 			return fmt.Errorf("%s did not signal READY=1 within 30 seconds", service)
 		}
 

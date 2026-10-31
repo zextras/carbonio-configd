@@ -14,9 +14,19 @@ import (
 	"time"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/metrics"
 	"github.com/zextras/carbonio-configd/internal/services"
 	"github.com/zextras/carbonio-configd/internal/state"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
+
+// SnapshotProvider scopes one process-table snapshot to a context so every
+// status probe of a watchdog tick answers from the same view. It is satisfied
+// by *services.Controller.
+type SnapshotProvider interface {
+	// WithProcessSnapshot returns ctx carrying a process-table snapshot.
+	WithProcessSnapshot(ctx context.Context) context.Context
+}
 
 // Watchdog monitors services and automatically restarts them on failure.
 type Watchdog struct {
@@ -52,6 +62,15 @@ type Watchdog struct {
 
 	// configLookup function for checking service configuration
 	configLookup func(string) string
+
+	// clock drives the check ticker.
+	clock sys.Clock
+
+	// snapshots scopes a process-table snapshot to each tick; nil probes live.
+	snapshots SnapshotProvider
+
+	// metrics counts watchdog restarts; nil records nothing.
+	metrics *metrics.Registry
 }
 
 const (
@@ -108,6 +127,15 @@ type Config struct {
 
 	// ConfigLookup function for checking service configuration
 	ConfigLookup func(string) string
+
+	// Clock paces the health-check ticker (sys.Real().Clock in production).
+	// Required: NewWatchdog does not default it.
+	Clock sys.Clock
+
+	// Snapshots gives each tick one shared process-table snapshot (usually the
+	// *services.Controller behind ServiceManager). Nil makes every probe read
+	// the live process table.
+	Snapshots SnapshotProvider
 }
 
 // NewWatchdog creates a new Watchdog instance.
@@ -124,7 +152,15 @@ func NewWatchdog(cfg Config) *Watchdog {
 		ServiceEnabled: make(map[string]bool),
 		prevServices:   make(map[string]string),
 		configLookup:   cfg.ConfigLookup,
+		clock:          cfg.Clock,
+		snapshots:      cfg.Snapshots,
 	}
+}
+
+// SetMetrics makes the watchdog count the restarts it attempts in reg. Call it
+// before Start; nil (the default) records nothing.
+func (w *Watchdog) SetMetrics(reg *metrics.Registry) {
+	w.metrics = reg
 }
 
 // Start begins the watchdog monitoring loop.
@@ -220,7 +256,7 @@ func (w *Watchdog) IsServiceTracked(service string) bool {
 func (w *Watchdog) run(ctx context.Context, stopChan <-chan struct{}, runningChan chan<- struct{}) {
 	defer close(runningChan)
 
-	ticker := time.NewTicker(w.CheckInterval)
+	ticker := w.clock.NewTicker(w.CheckInterval)
 	defer ticker.Stop()
 
 	for {
@@ -229,7 +265,7 @@ func (w *Watchdog) run(ctx context.Context, stopChan <-chan struct{}, runningCha
 			logger.DebugContext(ctx, "Watchdog stopped")
 
 			return
-		case <-ticker.C:
+		case <-ticker.C():
 			w.checkServices(ctx)
 		}
 	}
@@ -248,10 +284,19 @@ func (w *Watchdog) checkServices(ctx context.Context) {
 
 	logger.DebugContext(ctx, "Checking service health")
 
-	observed := w.logServiceStatusChanges(ctx)
+	// Every status probe of this tick shares one process-table snapshot, so all
+	// restart decisions come from the same view and /proc is walked once.
+	// Restarts (which re-check status before starting) keep the caller's ctx
+	// and see live process state.
+	probeCtx := ctx
+	if w.snapshots != nil {
+		probeCtx = w.snapshots.WithProcessSnapshot(ctx)
+	}
+
+	observed := w.logServiceStatusChanges(probeCtx)
 
 	for _, service := range w.getTrackedServices() {
-		w.checkOneService(ctx, service, observed)
+		w.checkOneService(ctx, probeCtx, service, observed)
 	}
 }
 
@@ -265,6 +310,7 @@ func (w *Watchdog) checkServices(ctx context.Context) {
 // iterates curServices(): probing e.g. antivirus on a node without it is
 // useless work. The returned map holds each probed service's running state so
 // checkOneService can reuse it instead of probing again in the same cycle.
+// ctx is the tick's probe context (services.WithProcessSnapshot).
 func (w *Watchdog) logServiceStatusChanges(ctx context.Context) map[string]bool {
 	w.mu.Lock()
 
@@ -283,17 +329,12 @@ func (w *Watchdog) logServiceStatusChanges(ctx context.Context) map[string]bool 
 
 	observed := make(map[string]bool, len(monitored))
 
-	// All probes of this tick share one /proc walk. The snapshot context is
-	// scoped to the probe loop: restarts (which re-check status before
-	// starting) must keep the caller's ctx and see live process state.
-	probeCtx := services.WithProcessSnapshot(ctx)
-
 	for _, service := range monitored {
 		if !w.isEnabledOnNode(service) {
 			continue
 		}
 
-		running, err := w.serviceManager.IsRunning(probeCtx, service)
+		running, err := w.serviceManager.IsRunning(ctx, service)
 		if err != nil {
 			// Don't record a status when the probe itself failed.
 			continue
@@ -324,21 +365,21 @@ func (w *Watchdog) logServiceStatusChanges(ctx context.Context) map[string]bool 
 }
 
 // isEnabledOnNode reports whether service is in this node's
-// zimbraServiceEnabled (ServerConfig.ServiceConfig).
+// zimbraServiceEnabled, read lock-free from the latest published snapshot.
 func (w *Watchdog) isEnabledOnNode(service string) bool {
-	if w.state == nil || w.state.ServerConfig == nil {
+	if w.state == nil {
 		return false
 	}
 
-	_, ok := w.state.ServerConfig.ServiceConfig.Get(service)
-
-	return ok
+	return w.state.Snapshot().ServiceEnabled(service)
 }
 
 // checkOneService verifies a single service and queues a restart when it is not running.
 // observed holds running states already probed in this cycle; a missing entry
-// triggers a fresh probe.
-func (w *Watchdog) checkOneService(ctx context.Context, service string, observed map[string]bool) {
+// triggers a probe through probeCtx, the tick's snapshot context, so it
+// answers from the same process-table view as the rest of the cycle; ctx is
+// the caller's live context, used for restarts.
+func (w *Watchdog) checkOneService(ctx, probeCtx context.Context, service string, observed map[string]bool) {
 	if !w.IsServiceEnabled(service) {
 		logger.DebugContext(ctx, "Skipping disabled service", "service", service)
 
@@ -355,7 +396,7 @@ func (w *Watchdog) checkOneService(ctx context.Context, service string, observed
 	if !probed {
 		var err error
 
-		isRunning, err = w.serviceManager.IsRunning(ctx, service)
+		isRunning, err = w.serviceManager.IsRunning(probeCtx, service)
 		if err != nil {
 			logger.WarnContext(ctx, "Failed to check service", "service", service, "error", err)
 
@@ -383,16 +424,25 @@ func (w *Watchdog) restartDownService(ctx context.Context, service string) {
 
 	if err := w.serviceManager.AddRestart(ctx, service); err != nil {
 		logger.ErrorContext(ctx, "Failed to queue restart", "service", service, "error", err)
+		w.metrics.WatchdogRestart(service, false)
 
 		return
 	}
 
 	if err := w.serviceManager.ProcessRestarts(ctx, w.configLookup); err != nil {
+		// Interrupted by a shutdown (already logged by the manager): neither
+		// an error nor a failed restart.
+		if ctx.Err() != nil {
+			return
+		}
+
 		logger.ErrorContext(ctx, "Failed to restart service", "service", service, "error", err)
+		w.metrics.WatchdogRestart(service, false)
 
 		return
 	}
 
+	w.metrics.WatchdogRestart(service, true)
 	logger.InfoContext(ctx, "Successfully restarted service", "service", service)
 	w.AddService(ctx, service)
 }

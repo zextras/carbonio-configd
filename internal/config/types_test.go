@@ -169,6 +169,43 @@ func TestConfig_SetVals(t *testing.T) {
 			},
 		},
 		{
+			name: "restart debounce",
+			localConfig: &LocalConfig{
+				Data: testConfigMap(map[string]string{"zmconfigd_restart_debounce_seconds": "30"}),
+			},
+			validate: func(t *testing.T, cfg *Config) {
+				if cfg.RestartDebounce != 30 {
+					t.Errorf("RestartDebounce = %v, want 30", cfg.RestartDebounce)
+				}
+			},
+		},
+		{
+			name: "observability opt-ins",
+			localConfig: &LocalConfig{
+				Data: testConfigMap(map[string]string{
+					"zmconfigd_metrics_textfile": "/var/lib/node_exporter/configd.prom",
+					"zmconfigd_cycle_summary":    "true",
+				}),
+			},
+			validate: func(t *testing.T, cfg *Config) {
+				if cfg.MetricsTextfile != "/var/lib/node_exporter/configd.prom" {
+					t.Errorf("MetricsTextfile = %q", cfg.MetricsTextfile)
+				}
+				if !cfg.CycleSummary {
+					t.Error("CycleSummary should be true")
+				}
+			},
+		},
+		{
+			name:        "observability off by default",
+			localConfig: &LocalConfig{Data: testConfigMap(map[string]string{})},
+			validate: func(t *testing.T, cfg *Config) {
+				if cfg.MetricsTextfile != "" || cfg.CycleSummary {
+					t.Errorf("observability must be off by default: %q %v", cfg.MetricsTextfile, cfg.CycleSummary)
+				}
+			},
+		},
+		{
 			name: "set configd intervals",
 			localConfig: &LocalConfig{
 				Data: testConfigMap(map[string]string{
@@ -338,7 +375,6 @@ func TestCacheTTLConstant(t *testing.T) {
 func TestMtaConfigSection(t *testing.T) {
 	section := &MtaConfigSection{
 		Name:         "test-section",
-		Changed:      false,
 		Depends:      make(map[string]bool),
 		Rewrites:     make(map[string]RewriteEntry),
 		Restarts:     make(map[string]bool),
@@ -352,10 +388,6 @@ func TestMtaConfigSection(t *testing.T) {
 
 	if section.Name != "test-section" {
 		t.Errorf("Name = %v, want test-section", section.Name)
-	}
-
-	if section.Changed {
-		t.Error("Changed should be false")
 	}
 
 	if section.Proxygen {
@@ -466,8 +498,7 @@ func TestMtaConfig(t *testing.T) {
 	}
 
 	section := &MtaConfigSection{
-		Name:    "main",
-		Changed: false,
+		Name: "main",
 	}
 
 	mc.Sections["main"] = section

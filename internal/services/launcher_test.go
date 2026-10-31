@@ -15,6 +15,8 @@ import (
 // --- buildLDAPBindURL ---
 
 func TestBuildLDAPBindURL_ExplicitBindURL(t *testing.T) {
+	t.Parallel()
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -28,6 +30,8 @@ func TestBuildLDAPBindURL_ExplicitBindURL(t *testing.T) {
 }
 
 func TestBuildLDAPBindURL_MultipleBindURLs(t *testing.T) {
+	t.Parallel()
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -42,6 +46,8 @@ func TestBuildLDAPBindURL_MultipleBindURLs(t *testing.T) {
 }
 
 func TestBuildLDAPBindURL_FallbackToLdapURL(t *testing.T) {
+	t.Parallel()
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -56,6 +62,8 @@ func TestBuildLDAPBindURL_FallbackToLdapURL(t *testing.T) {
 }
 
 func TestBuildLDAPBindURL_ReconstructFromHostPort(t *testing.T) {
+	t.Parallel()
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -70,6 +78,8 @@ func TestBuildLDAPBindURL_ReconstructFromHostPort(t *testing.T) {
 }
 
 func TestBuildLDAPBindURL_DefaultsWhenEmpty(t *testing.T) {
+	t.Parallel()
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -81,6 +91,8 @@ func TestBuildLDAPBindURL_DefaultsWhenEmpty(t *testing.T) {
 }
 
 func TestBuildLDAPBindURL_DefaultPort(t *testing.T) {
+	t.Parallel()
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -94,6 +106,8 @@ func TestBuildLDAPBindURL_DefaultPort(t *testing.T) {
 }
 
 func TestBuildLDAPBindURL_DefaultHost(t *testing.T) {
+	t.Parallel()
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -109,11 +123,15 @@ func TestBuildLDAPBindURL_DefaultHost(t *testing.T) {
 // --- mailboxJavaArgs ---
 
 func TestMailboxJavaArgs_DefaultHeapAndStack(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	lc := map[string]string{}
-	args := mailboxJavaArgs(lc)
+	args := ctl.mailboxJavaArgs(lc)
 
 	// Must contain -Xms512m and -Xmx512m defaults.
 	assertContains(t, args, "-Xms512m")
@@ -129,69 +147,93 @@ func TestMailboxJavaArgs_DefaultHeapAndStack(t *testing.T) {
 }
 
 func TestMailboxJavaArgs_CustomHeap(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	lc := map[string]string{
 		"mailboxd_java_heap_size": "2048",
 	}
-	args := mailboxJavaArgs(lc)
+	args := ctl.mailboxJavaArgs(lc)
 	assertContains(t, args, "-Xms2048m")
 	assertContains(t, args, "-Xmx2048m")
 }
 
 func TestMailboxJavaArgs_CustomThreadStack(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	lc := map[string]string{
 		"mailboxd_thread_stack_size": "512k",
 	}
-	args := mailboxJavaArgs(lc)
+	args := ctl.mailboxJavaArgs(lc)
 	assertContains(t, args, "-Xss512k")
 }
 
 func TestMailboxJavaArgs_NetworkTTL(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	lc := map[string]string{
 		"networkaddress_cache_ttl": "30",
 	}
-	args := mailboxJavaArgs(lc)
+	args := ctl.mailboxJavaArgs(lc)
 	assertContainsPrefix(t, args, "-Dsun.net.inetaddr.ttl=30")
 }
 
 func TestMailboxJavaArgs_DefaultNetworkTTL(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	lc := map[string]string{}
-	args := mailboxJavaArgs(lc)
+	args := ctl.mailboxJavaArgs(lc)
 	assertContainsPrefix(t, args, "-Dsun.net.inetaddr.ttl=60")
 }
 
 func TestMailboxJavaArgs_Log4jProps(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	lc := map[string]string{
 		"zimbra_log4j_properties": "/etc/carbonio/log4j.xml",
 	}
-	args := mailboxJavaArgs(lc)
+	args := ctl.mailboxJavaArgs(lc)
 	assertContainsPrefix(t, args, "-Dlog4j.configurationFile=")
 }
 
 func TestMailboxJavaArgs_GcLogStripped(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	// GC log flag must be stripped from java options.
-	gcFlag := "-Xlog:gc*=info,safepoint=info:file=" + logPath + "/gc.log:time:filecount=20,filesize=10m"
+	gcFlag := "-Xlog:gc*=info,safepoint=info:file=" + ctl.p.log + "/gc.log:time:filecount=20,filesize=10m"
 	lc := map[string]string{
 		"mailboxd_java_options": gcFlag + " -Xss256k",
 	}
-	args := mailboxJavaArgs(lc)
+	args := ctl.mailboxJavaArgs(lc)
 	for _, a := range args {
 		if strings.Contains(a, "gc*=info") {
 			t.Errorf("GC log flag should be stripped from args, found: %q", a)
@@ -200,6 +242,10 @@ func TestMailboxJavaArgs_GcLogStripped(t *testing.T) {
 }
 
 func TestMailboxJavaArgs_NoXssDoubleInjection(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -207,7 +253,7 @@ func TestMailboxJavaArgs_NoXssDoubleInjection(t *testing.T) {
 	lc := map[string]string{
 		"mailboxd_java_options": "-Xss1m",
 	}
-	args := mailboxJavaArgs(lc)
+	args := ctl.mailboxJavaArgs(lc)
 	count := 0
 	for _, a := range args {
 		if strings.HasPrefix(a, "-Xss") {
@@ -220,22 +266,30 @@ func TestMailboxJavaArgs_NoXssDoubleInjection(t *testing.T) {
 }
 
 func TestMailboxJavaArgs_ContainsCpAndMainClass(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	lc := map[string]string{}
-	args := mailboxJavaArgs(lc)
+	args := ctl.mailboxJavaArgs(lc)
 	assertContains(t, args, "-cp")
 	assertContains(t, args, "com.zextras.mailbox.Mailbox")
 }
 
 func TestMailboxJavaArgs_PreviewFlagsOnceBeforeMainClass(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	for name, opts := range map[string]string{
 		"absent":  "",
 		"present": "--enable-preview --enable-native-access=ALL-UNNAMED -Xss512k",
 	} {
 		t.Run(name, func(t *testing.T) {
-			assertPreviewFlagsOnce(t, mailboxJavaArgs(map[string]string{"mailboxd_java_options": opts}),
+			assertPreviewFlagsOnce(t, ctl.mailboxJavaArgs(map[string]string{"mailboxd_java_options": opts}),
 				"com.zextras.mailbox.Mailbox")
 		})
 	}
@@ -244,12 +298,16 @@ func TestMailboxJavaArgs_PreviewFlagsOnceBeforeMainClass(t *testing.T) {
 // --- milterJavaArgs ---
 
 func TestMilterJavaArgs_PreviewFlagsOnceBeforeMainClass(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	for name, opts := range map[string]string{
 		"absent":  "-Xmx256m",
 		"present": "--enable-preview -Xmx256m --enable-native-access=ALL-UNNAMED",
 	} {
 		t.Run(name, func(t *testing.T) {
-			assertPreviewFlagsOnce(t, milterJavaArgs(map[string]string{"zimbra_zmjava_options": opts}),
+			assertPreviewFlagsOnce(t, ctl.milterJavaArgs(map[string]string{"zimbra_zmjava_options": opts}),
 				"com.zimbra.cs.milter.MilterServer")
 		})
 	}
@@ -280,11 +338,15 @@ func assertPreviewFlagsOnce(t *testing.T, args []string, mainClass string) {
 }
 
 func TestMilterJavaArgs_DefaultJavaOpts(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	lc := map[string]string{}
-	args := milterJavaArgs(lc)
+	args := ctl.milterJavaArgs(lc)
 
 	assertContains(t, args, "-client")
 
@@ -293,71 +355,99 @@ func TestMilterJavaArgs_DefaultJavaOpts(t *testing.T) {
 }
 
 func TestMilterJavaArgs_CustomJavaOpts(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	lc := map[string]string{
 		"zimbra_zmjava_options": "-Xmx512m -Xms128m",
 	}
-	args := milterJavaArgs(lc)
+	args := ctl.milterJavaArgs(lc)
 	assertContains(t, args, "-Xmx512m")
 	assertContains(t, args, "-Xms128m")
 }
 
 func TestMilterJavaArgs_CustomLibPath(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	lc := map[string]string{
 		"zimbra_zmjava_java_library_path": "/custom/lib",
 	}
-	args := milterJavaArgs(lc)
+	args := ctl.milterJavaArgs(lc)
 	assertContainsPrefix(t, args, "-Djava.library.path=/custom/lib")
 }
 
 func TestMilterJavaArgs_DefaultLibPath(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	lc := map[string]string{}
-	args := milterJavaArgs(lc)
+	args := ctl.milterJavaArgs(lc)
 	assertContainsPrefix(t, args, "-Djava.library.path=")
 }
 
 func TestMilterJavaArgs_ContainsMainClass(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	lc := map[string]string{}
-	args := milterJavaArgs(lc)
+	args := ctl.milterJavaArgs(lc)
 	assertContains(t, args, "com.zimbra.cs.milter.MilterServer")
 }
 
 func TestMilterJavaArgs_ContainsClasspath(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	lc := map[string]string{}
-	args := milterJavaArgs(lc)
+	args := ctl.milterJavaArgs(lc)
 	assertContains(t, args, "-classpath")
 }
 
 func TestMilterJavaArgs_ContainsZimbraHome(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	lc := map[string]string{}
-	args := milterJavaArgs(lc)
+	args := ctl.milterJavaArgs(lc)
 	assertContainsPrefix(t, args, "-Dzimbra.home=")
 }
 
 func TestMilterJavaArgs_TLSProtocols(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	// Default opts must contain TLS settings.
 	lc := map[string]string{}
-	args := milterJavaArgs(lc)
+	args := ctl.milterJavaArgs(lc)
 	joined := strings.Join(args, " ")
 	if !strings.Contains(joined, "TLSv1") {
 		t.Error("expected TLS protocol flags in default milter args")
@@ -367,6 +457,8 @@ func TestMilterJavaArgs_TLSProtocols(t *testing.T) {
 // --- sortByOrder / orderOf ---
 
 func TestOrderOf_KnownService(t *testing.T) {
+	t.Parallel()
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -384,6 +476,8 @@ func TestOrderOf_KnownService(t *testing.T) {
 }
 
 func TestOrderOf_UnknownServiceReturns1000(t *testing.T) {
+	t.Parallel()
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -394,6 +488,8 @@ func TestOrderOf_UnknownServiceReturns1000(t *testing.T) {
 }
 
 func TestSortByOrder_SortsCorrectly(t *testing.T) {
+	t.Parallel()
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -410,6 +506,8 @@ func TestSortByOrder_SortsCorrectly(t *testing.T) {
 }
 
 func TestSortByOrder_UnknownServicesAppended(t *testing.T) {
+	t.Parallel()
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -427,6 +525,8 @@ func TestSortByOrder_UnknownServicesAppended(t *testing.T) {
 }
 
 func TestSortByOrder_EqualOrderAlphabetical(t *testing.T) {
+	t.Parallel()
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -442,25 +542,37 @@ func TestSortByOrder_EqualOrderAlphabetical(t *testing.T) {
 // --- IsCustomEnabled ---
 
 func TestIsCustomEnabled_UnknownService(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	if IsCustomEnabled(context.Background(), "nonexistent-service") {
+	if ctl.IsCustomEnabled(context.Background(), "nonexistent-service") {
 		t.Error("expected false for unknown service")
 	}
 }
 
 func TestIsCustomEnabled_ServiceWithoutEnableCheck(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	// mta has no EnableCheck
-	if IsCustomEnabled(context.Background(), "mta") {
+	if ctl.IsCustomEnabled(context.Background(), "mta") {
 		t.Error("expected false for service without EnableCheck")
 	}
 }
 
 func TestIsCustomEnabled_MilterWithEnableCheck(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -469,16 +581,14 @@ func TestIsCustomEnabled_MilterWithEnableCheck(t *testing.T) {
 	tmp := t.TempDir()
 	filePath := filepath.Join(tmp, "mta_milter_options")
 
-	oldPath := milterOptionsPath
-	milterOptionsPath = filePath
-	defer func() { milterOptionsPath = oldPath }()
+	ctl.p.milterOptions = filePath
 
 	// Write enabled file
 	if err := os.WriteFile(filePath, []byte("zimbraMilterServerEnabled=TRUE\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	if !IsCustomEnabled(context.Background(), "milter") {
+	if !ctl.IsCustomEnabled(context.Background(), "milter") {
 		t.Error("expected true when milter options file says enabled")
 	}
 
@@ -487,7 +597,7 @@ func TestIsCustomEnabled_MilterWithEnableCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if IsCustomEnabled(context.Background(), "milter") {
+	if ctl.IsCustomEnabled(context.Background(), "milter") {
 		t.Error("expected false when milter options file says disabled")
 	}
 }
@@ -495,6 +605,8 @@ func TestIsCustomEnabled_MilterWithEnableCheck(t *testing.T) {
 // --- validateName (remote.go) ---
 
 func TestValidateName_ValidNames(t *testing.T) {
+	t.Parallel()
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -507,6 +619,8 @@ func TestValidateName_ValidNames(t *testing.T) {
 }
 
 func TestValidateName_InvalidNames(t *testing.T) {
+	t.Parallel()
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -527,6 +641,8 @@ func TestValidateName_InvalidNames(t *testing.T) {
 }
 
 func TestValidateName_ErrorMentionsKind(t *testing.T) {
+	t.Parallel()
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -542,17 +658,25 @@ func TestValidateName_ErrorMentionsKind(t *testing.T) {
 // --- killStatsPidFile ---
 
 func TestKillStatsPidFile_MissingFile(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	ctx := context.Background()
-	result := killStatsPidFile(ctx, "/nonexistent/path/zmstat-cpu.pid")
+	result := ctl.killStatsPidFile(ctx, "/nonexistent/path/zmstat-cpu.pid")
 	if result {
 		t.Error("expected false for missing pid file")
 	}
 }
 
 func TestKillStatsPidFile_InvalidPid(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -563,7 +687,7 @@ func TestKillStatsPidFile_InvalidPid(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	result := killStatsPidFile(ctx, pidFile)
+	result := ctl.killStatsPidFile(ctx, pidFile)
 	if result {
 		t.Error("expected false for invalid pid")
 	}

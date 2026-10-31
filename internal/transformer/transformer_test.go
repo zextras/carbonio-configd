@@ -8,7 +8,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/zextras/carbonio-configd/internal/state"
 	"github.com/zextras/carbonio-configd/internal/testutil"
 )
 
@@ -53,9 +52,8 @@ func TestTransformComplexScenarios(t *testing.T) {
 		},
 	}
 
-	st := &state.State{}
 	mockLookup := newMockLookup()
-	transformer := NewTransformer(mockLookup, st)
+	transformer := NewTransformer(mockLookup)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -70,7 +68,6 @@ func TestTransformComplexScenarios(t *testing.T) {
 // TestMultipleDirectivesInOneLine tests complex line processing
 func TestMultipleDirectivesInOneLine(t *testing.T) {
 	ctx := context.Background()
-	st := &state.State{}
 
 	mock := testutil.NewMockConfigLookupWithData(map[string]map[string]string{
 		"VAR": {
@@ -80,7 +77,7 @@ func TestMultipleDirectivesInOneLine(t *testing.T) {
 		},
 	})
 
-	transformer := NewTransformer(mock, st)
+	transformer := NewTransformer(mock)
 
 	tests := []struct {
 		name     string
@@ -118,9 +115,8 @@ func TestMultipleDirectivesInOneLine(t *testing.T) {
 
 func BenchmarkTransform_SimpleVarSubstitution(b *testing.B) {
 	ctx := context.Background()
-	st := &state.State{}
 	mockLookup := newMockLookup()
-	transformer := NewTransformer(mockLookup, st)
+	transformer := NewTransformer(mockLookup)
 	line := "bind_address = %%VAR:zimbraLocalBindAddress%%"
 
 	b.ResetTimer()
@@ -131,9 +127,8 @@ func BenchmarkTransform_SimpleVarSubstitution(b *testing.B) {
 
 func BenchmarkTransform_LocalConfigSubstitution(b *testing.B) {
 	ctx := context.Background()
-	st := &state.State{}
 	mockLookup := newMockLookup()
-	transformer := NewTransformer(mockLookup, st)
+	transformer := NewTransformer(mockLookup)
 	line := "mysql_bind_address = @@mysql_bind_address@@"
 
 	b.ResetTimer()
@@ -144,9 +139,8 @@ func BenchmarkTransform_LocalConfigSubstitution(b *testing.B) {
 
 func BenchmarkTransform_CommentDirective(b *testing.B) {
 	ctx := context.Background()
-	st := &state.State{}
 	mockLookup := newMockLookup()
-	transformer := NewTransformer(mockLookup, st)
+	transformer := NewTransformer(mockLookup)
 	line := "%%comment VAR:zimbraLogToSyslog%%syslog-enabled"
 
 	b.ResetTimer()
@@ -157,9 +151,8 @@ func BenchmarkTransform_CommentDirective(b *testing.B) {
 
 func BenchmarkTransform_BinaryDirective(b *testing.B) {
 	ctx := context.Background()
-	st := &state.State{}
 	mockLookup := newMockLookup()
-	transformer := NewTransformer(mockLookup, st)
+	transformer := NewTransformer(mockLookup)
 	line := "%%binary SERVICE:antispam%%"
 
 	b.ResetTimer()
@@ -170,9 +163,8 @@ func BenchmarkTransform_BinaryDirective(b *testing.B) {
 
 func BenchmarkTransform_ListDirective(b *testing.B) {
 	ctx := context.Background()
-	st := &state.State{}
 	mockLookup := newMockLookup()
-	transformer := NewTransformer(mockLookup, st)
+	transformer := NewTransformer(mockLookup)
 	line := "%%list VAR:zimbraMtaBlockedExtension |%%"
 
 	b.ResetTimer()
@@ -183,9 +175,8 @@ func BenchmarkTransform_ListDirective(b *testing.B) {
 
 func BenchmarkTransform_ContainsDirective(b *testing.B) {
 	ctx := context.Background()
-	st := &state.State{}
 	mockLookup := newMockLookup()
-	transformer := NewTransformer(mockLookup, st)
+	transformer := NewTransformer(mockLookup)
 	line := "%%contains VAR:zimbraMtaBlockedExtension exe^blocked^allowed%%"
 
 	b.ResetTimer()
@@ -196,9 +187,8 @@ func BenchmarkTransform_ContainsDirective(b *testing.B) {
 
 func BenchmarkTransform_ComplexLine(b *testing.B) {
 	ctx := context.Background()
-	st := &state.State{}
 	mockLookup := newMockLookup()
-	transformer := NewTransformer(mockLookup, st)
+	transformer := NewTransformer(mockLookup)
 	line := "%%comment SERVICE:antispam%%server = %%VAR:zimbraServerHostname%% bind = @@mysql_bind_address@@"
 
 	b.ResetTimer()
@@ -209,9 +199,8 @@ func BenchmarkTransform_ComplexLine(b *testing.B) {
 
 func BenchmarkTransform_NoSubstitution(b *testing.B) {
 	ctx := context.Background()
-	st := &state.State{}
 	mockLookup := newMockLookup()
-	transformer := NewTransformer(mockLookup, st)
+	transformer := NewTransformer(mockLookup)
 	line := "simple line with no directives"
 
 	b.ResetTimer()
@@ -222,9 +211,8 @@ func BenchmarkTransform_NoSubstitution(b *testing.B) {
 
 func BenchmarkXformConfig_Comment(b *testing.B) {
 	ctx := context.Background()
-	st := &state.State{}
 	mockLookup := newMockLookup()
-	transformer := NewTransformer(mockLookup, st)
+	transformer := NewTransformer(mockLookup)
 	match := "%%comment VAR:zimbraLogToSyslog%%"
 
 	b.ResetTimer()
@@ -235,9 +223,8 @@ func BenchmarkXformConfig_Comment(b *testing.B) {
 
 func BenchmarkXformConfig_Binary(b *testing.B) {
 	ctx := context.Background()
-	st := &state.State{}
 	mockLookup := newMockLookup()
-	transformer := NewTransformer(mockLookup, st)
+	transformer := NewTransformer(mockLookup)
 	match := "%%binary SERVICE:antispam%%"
 
 	b.ResetTimer()
@@ -248,9 +235,8 @@ func BenchmarkXformConfig_Binary(b *testing.B) {
 
 func BenchmarkXformConfig_List(b *testing.B) {
 	ctx := context.Background()
-	st := &state.State{}
 	mockLookup := newMockLookup()
-	transformer := NewTransformer(mockLookup, st)
+	transformer := NewTransformer(mockLookup)
 	match := "%%list VAR:zimbraMtaBlockedExtension |%%"
 
 	b.ResetTimer()

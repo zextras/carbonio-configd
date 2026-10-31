@@ -8,7 +8,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/zextras/carbonio-configd/internal/state"
+	"github.com/zextras/carbonio-configd/internal/snapshot"
+	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
 
 // Mock LDAP Manager for testing
@@ -142,7 +143,7 @@ func TestNewExecutor(t *testing.T) {
 	mockLdap := &mockLdapManager{}
 	baseDir := "/opt/zextras"
 
-	executor := NewExecutor(baseDir, mockLdap)
+	executor := NewExecutor(baseDir, mockLdap, systest.New().System())
 
 	if executor == nil {
 		t.Fatal("NewExecutor should not return nil")
@@ -154,7 +155,7 @@ func TestNewExecutor(t *testing.T) {
 
 func TestExecutor_EmptyBatch(t *testing.T) {
 	mockLdap := &mockLdapManager{}
-	executor := NewExecutor("/opt/zextras", mockLdap)
+	executor := NewExecutor("/opt/zextras", mockLdap, systest.New().System())
 
 	// Empty batch should not error
 	err := executor.ExecutePostconfBatch(context.Background(), nil)
@@ -245,7 +246,7 @@ func TestOperationTypes(t *testing.T) {
 func TestInterfaces(t *testing.T) {
 	t.Run("Executor interface", func(t *testing.T) {
 		mockLdap := &mockLdapManager{}
-		var executor = NewExecutor("/opt/zextras", mockLdap)
+		var executor = NewExecutor("/opt/zextras", mockLdap, systest.New().System())
 
 		if executor == nil {
 			t.Error("Executor should not be nil")
@@ -263,7 +264,9 @@ func TestInterfaces(t *testing.T) {
 // testResolver is a mock OperationResolver for interface verification
 type testResolver struct{}
 
-func (r *testResolver) ResolveValue(ctx context.Context, valueType, key string, state *state.State) (string, error) {
+func (r *testResolver) ResolveValue(
+	ctx context.Context, valueType, key string, snap *snapshot.Snapshot,
+) (string, error) {
 	return "", nil
 }
 

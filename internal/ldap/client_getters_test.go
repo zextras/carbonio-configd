@@ -12,6 +12,9 @@ import (
 	"github.com/go-ldap/ldap/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/zextras/carbonio-configd/internal/sys"
+	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
 
 // recordedSearch captures the arguments of the last search call.
@@ -83,7 +86,7 @@ func TestGetGlobalConfig_NotFound(t *testing.T) {
 // newServerGetterTestClient stubs both the server entry and cn=config lookups
 // and points the schema at the real attrs.xml excerpt in testdata.
 func newServerGetterTestClient(server, global *ldap.Entry) *Client {
-	c := &Client{baseDN: defaultBaseDN, attrsDir: filepath.Join("testdata", "attrs")}
+	c := &Client{baseDN: defaultBaseDN, fs: sys.RealFS{}, attrsDir: filepath.Join("testdata", "attrs")}
 	c.searchFn = func(baseDN, _ string, _ []string, _ int) (*ldap.SearchResult, error) {
 		if baseDN == "cn=config,cn=zimbra" {
 			return &ldap.SearchResult{Entries: []*ldap.Entry{global}}, nil
@@ -100,6 +103,8 @@ func newServerGetterTestClient(server, global *ldap.Entry) *Client {
 }
 
 func TestGetServerConfig(t *testing.T) {
+	t.Parallel()
+
 	c := newServerGetterTestClient(
 		entryWithAttrs("cn=mail.example.com,cn=servers,cn=zimbra", map[string][]string{
 			"zimbraServiceEnabled": {"proxy", "mta"},
@@ -117,6 +122,8 @@ func TestGetServerConfig(t *testing.T) {
 // attributes missing on the server come from global config, own values win,
 // and attributes not flagged serverInherited are never inherited.
 func TestGetServerConfig_InheritsGlobal(t *testing.T) {
+	t.Parallel()
+
 	c := newServerGetterTestClient(
 		entryWithAttrs("cn=mail.example.com,cn=servers,cn=zimbra", map[string][]string{
 			"zimbraMilterBindPort": {"9999"},
@@ -144,11 +151,16 @@ func TestGetServerConfig_InheritsGlobal(t *testing.T) {
 }
 
 func TestGetServerConfig_SchemaUnreadable(t *testing.T) {
+	t.Parallel()
+
 	c := newServerGetterTestClient(
 		entryWithAttrs("cn=m,cn=servers,cn=zimbra", map[string][]string{"cn": {"m"}}),
 		entryWithAttrs("cn=config,cn=zimbra", map[string][]string{"cn": {"config"}}),
 	)
-	c.attrsDir = t.TempDir()
+	f := systest.New()
+	f.FS.PutDir("/schema", 0o755)
+	c.fs = f.FS
+	c.attrsDir = "/schema"
 
 	_, err := c.GetServerConfig("m")
 	require.Error(t, err)
@@ -156,6 +168,8 @@ func TestGetServerConfig_SchemaUnreadable(t *testing.T) {
 }
 
 func TestGetServerConfig_NotFound(t *testing.T) {
+	t.Parallel()
+
 	c := newServerGetterTestClient(nil, entryWithAttrs("cn=config,cn=zimbra", nil))
 
 	_, err := c.GetServerConfig("ghost.example.com")

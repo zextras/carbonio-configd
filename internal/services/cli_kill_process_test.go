@@ -14,10 +14,14 @@ import (
 
 // TestKillProcess_NoMatch verifies killProcess returns nil when no process matches.
 func TestKillProcess_NoMatch(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	err := killProcess(context.Background(), "carbonio-configd-unique-needle-xyzzy-no-match-99999")
+	err := ctl.killProcess(context.Background(), "carbonio-configd-unique-needle-xyzzy-no-match-99999")
 	if err != nil {
 		t.Errorf("killProcess with no match returned error: %v", err)
 	}
@@ -25,13 +29,15 @@ func TestKillProcess_NoMatch(t *testing.T) {
 
 // TestKillProcess_SelfExclusion verifies killProcess skips our own PID even when matched.
 func TestKillProcess_SelfExclusion(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	tmpDir := t.TempDir()
-	oldRoot := procFSRoot
-	procFSRoot = tmpDir + "/"
-	defer func() { procFSRoot = oldRoot }()
+	ctl.useProcRoot(tmpDir + "/")
 
 	uid := os.Getuid()
 	self := os.Getpid()
@@ -49,7 +55,7 @@ func TestKillProcess_SelfExclusion(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := killProcess(context.Background(), needle)
+	err := ctl.killProcess(context.Background(), needle)
 	if err != nil {
 		t.Errorf("killProcess returned unexpected error: %v", err)
 	}
@@ -57,13 +63,15 @@ func TestKillProcess_SelfExclusion(t *testing.T) {
 
 // TestKillProcess_ParentExclusion verifies killProcess skips the parent PID.
 func TestKillProcess_ParentExclusion(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	tmpDir := t.TempDir()
-	oldRoot := procFSRoot
-	procFSRoot = tmpDir + "/"
-	defer func() { procFSRoot = oldRoot }()
+	ctl.useProcRoot(tmpDir + "/")
 
 	uid := os.Getuid()
 	parent := os.Getppid()
@@ -81,7 +89,7 @@ func TestKillProcess_ParentExclusion(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := killProcess(context.Background(), needle)
+	err := ctl.killProcess(context.Background(), needle)
 	if err != nil {
 		t.Errorf("killProcess returned unexpected error: %v", err)
 	}
@@ -89,13 +97,15 @@ func TestKillProcess_ParentExclusion(t *testing.T) {
 
 // TestKillProcess_ParentExcluded verifies killProcess excludes parent PID (variant).
 func TestKillProcess_ParentExcluded(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	tmp := t.TempDir()
-	oldRoot := procFSRoot
-	procFSRoot = tmp + "/"
-	defer func() { procFSRoot = oldRoot }()
+	ctl.useProcRoot(tmp + "/")
 
 	uid := os.Getuid()
 	parent := os.Getppid()
@@ -115,7 +125,7 @@ func TestKillProcess_ParentExcluded(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := killProcess(context.Background(), needle)
+	err := ctl.killProcess(context.Background(), needle)
 	if err != nil {
 		t.Errorf("killProcess returned unexpected error: %v", err)
 	}
@@ -123,13 +133,15 @@ func TestKillProcess_ParentExcluded(t *testing.T) {
 
 // TestKillProcess_SelfExcluded verifies killProcess does not kill itself (variant).
 func TestKillProcess_SelfExcluded(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	tmp := t.TempDir()
-	oldRoot := procFSRoot
-	procFSRoot = tmp + "/"
-	defer func() { procFSRoot = oldRoot }()
+	ctl.useProcRoot(tmp + "/")
 
 	uid := os.Getuid()
 	self := os.Getpid()
@@ -149,7 +161,7 @@ func TestKillProcess_SelfExcluded(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := killProcess(context.Background(), needle)
+	err := ctl.killProcess(context.Background(), needle)
 	if err != nil {
 		t.Errorf("killProcess returned unexpected error: %v", err)
 	}

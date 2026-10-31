@@ -6,28 +6,16 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"os"
-	"os/exec"
+	"io/fs"
 	"strconv"
 	"strings"
 	"syscall"
 
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/logger"
-)
-
-// Mailbox and antispam share the same mysqld_safe binary; they differ only
-// in their --defaults-file (resolved from localconfig) and in their runtime
-// state (pidfile, log). Declaring paths here keeps them overridable from
-// tests without plumbing.
-var (
-	mysqldSafeBin   = commonPath + "/bin/mysqld_safe"
-	mysqldSafeLedir = commonPath + "/sbin"
-	mysqldMallocLib = commonPath + "/lib/libjemalloc.so"
-
-	appserverDBPidFile = pidDir + "/mysql.pid"
-	antispamDBPidFile  = pidDir + "/amavisd-mysql.pid"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // startAppserverDB spawns mysqld_safe for the mailbox mariadb. Invoked by
@@ -35,24 +23,24 @@ var (
 // Replaces legacy zmstorectl's call to `/opt/zextras/bin/mysql.server start`
 // with a direct exec so the daemon has no runtime dependency on the legacy
 // shell wrapper.
-func startAppserverDB(ctx context.Context) error {
-	lc, err := loadConfig()
+func (c *Controller) startAppserverDB(ctx context.Context) error {
+	lc, err := c.loadConfig()
 	if err != nil {
 		return fmt.Errorf("load localconfig: %w", err)
 	}
 
-	return spawnMysqldSafe(ctx, "appserver-db",
-		lc["mysql_mycnf"], lc["mysql_errlogfile"], appserverDBPidFile)
+	return c.spawnMysqldSafe(ctx, "appserver-db",
+		lc["mysql_mycnf"], lc["mysql_errlogfile"], c.p.appserverDBPidFile)
 }
 
 // stopAppserverDB flushes InnoDB dirty pages and then terminates the mailbox
 // mariadb via its pidfile with SIGTERM→SIGKILL escalation. mysqld_safe
 // (the supervising shell wrapper) exits on its own when its child mariadbd
 // is gone, so no separate signal is needed.
-func stopAppserverDB(ctx context.Context) error {
-	flushAppserverDBDirtyPages(ctx)
+func (c *Controller) stopAppserverDB(ctx context.Context) error {
+	c.flushAppserverDBDirtyPages(ctx)
 
-	return stopMysqldByPidFile(ctx, "appserver-db", appserverDBPidFile)
+	return c.stopMysqldByPidFile(ctx, "appserver-db", c.p.appserverDBPidFile)
 }
 
 // startAntispamDB spawns mysqld_safe for the amavisd mariadb. Uses
@@ -60,8 +48,8 @@ func stopAppserverDB(ctx context.Context) error {
 // defaults file. Guarded by antispamDBEnabled at the caller; this function
 // does the minimal correctness check (non-empty mycnf) and returns a no-op
 // result when the install is not configured for a local antispam DB.
-func startAntispamDB(ctx context.Context) error {
-	lc, err := loadConfig()
+func (c *Controller) startAntispamDB(ctx context.Context) error {
+	lc, err := c.loadConfig()
 	if err != nil {
 		return fmt.Errorf("load localconfig: %w", err)
 	}
@@ -73,22 +61,22 @@ func startAntispamDB(ctx context.Context) error {
 		return nil
 	}
 
-	return spawnMysqldSafe(ctx, "antispam-db",
-		mycnf, lc["antispam_mysql_errlogfile"], antispamDBPidFile)
+	return c.spawnMysqldSafe(ctx, "antispam-db",
+		mycnf, lc["antispam_mysql_errlogfile"], c.p.antispamDBPidFile)
 }
 
 // stopAntispamDB terminates the amavisd mariadb. No InnoDB flush — antispam
 // DB content is transient scoring state, not user mail.
-func stopAntispamDB(ctx context.Context) error {
-	return stopMysqldByPidFile(ctx, "antispam-db", antispamDBPidFile)
+func (c *Controller) stopAntispamDB(ctx context.Context) error {
+	return c.stopMysqldByPidFile(ctx, "antispam-db", c.p.antispamDBPidFile)
 }
 
 // antispamDBEnabled gates the antispam lifecycle hooks. Mirrors the guard at
 // the top of legacy antispam-mysql.server: run the DB locally only when
 // antispam_mysql_enabled is truthy AND antispam_mysql_host resolves to this
 // host. Elsewhere the DB is managed by another node and our hook is a no-op.
-func antispamDBEnabled(ctx context.Context) bool {
-	lc, err := loadConfig()
+func (c *Controller) antispamDBEnabled(ctx context.Context) bool {
+	lc, err := c.loadConfig()
 	if err != nil {
 		return false
 	}
@@ -106,7 +94,7 @@ func antispamDBEnabled(ctx context.Context) bool {
 		return true
 	}
 
-	out, err := exec.CommandContext(ctx, binPath+"/zmhostname").Output()
+	out, err := sys.Output(ctx, c.env.Exec, c.p.bin+"/zmhostname")
 	if err != nil {
 		return false
 	}
@@ -123,12 +111,12 @@ func antispamDBEnabled(ctx context.Context) bool {
 //
 // Returns nil (skip) when the pidfile already points at a live process —
 // idempotent start behavior matching mysql.server's check_running branch.
-func spawnMysqldSafe(ctx context.Context, name, defaultsFile, errlogFile, pidfile string) error {
+func (c *Controller) spawnMysqldSafe(ctx context.Context, name, defaultsFile, errlogFile, pidfile string) error {
 	if defaultsFile == "" {
 		return fmt.Errorf("%s: defaults file path not set in localconfig", name)
 	}
 
-	if running, ok := isRunningByPidFile(pidfile); ok && running {
+	if running, ok := c.isRunningByPidFile(pidfile); ok && running {
 		logger.InfoContext(ctx, "DB already running", "name", name, "pidfile", pidfile)
 
 		return nil
@@ -144,26 +132,27 @@ func spawnMysqldSafe(ctx context.Context, name, defaultsFile, errlogFile, pidfil
 	}
 
 	args = append(args,
-		"--malloc-lib="+mysqldMallocLib,
-		"--ledir="+mysqldSafeLedir,
+		"--malloc-lib="+c.p.mysqldMallocLib,
+		"--ledir="+c.p.mysqldSafeLedir,
 	)
 
-	logFd, err := openLogFile(logPath + "/mysqld_safe_" + name + ".out")
+	logFd, err := c.openLogFile(c.p.log + "/mysqld_safe_" + name + ".out")
 	if err != nil {
 		return fmt.Errorf("%s: open log file: %w", name, err)
 	}
 
 	// mysqld_safe must outlive the CLI invocation — see the same pattern in
-	// startDetached (cli_process.go). A CommandContext would tie the
+	// startDetached (cli_process.go). Starting it with ctx would tie the
 	// daemon's lifetime to this function's ctx, which is the exact opposite
 	// of what we want.
-	//nolint:noctx,gosec // detached daemon must outlive CLI ctx; paths are registry constants
-	cmd := exec.Command(mysqldSafeBin, args...)
-	cmd.Stdout = logFd
-	cmd.Stderr = logFd
-	cmd.SysProcAttr = detachedSysProcAttr()
-
-	if startErr := cmd.Start(); startErr != nil {
+	proc, startErr := c.env.Exec.Start(context.Background(), &sys.Cmd{
+		Path:   c.p.mysqldSafeBin,
+		Args:   args,
+		Stdout: logFd,
+		Stderr: logFd,
+		Setsid: true,
+	})
+	if startErr != nil {
 		_ = logFd.Close()
 
 		return fmt.Errorf("%s: spawn mysqld_safe: %w", name, startErr)
@@ -171,27 +160,27 @@ func spawnMysqldSafe(ctx context.Context, name, defaultsFile, errlogFile, pidfil
 
 	_ = logFd.Close()
 
-	if releaseErr := cmd.Process.Release(); releaseErr != nil {
+	if releaseErr := proc.Release(); releaseErr != nil {
 		logger.WarnContext(ctx, "Failed to release mysqld_safe child handle",
-			"name", name, "pid", cmd.Process.Pid, "error", releaseErr)
+			"name", name, "pid", proc.Pid(), "error", releaseErr)
 	}
 
 	logger.InfoContext(ctx, "Spawned mysqld_safe",
-		"name", name, "defaults", defaultsFile, "log", logPath+"/mysqld_safe_"+name+".out")
+		"name", name, "defaults", defaultsFile, "log", c.p.log+"/mysqld_safe_"+name+".out")
 
 	return nil
 }
 
 // stopMysqldByPidFile reads the PID recorded by mariadbd, sends SIGTERM with
-// escalation to SIGKILL on timeout (killProcessTimeout), and removes the
+// escalation to SIGKILL on timeout (the kill timeout), and removes the
 // pidfile. Signaling the PID directly rather than the process group is
 // intentional: mysqld_safe exits on its own once its supervised child is
 // gone, so a group kill would only add risk of cross-signal collisions when
 // appserver and antispam DBs coexist.
-func stopMysqldByPidFile(ctx context.Context, name, pidfile string) error {
-	data, err := os.ReadFile(pidfile) //nolint:gosec // path is an internal registry constant
+func (c *Controller) stopMysqldByPidFile(ctx context.Context, name, pidfile string) error {
+	data, err := c.env.FS.ReadFile(pidfile)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, fs.ErrNotExist) {
 			logger.InfoContext(ctx, "DB already stopped (no pidfile)",
 				"name", name, "pidfile", pidfile)
 
@@ -205,15 +194,15 @@ func stopMysqldByPidFile(ctx context.Context, name, pidfile string) error {
 
 	pid, err := strconv.Atoi(strings.TrimSpace(pidStr))
 	if err != nil || pid <= 0 {
-		_ = os.Remove(pidfile)
+		_ = c.env.FS.Remove(pidfile)
 
 		return fmt.Errorf("%s: invalid pid in %s: %q", name, pidfile, pidStr)
 	}
 
-	signalPID(pid, syscall.SIGTERM)
-	waitAndEscalate(ctx, []int{pid}, killProcessTimeout)
+	c.signalPID(pid, syscall.SIGTERM)
+	c.waitAndEscalate(ctx, []int{pid}, c.killTimeout)
 
-	_ = os.Remove(pidfile)
+	_ = c.env.FS.Remove(pidfile)
 
 	logger.InfoContext(ctx, "DB stopped", "name", name, "pid", pid)
 
@@ -224,8 +213,8 @@ func stopMysqldByPidFile(ctx context.Context, name, pidfile string) error {
 // by setting innodb_max_dirty_pages_pct to 0. Best effort: skipped when the
 // password is missing or mysql is already unreachable. Matches the intent
 // of legacy zmstorectl.flushDirtyPages without shelling out to its script.
-func flushAppserverDBDirtyPages(ctx context.Context) {
-	lc, err := loadConfig()
+func (c *Controller) flushAppserverDBDirtyPages(ctx context.Context) {
+	lc, err := c.loadConfig()
 	if err != nil {
 		return
 	}
@@ -236,11 +225,14 @@ func flushAppserverDBDirtyPages(ctx context.Context) {
 	}
 
 	//nolint:gosec // password is from localconfig, mysql binary path is fixed
-	cmd := exec.CommandContext(ctx, binPath+"/mysql",
-		"-u", "zextras", "--password="+password,
-		"-e", "set global innodb_max_dirty_pages_pct=0;")
-
-	if err := cmd.Run(); err != nil {
+	_, err = c.env.Exec.Run(ctx, &sys.Cmd{
+		Path: c.p.bin + "/mysql",
+		Args: []string{
+			"-u", "zextras", "--password=" + password,
+			"-e", "set global innodb_max_dirty_pages_pct=0;",
+		},
+	})
+	if err != nil {
 		logger.WarnContext(ctx, "Could not signal InnoDB to flush dirty pages; proceeding to stop",
 			"error", err)
 	}
@@ -250,19 +242,19 @@ func flushAppserverDBDirtyPages(ctx context.Context) {
 // mariadb when configured locally. amavisd itself is managed by the amavis
 // service's own launcher (they share the same ProcessName), so this hook is
 // strictly about the DB side of antispam.
-func antispamCustomStart(ctx context.Context, _ *ServiceDef) error {
-	if !antispamDBEnabled(ctx) {
+func (c *Controller) antispamCustomStart(ctx context.Context, _ *ServiceDef) error {
+	if !c.antispamDBEnabled(ctx) {
 		return nil
 	}
 
-	return startAntispamDB(ctx)
+	return c.startAntispamDB(ctx)
 }
 
 // antispamCustomStop is the symmetric stop-side of antispamCustomStart.
-func antispamCustomStop(ctx context.Context, _ *ServiceDef) error {
-	if !antispamDBEnabled(ctx) {
+func (c *Controller) antispamCustomStop(ctx context.Context, _ *ServiceDef) error {
+	if !c.antispamDBEnabled(ctx) {
 		return nil
 	}
 
-	return stopAntispamDB(ctx)
+	return c.stopAntispamDB(ctx)
 }

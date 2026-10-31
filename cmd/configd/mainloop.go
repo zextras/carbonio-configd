@@ -16,13 +16,19 @@ import (
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/configmgr"
 	"github.com/zextras/carbonio-configd/internal/ldap"
+	"github.com/zextras/carbonio-configd/internal/ldapwatch"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/network"
+	"github.com/zextras/carbonio-configd/internal/plan"
 	"github.com/zextras/carbonio-configd/internal/sdnotify"
 	"github.com/zextras/carbonio-configd/internal/services"
 	"github.com/zextras/carbonio-configd/internal/state"
+	"github.com/zextras/carbonio-configd/internal/sys"
 	"github.com/zextras/carbonio-configd/internal/watchdog"
 )
+
+// componentAntivirus is the watchdog's default monitored service.
+const componentAntivirus = "antivirus"
 
 // MainLoopActionTrigger implements the network.ActionTrigger interface.
 type MainLoopActionTrigger struct {
@@ -78,13 +84,19 @@ func runForcedMode(
 	}
 
 	buildServiceDependencies(ctx, serviceManager, appState)
-	configManager.CompileActions(ctx)
 
-	if err := configManager.DoConfigRewrites(ctx); err != nil {
+	pl, err := configManager.Plan(ctx)
+	if err != nil {
+		logger.ErrorContext(ctx, "Failed to plan forced config rewrites", "error", err)
+
+		return
+	}
+
+	if err := configManager.Execute(ctx, pl); err != nil {
 		logger.ErrorContext(ctx, "Error during forced config rewrites", "error", err)
 	}
 
-	// No restarts on forced rewrites in Jython, so skipping DoRestarts here.
+	// No restarts on forced rewrites in Jython, so the plan's restarts are not applied here.
 	logger.InfoContext(ctx, "Completed forced run", "program", mainCfg.Progname)
 }
 
@@ -136,6 +148,7 @@ func runLoadAndParse(
 	if err = configManager.ParseMtaConfig(ctx, mainCfg.ConfigFile); err != nil {
 		if ctx.Err() == nil {
 			logger.ErrorContext(ctx, "Failed to parse MTA config (sleeping 60s)", "error", err)
+			configManager.Metrics().LoadFailed("mta_config")
 		}
 
 		return loadDur, time.Since(t), err
@@ -169,12 +182,13 @@ func maybeStartListener(
 		return server
 	}
 
-	listenerPortStr, _ := appState.GetLocalConfig().Data.Get("zmconfigd_listen_port")
+	snap := appState.Snapshot()
+	listenerPortStr, _ := snap.Local("zmconfigd_listen_port")
 	listenerPort, _ := strconv.Atoi(listenerPortStr)
 	listenerAddr := "127.0.0.1"
 	ipv6 := false
 
-	ipMode, _ := appState.GetServerConfig().Data.Get("zimbraIPMode")
+	ipMode, _ := snap.Server("zimbraIPMode")
 	if ipMode == "ipv6" {
 		listenerAddr = "::1"
 		ipv6 = true
@@ -209,24 +223,24 @@ func notifyReady(ctx context.Context, notifier *sdnotify.Notifier, loopCount int
 
 // phaseTimings carries the elapsed time of each runConfigPhases step for later logging.
 type phaseTimings struct {
-	buildDeps      time.Duration
-	compareKeys    time.Duration
-	compileActions time.Duration
-	rewrites       time.Duration
+	buildDeps time.Duration
+	plan      time.Duration
+	rewrites  time.Duration
 }
 
-// runConfigPhases executes the per-iteration dependency, compare, compile, and rewrite phases.
-// Returns phase timings and skipIter=true when the caller should continue the outer loop
-// (after a CompareKeys failure and the 60s back-off sleep).
+// runConfigPhases executes the per-iteration dependency, plan and execute phases.
+// Returns phase timings, the plan of the cycle and skipIter=true when the caller should
+// continue the outer loop (after a planning failure and the 60s back-off sleep).
 func runConfigPhases(
 	ctx context.Context,
+	clock sys.Clock,
 	mainCfg *config.Config,
 	appState *state.State,
 	configManager *configmgr.ConfigManager,
 	serviceManager services.Manager,
 	wd *watchdog.Watchdog,
 	reloadChan chan struct{},
-) (timings phaseTimings, skipIter bool) {
+) (timings phaseTimings, pl *plan.Plan, skipIter bool) {
 	phaseStart := time.Now()
 
 	buildServiceDependencies(ctx, serviceManager, appState)
@@ -239,23 +253,24 @@ func runConfigPhases(
 
 	phaseStart = time.Now()
 
-	if err := configManager.CompareKeys(ctx); err != nil {
+	pl, err := configManager.Plan(ctx)
+	if err != nil {
 		logger.ErrorContext(ctx, "Configuration inconsistency detected (sleeping 60s)", "error", err)
-		SleepWithContext(ctx, 60*time.Second, reloadChan)
+		SleepWithContext(ctx, clock, 60*time.Second, reloadChan)
 
-		return timings, true
+		return timings, nil, true
 	}
 
-	timings.compareKeys = time.Since(phaseStart)
+	timings.plan = time.Since(phaseStart)
 
-	logger.DebugContext(ctx, "Timing: CompareKeys completed",
-		"duration_seconds", timings.compareKeys.Seconds(),
-		"operation", "compare_keys")
+	logger.DebugContext(ctx, "Timing: Plan completed",
+		"duration_seconds", timings.plan.Seconds(),
+		"operation", "plan")
 
 	if appState.IsFirstRun() {
 		phaseStart = time.Now()
 
-		updateWatchdogServices(ctx, wd, appState, mainCfg)
+		updateWatchdogServices(ctx, wd, pl.Tracked, mainCfg)
 
 		logger.DebugContext(ctx, "Timing: updateWatchdogServices completed",
 			"duration_seconds", time.Since(phaseStart).Seconds(),
@@ -264,31 +279,22 @@ func runConfigPhases(
 
 	phaseStart = time.Now()
 
-	configManager.CompileActions(ctx)
-
-	timings.compileActions = time.Since(phaseStart)
-
-	logger.DebugContext(ctx, "Timing: CompileActions completed",
-		"duration_seconds", timings.compileActions.Seconds(),
-		"operation", "compile_actions")
-
-	phaseStart = time.Now()
-
-	if err := configManager.DoConfigRewrites(ctx); err != nil {
+	if err := configManager.Execute(ctx, pl); err != nil {
 		logger.ErrorContext(ctx, "Error during config rewrites", "error", err)
 	}
 
 	timings.rewrites = time.Since(phaseStart)
 
-	logger.DebugContext(ctx, "Timing: DoConfigRewrites completed",
+	logger.DebugContext(ctx, "Timing: Execute completed",
 		"duration_seconds", timings.rewrites.Seconds(),
-		"operation", "do_config_rewrites")
+		"operation", "execute_plan")
 
-	return timings, false
+	return timings, pl, false
 }
 
 // daemonLoopDeps bundles dependencies of the daemon main loop.
 type daemonLoopDeps struct {
+	env            sys.System
 	cfg            *config.Config
 	appState       *state.State
 	configManager  *configmgr.ConfigManager
@@ -298,6 +304,9 @@ type daemonLoopDeps struct {
 	notifier       *sdnotify.Notifier
 	trigger        *MainLoopActionTrigger
 	reloadChan     chan struct{}
+	// ldapSource replaces the LDAP client as the source the opt-in LDAP change
+	// watcher polls; production leaves it nil.
+	ldapSource ldapwatch.Source
 }
 
 // loopIterState carries mutable per-iteration counters between runs.
@@ -306,6 +315,7 @@ type loopIterState struct {
 	loopCount      int
 	reloadSignaled bool
 	server         *network.ThreadedStreamServer
+	ldapWatch      *ldapWatch // nil unless zmconfigd_ldap_change_trigger started it
 }
 
 // iterOutcome signals how runLoopIteration wants the caller to proceed.
@@ -321,6 +331,8 @@ func runDaemonLoop(ctx context.Context, deps *daemonLoopDeps) {
 	st := &loopIterState{}
 
 	defer func() {
+		st.ldapWatch.stop()
+
 		if st.server != nil {
 			st.server.Shutdown(ctx)
 		}
@@ -350,7 +362,7 @@ func runLoopIterationSafe(ctx context.Context, deps *daemonLoopDeps, st *loopIte
 
 		logger.ErrorContext(ctx, "Main loop iteration panicked, backing off",
 			"interval_seconds", deps.cfg.Interval)
-		SleepWithContext(ctx, time.Duration(deps.cfg.Interval)*time.Second, deps.reloadChan)
+		SleepWithContext(ctx, deps.env.Clock, time.Duration(deps.cfg.Interval)*time.Second, deps.reloadChan)
 	}()
 
 	defer recoverGoroutine(ctx, "main-loop")
@@ -379,12 +391,14 @@ func runLoopIteration(ctx context.Context, deps *daemonLoopDeps, st *loopIterSta
 
 	loadDur, parseDur, err := runLoadAndParse(ctx, deps.configManager, deps.cfg)
 	if err != nil {
-		SleepWithContext(ctx, 60*time.Second, deps.reloadChan)
+		exportMetrics(ctx, deps)
+		SleepWithContext(ctx, deps.env.Clock, 60*time.Second, deps.reloadChan)
 
 		return iterContinue
 	}
 
 	st.server = maybeStartListener(ctx, deps.appState, deps.args, deps.trigger, st.server)
+	st.ldapWatch = syncLDAPWatch(ctx, deps, st.ldapWatch)
 
 	// Signal readiness as soon as the IPC listener is serving on 7171. The first
 	// config rewrite is steady-state reconciliation (re-run every interval), not a
@@ -394,11 +408,13 @@ func runLoopIteration(ctx context.Context, deps *daemonLoopDeps, st *loopIterSta
 		notifyReady(ctx, deps.notifier, st.loopCount)
 	}
 
-	timings, skipIter := runConfigPhases(
-		ctx, deps.cfg, deps.appState, deps.configManager,
+	timings, pl, skipIter := runConfigPhases(
+		ctx, deps.env.Clock, deps.cfg, deps.appState, deps.configManager,
 		deps.serviceManager, deps.wd, deps.reloadChan,
 	)
 	if skipIter {
+		exportMetrics(ctx, deps)
+
 		return iterContinue
 	}
 
@@ -409,7 +425,7 @@ func runLoopIteration(ctx context.Context, deps *daemonLoopDeps, st *loopIterSta
 		return iterExit
 	}
 
-	restartsDur := runRestartsPhase(ctx, deps.cfg, deps.configManager)
+	restartsDur := runRestartsPhase(ctx, deps.configManager, pl)
 
 	return finalizeIteration(ctx, deps, st, &loopPhaseDurations{
 		t1:       t1,
@@ -417,6 +433,7 @@ func runLoopIteration(ctx context.Context, deps *daemonLoopDeps, st *loopIterSta
 		parse:    parseDur,
 		config:   timings,
 		restarts: restartsDur,
+		plan:     pl,
 	})
 }
 
@@ -445,27 +462,24 @@ func handleIdleSleep(ctx context.Context, deps *daemonLoopDeps, st *loopIterStat
 	logger.DebugContext(ctx, "Skipping idle config poll", "reason", "no_events_since_last_check")
 	logger.DebugContext(ctx, "Sleeping", "interval_seconds", deps.cfg.Interval)
 
-	if SleepWithContext(ctx, time.Duration(deps.cfg.Interval)*time.Second, deps.reloadChan) {
+	if SleepWithContext(ctx, deps.env.Clock, time.Duration(deps.cfg.Interval)*time.Second, deps.reloadChan) {
 		st.reloadSignaled = true
 	}
 }
 
-// runRestartsPhase runs DoRestarts when restarts are enabled and returns the
-// elapsed time (zero when disabled).
-func runRestartsPhase(ctx context.Context, cfg *config.Config, cm *configmgr.ConfigManager) time.Duration {
-	if !cfg.RestartConfig {
-		return 0
-	}
-
+// runRestartsPhase hands the plan's restarts to the restart policy and returns
+// the elapsed time. The policy runs every cycle: with restarts disabled it only
+// publishes the dependency graph and keeps the restarts pending.
+func runRestartsPhase(ctx context.Context, cm *configmgr.ConfigManager, pl *plan.Plan) time.Duration {
 	phaseStart := time.Now()
 
-	cm.DoRestarts(ctx)
+	cm.ApplyRestarts(ctx, pl)
 
 	dur := time.Since(phaseStart)
 
-	logger.DebugContext(ctx, "Timing: DoRestarts completed",
+	logger.DebugContext(ctx, "Timing: Restarts completed",
 		"duration_seconds", dur.Seconds(),
-		"operation", "do_restarts")
+		"operation", "restarts")
 
 	return dur
 }
@@ -487,6 +501,7 @@ type loopPhaseDurations struct {
 	parse    time.Duration
 	config   phaseTimings
 	restarts time.Duration
+	plan     *plan.Plan
 }
 
 // finalizeIteration commits post-rewrite bookkeeping: first-run flag,
@@ -513,11 +528,12 @@ func finalizeIteration(
 		"load_configs_seconds", dur.load.Seconds(),
 		"parse_mta_seconds", dur.parse.Seconds(),
 		"build_deps_seconds", dur.config.buildDeps.Seconds(),
-		"compare_keys_seconds", dur.config.compareKeys.Seconds(),
-		"compile_actions_seconds", dur.config.compileActions.Seconds(),
+		"plan_seconds", dur.config.plan.Seconds(),
 		"rewrites_seconds", dur.config.rewrites.Seconds(),
 		"restarts_seconds", dur.restarts.Seconds())
 	logger.InfoContext(ctx, "Loop completed", "total_duration_seconds", lt.Seconds())
+
+	observeCycle(ctx, deps, st.loopCount, dur, lt)
 
 	if deps.args.Once {
 		logger.InfoContext(ctx, "Single-run mode: Exiting after one loop completion",
@@ -528,7 +544,7 @@ func finalizeIteration(
 
 	logger.DebugContext(ctx, "Sleeping for interval", "interval_seconds", deps.cfg.Interval)
 
-	if SleepWithContext(ctx, time.Duration(deps.cfg.Interval)*time.Second, deps.reloadChan) {
+	if SleepWithContext(ctx, deps.env.Clock, time.Duration(deps.cfg.Interval)*time.Second, deps.reloadChan) {
 		st.reloadSignaled = true
 	}
 
@@ -539,6 +555,7 @@ func finalizeIteration(
 // It returns an exit code: 0 for success, 1 for error.
 func RunMainLoop(
 	ctx context.Context,
+	env sys.System,
 	mainCfg *config.Config,
 	appState *state.State,
 	ldapClient *ldap.Ldap,
@@ -550,10 +567,10 @@ func RunMainLoop(
 	defer cancel()
 
 	// Bootstrap core dependencies
-	configManager, serviceManager, wd := bootstrapDependencies(ctx, mainCfg, appState, ldapClient, args)
+	configManager, serviceManager, wd := bootstrapDependencies(ctx, env, mainCfg, appState, ldapClient, args)
 
 	// Bootstrap systemd integration
-	reloadChan := bootstrapSystemd(ctx, appState, cancel, notifier)
+	reloadChan := bootstrapSystemd(ctx, env, appState, cancel, notifier)
 
 	// Start watchdog in daemon mode (not for forced configs)
 	if !args.HasForcedConfigs() {
@@ -573,6 +590,7 @@ func RunMainLoop(
 	}
 
 	runDaemonLoop(ctx, &daemonLoopDeps{
+		env:            env,
 		cfg:            mainCfg,
 		appState:       appState,
 		configManager:  configManager,
@@ -611,7 +629,9 @@ func buildServiceDependencies(ctx context.Context, serviceMgr services.Manager, 
 
 // updateWatchdogServices updates the watchdog with currently tracked services.
 // This is called on first run to notify watchdog about services that should be monitored.
-func updateWatchdogServices(ctx context.Context, wd *watchdog.Watchdog, appState *state.State, mainCfg *config.Config) {
+func updateWatchdogServices(
+	ctx context.Context, wd *watchdog.Watchdog, tracked map[string]string, mainCfg *config.Config,
+) {
 	ctx = logger.ContextWithComponent(ctx, "mainloop")
 	// Get watchdog service list from config (defaults to ["antivirus"])
 	watchdogServices := mainCfg.WdList
@@ -623,7 +643,7 @@ func updateWatchdogServices(ctx context.Context, wd *watchdog.Watchdog, appState
 	wd.UpdateServiceList(ctx, watchdogServices)
 
 	// For services that are currently tracked and in the watchdog list, mark them as available
-	for service := range appState.CurrentActions.Services {
+	for service := range tracked {
 		// Check if service is in watchdog list
 		isInWatchdogList := slices.Contains(watchdogServices, service)
 

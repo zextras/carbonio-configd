@@ -69,6 +69,8 @@ func TestParseURLs(t *testing.T) {
 }
 
 func TestDialFirstReachable_NoURLs(t *testing.T) {
+	t.Parallel()
+
 	conn, picked, err := DialFirstReachable(context.Background(), nil)
 	if err == nil {
 		t.Fatal("expected error for empty URL list, got nil")
@@ -93,16 +95,15 @@ func TestDialFirstReachable_NoURLs(t *testing.T) {
 }
 
 func TestDialFirstReachable_AllFail(t *testing.T) {
-	prev := defaultDial
-	t.Cleanup(func() { defaultDial = prev })
+	t.Parallel()
 
-	defaultDial = func(url string, _ ...ldap.DialOpt) (*ldap.Conn, error) {
+	dial := func(url string, _ ...ldap.DialOpt) (*ldap.Conn, error) {
 		return nil, errors.New("dial " + url + " refused")
 	}
 
 	urls := []string{"ldap://a:389", "ldap://b:389", "ldap://c:389"}
 
-	conn, picked, err := DialFirstReachable(context.Background(), urls)
+	conn, picked, err := dialFirstReachable(context.Background(), dial, urls)
 	if err == nil {
 		t.Fatal("expected aggregate error, got nil")
 	}
@@ -133,10 +134,9 @@ func TestDialFirstReachable_AllFail(t *testing.T) {
 }
 
 func TestDialFirstReachable_CtxCancelled(t *testing.T) {
-	prev := defaultDial
-	t.Cleanup(func() { defaultDial = prev })
+	t.Parallel()
 
-	defaultDial = func(_ string, _ ...ldap.DialOpt) (*ldap.Conn, error) {
+	dial := func(_ string, _ ...ldap.DialOpt) (*ldap.Conn, error) {
 		t.Fatal("dialer should not be called when ctx is already cancelled")
 		return nil, errors.New("unreachable")
 	}
@@ -144,7 +144,7 @@ func TestDialFirstReachable_CtxCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	conn, picked, err := DialFirstReachable(ctx, []string{"ldap://a:389"})
+	conn, picked, err := dialFirstReachable(ctx, dial, []string{"ldap://a:389"})
 	if err == nil {
 		t.Fatal("expected error from cancelled ctx")
 	}

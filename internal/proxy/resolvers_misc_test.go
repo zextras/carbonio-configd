@@ -12,12 +12,14 @@ import (
 
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/config/configtest"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // TestResolveSaslHostFromIP tests resolveSaslHostFromIP branches
 func TestResolveSaslHostFromIP(t *testing.T) {
 	t.Run("returns off when not configured", func(t *testing.T) {
 		g := &Generator{
+			env:          sys.Real(),
 			GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMap()},
 		}
 		result, err := g.resolveSaslHostFromIP(context.Background())
@@ -31,6 +33,7 @@ func TestResolveSaslHostFromIP(t *testing.T) {
 
 	t.Run("returns configured value", func(t *testing.T) {
 		g := &Generator{
+			env: sys.Real(),
 			GlobalConfig: &config.GlobalConfig{Data: configtest.NewConfigMapFrom(map[string]string{
 				"zimbraReverseProxySaslHostFromIP": "on",
 			})},
@@ -49,6 +52,7 @@ func TestResolveSaslHostFromIP(t *testing.T) {
 func TestResolveLookupTargetAvailable(t *testing.T) {
 	t.Run("returns false when attribute not set", func(t *testing.T) {
 		g := &Generator{
+			env:          sys.Real(),
 			GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMap()},
 		}
 		result, err := g.resolveLookupTargetAvailable(context.Background())
@@ -62,6 +66,7 @@ func TestResolveLookupTargetAvailable(t *testing.T) {
 
 	t.Run("returns true when attribute is set", func(t *testing.T) {
 		g := &Generator{
+			env: sys.Real(),
 			GlobalConfig: &config.GlobalConfig{Data: configtest.NewConfigMapFrom(map[string]string{
 				"zimbraReverseProxyLookupTarget": "TRUE",
 			})},
@@ -80,6 +85,7 @@ func TestResolveLookupTargetAvailable(t *testing.T) {
 func TestResolveLookupAvailable(t *testing.T) {
 	t.Run("returns true when lookup targets configured", func(t *testing.T) {
 		g := &Generator{
+			env: sys.Real(),
 			GlobalConfig: &config.GlobalConfig{Data: configtest.NewConfigMapFrom(map[string]string{
 				"zimbraReverseProxyAvailableLookupTargets": "host1 host2",
 			})},
@@ -95,6 +101,7 @@ func TestResolveLookupAvailable(t *testing.T) {
 
 	t.Run("returns false when attribute not set", func(t *testing.T) {
 		g := &Generator{
+			env:          sys.Real(),
 			GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMap()},
 		}
 		result, err := g.resolveLookupAvailable(context.Background())
@@ -154,6 +161,7 @@ func TestMakeTimeoutResolver(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			g := &Generator{
+				env:         sys.Real(),
 				LocalConfig: &config.LocalConfig{Data: tt.localData},
 			}
 			resolver := g.makeTimeoutResolver(tt.configKey, tt.defaultBase, tt.offset)

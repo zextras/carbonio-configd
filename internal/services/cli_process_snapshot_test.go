@@ -14,18 +14,17 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
-// fakeProcFS points procFSRoot at a temp dir and returns a writer that adds a
+// fakeProcFS points the Controller's process table at a temp dir and returns a writer that adds a
 // /proc/<pid> entry (state "S", or "Z" for zombies).
-func fakeProcFS(t *testing.T) (root string, add func(pid int, cmdline, comm string, zombie bool)) {
+func fakeProcFS(t *testing.T, ctl *Controller) (root string, add func(pid int, cmdline, comm string, zombie bool)) {
 	t.Helper()
 
 	root = t.TempDir()
-	old := procFSRoot
-	procFSRoot = root + "/"
-
-	t.Cleanup(func() { procFSRoot = old })
+	ctl.useProcRoot(root + "/")
 
 	add = func(pid int, cmdline, comm string, zombie bool) {
 		t.Helper()
@@ -47,21 +46,29 @@ func fakeProcFS(t *testing.T) (root string, add func(pid int, cmdline, comm stri
 	return root, add
 }
 
-func TestScanProcessesByCmdline_UsesProcFSRoot(t *testing.T) {
-	_, add := fakeProcFS(t)
+func TestScanProcesses_UsesProcFSRoot(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	_, add := fakeProcFS(t, ctl)
 	add(4001, "/opt/zextras/common/sbin/opendkim\x00-x\x00/etc/opendkim.conf\x00", "opendkim", false)
 	add(4002, "/usr/sbin/other\x00", "other", false)
 
-	pids, err := scanProcessesByCmdline("opendkim")
+	pids, err := ctl.scanProcesses("opendkim")
 	require.NoError(t, err)
 	assert.Equal(t, []int{4001}, pids)
 }
 
-func TestScanProcessesByCmdline_MissingRootErrors(t *testing.T) {
-	root, _ := fakeProcFS(t)
+func TestScanProcesses_MissingRootErrors(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	root, _ := fakeProcFS(t, ctl)
 	require.NoError(t, os.Remove(root))
 
-	_, err := scanProcessesByCmdline("anything")
+	_, err := ctl.scanProcesses("anything")
 	require.Error(t, err)
 }
 
@@ -69,7 +76,11 @@ func TestScanProcessesByCmdline_MissingRootErrors(t *testing.T) {
 // same verdicts as a fresh scan for every needle, including the zombie skip,
 // the cmdline-authoritative rule and the exact-comm fallback.
 func TestProcessSnapshot_MatchesLikeFreshScan(t *testing.T) {
-	_, add := fakeProcFS(t)
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	_, add := fakeProcFS(t, ctl)
 	add(5001, "/usr/bin/memcached\x00-p\x0011211\x00", "memcached", false)
 	add(5002, "", "nginx", false)                          // argv zeroed: exact comm fallback
 	add(5003, "nginx: worker process\x00", "nginx", false) // cmdline authoritative
@@ -77,11 +88,11 @@ func TestProcessSnapshot_MatchesLikeFreshScan(t *testing.T) {
 	add(5005, "/bin/bash\x00/usr/bin/service-discover-wrapper.sh\x00", "service-discove", false)
 
 	needles := []string{"memcached", "nginx", "nginx-worker", "service-discovered", "-p 11211", "absent"}
-	snap := &procSnapshot{}
+	snap := &procSnapshot{proc: ctl.env.Proc}
 
 	for _, needle := range needles {
 		t.Run(needle, func(t *testing.T) {
-			want, err := scanProcessesByCmdline(needle)
+			want, err := ctl.scanProcesses(needle)
 			require.NoError(t, err)
 
 			got, err := snap.scan(needle)
@@ -98,60 +109,74 @@ func TestProcessSnapshot_MatchesLikeFreshScan(t *testing.T) {
 }
 
 func TestIsProcessRunning_SnapshotReusedAcrossProbes(t *testing.T) {
-	root, add := fakeProcFS(t)
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	root, add := fakeProcFS(t, ctl)
 	add(6001, "/usr/bin/memcached\x00", "memcached", false)
 
-	ctx := WithProcessSnapshot(context.Background())
-	assert.True(t, isProcessRunning(ctx, "memcached"))
+	ctx := ctl.WithProcessSnapshot(context.Background())
+	assert.True(t, ctl.pidFromProcessName(ctx, "memcached") > 0)
 
 	// The snapshot is frozen: a process appearing or vanishing afterwards is
 	// only seen by a fresh scan.
 	add(6002, "/usr/sbin/opendkim\x00", "opendkim", false)
 	require.NoError(t, os.RemoveAll(filepath.Join(root, "6001")))
 
-	assert.True(t, isProcessRunning(ctx, "memcached"), "snapshot must not be re-read")
-	assert.False(t, isProcessRunning(ctx, "opendkim"), "snapshot must not be re-read")
+	assert.True(t, ctl.pidFromProcessName(ctx, "memcached") > 0, "snapshot must not be re-read")
+	assert.Zero(t, ctl.pidFromProcessName(ctx, "opendkim"), "snapshot must not be re-read")
 
-	assert.False(t, isProcessRunning(context.Background(), "memcached"), "plain ctx takes a fresh listing")
-	assert.True(t, isProcessRunning(context.Background(), "opendkim"), "plain ctx takes a fresh listing")
+	assert.Zero(t, ctl.pidFromProcessName(context.Background(), "memcached"), "plain ctx takes a fresh listing")
+	assert.True(t, ctl.pidFromProcessName(context.Background(), "opendkim") > 0, "plain ctx takes a fresh listing")
 }
 
 func TestWithProcessSnapshot_Idempotent(t *testing.T) {
-	ctx := WithProcessSnapshot(context.Background())
-	assert.Same(t, ctx, WithProcessSnapshot(ctx))
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	ctx := ctl.WithProcessSnapshot(context.Background())
+	assert.Same(t, ctx, ctl.WithProcessSnapshot(ctx))
 }
 
 func TestIsProcessRunning_ExcludesSelfWithSnapshot(t *testing.T) {
-	_, add := fakeProcFS(t)
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	_, add := fakeProcFS(t, ctl)
 	add(os.Getpid(), "configd\x00status\x00", "configd", false)
 
-	ctx := WithProcessSnapshot(context.Background())
-	assert.False(t, isProcessRunning(ctx, "configd"))
-	assert.Equal(t, 0, pidFromProcessName("configd"))
+	ctx := ctl.WithProcessSnapshot(context.Background())
+	assert.Equal(t, 0, ctl.pidFromProcessName(ctx, "configd"))
+	assert.Equal(t, 0, ctl.pidFromProcessName(context.Background(), "configd"))
 }
 
 // TestKillProcess_IgnoresSnapshot pins that signaling always sees live state:
-// scanProcessesByCmdline (used by killProcess) never consults a snapshot.
+// scanProcesses (used by killProcess) never consults a snapshot.
 func TestKillProcess_IgnoresSnapshot(t *testing.T) {
-	root, add := fakeProcFS(t)
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	root, add := fakeProcFS(t, ctl)
 	add(7001, "/usr/bin/target\x00", "target", false)
 
-	ctx := WithProcessSnapshot(context.Background())
-	require.True(t, isProcessRunning(ctx, "target"))
+	ctx := ctl.WithProcessSnapshot(context.Background())
+	require.True(t, ctl.pidFromProcessName(ctx, "target") > 0)
 
 	require.NoError(t, os.RemoveAll(filepath.Join(root, "7001")))
 
-	pids, err := scanProcessesByCmdline("target")
+	pids, err := ctl.scanProcesses("target")
 	require.NoError(t, err)
 	assert.Empty(t, pids)
 }
 
 func BenchmarkServiceProbesAgainstProc(b *testing.B) {
 	root := b.TempDir()
-	old := procFSRoot
-	procFSRoot = root + "/"
-
-	b.Cleanup(func() { procFSRoot = old })
+	ctl := NewController(sys.Real(), WithConfigLoader(emptyConfig))
+	ctl.useProcRoot(root + "/")
 
 	for pid := 1; pid <= 400; pid++ {
 		dir := filepath.Join(root, strconv.Itoa(pid))
@@ -175,16 +200,16 @@ func BenchmarkServiceProbesAgainstProc(b *testing.B) {
 	b.Run("fresh-per-probe", func(b *testing.B) {
 		for b.Loop() {
 			for _, n := range needles {
-				isProcessRunning(context.Background(), n)
+				_ = ctl.pidFromProcessName(context.Background(), n)
 			}
 		}
 	})
 
 	b.Run("shared-snapshot", func(b *testing.B) {
 		for b.Loop() {
-			ctx := WithProcessSnapshot(context.Background())
+			ctx := ctl.WithProcessSnapshot(context.Background())
 			for _, n := range needles {
-				isProcessRunning(ctx, n)
+				_ = ctl.pidFromProcessName(ctx, n)
 			}
 		}
 	})

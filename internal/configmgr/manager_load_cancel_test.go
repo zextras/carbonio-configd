@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/zextras/carbonio-configd/internal/commands"
-	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/snapshot"
 )
 
 // cancelDuringCommand registers name so that executing it cancels the load
@@ -25,35 +25,60 @@ func cancelDuringCommand(cm *ConfigManager, cancel context.CancelFunc, name, out
 		})
 }
 
+// miscKeys returns the set values among keys of the snapshot's misc config.
+func miscKeys(snap *snapshot.Snapshot, keys ...string) map[string]string {
+	out := map[string]string{}
+
+	for _, k := range keys {
+		if v, ok := snap.Misc(k); ok {
+			out[k] = v
+		}
+	}
+
+	return out
+}
+
 // TestLoaders_CancelledMidLoadDoNotPublish: a loader whose context is cancelled
 // mid-load must return an error and leave State untouched. A straggler of a
 // timed-out cycle would otherwise overwrite the state of a later cycle.
 func TestLoaders_CancelledMidLoadDoNotPublish(t *testing.T) {
 	tests := []struct {
 		name   string
-		target func(cm *ConfigManager) *config.ConfigMap
+		seed   func(cm *ConfigManager)
+		target func(cm *ConfigManager) map[string]string
 		setup  func(cm *ConfigManager, cancel context.CancelFunc)
 		load   func(cm *ConfigManager, ctx context.Context) error
 	}{
 		{
 			name:   "global",
-			target: func(cm *ConfigManager) *config.ConfigMap { return cm.State.GlobalConfig.Data },
+			seed:   func(cm *ConfigManager) { setGlobal(cm, map[string]string{"old": "value"}) },
+			target: func(cm *ConfigManager) map[string]string { return cm.State.Snapshot().GlobalMap() },
 			setup: func(cm *ConfigManager, cancel context.CancelFunc) {
-				cancelDuringCommand(cm, cancel, "gacf", "zimbraFoo: new\n")
+				cm.CommandRegistry.GlobalAttrs = func(context.Context) (map[string]string, error) {
+					cancel()
+
+					return map[string]string{"zimbraFoo": "new"}, nil
+				}
 			},
 			load: func(cm *ConfigManager, ctx context.Context) error { return cm.loadGlobalConfigWithRetry(ctx, 1) },
 		},
 		{
 			name:   "server",
-			target: func(cm *ConfigManager) *config.ConfigMap { return cm.State.ServerConfig.Data },
+			seed:   func(cm *ConfigManager) { setServer(cm, map[string]string{"old": "value"}, nil) },
+			target: func(cm *ConfigManager) map[string]string { return cm.State.Snapshot().ServerMap() },
 			setup: func(cm *ConfigManager, cancel context.CancelFunc) {
-				cancelDuringCommand(cm, cancel, "gs", "zimbraFoo: new\nzimbraServiceEnabled: mta\n")
+				cm.CommandRegistry.ServerAttrs = func(context.Context, string) (map[string]string, error) {
+					cancel()
+
+					return map[string]string{"zimbraFoo": "new", "zimbraServiceEnabled": "mta"}, nil
+				}
 			},
 			load: func(cm *ConfigManager, ctx context.Context) error { return cm.loadServerConfigWithRetry(ctx, 1) },
 		},
 		{
 			name:   "misc",
-			target: func(cm *ConfigManager) *config.ConfigMap { return cm.State.MiscConfig.Data },
+			seed:   func(cm *ConfigManager) { setMisc(cm, map[string]string{"old": "value"}) },
+			target: func(cm *ConfigManager) map[string]string { return miscKeys(cm.State.Snapshot(), "old", "garpu") },
 			setup: func(cm *ConfigManager, cancel context.CancelFunc) {
 				cancelDuringCommand(cm, cancel, "garpu", "new-value")
 			},
@@ -64,10 +89,9 @@ func TestLoaders_CancelledMidLoadDoNotPublish(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cm := newTestConfigManager(t)
-			target := tt.target(cm)
-			target.Set("old", "value")
+			tt.seed(cm)
 
-			before := target.Snapshot()
+			before := tt.target(cm)
 
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -79,55 +103,162 @@ func TestLoaders_CancelledMidLoadDoNotPublish(t *testing.T) {
 				t.Fatalf("load error = %v, want context.Canceled", err)
 			}
 
-			if after := target.Snapshot(); !maps.Equal(before, after) {
+			if after := tt.target(cm); !maps.Equal(before, after) {
 				t.Errorf("state published after cancellation: before=%v after=%v", before, after)
 			}
 		})
 	}
 }
 
-// TestParseLocalConfigOutput_CancelledDoesNotPublish: the local config is
-// replaced in one step and only while the context is alive.
+// TestParseLocalConfigOutput_CancelledDoesNotPublish: a cancelled context yields
+// an error and no data, and the published snapshot is left untouched.
 func TestParseLocalConfigOutput_CancelledDoesNotPublish(t *testing.T) {
 	cm := newTestConfigManager(t)
-	cm.State.LocalConfig.Data.Set("old", "value")
+	setLocal(cm, map[string]string{"old": "value"})
 
-	before := cm.State.LocalConfig.Data.Snapshot()
+	before := cm.State.Snapshot().LocalMap()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := cm.parseLocalConfigOutput(ctx, "key1 = value1")
+	data, err := cm.parseLocalConfigOutput(ctx, "key1 = value1")
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("parseLocalConfigOutput error = %v, want context.Canceled", err)
 	}
 
-	if after := cm.State.LocalConfig.Data.Snapshot(); !maps.Equal(before, after) {
+	if data != nil {
+		t.Errorf("data = %v, want nil after cancellation", data)
+	}
+
+	if after := cm.State.Snapshot().LocalMap(); !maps.Equal(before, after) {
 		t.Errorf("local config published after cancellation: before=%v after=%v", before, after)
 	}
 }
 
-// TestParseLocalConfigOutput_ReplacesAndDefaults: a live context publishes the
-// parsed data together with the post-processing defaults, dropping stale keys.
+// TestParseLocalConfigOutput_ReplacesAndDefaults: a live context returns the
+// parsed data together with the post-processing defaults; it only contains
+// what the output holds (stale keys of the published snapshot are not carried).
 func TestParseLocalConfigOutput_ReplacesAndDefaults(t *testing.T) {
 	cm := newTestConfigManager(t)
-	cm.State.LocalConfig.Data.Set("stale", "value")
+	setLocal(cm, map[string]string{"stale": "value"})
 
-	if err := cm.parseLocalConfigOutput(context.Background(), "key1 = value1"); err != nil {
+	data, err := cm.parseLocalConfigOutput(context.Background(), "key1 = value1")
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	data := cm.State.LocalConfig.Data
-
-	if _, ok := data.Get("stale"); ok {
-		t.Error("stale key survived the replace")
+	if _, ok := data["stale"]; ok {
+		t.Error("stale key leaked into parsed data")
 	}
 
-	if got := data.GetOr("key1", ""); got != "value1" {
+	if got := data["key1"]; got != "value1" {
 		t.Errorf("key1 = %q, want value1", got)
 	}
 
-	if got := data.GetOr("zmconfigd_listen_port", ""); got != "7171" {
+	if got := data["zmconfigd_listen_port"]; got != "7171" {
 		t.Errorf("zmconfigd_listen_port = %q, want default 7171", got)
+	}
+}
+
+// loadAllFixture wires the four loaders of a ConfigManager to fixed data; the
+// server loader fails when serverErr is set.
+func loadAllFixture(cm *ConfigManager, serverErr error) {
+	cm.loadResolvedLocalConfig = func() (map[string]string, error) {
+		return map[string]string{"local_key": "new"}, nil
+	}
+	cm.CommandRegistry.GlobalAttrs = func(context.Context) (map[string]string, error) {
+		return map[string]string{"zimbraGlobalKey": "new"}, nil
+	}
+	cm.CommandRegistry.ServerAttrs = func(context.Context, string) (map[string]string, error) {
+		if serverErr != nil {
+			return nil, serverErr
+		}
+
+		return map[string]string{"zimbraServerKey": "new", "zimbraServiceEnabled": "mta"}, nil
+	}
+	cancelNothing := func(name, out string) {
+		cm.CommandRegistry.Commands[name] = commands.NewCommand(name, name,
+			func(context.Context, ...string) (string, error) { return out, nil })
+	}
+	cancelNothing("garpu", "new-misc")
+}
+
+// TestLoadAllConfigs_PublishesOneSnapshotOnSuccess: all four loaders succeed and
+// their results become visible together.
+func TestLoadAllConfigs_PublishesOneSnapshotOnSuccess(t *testing.T) {
+	cm := newTestConfigManager(t)
+	setLocal(cm, map[string]string{"old": "value"})
+	loadAllFixture(cm, nil)
+
+	if err := cm.LoadAllConfigs(context.Background()); err != nil {
+		t.Fatalf("LoadAllConfigs: %v", err)
+	}
+
+	snap := cm.State.Snapshot()
+
+	if got := valueOrEmpty(snap.Local("local_key")); got != "new" {
+		t.Errorf("local_key = %q, want new", got)
+	}
+
+	if _, ok := snap.Local("old"); ok {
+		t.Error("stale local key survived the full load")
+	}
+
+	if got := valueOrEmpty(snap.Global("zimbraGlobalKey")); got != "new" {
+		t.Errorf("zimbraGlobalKey = %q, want new", got)
+	}
+
+	if got := valueOrEmpty(snap.Server("zimbraServerKey")); got != "new" {
+		t.Errorf("zimbraServerKey = %q, want new", got)
+	}
+
+	if got := valueOrEmpty(snap.Misc("garpu")); got != "new-misc" {
+		t.Errorf("garpu = %q, want new-misc", got)
+	}
+
+	if !snap.ServiceEnabled("mta") {
+		t.Error("mta service not enabled after load")
+	}
+}
+
+// TestLoadAllConfigs_PartialFailurePublishesSuccessfulParts: when one loader
+// fails, the parts of the loaders that succeeded are published and the failed
+// loader's part keeps its previous value, as in the legacy zmconfigd (each
+// config object is replaced only when its own load succeeds). The error is
+// still returned, so the cycle is skipped.
+func TestLoadAllConfigs_PartialFailurePublishesSuccessfulParts(t *testing.T) {
+	cm := newTestConfigManager(t)
+	setLocal(cm, map[string]string{"old": "value"})
+	setServer(cm, map[string]string{"oldServer": "value"}, enabled("proxy"))
+	loadAllFixture(cm, errors.New("ldap down"))
+
+	if err := cm.LoadAllConfigsWithRetry(context.Background(), 1); err == nil {
+		t.Fatal("LoadAllConfigs error = nil, want the server loader failure")
+	}
+
+	after := cm.State.Snapshot()
+
+	if got := valueOrEmpty(after.Local("local_key")); got != "new" {
+		t.Errorf("local_key = %q, want the new local config", got)
+	}
+
+	if _, ok := after.Local("old"); ok {
+		t.Error("stale local key survived although the local loader succeeded")
+	}
+
+	if got := valueOrEmpty(after.Global("zimbraGlobalKey")); got != "new" {
+		t.Errorf("zimbraGlobalKey = %q, want the new global config", got)
+	}
+
+	if got := valueOrEmpty(after.Misc("garpu")); got != "new-misc" {
+		t.Errorf("garpu = %q, want the new misc config", got)
+	}
+
+	if got := valueOrEmpty(after.Server("oldServer")); got != "value" {
+		t.Errorf("oldServer = %q, want the previous server config", got)
+	}
+
+	if !after.ServiceEnabled("proxy") {
+		t.Error("previous service enablement was lost although the server loader failed")
 	}
 }

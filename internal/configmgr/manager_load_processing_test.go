@@ -7,8 +7,6 @@ package configmgr
 import (
 	"strings"
 	"testing"
-
-	"github.com/zextras/carbonio-configd/internal/config/configtest"
 )
 
 // TestProcessIPModeConfig tests IP mode configuration processing
@@ -81,13 +79,11 @@ func TestProcessIPModeConfig(t *testing.T) {
 			data := map[string]string{
 				"zimbraIPMode": tt.ipMode,
 			}
-			cm.State.ServerConfig.Data = configtest.NewConfigMapFrom(data)
-
 			processIPModeConfigForData(data)
-			cm.State.ServerConfig.Data.Replace(data)
+			setServer(cm, data, nil)
 
 			for _, key := range tt.checkKeys {
-				if v, _ := cm.State.ServerConfig.Data.Get(key); v != tt.expected[key] {
+				if v, _ := cm.State.Snapshot().Server(key); v != tt.expected[key] {
 					t.Errorf("Key %s: expected '%s', got '%s'",
 						key, tt.expected[key], v)
 				}
@@ -104,13 +100,11 @@ func TestProcessIPModeConfig_NoIPMode(t *testing.T) {
 	cm := newTestConfigManager(t)
 
 	data := map[string]string{"someKey": "someValue"}
-	cm.State.ServerConfig.Data = configtest.NewConfigMapFrom(data)
-
 	processIPModeConfigForData(data)
-	cm.State.ServerConfig.Data.Replace(data)
+	setServer(cm, data, nil)
 
 	// Should not add any IP mode related keys
-	if _, ok := cm.State.ServerConfig.Data.Get("zimbraPostconfProtocol"); ok {
+	if _, ok := cm.State.Snapshot().Server("zimbraPostconfProtocol"); ok {
 		t.Error("Expected no zimbraPostconfProtocol when IP mode not set")
 	}
 }
@@ -462,12 +456,10 @@ func TestProcessMilterConfig(t *testing.T) {
 			for k, v := range tt.input {
 				data[k] = v
 			}
-			cm.State.ServerConfig.Data = configtest.NewConfigMapFrom(data)
-
 			processMilterConfigForData(data)
-			cm.State.ServerConfig.Data.Replace(data)
+			setServer(cm, data, nil)
 
-			result := cm.State.ServerConfig.Data.GetOr("zimbraMtaSmtpdMilters", "")
+			result := valueOrEmpty(cm.State.Snapshot().Server("zimbraMtaSmtpdMilters"))
 			if result != tt.expected {
 				t.Errorf("Expected zimbraMtaSmtpdMilters '%s', got '%s'", tt.expected, result)
 			}

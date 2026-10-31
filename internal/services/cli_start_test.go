@@ -16,15 +16,19 @@ import (
 
 // TestServiceStart_WithConfigRewrite exercises the rewriteConfigs branch.
 func TestServiceStart_WithConfigRewrite(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	if IsSystemdMode() {
+	if ctl.IsSystemdMode() {
 		t.Skip("skipping: start with config rewrite test on systemd-booted host")
 	}
 
-	orig := Registry["memcached"]
-	defer func() { Registry["memcached"] = orig }()
+	orig := ctl.registry["memcached"]
+	defer func() { ctl.registry["memcached"] = orig }()
 
 	def := *orig
 	def.SystemdUnits = nil
@@ -35,21 +39,23 @@ func TestServiceStart_WithConfigRewrite(t *testing.T) {
 	def.Dependencies = nil
 	def.PreStart = nil
 	def.PostStart = nil
-	Registry["memcached"] = &def
+	ctl.registry["memcached"] = &def
 
-	oldNoRewrite := NoRewrite
-	NoRewrite = false
-	defer func() { NoRewrite = oldNoRewrite }()
+	ctl.noRewrite = false
 
-	ServiceStart(context.Background(), "memcached")
+	ctl.ServiceStart(context.Background(), "memcached")
 }
 
 // TestServiceStart_AlreadyRunning exercises the "already running" early return.
 func TestServiceStart_AlreadyRunning(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	if IsSystemdMode() {
+	if ctl.IsSystemdMode() {
 		t.Skip("skipping: already-running test on systemd-booted host")
 	}
 
@@ -60,8 +66,8 @@ func TestServiceStart_AlreadyRunning(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	orig := Registry["memcached"]
-	defer func() { Registry["memcached"] = orig }()
+	orig := ctl.registry["memcached"]
+	defer func() { ctl.registry["memcached"] = orig }()
 
 	def := *orig
 	def.PidFile = pidFile
@@ -71,9 +77,9 @@ func TestServiceStart_AlreadyRunning(t *testing.T) {
 		t.Error("CustomStart should not be called when service is already running")
 		return nil
 	}
-	Registry["memcached"] = &def
+	ctl.registry["memcached"] = &def
 
-	err := ServiceStart(context.Background(), "memcached")
+	err := ctl.ServiceStart(context.Background(), "memcached")
 	if err != nil {
 		t.Errorf("ServiceStart for already-running service returned error: %v", err)
 	}
@@ -81,15 +87,19 @@ func TestServiceStart_AlreadyRunning(t *testing.T) {
 
 // TestServiceStart_PreStartHookError exercises the pre-start hook error return.
 func TestServiceStart_PreStartHookError(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	if IsSystemdMode() {
+	if ctl.IsSystemdMode() {
 		t.Skip("skipping: pre-start hook test on systemd-booted host")
 	}
 
-	orig := Registry["memcached"]
-	defer func() { Registry["memcached"] = orig }()
+	orig := ctl.registry["memcached"]
+	defer func() { ctl.registry["memcached"] = orig }()
 
 	def := *orig
 	def.SystemdUnits = nil
@@ -103,9 +113,9 @@ func TestServiceStart_PreStartHookError(t *testing.T) {
 		},
 	}
 	def.CustomStart = func(_ context.Context, _ *ServiceDef) error { return nil }
-	Registry["memcached"] = &def
+	ctl.registry["memcached"] = &def
 
-	err := ServiceStart(context.Background(), "memcached")
+	err := ctl.ServiceStart(context.Background(), "memcached")
 	if err == nil {
 		t.Error("expected error from pre-start hook failure")
 	}
@@ -113,15 +123,19 @@ func TestServiceStart_PreStartHookError(t *testing.T) {
 
 // TestServiceStart_PostStartHookCalled exercises the post-start hook path.
 func TestServiceStart_PostStartHookCalled(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	if IsSystemdMode() {
+	if ctl.IsSystemdMode() {
 		t.Skip("skipping: post-start hook test on systemd-booted host")
 	}
 
-	orig := Registry["memcached"]
-	defer func() { Registry["memcached"] = orig }()
+	orig := ctl.registry["memcached"]
+	defer func() { ctl.registry["memcached"] = orig }()
 
 	called := false
 	def := *orig
@@ -138,9 +152,9 @@ func TestServiceStart_PostStartHookCalled(t *testing.T) {
 		},
 	}
 	def.CustomStart = func(_ context.Context, _ *ServiceDef) error { return nil }
-	Registry["memcached"] = &def
+	ctl.registry["memcached"] = &def
 
-	err := ServiceStart(context.Background(), "memcached")
+	err := ctl.ServiceStart(context.Background(), "memcached")
 	if err != nil {
 		t.Errorf("ServiceStart returned unexpected error: %v", err)
 	}
@@ -151,12 +165,16 @@ func TestServiceStart_PostStartHookCalled(t *testing.T) {
 
 // TestServiceStartSystemd_RunsCustomLauncherAndHooks verifies the systemd-leaf
 // start path invokes CustomStart and the pre/post-start hooks directly, WITHOUT
-// going through systemctl. This is independent of IsSystemdMode() — it is the
+// going through systemctl. This is independent of ctl.IsSystemdMode() — it is the
 // ExecStart leaf that breaks the systemctl recursion loop, so it must launch
 // the workers in-process regardless of whether the host is systemd-booted.
 func TestServiceStartSystemd_RunsCustomLauncherAndHooks(t *testing.T) {
-	orig := Registry["memcached"]
-	defer func() { Registry["memcached"] = orig }()
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	orig := ctl.registry["memcached"]
+	defer func() { ctl.registry["memcached"] = orig }()
 
 	var startCalled, preCalled, postCalled bool
 
@@ -183,9 +201,9 @@ func TestServiceStartSystemd_RunsCustomLauncherAndHooks(t *testing.T) {
 
 		return nil
 	}
-	Registry["memcached"] = &def
+	ctl.registry["memcached"] = &def
 
-	if err := ServiceStartSystemd(context.Background(), "memcached"); err != nil {
+	if err := ctl.ServiceStartSystemd(context.Background(), "memcached"); err != nil {
 		t.Fatalf("ServiceStartSystemd returned unexpected error: %v", err)
 	}
 
@@ -204,7 +222,11 @@ func TestServiceStartSystemd_RunsCustomLauncherAndHooks(t *testing.T) {
 // unknown service rather than silently succeeding (the bug symptom was an
 // "unexpected argument" parse error; a known service must resolve).
 func TestServiceStartSystemd_UnknownService(t *testing.T) {
-	if err := ServiceStartSystemd(context.Background(), "nonexistent-service-xyz"); err == nil {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	if err := ctl.ServiceStartSystemd(context.Background(), "nonexistent-service-xyz"); err == nil {
 		t.Error("expected error for unknown service")
 	}
 }
@@ -212,8 +234,12 @@ func TestServiceStartSystemd_UnknownService(t *testing.T) {
 // TestServiceStopSystemd_RunsCustomStop verifies the systemd-leaf stop path
 // invokes CustomStop directly without systemctl.
 func TestServiceStopSystemd_RunsCustomStop(t *testing.T) {
-	orig := Registry["memcached"]
-	defer func() { Registry["memcached"] = orig }()
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	orig := ctl.registry["memcached"]
+	defer func() { ctl.registry["memcached"] = orig }()
 
 	var stopCalled bool
 
@@ -225,9 +251,9 @@ func TestServiceStopSystemd_RunsCustomStop(t *testing.T) {
 
 		return nil
 	}
-	Registry["memcached"] = &def
+	ctl.registry["memcached"] = &def
 
-	if err := ServiceStopSystemd(context.Background(), "memcached"); err != nil {
+	if err := ctl.ServiceStopSystemd(context.Background(), "memcached"); err != nil {
 		t.Fatalf("ServiceStopSystemd returned unexpected error: %v", err)
 	}
 
@@ -236,48 +262,54 @@ func TestServiceStopSystemd_RunsCustomStop(t *testing.T) {
 	}
 }
 
-// TestServiceStart_NoRewrite verifies the NoRewrite flag skips config rewriting.
+// TestServiceStart_NoRewrite verifies the ctl.noRewrite flag skips config rewriting.
 func TestServiceStart_NoRewrite(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 
-	old := NoRewrite
-	NoRewrite = true
-	defer func() { NoRewrite = old }()
+	ctl.noRewrite = true
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	ServiceStart(ctx, "memcached")
+	ctl.ServiceStart(ctx, "memcached")
 }
 
 // TestStartEnabledDependencies_EnabledDepFailsStart exercises the ServiceStart error return.
 func TestStartEnabledDependencies_EnabledDepFailsStart(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	const depName = "test-failing-dep-xyzzy"
 
-	Registry[depName] = &ServiceDef{
+	ctl.registry[depName] = &ServiceDef{
 		Name:         depName,
 		SystemdUnits: []string{"carbonio-test-failing-dep-xyzzy.service"},
 		CustomStart: func(_ context.Context, _ *ServiceDef) error {
 			return errors.New("intentional failure")
 		},
 	}
-	defer delete(Registry, depName)
+	defer delete(ctl.registry, depName)
 
 	def := &ServiceDef{
 		Name:         "parent",
 		Dependencies: []string{depName},
 	}
 
-	if IsSystemdMode() {
+	if ctl.IsSystemdMode() {
 		t.Skip("systemd booted: ServiceStatus short-circuits before CustomStart")
 	}
 
-	err := startEnabledDependencies(context.Background(), "parent", def)
+	err := ctl.startEnabledDependencies(context.Background(), "parent", def)
 	if err == nil {
 		t.Error("expected error when enabled dependency fails to start")
 	}
@@ -286,38 +318,50 @@ func TestStartEnabledDependencies_EnabledDepFailsStart(t *testing.T) {
 // TestStartEnabledDependencies_EnabledDepFails verifies that a dependency that is
 // enabled but fails to start propagates the error.
 func TestStartEnabledDependencies_EnabledDepFails(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	Registry["testdep-xyz"] = &ServiceDef{
+	ctl.registry["testdep-xyz"] = &ServiceDef{
 		Name: "testdep-xyz",
 	}
-	defer delete(Registry, "testdep-xyz")
+	defer delete(ctl.registry, "testdep-xyz")
 
 	def := &ServiceDef{
 		Name:         "parent",
 		Dependencies: []string{"testdep-xyz"},
 	}
 
-	startEnabledDependencies(context.Background(), "parent", def)
+	ctl.startEnabledDependencies(context.Background(), "parent", def)
 }
 
 // TestServiceStopSystemd_UnknownService verifies ServiceStopSystemd returns an error
 // for an unknown service name, hitting the LookupService nil branch.
 func TestServiceStopSystemd_UnknownService(t *testing.T) {
-	err := ServiceStopSystemd(context.Background(), "not-a-real-service-xyz-9999")
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	err := ctl.ServiceStopSystemd(context.Background(), "not-a-real-service-xyz-9999")
 	if err == nil {
-		t.Error("ServiceStopSystemd() expected error for unknown service, got nil")
+		t.Error("ctl.ServiceStopSystemd() expected error for unknown service, got nil")
 	}
 }
 
 // TestServiceStopSystemd_PreStopHookError verifies that a failing pre-stop hook
 // is logged as a warning and stop continues (non-fatal).
 func TestServiceStopSystemd_PreStopHookError(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	hookCalled := false
 	hookErr := errors.New("pre-stop hook failed deliberately")
 
-	Registry["test-prestop-svc"] = &ServiceDef{
+	ctl.registry["test-prestop-svc"] = &ServiceDef{
 		Name:        "test-prestop-svc",
 		DisplayName: "Test PreStop Service",
 		PreStop: []Hook{
@@ -328,9 +372,9 @@ func TestServiceStopSystemd_PreStopHookError(t *testing.T) {
 		},
 		// No BinaryPath, no ProcessName → stopWithoutSystemd is a no-op stop
 	}
-	defer delete(Registry, "test-prestop-svc")
+	defer delete(ctl.registry, "test-prestop-svc")
 
-	err := ServiceStopSystemd(context.Background(), "test-prestop-svc")
+	err := ctl.ServiceStopSystemd(context.Background(), "test-prestop-svc")
 	if !hookCalled {
 		t.Error("pre-stop hook was not called")
 	}
@@ -342,11 +386,15 @@ func TestServiceStopSystemd_PreStopHookError(t *testing.T) {
 // when every matching PID is the current process or its parent.
 // We pass the test binary's own argv[0] which guarantees a match for self.
 func TestPidFromProcessName_AllSelfOrParent(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	// os.Args[0] is the test binary — scanning for it will find at least self.
 	// After filtering self and parent, the result must be 0 (no "other" match).
 	// If another test process with the same binary is running, the test may
 	// non-deterministically find it; accept either outcome to avoid flakiness.
-	result := pidFromProcessName(os.Args[0])
+	result := ctl.pidFromProcessName(context.Background(), os.Args[0])
 	// result is either 0 (no other instance) or a valid PID (another test binary)
 	_ = result // just ensure no panic
 }

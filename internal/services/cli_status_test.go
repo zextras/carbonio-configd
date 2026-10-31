@@ -11,28 +11,32 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/zextras/carbonio-configd/internal/systemd"
+	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
 
 // TestServiceStatus_NoPidFileNoProcessName verifies ServiceStatus returns (false, nil)
 // when no detection method is configured (non-systemd hosts only).
 func TestServiceStatus_NoPidFileNoProcessName(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	if IsSystemdMode() {
+	if ctl.IsSystemdMode() {
 		t.Skip("skipping: on systemd host ServiceStatus uses systemctl, not PID/process detection")
 	}
 
-	orig := Registry["memcached"]
-	defer func() { Registry["memcached"] = orig }()
+	orig := ctl.registry["memcached"]
+	defer func() { ctl.registry["memcached"] = orig }()
 
 	def := *orig
 	def.PidFile = ""
 	def.ProcessName = ""
-	Registry["memcached"] = &def
+	ctl.registry["memcached"] = &def
 
-	running, err := ServiceStatus(context.Background(), "memcached")
+	running, err := ctl.ServiceStatus(context.Background(), "memcached")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -43,10 +47,14 @@ func TestServiceStatus_NoPidFileNoProcessName(t *testing.T) {
 
 // TestServiceStatus_WithPidFile_Running verifies ServiceStatus detects running via PID file.
 func TestServiceStatus_WithPidFile_Running(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	if IsSystemdMode() {
+	if ctl.IsSystemdMode() {
 		t.Skip("skipping PID-file detection test on systemd-booted host")
 	}
 
@@ -57,15 +65,15 @@ func TestServiceStatus_WithPidFile_Running(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	orig := Registry["memcached"]
-	defer func() { Registry["memcached"] = orig }()
+	orig := ctl.registry["memcached"]
+	defer func() { ctl.registry["memcached"] = orig }()
 
 	def := *orig
 	def.PidFile = pidFile
 	def.ProcessName = ""
-	Registry["memcached"] = &def
+	ctl.registry["memcached"] = &def
 
-	running, err := ServiceStatus(context.Background(), "memcached")
+	running, err := ctl.ServiceStatus(context.Background(), "memcached")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -76,22 +84,26 @@ func TestServiceStatus_WithPidFile_Running(t *testing.T) {
 
 // TestServiceStatus_WithProcessName verifies ServiceStatus uses ProcessName fallback.
 func TestServiceStatus_WithProcessName(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	if IsSystemdMode() {
+	if ctl.IsSystemdMode() {
 		t.Skip("skipping: on systemd host ServiceStatus uses systemctl, not process name scan")
 	}
 
-	orig := Registry["memcached"]
-	defer func() { Registry["memcached"] = orig }()
+	orig := ctl.registry["memcached"]
+	defer func() { ctl.registry["memcached"] = orig }()
 
 	def := *orig
 	def.PidFile = ""
 	def.ProcessName = "carbonio-configd-unique-needle-xyzzy-no-match-99999"
-	Registry["memcached"] = &def
+	ctl.registry["memcached"] = &def
 
-	running, err := ServiceStatus(context.Background(), "memcached")
+	running, err := ctl.ServiceStatus(context.Background(), "memcached")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -103,10 +115,14 @@ func TestServiceStatus_WithProcessName(t *testing.T) {
 // TestServiceStatus_PidFileUnreadable_FallsBackToProcessName exercises the
 // "PID file unreadable → fall through to ProcessName" path.
 func TestServiceStatus_PidFileUnreadable_FallsBackToProcessName(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	if IsSystemdMode() {
+	if ctl.IsSystemdMode() {
 		t.Skip("skipping: PID fallback test on systemd-booted host")
 	}
 	if os.Getuid() == 0 {
@@ -120,16 +136,16 @@ func TestServiceStatus_PidFileUnreadable_FallsBackToProcessName(t *testing.T) {
 	}
 	defer os.Chmod(pidFile, 0o644) //nolint:errcheck
 
-	orig := Registry["memcached"]
-	defer func() { Registry["memcached"] = orig }()
+	orig := ctl.registry["memcached"]
+	defer func() { ctl.registry["memcached"] = orig }()
 
 	def := *orig
 	def.PidFile = pidFile
 	def.ProcessName = "carbonio-configd-unique-needle-xyzzy-no-match-99999"
 	def.SystemdUnits = nil
-	Registry["memcached"] = &def
+	ctl.registry["memcached"] = &def
 
-	running, err := ServiceStatus(context.Background(), "memcached")
+	running, err := ctl.ServiceStatus(context.Background(), "memcached")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -141,23 +157,27 @@ func TestServiceStatus_PidFileUnreadable_FallsBackToProcessName(t *testing.T) {
 // TestServiceStatus_PidFileMissing_FallsToProcessName exercises the PID file absent
 // path falling through to ProcessName on non-systemd hosts.
 func TestServiceStatus_PidFileMissing_FallsToProcessName(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	if IsSystemdMode() {
+	if ctl.IsSystemdMode() {
 		t.Skip("skipping: legacy PID fallback test on systemd-booted host")
 	}
 
-	orig := Registry["memcached"]
-	defer func() { Registry["memcached"] = orig }()
+	orig := ctl.registry["memcached"]
+	defer func() { ctl.registry["memcached"] = orig }()
 
 	def := *orig
 	def.PidFile = "/nonexistent-pid-file-xyz-test.pid"
 	def.ProcessName = "carbonio-configd-unique-needle-xyzzy-no-match-99999"
 	def.SystemdUnits = nil
-	Registry["memcached"] = &def
+	ctl.registry["memcached"] = &def
 
-	running, err := ServiceStatus(context.Background(), "memcached")
+	running, err := ctl.ServiceStatus(context.Background(), "memcached")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -171,14 +191,18 @@ func TestServiceStatus_PidFileMissing_FallsToProcessName(t *testing.T) {
 // service's SystemdUnits entirely and reports running from the PID file.
 // This is the container regression test: stats in a podman install has an
 // inactive carbonio-stats.service but live zmstat-* workers; before the
-// IsSystemdMode()-gated refactor, a systemd-booted host would query
+// ctl.IsSystemdMode()-gated refactor, a systemd-booted host would query
 // systemctl and report stopped even though workers were alive.
 func TestServiceStatus_LegacyMode_UsesPidProbeRegardlessOfSystemdUnit(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 
-	withMode(t, false)
+	ctl.pinMode(false)
 
 	tmp := t.TempDir()
 	pidFile := filepath.Join(tmp, "live.pid")
@@ -187,16 +211,16 @@ func TestServiceStatus_LegacyMode_UsesPidProbeRegardlessOfSystemdUnit(t *testing
 		t.Fatal(err)
 	}
 
-	orig := Registry["memcached"]
-	defer func() { Registry["memcached"] = orig }()
+	orig := ctl.registry["memcached"]
+	defer func() { ctl.registry["memcached"] = orig }()
 
 	def := *orig
 	def.SystemdUnits = []string{"carbonio-nonexistent-test-xyz.service"}
 	def.PidFile = pidFile
 	def.ProcessName = ""
-	Registry["memcached"] = &def
+	ctl.registry["memcached"] = &def
 
-	running, err := ServiceStatus(context.Background(), "memcached")
+	running, err := ctl.ServiceStatus(context.Background(), "memcached")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -212,15 +236,12 @@ func TestServiceStatus_LegacyMode_UsesPidProbeRegardlessOfSystemdUnit(t *testing
 // reintroducing the hybrid fall-through (which would have returned true by
 // checking the PID file after systemctl failed).
 func TestServiceStatus_StrictMode_TrustsSystemctlOverPidProbe(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
+	t.Parallel()
 
-	if !systemd.IsBooted() {
-		t.Skip("skipping: strict-mode path requires a host that can actually run systemctl")
-	}
+	ctl, f := newFakeController(t)
 
-	withMode(t, true)
+	ctl.pinMode(true)
+	f.Exec.OnPath(systemctlBin, systest.Fail(3, "")) // the unit is not active
 
 	tmp := t.TempDir()
 	pidFile := filepath.Join(tmp, "live.pid")
@@ -229,16 +250,16 @@ func TestServiceStatus_StrictMode_TrustsSystemctlOverPidProbe(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	orig := Registry["memcached"]
-	defer func() { Registry["memcached"] = orig }()
+	orig := ctl.registry["memcached"]
+	defer func() { ctl.registry["memcached"] = orig }()
 
 	def := *orig
 	def.SystemdUnits = []string{"carbonio-nonexistent-test-xyz.service"}
 	def.PidFile = pidFile
 	def.ProcessName = ""
-	Registry["memcached"] = &def
+	ctl.registry["memcached"] = &def
 
-	running, err := ServiceStatus(context.Background(), "memcached")
+	running, err := ctl.ServiceStatus(context.Background(), "memcached")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}

@@ -46,7 +46,7 @@ func TestRewriteWorker_HappyPath(t *testing.T) {
 		ConfigFile: filepath.Join(tmpDir, "zmconfigd.cf"),
 	}
 	cacheInstance := cache.New(ctx, false)
-	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance)
+	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance, hostEnv())
 
 	// Create a rewrite entry
 	entry := config.RewriteEntry{
@@ -81,7 +81,7 @@ func TestRewriteWorker_ErrorPath(t *testing.T) {
 		ConfigFile: filepath.Join(tmpDir, "zmconfigd.cf"),
 	}
 	cacheInstance := cache.New(ctx, false)
-	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance)
+	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance, hostEnv())
 
 	// Create a rewrite entry pointing to non-existent source
 	entry := config.RewriteEntry{
@@ -135,7 +135,7 @@ func TestRewriteWorker_DebugLogging(t *testing.T) {
 		ConfigFile: filepath.Join(tmpDir, "zmconfigd.cf"),
 	}
 	cacheInstance := cache.New(ctx, false)
-	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance)
+	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance, hostEnv())
 
 	// Create a rewrite entry
 	entry := config.RewriteEntry{
@@ -171,7 +171,7 @@ func TestRewriteAtomicCommit_HappyPath(t *testing.T) {
 	destPath := filepath.Join(tmpDir, "dest.txt")
 
 	// Execute rewriteAtomicCommit with empty mode (should default to 0440, legacy state.py:775)
-	err = rewriteAtomicCommit(ctx, tmpFile.Name(), destPath, "")
+	err = realFSConfigManager().rewriteAtomicCommit(ctx, tmpFile.Name(), destPath, "")
 	require.NoError(t, err)
 
 	// Verify destination file exists
@@ -202,7 +202,7 @@ func TestRewriteAtomicCommit_InvalidMode(t *testing.T) {
 	destPath := filepath.Join(tmpDir, "dest.txt")
 
 	// Execute rewriteAtomicCommit with invalid mode
-	err = rewriteAtomicCommit(ctx, tmpFile.Name(), destPath, "not-octal")
+	err = realFSConfigManager().rewriteAtomicCommit(ctx, tmpFile.Name(), destPath, "not-octal")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "invalid file mode")
 }
@@ -225,7 +225,7 @@ func TestRewriteAtomicCommit_CustomMode(t *testing.T) {
 	destPath := filepath.Join(tmpDir, "dest.txt")
 
 	// Execute rewriteAtomicCommit with custom mode
-	err = rewriteAtomicCommit(ctx, tmpFile.Name(), destPath, "0755")
+	err = realFSConfigManager().rewriteAtomicCommit(ctx, tmpFile.Name(), destPath, "0755")
 	require.NoError(t, err)
 
 	// Verify destination file has correct mode
@@ -262,7 +262,7 @@ func TestRewriteTransform(t *testing.T) {
 		ConfigFile: filepath.Join(tmpDir, "zmconfigd.cf"),
 	}
 	cacheInstance := cache.New(ctx, false)
-	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance)
+	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance, hostEnv())
 
 	// Execute rewriteTransform
 	lineCount, err := cm.rewriteTransform(ctx, srcPath, tmpFile)
@@ -299,14 +299,13 @@ func TestRewriteTransform_NonexistentSource(t *testing.T) {
 		ConfigFile: filepath.Join(tmpDir, "zmconfigd.cf"),
 	}
 	cacheInstance := cache.New(ctx, false)
-	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance)
+	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance, hostEnv())
 
 	// Execute rewriteTransform with non-existent source
 	_, err = cm.rewriteTransform(ctx, filepath.Join(tmpDir, "nonexistent.txt"), tmpFile)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "open source file")
 }
-
 
 // TestResolveValueSpec_FILE is the CO-4096 regression suite: FILE fragments must be
 // transformer-expanded before reaching postconf. Before the fix, FILE was delegated
@@ -328,7 +327,7 @@ func TestResolveValueSpec_FILE(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(fragDir, fragName), []byte(fragContent), 0644))
 		st := state.NewState()
 		cfg := &config.Config{BaseDir: tmpDir}
-		cm := NewConfigManager(ctx, cfg, st, nil, cache.New(ctx, false))
+		cm := NewConfigManager(ctx, cfg, st, nil, cache.New(ctx, false), hostEnv())
 		resolve := func(key, valueSpec string) (string, error) {
 			return cm.resolveValueSpec(ctx, key, valueSpec)
 		}
@@ -338,8 +337,9 @@ func TestResolveValueSpec_FILE(t *testing.T) {
 	t.Run("contains directives fully expanded - regression guard no %%", func(t *testing.T) {
 		cm, resolve := setup(t, "smtpd_sender_login_maps.cf", senderLoginMapsContent)
 		// Seed the lookup value so both %%contains%% lines hit.
-		cm.State.GlobalConfig.Data.Set("zimbraMtaSmtpdSenderLoginMaps",
-			"lmdb:/opt/zextras/conf/slm-exceptions-db proxy:ldap:/opt/zextras/conf/ldap-slm.cf")
+		setGlobal(cm, map[string]string{
+			"zimbraMtaSmtpdSenderLoginMaps": "lmdb:/opt/zextras/conf/slm-exceptions-db proxy:ldap:/opt/zextras/conf/ldap-slm.cf",
+		})
 
 		result, err := resolve("smtpd_sender_login_maps", "FILE zmconfigd/smtpd_sender_login_maps.cf")
 		require.NoError(t, err)
@@ -356,7 +356,7 @@ func TestResolveValueSpec_FILE(t *testing.T) {
 	t.Run("bare variable expanded", func(t *testing.T) {
 		const contentFilterContent = "smtp-amavis:[%%zimbraLocalBindAddress%%]:10024\n"
 		cm, resolve := setup(t, "postfix_content_filter.cf", contentFilterContent)
-		cm.State.GlobalConfig.Data.Set("zimbraLocalBindAddress", "127.0.0.1")
+		setGlobal(cm, map[string]string{"zimbraLocalBindAddress": "127.0.0.1"})
 
 		result, err := resolve("content_filter", "FILE zmconfigd/postfix_content_filter.cf")
 		require.NoError(t, err)
@@ -367,7 +367,7 @@ func TestResolveValueSpec_FILE(t *testing.T) {
 	t.Run("contains miss - empty lines dropped from join", func(t *testing.T) {
 		cm, resolve := setup(t, "smtpd_sender_login_maps.cf", senderLoginMapsContent)
 		// VAR value does not contain either search string → both lines resolve to "".
-		cm.State.GlobalConfig.Data.Set("zimbraMtaSmtpdSenderLoginMaps", "ldap:/some/other/map")
+		setGlobal(cm, map[string]string{"zimbraMtaSmtpdSenderLoginMaps": "ldap:/some/other/map"})
 
 		result, err := resolve("smtpd_sender_login_maps", "FILE zmconfigd/smtpd_sender_login_maps.cf")
 		require.NoError(t, err)

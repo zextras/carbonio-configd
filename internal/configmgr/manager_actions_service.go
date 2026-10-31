@@ -7,62 +7,11 @@ package configmgr
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/proxy"
 )
-
-// DoRestarts executes service restarts using the ServiceManager with dependency cascading.
-//
-// Each successfully-queued restart is removed from State.CurrentActions.Restarts
-// as it is handed off to the ServiceManager. Without this, the map persists
-// across cycles, DoRestarts re-queues the same services every wake-up, and
-// every ExecStartPre REWRITE triggers another round of restarts — a 5-second
-// feedback loop visible as alternating mta/antivirus restarts in journalctl.
-// Entries for which AddRestart returned an error are intentionally retained
-// so the next cycle retries them.
-func (cm *ConfigManager) DoRestarts(ctx context.Context) {
-	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
-	logger.DebugContext(ctx, "Executing service restarts")
-
-	for service := range cm.State.CurrentActions.Restarts {
-		if err := cm.ServiceMgr.AddRestart(ctx, service); err != nil {
-			logger.WarnContext(ctx, "Failed to queue restart",
-				"service", service,
-				"error", err)
-
-			continue
-		}
-
-		cm.State.DelRestart(service)
-	}
-
-	// Create a lookup function that wraps LookUpConfig for SERVICE_* keys
-	configLookup := func(key string) string {
-		// Extract service name from SERVICE_<name> key format
-		// Key is expected in format "SERVICE_MTA", "SERVICE_PROXY", etc.
-		if rest, ok := strings.CutPrefix(key, "SERVICE_"); ok && rest != "" {
-			serviceName := strings.ToLower(rest)
-
-			value, err := cm.LookUpConfig(ctx, "SERVICE", serviceName)
-			if err == nil && strings.EqualFold(value, constTRUE) {
-				return serviceEnabled
-			}
-		}
-
-		return serviceDisabled
-	}
-
-	// Process all queued restarts with dependency cascading
-	if err := cm.ServiceMgr.ProcessRestarts(ctx, configLookup); err != nil {
-		logger.ErrorContext(ctx, "Error during service restarts",
-			"error", err)
-	}
-
-	logger.DebugContext(ctx, "Service restarts complete")
-}
 
 // ProcessIsRunning checks if a service is currently running.
 func (cm *ConfigManager) ProcessIsRunning(ctx context.Context, service string) bool {
@@ -97,16 +46,20 @@ func (cm *ConfigManager) RunProxygenWithConfigs(ctx context.Context) error {
 	// and passed to the proxy generator. Cache invalidation should only happen
 	// when SIGHUP/network reload is explicitly requested (see LoadAllConfigsWithRetry).
 
-	// Create proxy generator with loaded configs from state
+	// Create proxy generator with the configs of the current snapshot
+	snap := cm.State.Snapshot()
 	initStart := time.Now()
 	gen, err := proxy.LoadConfiguration(
 		ctx,
+		cm.env,
 		cm.mainConfig,
-		cm.State.LocalConfig,
-		cm.State.GlobalConfig,
-		cm.State.ServerConfig,
-		cm.LdapClient,
-		cm.Cache)
+		proxy.Sources{
+			Local:  snap.LocalConfig(),
+			Global: snap.GlobalConfig(),
+			Server: snap.ServerConfig(),
+			Ldap:   cm.LdapClient,
+			Cache:  cm.Cache,
+		})
 	initDuration := time.Since(initStart)
 	logger.DebugContext(ctx, "Proxy generator initialization completed",
 		"duration_seconds", initDuration.Seconds())

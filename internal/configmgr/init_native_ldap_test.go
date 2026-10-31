@@ -14,23 +14,18 @@ import (
 	"github.com/zextras/carbonio-configd/internal/ldap"
 )
 
-func withLocalConfigForLDAP(t *testing.T, fn func() (map[string]string, error)) {
-	t.Helper()
-
-	prev := loadLocalConfigForLDAP
-	t.Cleanup(func() { loadLocalConfigForLDAP = prev })
-
-	loadLocalConfigForLDAP = fn
-}
-
 func TestInitNativeLdapClient_LoadFails(t *testing.T) {
-	withLocalConfigForLDAP(t, func() (map[string]string, error) {
+	t.Parallel()
+
+	load := func() (map[string]string, error) {
 		return nil, errors.New("disk read failed")
-	})
+	}
 
 	cm := &ConfigManager{
-		mainConfig:      &config.Config{},
-		CommandRegistry: commands.NewRegistry(""),
+		env:                    hostEnv(),
+		loadLocalConfigForLDAP: load,
+		mainConfig:             &config.Config{},
+		CommandRegistry:        commands.NewRegistry("", hostEnv()),
 	}
 	cm.initNativeLdapClient(context.Background())
 
@@ -40,16 +35,20 @@ func TestInitNativeLdapClient_LoadFails(t *testing.T) {
 }
 
 func TestInitNativeLdapClient_MissingURL(t *testing.T) {
-	withLocalConfigForLDAP(t, func() (map[string]string, error) {
+	t.Parallel()
+
+	load := func() (map[string]string, error) {
 		return map[string]string{
 			"zimbra_ldap_userdn":   "uid=zimbra,cn=admins,cn=zimbra",
 			"zimbra_ldap_password": "secret",
 		}, nil
-	})
+	}
 
 	cm := &ConfigManager{
-		mainConfig:      &config.Config{},
-		CommandRegistry: commands.NewRegistry(""),
+		env:                    hostEnv(),
+		loadLocalConfigForLDAP: load,
+		mainConfig:             &config.Config{},
+		CommandRegistry:        commands.NewRegistry("", hostEnv()),
 	}
 	cm.initNativeLdapClient(context.Background())
 
@@ -59,17 +58,21 @@ func TestInitNativeLdapClient_MissingURL(t *testing.T) {
 }
 
 func TestInitNativeLdapClient_WhitespaceURL(t *testing.T) {
-	withLocalConfigForLDAP(t, func() (map[string]string, error) {
+	t.Parallel()
+
+	load := func() (map[string]string, error) {
 		return map[string]string{
 			"ldap_url":             "   \t  ",
 			"zimbra_ldap_userdn":   "uid=zimbra,cn=admins,cn=zimbra",
 			"zimbra_ldap_password": "secret",
 		}, nil
-	})
+	}
 
 	cm := &ConfigManager{
-		mainConfig:      &config.Config{},
-		CommandRegistry: commands.NewRegistry(""),
+		env:                    hostEnv(),
+		loadLocalConfigForLDAP: load,
+		mainConfig:             &config.Config{},
+		CommandRegistry:        commands.NewRegistry("", hostEnv()),
 	}
 	cm.initNativeLdapClient(context.Background())
 
@@ -79,16 +82,20 @@ func TestInitNativeLdapClient_WhitespaceURL(t *testing.T) {
 }
 
 func TestInitNativeLdapClient_MissingBindDN(t *testing.T) {
-	withLocalConfigForLDAP(t, func() (map[string]string, error) {
+	t.Parallel()
+
+	load := func() (map[string]string, error) {
 		return map[string]string{
 			"ldap_url":             "ldap://srv1:389 ldap://srv2:389",
 			"zimbra_ldap_password": "secret",
 		}, nil
-	})
+	}
 
 	cm := &ConfigManager{
-		mainConfig:      &config.Config{},
-		CommandRegistry: commands.NewRegistry(""),
+		env:                    hostEnv(),
+		loadLocalConfigForLDAP: load,
+		mainConfig:             &config.Config{},
+		CommandRegistry:        commands.NewRegistry("", hostEnv()),
 	}
 	cm.initNativeLdapClient(context.Background())
 
@@ -98,16 +105,20 @@ func TestInitNativeLdapClient_MissingBindDN(t *testing.T) {
 }
 
 func TestInitNativeLdapClient_MissingPassword(t *testing.T) {
-	withLocalConfigForLDAP(t, func() (map[string]string, error) {
+	t.Parallel()
+
+	load := func() (map[string]string, error) {
 		return map[string]string{
 			"ldap_url":           "ldap://srv1:389",
 			"zimbra_ldap_userdn": "uid=zimbra,cn=admins,cn=zimbra",
 		}, nil
-	})
+	}
 
 	cm := &ConfigManager{
-		mainConfig:      &config.Config{},
-		CommandRegistry: commands.NewRegistry(""),
+		env:                    hostEnv(),
+		loadLocalConfigForLDAP: load,
+		mainConfig:             &config.Config{},
+		CommandRegistry:        commands.NewRegistry("", hostEnv()),
 	}
 	cm.initNativeLdapClient(context.Background())
 
@@ -117,20 +128,24 @@ func TestInitNativeLdapClient_MissingPassword(t *testing.T) {
 }
 
 func TestInitNativeLdapClient_MultiURLSucceedsBuilding(t *testing.T) {
-	withLocalConfigForLDAP(t, func() (map[string]string, error) {
+	t.Parallel()
+
+	load := func() (map[string]string, error) {
 		return map[string]string{
 			"ldap_url":             "ldap://srv3:389 ldap://srv1:389",
 			"zimbra_ldap_userdn":   "uid=zimbra,cn=admins,cn=zimbra",
 			"zimbra_ldap_password": "secret",
 		}, nil
-	})
+	}
 
 	// Note: RegisterLDAPCommands now registers to the per-instance registry,
 	// so no global cleanup is needed.
 
 	cm := &ConfigManager{
-		mainConfig:      &config.Config{},
-		CommandRegistry: commands.NewRegistry(""),
+		env:                    hostEnv(),
+		loadLocalConfigForLDAP: load,
+		mainConfig:             &config.Config{},
+		CommandRegistry:        commands.NewRegistry("", hostEnv()),
 	}
 	cm.initNativeLdapClient(context.Background())
 
@@ -140,19 +155,23 @@ func TestInitNativeLdapClient_MultiURLSucceedsBuilding(t *testing.T) {
 }
 
 func TestInitNativeLdapClient_ConfigClientWiredWithRootPassword(t *testing.T) {
-	withLocalConfigForLDAP(t, func() (map[string]string, error) {
+	t.Parallel()
+
+	load := func() (map[string]string, error) {
 		return map[string]string{
 			"ldap_url":             "ldap://srv1:389",
 			"zimbra_ldap_userdn":   "uid=zimbra,cn=admins,cn=zimbra",
 			"zimbra_ldap_password": "secret",
 			"ldap_root_password":   "rootpw",
 		}, nil
-	})
+	}
 
 	cm := &ConfigManager{
-		mainConfig:      &config.Config{},
-		CommandRegistry: commands.NewRegistry(""),
-		LdapClient:      ldap.NewLdap(context.Background(), &config.Config{}),
+		env:                    hostEnv(),
+		loadLocalConfigForLDAP: load,
+		mainConfig:             &config.Config{},
+		CommandRegistry:        commands.NewRegistry("", hostEnv()),
+		LdapClient:             ldap.NewLdap(context.Background(), &config.Config{}),
 	}
 	cm.initNativeLdapClient(context.Background())
 
@@ -169,18 +188,22 @@ func TestInitNativeLdapClient_ConfigClientWiredWithRootPassword(t *testing.T) {
 }
 
 func TestInitNativeLdapClient_ConfigClientNilWithoutRootPassword(t *testing.T) {
-	withLocalConfigForLDAP(t, func() (map[string]string, error) {
+	t.Parallel()
+
+	load := func() (map[string]string, error) {
 		return map[string]string{
 			"ldap_url":             "ldap://srv1:389",
 			"zimbra_ldap_userdn":   "uid=zimbra,cn=admins,cn=zimbra",
 			"zimbra_ldap_password": "secret",
 		}, nil
-	})
+	}
 
 	cm := &ConfigManager{
-		mainConfig:      &config.Config{},
-		CommandRegistry: commands.NewRegistry(""),
-		LdapClient:      ldap.NewLdap(context.Background(), &config.Config{}),
+		env:                    hostEnv(),
+		loadLocalConfigForLDAP: load,
+		mainConfig:             &config.Config{},
+		CommandRegistry:        commands.NewRegistry("", hostEnv()),
+		LdapClient:             ldap.NewLdap(context.Background(), &config.Config{}),
 	}
 	cm.initNativeLdapClient(context.Background())
 

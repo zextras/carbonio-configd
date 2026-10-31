@@ -6,36 +6,38 @@ package services
 
 import (
 	"fmt"
-	"os"
 	"strconv"
-	"syscall"
 )
 
 const defaultDiskThresholdMB = 100
 
-// ServiceDiskDirs maps service names to directories that should be checked before start.
-var ServiceDiskDirs = map[string][]string{
-	svcMailbox: {storePath, basePath + "/db", basePath + "/index", basePath + "/redolog"},
-	serviceMTA: {dataPath + "/postfix/spool"},
+// serviceDiskDirs lists the directories of a service that should be checked before start.
+func (c *Controller) serviceDiskDirs(service string) []string {
+	switch service {
+	case svcMailbox:
+		return []string{c.p.store, c.p.base + "/db", c.p.base + "/index", c.p.base + "/redolog"}
+	case serviceMTA:
+		return []string{c.p.mtaSpool}
+	default:
+		return nil
+	}
 }
 
 // CheckDiskSpace checks available space on a path. Returns available MB and whether it's above threshold.
-func CheckDiskSpace(path string, thresholdMB int) (availMB int, ok bool, err error) {
-	var stat syscall.Statfs_t
-	if err := syscall.Statfs(path, &stat); err != nil {
+func (c *Controller) CheckDiskSpace(path string, thresholdMB int) (availMB int, ok bool, err error) {
+	availBytes, err := c.env.FS.AvailBytes(path)
+	if err != nil {
 		return 0, true, fmt.Errorf("statfs %s: %w", path, err) // return ok=true to not block on error
 	}
 
-	// #nosec G115 - block size and available blocks are always positive on real filesystems
-	availBytes := stat.Bavail * uint64(stat.Bsize) //nolint:gosec
-	avail := int(availBytes / (1024 * 1024))       //nolint:gosec
+	avail := int(availBytes / (1024 * 1024)) //nolint:gosec
 
 	return avail, avail >= thresholdMB, nil
 }
 
 // GetDiskThreshold reads the disk threshold from localconfig, defaulting to 100MB.
-func GetDiskThreshold() int {
-	lc, err := loadConfig()
+func (c *Controller) GetDiskThreshold() int {
+	lc, err := c.loadConfig()
 	if err != nil {
 		return defaultDiskThresholdMB
 	}
@@ -50,18 +52,13 @@ func GetDiskThreshold() int {
 }
 
 // CheckServiceDiskSpace prints warnings for service-specific directories below threshold.
-func CheckServiceDiskSpace(service string, threshold int) {
-	dirs, ok := ServiceDiskDirs[service]
-	if !ok {
-		return
-	}
-
-	for _, dir := range dirs {
-		if _, err := os.Stat(dir); err != nil {
+func (c *Controller) CheckServiceDiskSpace(service string, threshold int) {
+	for _, dir := range c.serviceDiskDirs(service) {
+		if _, err := c.env.FS.Stat(dir); err != nil {
 			continue // directory doesn't exist, skip
 		}
 
-		availMB, ok, err := CheckDiskSpace(dir, threshold)
+		availMB, ok, err := c.CheckDiskSpace(dir, threshold)
 		if err != nil {
 			continue
 		}

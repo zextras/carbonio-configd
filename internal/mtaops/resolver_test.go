@@ -6,19 +6,17 @@ package mtaops
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/zextras/carbonio-configd/internal/config"
-	"github.com/zextras/carbonio-configd/internal/config/configtest"
-	"github.com/zextras/carbonio-configd/internal/state"
+	"github.com/zextras/carbonio-configd/internal/snapshot"
+	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
 
 // TestNewResolver verifies resolver creation.
 func TestNewResolver(t *testing.T) {
 	baseDir := "/opt/zextras"
-	r := NewResolver(baseDir)
+	r := NewResolver(baseDir, systest.New().System())
 
 	if r == nil {
 		t.Fatal("NewResolver() returned nil")
@@ -30,20 +28,16 @@ func TestNewResolver(t *testing.T) {
 
 // TestResolveValue_VAR tests resolving values from VAR type (GlobalConfig or ServerConfig).
 func TestResolveValue_VAR(t *testing.T) {
-	r := NewResolver("/opt/zextras")
-	st := &state.State{
-		GlobalConfig: &config.GlobalConfig{
-			Data: configtest.NewConfigMapFrom(map[string]string{
-				"zimbraMtaMyNetworks": "127.0.0.0/8 10.0.0.0/8",
-				"zimbraMtaRelayHost":  "relay.example.com",
-			}),
+	r := NewResolver("/opt/zextras", systest.New().System())
+	snap := snapshot.New(snapshot.Parts{
+		Global: map[string]string{
+			"zimbraMtaMyNetworks": "127.0.0.0/8 10.0.0.0/8",
+			"zimbraMtaRelayHost":  "relay.example.com",
 		},
-		ServerConfig: &config.ServerConfig{
-			Data: configtest.NewConfigMapFrom(map[string]string{
-				"zimbraServiceHostname": "mail.example.com",
-			}),
+		Server: map[string]string{
+			"zimbraServiceHostname": "mail.example.com",
 		},
-	}
+	})
 
 	tests := []struct {
 		name      string
@@ -79,7 +73,7 @@ func TestResolveValue_VAR(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := r.ResolveValue(context.Background(), "VAR", tt.key, st)
+			got, err := r.ResolveValue(context.Background(), "VAR", tt.key, snap)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ResolveValue() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -93,15 +87,13 @@ func TestResolveValue_VAR(t *testing.T) {
 
 // TestResolveValue_LOCAL tests resolving values from LOCAL type (LocalConfig).
 func TestResolveValue_LOCAL(t *testing.T) {
-	r := NewResolver("/opt/zextras")
-	st := &state.State{
-		LocalConfig: &config.LocalConfig{
-			Data: configtest.NewConfigMapFrom(map[string]string{
-				"ldap_master_url":         "ldap://ldap.example.com:389",
-				"ldap_starttls_supported": "1",
-			}),
+	r := NewResolver("/opt/zextras", systest.New().System())
+	snap := snapshot.New(snapshot.Parts{
+		Local: map[string]string{
+			"ldap_master_url":         "ldap://ldap.example.com:389",
+			"ldap_starttls_supported": "1",
 		},
-	}
+	})
 
 	tests := []struct {
 		name      string
@@ -125,7 +117,7 @@ func TestResolveValue_LOCAL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := r.ResolveValue(context.Background(), "LOCAL", tt.key, st)
+			got, err := r.ResolveValue(context.Background(), "LOCAL", tt.key, snap)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ResolveValue() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -137,15 +129,51 @@ func TestResolveValue_LOCAL(t *testing.T) {
 	}
 }
 
+// TestResolveValue_NilSnapshot asserts a nil snapshot behaves as an empty config.
+func TestResolveValue_NilSnapshot(t *testing.T) {
+	t.Parallel()
+
+	r := NewResolver("/opt/zextras", systest.New().System())
+
+	for _, valueType := range []string{"VAR", "LOCAL"} {
+		got, err := r.ResolveValue(context.Background(), valueType, "anything", nil)
+		if err != nil || got != "" {
+			t.Errorf("ResolveValue(%s, nil snapshot) = %q, %v; want empty, nil", valueType, got, err)
+		}
+	}
+
+	op, err := r.(*resolver).ResolveMapfileDirective(attrZimbraSSLDHParam, false, nil)
+	if err != nil || op.Base64Data != "" {
+		t.Errorf("ResolveMapfileDirective(nil snapshot) = %+v, %v; want empty Base64Data, nil", op, err)
+	}
+}
+
+// TestResolveValue_VAR_EmptyGlobalFallsBackToServer pins the legacy lookup
+// order: an empty global value falls through to the server config.
+func TestResolveValue_VAR_EmptyGlobalFallsBackToServer(t *testing.T) {
+	t.Parallel()
+
+	r := NewResolver("/opt/zextras", systest.New().System())
+	snap := snapshot.New(snapshot.Parts{
+		Global: map[string]string{"k": ""},
+		Server: map[string]string{"k": " from-server "},
+	})
+
+	got, err := r.ResolveValue(context.Background(), "VAR", "k", snap)
+	if err != nil || got != "from-server" {
+		t.Errorf("ResolveValue() = %q, %v; want %q, nil", got, err, "from-server")
+	}
+}
+
 // TestResolveValue_FILE_NotHandled asserts that ResolveValue with type "FILE"
 // falls through to the literal branch and returns the key unchanged. mtaops
 // deliberately does not resolve FILE — transformer expansion of %%…%% directives
 // inside .cf fragments is owned by configmgr.lookupFileKey (CO-4096).
 func TestResolveValue_FILE_NotHandled(t *testing.T) {
-	r := NewResolver(t.TempDir())
-	st := &state.State{}
+	r := NewResolver(t.TempDir(), systest.New().System())
+	snap := snapshot.New(snapshot.Parts{})
 	key := "zmconfigd/smtpd_sender_login_maps.cf"
-	got, err := r.ResolveValue(context.Background(), "FILE", key, st)
+	got, err := r.ResolveValue(context.Background(), "FILE", key, snap)
 	if err != nil {
 		t.Fatalf("ResolveValue() unexpected error: %v", err)
 	}
@@ -156,21 +184,16 @@ func TestResolveValue_FILE_NotHandled(t *testing.T) {
 
 // TestResolveValue_MAPLOCAL tests resolving mapped file paths.
 func TestResolveValue_MAPLOCAL(t *testing.T) {
-	// Create temp directory for test
-	tmpDir := t.TempDir()
-	confDir := filepath.Join(tmpDir, "conf")
-	if err := os.MkdirAll(confDir, 0755); err != nil {
-		t.Fatalf("Failed to create conf dir: %v", err)
-	}
+	t.Parallel()
 
-	// Create dhparam.pem file
-	dhparamFile := filepath.Join(confDir, "dhparam.pem")
-	if err := os.WriteFile(dhparamFile, []byte("test dhparam data"), 0644); err != nil {
-		t.Fatalf("Failed to write dhparam file: %v", err)
-	}
+	const baseDir = "/opt/zextras"
 
-	r := NewResolver(tmpDir)
-	st := &state.State{}
+	fakes := systest.New()
+	dhparamFile := filepath.Join(baseDir, "conf", "dhparam.pem")
+	fakes.FS.Put(dhparamFile, []byte("test dhparam data"), 0o644)
+
+	r := NewResolver(baseDir, fakes.System())
+	snap := snapshot.New(snapshot.Parts{})
 
 	tests := []struct {
 		name      string
@@ -194,7 +217,7 @@ func TestResolveValue_MAPLOCAL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := r.ResolveValue(context.Background(), "MAPLOCAL", tt.key, st)
+			got, err := r.ResolveValue(context.Background(), "MAPLOCAL", tt.key, snap)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ResolveValue() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -208,12 +231,13 @@ func TestResolveValue_MAPLOCAL(t *testing.T) {
 
 // TestResolveValue_MAPLOCAL_FileNotExists tests MAPLOCAL when file doesn't exist.
 func TestResolveValue_MAPLOCAL_FileNotExists(t *testing.T) {
-	tmpDir := t.TempDir()
-	r := NewResolver(tmpDir)
-	st := &state.State{}
+	t.Parallel()
 
-	// dhparam.pem doesn't exist in tmpDir
-	got, err := r.ResolveValue(context.Background(), "MAPLOCAL", attrZimbraSSLDHParam, st)
+	r := NewResolver("/opt/zextras", systest.New().System())
+	snap := snapshot.New(snapshot.Parts{})
+
+	// dhparam.pem doesn't exist in the fake filesystem
+	got, err := r.ResolveValue(context.Background(), "MAPLOCAL", attrZimbraSSLDHParam, snap)
 	if err != nil {
 		t.Errorf("ResolveValue() returned error for non-existent file: %v", err)
 	}
@@ -224,8 +248,8 @@ func TestResolveValue_MAPLOCAL_FileNotExists(t *testing.T) {
 
 // TestResolveValue_Literal tests literal values (unknown types).
 func TestResolveValue_Literal(t *testing.T) {
-	r := NewResolver("/opt/zextras")
-	st := &state.State{}
+	r := NewResolver("/opt/zextras", systest.New().System())
+	snap := snapshot.New(snapshot.Parts{})
 
 	tests := []struct {
 		name      string
@@ -255,7 +279,7 @@ func TestResolveValue_Literal(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := r.ResolveValue(context.Background(), tt.valueType, tt.key, st)
+			got, err := r.ResolveValue(context.Background(), tt.valueType, tt.key, snap)
 			if err != nil {
 				t.Errorf("ResolveValue() unexpected error: %v", err)
 			}
@@ -268,16 +292,14 @@ func TestResolveValue_Literal(t *testing.T) {
 
 // TestResolvePostconfDirective tests POSTCONF directive resolution.
 func TestResolvePostconfDirective(t *testing.T) {
-	r := NewResolver("/opt/zextras").(*resolver)
-	st := &state.State{
-		GlobalConfig: &config.GlobalConfig{
-			Data: configtest.NewConfigMapFrom(map[string]string{
-				"zimbraMtaMyNetworks": "127.0.0.0/8",
-				"zimbraBooleanTrue":   "TRUE",
-				"zimbraBooleanFalse":  "FALSE",
-			}),
+	r := NewResolver("/opt/zextras", systest.New().System()).(*resolver)
+	snap := snapshot.New(snapshot.Parts{
+		Global: map[string]string{
+			"zimbraMtaMyNetworks": "127.0.0.0/8",
+			"zimbraBooleanTrue":   "TRUE",
+			"zimbraBooleanFalse":  "FALSE",
 		},
-	}
+	})
 
 	tests := []struct {
 		name      string
@@ -328,7 +350,7 @@ func TestResolvePostconfDirective(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := r.ResolvePostconfDirective(context.Background(), tt.key, tt.valueType, tt.valueKey, st)
+			got, err := r.ResolvePostconfDirective(context.Background(), tt.key, tt.valueType, tt.valueKey, snap)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ResolvePostconfDirective() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -345,7 +367,7 @@ func TestResolvePostconfDirective(t *testing.T) {
 
 // TestResolvePostconfdDirective tests POSTCONFD directive resolution (delete operation).
 func TestResolvePostconfdDirective(t *testing.T) {
-	r := NewResolver("/opt/zextras").(*resolver)
+	r := NewResolver("/opt/zextras", systest.New().System()).(*resolver)
 
 	tests := []struct {
 		name    string
@@ -376,14 +398,12 @@ func TestResolvePostconfdDirective(t *testing.T) {
 
 // TestResolveLdapDirective tests LDAP directive resolution.
 func TestResolveLdapDirective(t *testing.T) {
-	r := NewResolver("/opt/zextras").(*resolver)
-	st := &state.State{
-		LocalConfig: &config.LocalConfig{
-			Data: configtest.NewConfigMapFrom(map[string]string{
-				"ldap_db_maxsize": "85899345920",
-			}),
+	r := NewResolver("/opt/zextras", systest.New().System()).(*resolver)
+	snap := snapshot.New(snapshot.Parts{
+		Local: map[string]string{
+			"ldap_db_maxsize": "85899345920",
 		},
-	}
+	})
 
 	tests := []struct {
 		name      string
@@ -416,7 +436,7 @@ func TestResolveLdapDirective(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := r.ResolveLdapDirective(context.Background(), tt.key, tt.valueType, tt.valueKey, st)
+			got, err := r.ResolveLdapDirective(context.Background(), tt.key, tt.valueType, tt.valueKey, snap)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ResolveLdapDirective() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -433,18 +453,17 @@ func TestResolveLdapDirective(t *testing.T) {
 
 // TestResolveMapfileDirective tests MAPFILE directive resolution.
 func TestResolveMapfileDirective(t *testing.T) {
-	tmpDir := t.TempDir()
-	r := NewResolver(tmpDir).(*resolver)
+	const tmpDir = "/opt/zextras"
+
+	r := NewResolver(tmpDir, systest.New().System()).(*resolver)
 
 	expectedPath := filepath.Join(tmpDir, "conf", "dhparam.pem")
 
-	st := &state.State{
-		GlobalConfig: &config.GlobalConfig{
-			Data: configtest.NewConfigMapFrom(map[string]string{
-				attrZimbraSSLDHParam: "base64encodeddata==",
-			}),
+	snap := snapshot.New(snapshot.Parts{
+		Global: map[string]string{
+			attrZimbraSSLDHParam: "base64encodeddata==",
 		},
-	}
+	})
 
 	tests := []struct {
 		name         string
@@ -490,7 +509,7 @@ func TestResolveMapfileDirective(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := r.ResolveMapfileDirective(tt.key, tt.isLocal, st)
+			got, err := r.ResolveMapfileDirective(tt.key, tt.isLocal, snap)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ResolveMapfileDirective() error = %v, wantErr %v", err, tt.wantErr)
 				return

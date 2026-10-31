@@ -25,13 +25,9 @@ zimbraAmavisQuarantineAccount: quarantine@example.com
 zimbraMailboxdSSLProtocols: TLSv1.2 TLSv1.3
 zimbraSSLIncludeCipherSuites: ECDHE-RSA-AES256-GCM-SHA384 AES256-GCM-SHA384`
 
-	cm.CommandRegistry.Commands["gacf"] = commands.NewCommand(
-		"Global config test",
-		"gacf",
-		func(_ context.Context, args ...string) (string, error) {
-			return mockOutput, nil
-		},
-	)
+	cm.CommandRegistry.GlobalAttrs = func(_ context.Context) (map[string]string, error) {
+		return attrs(mockOutput), nil
+	}
 
 	result, err := cm.fetchGlobalConfig(context.Background(), 3)
 	if err != nil {
@@ -83,14 +79,10 @@ func TestFetchGlobalConfig_CommandFails(t *testing.T) {
 	cm := newTestConfigManager(t)
 
 	attempts := 0
-	cm.CommandRegistry.Commands["gacf"] = commands.NewCommand(
-		"Global config test",
-		"gacf",
-		func(_ context.Context, args ...string) (string, error) {
-			attempts++
-			return "", fmt.Errorf("command failed")
-		},
-	)
+	cm.CommandRegistry.GlobalAttrs = func(_ context.Context) (map[string]string, error) {
+		attempts++
+		return nil, fmt.Errorf("command failed")
+	}
 
 	result, err := cm.fetchGlobalConfig(context.Background(), 3)
 	if err == nil {
@@ -106,24 +98,20 @@ func TestFetchGlobalConfig_CommandFails(t *testing.T) {
 	}
 }
 
-// TestFetchGlobalConfig_EmptyOutput tests behavior with empty output
+// TestFetchGlobalConfig_EmptyOutput tests behavior with blank values
 func TestFetchGlobalConfig_EmptyOutput(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: has retry delays")
 	}
 	cm := newTestConfigManager(t)
 
-	cm.CommandRegistry.Commands["gacf"] = commands.NewCommand(
-		"Global config test",
-		"gacf",
-		func(_ context.Context, args ...string) (string, error) {
-			return "   \n   \n   ", nil
-		},
-	)
+	cm.CommandRegistry.GlobalAttrs = func(_ context.Context) (map[string]string, error) {
+		return map[string]string{"zimbraFoo": "   "}, nil
+	}
 
 	result, err := cm.fetchGlobalConfig(context.Background(), 2)
 	if err != nil {
-		t.Fatalf("Expected no error with empty output, got: %v", err)
+		t.Fatalf("Expected no error with blank values, got: %v", err)
 	}
 
 	if result == nil {
@@ -149,13 +137,9 @@ func TestFetchGlobalConfig_QuarantineBannedItemsFalse(t *testing.T) {
 	mockOutput := `zimbraMtaBlockedExtensionWarnRecipient: FALSE
 zimbraAmavisQuarantineAccount: `
 
-	cm.CommandRegistry.Commands["gacf"] = commands.NewCommand(
-		"Global config test",
-		"gacf",
-		func(_ context.Context, args ...string) (string, error) {
-			return mockOutput, nil
-		},
-	)
+	cm.CommandRegistry.GlobalAttrs = func(_ context.Context) (map[string]string, error) {
+		return attrs(mockOutput), nil
+	}
 
 	result, err := cm.fetchGlobalConfig(context.Background(), 3)
 	if err != nil {
@@ -181,13 +165,9 @@ func TestLoadGlobalConfigWithRetry_Success(t *testing.T) {
 zimbraAmavisQuarantineAccount: virus-quarantine.account@example.com
 zimbraMailboxdSSLProtocols: TLSv1.2 TLSv1.3`
 
-	cm.CommandRegistry.Commands["gacf"] = commands.NewCommand(
-		"Global config test",
-		"gacf",
-		func(_ context.Context, args ...string) (string, error) {
-			return mockOutput, nil
-		},
-	)
+	cm.CommandRegistry.GlobalAttrs = func(_ context.Context) (map[string]string, error) {
+		return attrs(mockOutput), nil
+	}
 
 	err := cm.loadGlobalConfigWithRetry(context.Background(), 3)
 	if err != nil {
@@ -195,15 +175,15 @@ zimbraMailboxdSSLProtocols: TLSv1.2 TLSv1.3`
 	}
 
 	// Verify data was loaded
-	if cm.State.GlobalConfig.Data.GetOr("zimbraMtaBlockedExtensionWarnRecipient", "") != "TRUE" {
+	if valueOrEmpty(cm.State.Snapshot().Global("zimbraMtaBlockedExtensionWarnRecipient")) != "TRUE" {
 		t.Errorf("Expected zimbraMtaBlockedExtensionWarnRecipient to be TRUE, got: %s",
-			cm.State.GlobalConfig.Data.GetOr("zimbraMtaBlockedExtensionWarnRecipient", ""))
+			valueOrEmpty(cm.State.Snapshot().Global("zimbraMtaBlockedExtensionWarnRecipient")))
 	}
 
 	// Verify zimbraQuarantineBannedItems was set based on conditions
-	if cm.State.GlobalConfig.Data.GetOr("zimbraQuarantineBannedItems", "") != "TRUE" {
+	if valueOrEmpty(cm.State.Snapshot().Global("zimbraQuarantineBannedItems")) != "TRUE" {
 		t.Errorf("Expected zimbraQuarantineBannedItems to be TRUE, got: %s",
-			cm.State.GlobalConfig.Data.GetOr("zimbraQuarantineBannedItems", ""))
+			valueOrEmpty(cm.State.Snapshot().Global("zimbraQuarantineBannedItems")))
 	}
 }
 
@@ -218,13 +198,9 @@ func TestLoadGlobalConfigWithRetry_NoCache(t *testing.T) {
 
 	mockOutput := `zimbraMtaBlockedExtensionWarnRecipient: FALSE`
 
-	cm.CommandRegistry.Commands["gacf"] = commands.NewCommand(
-		"Global config test",
-		"gacf",
-		func(_ context.Context, args ...string) (string, error) {
-			return mockOutput, nil
-		},
-	)
+	cm.CommandRegistry.GlobalAttrs = func(_ context.Context) (map[string]string, error) {
+		return attrs(mockOutput), nil
+	}
 
 	err := cm.loadGlobalConfigWithRetry(context.Background(), 3)
 	if err != nil {
@@ -232,9 +208,9 @@ func TestLoadGlobalConfigWithRetry_NoCache(t *testing.T) {
 	}
 
 	// Verify data was loaded even without cache
-	if cm.State.GlobalConfig.Data.GetOr("zimbraMtaBlockedExtensionWarnRecipient", "") != "FALSE" {
+	if valueOrEmpty(cm.State.Snapshot().Global("zimbraMtaBlockedExtensionWarnRecipient")) != "FALSE" {
 		t.Errorf("Expected zimbraMtaBlockedExtensionWarnRecipient to be FALSE, got: %s",
-			cm.State.GlobalConfig.Data.GetOr("zimbraMtaBlockedExtensionWarnRecipient", ""))
+			valueOrEmpty(cm.State.Snapshot().Global("zimbraMtaBlockedExtensionWarnRecipient")))
 	}
 }
 
@@ -249,14 +225,10 @@ func TestLoadGlobalConfigWithRetry_CachedData(t *testing.T) {
 	callCount := 0
 	mockOutput := `zimbraMtaBlockedExtensionWarnRecipient: TRUE`
 
-	cm.CommandRegistry.Commands["gacf"] = commands.NewCommand(
-		"Global config test",
-		"gacf",
-		func(_ context.Context, args ...string) (string, error) {
-			callCount++
-			return mockOutput, nil
-		},
-	)
+	cm.CommandRegistry.GlobalAttrs = func(_ context.Context) (map[string]string, error) {
+		callCount++
+		return attrs(mockOutput), nil
+	}
 
 	// First call should fetch from command
 	err := cm.loadGlobalConfigWithRetry(context.Background(), 3)

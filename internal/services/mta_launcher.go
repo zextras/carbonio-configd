@@ -8,30 +8,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"os/exec"
-	"os/user"
+	"io/fs"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/zextras/carbonio-configd/internal/config"
-	"github.com/zextras/carbonio-configd/internal/fileutil"
 	"github.com/zextras/carbonio-configd/internal/logger"
-)
-
-// Postfix binary and config paths. All entries point at upstream postfix —
-// no legacy shell wrappers (/opt/zextras/bin/postfix, /opt/zextras/libexec/
-// zmmtastatus, /opt/zextras/libexec/zmmtainit) are invoked from this
-// package. Their logic has been reimplemented natively below.
-var sudoBin = "/usr/bin/sudo"
-
-var (
-	postfixBin   = commonPath + "/sbin/postfix"
-	postconfBin  = commonPath + "/sbin/postconf"
-	postaliasBin = commonPath + "/sbin/postalias"
-	mainCfPath   = commonPath + "/conf/main.cf"
-	aliasesPath  = "/etc/aliases"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // startTLSYes is the Postfix boolean literal for "yes", used in LDAP table rendering.
@@ -60,38 +43,36 @@ const startTLSYes = "yes"
 // /opt/zextras/libexec/configrewrite before this hook runs — that regenerates
 // main.cf itself and is intentionally kept outside of this function so it
 // runs for every start path (including systemd).
-func mtaCustomStart(ctx context.Context, _ *ServiceDef) error {
-	lc, err := loadConfig()
+func (c *Controller) mtaCustomStart(ctx context.Context, _ *ServiceDef) error {
+	lc, err := c.loadConfig()
 	if err != nil {
 		return fmt.Errorf("load localconfig: %w", err)
 	}
 
-	if mtaIsRunning(ctx) {
+	if c.mtaIsRunning(ctx) {
 		logger.InfoContext(ctx, "postfix already running; skipping start")
 
 		return nil
 	}
 
-	if err := bootstrapPostfixMainCf(ctx, lc); err != nil {
+	if err := c.bootstrapPostfixMainCf(ctx, lc); err != nil {
 		return fmt.Errorf("bootstrap main.cf: %w", err)
 	}
 
-	if err := writePostfixLDAPConfig(ctx, lc); err != nil {
+	if err := c.writePostfixLDAPConfig(ctx, lc); err != nil {
 		return fmt.Errorf("render ldap-*.cf: %w", err)
 	}
 
-	runPostalias(ctx)
+	c.runPostalias(ctx)
 
-	return startPostfixDaemon(ctx)
+	return c.startPostfixDaemon(ctx)
 }
 
 // mtaCustomStop runs "sudo postfix stop" to gracefully shut down postfix.
 // zextras has NOPASSWD sudo rights for postfix binary.
-func mtaCustomStop(ctx context.Context, _ *ServiceDef) error {
+func (c *Controller) mtaCustomStop(ctx context.Context, _ *ServiceDef) error {
 	// #nosec G204 — fixed binary path from internal registry
-	cmd := exec.CommandContext(ctx, sudoBin, postfixBin, "stop")
-
-	out, err := cmd.CombinedOutput()
+	out, err := sys.CombinedOutput(ctx, c.env.Exec, sudoBin, c.p.postfixBin, "stop")
 	if err != nil {
 		// "not running" means postfix is already stopped — treat as success.
 		if strings.Contains(string(out), "is not running") {
@@ -105,11 +86,11 @@ func mtaCustomStop(ctx context.Context, _ *ServiceDef) error {
 }
 
 // mtaIsRunning is the idempotence gate before start. Replaces zmmtastatus.
-func mtaIsRunning(ctx context.Context) bool {
+func (c *Controller) mtaIsRunning(ctx context.Context) bool {
 	// #nosec G204 — fixed binary path from internal registry
-	cmd := exec.CommandContext(ctx, sudoBin, postfixBin, "status")
+	_, err := c.env.Exec.Run(ctx, &sys.Cmd{Path: sudoBin, Args: []string{c.p.postfixBin, "status"}})
 
-	return cmd.Run() == nil
+	return err == nil
 }
 
 // postfixAccountNameRe is the shape of a POSIX user/group name accepted for
@@ -122,11 +103,11 @@ var errInvalidPostfixAccount = errors.New("invalid postfix owner/group name")
 // bootstrapPostfixMainCf ensures /opt/zextras/common/conf/main.cf exists
 // with mail_owner and setgid_group set. Skips silently when the file is
 // already present — configrewrite owns the rest of the file's contents.
-func bootstrapPostfixMainCf(ctx context.Context, lc map[string]string) error {
-	if _, err := os.Stat(mainCfPath); err == nil {
+func (c *Controller) bootstrapPostfixMainCf(ctx context.Context, lc map[string]string) error {
+	if _, err := c.env.FS.Stat(c.p.mainCf); err == nil {
 		return nil
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("stat %s: %w", mainCfPath, err)
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("stat %s: %w", c.p.mainCf, err)
 	}
 
 	owner := strings.TrimSpace(lc["postfix_mail_owner"])
@@ -140,8 +121,8 @@ func bootstrapPostfixMainCf(ctx context.Context, lc map[string]string) error {
 
 	// sudo touch — main.cf lives under /opt/zextras/common which is
 	// root-owned; zextras cannot create files there directly.
-	if err := sudoRun(ctx, "/usr/bin/touch", mainCfPath); err != nil {
-		return fmt.Errorf("touch %s: %w", mainCfPath, err)
+	if err := c.sudoRun(ctx, "/usr/bin/touch", c.p.mainCf); err != nil {
+		return fmt.Errorf("touch %s: %w", c.p.mainCf, err)
 	}
 
 	if owner == "" || group == "" {
@@ -152,7 +133,7 @@ func bootstrapPostfixMainCf(ctx context.Context, lc map[string]string) error {
 		return nil
 	}
 
-	if err := sudoRun(ctx, postconfBin, "-e",
+	if err := c.sudoRun(ctx, c.p.postconfBin, "-e",
 		"mail_owner="+owner,
 		"setgid_group="+group,
 	); err != nil {
@@ -165,13 +146,13 @@ func bootstrapPostfixMainCf(ctx context.Context, lc map[string]string) error {
 // writePostfixLDAPConfig writes the 8 ldap-*.cf files that postfix's
 // main.cf references. Replaces legacy mtainit.sh.
 //
-// Files are written atomically (temp file + rename via fileutil.AtomicWrite)
+// Files are written atomically (temp file + rename via FS.WriteFileAtomic)
 // with an explicit 0640, so a pre-existing file never keeps a looser mode and
 // readers never see a partial bind_pw. Only the owner and the postfix group
 // can read them. The files are then chgrp'd to the postfix group (matches
 // legacy `chgrp postfix`); chgrp failures are logged and non-fatal — on fresh
 // installs the postfix group may not exist yet.
-func writePostfixLDAPConfig(ctx context.Context, lc map[string]string) error {
+func (c *Controller) writePostfixLDAPConfig(ctx context.Context, lc map[string]string) error {
 	ldapURL := strings.TrimSpace(lc["ldap_url"])
 	ldapPort := strings.TrimSpace(lc["ldap_port"])
 	bindPW := lc["ldap_postfix_password"]
@@ -185,8 +166,8 @@ func writePostfixLDAPConfig(ctx context.Context, lc map[string]string) error {
 		return fmt.Errorf("ldap_url or ldap_port missing from localconfig")
 	}
 
-	if err := os.MkdirAll(confPath, 0o755); err != nil {
-		return fmt.Errorf("mkdir %s: %w", confPath, err)
+	if err := c.env.FS.MkdirAll(c.p.conf, 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", c.p.conf, err)
 	}
 
 	// Ordering: mirror legacy mtainit.sh so diffs between legacy and
@@ -207,17 +188,17 @@ func writePostfixLDAPConfig(ctx context.Context, lc map[string]string) error {
 	}
 
 	for _, t := range tables {
-		path := confPath + "/" + t.name
+		path := c.p.conf + "/" + t.name
 		content := renderLDAPTable(ldapURL, ldapPort, startTLS, bindPW, t.body, t.extraTLS)
 
 		// 0640: bind_pw must stay off world-read while remaining group-readable
 		// by postfix (chgrp'd below). Owner 0600 would lock postfix out.
-		if err := fileutil.AtomicWrite(path, []byte(content), 0o640); err != nil {
+		if err := c.env.FS.WriteFileAtomic(path, []byte(content), 0o640); err != nil {
 			return fmt.Errorf("write %s: %w", path, err)
 		}
 	}
 
-	chgrpPostfixLDAPFiles(ctx)
+	c.chgrpPostfixLDAPFiles(ctx)
 
 	return nil
 }
@@ -240,18 +221,11 @@ timeout = 30
 // postfix group. Mirrors legacy `chgrp postfix /opt/zextras/conf/ldap-*.cf`.
 // When the group doesn't resolve (early-install race) we log and continue;
 // file mode 0640 still keeps bind_pw off world-read.
-func chgrpPostfixLDAPFiles(ctx context.Context) {
-	grp, err := user.LookupGroup("postfix")
+func (c *Controller) chgrpPostfixLDAPFiles(ctx context.Context) {
+	gid, err := c.env.Proc.LookupGID("postfix")
 	if err != nil {
 		logger.WarnContext(ctx, "postfix group not found; leaving ldap-*.cf at default group",
 			"error", err)
-
-		return
-	}
-
-	gid, err := strconv.Atoi(grp.Gid)
-	if err != nil {
-		logger.WarnContext(ctx, "postfix group has non-numeric gid", "gid", grp.Gid, "error", err)
 
 		return
 	}
@@ -260,8 +234,8 @@ func chgrpPostfixLDAPFiles(ctx context.Context) {
 		ldapVmm, ldapVmd, ldapVam, ldapVad,
 		ldapCanonical, ldapTransport, ldapSlm, ldapSplitdomain,
 	} {
-		path := confPath + "/" + name
-		if err := os.Chown(path, -1, gid); err != nil {
+		path := c.p.conf + "/" + name
+		if err := c.env.FS.Chown(path, -1, gid); err != nil {
 			logger.WarnContext(ctx, "chgrp postfix failed",
 				"path", path, "error", err)
 		}
@@ -271,22 +245,20 @@ func chgrpPostfixLDAPFiles(ctx context.Context) {
 // runPostalias rebuilds /etc/aliases.db from /etc/aliases when the source
 // file exists. Best-effort — a missing aliases file or a postalias failure
 // is logged and non-fatal, matching legacy postfix wrapper behavior.
-func runPostalias(ctx context.Context) {
-	if _, err := os.Stat(aliasesPath); err != nil {
+func (c *Controller) runPostalias(ctx context.Context) {
+	if _, err := c.env.FS.Stat(c.p.aliases); err != nil {
 		return
 	}
 
-	if err := sudoRun(ctx, postaliasBin, aliasesPath); err != nil {
+	if err := c.sudoRun(ctx, c.p.postaliasBin, c.p.aliases); err != nil {
 		logger.WarnContext(ctx, "postalias failed; continuing",
-			"aliases", aliasesPath, "error", err)
+			"aliases", c.p.aliases, "error", err)
 	}
 }
 
-func startPostfixDaemon(ctx context.Context) error {
+func (c *Controller) startPostfixDaemon(ctx context.Context) error {
 	// #nosec G204 — fixed binary path from internal registry
-	cmd := exec.CommandContext(ctx, sudoBin, postfixBin, "start")
-
-	out, err := cmd.CombinedOutput()
+	out, err := sys.CombinedOutput(ctx, c.env.Exec, sudoBin, c.p.postfixBin, "start")
 	if err != nil {
 		return fmt.Errorf("postfix start: %s: %w",
 			strings.TrimSpace(string(out)), err)
@@ -295,12 +267,10 @@ func startPostfixDaemon(ctx context.Context) error {
 	return nil
 }
 
-func sudoRun(ctx context.Context, binary string, args ...string) error {
+func (c *Controller) sudoRun(ctx context.Context, binary string, args ...string) error {
 	full := append([]string{binary}, args...)
 	// #nosec G204 — binary path is a registry constant; args are localconfig scalars or literals
-	cmd := exec.CommandContext(ctx, sudoBin, full...)
-
-	out, err := cmd.CombinedOutput()
+	out, err := sys.CombinedOutput(ctx, c.env.Exec, sudoBin, full...)
 	if err != nil {
 		return fmt.Errorf("%s %s: %s: %w",
 			binary, strings.Join(args, " "),

@@ -7,6 +7,7 @@ package proxy
 import (
 	"context"
 	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/sys"
 	"os"
 	"path/filepath"
 	"testing"
@@ -21,6 +22,7 @@ func BenchmarkVariableRegistration(b *testing.B) {
 
 	for b.Loop() {
 		gen := &Generator{
+			env:        sys.Real(),
 			Config:     cfg,
 			Variables:  make(map[string]*Variable),
 			Hostname:   cfg.Hostname,
@@ -37,7 +39,7 @@ func BenchmarkVariableResolution(b *testing.B) {
 		Hostname: "test.example.com",
 	}
 
-	gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
 	if err != nil {
 		b.Fatalf("NewGenerator(, nil) failed: %v", err)
 	}
@@ -96,7 +98,7 @@ proxy_send_timeout ${main.stimeout};
 		Hostname: "test.example.com",
 	}
 
-	gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
 	if err != nil {
 		b.Fatalf("NewGenerator(, nil) failed: %v", err)
 	}
@@ -104,7 +106,7 @@ proxy_send_timeout ${main.stimeout};
 	gen.TemplateDir = templateDir
 	gen.ConfDir = outputDir
 
-	processor := NewTemplateProcessor(gen, templateDir, outputDir)
+	processor := NewTemplateProcessor(gen, gen.env.FS, templateDir, outputDir)
 	tmpl, err := processor.LoadTemplate(context.Background(), "nginx.conf.template")
 	if err != nil {
 		b.Fatalf("LoadTemplate() failed: %v", err)
@@ -161,7 +163,7 @@ server { listen ${web.http.port}; ssl_certificate ${ssl.crt.default}; }`,
 			Hostname: "test.example.com",
 		}
 
-		gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
+		gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
 		if err != nil {
 			b.Fatalf("NewGenerator(, nil) failed: %v", err)
 		}
@@ -169,7 +171,7 @@ server { listen ${web.http.port}; ssl_certificate ${ssl.crt.default}; }`,
 		gen.TemplateDir = templateDir
 		gen.ConfDir = iterOutputDir
 
-		processor := NewTemplateProcessor(gen, templateDir, iterOutputDir)
+		processor := NewTemplateProcessor(gen, gen.env.FS, templateDir, iterOutputDir)
 		if err := processor.ProcessAllTemplates(context.Background()); err != nil {
 			b.Fatalf("ProcessAllTemplates() failed: %v", err)
 		}
@@ -186,7 +188,7 @@ func BenchmarkVariableLookup(b *testing.B) {
 		Hostname: "test.example.com",
 	}
 
-	gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
 	if err != nil {
 		b.Fatalf("NewGenerator(, nil) failed: %v", err)
 	}
@@ -205,7 +207,7 @@ func BenchmarkVariableExpansion(b *testing.B) {
 		Hostname: "test.example.com",
 	}
 
-	gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
 	if err != nil {
 		b.Fatalf("NewGenerator(, nil) failed: %v", err)
 	}
@@ -216,7 +218,7 @@ func BenchmarkVariableExpansion(b *testing.B) {
 		"proxy_connect_timeout ${main.ctimeout}s;",
 	}
 
-	processor := NewTemplateProcessor(gen, "", "")
+	processor := NewTemplateProcessor(gen, gen.env.FS, "", "")
 
 	for b.Loop() {
 		for _, str := range testStrings {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/config/configtest"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // TestResolvePOP3Capabilities tests all branches of resolvePOP3Capabilities
@@ -56,6 +57,7 @@ func TestResolvePOP3Capabilities(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			g := &Generator{
+				env:          sys.Real(),
 				GlobalConfig: &config.GlobalConfig{Data: tt.globalData},
 			}
 			result, err := g.resolvePOP3Capabilities(context.Background())
@@ -118,6 +120,7 @@ func TestResolveIMAPCapabilities(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			g := &Generator{
+				env:          sys.Real(),
 				GlobalConfig: &config.GlobalConfig{Data: tt.globalData},
 			}
 			result, err := g.resolveIMAPCapabilities(context.Background())
@@ -216,6 +219,7 @@ func TestFormatPOP3Capabilities(t *testing.T) {
 // TestResolvePOP3Capabilities_WhitespaceOnly tests resolvePOP3Capabilities with whitespace-only input
 func TestResolvePOP3Capabilities_WhitespaceOnly(t *testing.T) {
 	g := &Generator{
+		env: sys.Real(),
 		GlobalConfig: &config.GlobalConfig{Data: configtest.NewConfigMapFrom(map[string]string{
 			"zimbraReverseProxyPop3EnabledCapability": "\n\n\n",
 		})},

@@ -18,6 +18,8 @@ import (
 // key: LC.java defaults merged under localconfig.xml, ${var} expanded. A key
 // absent from localconfig.xml but known to LC.java must therefore resolve.
 func TestExecuteLocalConfigCommand_IncludesDefaults(t *testing.T) {
+	t.Parallel()
+
 	xml := `<?xml version="1.0" encoding="UTF-8"?>
 <localconfig>
 <key name="zimbra_home"><value>/opt/zextras</value></key>
@@ -28,14 +30,10 @@ func TestExecuteLocalConfigCommand_IncludesDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	prev := loadResolvedLocalConfig
-	t.Cleanup(func() { loadResolvedLocalConfig = prev })
-
-	loadResolvedLocalConfig = func() (map[string]string, error) {
+	cm := newTestConfigManager(t)
+	cm.loadResolvedLocalConfig = func() (map[string]string, error) {
 		return localconfig.LoadResolvedConfigFromFile(path)
 	}
-
-	cm := newTestConfigManager(t)
 
 	out, err := cm.executeLocalConfigCommand(context.Background())
 	if err != nil {

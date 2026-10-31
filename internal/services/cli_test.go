@@ -19,65 +19,85 @@ import (
 
 // TestIsDepEnabled_UnknownService verifies that an unregistered dep is disabled.
 func TestIsDepEnabled_UnknownService(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	if isDepEnabled(context.Background(), "nonexistent-service-xyz") {
+	if ctl.isDepEnabled(context.Background(), "nonexistent-service-xyz") {
 		t.Error("expected isDepEnabled to return false for unknown service")
 	}
 }
 
 // TestIsDepEnabled_NoEnableCheck verifies that a service without EnableCheck is enabled.
 func TestIsDepEnabled_NoEnableCheck(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	// "memcached" is a real service with no EnableCheck — always enabled.
-	if !isDepEnabled(context.Background(), "memcached") {
+	if !ctl.isDepEnabled(context.Background(), "memcached") {
 		t.Error("expected isDepEnabled to return true for service with no EnableCheck")
 	}
 }
 
 // TestIsDepEnabled_EnableCheckTrue verifies that EnableCheck returning true enables the dep.
 func TestIsDepEnabled_EnableCheckTrue(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	orig := Registry["memcached"]
-	defer func() { Registry["memcached"] = orig }()
+	orig := ctl.registry["memcached"]
+	defer func() { ctl.registry["memcached"] = orig }()
 
 	def := *orig
 	def.EnableCheck = func(_ context.Context) bool { return true }
-	Registry["memcached"] = &def
+	ctl.registry["memcached"] = &def
 
-	if !isDepEnabled(context.Background(), "memcached") {
+	if !ctl.isDepEnabled(context.Background(), "memcached") {
 		t.Error("expected isDepEnabled to return true when EnableCheck returns true")
 	}
 }
 
 // TestIsDepEnabled_EnableCheckFalse verifies that EnableCheck returning false disables the dep.
 func TestIsDepEnabled_EnableCheckFalse(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	orig := Registry["memcached"]
-	defer func() { Registry["memcached"] = orig }()
+	orig := ctl.registry["memcached"]
+	defer func() { ctl.registry["memcached"] = orig }()
 
 	def := *orig
 	def.EnableCheck = func(_ context.Context) bool { return false }
-	Registry["memcached"] = &def
+	ctl.registry["memcached"] = &def
 
-	if isDepEnabled(context.Background(), "memcached") {
+	if ctl.isDepEnabled(context.Background(), "memcached") {
 		t.Error("expected isDepEnabled to return false when EnableCheck returns false")
 	}
 }
 
 // TestServiceStart_UnknownService verifies error for unknown service.
 func TestServiceStart_UnknownService(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	err := ServiceStart(context.Background(), "nonexistent-xyz")
+	err := ctl.ServiceStart(context.Background(), "nonexistent-xyz")
 	if err == nil {
 		t.Fatal("expected error for unknown service")
 	}
@@ -85,10 +105,14 @@ func TestServiceStart_UnknownService(t *testing.T) {
 
 // TestServiceStop_UnknownService verifies error for unknown service.
 func TestServiceStop_UnknownService(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	err := ServiceStop(context.Background(), "nonexistent-xyz")
+	err := ctl.ServiceStop(context.Background(), "nonexistent-xyz")
 	if err == nil {
 		t.Fatal("expected error for unknown service")
 	}
@@ -96,10 +120,14 @@ func TestServiceStop_UnknownService(t *testing.T) {
 
 // TestServiceRestart_UnknownService verifies error for unknown service.
 func TestServiceRestart_UnknownService(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	err := ServiceRestart(context.Background(), "nonexistent-xyz")
+	err := ctl.ServiceRestart(context.Background(), "nonexistent-xyz")
 	if err == nil {
 		t.Fatal("expected error for unknown service")
 	}
@@ -107,10 +135,14 @@ func TestServiceRestart_UnknownService(t *testing.T) {
 
 // TestServiceReload_UnknownService verifies error for unknown service.
 func TestServiceReload_UnknownService(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	err := ServiceReload(context.Background(), "nonexistent-xyz")
+	err := ctl.ServiceReload(context.Background(), "nonexistent-xyz")
 	if err == nil {
 		t.Fatal("expected error for unknown service")
 	}
@@ -118,10 +150,14 @@ func TestServiceReload_UnknownService(t *testing.T) {
 
 // TestServiceStatus_UnknownService verifies error for unknown service.
 func TestServiceStatus_UnknownService(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	_, err := ServiceStatus(context.Background(), "nonexistent-xyz")
+	_, err := ctl.ServiceStatus(context.Background(), "nonexistent-xyz")
 	if err == nil {
 		t.Fatal("expected error for unknown service")
 	}
@@ -129,10 +165,14 @@ func TestServiceStatus_UnknownService(t *testing.T) {
 
 // TestRunPreStartHooks_NoHooks verifies that no hooks returns nil.
 func TestRunPreStartHooks_NoHooks(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	sm := NewServiceManager()
+	sm := NewServiceManager(ctl)
 	def := &ServiceDef{Name: "test"}
 	err := runPreStartHooks(context.Background(), "test", sm, def)
 	if err != nil {
@@ -142,10 +182,14 @@ func TestRunPreStartHooks_NoHooks(t *testing.T) {
 
 // TestRunPreStartHooks_HookError verifies that hook errors are returned.
 func TestRunPreStartHooks_HookError(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	sm := NewServiceManager()
+	sm := NewServiceManager(ctl)
 	wantErr := errors.New("hook failure")
 	def := &ServiceDef{
 		Name: "test",
@@ -164,10 +208,14 @@ func TestRunPreStartHooks_HookError(t *testing.T) {
 
 // TestRunPreStartHooks_HookSuccess verifies that successful hooks return nil.
 func TestRunPreStartHooks_HookSuccess(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	sm := NewServiceManager()
+	sm := NewServiceManager(ctl)
 	called := false
 	def := &ServiceDef{
 		Name: "test",
@@ -190,10 +238,14 @@ func TestRunPreStartHooks_HookSuccess(t *testing.T) {
 // TestRunPostStartHooks_HookError verifies that post-start hook errors are logged
 // but not returned (the function returns nothing).
 func TestRunPostStartHooks_HookError(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	sm := NewServiceManager()
+	sm := NewServiceManager(ctl)
 	called := false
 	def := &ServiceDef{
 		Name: "test",
@@ -214,6 +266,10 @@ func TestRunPostStartHooks_HookError(t *testing.T) {
 // TestStartEnabledDependencies_UnknownDep verifies that an unknown dep fails gracefully.
 // isDepEnabled returns false for unknown deps, so the dep is skipped — no error.
 func TestStartEnabledDependencies_UnknownDep(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -221,7 +277,7 @@ func TestStartEnabledDependencies_UnknownDep(t *testing.T) {
 		Name:         "parent",
 		Dependencies: []string{"nonexistent-dep-xyz"},
 	}
-	err := startEnabledDependencies(context.Background(), "parent", def)
+	err := ctl.startEnabledDependencies(context.Background(), "parent", def)
 	if err != nil {
 		t.Errorf("expected no error for unknown (disabled) dep, got: %v", err)
 	}
@@ -229,11 +285,15 @@ func TestStartEnabledDependencies_UnknownDep(t *testing.T) {
 
 // TestStartEnabledDependencies_NoDeps verifies empty dependencies are a no-op.
 func TestStartEnabledDependencies_NoDeps(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	def := &ServiceDef{Name: "parent"}
-	err := startEnabledDependencies(context.Background(), "parent", def)
+	err := ctl.startEnabledDependencies(context.Background(), "parent", def)
 	if err != nil {
 		t.Errorf("expected no error with no dependencies, got: %v", err)
 	}
@@ -242,11 +302,15 @@ func TestStartEnabledDependencies_NoDeps(t *testing.T) {
 // TestServiceListStatus_ReturnsAllServices verifies ServiceListStatus returns entries
 // for every registered service.
 func TestServiceListStatus_ReturnsAllServices(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	ctx := context.Background()
-	result := ServiceListStatus(ctx)
+	result := ctl.ServiceListStatus(ctx)
 	if len(result) == 0 {
 		t.Fatal("expected at least one service in ServiceListStatus result")
 	}
@@ -257,31 +321,17 @@ func TestServiceListStatus_ReturnsAllServices(t *testing.T) {
 		}
 	}
 	// Result count must match registry size
-	if len(result) != len(Registry) {
-		t.Errorf("expected %d entries, got %d", len(Registry), len(result))
-	}
-}
-
-// TestSystemctl_NotBooted verifies Systemctl returns ErrSystemdNotBooted when
-// systemd is not the init system (which is the case in the CI/test environment).
-func TestSystemctl_NotBooted(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	// systemd.IsBooted() returns false in this test environment (no /run/systemd/system).
-	// Systemctl must return ErrSystemdNotBooted immediately without invoking systemctl.
-	err := Systemctl(context.Background(), "status", "carbonio-fake.service")
-	// In CI the host may or may not have systemd. Accept either:
-	// - ErrSystemdNotBooted (non-systemd host)
-	// - any other error (systemd host where unit doesn't exist)
-	// What we must NOT get is a nil error for a non-existent unit.
-	if err == nil {
-		t.Error("expected Systemctl to return an error for a non-existent unit")
+	if len(result) != len(ctl.registry) {
+		t.Errorf("expected %d entries, got %d", len(ctl.registry), len(result))
 	}
 }
 
 // TestRewriteViaConfigd_OKFromLocalListener verifies a successful REWRITE round-trip.
 func TestRewriteViaConfigd_OKFromLocalListener(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -294,14 +344,11 @@ func TestRewriteViaConfigd_OKFromLocalListener(t *testing.T) {
 
 	port := ln.Addr().(*net.TCPAddr).Port
 
-	old := loadConfig
-	loadConfig = func() (map[string]string, error) {
+	ctl.loadConfig = func() (map[string]string, error) {
 		return map[string]string{
 			"zmconfigd_listen_port": fmt.Sprintf("%d", port),
 		}, nil
 	}
-
-	defer func() { loadConfig = old }()
 
 	go func() {
 		conn, err := ln.Accept()
@@ -319,25 +366,26 @@ func TestRewriteViaConfigd_OKFromLocalListener(t *testing.T) {
 		_, _ = conn.Write([]byte("OK\n"))
 	}()
 
-	err = rewriteViaConfigd(context.Background(), []string{"proxy", "mta"})
+	err = ctl.rewriteViaConfigd(context.Background(), []string{"proxy", "mta"})
 	if err != nil {
-		t.Errorf("rewriteViaConfigd() returned error: %v", err)
+		t.Errorf("ctl.rewriteViaConfigd() returned error: %v", err)
 	}
 }
 
 // TestRewriteViaConfigd_NoPortFallsToDefault verifies error when no port config and default port is closed.
 func TestRewriteViaConfigd_NoPortFallsToDefault(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	old := loadConfig
-	loadConfig = func() (map[string]string, error) {
+	ctl.loadConfig = func() (map[string]string, error) {
 		return map[string]string{}, nil
 	}
 
-	defer func() { loadConfig = old }()
-
-	err := rewriteViaConfigd(context.Background(), []string{"proxy"})
+	err := ctl.rewriteViaConfigd(context.Background(), []string{"proxy"})
 	if err == nil {
 		t.Fatal("expected error when configd is not reachable")
 	}
@@ -349,6 +397,10 @@ func TestRewriteViaConfigd_NoPortFallsToDefault(t *testing.T) {
 
 // TestRewriteViaConfigd_ErrorFromListener verifies error when configd returns ERROR.
 func TestRewriteViaConfigd_ErrorFromListener(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -361,14 +413,11 @@ func TestRewriteViaConfigd_ErrorFromListener(t *testing.T) {
 
 	port := ln.Addr().(*net.TCPAddr).Port
 
-	old := loadConfig
-	loadConfig = func() (map[string]string, error) {
+	ctl.loadConfig = func() (map[string]string, error) {
 		return map[string]string{
 			"zmconfigd_listen_port": fmt.Sprintf("%d", port),
 		}, nil
 	}
-
-	defer func() { loadConfig = old }()
 
 	go func() {
 		conn, err := ln.Accept()
@@ -386,7 +435,7 @@ func TestRewriteViaConfigd_ErrorFromListener(t *testing.T) {
 		_, _ = conn.Write([]byte("ERROR something went wrong\n"))
 	}()
 
-	err = rewriteViaConfigd(context.Background(), []string{"proxy"})
+	err = ctl.rewriteViaConfigd(context.Background(), []string{"proxy"})
 	if err == nil {
 		t.Fatal("expected error when configd returns ERROR")
 	}
@@ -397,23 +446,39 @@ func TestRewriteViaConfigd_ErrorFromListener(t *testing.T) {
 }
 
 func TestRunningPID_NilDef(t *testing.T) {
-	if RunningPID(nil) != 0 {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	if ctl.RunningPID(context.Background(), nil) != 0 {
 		t.Error("expected 0 for nil def")
 	}
 }
 
 func TestRunningPID_EmptyPidFile(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	def := &ServiceDef{Name: "test", PidFile: "", ProcessName: ""}
-	if RunningPID(def) != 0 {
+	if ctl.RunningPID(context.Background(), def) != 0 {
 		t.Error("expected 0 for empty PidFile and ProcessName")
 	}
 }
 
 func TestRunningPID_ValidPidFile(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may read real proc")
 	}
 	self := os.Getpid()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
 	tmpDir := t.TempDir()
 	pidFile := filepath.Join(tmpDir, "test.pid")
 	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(self)+"\n"), 0o644); err != nil {
@@ -423,15 +488,19 @@ func TestRunningPID_ValidPidFile(t *testing.T) {
 	def := &ServiceDef{
 		Name:        "test",
 		PidFile:     pidFile,
-		ProcessName: "nonexistent-process-xyz",
+		ProcessName: exe,
 	}
-	pid := RunningPID(def)
+	pid := ctl.RunningPID(context.Background(), def)
 	if pid != self {
 		t.Errorf("expected PID %d, got %d", self, pid)
 	}
 }
 
 func TestRunningPID_PidFileDeadFallsBackToProcessName(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: reads /proc")
 	}
@@ -446,65 +515,48 @@ func TestRunningPID_PidFileDeadFallsBackToProcessName(t *testing.T) {
 		PidFile:     pidFile,
 		ProcessName: "nonexistent-process-xyz-test",
 	}
-	pid := RunningPID(def)
+	pid := ctl.RunningPID(context.Background(), def)
 	if pid != 0 {
 		t.Errorf("expected 0 for dead pidfile and nonexistent process, got %d", pid)
 	}
 }
 
-func TestPidFromPidFile_EmptyPath(t *testing.T) {
-	if pidFromPidFile("") != 0 {
-		t.Error("expected 0 for empty path")
-	}
-}
-
-func TestPidFromPidFile_NonexistentFile(t *testing.T) {
-	if pidFromPidFile("/nonexistent/path/test.pid") != 0 {
-		t.Error("expected 0 for nonexistent file")
-	}
-}
-
-func TestPidFromPidFile_ValidPid(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: reads /proc")
-	}
-	self := os.Getpid()
-	tmpDir := t.TempDir()
-	pidFile := filepath.Join(tmpDir, "test.pid")
-	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(self)+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	pid := pidFromPidFile(pidFile)
-	if pid != self {
-		t.Errorf("expected %d, got %d", self, pid)
-	}
-}
-
 func TestPidFromProcessName_EmptyName(t *testing.T) {
-	if pidFromProcessName("") != 0 {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	if ctl.pidFromProcessName(context.Background(), "") != 0 {
 		t.Error("expected 0 for empty process name")
 	}
 }
 
 func TestPidFromProcessName_Nonexistent(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: reads /proc")
 	}
-	pid := pidFromProcessName("nonexistent-process-xyz-12345")
+	pid := ctl.pidFromProcessName(context.Background(), "nonexistent-process-xyz-12345")
 	if pid != 0 {
 		t.Errorf("expected 0 for nonexistent process, got %d", pid)
 	}
 }
 
 func TestServiceListStatusStream_Cancelled(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	ch := ServiceListStatusStream(ctx)
+	ch := ctl.ServiceListStatusStream(ctx)
 	count := 0
 	for range ch {
 		count++
@@ -513,11 +565,15 @@ func TestServiceListStatusStream_Cancelled(t *testing.T) {
 }
 
 func TestServiceListStatusStream_Default(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	ctx := context.Background()
-	ch := ServiceListStatusStream(ctx)
+	ch := ctl.ServiceListStatusStream(ctx)
 
 	entries := 0
 	for info := range ch {
@@ -527,50 +583,46 @@ func TestServiceListStatusStream_Default(t *testing.T) {
 		entries++
 	}
 
-	if entries != len(Registry) {
-		t.Errorf("expected %d entries, got %d", len(Registry), entries)
+	if entries != len(ctl.registry) {
+		t.Errorf("expected %d entries, got %d", len(ctl.registry), entries)
 	}
-}
-
-func TestDefaultIsSystemdMode(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	_ = defaultIsSystemdMode()
 }
 
 func TestIsSystemdMode_Override(t *testing.T) {
-	orig := isSystemdModeFn
-	defer func() { isSystemdModeFn = orig }()
+	t.Parallel()
 
-	isSystemdModeFn = func() bool { return true }
-	if !IsSystemdMode() {
+	ctl := newRealController(t)
+
+	ctl.pinMode(true)
+	if !ctl.IsSystemdMode() {
 		t.Error("expected IsSystemdMode to return true when override is true")
 	}
 
-	isSystemdModeFn = func() bool { return false }
-	if IsSystemdMode() {
+	ctl.pinMode(false)
+	if ctl.IsSystemdMode() {
 		t.Error("expected IsSystemdMode to return false when override is false")
 	}
 }
 
 func TestServiceStatus_SystemdModeOverride(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	orig := isSystemdModeFn
-	defer func() { isSystemdModeFn = orig }()
 
-	isSystemdModeFn = func() bool { return false }
+	ctl.pinMode(false)
 
 	def := &ServiceDef{
 		Name:        "test-legacy-status",
 		ProcessName: "nonexistent-process-xyz",
 	}
-	Registry["test-legacy-status"] = def
-	defer delete(Registry, "test-legacy-status")
+	ctl.registry["test-legacy-status"] = def
+	defer delete(ctl.registry, "test-legacy-status")
 
-	running, err := ServiceStatus(context.Background(), "test-legacy-status")
+	running, err := ctl.ServiceStatus(context.Background(), "test-legacy-status")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -580,52 +632,55 @@ func TestServiceStatus_SystemdModeOverride(t *testing.T) {
 }
 
 func TestNoRewrite_SkipConfigRewrite(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	origNoRewrite := NoRewrite
-	defer func() { NoRewrite = origNoRewrite }()
 
-	orig := isSystemdModeFn
-	defer func() { isSystemdModeFn = orig }()
-
-	isSystemdModeFn = func() bool { return false }
-	NoRewrite = true
+	ctl.pinMode(false)
+	ctl.noRewrite = true
 
 	def := &ServiceDef{
 		Name:          "test-norewrite",
 		ConfigRewrite: []string{"proxy", "mta"},
 	}
-	Registry["test-norewrite"] = def
-	defer delete(Registry, "test-norewrite")
+	ctl.registry["test-norewrite"] = def
+	defer delete(ctl.registry, "test-norewrite")
 
-	err := ServiceStart(context.Background(), "test-norewrite")
+	err := ctl.ServiceStart(context.Background(), "test-norewrite")
 	if err == nil {
 		t.Error("expected error for service with no launcher")
 	}
 }
 
 func TestServiceReload_FallbackOnNonSystemd(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	orig := isSystemdModeFn
-	defer func() { isSystemdModeFn = orig }()
 
-	isSystemdModeFn = func() bool { return false }
+	ctl.pinMode(false)
 
-	err := ServiceReload(context.Background(), "proxy")
+	err := ctl.ServiceReload(context.Background(), "proxy")
 	_ = err
 }
 
 func TestServiceStatus_LegacyMode_PidFile(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	orig := isSystemdModeFn
-	defer func() { isSystemdModeFn = orig }()
 
-	isSystemdModeFn = func() bool { return false }
+	ctl.pinMode(false)
 
 	self := os.Getpid()
 	tmpDir := t.TempDir()
@@ -634,15 +689,22 @@ func TestServiceStatus_LegacyMode_PidFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// The pidfile PID is believed only when its binary is the service's: the
+	// test process is its own "service" here.
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	def := &ServiceDef{
 		Name:        "test-pid-status",
 		PidFile:     pidFile,
-		ProcessName: "nonexistent-pid-status-xyz",
+		ProcessName: exe,
 	}
-	Registry["test-pid-status"] = def
-	defer delete(Registry, "test-pid-status")
+	ctl.registry["test-pid-status"] = def
+	defer delete(ctl.registry, "test-pid-status")
 
-	running, err := ServiceStatus(context.Background(), "test-pid-status")
+	running, err := ctl.ServiceStatus(context.Background(), "test-pid-status")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -652,22 +714,24 @@ func TestServiceStatus_LegacyMode_PidFile(t *testing.T) {
 }
 
 func TestServiceStatus_LegacyMode_ProcessName(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	orig := isSystemdModeFn
-	defer func() { isSystemdModeFn = orig }()
 
-	isSystemdModeFn = func() bool { return false }
+	ctl.pinMode(false)
 
 	def := &ServiceDef{
 		Name:        "test-proc-scan",
 		ProcessName: "nonexistent-proc-scan-xyz",
 	}
-	Registry["test-proc-scan"] = def
-	defer delete(Registry, "test-proc-scan")
+	ctl.registry["test-proc-scan"] = def
+	defer delete(ctl.registry, "test-proc-scan")
 
-	running, err := ServiceStatus(context.Background(), "test-proc-scan")
+	running, err := ctl.ServiceStatus(context.Background(), "test-proc-scan")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -677,21 +741,23 @@ func TestServiceStatus_LegacyMode_ProcessName(t *testing.T) {
 }
 
 func TestServiceStatus_LegacyMode_NoPidFileNoProcessName(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	orig := isSystemdModeFn
-	defer func() { isSystemdModeFn = orig }()
 
-	isSystemdModeFn = func() bool { return false }
+	ctl.pinMode(false)
 
 	def := &ServiceDef{
 		Name: "test-no-pid-no-proc",
 	}
-	Registry["test-no-pid-no-proc"] = def
-	defer delete(Registry, "test-no-pid-no-proc")
+	ctl.registry["test-no-pid-no-proc"] = def
+	defer delete(ctl.registry, "test-no-pid-no-proc")
 
-	running, err := ServiceStatus(context.Background(), "test-no-pid-no-proc")
+	running, err := ctl.ServiceStatus(context.Background(), "test-no-pid-no-proc")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -701,19 +767,27 @@ func TestServiceStatus_LegacyMode_NoPidFileNoProcessName(t *testing.T) {
 }
 
 func TestStartEnabledDependencies_DisabledDep(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	def := &ServiceDef{
 		Name:         "test-with-disabled-dep",
 		Dependencies: []string{"nonexistent-service-xyz"},
 	}
 
-	err := startEnabledDependencies(context.Background(), "test-with-disabled-dep", def)
+	err := ctl.startEnabledDependencies(context.Background(), "test-with-disabled-dep", def)
 	if err != nil {
 		t.Errorf("startEnabledDependencies with disabled dep should not error, got %v", err)
 	}
 }
 
 func TestRunPreStartHooks_Nil(t *testing.T) {
-	sm := NewServiceManager()
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	sm := NewServiceManager(ctl)
 	def := &ServiceDef{Name: "test", PreStart: nil}
 	err := runPreStartHooks(context.Background(), "test", sm, def)
 	if err != nil {
@@ -722,32 +796,38 @@ func TestRunPreStartHooks_Nil(t *testing.T) {
 }
 
 func TestRunPostStartHooks_Nil(t *testing.T) {
+	t.Parallel()
+
 	def := &ServiceDef{Name: "test", PostStart: nil}
 	runPostStartHooks(context.Background(), "test", nil, def)
 }
 
 func TestRewriteConfigs_NoScript(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	oldBase := basePath
-	basePath = "/nonexistent/path/for/test"
-	defer func() { basePath = oldBase }()
+	ctl.p.base = "/nonexistent/path/for/test"
 
 	def := &ServiceDef{
 		Name:          "test-rewrite-no-script",
 		ConfigRewrite: []string{"proxy"},
 	}
-	rewriteConfigs(context.Background(), def)
+	ctl.rewriteConfigs(context.Background(), def)
 }
 
 func TestServiceStart_AlreadyRunningPid(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	orig := isSystemdModeFn
-	defer func() { isSystemdModeFn = orig }()
-	isSystemdModeFn = func() bool { return false }
+	ctl.pinMode(false)
 
 	// Register a service that's "running" (our own PID in pidfile)
 	tmp := t.TempDir()
@@ -762,44 +842,50 @@ func TestServiceStart_AlreadyRunningPid(t *testing.T) {
 		PidFile:     pidFile,
 		ProcessName: "nonexistent-already-running-xyz",
 	}
-	Registry["test-already-running"] = def
-	defer delete(Registry, "test-already-running")
+	ctl.registry["test-already-running"] = def
+	defer delete(ctl.registry, "test-already-running")
 
-	err := ServiceStart(context.Background(), "test-already-running")
+	err := ctl.ServiceStart(context.Background(), "test-already-running")
 	if err != nil {
 		t.Errorf("expected nil when service already running, got %v", err)
 	}
 }
 
 func TestServiceRestart_UnknownSvc(t *testing.T) {
-	err := ServiceRestart(context.Background(), "nonexistent-service-xyz")
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	err := ctl.ServiceRestart(context.Background(), "nonexistent-service-xyz")
 	if err == nil {
 		t.Error("expected error for unknown service")
 	}
 }
 
 func TestStartEnabledDependencies_FailsToStart(t *testing.T) {
-	orig := isSystemdModeFn
-	defer func() { isSystemdModeFn = orig }()
-	isSystemdModeFn = func() bool { return false }
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	ctl.pinMode(false)
 
 	depDef := &ServiceDef{
 		Name:        "test-dep-fail",
 		ProcessName: "nonexistent-dep-fail-xyz",
 		BinaryPath:  "/nonexistent/binary",
 	}
-	Registry["test-dep-fail"] = depDef
-	defer delete(Registry, "test-dep-fail")
+	ctl.registry["test-dep-fail"] = depDef
+	defer delete(ctl.registry, "test-dep-fail")
 
 	parentDef := &ServiceDef{
 		Name:         "test-parent-dep",
 		Dependencies: []string{"test-dep-fail"},
 		BinaryPath:   "/nonexistent/binary",
 	}
-	Registry["test-parent-dep"] = parentDef
-	defer delete(Registry, "test-parent-dep")
+	ctl.registry["test-parent-dep"] = parentDef
+	defer delete(ctl.registry, "test-parent-dep")
 
-	err := startEnabledDependencies(context.Background(), "test-parent-dep", parentDef)
+	err := ctl.startEnabledDependencies(context.Background(), "test-parent-dep", parentDef)
 	if err == nil {
 		t.Error("expected error when dependency fails to start")
 	}

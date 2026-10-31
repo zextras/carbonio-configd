@@ -6,30 +6,96 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 # Restart Behavior
 
-## REWRITE commands vs. automatic restarts
+## When a section triggers restarts
 
-Source: `internal/configmgr/manager_actions.go` (`compileSectionActions`)
+Source: `internal/plan/compute.go` (`compileSection`, `compileSectionRestarts`)
 
-Service restarts only happen during automatic polling cycles where config changes are
-detected. They do **not** happen when a REWRITE command triggers the cycle.
-
-When the TCP server receives a `REWRITE` command (sent by `configd rewrite <section>...`
-or directly via netcat), it calls `State.AddRequestedConfigs`, which populates
-`RequestedConfig`. In `compileSectionActions`, the restart-compilation block is guarded by:
+`plan.Compute` decides, section by section, which services the plan restarts. A section
+that is processed (first run, forced, requested, or one of its required variables changed)
+compiles its `RESTART` services into plan restarts **unless** the section itself is
+excluded:
 
 ```go
-if firstRun || len(forcedConfig) > 0 || len(requestedConfigs) > 0 {
-    return  // skip restarts
+if !firstRun && !forced[section] && !requested[section] {
+    compileSectionRestarts(...)
 }
 ```
 
-So a REWRITE cycle rewrites config files and runs postconf/LDAP operations, but no service
-is restarted. This makes `configd rewrite proxy` safe to run on a live system — nginx
-config files are updated but nginx itself is not touched.
+The skip is **section-scoped**, not cycle-wide:
 
-Automatic restarts happen when `RequestedConfig` is empty, `ForcedConfig` is empty, and
-it is not the first run. This means only organic polling cycles that detect a config
-change can trigger restarts.
+- On the first run no section restarts anything.
+- A section named by `configd rewrite <section>` (forced) or by a TCP `REWRITE` command
+  (requested) is rewritten but its own services are not restarted. Restarting them would
+  trigger the `ExecStartPre` REWRITE of the very service being restarted.
+- Any other section in the same cycle whose variables changed still restarts its services.
+  A cycle that carries a REWRITE request for `proxy` therefore still restarts `mta` if an
+  `mta` variable changed in that cycle.
+
+So `configd rewrite proxy` is safe on a live system: nginx configuration is rewritten but
+nginx is not touched by that request.
+
+For each `RESTART` service of a restarting section the plan records:
+
+- `restart` when the service is enabled on the node;
+- `opendkim`: `restart` when the MTA is enabled, even if opendkim itself is not;
+- `archiving`: never stopped when disabled;
+- `stop` for any other disabled service.
+
+Services that became enabled or disabled since the previous cycle add `start`/`stop`
+entries with the reasons `service-enabled`/`service-disabled`.
+
+## Reasons
+
+Every plan restart carries the reasons that caused it, and so does every other plan entry:
+
+| Kind | Meaning |
+|---|---|
+| `first-run` | first cycle of the process |
+| `forced` | section named on the command line |
+| `requested` | section named by a REWRITE command |
+| `var-changed` | a variable the section requires changed (`old->new`; secret values redacted, long values truncated) |
+| `service-enabled` / `service-disabled` | the service changed state on this node |
+| `dependency` | rendered as `dependency of <name>`: the service manager restarted it because `<name>` was restarted through `DEPENDS` (watchdog restarts only, see Dependency cascading) |
+| `retry` | the previous attempt did not complete |
+| `mapfile-sync` | a mapped file is re-synced every cycle |
+
+When a service is restarted, one INFO line is logged:
+
+```
+msg="Restarting service" service=amavis reasons=[...]
+```
+
+The `reasons` attribute holds the human-readable reasons, for example
+`section mta changed because VAR zimbraMtaRestriction changed 'a'->'b'` or
+`dependency of antivirus`. A service queued several times in one cycle is logged once with
+the merged reasons.
+
+`configd plan` prints the same reasons without changing anything; see the README.
+
+## Restart settings
+
+Source: `internal/restart/policy.go` (`Policy.Apply`)
+
+`ConfigManager.ApplyRestarts` runs `restart.Policy.Apply` once per cycle, even when the plan
+has no restarts, because it also flushes due debounced requests and lets the service
+manager drain what it already holds.
+
+| Setting | Effect |
+|---|---|
+| `zmconfigd_enable_config_restarts` (default `true`) | When `false` no plan restart is consumed; they are carried to the next cycle |
+| `zmconfigd_restart_debounce_seconds` (default `0` = off) | When > 0, requests are coalesced across cycles: each request restarts the service's quiet window and the service restarts once no new request arrived for that many seconds (trailing edge). State is in memory and lost on process restart |
+| `MaxFailedRestarts` (service manager, `3`) | Retry limit, see Dependency cascading |
+| `--disable-restarts` | Dry-run: the service manager skips every restart |
+
+**Config-driven restarts do not cascade.** The legacy zmconfigd queues the `DEPENDS` of a
+service only after a successful stop or start, never after a restart, and a config change
+restarts exactly the services of the changed sections, once each. The config manager's
+service manager therefore never receives the `DEPENDS` map (only the watchdog's does), so a
+config change restarts the services named by `RESTART` and nothing else.
+
+**Deliberate correction.** `--disable-restarts` now also reaches the config manager's service
+manager (`SetDisableRestarts`); previously only the watchdog honoured it and a config change
+still restarted services.
 
 ## Service control priority
 
@@ -50,7 +116,20 @@ control path, not a per-instance flag — each of those functions bifurcates int
    never invoked. There is no `zm*ctl` fallback: services whose legacy launch is too dynamic
    for a static `BinaryPath` (mailbox, stats, mta, ldap, milter, antispam, ...) get a native
    `CustomStart`/`CustomStop` implementation in the corresponding `*_launcher.go` file instead
-   of shelling out to the old `/opt/zextras/bin/zm*ctl` scripts.
+   of shelling out to the old `/opt/zextras/bin/zm*ctl` scripts. Stops that are only a
+   bounded SIGTERM wait (slapd/LMDB) are data too: `ServiceDef.GracefulStop`.
+
+   **Process identity.** Legacy status and stop recognise a service's processes by what the
+   kernel records, never by a cmdline substring (`internal/services/procident.go`). The
+   `ServiceDef.PidFile` PID is believed only if it is alive and its `/proc/<pid>/exe` or argv
+   matches `ServiceDef.ProcessName` (an exact path, glob over a whole path, Java main class or
+   bare daemon name); otherwise `/proc` is scanned for the same identity (exe, then exact argv
+   tokens, then `comm` only for processes with an empty argv). A process that only mentions
+   the service (`tail -f .../clamd.log`, a consul sidecar `-sidecar-for carbonio-x`) never
+   matches, and a stale pidfile naming a recycled PID is ignored. A service that is not
+   running is `(false, nil)`. Every status probe of one `zmcontrol status` run or one
+   watchdog tick shares a single process-table snapshot (`services.WithProcessSnapshot`);
+   start/stop paths always read live state.
 
 **Service name → systemd unit(s)** (`ServiceDef.SystemdUnits`, used when `IsSystemdMode()`):
 
@@ -102,7 +181,11 @@ Source: `internal/services/manager.go` (`AddDependencyRestarts`, `ProcessRestart
 
 After a service restarts successfully, the service manager checks whether that service has
 any dependents registered in the `Dependencies` map. Dependents come from `DEPENDS` entries
-in `zmconfigd.cf` sections, loaded by `buildServiceDependencies` at the start of each loop.
+in `zmconfigd.cf` sections, loaded by `buildServiceDependencies` at the start of each loop and
+set on the watchdog's service manager only. A dependent restarted this way is queued with the
+reason `dependency of <service>`. Restarts derived from a config change (`ConfigManager`)
+use a separate service manager without dependencies and never cascade, as in the legacy
+zmconfigd; `configd plan` therefore lists exactly the services the sections name.
 
 For each dependent service:
 
@@ -134,3 +217,11 @@ error wrapping `ErrRestartsFailed` that lists, sorted by name, every service tha
 left queued without progress. The watchdog logs that as a failed restart and leaves the service
 untracked until a later status check sees it running (legacy parity); configmgr logs it at ERROR.
 Services with equal start order (including all those missing from `StartOrder`) restart in name order.
+
+**Shutdown.** When the context is cancelled (SIGTERM/SIGINT) while restarts are being processed,
+`ProcessRestarts` stops at once: the interrupted restart is not retried and does not count toward
+`MaxFailedRestarts`, no further service is restarted, and one INFO line
+`Shutdown during service restarts` lists the pending services. The error it returns wraps the
+context error (not `ErrRestartsFailed`), and neither the restart policy nor the watchdog log it as
+an ERROR or count a failed restart. The legacy zmconfigd also stops immediately on these signals
+(its handler calls `sys.exit(0)`).

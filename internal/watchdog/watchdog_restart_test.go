@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/metrics"
 	"github.com/zextras/carbonio-configd/internal/services"
 	"github.com/zextras/carbonio-configd/internal/state"
 )
@@ -23,6 +24,8 @@ import (
 // success, and leaves the service untracked (legacy configd only re-tracks a
 // service once a later status check sees it running).
 func TestRestartDownService_FailureNotLoggedAsSuccess(t *testing.T) {
+	t.Parallel()
+
 	var buf bytes.Buffer
 
 	ctx := logger.ContextWithLogger(context.Background(),
@@ -54,6 +57,8 @@ func TestRestartDownService_FailureNotLoggedAsSuccess(t *testing.T) {
 
 // TestRestartDownService_SuccessRetracks is the success counterpart.
 func TestRestartDownService_SuccessRetracks(t *testing.T) {
+	t.Parallel()
+
 	var buf bytes.Buffer
 
 	ctx := logger.ContextWithLogger(context.Background(),
@@ -76,6 +81,8 @@ func TestRestartDownService_SuccessRetracks(t *testing.T) {
 // TestCheckOneService_ProbeFailureIsWarn verifies a failing status probe is a
 // WARN, not an ERROR.
 func TestCheckOneService_ProbeFailureIsWarn(t *testing.T) {
+	t.Parallel()
+
 	var buf bytes.Buffer
 
 	ctx := logger.ContextWithLogger(context.Background(),
@@ -88,7 +95,7 @@ func TestCheckOneService_ProbeFailureIsWarn(t *testing.T) {
 	wd.AddService(ctx, "amavis")
 	wd.SetServiceEnabled(ctx, "amavis", true)
 
-	wd.checkOneService(ctx, "amavis", map[string]bool{})
+	wd.checkOneService(ctx, ctx, "amavis", map[string]bool{})
 
 	out := buf.String()
 	if !strings.Contains(out, "level=WARN") || !strings.Contains(out, "Failed to check service") {
@@ -104,6 +111,8 @@ func TestCheckOneService_ProbeFailureIsWarn(t *testing.T) {
 // context is done even though the monitoring loop is stuck in a restart, and
 // that the watchdog can be started and stopped again afterwards.
 func TestWatchdog_StopHonorsContextWhileRunBusy(t *testing.T) {
+	t.Parallel()
+
 	entered := make(chan struct{}, 1)
 	release := make(chan struct{})
 
@@ -119,15 +128,17 @@ func TestWatchdog_StopHonorsContextWhileRunBusy(t *testing.T) {
 		return nil
 	}
 
-	wd := NewWatchdog(Config{
+	h := newHarness(t, Config{
 		ServiceManager: mockSM,
 		State:          state.NewState(),
 		CheckInterval:  5 * time.Millisecond,
 	})
+	wd := h.wd
 	wd.AddService(context.Background(), "amavis")
 	wd.SetServiceEnabled(context.Background(), "amavis", true)
 
-	wd.Start(context.Background())
+	h.start()
+	h.clock.Advance(h.wd.CheckInterval)
 
 	select {
 	case <-entered:
@@ -181,14 +192,71 @@ func TestWatchdog_StopHonorsContextWhileRunBusy(t *testing.T) {
 // TestWatchdog_StartStopRepeats verifies Stop followed by Start/Stop cycles
 // neither panics (closed channel) nor hangs.
 func TestWatchdog_StartStopRepeats(t *testing.T) {
-	wd := NewWatchdog(Config{
+	t.Parallel()
+
+	h := newHarness(t, Config{
 		ServiceManager: NewMockServiceManager(),
 		State:          state.NewState(),
 		CheckInterval:  time.Millisecond,
 	})
+	wd := h.wd
 
 	for range 3 {
 		wd.Start(context.Background())
 		wd.Stop(context.Background())
+	}
+}
+
+// TestRestartDownService_CountsRestartsInMetrics verifies the watchdog counts
+// every restart attempt by service and result.
+func TestRestartDownService_CountsRestartsInMetrics(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	reg := metrics.New()
+
+	ok := NewWatchdog(Config{ServiceManager: NewMockServiceManager(), State: state.NewState()})
+	ok.SetMetrics(reg)
+	ok.restartDownService(ctx, "antivirus")
+
+	failing := NewMockServiceManager()
+	failing.processRestartsFunc = func(func(string) string) error { return errors.New("boom") }
+
+	bad := NewWatchdog(Config{ServiceManager: failing, State: state.NewState()})
+	bad.SetMetrics(reg)
+	bad.restartDownService(ctx, "amavis")
+
+	out := string(reg.Render())
+	if !strings.Contains(out, `configd_watchdog_restarts_total{result="success",service="antivirus"} 1`) {
+		t.Errorf("missing success counter:\n%s", out)
+	}
+
+	if !strings.Contains(out, `configd_watchdog_restarts_total{result="failure",service="amavis"} 1`) {
+		t.Errorf("missing failure counter:\n%s", out)
+	}
+}
+
+// TestRestartDownService_ShutdownIsNotAFailure verifies a restart interrupted
+// by a shutdown is neither counted as a failed restart nor re-added to the
+// tracked services.
+func TestRestartDownService_ShutdownIsNotAFailure(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	reg := metrics.New()
+
+	mgr := NewMockServiceManager()
+	mgr.processRestartsFunc = func(func(string) string) error {
+		cancel()
+
+		return context.Canceled
+	}
+
+	wd := NewWatchdog(Config{ServiceManager: mgr, State: state.NewState()})
+	wd.SetMetrics(reg)
+	wd.restartDownService(ctx, "amavis")
+
+	if out := string(reg.Render()); strings.Contains(out, `service="amavis"`) {
+		t.Errorf("an interrupted restart must not be counted:\n%s", out)
 	}
 }

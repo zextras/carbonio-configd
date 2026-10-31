@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
-	"github.com/zextras/carbonio-configd/internal/state"
+	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
 
 // scannerMaxToken is bufio.Scanner's default token limit.
@@ -61,7 +61,7 @@ func FuzzRewriteReader(f *testing.F) {
 	}
 
 	ctx := logger.ContextWithLogger(context.Background(), slog.New(slog.DiscardHandler))
-	rw := NewRewriter("/opt/zextras", newMockLookup(), &state.State{})
+	rw := NewRewriter("/opt/zextras", newMockLookup(), systest.New().System())
 
 	f.Fuzz(func(t *testing.T, input string) {
 		if len(input) >= scannerMaxToken {

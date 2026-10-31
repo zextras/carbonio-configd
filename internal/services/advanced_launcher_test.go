@@ -6,6 +6,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -28,6 +29,8 @@ const hookSoapPath = "/service/admin/soap"
 const hookStatusPath = "/service/extension/zextras"
 
 func TestAdvancedRunning_True(t *testing.T) {
+	t.Parallel()
+
 	mux := http.NewServeMux()
 	mux.HandleFunc(hookSoapPath, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/xml; charset=UTF-8")
@@ -53,6 +56,8 @@ func TestAdvancedRunning_True(t *testing.T) {
 }
 
 func TestAdvancedRunning_False(t *testing.T) {
+	t.Parallel()
+
 	mux := http.NewServeMux()
 	mux.HandleFunc(hookSoapPath, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/xml; charset=UTF-8")
@@ -77,6 +82,8 @@ func TestAdvancedRunning_False(t *testing.T) {
 }
 
 func TestAdvancedRunning_AuthFailure(t *testing.T) {
+	t.Parallel()
+
 	mux := http.NewServeMux()
 	mux.HandleFunc(hookSoapPath, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -108,18 +115,20 @@ func TestAdvancedRunning_AuthFailure(t *testing.T) {
 }
 
 func TestMailboxAdvancedStatusHook_LocalConfigMissing(t *testing.T) {
-	origDir := advancedJARDir
-	t.Cleanup(func() { advancedJARDir = origDir })
+	t.Parallel()
+
+	ctl := newRealController(t)
+	ctl.loadRawConfig = func() (map[string]string, error) { return nil, errors.New("localconfig.xml missing") }
 
 	tmpDir := t.TempDir()
-	advancedJARDir = tmpDir
+	ctl.p.advancedJARDir = tmpDir
 
 	jarPath := filepath.Join(tmpDir, "carbonio-advanced-1.0.jar")
 	if err := os.WriteFile(jarPath, []byte("dummy"), 0o644); err != nil {
 		t.Fatalf("failed to create dummy JAR: %v", err)
 	}
 
-	err := MailboxAdvancedStatusHook(context.Background(), &ServiceManager{})
+	err := ctl.MailboxAdvancedStatusHook(context.Background(), &ServiceManager{})
 	if err != nil {
 		t.Errorf("MailboxAdvancedStatusHook returned error: %v", err)
 	}
@@ -128,6 +137,10 @@ func TestMailboxAdvancedStatusHook_LocalConfigMissing(t *testing.T) {
 // --- advancedInstalled ---
 
 func TestAdvancedInstalled(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	tests := []struct {
 		name  string
 		setup func(t *testing.T) string // returns dir path
@@ -205,12 +218,10 @@ func TestAdvancedInstalled(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := tt.setup(t)
 
-			old := advancedJARDir
-			advancedJARDir = dir
-			defer func() { advancedJARDir = old }()
+			ctl.p.advancedJARDir = dir
 
-			if got := advancedInstalled(); got != tt.want {
-				t.Errorf("advancedInstalled() = %v, want %v", got, tt.want)
+			if got := ctl.advancedInstalled(); got != tt.want {
+				t.Errorf("ctl.advancedInstalled() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -219,32 +230,36 @@ func TestAdvancedInstalled(t *testing.T) {
 // --- MailboxAdvancedStatusHook ---
 
 func TestMailboxAdvancedStatusHook_NotInstalled(t *testing.T) {
-	// When no advanced jars exist, the hook should return nil immediately.
-	old := advancedJARDir
-	advancedJARDir = filepath.Join(t.TempDir(), "nonexistent")
-	defer func() { advancedJARDir = old }()
+	t.Parallel()
 
-	err := MailboxAdvancedStatusHook(context.Background(), nil)
+	ctl := newRealController(t)
+
+	// When no advanced jars exist, the hook should return nil immediately.
+	ctl.p.advancedJARDir = filepath.Join(t.TempDir(), "nonexistent")
+
+	err := ctl.MailboxAdvancedStatusHook(context.Background(), nil)
 	if err != nil {
 		t.Errorf("expected nil when advanced not installed, got: %v", err)
 	}
 }
 
 func TestMailboxAdvancedStatusHook_ContextCancelled(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	// When context is cancelled, hook should return nil without hanging.
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "carbonio-advanced-1.0.jar"), []byte("fake"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	oldJAR := advancedJARDir
-	advancedJARDir = dir
-	defer func() { advancedJARDir = oldJAR }()
+	ctl.p.advancedJARDir = dir
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately
 
-	err := MailboxAdvancedStatusHook(ctx, nil)
+	err := ctl.MailboxAdvancedStatusHook(ctx, nil)
 	if err != nil {
 		t.Errorf("expected nil on cancelled context, got: %v", err)
 	}

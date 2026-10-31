@@ -9,7 +9,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -17,6 +16,7 @@ import (
 	"sync"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // bufPool reuses bytes.Buffer allocations across template processing calls.
@@ -45,6 +45,7 @@ type Template struct {
 // TemplateProcessor processes nginx configuration templates
 type TemplateProcessor struct {
 	generator             *Generator
+	fs                    sys.FS // reads template files
 	templateDir           string
 	outputDir             string
 	varPattern            *regexp.Regexp
@@ -59,9 +60,10 @@ type TemplateProcessor struct {
 }
 
 // NewTemplateProcessor creates a new template processor
-func NewTemplateProcessor(gen *Generator, templateDir, outputDir string) *TemplateProcessor {
+func NewTemplateProcessor(gen *Generator, fsys sys.FS, templateDir, outputDir string) *TemplateProcessor {
 	return &TemplateProcessor{
 		generator:             gen,
+		fs:                    fsys,
 		templateDir:           templateDir,
 		outputDir:             outputDir,
 		varPattern:            regexp.MustCompile(`\$\{([a-zA-Z0-9._:]+)\}`),
@@ -89,7 +91,7 @@ func (tp *TemplateProcessor) LoadTemplate(ctx context.Context, name string) (*Te
 	}
 
 	//nolint:gosec // G304: File path comes from trusted configuration
-	content, err := os.ReadFile(path)
+	content, err := tp.fs.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read template file %s from %s: %w", name, path, err)
 	}

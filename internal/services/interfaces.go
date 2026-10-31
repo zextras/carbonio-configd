@@ -53,6 +53,10 @@ type Manager interface {
 	// AddRestart queues a service for restart.
 	AddRestart(ctx context.Context, service string) error
 
+	// AddRestartWithReasons queues a service for restart and records why;
+	// the (merged, de-duplicated) reasons are logged when the restart runs.
+	AddRestartWithReasons(ctx context.Context, service string, reasons []string) error
+
 	// ProcessRestarts processes all queued service restarts with dependency cascading.
 	// Handles dependency ordering and retry logic.
 	// The configLookup function is used to check if dependent services are enabled (SERVICE_* keys).

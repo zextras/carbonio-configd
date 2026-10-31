@@ -1,0 +1,50 @@
+# SPDX-FileCopyrightText: 2026 Zextras <https://www.zextras.com>
+#
+# SPDX-License-Identifier: AGPL-3.0-only
+#
+# Minimal slapd-config for the configd integration tests: the cn=config
+# database is writable by its rootDN (what the ldap_* keymap writes need) and
+# the data suffix cn=zimbra uses the Carbonio rootDN. Credentials are throwaway
+# test values.
+dn: cn=config
+objectClass: olcGlobal
+cn: config
+olcLogLevel: stats
+olcThreads: 16
+
+dn: cn=schema,cn=config
+objectClass: olcSchemaConfig
+cn: schema
+
+include: file:///etc/openldap/schema/core.ldif
+include: file:///etc/openldap/schema/cosine.ldif
+include: file:///etc/openldap/schema/inetorgperson.ldif
+
+dn: olcDatabase={-1}frontend,cn=config
+objectClass: olcDatabaseConfig
+objectClass: olcFrontendConfig
+olcDatabase: {-1}frontend
+
+dn: olcDatabase={0}config,cn=config
+objectClass: olcDatabaseConfig
+olcDatabase: {0}config
+olcRootDN: cn=config
+olcRootPW: configpass
+
+dn: cn=module{0},cn=config
+objectClass: olcModuleList
+cn: module{0}
+olcModulePath: /usr/lib/openldap
+olcModuleLoad: back_mdb.so
+
+dn: olcDatabase={1}mdb,cn=config
+objectClass: olcDatabaseConfig
+objectClass: olcMdbConfig
+olcDatabase: {1}mdb
+olcDbDirectory: /var/lib/openldap/openldap-data
+olcSuffix:
+olcRootDN: uid=zimbra,cn=admins,cn=zimbra
+olcRootPW: password
+olcDbIndex: objectClass eq
+olcDbIndex: cn eq
+olcAccess: {0}to * by * read

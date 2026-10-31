@@ -17,95 +17,84 @@ import (
 
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/mtaops"
-	"github.com/zextras/carbonio-configd/internal/state"
+	"github.com/zextras/carbonio-configd/internal/plan"
+	"github.com/zextras/carbonio-configd/internal/snapshot"
 )
 
 const dhParamKey = "zimbraSSLDHParam"
 
-// TestCompareKeys_MapfileSelfHeals verifies a deleted or edited mapped file is
-// restored during compare without flagging the section (legacy lookUpConfig
-// rewrites it on every lookup), and that steady-state cycles report no change.
-func TestCompareKeys_MapfileSelfHeals(t *testing.T) {
+// TestCycle_MapfileSelfHeals verifies a deleted or edited mapped file is
+// restored during the cycle without making the section changed (legacy
+// lookUpConfig rewrites it on every lookup), and that steady-state cycles plan
+// no change.
+func TestCycle_MapfileSelfHeals(t *testing.T) {
 	cm, _ := newTestCMWithExecutor(t)
-	cm.mtaExecutor = mtaops.NewExecutor(cm.mainConfig.BaseDir, nil)
-	cm.comparator = NewComparator(cm, cm.State, cm.ServiceMgr)
+	cm.mtaExecutor = mtaops.NewExecutor(cm.mainConfig.BaseDir, nil, cm.env)
 
 	content := []byte("dh params")
-	cm.State.GlobalConfig.Data.Set(dhParamKey, base64.StdEncoding.EncodeToString(content))
+	setGlobal(cm, map[string]string{dhParamKey: base64.StdEncoding.EncodeToString(content)})
 
-	section := &config.MtaConfigSection{
+	cm.State.MtaConfig.Sections["mta"] = &config.MtaConfigSection{
 		Name:         "mta",
 		RequiredVars: map[string]string{dhParamKey: configTypeMAPFILE},
 	}
-	cm.State.MtaConfig.Sections["mta"] = section
-	cm.State.FirstRun = true
+	setServer(cm, nil, map[string]string{"mta": "zimbraServiceEnabled"})
+	cm.State.SetFirstRun(true)
 
-	ctx := context.Background()
 	path := filepath.Join(cm.mainConfig.BaseDir, "conf", "dhparam.pem")
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o750))
 
-	require.NoError(t, cm.comparator.CompareKeys(ctx))
-	assert.True(t, section.Changed, "first cycle records the key")
+	pl := mustCycle(t, cm)
+	assert.Len(t, pl.Sections, 1, "first cycle records the key")
 
-	cm.State.FirstRun = false
+	cm.State.SetFirstRun(false)
 
-	require.NoError(t, cm.comparator.CompareKeys(ctx))
-	assert.False(t, section.Changed, "steady state must not report changes")
+	pl = mustCycle(t, cm)
+	assert.Empty(t, pl.Sections, "steady state must not report changes")
 
 	require.NoError(t, os.Remove(path))
-	require.NoError(t, cm.comparator.CompareKeys(ctx))
-	assert.False(t, section.Changed, "restoring a deleted file must not restart")
+
+	pl = mustCycle(t, cm)
+	assert.Empty(t, pl.Sections, "restoring a deleted file must not restart")
+	assert.Empty(t, pl.Restarts)
 
 	got, err := os.ReadFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, content, got)
 
 	require.NoError(t, os.WriteFile(path, []byte("tampered"), 0o600))
-	require.NoError(t, cm.comparator.CompareKeys(ctx))
-	assert.False(t, section.Changed)
+
+	pl = mustCycle(t, cm)
+	assert.Empty(t, pl.Sections)
 
 	got, err = os.ReadFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, content, got)
 }
 
-// TestDoMapfileSection_PassesConfiguredData verifies the MAPFILE operation
+// TestDoMapfile_PassesConfiguredData verifies the MAPFILE operation
 // carries the configured base64 value; without it the executor treats the key
 // as unset and deletes the file.
-func TestDoMapfileSection_PassesConfiguredData(t *testing.T) {
+func TestDoMapfile_PassesConfiguredData(t *testing.T) {
 	cm, exec := newTestCMWithExecutor(t)
-	cm.State.FirstRun = false
-	cm.State.GlobalConfig.Data.Set(dhParamKey, "ZGF0YQ==")
+	setGlobal(cm, map[string]string{dhParamKey: "ZGF0YQ=="})
 
-	section := &config.MtaConfigSection{
-		Name:         "mta",
-		Changed:      true,
-		RequiredVars: map[string]string{dhParamKey: configTypeMAPFILE},
-	}
-
-	require.Empty(t, cm.doMapfileSection(context.Background(), section))
+	require.NoError(t, cm.doMapfile(context.Background(), []plan.Mapfile{{Key: dhParamKey}}))
 	require.Len(t, exec.mapfileOps, 1)
 	assert.Equal(t, "ZGF0YQ==", exec.mapfileOps[0].Base64Data)
 }
 
-// TestDoMapfileSection_EncodesRawNativeValue covers the native LDAP client,
+// TestDoMapfile_EncodesRawNativeValue covers the native LDAP client,
 // which returns the raw attribute bytes (the DH PEM) instead of zmprov's
 // "attr:: <base64>" payload: the operation must still carry valid base64 of
 // exactly those bytes, or the executor fails and the rewrite cycle aborts.
-func TestDoMapfileSection_EncodesRawNativeValue(t *testing.T) {
+func TestDoMapfile_EncodesRawNativeValue(t *testing.T) {
 	const pem = "-----BEGIN DH PARAMETERS-----\nMIIBCAKCAQEA\n-----END DH PARAMETERS-----"
 
 	cm, exec := newTestCMWithExecutor(t)
-	cm.State.FirstRun = false
-	cm.State.GlobalConfig.Data.Set(dhParamKey, pem)
+	setGlobal(cm, map[string]string{dhParamKey: pem})
 
-	section := &config.MtaConfigSection{
-		Name:         "mta",
-		Changed:      true,
-		RequiredVars: map[string]string{dhParamKey: configTypeMAPFILE},
-	}
-
-	require.Empty(t, cm.doMapfileSection(context.Background(), section))
+	require.NoError(t, cm.doMapfile(context.Background(), []plan.Mapfile{{Key: dhParamKey}}))
 	require.Len(t, exec.mapfileOps, 1)
 
 	decoded, err := base64.StdEncoding.DecodeString(exec.mapfileOps[0].Base64Data)
@@ -113,17 +102,20 @@ func TestDoMapfileSection_EncodesRawNativeValue(t *testing.T) {
 	assert.Equal(t, pem, string(decoded))
 }
 
-// TestCompareKeys_EmptyValueSteadyState pins that a defined-but-empty value never
+// TestCycle_EmptyValueSteadyState pins that a defined-but-empty value never
 // reports a change once recorded as absent.
-func TestCompareKeys_EmptyValueSteadyState(t *testing.T) {
-	c, st := newComparatorWithLookup(map[string]map[string]string{"VAR": {"k": ""}}, nil)
-	st.FirstRun = false
-	section := &config.MtaConfigSection{Name: "s", RequiredVars: map[string]string{"k": "VAR"}}
-	st.MtaConfig.Sections["s"] = section
+func TestCycle_EmptyValueSteadyState(t *testing.T) {
+	cm, _ := newTestCMWithExecutor(t)
+	setGlobal(cm, map[string]string{"k": ""})
+	setServer(cm, nil, map[string]string{"s": "zimbraServiceEnabled"})
+	cm.State.SetFirstRun(false)
+	cm.State.MtaConfig.Sections["s"] = &config.MtaConfigSection{
+		Name: "s", RequiredVars: map[string]string{"k": "VAR"},
+	}
 
 	for range 3 {
-		require.NoError(t, c.CompareKeys(context.Background()))
-		assert.False(t, section.Changed)
+		pl := mustCycle(t, cm)
+		assert.Empty(t, pl.Sections)
 	}
 }
 
@@ -153,14 +145,13 @@ func TestDoPostconf_BatchFailureFallsBackPerKey(t *testing.T) {
 	cm, _ := newTestCMWithExecutor(t)
 	exec := &failingBatchExecutor{badKey: "bad"}
 	cm.mtaExecutor = exec
-	cm.State.CurrentActions.Postconf["good"] = "VAR:good"
-	cm.State.CurrentActions.Postconf["bad"] = "VAR:bad"
+	entries := []plan.Postconf{{Key: "good", Value: "VAR:good"}, {Key: "bad", Value: "VAR:bad"}}
 
-	require.Error(t, cm.doPostconf(context.Background()))
+	pending, err := cm.doPostconf(context.Background(), entries)
+	require.Error(t, err)
 
 	assert.Len(t, exec.postconfOps, 1)
-	assert.NotContains(t, cm.State.CurrentActions.Postconf, "good")
-	assert.Equal(t, "VAR:bad", cm.State.CurrentActions.Postconf["bad"])
+	assert.Equal(t, []plan.Postconf{{Key: "bad", Value: "VAR:bad"}}, pending)
 }
 
 // TestDoPostconf_ResolveFailureStaysPending verifies a directive that could not
@@ -168,20 +159,20 @@ func TestDoPostconf_BatchFailureFallsBackPerKey(t *testing.T) {
 func TestDoPostconf_ResolveFailureStaysPending(t *testing.T) {
 	cm, exec := newTestCMWithExecutor(t)
 	cm.mtaResolver = &keyedFailResolver{failKey: "bad"}
-	cm.State.CurrentActions.Postconf["good"] = "VAR:good"
-	cm.State.CurrentActions.Postconf["bad"] = "VAR:bad"
+	entries := []plan.Postconf{{Key: "good", Value: "VAR:good"}, {Key: "bad", Value: "VAR:bad"}}
 
-	require.Error(t, cm.doPostconf(context.Background()))
+	pending, err := cm.doPostconf(context.Background(), entries)
+	require.Error(t, err)
 
 	assert.Len(t, exec.postconfOps, 1)
-	assert.NotContains(t, cm.State.CurrentActions.Postconf, "good")
-	assert.Contains(t, cm.State.CurrentActions.Postconf, "bad")
+	require.Len(t, pending, 1)
+	assert.Equal(t, "bad", pending[0].Key)
 }
 
 // keyedFailResolver fails ResolveValue for failKey only.
 type keyedFailResolver struct{ failKey string }
 
-func (r *keyedFailResolver) ResolveValue(_ context.Context, _, key string, _ *state.State) (string, error) {
+func (r *keyedFailResolver) ResolveValue(_ context.Context, _, key string, _ *snapshot.Snapshot) (string, error) {
 	if key == r.failKey {
 		return "", errors.New("cannot resolve")
 	}

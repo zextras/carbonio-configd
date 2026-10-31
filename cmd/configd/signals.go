@@ -16,6 +16,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/sdnotify"
 	"github.com/zextras/carbonio-configd/internal/state"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // SetupSignalHandler sets up a goroutine to listen for OS signals until ctx is
@@ -165,12 +166,12 @@ func dispatchSignal(
 // Returns true if interrupted, false if sleep completed naturally.
 //
 //nolint:unparam // Return value is used in multiple places for flow control
-func SleepWithContext(ctx context.Context, interval time.Duration, reloadChan <-chan struct{}) bool {
+func SleepWithContext(ctx context.Context, clock sys.Clock, interval time.Duration, reloadChan <-chan struct{}) bool {
 	ctx = logger.ContextWithComponent(ctx, "signals")
 	logger.DebugContext(ctx, "Sleeping",
 		"duration_seconds", interval.Seconds())
 
-	timer := time.NewTimer(interval)
+	timer := clock.NewTimer(interval)
 	defer timer.Stop()
 
 	select {
@@ -184,7 +185,7 @@ func SleepWithContext(ctx context.Context, interval time.Duration, reloadChan <-
 			"reason", "reload")
 
 		return true
-	case <-timer.C:
+	case <-timer.C():
 		logger.DebugContext(ctx, "Waking up from sleep (timer expired)")
 
 		return false

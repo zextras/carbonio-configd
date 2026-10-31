@@ -99,7 +99,7 @@ func (tp *TemplateProcessor) syncClientCA(ctx context.Context, domains []DomainI
 		return nil
 	}
 
-	return writeIfChanged(ctx, g.clientCertCAPath(), clientCA)
+	return writeIfChanged(ctx, g.env.FS, g.clientCertCAPath(), clientCA)
 }
 
 // setClientCAEnabled records ssl.clientcertca.enabled (legacy mVars.put).

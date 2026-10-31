@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 // ============================================================
@@ -17,6 +19,10 @@ import (
 
 // TestCbpolicydInitDB_DBAlreadyExists verifies the early-return when the DB file exists.
 func TestCbpolicydInitDB_DBAlreadyExists(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -26,11 +32,9 @@ func TestCbpolicydInitDB_DBAlreadyExists(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	old := cbpolicydDBPath
-	cbpolicydDBPath = dbFile
-	defer func() { cbpolicydDBPath = old }()
+	ctl.p.cbpolicydDB = dbFile
 
-	err := cbpolicydInitDB(context.Background(), nil)
+	err := ctl.cbpolicydInitDB(context.Background(), nil)
 	if err != nil {
 		t.Errorf("cbpolicydInitDB with existing DB returned error: %v", err)
 	}
@@ -39,21 +43,21 @@ func TestCbpolicydInitDB_DBAlreadyExists(t *testing.T) {
 // TestCbpolicydInitDB_DBMissingNoBinary verifies the error path when the DB is absent
 // and the init binary is also absent.
 func TestCbpolicydInitDB_DBMissingNoBinary(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	tmp := t.TempDir()
 	dbFile := filepath.Join(tmp, "nonexistent", "cbpolicyd.sqlitedb")
 
-	oldDB := cbpolicydDBPath
-	cbpolicydDBPath = dbFile
-	defer func() { cbpolicydDBPath = oldDB }()
+	ctl.p.cbpolicydDB = dbFile
 
-	oldBin := cbpolicydInitBin
-	cbpolicydInitBin = filepath.Join(tmp, "nonexistent-bin")
-	defer func() { cbpolicydInitBin = oldBin }()
+	ctl.p.cbpolicydInitBin = filepath.Join(tmp, "nonexistent-bin")
 
-	err := cbpolicydInitDB(context.Background(), nil)
+	err := ctl.cbpolicydInitDB(context.Background(), nil)
 	if err == nil {
 		t.Error("expected error when DB missing and init binary absent")
 	}
@@ -62,6 +66,10 @@ func TestCbpolicydInitDB_DBMissingNoBinary(t *testing.T) {
 // TestCbpolicydInitDB_DBMissingBinaryFails verifies the path where DB is absent,
 // MkdirAll succeeds, binary exists, but the init command fails.
 func TestCbpolicydInitDB_DBMissingBinaryFails(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -73,15 +81,11 @@ func TestCbpolicydInitDB_DBMissingBinaryFails(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldDB := cbpolicydDBPath
-	cbpolicydDBPath = dbFile
-	defer func() { cbpolicydDBPath = oldDB }()
+	ctl.p.cbpolicydDB = dbFile
 
-	oldBin := cbpolicydInitBin
-	cbpolicydInitBin = initBin
-	defer func() { cbpolicydInitBin = oldBin }()
+	ctl.p.cbpolicydInitBin = initBin
 
-	err := cbpolicydInitDB(context.Background(), nil)
+	err := ctl.cbpolicydInitDB(context.Background(), nil)
 	if err == nil {
 		t.Error("expected error when init binary exits non-zero")
 	}
@@ -89,6 +93,10 @@ func TestCbpolicydInitDB_DBMissingBinaryFails(t *testing.T) {
 
 // TestCbpolicydInitDB_DBMissingBinarySucceeds verifies happy path: DB absent, binary present and succeeds.
 func TestCbpolicydInitDB_DBMissingBinarySucceeds(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -100,15 +108,11 @@ func TestCbpolicydInitDB_DBMissingBinarySucceeds(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldDB := cbpolicydDBPath
-	cbpolicydDBPath = dbFile
-	defer func() { cbpolicydDBPath = oldDB }()
+	ctl.p.cbpolicydDB = dbFile
 
-	oldBin := cbpolicydInitBin
-	cbpolicydInitBin = initBin
-	defer func() { cbpolicydInitBin = oldBin }()
+	ctl.p.cbpolicydInitBin = initBin
 
-	err := cbpolicydInitDB(context.Background(), nil)
+	err := ctl.cbpolicydInitDB(context.Background(), nil)
 	if err != nil {
 		t.Errorf("expected nil when init binary succeeds, got: %v", err)
 	}
@@ -120,14 +124,16 @@ func TestCbpolicydInitDB_DBMissingBinarySucceeds(t *testing.T) {
 
 // TestMilterEnabled_FileNotFound verifies milterEnabled returns false when file absent.
 func TestMilterEnabled_FileNotFound(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	old := milterOptionsPath
-	milterOptionsPath = "/nonexistent/path/mta_milter_options"
-	defer func() { milterOptionsPath = old }()
+	ctl.p.milterOptions = "/nonexistent/path/mta_milter_options"
 
-	if milterEnabled(context.Background()) {
+	if ctl.milterEnabled(context.Background()) {
 		t.Error("expected milterEnabled=false when options file does not exist")
 	}
 }
@@ -139,14 +145,16 @@ func TestMilterEnabled_FileNotFound(t *testing.T) {
 // TestStatsCustomStop_NonExistentDir verifies statsCustomStop succeeds when the
 // stats PID directory does not exist.
 func TestStatsCustomStop_NonExistentDir(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	old := statsPidDir
-	statsPidDir = "/nonexistent-stats-pid-dir-xyz-123"
-	defer func() { statsPidDir = old }()
+	ctl.p.statsPidDir = "/nonexistent-stats-pid-dir-xyz-123"
 
-	err := statsCustomStop(context.Background(), nil)
+	err := ctl.statsCustomStop(context.Background(), nil)
 	if err != nil {
 		t.Errorf("statsCustomStop with non-existent dir returned error: %v", err)
 	}
@@ -154,16 +162,18 @@ func TestStatsCustomStop_NonExistentDir(t *testing.T) {
 
 // TestStatsCustomStop_EmptyDir verifies statsCustomStop with an existing but empty dir.
 func TestStatsCustomStop_EmptyDir(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	tmp := t.TempDir()
 
-	old := statsPidDir
-	statsPidDir = tmp
-	defer func() { statsPidDir = old }()
+	ctl.p.statsPidDir = tmp
 
-	err := statsCustomStop(context.Background(), nil)
+	err := ctl.statsCustomStop(context.Background(), nil)
 	if err != nil {
 		t.Errorf("statsCustomStop with empty dir returned error: %v", err)
 	}
@@ -171,6 +181,10 @@ func TestStatsCustomStop_EmptyDir(t *testing.T) {
 
 // TestStatsCustomStop_SkipsNonPidFiles verifies that non-.pid entries are ignored.
 func TestStatsCustomStop_SkipsNonPidFiles(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -183,19 +197,21 @@ func TestStatsCustomStop_SkipsNonPidFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	old := statsPidDir
-	statsPidDir = tmp
-	defer func() { statsPidDir = old }()
+	ctl.p.statsPidDir = tmp
 
-	err := statsCustomStop(context.Background(), nil)
+	err := ctl.statsCustomStop(context.Background(), nil)
 	if err != nil {
 		t.Errorf("statsCustomStop returned unexpected error: %v", err)
 	}
 }
 
 // TestStatsCustomStop_ReadDirError verifies statsCustomStop returns error when
-// statsPidDir exists but is not a directory.
+// ctl.p.statsPidDir exists but is not a directory.
 func TestStatsCustomStop_ReadDirError(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -205,13 +221,11 @@ func TestStatsCustomStop_ReadDirError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	old := statsPidDir
-	statsPidDir = fakePidDir
-	defer func() { statsPidDir = old }()
+	ctl.p.statsPidDir = fakePidDir
 
-	err := statsCustomStop(context.Background(), nil)
+	err := ctl.statsCustomStop(context.Background(), nil)
 	if err == nil {
-		t.Error("expected error when statsPidDir is a file (ReadDir fails)")
+		t.Error("expected error when ctl.p.statsPidDir is a file (ReadDir fails)")
 	}
 }
 
@@ -222,6 +236,10 @@ func TestStatsCustomStop_ReadDirError(t *testing.T) {
 // TestKillStatsPidFile_ValidPidSelfNoError verifies killStatsPidFile handles a valid but
 // non-running PID gracefully.
 func TestKillStatsPidFile_ValidPidSelfNoError(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -231,7 +249,7 @@ func TestKillStatsPidFile_ValidPidSelfNoError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_ = killStatsPidFile(context.Background(), pidFile)
+	_ = ctl.killStatsPidFile(context.Background(), pidFile)
 }
 
 // ============================================================
@@ -241,28 +259,32 @@ func TestKillStatsPidFile_ValidPidSelfNoError(t *testing.T) {
 // TestStatsCustomStart_NoCollectors verifies statsCustomStart returns an error
 // when no collector binaries exist.
 func TestStatsCustomStart_NoCollectors(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	tmp := t.TempDir()
 
-	oldLibexec := libexecDir
-	libexecDir = tmp
-	defer func() { libexecDir = oldLibexec }()
+	ctl.p.libexec = tmp
 
-	oldLog := logPath
-	logPath = tmp
-	defer func() { logPath = oldLog }()
+	ctl.p.log = tmp
 
-	err := statsCustomStart(context.Background(), &ServiceDef{Name: "stats"})
+	err := ctl.statsCustomStart(context.Background(), &ServiceDef{Name: "stats"})
 	if err == nil {
 		t.Error("expected error when no collector binaries exist")
 	}
 }
 
 // TestStatsCustomStart_WithFakeCollector verifies statsCustomStart starts at least
-// one collector when a matching binary is present in libexecDir.
+// one collector when a matching binary is present in ctl.p.libexec.
 func TestStatsCustomStart_WithFakeCollector(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -278,21 +300,21 @@ func TestStatsCustomStart_WithFakeCollector(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldLibexec := libexecDir
-	libexecDir = tmp
-	defer func() { libexecDir = oldLibexec }()
+	ctl.p.libexec = tmp
 
-	oldLog := logPath
-	logPath = logDir
-	defer func() { logPath = oldLog }()
+	ctl.p.log = logDir
 
-	err := statsCustomStart(context.Background(), &ServiceDef{Name: "stats"})
+	err := ctl.statsCustomStart(context.Background(), &ServiceDef{Name: "stats"})
 	_ = err
 }
 
 // TestStatsCustomStart_LogOpenFails verifies that when log open fails the collector
 // is skipped and no panic occurs.
 func TestStatsCustomStart_LogOpenFails(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -303,15 +325,11 @@ func TestStatsCustomStart_LogOpenFails(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldLibexec := libexecDir
-	libexecDir = tmp
-	defer func() { libexecDir = oldLibexec }()
+	ctl.p.libexec = tmp
 
-	oldLog := logPath
-	logPath = filepath.Join(tmp, "nonexistent-log-dir")
-	defer func() { logPath = oldLog }()
+	ctl.p.log = filepath.Join(tmp, "nonexistent-log-dir")
 
-	err := statsCustomStart(context.Background(), &ServiceDef{Name: "stats"})
+	err := ctl.statsCustomStart(context.Background(), &ServiceDef{Name: "stats"})
 	if err == nil {
 		t.Error("expected error when no collectors can be started (log dir missing)")
 	}
@@ -320,16 +338,18 @@ func TestStatsCustomStart_LogOpenFails(t *testing.T) {
 // TestStatsCustomStart_LocalconfigFailError verifies the error message
 // when localconfig fails.
 func TestStatsCustomStart_LocalconfigFailError(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	tmp := t.TempDir()
 
-	oldLibexec := libexecDir
-	libexecDir = tmp
-	defer func() { libexecDir = oldLibexec }()
+	ctl.p.libexec = tmp
 
-	err := statsCustomStart(context.Background(), &ServiceDef{Name: "stats"})
+	err := ctl.statsCustomStart(context.Background(), &ServiceDef{Name: "stats"})
 	if err == nil {
 		t.Error("expected error in test environment (no localconfig)")
 	}
@@ -338,6 +358,10 @@ func TestStatsCustomStart_LocalconfigFailError(t *testing.T) {
 // TestStatsCustomStart_ConditionalCollectors verifies that conditional collector
 // keys are evaluated.
 func TestStatsCustomStart_ConditionalCollectors(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -358,15 +382,11 @@ func TestStatsCustomStart_ConditionalCollectors(t *testing.T) {
 		}
 	}
 
-	oldLibexec := libexecDir
-	libexecDir = tmp
-	defer func() { libexecDir = oldLibexec }()
+	ctl.p.libexec = tmp
 
-	oldLog := logPath
-	logPath = logDir
-	defer func() { logPath = oldLog }()
+	ctl.p.log = logDir
 
-	err := statsCustomStart(context.Background(), &ServiceDef{Name: "stats"})
+	err := ctl.statsCustomStart(context.Background(), &ServiceDef{Name: "stats"})
 	_ = err
 }
 
@@ -376,6 +396,10 @@ func TestStatsCustomStart_ConditionalCollectors(t *testing.T) {
 
 // TestMailboxJavaBinary_ExplicitJavaHome verifies mailboxd_java_home is used.
 func TestMailboxJavaBinary_ExplicitJavaHome(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -392,7 +416,7 @@ func TestMailboxJavaBinary_ExplicitJavaHome(t *testing.T) {
 	lc := map[string]string{
 		"mailboxd_java_home": tmp,
 	}
-	got, err := mailboxJavaBinary(context.Background(), lc)
+	got, err := ctl.mailboxJavaBinary(context.Background(), lc)
 	if err != nil {
 		t.Fatalf("mailboxJavaBinary returned error: %v", err)
 	}
@@ -403,6 +427,10 @@ func TestMailboxJavaBinary_ExplicitJavaHome(t *testing.T) {
 
 // TestMailboxJavaBinary_FallbackToZimbraJavaHome verifies zimbra_java_home fallback.
 func TestMailboxJavaBinary_FallbackToZimbraJavaHome(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -419,7 +447,7 @@ func TestMailboxJavaBinary_FallbackToZimbraJavaHome(t *testing.T) {
 	lc := map[string]string{
 		"zimbra_java_home": tmp,
 	}
-	got, err := mailboxJavaBinary(context.Background(), lc)
+	got, err := ctl.mailboxJavaBinary(context.Background(), lc)
 	if err != nil {
 		t.Fatalf("mailboxJavaBinary returned error: %v", err)
 	}
@@ -428,18 +456,20 @@ func TestMailboxJavaBinary_FallbackToZimbraJavaHome(t *testing.T) {
 	}
 }
 
-// TestMailboxJavaBinary_FixedFallbackMissing verifies the commonPath fixed fallback path.
+// TestMailboxJavaBinary_FixedFallbackMissing verifies the ctl.p.common fixed fallback path.
 func TestMailboxJavaBinary_FixedFallbackMissing(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	tmp := t.TempDir()
-	old := commonPath
-	commonPath = tmp
-	defer func() { commonPath = old }()
+	ctl.p.common = tmp
 
 	lc := map[string]string{}
-	_, err := mailboxJavaBinary(context.Background(), lc)
+	_, err := ctl.mailboxJavaBinary(context.Background(), lc)
 	if err == nil {
 		t.Error("expected error when java binary is absent in fixed fallback path")
 	}
@@ -447,6 +477,10 @@ func TestMailboxJavaBinary_FixedFallbackMissing(t *testing.T) {
 
 // TestMailboxJavaBinary_BinaryNotFound verifies error when java binary doesn't exist.
 func TestMailboxJavaBinary_BinaryNotFound(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -454,7 +488,7 @@ func TestMailboxJavaBinary_BinaryNotFound(t *testing.T) {
 	lc := map[string]string{
 		"mailboxd_java_home": tmp,
 	}
-	_, err := mailboxJavaBinary(context.Background(), lc)
+	_, err := ctl.mailboxJavaBinary(context.Background(), lc)
 	if err == nil {
 		t.Error("expected error when java binary not found")
 	}
@@ -466,6 +500,10 @@ func TestMailboxJavaBinary_BinaryNotFound(t *testing.T) {
 
 // TestMtaCustomStop_NotRunningOutput verifies that "is not running" in sudo output is treated as success.
 func TestMtaCustomStop_NotRunningOutput(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -477,17 +515,19 @@ func TestMtaCustomStop_NotRunningOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	old := postfixBin
-	postfixBin = fakeBin
-	defer func() { postfixBin = old }()
+	ctl.p.postfixBin = fakeBin
 
-	err := mtaCustomStop(context.Background(), nil)
+	err := ctl.mtaCustomStop(context.Background(), nil)
 	_ = err
 }
 
 // TestMtaCustomStop_ErrorNotRunning verifies the error return when the command fails
 // with output that does NOT contain "is not running".
 func TestMtaCustomStop_ErrorNotRunning(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -500,16 +540,18 @@ func TestMtaCustomStop_ErrorNotRunning(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	old := postfixBin
-	postfixBin = fakePostfix
-	defer func() { postfixBin = old }()
+	ctl.p.postfixBin = fakePostfix
 
-	err := mtaCustomStop(context.Background(), nil)
+	err := ctl.mtaCustomStop(context.Background(), nil)
 	_ = err
 }
 
 // TestMtaCustomStop_SuccessPath verifies the success return when the command exits 0.
 func TestMtaCustomStop_SuccessPath(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -520,11 +562,9 @@ func TestMtaCustomStop_SuccessPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	old := postfixBin
-	postfixBin = fakePostfix
-	defer func() { postfixBin = old }()
+	ctl.p.postfixBin = fakePostfix
 
-	err := mtaCustomStop(context.Background(), nil)
+	err := ctl.mtaCustomStop(context.Background(), nil)
 	if err != nil {
 		t.Logf("sudo not available or rejected fake binary (expected in CI): %v", err)
 		t.Skip("skipping success-path assertion: sudo unavailable in this environment")
@@ -537,7 +577,11 @@ func TestMtaCustomStop_SuccessPath(t *testing.T) {
 // mode — matching legacy control.pl, which skipped it in doStartup and only
 // ran `systemctl is-active service-discover.service` for status.
 func TestServiceDiscoverIsExternallyManaged(t *testing.T) {
-	def := LookupService(svcServiceDiscover)
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	def := ctl.LookupService(svcServiceDiscover)
 	if def == nil {
 		t.Fatal("service-discover not found")
 	}
@@ -557,55 +601,73 @@ func TestServiceDiscoverIsExternallyManaged(t *testing.T) {
 
 	ctx := context.Background()
 
-	if err := startService(ctx, svcServiceDiscover, def); err != nil {
+	if err := ctl.startService(ctx, svcServiceDiscover, def); err != nil {
 		t.Errorf("startService = %v, want nil no-op", err)
 	}
 
-	if err := stopService(ctx, svcServiceDiscover, def); err != nil {
+	if err := ctl.stopService(ctx, svcServiceDiscover, def); err != nil {
 		t.Errorf("stopService = %v, want nil no-op", err)
 	}
 
-	if err := ServiceReload(ctx, svcServiceDiscover); err != nil {
+	if err := ctl.ServiceReload(ctx, svcServiceDiscover); err != nil {
 		t.Errorf("ServiceReload = %v, want nil no-op", err)
 	}
 }
 
 // TestMilterCustomStart_LocalconfigError verifies error when localconfig unavailable.
 func TestMilterCustomStart_LocalconfigError(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	err := milterCustomStart(context.Background(), nil)
+	err := ctl.milterCustomStart(context.Background(), nil)
 	_ = err
 }
 
 // TestMailboxCustomStart_LocalconfigError verifies error when localconfig unavailable.
 func TestMailboxCustomStart_LocalconfigError(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	err := mailboxCustomStart(context.Background(), &ServiceDef{Name: "mailbox"})
+	err := ctl.mailboxCustomStart(context.Background(), &ServiceDef{Name: "mailbox"})
 	_ = err
 }
 
 // TestLdapCustomStart_LocalconfigError verifies error when localconfig unavailable.
 func TestLdapCustomStart_LocalconfigError(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	err := ldapCustomStart(context.Background(), &ServiceDef{Name: "ldap"})
+	err := ctl.ldapCustomStart(context.Background(), &ServiceDef{Name: "ldap"})
 	_ = err
 }
 
-// TestLdapCustomStop_NoPidFile verifies ldapCustomStop returns nil when slapd.pid absent.
-func TestLdapCustomStop_NoPidFile(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	err := ldapCustomStop(context.Background(), nil)
-	if err != nil {
-		t.Errorf("ldapCustomStop returned unexpected error: %v", err)
-	}
+// TestLdapStop_DeclarativeNoPidFile verifies the LDAP stop is pure registry
+// data (GracefulStop, no CustomStop) and that it returns nil when slapd.pid is
+// absent: the service is already stopped.
+func TestLdapStop_DeclarativeNoPidFile(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	def := *ctl.registry[svcLdap]
+	require.Nil(t, def.CustomStop, "ldap stop must be declarative")
+	require.Equal(t, ldapStopTimeout, def.GracefulStop)
+
+	def.PidFile = filepath.Join(t.TempDir(), "slapd.pid")
+
+	require.NoError(t, ctl.stopWithoutSystemd(context.Background(), svcLdap, &def))
 }
 
 // ============================================================
@@ -614,21 +676,29 @@ func TestLdapCustomStop_NoPidFile(t *testing.T) {
 
 // TestGetDiskThreshold_UsesDefault verifies GetDiskThreshold does not panic.
 func TestGetDiskThreshold_UsesDefault(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	_ = GetDiskThreshold()
+	_ = ctl.GetDiskThreshold()
 }
 
 // TestGetDiskThreshold_RepeatedCalls verifies the function returns > 0.
 func TestGetDiskThreshold_RepeatedCalls(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	for i := 0; i < 3; i++ {
-		v := GetDiskThreshold()
+		v := ctl.GetDiskThreshold()
 		if v <= 0 {
-			t.Errorf("call %d: GetDiskThreshold() = %d, want > 0", i, v)
+			t.Errorf("call %d: ctl.GetDiskThreshold() = %d, want > 0", i, v)
 		}
 	}
 }
@@ -640,10 +710,14 @@ func TestGetDiskThreshold_RepeatedCalls(t *testing.T) {
 // TestIsLDAPLocal_ConfigPresentNoMatch verifies false when localconfig loads
 // but hostname doesn't appear in ldap_url.
 func TestIsLDAPLocal_ConfigPresentNoMatch(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	result := IsLDAPLocal()
+	result := ctl.IsLDAPLocal()
 	_ = result
 }
 
@@ -653,10 +727,14 @@ func TestIsLDAPLocal_ConfigPresentNoMatch(t *testing.T) {
 
 // TestRemoteHostStart_InvalidService verifies error for invalid service name.
 func TestRemoteHostStart_InvalidService(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	err := RemoteHostStart(context.Background(), "somehost", "bad name!")
+	err := ctl.RemoteHostStart(context.Background(), "somehost", "bad name!")
 	if err == nil {
 		t.Error("expected error for invalid service name")
 	}
@@ -664,10 +742,14 @@ func TestRemoteHostStart_InvalidService(t *testing.T) {
 
 // TestRemoteHostStop_InvalidService verifies error for invalid service name.
 func TestRemoteHostStop_InvalidService(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	err := RemoteHostStop(context.Background(), "somehost", "bad name!")
+	err := ctl.RemoteHostStop(context.Background(), "somehost", "bad name!")
 	if err == nil {
 		t.Error("expected error for invalid service name")
 	}
@@ -675,10 +757,14 @@ func TestRemoteHostStop_InvalidService(t *testing.T) {
 
 // TestRemoteHostStatus_InvalidService verifies error for invalid service name.
 func TestRemoteHostStatus_InvalidService(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	_, err := RemoteHostStatus(context.Background(), "somehost", "bad name!")
+	_, err := ctl.RemoteHostStatus(context.Background(), "somehost", "bad name!")
 	if err == nil {
 		t.Error("expected error for invalid service name")
 	}
@@ -686,10 +772,14 @@ func TestRemoteHostStatus_InvalidService(t *testing.T) {
 
 // TestRemoteHostStart_ValidServiceConnectFails verifies SSH connect error is returned.
 func TestRemoteHostStart_ValidServiceConnectFails(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	err := RemoteHostStart(context.Background(), "127.0.0.1:1", "mta")
+	err := ctl.RemoteHostStart(context.Background(), "127.0.0.1:1", "mta")
 	if err == nil {
 		t.Error("expected error when SSH connect fails")
 	}
@@ -697,10 +787,14 @@ func TestRemoteHostStart_ValidServiceConnectFails(t *testing.T) {
 
 // TestRemoteHostStop_ValidServiceConnectFails verifies SSH connect error is returned.
 func TestRemoteHostStop_ValidServiceConnectFails(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	err := RemoteHostStop(context.Background(), "127.0.0.1:1", "mta")
+	err := ctl.RemoteHostStop(context.Background(), "127.0.0.1:1", "mta")
 	if err == nil {
 		t.Error("expected error when SSH connect fails")
 	}
@@ -708,10 +802,14 @@ func TestRemoteHostStop_ValidServiceConnectFails(t *testing.T) {
 
 // TestRemoteHostStatus_ValidServiceConnectFails verifies SSH connect error is returned.
 func TestRemoteHostStatus_ValidServiceConnectFails(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	_, err := RemoteHostStatus(context.Background(), "127.0.0.1:1", "mta")
+	_, err := ctl.RemoteHostStatus(context.Background(), "127.0.0.1:1", "mta")
 	if err == nil {
 		t.Error("expected error when SSH connect fails")
 	}
@@ -719,6 +817,8 @@ func TestRemoteHostStatus_ValidServiceConnectFails(t *testing.T) {
 
 // TestSshConnect_NoKey verifies sshConnect returns error when SSH key is missing.
 func TestSshConnect_NoKey(t *testing.T) {
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -727,7 +827,7 @@ func TestSshConnect_NoKey(t *testing.T) {
 	os.Setenv("HOME", tmp)
 	defer os.Setenv("HOME", old)
 
-	_, err := sshConnect("127.0.0.1:1")
+	_, err := ctl.sshConnect("127.0.0.1:1")
 	if err == nil {
 		t.Error("expected error when SSH key is missing")
 	}
@@ -735,6 +835,8 @@ func TestSshConnect_NoKey(t *testing.T) {
 
 // TestSshConnect_InvalidKey verifies sshConnect returns error for invalid key data.
 func TestSshConnect_InvalidKey(t *testing.T) {
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -751,7 +853,7 @@ func TestSshConnect_InvalidKey(t *testing.T) {
 	os.Setenv("HOME", tmp)
 	defer os.Setenv("HOME", old)
 
-	_, err := sshConnect("127.0.0.1:1")
+	_, err := ctl.sshConnect("127.0.0.1:1")
 	if err == nil {
 		t.Error("expected error for invalid SSH key")
 	}
@@ -759,6 +861,8 @@ func TestSshConnect_InvalidKey(t *testing.T) {
 
 // TestSshConnect_NoKnownHosts verifies error when known_hosts is missing.
 func TestSshConnect_NoKnownHosts(t *testing.T) {
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -783,7 +887,7 @@ oIZwAAAEBVE7YQBA0pDIhPZ1+5FJJRLcZPvuFLHSiZlmCOGKqumFjj7wkwYyEmxIsdEN
 	os.Setenv("HOME", tmp)
 	defer os.Setenv("HOME", old)
 
-	_, err := sshConnect("127.0.0.1:1")
+	_, err := ctl.sshConnect("127.0.0.1:1")
 	if err == nil {
 		t.Error("expected error when known_hosts is missing")
 	}
@@ -796,6 +900,10 @@ oIZwAAAEBVE7YQBA0pDIhPZ1+5FJJRLcZPvuFLHSiZlmCOGKqumFjj7wkwYyEmxIsdEN
 // TestClamdDirInit_CreatesDir verifies that clamdDirInit creates
 // the clamav database directory if it doesn't exist.
 func TestClamdDirInit_CreatesDir(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -803,11 +911,9 @@ func TestClamdDirInit_CreatesDir(t *testing.T) {
 	tmp := t.TempDir()
 	testPath := filepath.Join(tmp, "clamav", "db")
 
-	old := clamdDirPath
-	clamdDirPath = testPath
-	defer func() { clamdDirPath = old }()
+	ctl.p.clamdDir = testPath
 
-	err := clamdDirInit(context.Background(), nil)
+	err := ctl.clamdDirInit(context.Background(), nil)
 	if err != nil {
 		t.Errorf("clamdDirInit returned error: %v", err)
 	}
@@ -825,6 +931,10 @@ func TestClamdDirInit_CreatesDir(t *testing.T) {
 // TestClamdDirInit_Idempotent verifies that clamdDirInit can be
 // called multiple times without error (idempotent).
 func TestClamdDirInit_Idempotent(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -832,18 +942,16 @@ func TestClamdDirInit_Idempotent(t *testing.T) {
 	tmp := t.TempDir()
 	testPath := filepath.Join(tmp, "clamav", "db")
 
-	old := clamdDirPath
-	clamdDirPath = testPath
-	defer func() { clamdDirPath = old }()
+	ctl.p.clamdDir = testPath
 
 	// First call
-	err := clamdDirInit(context.Background(), nil)
+	err := ctl.clamdDirInit(context.Background(), nil)
 	if err != nil {
 		t.Errorf("first clamdDirInit returned error: %v", err)
 	}
 
 	// Second call (directory already exists)
-	err = clamdDirInit(context.Background(), nil)
+	err = ctl.clamdDirInit(context.Background(), nil)
 	if err != nil {
 		t.Errorf("second clamdDirInit returned error: %v", err)
 	}
@@ -852,6 +960,10 @@ func TestClamdDirInit_Idempotent(t *testing.T) {
 // TestClamdDirInit_Error verifies that clamdDirInit returns an error
 // when the directory cannot be created (e.g., permission denied).
 func TestClamdDirInit_Error(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -864,11 +976,9 @@ func TestClamdDirInit_Error(t *testing.T) {
 	// Try to create a directory under /proc which is not writable
 	testPath := "/proc/1/clamav-db-test-" + t.Name()
 
-	old := clamdDirPath
-	clamdDirPath = testPath
-	defer func() { clamdDirPath = old }()
+	ctl.p.clamdDir = testPath
 
-	err := clamdDirInit(context.Background(), nil)
+	err := ctl.clamdDirInit(context.Background(), nil)
 	if err == nil {
 		t.Error("expected error when creating directory in non-writable location")
 	}

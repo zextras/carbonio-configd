@@ -13,15 +13,19 @@ import (
 
 // TestServiceStop_WithDisabledDependency exercises the "stop dependencies" path.
 func TestServiceStop_WithDisabledDependency(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	if IsSystemdMode() {
+	if ctl.IsSystemdMode() {
 		t.Skip("skipping: stop dependency test on systemd-booted host")
 	}
 
-	orig := Registry["memcached"]
-	defer func() { Registry["memcached"] = orig }()
+	orig := ctl.registry["memcached"]
+	defer func() { ctl.registry["memcached"] = orig }()
 
 	def := *orig
 	def.Dependencies = []string{"nonexistent-dep-xyz"}
@@ -29,9 +33,9 @@ func TestServiceStop_WithDisabledDependency(t *testing.T) {
 	def.PidFile = ""
 	def.SystemdUnits = nil
 	def.CustomStop = func(_ context.Context, _ *ServiceDef) error { return nil }
-	Registry["memcached"] = &def
+	ctl.registry["memcached"] = &def
 
-	err := ServiceStop(context.Background(), "memcached")
+	err := ctl.ServiceStop(context.Background(), "memcached")
 	if err != nil {
 		t.Errorf("ServiceStop with disabled dependency returned error: %v", err)
 	}
@@ -39,31 +43,35 @@ func TestServiceStop_WithDisabledDependency(t *testing.T) {
 
 // TestServiceStop_WithEnabledDependency exercises stopping with an enabled dependency.
 func TestServiceStop_WithEnabledDependency(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	if IsSystemdMode() {
+	if ctl.IsSystemdMode() {
 		t.Skip("skipping: stop dependency test on systemd-booted host")
 	}
 
 	const depName = "test-dep-xyzzy"
-	Registry[depName] = &ServiceDef{
+	ctl.registry[depName] = &ServiceDef{
 		Name:       depName,
 		CustomStop: func(_ context.Context, _ *ServiceDef) error { return nil },
 	}
-	defer delete(Registry, depName)
+	defer delete(ctl.registry, depName)
 
-	orig := Registry["memcached"]
-	defer func() { Registry["memcached"] = orig }()
+	orig := ctl.registry["memcached"]
+	defer func() { ctl.registry["memcached"] = orig }()
 
 	def := *orig
 	def.Dependencies = []string{depName}
 	def.SystemdUnits = nil
 	def.PidFile = ""
 	def.CustomStop = func(_ context.Context, _ *ServiceDef) error { return nil }
-	Registry["memcached"] = &def
+	ctl.registry["memcached"] = &def
 
-	err := ServiceStop(context.Background(), "memcached")
+	err := ctl.ServiceStop(context.Background(), "memcached")
 	if err != nil {
 		t.Errorf("ServiceStop with enabled dependency returned error: %v", err)
 	}
@@ -71,15 +79,19 @@ func TestServiceStop_WithEnabledDependency(t *testing.T) {
 
 // TestServiceStop_StopServiceError exercises the stopService error path.
 func TestServiceStop_StopServiceError(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	if IsSystemdMode() {
+	if ctl.IsSystemdMode() {
 		t.Skip("skipping: stopService error test on systemd-booted host")
 	}
 
-	orig := Registry["memcached"]
-	defer func() { Registry["memcached"] = orig }()
+	orig := ctl.registry["memcached"]
+	defer func() { ctl.registry["memcached"] = orig }()
 
 	def := *orig
 	def.SystemdUnits = nil
@@ -88,9 +100,9 @@ func TestServiceStop_StopServiceError(t *testing.T) {
 	def.CustomStop = func(_ context.Context, _ *ServiceDef) error {
 		return errors.New("stop failed")
 	}
-	Registry["memcached"] = &def
+	ctl.registry["memcached"] = &def
 
-	err := ServiceStop(context.Background(), "memcached")
+	err := ctl.ServiceStop(context.Background(), "memcached")
 	if err == nil {
 		t.Error("expected ServiceStop to return error when stopService fails")
 	}
@@ -98,15 +110,19 @@ func TestServiceStop_StopServiceError(t *testing.T) {
 
 // TestServiceStop_PreStopHookError exercises the pre-stop hook warning path.
 func TestServiceStop_PreStopHookError(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	if IsSystemdMode() {
+	if ctl.IsSystemdMode() {
 		t.Skip("skipping: pre-stop hook test on systemd-booted host")
 	}
 
-	orig := Registry["memcached"]
-	defer func() { Registry["memcached"] = orig }()
+	orig := ctl.registry["memcached"]
+	defer func() { ctl.registry["memcached"] = orig }()
 
 	called := false
 	def := *orig
@@ -119,9 +135,9 @@ func TestServiceStop_PreStopHookError(t *testing.T) {
 	def.SystemdUnits = nil
 	def.PidFile = ""
 	def.CustomStop = func(_ context.Context, _ *ServiceDef) error { return nil }
-	Registry["memcached"] = &def
+	ctl.registry["memcached"] = &def
 
-	err := ServiceStop(context.Background(), "memcached")
+	err := ctl.ServiceStop(context.Background(), "memcached")
 	if err != nil {
 		t.Errorf("ServiceStop should not return error for pre-stop hook failure, got: %v", err)
 	}
@@ -132,27 +148,31 @@ func TestServiceStop_PreStopHookError(t *testing.T) {
 
 // TestServiceStop_WithPreStopHookFails verifies pre-stop hook does not cause panic.
 func TestServiceStop_WithPreStopHookFails(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 
-	orig, existed := Registry["memcached"]
+	orig, existed := ctl.registry["memcached"]
 	defer func() {
 		if existed {
-			Registry["memcached"] = orig
+			ctl.registry["memcached"] = orig
 		}
 	}()
 
-	def := *Registry["memcached"]
+	def := *ctl.registry["memcached"]
 	def.PreStop = []Hook{
 		func(_ context.Context, _ *ServiceManager) error {
 			return errors.New("pre-stop hook error")
 		},
 	}
-	Registry["memcached"] = &def
+	ctl.registry["memcached"] = &def
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	ServiceStop(ctx, "memcached")
+	ctl.ServiceStop(ctx, "memcached")
 }

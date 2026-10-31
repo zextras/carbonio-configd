@@ -13,6 +13,10 @@ import (
 
 // TestStartDirect_EmptyBinaryPath verifies error returned immediately for empty binary.
 func TestStartDirect_EmptyBinaryPath(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -21,7 +25,7 @@ func TestStartDirect_EmptyBinaryPath(t *testing.T) {
 		BinaryPath: "",
 	}
 
-	err := startDirect(context.Background(), "testservice", def)
+	err := ctl.startDirect(context.Background(), "testservice", def)
 	if err == nil {
 		t.Error("expected error for empty BinaryPath")
 	}
@@ -29,6 +33,10 @@ func TestStartDirect_EmptyBinaryPath(t *testing.T) {
 
 // TestStartDirect_MissingBinary verifies error when binary file does not exist.
 func TestStartDirect_MissingBinary(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -37,7 +45,7 @@ func TestStartDirect_MissingBinary(t *testing.T) {
 		BinaryPath: "/nonexistent/binary/xyz-configd-test-direct",
 	}
 
-	err := startDirect(context.Background(), "testservice", def)
+	err := ctl.startDirect(context.Background(), "testservice", def)
 	if err == nil {
 		t.Error("expected error for missing binary")
 	}
@@ -45,6 +53,10 @@ func TestStartDirect_MissingBinary(t *testing.T) {
 
 // TestStartDirect_NeedsRoot_NonRoot exercises the sudo-wrapping branch.
 func TestStartDirect_NeedsRoot_NonRoot(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -65,11 +77,15 @@ func TestStartDirect_NeedsRoot_NonRoot(t *testing.T) {
 		UseSDNotify: false,
 	}
 
-	startDirect(context.Background(), "testservice", def)
+	ctl.startDirect(context.Background(), "testservice", def)
 }
 
 // TestStartDirect_NeedsRootAsNonRoot verifies that NeedsRoot=true prepends sudo.
 func TestStartDirect_NeedsRootAsNonRoot(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -91,11 +107,15 @@ func TestStartDirect_NeedsRootAsNonRoot(t *testing.T) {
 		UseSDNotify: false,
 	}
 
-	startDirect(context.Background(), "testservice", def)
+	ctl.startDirect(context.Background(), "testservice", def)
 }
 
 // TestStartDirect_DirectExec_Success verifies startDirect with a real binary that exits 0.
 func TestStartDirect_DirectExec_Success(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -113,7 +133,7 @@ func TestStartDirect_DirectExec_Success(t *testing.T) {
 		UseSDNotify: false,
 	}
 
-	err := startDirect(context.Background(), "testservice", def)
+	err := ctl.startDirect(context.Background(), "testservice", def)
 	if err != nil {
 		t.Errorf("startDirect with exiting-0 binary returned error: %v", err)
 	}
@@ -121,6 +141,10 @@ func TestStartDirect_DirectExec_Success(t *testing.T) {
 
 // TestStartDirect_DirectExec_Failure verifies startDirect with a binary that exits non-zero.
 func TestStartDirect_DirectExec_Failure(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -138,7 +162,7 @@ func TestStartDirect_DirectExec_Failure(t *testing.T) {
 		UseSDNotify: false,
 	}
 
-	err := startDirect(context.Background(), "testservice", def)
+	err := ctl.startDirect(context.Background(), "testservice", def)
 	if err == nil {
 		t.Error("expected error for binary that exits non-zero")
 	}
@@ -146,6 +170,10 @@ func TestStartDirect_DirectExec_Failure(t *testing.T) {
 
 // TestStartDirect_DetachedPath exercises the Detached=true branch in startDirect.
 func TestStartDirect_DetachedPath(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -164,7 +192,7 @@ func TestStartDirect_DetachedPath(t *testing.T) {
 		UseSDNotify: false,
 	}
 
-	err := startDirect(context.Background(), "testservice", def)
+	err := ctl.startDirect(context.Background(), "testservice", def)
 	if err != nil {
 		t.Errorf("startDirect Detached=true returned error: %v", err)
 	}

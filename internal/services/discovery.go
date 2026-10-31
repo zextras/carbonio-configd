@@ -9,14 +9,14 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"io/fs"
 	"os"
 	"strings"
 
 	carboldap "github.com/zextras/carbonio-configd/internal/ldap"
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
-
-var cacheFile = logPath + "/.zmcontrol.cache"
 
 // legacyServiceNames are service names from LDAP that should be ignored.
 // These are zimbraServiceEnabled values, not OS users.
@@ -28,10 +28,10 @@ var legacyServiceNames = map[string]bool{
 
 // DiscoverEnabledServices queries LDAP for services enabled on this host.
 // Falls back to cache if LDAP is unreachable.
-func DiscoverEnabledServices(ctx context.Context) ([]string, error) {
+func (c *Controller) DiscoverEnabledServices(ctx context.Context) ([]string, error) {
 	ctx = logger.ContextWithComponent(ctx, "discovery")
 
-	lc, err := loadConfig()
+	lc, err := c.loadConfig()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load localconfig: %w", err)
 	}
@@ -45,7 +45,7 @@ func DiscoverEnabledServices(ctx context.Context) ([]string, error) {
 
 	var tlsConfig *tls.Config
 	if startTLS {
-		tlsConfig = carbonioCATLSConfig()
+		tlsConfig = c.carbonioCATLSConfig()
 	}
 
 	// ldap_master_url may be space-separated multi-URL (Carbonio HA) — let
@@ -54,7 +54,7 @@ func DiscoverEnabledServices(ctx context.Context) ([]string, error) {
 	if len(masterURLs) == 0 {
 		logger.WarnContext(ctx, "ldap_master_url is empty in localconfig, trying cache")
 
-		return readCache(ctx)
+		return c.readCache(ctx)
 	}
 
 	client, err := carboldap.NewClient(&carboldap.ClientConfig{
@@ -63,11 +63,12 @@ func DiscoverEnabledServices(ctx context.Context) ([]string, error) {
 		Password:  lc["zimbra_ldap_password"],
 		StartTLS:  startTLS,
 		TLSConfig: tlsConfig,
+		FS:        c.env.FS,
 	})
 	if err != nil {
 		logger.WarnContext(ctx, "LDAP connect failed, trying cache", "error", err)
 
-		return readCache(ctx)
+		return c.readCache(ctx)
 	}
 
 	defer func() { _ = client.Close() }()
@@ -76,7 +77,7 @@ func DiscoverEnabledServices(ctx context.Context) ([]string, error) {
 	if err != nil {
 		logger.WarnContext(ctx, "LDAP query failed, trying cache", "error", err)
 
-		return readCache(ctx)
+		return c.readCache(ctx)
 	}
 
 	// Filter legacy names
@@ -102,7 +103,7 @@ func DiscoverEnabledServices(ctx context.Context) ([]string, error) {
 		services = append(services, svcZmconfigd)
 	}
 
-	writeCache(ctx, services)
+	c.writeCache(ctx, services)
 
 	logger.InfoContext(ctx, "Discovered enabled services", "count", len(services), "services", services)
 
@@ -110,8 +111,8 @@ func DiscoverEnabledServices(ctx context.Context) ([]string, error) {
 }
 
 // IsLDAPLocal returns true if the LDAP URL contains the local hostname.
-func IsLDAPLocal() bool {
-	lc, err := loadConfig()
+func (c *Controller) IsLDAPLocal() bool {
+	lc, err := c.loadConfig()
 	if err != nil {
 		return false
 	}
@@ -136,13 +137,13 @@ func MapLDAPServiceToRegistry(ldapName string) string {
 	return ldapName
 }
 
-func readCache(ctx context.Context) ([]string, error) {
-	data, err := os.ReadFile(cacheFile)
+func (c *Controller) readCache(ctx context.Context) ([]string, error) {
+	data, err := c.env.FS.ReadFile(c.p.cacheFile)
 	if err != nil {
 		return nil, fmt.Errorf("cannot determine enabled services: LDAP unreachable and cache missing")
 	}
 
-	logger.WarnContext(ctx, "Using cached service list — may be inaccurate", "cache", cacheFile)
+	logger.WarnContext(ctx, "Using cached service list — may be inaccurate", "cache", c.p.cacheFile)
 
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
 	services := make([]string, 0, len(lines))
@@ -157,20 +158,20 @@ func readCache(ctx context.Context) ([]string, error) {
 	return services, nil
 }
 
-func writeCache(ctx context.Context, services []string) {
+func (c *Controller) writeCache(ctx context.Context, services []string) {
 	content := strings.Join(services, "\n") + "\n"
 	// #nosec G306 - cache file needs to be readable by zextras group
-	if err := os.WriteFile(cacheFile, []byte(content), 0o600); err != nil {
+	if err := writeFile(c.env.FS, c.p.cacheFile, []byte(content), 0o600); err != nil {
 		logger.WarnContext(ctx, "Failed to write service cache", "error", err)
 	}
 }
 
 // carbonioCATLSConfig returns a TLS config that trusts Carbonio's self-signed CA.
 // Falls back to system roots if the CA cert cannot be loaded.
-func carbonioCATLSConfig() *tls.Config {
-	caPath := confPath + "/ca/ca.pem"
+func (c *Controller) carbonioCATLSConfig() *tls.Config {
+	caPath := c.p.conf + "/ca/ca.pem"
 
-	caPEM, err := os.ReadFile(caPath) //nolint:gosec // path is from internal constant
+	caPEM, err := c.env.FS.ReadFile(caPath)
 	if err != nil {
 		return nil // fall back to system roots
 	}
@@ -182,4 +183,20 @@ func carbonioCATLSConfig() *tls.Config {
 		RootCAs:    pool,
 		MinVersion: tls.VersionTLS12,
 	}
+}
+
+// writeFile writes data to name like os.WriteFile (create or truncate, no
+// atomic rename), through the filesystem boundary.
+func writeFile(fsys sys.FS, name string, data []byte, perm fs.FileMode) error {
+	f, err := fsys.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	if err != nil {
+		return err //nolint:wrapcheck // same error os.WriteFile returns
+	}
+
+	_, err = f.Write(data)
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+
+	return err //nolint:wrapcheck // same error os.WriteFile returns
 }

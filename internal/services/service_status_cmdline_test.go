@@ -33,7 +33,11 @@ func startFakeProcess(t *testing.T, argv ...string) {
 // Before CO-4569 the bare-name ProcessName made memcached look "already
 // running" at boot, so zmcontrol skipped starting it.
 func TestServiceStatus_IgnoresProcessesMentioningTheName(t *testing.T) {
-	withMode(t, false)
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	ctl.pinMode(false)
 
 	for _, tc := range []struct {
 		service   string
@@ -51,24 +55,24 @@ func TestServiceStatus_IgnoresProcessesMentioningTheName(t *testing.T) {
 		{svcLdap, []string{"less", "/opt/zextras/log/slapd.log"}},
 	} {
 		t.Run(tc.service, func(t *testing.T) {
-			def := LookupService(tc.service)
-			if running, _ := isRunningByPidFile(def.PidFile); running {
+			def := ctl.LookupService(tc.service)
+			if running, _ := ctl.isRunningByPidFile(def.PidFile); running {
 				t.Skipf("%s pid file reports a live process on this host", tc.service)
 			}
 
-			if isProcessRunning(context.Background(), def.ProcessName) {
+			if ctl.pidFromProcessName(context.Background(), def.ProcessName) > 0 {
 				t.Skipf("%s is really running on this host", tc.service)
 			}
 
 			startFakeProcess(t, tc.unrelated...)
 
-			if running, err := ServiceStatus(context.Background(), tc.service); err != nil || running {
+			if running, err := ctl.ServiceStatus(context.Background(), tc.service); err != nil || running {
 				t.Errorf("unrelated process %v: ServiceStatus = %v, %v; want false, nil", tc.unrelated, running, err)
 			}
 
 			startFakeProcess(t, def.ProcessName, "-d")
 
-			if running, err := ServiceStatus(context.Background(), tc.service); err != nil || !running {
+			if running, err := ctl.ServiceStatus(context.Background(), tc.service); err != nil || !running {
 				t.Errorf("process %q: ServiceStatus = %v, %v; want true, nil", def.ProcessName, running, err)
 			}
 		})

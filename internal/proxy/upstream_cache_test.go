@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/sys"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,7 +22,7 @@ func TestUpstreamCacheInitialization(t *testing.T) {
 		Hostname: "test.example.com",
 	}
 
-	gen, err := NewGenerator(context.Background(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
 	if err != nil {
 		t.Fatalf("NewGenerator failed: %v", err)
 	}
@@ -85,6 +86,7 @@ exit 0
 	}
 
 	gen := &Generator{
+		env:           sys.Real(),
 		Config:        cfg,
 		upstreamCache: &upstreamQueryCache{},
 		LocalConfig:   &config.LocalConfig{Data: config.NewConfigMap()},
@@ -196,6 +198,7 @@ exit 0
 	}
 
 	gen := &Generator{
+		env:           sys.Real(),
 		Config:        cfg,
 		upstreamCache: &upstreamQueryCache{},
 		LocalConfig:   &config.LocalConfig{Data: config.NewConfigMap()},
@@ -273,6 +276,7 @@ exit 0
 	}
 
 	gen := &Generator{
+		env:           sys.Real(),
 		Config:        cfg,
 		upstreamCache: &upstreamQueryCache{},
 		LocalConfig:   &config.LocalConfig{Data: config.NewConfigMap()},

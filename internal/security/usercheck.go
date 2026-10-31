@@ -9,7 +9,7 @@ package security
 
 import (
 	"fmt"
-	"os"
+	"io"
 	"os/user"
 
 	"github.com/zextras/carbonio-configd/internal/config"
@@ -18,10 +18,21 @@ import (
 // RequiredUser is the username that must be running configd
 const RequiredUser = config.ZextrasUser
 
+// UserResolver resolves the OS user the process runs as. Production passes
+// OSUser; tests pass a stub to exercise both the zextras and non-zextras
+// branches regardless of the user running the test binary.
+type UserResolver func() (*user.User, error)
+
+// OSUser is the production UserResolver: the user of the running process, as
+// reported by os/user.
+func OSUser() (*user.User, error) {
+	return user.Current() //nolint:wrapcheck // CheckUserPermissions adds the context
+}
+
 // CheckUserPermissions verifies that configd is running strictly as the zextras user.
 // Root is not accepted. Returns an error for any other user.
-func CheckUserPermissions() error {
-	currentUser, err := currentUserFn()
+func CheckUserPermissions(resolve UserResolver) error {
+	currentUser, err := resolve()
 	if err != nil {
 		return fmt.Errorf("failed to get current user: %w", err)
 	}
@@ -35,19 +46,14 @@ func CheckUserPermissions() error {
 }
 
 // MustCheckUserPermissions verifies user permissions.
-// If the check fails, it logs an error to stderr and returns the error.
-// It is up to the caller to handle the error (e.g., by exiting).
-func MustCheckUserPermissions() error {
-	if err := CheckUserPermissions(); err != nil {
-		fmt.Fprintf(os.Stderr, "Please run this program as the '%s' user.\n", RequiredUser)
+// If the check fails, it writes the usage message to stderr and returns the
+// error. It is up to the caller to handle the error (e.g., by exiting).
+func MustCheckUserPermissions(resolve UserResolver, stderr io.Writer) error {
+	if err := CheckUserPermissions(resolve); err != nil {
+		_, _ = fmt.Fprintf(stderr, "Please run this program as the '%s' user.\n", RequiredUser)
 
 		return err
 	}
 
 	return nil
 }
-
-// currentUserFn resolves the current OS user. It is a variable so tests can
-// exercise both the zextras and non-zextras branches regardless of the user
-// actually running the test binary.
-var currentUserFn = user.Current

@@ -9,10 +9,9 @@ import (
 	"crypto/md5" //nolint:gosec // MD5 used for non-cryptographic checksumming only
 	"encoding/hex"
 	"io"
-	"os"
 
-	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // MAPPEDFILES mirrors the MAPPEDFILES in jylibs/state.py
@@ -24,10 +23,10 @@ var MAPPEDFILES = map[string]string{
 
 // ComputeFileMD5 computes the MD5 hash of a file's contents.
 // Returns the hex-encoded MD5 hash string or an error if file cannot be read.
-func ComputeFileMD5(ctx context.Context, filepath string) (string, error) {
+func ComputeFileMD5(ctx context.Context, fsys sys.FS, filepath string) (string, error) {
 	ctx = logger.ContextWithComponentOnce(ctx, "state")
 	//nolint:gosec // G304: File path comes from trusted configuration
-	file, err := os.Open(filepath)
+	file, err := fsys.Open(filepath)
 	if err != nil {
 		return "", err
 	}
@@ -77,11 +76,11 @@ func (s *State) SetFileMD5(filepath, md5hash string) {
 // FileHasChanged checks if a file's current MD5 differs from cached MD5.
 // If no cached MD5 exists, returns true (file is considered new/changed).
 // If file doesn't exist or can't be read, returns true (triggering rewrite).
-func (s *State) FileHasChanged(ctx context.Context, filepath string) bool {
+func (s *State) FileHasChanged(ctx context.Context, fsys sys.FS, filepath string) bool {
 	ctx = logger.ContextWithComponentOnce(ctx, "state")
 	cachedMD5 := s.GetFileMD5(filepath)
 
-	currentMD5, err := ComputeFileMD5(ctx, filepath)
+	currentMD5, err := ComputeFileMD5(ctx, fsys, filepath)
 	if err != nil {
 		// File doesn't exist or can't be read - consider it changed
 		logger.DebugContext(ctx, "File cannot be read, treating as changed",
@@ -112,10 +111,10 @@ func (s *State) FileHasChanged(ctx context.Context, filepath string) bool {
 
 // UpdateFileMD5 recomputes and updates the cached MD5 for a file.
 // Returns error if file cannot be read.
-func (s *State) UpdateFileMD5(ctx context.Context, filepath string) error {
+func (s *State) UpdateFileMD5(ctx context.Context, fsys sys.FS, filepath string) error {
 	ctx = logger.ContextWithComponentOnce(ctx, "state")
 
-	md5hash, err := ComputeFileMD5(ctx, filepath)
+	md5hash, err := ComputeFileMD5(ctx, fsys, filepath)
 	if err != nil {
 		return err
 	}
@@ -127,51 +126,6 @@ func (s *State) UpdateFileMD5(ctx context.Context, filepath string) error {
 		"md5", md5hash)
 
 	return nil
-}
-
-// ShouldRewriteSection determines if a section should be rewritten based on:
-// 1. FirstRun flag (always rewrite on first run)
-// 2. Section.changed flag (configuration variables changed)
-// 3. ForcedConfig map (section explicitly forced via command-line or network)
-// 4. RequestedConfig map (section explicitly requested via network command)
-func (s *State) ShouldRewriteSection(ctx context.Context, sectionName string, section *config.MtaConfigSection) bool {
-	ctx = logger.ContextWithComponentOnce(ctx, "state")
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.FirstRun {
-		logger.DebugContext(ctx, "Section rewrite required (first run)",
-			"section", sectionName)
-
-		return true
-	}
-
-	if section != nil && section.Changed {
-		logger.DebugContext(ctx, "Section rewrite required (configuration changed)",
-			"section", sectionName)
-
-		return true
-	}
-
-	if _, forced := s.ForcedConfig[sectionName]; forced {
-		logger.DebugContext(ctx, "Section rewrite required (forced)",
-			"section", sectionName)
-
-		return true
-	}
-
-	if _, requested := s.RequestedConfig[sectionName]; requested {
-		logger.DebugContext(ctx, "Section rewrite required (requested)",
-			"section", sectionName)
-
-		return true
-	}
-
-	logger.DebugContext(ctx, "Section no rewrite needed",
-		"section", sectionName)
-
-	return false
 }
 
 // LookupFile returns the cached content for a FILE type lookup key.

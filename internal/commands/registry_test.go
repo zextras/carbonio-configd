@@ -6,13 +6,15 @@ package commands
 
 import (
 	"testing"
+
+	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
 
 // TestNewRegistry_DifferentPaths tests that two registries with different ZEXTRAS_HOME
 // paths have different executable paths.
 func TestNewRegistry_DifferentPaths(t *testing.T) {
-	registry1 := NewRegistry("/opt/zextras")
-	registry2 := NewRegistry("/custom/zextras")
+	registry1 := NewRegistry("/opt/zextras", systest.New().System())
+	registry2 := NewRegistry("/custom/zextras", systest.New().System())
 
 	// Verify that the registries have different paths
 	if registry1.Exe["AMAVIS"] == registry2.Exe["AMAVIS"] {
@@ -31,7 +33,7 @@ func TestNewRegistry_DifferentPaths(t *testing.T) {
 
 // TestNewRegistry_DefaultPath tests that NewRegistry with empty string defaults to /opt/zextras
 func TestNewRegistry_DefaultPath(t *testing.T) {
-	registry := NewRegistry("")
+	registry := NewRegistry("", systest.New().System())
 
 	if registry.Exe["AMAVIS"] != "/opt/zextras/bin/zmamavisdctl" {
 		t.Errorf("registry.Exe[AMAVIS] = %q, want %q", registry.Exe["AMAVIS"], "/opt/zextras/bin/zmamavisdctl")
@@ -40,7 +42,7 @@ func TestNewRegistry_DefaultPath(t *testing.T) {
 
 // TestNewRegistry_CommandsInitialized tests that NewRegistry initializes the Commands map
 func TestNewRegistry_CommandsInitialized(t *testing.T) {
-	registry := NewRegistry("/opt/zextras")
+	registry := NewRegistry("/opt/zextras", systest.New().System())
 
 	expectedCommands := []string{
 		"amavis", "antispam", "antivirus", "cbpolicyd", "ldap",
@@ -58,19 +60,23 @@ func TestNewRegistry_CommandsInitialized(t *testing.T) {
 
 // TestRegistry_RegisterLDAPCommands tests that RegisterLDAPCommands adds LDAP commands to the registry
 func TestRegistry_RegisterLDAPCommands(t *testing.T) {
-	registry := NewRegistry("/opt/zextras")
+	registry := NewRegistry("/opt/zextras", systest.New().System())
 	executor := NewCommandExecutor(nil)
 
 	// Before registering, LDAP commands should not be present
-	if _, ok := registry.Commands["gacf"]; ok {
-		t.Error("gacf should not be in registry before RegisterLDAPCommands")
+	if _, ok := registry.Commands["garpu"]; ok {
+		t.Error("garpu should not be in registry before RegisterLDAPCommands")
+	}
+
+	if registry.ServerAttrs != nil || registry.GlobalAttrs != nil {
+		t.Error("typed LDAP loaders should be unset before RegisterLDAPCommands")
 	}
 
 	// Register LDAP commands
 	registry.RegisterLDAPCommands(executor)
 
 	// After registering, LDAP commands should be present
-	expectedLDAPCommands := []string{"gacf", "gamau", "garpb", "garpu", "gs", "gs:enabled"}
+	expectedLDAPCommands := []string{"gamau", "garpb", "garpu"}
 	for _, cmd := range expectedLDAPCommands {
 		if _, ok := registry.Commands[cmd]; !ok {
 			t.Errorf("registry.Commands missing LDAP command: %s", cmd)
@@ -80,8 +86,8 @@ func TestRegistry_RegisterLDAPCommands(t *testing.T) {
 
 // TestRegistry_MultipleInstances tests that multiple registry instances are independent
 func TestRegistry_MultipleInstances(t *testing.T) {
-	registry1 := NewRegistry("/opt/zextras")
-	registry2 := NewRegistry("/custom/zextras")
+	registry1 := NewRegistry("/opt/zextras", systest.New().System())
+	registry2 := NewRegistry("/custom/zextras", systest.New().System())
 
 	executor := NewCommandExecutor(nil)
 
@@ -89,12 +95,12 @@ func TestRegistry_MultipleInstances(t *testing.T) {
 	registry1.RegisterLDAPCommands(executor)
 
 	// registry2 should not have LDAP commands
-	if _, ok := registry2.Commands["gacf"]; ok {
-		t.Error("registry2 should not have gacf after registering only in registry1")
+	if _, ok := registry2.Commands["garpu"]; ok {
+		t.Error("registry2 should not have garpu after registering only in registry1")
 	}
 
 	// registry1 should have LDAP commands
-	if _, ok := registry1.Commands["gacf"]; !ok {
-		t.Error("registry1 should have gacf after RegisterLDAPCommands")
+	if _, ok := registry1.Commands["garpu"]; !ok {
+		t.Error("registry1 should have garpu after RegisterLDAPCommands")
 	}
 }

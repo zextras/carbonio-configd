@@ -7,7 +7,6 @@ package proxy
 
 import (
 	"context"
-	"os"
 	"strings"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
@@ -107,7 +106,7 @@ func (g *Generator) clientCertCAPath() string {
 // resolveDHParamEnabled returns the keyword if DH parameters file exists
 func (g *Generator) resolveDHParamEnabled(ctx context.Context) (any, error) {
 	dhPath := g.ConfDir + "/dhparam.pem"
-	if _, err := os.Stat(dhPath); err == nil {
+	if _, err := g.env.FS.Stat(dhPath); err == nil {
 		return sslDHParamKey, nil // Return the keyword to enable
 	}
 
@@ -177,7 +176,7 @@ func (g *Generator) resolveWebSSLDhparamEnabled(_ context.Context) (any, error) 
 		}
 	}
 
-	if _, err := os.Stat(dhPath); err == nil {
+	if _, err := g.env.FS.Stat(dhPath); err == nil {
 		return true, nil
 	}
 
@@ -189,7 +188,7 @@ func (g *Generator) resolveWebSSLDhparamEnabled(_ context.Context) (any, error) 
 func (g *Generator) resolveSSLClientCertCAEnabled(_ context.Context) (any, error) {
 	caPath := g.clientCertCAPath()
 
-	info, err := os.Stat(caPath)
+	info, err := g.env.FS.Stat(caPath)
 	if err != nil {
 		return false, nil //nolint:nilerr // missing file means disabled, not an error
 	}

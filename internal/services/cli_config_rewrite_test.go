@@ -15,6 +15,8 @@ import (
 
 // TestServiceActionString_Default exercises the default (unknown) branch of String().
 func TestServiceActionString_Default(t *testing.T) {
+	t.Parallel()
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -27,25 +29,31 @@ func TestServiceActionString_Default(t *testing.T) {
 // TestRewriteConfigs_NoConfigrewriteBinary exercises rewriteConfigs when the
 // configrewrite binary does not exist.
 func TestRewriteConfigs_NoConfigrewriteBinary(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	tmp := t.TempDir()
-	old := basePath
-	basePath = tmp
-	defer func() { basePath = old }()
+	ctl.p.base = tmp
 
 	def := &ServiceDef{
 		Name:          "testservice",
 		ConfigRewrite: []string{"testconfig"},
 	}
 
-	rewriteConfigs(context.Background(), def)
+	ctl.rewriteConfigs(context.Background(), def)
 }
 
 // TestRewriteConfigs_WithConfigrewriteBinary exercises rewriteConfigs when the
 // configrewrite binary exists (as a "true" symlink so it exits 0).
 func TestRewriteConfigs_WithConfigrewriteBinary(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -60,21 +68,23 @@ func TestRewriteConfigs_WithConfigrewriteBinary(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	old := basePath
-	basePath = tmp
-	defer func() { basePath = old }()
+	ctl.p.base = tmp
 
 	def := &ServiceDef{
 		Name:          "testservice",
 		ConfigRewrite: []string{"testconfig"},
 	}
 
-	rewriteConfigs(context.Background(), def)
+	ctl.rewriteConfigs(context.Background(), def)
 }
 
 // TestRewriteConfigs_ConfigrewriteFailure exercises the error-logging path when
 // the configrewrite binary exits non-zero.
 func TestRewriteConfigs_ConfigrewriteFailure(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -89,24 +99,26 @@ func TestRewriteConfigs_ConfigrewriteFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	old := basePath
-	basePath = tmp
-	defer func() { basePath = old }()
+	ctl.p.base = tmp
 
 	def := &ServiceDef{
 		Name:          "testservice",
 		ConfigRewrite: []string{"testconfig"},
 	}
 
-	rewriteConfigs(context.Background(), def)
+	ctl.rewriteConfigs(context.Background(), def)
 }
 
 // TestRewriteViaConfigd_ConnectionRefused verifies the connection-refused error path.
 func TestRewriteViaConfigd_ConnectionRefused(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	err := rewriteViaConfigd(context.Background(), []string{"testconfig"})
+	err := ctl.rewriteViaConfigd(context.Background(), []string{"testconfig"})
 	if err == nil {
 		t.Error("expected error when no configd server is running")
 	}
@@ -114,6 +126,10 @@ func TestRewriteViaConfigd_ConnectionRefused(t *testing.T) {
 
 // TestRewriteViaConfigd_ErrorResponse verifies the ERROR response path.
 func TestRewriteViaConfigd_ErrorResponse(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -134,7 +150,7 @@ func TestRewriteViaConfigd_ErrorResponse(t *testing.T) {
 		_, _ = conn.Write([]byte("ERROR bad config\n"))
 	}()
 
-	err = rewriteViaConfigd(context.Background(), []string{"testconfig"})
+	err = ctl.rewriteViaConfigd(context.Background(), []string{"testconfig"})
 	if err == nil {
 		t.Error("expected error from rewriteViaConfigd")
 	}
@@ -143,6 +159,8 @@ func TestRewriteViaConfigd_ErrorResponse(t *testing.T) {
 // TestRewriteViaConfigd_SuccessResponse verifies the success path by serving a
 // non-ERROR response from a local TCP listener.
 func TestRewriteViaConfigd_SuccessResponse(t *testing.T) {
+	t.Parallel()
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -191,6 +209,10 @@ func TestRewriteViaConfigd_SuccessResponse(t *testing.T) {
 
 // TestRewriteViaConfigd_WriteError exercises the "failed to send REWRITE" path.
 func TestRewriteViaConfigd_WriteError(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -208,7 +230,7 @@ func TestRewriteViaConfigd_WriteError(t *testing.T) {
 		conn.Close()
 	}()
 
-	err = rewriteViaConfigd(context.Background(), []string{"testconfig"})
+	err = ctl.rewriteViaConfigd(context.Background(), []string{"testconfig"})
 	if err == nil {
 		t.Error("expected error when configd is not reachable")
 	}
@@ -216,6 +238,8 @@ func TestRewriteViaConfigd_WriteError(t *testing.T) {
 
 // TestRewriteViaConfigd_WriteOrReadError exercises the write/read error path.
 func TestRewriteViaConfigd_WriteOrReadError(t *testing.T) {
+	t.Parallel()
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -250,6 +274,8 @@ func TestRewriteViaConfigd_WriteOrReadError(t *testing.T) {
 
 // TestRewriteViaConfigd_ErrorResponsePath verifies the ERROR response branch.
 func TestRewriteViaConfigd_ErrorResponsePath(t *testing.T) {
+	t.Parallel()
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -294,6 +320,8 @@ func TestRewriteViaConfigd_ErrorResponsePath(t *testing.T) {
 
 // TestRewriteViaConfigd_SuccessPath verifies the success path (non-ERROR response).
 func TestRewriteViaConfigd_SuccessPath(t *testing.T) {
+	t.Parallel()
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -338,6 +366,8 @@ func TestRewriteViaConfigd_SuccessPath(t *testing.T) {
 
 // TestRewriteViaConfigdProtocol_ErrorResponse verifies the ERROR response branch.
 func TestRewriteViaConfigdProtocol_ErrorResponse(t *testing.T) {
+	t.Parallel()
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -368,6 +398,8 @@ func TestRewriteViaConfigdProtocol_ErrorResponse(t *testing.T) {
 
 // TestRewriteViaConfigdProtocol_SuccessResponse verifies the success (non-ERROR) path.
 func TestRewriteViaConfigdProtocol_SuccessResponse(t *testing.T) {
+	t.Parallel()
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}

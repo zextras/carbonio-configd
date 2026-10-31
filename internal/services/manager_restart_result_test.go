@@ -12,36 +12,35 @@ import (
 	"testing"
 )
 
-// registerRestartStub registers a Registry entry whose start either succeeds
+// registerRestartStub registers a ctl.registry entry whose start either succeeds
 // or fails, and forces legacy (non-systemd) mode for the test.
-func registerRestartStub(t *testing.T, name string, startErr error) {
+func registerRestartStub(t *testing.T, ctl *Controller, name string, startErr error) {
 	t.Helper()
 
-	orig := isSystemdModeFn
-	isSystemdModeFn = func() bool { return false }
+	ctl.pinMode(false)
 
-	Registry[name] = &ServiceDef{
+	ctl.registry[name] = &ServiceDef{
 		Name:        name,
 		CustomStart: func(_ context.Context, _ *ServiceDef) error { return startErr },
 		CustomStop:  func(_ context.Context, _ *ServiceDef) error { return nil },
 	}
 
-	t.Cleanup(func() {
-		isSystemdModeFn = orig
-
-		delete(Registry, name)
-	})
+	t.Cleanup(func() { delete(ctl.registry, name) })
 }
 
 // TestProcessRestarts_DroppedServicesReturnSortedError verifies that services
 // dropped after max failed attempts are reported (sorted, wrapped) instead of
 // ProcessRestarts claiming success, while healthy services are not listed.
 func TestProcessRestarts_DroppedServicesReturnSortedError(t *testing.T) {
-	registerRestartStub(t, "zz-failing", errors.New("boom"))
-	registerRestartStub(t, "aa-failing", errors.New("boom"))
-	registerRestartStub(t, "mm-healthy", nil)
+	t.Parallel()
 
-	sm := NewServiceManager()
+	ctl, _ := newFakeController(t)
+
+	registerRestartStub(t, ctl, "zz-failing", errors.New("boom"))
+	registerRestartStub(t, ctl, "aa-failing", errors.New("boom"))
+	registerRestartStub(t, ctl, "mm-healthy", nil)
+
+	sm := NewServiceManager(ctl)
 	sm.MaxFailedRestarts = 1
 
 	for _, svc := range []string{"zz-failing", "mm-healthy", "aa-failing"} {
@@ -65,9 +64,13 @@ func TestProcessRestarts_DroppedServicesReturnSortedError(t *testing.T) {
 // TestProcessRestarts_SucceedingServiceReturnsNil guards against reporting
 // failure for a clean restart.
 func TestProcessRestarts_SucceedingServiceReturnsNil(t *testing.T) {
-	registerRestartStub(t, "ok-svc", nil)
+	t.Parallel()
 
-	sm := NewServiceManager()
+	ctl, _ := newFakeController(t)
+
+	registerRestartStub(t, ctl, "ok-svc", nil)
+
+	sm := NewServiceManager(ctl)
 	sm.MaxFailedRestarts = 1
 	sm.RestartQueue["ok-svc"] = true
 
@@ -80,7 +83,11 @@ func TestProcessRestarts_SucceedingServiceReturnsNil(t *testing.T) {
 // order (including every service absent from StartOrder) sort by name, so map
 // iteration order never leaks into the restart order.
 func TestGetSortedServices_EqualPriorityIsStable(t *testing.T) {
-	sm := NewServiceManager()
+	t.Parallel()
+
+	ctl, _ := newFakeController(t)
+
+	sm := NewServiceManager(ctl)
 	sm.StartOrder = map[string]int{"first": 0, "tie-b": 10, "tie-a": 10}
 
 	names := []string{"zeta", "tie-b", "alpha", "first", "tie-a", "mid", "omega", "beta"}

@@ -6,37 +6,14 @@ package main
 
 import (
 	"context"
-	"fmt"
-	"os/exec"
-	"strings"
+	"os"
+	"slices"
 
-	"github.com/zextras/carbonio-configd/internal/services"
+	"github.com/zextras/carbonio-configd/internal/cli/service"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 const norewriteArg = "norewrite"
-
-// cliPreamble runs the common Kong Run() setup shared by every
-// root-requiring CLI command: enforce root, initialize CLI logging, and
-// return a background context for the command body.
-func cliPreamble() context.Context {
-	requireZextras()
-	initCLILogging()
-
-	return context.Background()
-}
-
-// runServiceAction runs cliPreamble, then invokes fn and wraps any error
-// with the verb and service name to match each command's original
-// user-facing message. Shared by every service-mutating Kong command.
-func runServiceAction(name, verb string, fn func(context.Context, string) error) error {
-	ctx := cliPreamble()
-
-	if err := fn(ctx, name); err != nil {
-		return fmt.Errorf("failed to %s service %s: %w", verb, name, err)
-	}
-
-	return nil
-}
 
 // ServiceCmd handles the "configd service" subcommand.
 type ServiceCmd struct {
@@ -50,19 +27,17 @@ type ServiceCmd struct {
 	StopSystemd  ServiceStopSystemdCmd  `cmd:"" name:"stop-systemd" hidden:"" help:"systemd ExecStop leaf (no systemctl)"`
 }
 
+// runService executes one "configd service" action.
+func runService(env sys.System, opts *service.Options) error {
+	return exitWith(service.Run(context.Background(), env, os.Stdout, os.Stderr, opts))
+}
+
 // ServiceListCmd lists all services with their status.
 type ServiceListCmd struct{}
 
 // Run executes the service list command.
-//
-//nolint:unparam // Kong interface requires error return
-func (c *ServiceListCmd) Run() error {
-	initCLILogging()
-
-	ctx := context.Background()
-	runServiceList(ctx)
-
-	return nil
+func (c *ServiceListCmd) Run(env sys.System) error {
+	return runService(env, &service.Options{Action: service.ActionList})
 }
 
 // ServiceStartCmd starts a service.
@@ -73,17 +48,13 @@ type ServiceStartCmd struct {
 }
 
 // Run executes the service start command.
-func (c *ServiceStartCmd) Run() error {
+func (c *ServiceStartCmd) Run(env sys.System) error {
 	// Supports both --no-rewrite flag and legacy "norewrite" positional arg.
-	for _, a := range c.Extra {
-		if a == norewriteArg {
-			c.NoRewrite = true
-		}
-	}
-
-	services.NoRewrite = c.NoRewrite
-
-	return runServiceAction(c.Name, "start", services.ServiceStart)
+	return runService(env, &service.Options{
+		Action:    service.ActionStart,
+		Name:      c.Name,
+		NoRewrite: c.NoRewrite || slices.Contains(c.Extra, norewriteArg),
+	})
 }
 
 // ServiceStartSystemdCmd is the systemd ExecStart leaf: it launches the service
@@ -94,8 +65,8 @@ type ServiceStartSystemdCmd struct {
 }
 
 // Run executes the systemd-leaf start command.
-func (c *ServiceStartSystemdCmd) Run() error {
-	return runServiceAction(c.Name, "start", services.ServiceStartSystemd)
+func (c *ServiceStartSystemdCmd) Run(env sys.System) error {
+	return runService(env, &service.Options{Action: service.ActionStartSystemd, Name: c.Name})
 }
 
 // ServiceStopSystemdCmd is the systemd ExecStop leaf: it stops the service
@@ -105,8 +76,8 @@ type ServiceStopSystemdCmd struct {
 }
 
 // Run executes the systemd-leaf stop command.
-func (c *ServiceStopSystemdCmd) Run() error {
-	return runServiceAction(c.Name, "stop", services.ServiceStopSystemd)
+func (c *ServiceStopSystemdCmd) Run(env sys.System) error {
+	return runService(env, &service.Options{Action: service.ActionStopSystemd, Name: c.Name})
 }
 
 // ServiceStopCmd stops a service.
@@ -115,8 +86,8 @@ type ServiceStopCmd struct {
 }
 
 // Run executes the service stop command.
-func (c *ServiceStopCmd) Run() error {
-	return runServiceAction(c.Name, "stop", services.ServiceStop)
+func (c *ServiceStopCmd) Run(env sys.System) error {
+	return runService(env, &service.Options{Action: service.ActionStop, Name: c.Name})
 }
 
 // ServiceRestartCmd restarts a service.
@@ -127,18 +98,12 @@ type ServiceRestartCmd struct {
 }
 
 // Run executes the service restart command.
-func (c *ServiceRestartCmd) Run() error {
-	// Parse extra args for --no-rewrite / -R flag, then propagate to the services package.
-	// services.NoRewrite is checked by ServiceRestart before rewriting configs.
-	for _, a := range c.Extra {
-		if a == norewriteArg {
-			c.NoRewrite = true
-		}
-	}
-
-	services.NoRewrite = c.NoRewrite
-
-	return runServiceAction(c.Name, "restart", services.ServiceRestart)
+func (c *ServiceRestartCmd) Run(env sys.System) error {
+	return runService(env, &service.Options{
+		Action:    service.ActionRestart,
+		Name:      c.Name,
+		NoRewrite: c.NoRewrite || slices.Contains(c.Extra, norewriteArg),
+	})
 }
 
 // ServiceReloadCmd reloads a service.
@@ -147,8 +112,8 @@ type ServiceReloadCmd struct {
 }
 
 // Run executes the service reload command.
-func (c *ServiceReloadCmd) Run() error {
-	return runServiceAction(c.Name, "reload", services.ServiceReload)
+func (c *ServiceReloadCmd) Run(env sys.System) error {
+	return runService(env, &service.Options{Action: service.ActionReload, Name: c.Name})
 }
 
 // ServiceStatusCmd shows detailed status for a service.
@@ -157,111 +122,6 @@ type ServiceStatusCmd struct {
 }
 
 // Run executes the service status command.
-func (c *ServiceStatusCmd) Run() error {
-	initCLILogging()
-
-	return printServiceStatus(context.Background(), c.Name)
-}
-
-// Overridable in tests, mirroring the isSystemdModeFn seam in internal/services:
-// both probes hit the live host, so CLI rendering is otherwise untestable.
-var (
-	serviceStatusFn = services.ServiceStatus
-	isSystemdModeFn = services.IsSystemdMode
-)
-
-// printServiceStatus reports one service's state plus PID/uptime detail.
-// Shared by `configd service status <name>` and `configd status <name>`.
-func printServiceStatus(ctx context.Context, name string) error {
-	running, err := serviceStatusFn(ctx, name)
-	if err != nil {
-		return fmt.Errorf("failed to get status for service %s: %w", name, err)
-	}
-
-	def := services.LookupService(name)
-	if def == nil {
-		return fmt.Errorf("unknown service: %s", name)
-	}
-
-	if !running {
-		fmt.Printf("%s is not running.\n", def.DisplayName)
-
-		return fmt.Errorf("service %s is not running", name)
-	}
-
-	fmt.Printf("%s is running.\n", def.DisplayName)
-	showServiceDetail(ctx, def)
-
-	return nil
-}
-
-// showServiceDetail prints PID/uptime, sourced to match the orchestration
-// layer: systemctl show in strict systemd mode, /proc in legacy mode. Asking
-// systemctl in legacy mode reports the unit's state, not the process configd
-// actually spawned — on hosts with no unit at all (ubuntu-jammy, rocky-8)
-// that yielded "Since: n/a" for a healthy daemon.
-func showServiceDetail(ctx context.Context, def *services.ServiceDef) {
-	if isSystemdModeFn() {
-		for _, unit := range def.SystemdUnits {
-			showUnitDetail(ctx, unit)
-		}
-
-		return
-	}
-
-	pid := services.RunningPID(def)
-	if pid == 0 {
-		return
-	}
-
-	fmt.Printf("  PID: %d\n", pid)
-
-	if since, ok := procStartTime(pid); ok {
-		fmt.Printf("  Since: %s\n", since)
-	}
-}
-
-func showUnitDetail(ctx context.Context, unit string) {
-	// Get MainPID and ActiveEnterTimestamp from systemctl show
-	// #nosec G702 - unit name comes from internal registry, not user input
-	out, err := exec.CommandContext(ctx, "systemctl", "show", unit,
-		"--property=MainPID,ActiveEnterTimestamp,MemoryCurrent").Output()
-	if err != nil {
-		return
-	}
-
-	props := parseSystemctlShow(string(out))
-
-	if pid, ok := props["MainPID"]; ok && pid != "" && pid != "0" {
-		fmt.Printf("  PID: %s\n", pid)
-	}
-
-	// systemd renders an unset timestamp as "n/a" — never print that as a
-	// start time.
-	if ts, ok := props["ActiveEnterTimestamp"]; ok && ts != "" && ts != "n/a" {
-		fmt.Printf("  Since: %s\n", ts)
-	}
-
-	if mem, ok := props["MemoryCurrent"]; ok && mem != "" && mem != "[not set]" {
-		fmt.Printf("  Memory: %s\n", mem)
-	}
-}
-
-func parseSystemctlShow(output string) map[string]string {
-	props := make(map[string]string)
-
-	for line := range strings.SplitSeq(output, "\n") {
-		if idx := strings.IndexByte(line, '='); idx > 0 {
-			props[line[:idx]] = line[idx+1:]
-		}
-	}
-
-	return props
-}
-
-func runServiceList(ctx context.Context) {
-	infos := services.ServiceListStatus(ctx)
-	for _, info := range infos {
-		cliStatus(info.DisplayName, info.Running, "")
-	}
+func (c *ServiceStatusCmd) Run(env sys.System) error {
+	return runService(env, &service.Options{Action: service.ActionStatus, Name: c.Name})
 }

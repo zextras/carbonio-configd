@@ -12,6 +12,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/ldap"
 	"github.com/zextras/carbonio-configd/internal/network"
+	"github.com/zextras/carbonio-configd/internal/plan"
 	"github.com/zextras/carbonio-configd/internal/proxy"
 	"github.com/zextras/carbonio-configd/internal/services"
 	"github.com/zextras/carbonio-configd/internal/state"
@@ -53,18 +54,22 @@ func TestE2E_ConfigdCycleWithProxy(t *testing.T) {
 	ldapClient := ldap.NewLdap(context.Background(), mainCfg)
 
 	// Create ConfigManager
-	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil)
+	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv())
 
 	// Create Service Manager
-	serviceManager := services.NewServiceManager()
+	env := hostEnv()
+	controller := services.NewController(env)
+	serviceManager := services.NewServiceManager(controller)
 
 	// Create Watchdog (but don't start it yet)
 	wd := watchdog.NewWatchdog(watchdog.Config{
 		CheckInterval:  5 * time.Second, // Faster for testing
 		ServiceManager: serviceManager,
 		State:          appState,
+		Clock:          env.Clock,
+		Snapshots:      controller,
 		ConfigLookup: func(key string) string {
-			if val, exists := appState.LocalConfig.Data.Get(key); exists {
+			if val, exists := appState.Snapshot().Local(key); exists {
 				return val
 			}
 			return ""
@@ -88,20 +93,21 @@ func TestE2E_ConfigdCycleWithProxy(t *testing.T) {
 		}
 
 		// Verify basic configs loaded
-		if appState.LocalConfig.Data.Len() == 0 {
+		snap := appState.Snapshot()
+		if len(snap.LocalMap()) == 0 {
 			t.Error("LocalConfig not loaded")
 		}
-		if appState.GlobalConfig.Data.Len() == 0 {
+		if len(snap.GlobalMap()) == 0 {
 			t.Error("GlobalConfig not loaded")
 		}
-		if appState.ServerConfig.Data.Len() == 0 {
+		if len(snap.ServerMap()) == 0 {
 			t.Error("ServerConfig not loaded")
 		}
 
 		t.Logf("✓ Loaded configs: Local=%d keys, Global=%d keys, Server=%d keys",
-			appState.LocalConfig.Data.Len(),
-			appState.GlobalConfig.Data.Len(),
-			appState.ServerConfig.Data.Len())
+			len(snap.LocalMap()),
+			len(snap.GlobalMap()),
+			len(snap.ServerMap()))
 	})
 
 	t.Run("Parse_MTA_Config", func(t *testing.T) {
@@ -129,46 +135,65 @@ func TestE2E_ConfigdCycleWithProxy(t *testing.T) {
 			len(appState.MtaConfig.Sections), len(proxySection.RequiredVars))
 	})
 
+	var proxyPlan *plan.Plan
+
 	t.Run("Detect_Proxy_Changes", func(t *testing.T) {
-		// Simulate a proxy configuration change
-		// In real scenario, this would come from LDAP or config file change
-		appState.ChangedKeys = make(map[string][]string)
-		appState.ChangedKeys["proxy"] = []string{"zimbraReverseProxyLookupTarget"}
+		// Baseline cycle: the first run records every observed value.
+		if _, err := cm.Plan(context.Background()); err != nil {
+			t.Fatalf("baseline Plan failed: %v", err)
+		}
 
-		// Run CompareKeys to detect changes
-		err := cm.CompareKeys(context.Background())
+		appState.SetFirstRun(false)
+
+		// Simulate a proxy configuration change: request the section, as the
+		// REWRITE network command does.
+		appState.AddRequestedConfigs(context.Background(), []string{"proxy"})
+
+		pl, err := cm.Plan(context.Background())
 		if err != nil {
-			t.Errorf("CompareKeys failed: %v", err)
+			t.Fatalf("Plan failed: %v", err)
 		}
 
-		// Verify change detected
-		if len(appState.ChangedKeys["proxy"]) == 0 {
-			t.Error("Proxy change not detected in ChangedKeys")
+		// Verify the proxy section is processed
+		found := false
+		for _, sec := range pl.Sections {
+			if sec.Name == "proxy" {
+				found = true
+			}
+		}
+		if !found {
+			t.Error("Proxy change not detected in the plan sections")
 		}
 
-		t.Logf("✓ Change detection working: %d sections changed", len(appState.ChangedKeys))
+		proxyPlan = pl
+
+		t.Logf("✓ Change detection working: %d sections planned", len(pl.Sections))
 	})
 
 	t.Run("Compile_Actions_For_Proxy", func(t *testing.T) {
-		// Ensure proxy section is marked as changed
-		appState.ChangedKeys["proxy"] = []string{"zimbraReverseProxyLookupTarget"}
-
-		// Compile actions based on changes
-		cm.CompileActions(context.Background())
-
-		// Verify proxygen action is set
-		if !appState.CurrentActions.Proxygen {
-			t.Error("Proxygen action not set after proxy section change")
+		if proxyPlan == nil {
+			t.Skip("no plan from the previous step")
 		}
 
-		// Verify proxy restart is queued
-		if _, exists := appState.CurrentActions.Restarts["proxy"]; !exists {
-			t.Error("Proxy restart not queued after proxy section change")
+		// Verify proxygen action is planned
+		if proxyPlan.Proxygen == nil {
+			t.Error("Proxygen action not planned after proxy section change")
 		}
 
-		t.Logf("✓ Actions compiled: Proxygen=%v, Restarts=%d",
-			appState.CurrentActions.Proxygen,
-			len(appState.CurrentActions.Restarts))
+		// Verify proxy restart is planned
+		restartsProxy := false
+		for _, r := range proxyPlan.Restarts {
+			if r.Service == "proxy" {
+				restartsProxy = true
+			}
+		}
+		if !restartsProxy {
+			t.Error("Proxy restart not planned after proxy section change")
+		}
+
+		t.Logf("✓ Actions planned: Proxygen=%v, Restarts=%d",
+			proxyPlan.Proxygen != nil,
+			len(proxyPlan.Restarts))
 	})
 
 	t.Run("Generate_Proxy_Config", func(t *testing.T) {
@@ -180,15 +205,14 @@ func TestE2E_ConfigdCycleWithProxy(t *testing.T) {
 		defer os.RemoveAll(tmpDir)
 
 		// Override output directory in configs
-		appState.LocalConfig.Data.Set("zimbraProxyConfDir", tmpDir)
+		localCfg := appState.Snapshot().LocalMap()
+		localCfg["zimbraProxyConfDir"] = tmpDir
+		setLocal(cm, localCfg)
 
-		// Ensure proxygen is enabled
-		appState.CurrentActions.Proxygen = true
-
-		// Run proxy generation
-		err = cm.RunProxygenWithConfigs(ctx)
+		// Run proxy generation as the Execute step does
+		pending, err := cm.runProxygen(ctx, &plan.Proxygen{})
 		if err != nil {
-			t.Fatalf("RunProxygenWithConfigs failed: %v", err)
+			t.Fatalf("runProxygen failed: %v", err)
 		}
 
 		// Verify proxy config files were generated
@@ -216,7 +240,7 @@ func TestE2E_ConfigdCycleWithProxy(t *testing.T) {
 		}
 
 		// Verify proxygen action is cleared after successful generation
-		if appState.CurrentActions.Proxygen {
+		if pending != nil {
 			t.Error("Proxygen action not cleared after successful generation")
 		}
 
@@ -288,7 +312,7 @@ func TestE2E_NetworkCommandsWithProxy(t *testing.T) {
 	ldapClient := ldap.NewLdap(context.Background(), mainCfg)
 
 	// Create ConfigManager
-	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil)
+	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv())
 
 	// Load initial configs
 	err = cm.LoadAllConfigs(context.Background())
@@ -431,7 +455,7 @@ func TestE2E_ProxyConfigValidation(t *testing.T) {
 
 	// Load configs
 	ldapClient := ldap.NewLdap(context.Background(), mainCfg)
-	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil)
+	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv())
 
 	err = cm.LoadAllConfigs(context.Background())
 	if err != nil {
@@ -448,17 +472,22 @@ func TestE2E_ProxyConfigValidation(t *testing.T) {
 		defer os.RemoveAll(tmpDir)
 
 		// Override output directory in local config
-		appState.LocalConfig.Data.Set("zimbraProxyConfDir", tmpDir)
+		localCfg := appState.Snapshot().LocalMap()
+		localCfg["zimbraProxyConfDir"] = tmpDir
+		setLocal(cm, localCfg)
+		snap := appState.Snapshot()
 
 		// Create proxy generator with full configs
 		gen, err := proxy.LoadConfiguration(
 			context.Background(),
+			hostEnv(),
 			mainCfg,
-			appState.LocalConfig,
-			appState.GlobalConfig,
-			appState.ServerConfig,
-			ldapClient,
-			nil, // No cache in test
+			proxy.Sources{
+				Local:  snap.LocalConfig(),
+				Global: snap.GlobalConfig(),
+				Server: snap.ServerConfig(),
+				Ldap:   ldapClient, // No cache in test
+			},
 		)
 		if err != nil {
 			t.Skipf("Cannot initialize proxy generator (expected in test env): %v", err)

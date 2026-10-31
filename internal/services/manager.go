@@ -16,18 +16,25 @@ import (
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/intern"
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/plan"
 )
 
 // ServiceManager implements the Manager interface for service control
 // operations. ControlProcess and IsRunning delegate entirely to the
 // Registry-backed lifecycle in cli.go (ServiceStart/ServiceStop/
 // ServiceRestart/ServiceStatus) — the same control path the CLI uses,
-// bifurcated internally on IsSystemdMode(). ServiceManager itself only owns
+// bifurcated internally on Controller.IsSystemdMode(). ServiceManager itself only owns
 // the restart-queue bookkeeping consumed by watchdog and configmgr's
 // restart cascade.
 type ServiceManager struct {
+	// ctl is the Controller whose lifecycle methods ControlProcess and IsRunning drive.
+	ctl *Controller
 	// RestartQueue holds services pending restart
 	RestartQueue map[string]bool
+	// restartReasons holds, per queued service, the merged de-duplicated
+	// insertion-ordered reasons it was queued for. It is dropped with the
+	// queue entry and tolerates a nil map (struct-literal construction).
+	restartReasons map[string][]string
 	// MaxFailedRestarts is the maximum number of retry attempts for a failed restart
 	MaxFailedRestarts int
 	// StartOrder defines the order in which services should be started
@@ -38,10 +45,12 @@ type ServiceManager struct {
 	DisableRestarts bool
 }
 
-// NewServiceManager creates a new ServiceManager instance.
-func NewServiceManager() *ServiceManager {
+// NewServiceManager creates a ServiceManager that controls services through ctl.
+func NewServiceManager(ctl *Controller) *ServiceManager {
 	return &ServiceManager{
+		ctl:               ctl,
 		RestartQueue:      make(map[string]bool),
+		restartReasons:    make(map[string][]string),
 		MaxFailedRestarts: 3,
 		StartOrder:        getDefaultStartOrder(),
 		Dependencies:      make(map[string][]string),
@@ -104,13 +113,13 @@ func (sm *ServiceManager) ControlProcess(ctx context.Context, service string, ac
 
 	switch action {
 	case ActionStart:
-		return ServiceStart(ctx, service)
+		return sm.ctl.ServiceStart(ctx, service)
 	case ActionStop:
-		return ServiceStop(ctx, service)
+		return sm.ctl.ServiceStop(ctx, service)
 	case ActionRestart:
-		return ServiceRestart(ctx, service)
+		return sm.ctl.ServiceRestart(ctx, service)
 	case ActionStatus:
-		running, err := ServiceStatus(ctx, service)
+		running, err := sm.ctl.ServiceStatus(ctx, service)
 		if err != nil {
 			return err
 		}
@@ -129,18 +138,48 @@ func (sm *ServiceManager) ControlProcess(ctx context.Context, service string, ac
 func (sm *ServiceManager) IsRunning(ctx context.Context, service string) (bool, error) {
 	ctx = logger.ContextWithComponentOnce(ctx, "services")
 
-	return ServiceStatus(ctx, strings.ToLower(service))
+	return sm.ctl.ServiceStatus(ctx, strings.ToLower(service))
 }
 
 // AddRestart queues a service for restart.
 func (sm *ServiceManager) AddRestart(ctx context.Context, service string) error {
+	return sm.AddRestartWithReasons(ctx, service, nil)
+}
+
+// AddRestartWithReasons queues a service for restart and remembers why. The
+// reasons are merged (de-duplicated, insertion order) with those of an
+// earlier request for the same service still in the queue, and are logged
+// once when the restart is attempted.
+func (sm *ServiceManager) AddRestartWithReasons(ctx context.Context, service string, reasons []string) error {
 	ctx = logger.ContextWithComponentOnce(ctx, "services")
 	service = intern.Service(strings.ToLower(service))
 	sm.RestartQueue[service] = true
+
+	if len(reasons) > 0 {
+		if sm.restartReasons == nil {
+			sm.restartReasons = make(map[string][]string)
+		}
+
+		merged := sm.restartReasons[service]
+
+		for _, r := range reasons {
+			if !slices.Contains(merged, r) {
+				merged = append(merged, r)
+			}
+		}
+
+		sm.restartReasons[service] = merged
+	}
+
 	logger.DebugContext(ctx, "Queued restart for service",
 		"service", service)
 
 	return nil
+}
+
+// reasonsOf returns the reasons queued for service, never nil.
+func (sm *ServiceManager) reasonsOf(service string) []string {
+	return append([]string{}, sm.restartReasons[service]...)
 }
 
 // ProcessRestarts processes all queued service restarts with dependency cascading.
@@ -165,6 +204,12 @@ func (sm *ServiceManager) ProcessRestarts(ctx context.Context, configLookup func
 
 	for len(sm.RestartQueue) > 0 {
 		madeProgress := sm.processRestartRound(ctx, failedRestarts, processedThisRound, configLookup)
+
+		// A shutdown stops the processing at once: nothing is retried and
+		// the interrupted restart is neither a failure nor an error.
+		if ctx.Err() != nil {
+			return sm.interruptedRestarts(ctx)
+		}
 
 		if madeProgress {
 			processedThisRound = make(map[string]bool)
@@ -197,6 +242,17 @@ func (sm *ServiceManager) ProcessRestarts(ctx context.Context, configLookup func
 	return nil
 }
 
+// interruptedRestarts logs the restarts left pending by a shutdown and returns
+// the error that tells the caller the processing was interrupted (not failed).
+func (sm *ServiceManager) interruptedRestarts(ctx context.Context) error {
+	pending := slices.Sorted(maps.Keys(sm.RestartQueue))
+
+	logger.InfoContext(ctx, "Shutdown during service restarts",
+		"pending", strings.Join(pending, ", "))
+
+	return fmt.Errorf("service restarts interrupted: %w", context.Cause(ctx))
+}
+
 // logDryRunRestarts logs what would be restarted in dry-run mode.
 func (sm *ServiceManager) logDryRunRestarts(ctx context.Context) {
 	logger.DebugContext(ctx, "Restart disabled (dry-run mode)",
@@ -218,6 +274,10 @@ func (sm *ServiceManager) processRestartRound(
 	madeProgress := false
 
 	for _, service := range sm.getSortedServices() {
+		if ctx.Err() != nil {
+			break
+		}
+
 		if !sm.RestartQueue[service] || processedThisRound[service] {
 			continue
 		}
@@ -239,11 +299,12 @@ func (sm *ServiceManager) attemptServiceRestart(
 	failedRestarts map[string]int,
 	configLookup func(string) string,
 ) bool {
-	logger.InfoContext(ctx, "Restarting service", "service", service)
+	logger.InfoContext(ctx, "Restarting service", "service", service, "reasons", sm.reasonsOf(service))
 
 	err := sm.ControlProcess(ctx, service, ActionRestart)
 	if err == nil {
 		delete(sm.RestartQueue, service)
+		delete(sm.restartReasons, service)
 		delete(failedRestarts, service)
 
 		logger.InfoContext(ctx, "Successfully restarted service", "service", service)
@@ -255,12 +316,19 @@ func (sm *ServiceManager) attemptServiceRestart(
 		return true
 	}
 
+	// The restart was cut short by a shutdown: it is not a failed attempt, so
+	// it neither counts toward MaxFailedRestarts nor is logged as a failure.
+	if ctx.Err() != nil {
+		return false
+	}
+
 	failedRestarts[service]++
 
 	logger.WarnContext(ctx, "Failed to restart service", "service", service, "error", err)
 
 	if failedRestarts[service] >= sm.MaxFailedRestarts {
 		delete(sm.RestartQueue, service)
+		delete(sm.restartReasons, service)
 
 		logger.ErrorContext(ctx, "Removing service from restart queue after max failed attempts",
 			"service", service,
@@ -305,6 +373,7 @@ func (sm *ServiceManager) startOrderOf(service string) int {
 func (sm *ServiceManager) ClearRestarts(ctx context.Context) {
 	ctx = logger.ContextWithComponentOnce(ctx, "services")
 	sm.RestartQueue = make(map[string]bool)
+	sm.restartReasons = make(map[string][]string)
 
 	logger.DebugContext(ctx, "Cleared all pending restarts")
 }
@@ -324,7 +393,7 @@ func (sm *ServiceManager) GetPendingRestarts() []string {
 // configmgr's first-run tracking; "command" no longer means a legacy
 // zm*ctl path — there isn't one anymore.
 func (sm *ServiceManager) HasCommand(service string) bool {
-	return LookupService(strings.ToLower(service)) != nil
+	return sm.ctl.LookupService(strings.ToLower(service)) != nil
 }
 
 // SetDependencies sets the dependency map for service restart cascading.
@@ -351,18 +420,20 @@ func (sm *ServiceManager) AddDependencyRestarts(
 
 	logger.DebugContext(ctx, "Checking dependencies for section", "section", sectionName)
 
+	reason := plan.Reason{Kind: plan.ReasonDependency, Service: sectionName}.String()
+
 	for _, depService := range deps {
-		sm.queueDependencyRestart(ctx, strings.ToLower(depService), configLookup)
+		sm.queueDependencyRestart(ctx, strings.ToLower(depService), reason, configLookup)
 	}
 }
 
 // queueDependencyRestart decides whether to queue a restart for a single dependency.
 // "amavis" is always queued; other services are queued only when enabled.
 func (sm *ServiceManager) queueDependencyRestart(
-	ctx context.Context, depService string, configLookup func(string) string,
+	ctx context.Context, depService, reason string, configLookup func(string) string,
 ) {
 	if depService == svcAmavis {
-		sm.addRestartLogged(ctx, depService, svcAmavis+" (special case)")
+		sm.addRestartLogged(ctx, depService, reason, svcAmavis+" (special case)")
 		return
 	}
 
@@ -370,15 +441,15 @@ func (sm *ServiceManager) queueDependencyRestart(
 	serviceStatus := configLookup(serviceKey)
 
 	if config.IsTruthy(serviceStatus) || serviceStatus == serviceStatusEnabled {
-		sm.addRestartLogged(ctx, depService, depService)
+		sm.addRestartLogged(ctx, depService, reason, depService)
 	} else {
 		logger.DebugContext(ctx, "Skipped dependency restart for disabled service", "service", depService)
 	}
 }
 
-// addRestartLogged calls AddRestart and logs the outcome.
-func (sm *ServiceManager) addRestartLogged(ctx context.Context, service, logLabel string) {
-	if err := sm.AddRestart(ctx, service); err != nil {
+// addRestartLogged calls AddRestartWithReasons and logs the outcome.
+func (sm *ServiceManager) addRestartLogged(ctx context.Context, service, reason, logLabel string) {
+	if err := sm.AddRestartWithReasons(ctx, service, []string{reason}); err != nil {
 		logger.WarnContext(ctx, "Failed to add restart for service",
 			"service", logLabel,
 			"error", err)

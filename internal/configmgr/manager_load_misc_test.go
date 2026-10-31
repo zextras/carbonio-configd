@@ -151,15 +151,15 @@ func TestLoadMiscConfig_Success(t *testing.T) {
 	}
 
 	// Verify all commands were executed and stored
-	if val, ok := cm.State.MiscConfig.Data.Get("garpu"); !ok || val != "https://proxy1.example.com" {
+	if val, ok := cm.State.Snapshot().Misc("garpu"); !ok || val != "https://proxy1.example.com" {
 		t.Errorf("Expected garpu output to be stored, got: %s", val)
 	}
 
-	if val, ok := cm.State.MiscConfig.Data.Get("garpb"); !ok || val != "backend1.example.com" {
+	if val, ok := cm.State.Snapshot().Misc("garpb"); !ok || val != "backend1.example.com" {
 		t.Errorf("Expected garpb output to be stored, got: %s", val)
 	}
 
-	if val, ok := cm.State.MiscConfig.Data.Get("gamau"); !ok || val != "ldap://mta-auth.example.com" {
+	if val, ok := cm.State.Snapshot().Misc("gamau"); !ok || val != "ldap://mta-auth.example.com" {
 		t.Errorf("Expected gamau output to be stored, got: %s", val)
 	}
 }
@@ -190,7 +190,7 @@ func TestLoadMiscConfig_NoCache(t *testing.T) {
 	}
 
 	// Verify at least one command output was stored
-	if val, ok := cm.State.MiscConfig.Data.Get("garpu"); !ok || val != "https://proxy.example.com" {
+	if val, ok := cm.State.Snapshot().Misc("garpu"); !ok || val != "https://proxy.example.com" {
 		t.Errorf("Expected garpu output to be stored without cache, got: %s", val)
 	}
 }
@@ -230,12 +230,12 @@ func TestLoadMiscConfig_PartialFailure(t *testing.T) {
 	}
 
 	// Verify successful command output was stored
-	if val, ok := cm.State.MiscConfig.Data.Get("garpu"); !ok || val != "https://proxy.example.com" {
+	if val, ok := cm.State.Snapshot().Misc("garpu"); !ok || val != "https://proxy.example.com" {
 		t.Errorf("Expected garpu output to be stored, got: %s", val)
 	}
 
 	// Verify failed commands are not in the data map or are empty
-	if val, ok := cm.State.MiscConfig.Data.Get("garpb"); ok && val != "" {
+	if val, ok := cm.State.Snapshot().Misc("garpb"); ok && val != "" {
 		t.Errorf("Expected garpb to not be stored or be empty, got: %s", val)
 	}
 }

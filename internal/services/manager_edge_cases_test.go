@@ -12,7 +12,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"syscall"
 	"testing"
+	"time"
+
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // ============================================================
@@ -21,12 +25,16 @@ import (
 
 // TestAddRestartLogged_Deduplication verifies calling twice deduplicates.
 func TestAddRestartLogged_Deduplication(t *testing.T) {
+	t.Parallel()
+
+	ctl, _ := newFakeController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	sm := NewServiceManager()
-	sm.addRestartLogged(context.Background(), "mta", "mta-label")
-	sm.addRestartLogged(context.Background(), "mta", "mta-label")
+	sm := NewServiceManager(ctl)
+	sm.addRestartLogged(context.Background(), "mta", "r", "mta-label")
+	sm.addRestartLogged(context.Background(), "mta", "r", "mta-label")
 	if len(sm.RestartQueue) != 1 {
 		t.Errorf("expected 1 entry after duplicate addRestartLogged, got %d", len(sm.RestartQueue))
 	}
@@ -34,13 +42,17 @@ func TestAddRestartLogged_Deduplication(t *testing.T) {
 
 // TestAddRestartLogged_MultipleDifferentServices verifies multiple services are queued.
 func TestAddRestartLogged_MultipleDifferentServices(t *testing.T) {
+	t.Parallel()
+
+	ctl, _ := newFakeController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	sm := NewServiceManager()
-	sm.addRestartLogged(context.Background(), "mta", "mta")
-	sm.addRestartLogged(context.Background(), "proxy", "proxy")
-	sm.addRestartLogged(context.Background(), "mailbox", "mailbox")
+	sm := NewServiceManager(ctl)
+	sm.addRestartLogged(context.Background(), "mta", "r", "mta")
+	sm.addRestartLogged(context.Background(), "proxy", "r", "proxy")
+	sm.addRestartLogged(context.Background(), "mailbox", "r", "mailbox")
 
 	if len(sm.RestartQueue) != 3 {
 		t.Errorf("expected 3 queued services, got %d", len(sm.RestartQueue))
@@ -50,11 +62,15 @@ func TestAddRestartLogged_MultipleDifferentServices(t *testing.T) {
 // TestAddRestartLogged_LabelDiffersFromService verifies addRestartLogged
 // accepts a logLabel different from the service name.
 func TestAddRestartLogged_LabelDiffersFromService(t *testing.T) {
+	t.Parallel()
+
+	ctl, _ := newFakeController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	sm := NewServiceManager()
-	sm.addRestartLogged(context.Background(), "mta", "mta-display-label")
+	sm := NewServiceManager(ctl)
+	sm.addRestartLogged(context.Background(), "mta", "r", "mta-display-label")
 
 	if !sm.RestartQueue["mta"] {
 		t.Error("expected 'mta' queued when logLabel differs from service name")
@@ -68,21 +84,23 @@ func TestAddRestartLogged_LabelDiffersFromService(t *testing.T) {
 // TestAttemptServiceRestart_SuccessWithDependencies verifies that on success the service
 // is removed from the queue and AddDependencyRestarts is called.
 func TestAttemptServiceRestart_SuccessWithDependencies(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	orig := isSystemdModeFn
-	defer func() { isSystemdModeFn = orig }()
-	isSystemdModeFn = func() bool { return false }
+	ctl.pinMode(false)
 
-	Registry["testservice"] = &ServiceDef{
+	ctl.registry["testservice"] = &ServiceDef{
 		Name:        "testservice",
 		CustomStart: func(_ context.Context, _ *ServiceDef) error { return nil },
 		CustomStop:  func(_ context.Context, _ *ServiceDef) error { return nil },
 	}
-	defer delete(Registry, "testservice")
+	defer delete(ctl.registry, "testservice")
 
-	sm := NewServiceManager()
+	sm := NewServiceManager(ctl)
 	sm.RestartQueue["testservice"] = true
 
 	sm.SetDependencies(context.Background(), map[string][]string{
@@ -108,21 +126,23 @@ func TestAttemptServiceRestart_SuccessWithDependencies(t *testing.T) {
 
 // TestAttemptServiceRestart_SuccessNilConfigLookup verifies success path without configLookup.
 func TestAttemptServiceRestart_SuccessNilConfigLookup(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	orig := isSystemdModeFn
-	defer func() { isSystemdModeFn = orig }()
-	isSystemdModeFn = func() bool { return false }
+	ctl.pinMode(false)
 
-	Registry["testservice"] = &ServiceDef{
+	ctl.registry["testservice"] = &ServiceDef{
 		Name:        "testservice",
 		CustomStart: func(_ context.Context, _ *ServiceDef) error { return nil },
 		CustomStop:  func(_ context.Context, _ *ServiceDef) error { return nil },
 	}
-	defer delete(Registry, "testservice")
+	defer delete(ctl.registry, "testservice")
 
-	sm := NewServiceManager()
+	sm := NewServiceManager(ctl)
 	sm.RestartQueue["testservice"] = true
 
 	failedRestarts := make(map[string]int)
@@ -139,21 +159,23 @@ func TestAttemptServiceRestart_SuccessNilConfigLookup(t *testing.T) {
 // TestAttemptServiceRestart_FailBelowMax verifies partial failure (< MaxFailedRestarts)
 // returns false and keeps the service in the queue.
 func TestAttemptServiceRestart_FailBelowMax(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	orig := isSystemdModeFn
-	defer func() { isSystemdModeFn = orig }()
-	isSystemdModeFn = func() bool { return false }
+	ctl.pinMode(false)
 
-	Registry["testservice"] = &ServiceDef{
+	ctl.registry["testservice"] = &ServiceDef{
 		Name:        "testservice",
 		CustomStart: func(_ context.Context, _ *ServiceDef) error { return errors.New("start failed intentionally") },
 		CustomStop:  func(_ context.Context, _ *ServiceDef) error { return nil },
 	}
-	defer delete(Registry, "testservice")
+	defer delete(ctl.registry, "testservice")
 
-	sm := NewServiceManager()
+	sm := NewServiceManager(ctl)
 	sm.MaxFailedRestarts = 3
 	sm.RestartQueue["testservice"] = true
 
@@ -174,21 +196,23 @@ func TestAttemptServiceRestart_FailBelowMax(t *testing.T) {
 // TestAttemptServiceRestart_FailAtMax verifies that reaching MaxFailedRestarts removes
 // the service from the queue and returns true.
 func TestAttemptServiceRestart_FailAtMax(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	orig := isSystemdModeFn
-	defer func() { isSystemdModeFn = orig }()
-	isSystemdModeFn = func() bool { return false }
+	ctl.pinMode(false)
 
-	Registry["testservice"] = &ServiceDef{
+	ctl.registry["testservice"] = &ServiceDef{
 		Name:        "testservice",
 		CustomStart: func(_ context.Context, _ *ServiceDef) error { return errors.New("start failed intentionally") },
 		CustomStop:  func(_ context.Context, _ *ServiceDef) error { return nil },
 	}
-	defer delete(Registry, "testservice")
+	defer delete(ctl.registry, "testservice")
 
-	sm := NewServiceManager()
+	sm := NewServiceManager(ctl)
 	sm.MaxFailedRestarts = 3
 	sm.RestartQueue["testservice"] = true
 
@@ -211,23 +235,25 @@ func TestAttemptServiceRestart_FailAtMax(t *testing.T) {
 // TestProcessRestartRound_AllSucceed verifies that when all services succeed,
 // madeProgress is true and the queue is emptied.
 func TestProcessRestartRound_AllSucceed(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	orig := isSystemdModeFn
-	defer func() { isSystemdModeFn = orig }()
-	isSystemdModeFn = func() bool { return false }
+	ctl.pinMode(false)
 
 	succeed := &ServiceDef{
 		CustomStart: func(_ context.Context, _ *ServiceDef) error { return nil },
 		CustomStop:  func(_ context.Context, _ *ServiceDef) error { return nil },
 	}
-	Registry["svc1"] = succeed
-	Registry["svc2"] = succeed
-	defer delete(Registry, "svc1")
-	defer delete(Registry, "svc2")
+	ctl.registry["svc1"] = succeed
+	ctl.registry["svc2"] = succeed
+	defer delete(ctl.registry, "svc1")
+	defer delete(ctl.registry, "svc2")
 
-	sm := NewServiceManager()
+	sm := NewServiceManager(ctl)
 	sm.RestartQueue["svc1"] = true
 	sm.RestartQueue["svc2"] = true
 
@@ -245,12 +271,16 @@ func TestProcessRestartRound_AllSucceed(t *testing.T) {
 
 // TestProcessRestartRound_AlreadyProcessed verifies that a service already in
 // processedThisRound is skipped (attemptServiceRestart is never invoked, so no
-// Registry entry is needed for "svc1").
+// ctl.registry entry is needed for "svc1").
 func TestProcessRestartRound_AlreadyProcessed(t *testing.T) {
+	t.Parallel()
+
+	ctl, _ := newFakeController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	sm := NewServiceManager()
+	sm := NewServiceManager(ctl)
 	sm.RestartQueue["svc1"] = true
 
 	failedRestarts := make(map[string]int)
@@ -267,10 +297,14 @@ func TestProcessRestartRound_AlreadyProcessed(t *testing.T) {
 
 // TestProcessRestartRound_EmptyQueue verifies no progress with empty queue.
 func TestProcessRestartRound_EmptyQueue(t *testing.T) {
+	t.Parallel()
+
+	ctl, _ := newFakeController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	sm := NewServiceManager()
+	sm := NewServiceManager(ctl)
 	failedRestarts := make(map[string]int)
 	processedThisRound := make(map[string]bool)
 
@@ -287,23 +321,25 @@ func TestProcessRestartRound_EmptyQueue(t *testing.T) {
 // TestProcessRestarts_ServiceSucceedsEventually verifies the loop resets processedThisRound
 // when progress is made.
 func TestProcessRestarts_ServiceSucceedsEventually(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	orig := isSystemdModeFn
-	defer func() { isSystemdModeFn = orig }()
-	isSystemdModeFn = func() bool { return false }
+	ctl.pinMode(false)
 
 	succeed := &ServiceDef{
 		CustomStart: func(_ context.Context, _ *ServiceDef) error { return nil },
 		CustomStop:  func(_ context.Context, _ *ServiceDef) error { return nil },
 	}
-	Registry["svc1"] = succeed
-	Registry["svc2"] = succeed
-	defer delete(Registry, "svc1")
-	defer delete(Registry, "svc2")
+	ctl.registry["svc1"] = succeed
+	ctl.registry["svc2"] = succeed
+	defer delete(ctl.registry, "svc1")
+	defer delete(ctl.registry, "svc2")
 
-	sm := NewServiceManager()
+	sm := NewServiceManager(ctl)
 	sm.RestartQueue["svc1"] = true
 	sm.RestartQueue["svc2"] = true
 
@@ -318,20 +354,22 @@ func TestProcessRestarts_ServiceSucceedsEventually(t *testing.T) {
 
 // TestProcessRestarts_NoProgressBreaksLoop verifies the "no progress" break path.
 func TestProcessRestarts_NoProgressBreaksLoop(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	orig := isSystemdModeFn
-	defer func() { isSystemdModeFn = orig }()
-	isSystemdModeFn = func() bool { return false }
+	ctl.pinMode(false)
 
-	Registry["svc1"] = &ServiceDef{
+	ctl.registry["svc1"] = &ServiceDef{
 		CustomStart: func(_ context.Context, _ *ServiceDef) error { return errors.New("start failed intentionally") },
 		CustomStop:  func(_ context.Context, _ *ServiceDef) error { return nil },
 	}
-	defer delete(Registry, "svc1")
+	defer delete(ctl.registry, "svc1")
 
-	sm := NewServiceManager()
+	sm := NewServiceManager(ctl)
 	sm.MaxFailedRestarts = 5
 	sm.RestartQueue["svc1"] = true
 
@@ -350,26 +388,28 @@ func TestProcessRestarts_NoProgressBreaksLoop(t *testing.T) {
 
 // TestMilterEnabled verifies milterEnabled reads the options file correctly.
 func TestMilterEnabled(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	tempDir := t.TempDir()
 	filePath := filepath.Join(tempDir, "mta_milter_options")
-	oldPath := milterOptionsPath
-	milterOptionsPath = filePath
-	defer func() { milterOptionsPath = oldPath }()
+	ctl.p.milterOptions = filePath
 
 	if err := os.WriteFile(filePath, []byte("zimbraMilterServerEnabled=TRUE\n"), 0o644); err != nil {
 		t.Fatalf("failed writing enabled milter file: %v", err)
 	}
-	if !milterEnabled(context.Background()) {
+	if !ctl.milterEnabled(context.Background()) {
 		t.Fatal("expected milterEnabled to return true")
 	}
 
 	if err := os.WriteFile(filePath, []byte("zimbraMilterServerEnabled=FALSE\n"), 0o644); err != nil {
 		t.Fatalf("failed writing disabled milter file: %v", err)
 	}
-	if milterEnabled(context.Background()) {
+	if ctl.milterEnabled(context.Background()) {
 		t.Fatal("expected milterEnabled to return false")
 	}
 }
@@ -380,50 +420,31 @@ func TestMilterEnabled(t *testing.T) {
 
 // TestKillProcess_OtherPidSignaled verifies killProcess signals a non-self, non-parent PID.
 func TestKillProcess_OtherPidSignaled(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	cmd := exec.Command("sleep", "30")
-	if err := cmd.Start(); err != nil {
-		t.Skipf("cannot start background sleep: %v", err)
-	}
+	t.Parallel()
 
-	defer func() {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-	}()
+	ctl, f := newFakeController(t)
+	pumpClock(t, f.Clock, time.Second)
 
-	sleepPid := cmd.Process.Pid
+	const needle = "killprocess-sleep-test-needle-xyzzy"
 
-	tmp := t.TempDir()
-	oldRoot := procFSRoot
-	procFSRoot = tmp + "/"
-	defer func() { procFSRoot = oldRoot }()
+	f.Proc.Add(sys.ProcEntry{PID: 4321, Argv: []string{needle}, Comm: "sleep"})
 
-	uid := os.Getuid()
-	pidDir := filepath.Join(tmp, strconv.Itoa(sleepPid))
-	if err := os.MkdirAll(pidDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	needle := "killprocess-sleep-test-needle-xyzzy"
-	if err := os.WriteFile(filepath.Join(pidDir, "cmdline"), []byte(needle+"\x00"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	status := "Name:\tsleep\nState:\tS (sleeping)\nUid:\t" + strconv.Itoa(uid) + "\t" + strconv.Itoa(uid) + "\t" + strconv.Itoa(uid) + "\t" + strconv.Itoa(uid) + "\n"
-	if err := os.WriteFile(filepath.Join(pidDir, "status"), []byte(status), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	err := killProcess(context.Background(), needle)
-	if err != nil {
+	if err := ctl.killProcess(context.Background(), needle); err != nil {
 		t.Errorf("killProcess returned unexpected error: %v", err)
+	}
+
+	sigs := f.Proc.Signals()
+	if len(sigs) == 0 || sigs[0].PID != 4321 || sigs[0].Sig != syscall.SIGTERM {
+		t.Errorf("signals = %v, want SIGTERM to pid 4321 first", sigs)
 	}
 }
 
 // TestKillStatsPidFile_ValidPidKilled verifies killStatsPidFile kills a real process.
 func TestKillStatsPidFile_ValidPidKilled(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -444,7 +465,7 @@ func TestKillStatsPidFile_ValidPidKilled(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result := killStatsPidFile(context.Background(), pidFile)
+	result := ctl.killStatsPidFile(context.Background(), pidFile)
 	if !result {
 		t.Error("expected killStatsPidFile to return true for a live process")
 	}
@@ -456,6 +477,10 @@ func TestKillStatsPidFile_ValidPidKilled(t *testing.T) {
 
 // TestStatsCustomStop_WithValidPidFile verifies statsCustomStop kills via .pid files.
 func TestStatsCustomStop_WithValidPidFile(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -476,11 +501,9 @@ func TestStatsCustomStop_WithValidPidFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	old := statsPidDir
-	statsPidDir = tmp
-	defer func() { statsPidDir = old }()
+	ctl.p.statsPidDir = tmp
 
-	err := statsCustomStop(context.Background(), nil)
+	err := ctl.statsCustomStop(context.Background(), nil)
 	if err != nil {
 		t.Errorf("statsCustomStop returned error: %v", err)
 	}
@@ -504,6 +527,10 @@ func dialUnixgram(path string) (*net.UnixConn, error) {
 // TestWaitForSDNotify_NonReadyDatagram verifies that non-READY datagrams are
 // ignored and waiting continues until context cancel.
 func TestWaitForSDNotify_NonReadyDatagram(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -521,7 +548,7 @@ func TestWaitForSDNotify_NonReadyDatagram(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- waitForSDNotify(ctx, conn, "test-service", nil)
+		done <- ctl.waitForSDNotify(ctx, conn, "test-service", nil)
 	}()
 
 	sender, dialErr := dialUnixgram(socketPath)

@@ -13,6 +13,7 @@ import (
 
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/config/configtest"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // TestParseDurationToMillis covers all branches of parseDurationToMillis (0% → target)
@@ -111,6 +112,7 @@ func TestLookupValueBranches(t *testing.T) {
 
 	t.Run("OverrideServer hits server config", func(t *testing.T) {
 		g := &Generator{
+			env:          sys.Real(),
 			ServerConfig: &config.ServerConfig{Data: configtest.NewConfigMapFrom(map[string]string{"myAttr": "42"})},
 			GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMap()},
 		}
@@ -132,6 +134,7 @@ func TestLookupValueBranches(t *testing.T) {
 
 	t.Run("OverrideServer falls back to global config", func(t *testing.T) {
 		g := &Generator{
+			env:          sys.Real(),
 			ServerConfig: &config.ServerConfig{Data: configtest.NewConfigMapFrom(map[string]string{})},
 			GlobalConfig: &config.GlobalConfig{Data: configtest.NewConfigMapFrom(map[string]string{"myAttr": "99"})},
 		}
@@ -153,6 +156,7 @@ func TestLookupValueBranches(t *testing.T) {
 
 	t.Run("OverrideLocalConfig hits local config", func(t *testing.T) {
 		g := &Generator{
+			env:         sys.Real(),
 			LocalConfig: &config.LocalConfig{Data: configtest.NewConfigMapFrom(map[string]string{"localAttr": "77"})},
 		}
 		v := &Variable{
@@ -173,6 +177,7 @@ func TestLookupValueBranches(t *testing.T) {
 
 	t.Run("OverrideLocalConfig falls through to default when attr missing", func(t *testing.T) {
 		g := &Generator{
+			env:         sys.Real(),
 			LocalConfig: &config.LocalConfig{Data: configtest.NewConfigMapFrom(map[string]string{})},
 		}
 		v := &Variable{
@@ -191,7 +196,7 @@ func TestLookupValueBranches(t *testing.T) {
 	})
 
 	t.Run("CustomResolver is called", func(t *testing.T) {
-		g := &Generator{}
+		g := &Generator{env: sys.Real()}
 		v := &Variable{
 			Keyword: "custom",
 			CustomResolver: func(_ context.Context) (any, error) {
@@ -211,6 +216,7 @@ func TestLookupValueBranches(t *testing.T) {
 // TestGetVariableNotFound tests GetVariable returns error when keyword not found (75% → 100%)
 func TestGetVariableNotFound(t *testing.T) {
 	g := &Generator{
+		env: sys.Real(),
 		Variables: map[string]*Variable{
 			"existing.var": {Keyword: "existing.var", Value: "val"},
 		},
@@ -235,6 +241,7 @@ func TestGetVariableNotFound(t *testing.T) {
 func TestResolveAllVariablesError(t *testing.T) {
 	ctx := context.Background()
 	g := &Generator{
+		env: sys.Real(),
 		Variables: map[string]*Variable{
 			"bad.int": {
 				Keyword:   "bad.int",
@@ -259,7 +266,7 @@ func TestResolveAllVariablesError(t *testing.T) {
 // TestConvertValue covers all ValueType branches of convertValue (30.8% → target)
 func TestConvertValue(t *testing.T) {
 	ctx := context.Background()
-	g := &Generator{}
+	g := &Generator{env: sys.Real()}
 
 	tests := []struct {
 		name    string

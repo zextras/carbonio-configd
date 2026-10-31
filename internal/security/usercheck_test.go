@@ -6,8 +6,6 @@ package security
 
 import (
 	"bytes"
-	"io"
-	"os"
 	"os/user"
 	"strings"
 	"testing"
@@ -34,7 +32,7 @@ func TestCheckUserPermissions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := CheckUserPermissions()
+			err := CheckUserPermissions(OSUser)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("CheckUserPermissions() error = %v, wantErr %v", err, tt.wantErr)
 				t.Logf("Current user: %s, Required user: %s", currentUser.Username, RequiredUser)
@@ -56,7 +54,7 @@ func TestCheckUserPermissions_ErrorMessages(t *testing.T) {
 
 	// Test when not running as required user
 	if currentUser.Username != RequiredUser {
-		err := CheckUserPermissions()
+		err := CheckUserPermissions(OSUser)
 		if err == nil {
 			t.Error("CheckUserPermissions() should return error when not running as required user")
 		}
@@ -73,13 +71,7 @@ func TestCheckUserPermissions_ErrorMessages(t *testing.T) {
 }
 
 func TestMustCheckUserPermissions(t *testing.T) {
-	// Capture stderr output
-	oldStderr := os.Stderr
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("Failed to create pipe: %v", err)
-	}
-	os.Stderr = w
+	var stderr bytes.Buffer
 
 	// Get the current user
 	currentUser, err := user.Current()
@@ -88,16 +80,8 @@ func TestMustCheckUserPermissions(t *testing.T) {
 	}
 
 	// Call MustCheckUserPermissions
-	err = MustCheckUserPermissions()
-
-	// Close the writer and restore stderr
-	w.Close()
-	os.Stderr = oldStderr
-
-	// Read captured stderr
-	var buf bytes.Buffer
-	io.Copy(&buf, r)
-	stderrOutput := buf.String()
+	err = MustCheckUserPermissions(OSUser, &stderr)
+	stderrOutput := stderr.String()
 
 	// Verify behavior based on current user
 	if currentUser.Username == RequiredUser {
@@ -137,25 +121,10 @@ func TestMustCheckUserPermissions_StderrFormat(t *testing.T) {
 		t.Skipf("Skipping stderr format test - running as required user '%s'", RequiredUser)
 	}
 
-	// Capture stderr
-	oldStderr := os.Stderr
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("Failed to create pipe: %v", err)
-	}
-	os.Stderr = w
+	var stderr bytes.Buffer
 
-	// Call function
-	MustCheckUserPermissions()
-
-	// Close and restore
-	w.Close()
-	os.Stderr = oldStderr
-
-	// Read stderr
-	var buf bytes.Buffer
-	io.Copy(&buf, r)
-	stderrOutput := buf.String()
+	_ = MustCheckUserPermissions(OSUser, &stderr)
+	stderrOutput := stderr.String()
 
 	// Verify stderr contains the expected message
 	if !strings.Contains(stderrOutput, "Please run this program as") {

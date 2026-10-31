@@ -6,6 +6,7 @@ package security
 
 import (
 	"errors"
+	"io"
 	"os/user"
 	"testing"
 
@@ -13,42 +14,40 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func withStubbedUser(t *testing.T, u *user.User, err error) {
-	t.Helper()
-
-	prev := currentUserFn
-	currentUserFn = func() (*user.User, error) { return u, err }
-
-	t.Cleanup(func() { currentUserFn = prev })
+func stubbedUser(u *user.User, err error) UserResolver {
+	return func() (*user.User, error) { return u, err }
 }
 
 func TestCheckUserPermissions_ZextrasUser(t *testing.T) {
-	withStubbedUser(t, &user.User{Username: RequiredUser}, nil)
-	assert.NoError(t, CheckUserPermissions())
+	t.Parallel()
+
+	assert.NoError(t, CheckUserPermissions(stubbedUser(&user.User{Username: RequiredUser}, nil)))
 }
 
 func TestCheckUserPermissions_WrongUser(t *testing.T) {
-	withStubbedUser(t, &user.User{Username: "root"}, nil)
+	t.Parallel()
 
-	err := CheckUserPermissions()
+	err := CheckUserPermissions(stubbedUser(&user.User{Username: "root"}, nil))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "must be run as 'zextras'")
 }
 
 func TestCheckUserPermissions_LookupFailure(t *testing.T) {
-	withStubbedUser(t, nil, errors.New("no passwd entry"))
+	t.Parallel()
 
-	err := CheckUserPermissions()
+	err := CheckUserPermissions(stubbedUser(nil, errors.New("no passwd entry")))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to get current user")
 }
 
 func TestMustCheckUserPermissions_Success(t *testing.T) {
-	withStubbedUser(t, &user.User{Username: RequiredUser}, nil)
-	assert.NoError(t, MustCheckUserPermissions())
+	t.Parallel()
+
+	assert.NoError(t, MustCheckUserPermissions(stubbedUser(&user.User{Username: RequiredUser}, nil), io.Discard))
 }
 
 func TestMustCheckUserPermissions_Failure(t *testing.T) {
-	withStubbedUser(t, &user.User{Username: "nobody"}, nil)
-	assert.Error(t, MustCheckUserPermissions())
+	t.Parallel()
+
+	assert.Error(t, MustCheckUserPermissions(stubbedUser(&user.User{Username: "nobody"}, nil), io.Discard))
 }

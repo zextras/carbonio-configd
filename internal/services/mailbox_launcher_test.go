@@ -13,22 +13,24 @@ import (
 	"testing"
 )
 
-// --- mailboxCustomStart (loadConfig override) ---
+// --- mailboxCustomStart (ctl.loadConfig override) ---
 
 func TestMailboxCustomStart_LoadConfigFails(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 
-	old := loadConfig
-	loadConfig = func() (map[string]string, error) {
+	ctl.loadConfig = func() (map[string]string, error) {
 		return nil, fmt.Errorf("test config error")
 	}
-	defer func() { loadConfig = old }()
 
-	err := mailboxCustomStart(context.Background(), &ServiceDef{Name: "mailbox"})
+	err := ctl.mailboxCustomStart(context.Background(), &ServiceDef{Name: "mailbox"})
 	if err == nil {
-		t.Fatal("expected error when loadConfig fails")
+		t.Fatal("expected error when ctl.loadConfig fails")
 	}
 	if !strings.Contains(err.Error(), "failed to load localconfig") {
 		t.Errorf("error = %q, want it to contain %q", err, "failed to load localconfig")
@@ -36,20 +38,22 @@ func TestMailboxCustomStart_LoadConfigFails(t *testing.T) {
 }
 
 func TestMailboxCustomStart_JavaBinaryMissing(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	tmp := t.TempDir()
 
-	oldLC := loadConfig
-	loadConfig = func() (map[string]string, error) {
+	ctl.loadConfig = func() (map[string]string, error) {
 		return map[string]string{
 			"mailboxd_java_home": tmp,
 		}, nil
 	}
-	defer func() { loadConfig = oldLC }()
 
-	err := mailboxCustomStart(context.Background(), &ServiceDef{Name: "mailbox"})
+	err := ctl.mailboxCustomStart(context.Background(), &ServiceDef{Name: "mailbox"})
 	if err == nil {
 		t.Fatal("expected error when java binary is missing")
 	}
@@ -59,6 +63,10 @@ func TestMailboxCustomStart_JavaBinaryMissing(t *testing.T) {
 }
 
 func TestMailboxCustomStart_JavaBinaryPresent(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -78,35 +86,23 @@ func TestMailboxCustomStart_JavaBinaryPresent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldLC := loadConfig
-	loadConfig = func() (map[string]string, error) {
+	ctl.loadConfig = func() (map[string]string, error) {
 		return map[string]string{
 			"mailboxd_java_home": filepath.Join(tmp, "jdk"),
 		}, nil
 	}
-	defer func() { loadConfig = oldLC }()
 
-	oldMailboxd := mailboxdPath
-	mailboxdPath = filepath.Join(tmp, "mailboxd")
-	defer func() { mailboxdPath = oldMailboxd }()
+	ctl.p.mailboxd = filepath.Join(tmp, "mailboxd")
 
-	oldLog := logPath
-	logPath = logDir
-	defer func() { logPath = oldLog }()
+	ctl.p.log = logDir
 
-	oldLib := libPath
-	libPath = filepath.Join(tmp, "lib")
-	defer func() { libPath = oldLib }()
+	ctl.p.lib = filepath.Join(tmp, "lib")
 
-	oldConf := confPath
-	confPath = filepath.Join(tmp, "conf")
-	defer func() { confPath = oldConf }()
+	ctl.p.conf = filepath.Join(tmp, "conf")
 
-	oldMailbox := mailboxPath
-	mailboxPath = filepath.Join(tmp, "mailbox")
-	defer func() { mailboxPath = oldMailbox }()
+	ctl.p.mailbox = filepath.Join(tmp, "mailbox")
 
-	err := mailboxCustomStart(context.Background(), &ServiceDef{Name: "mailbox"})
+	err := ctl.mailboxCustomStart(context.Background(), &ServiceDef{Name: "mailbox"})
 	if err != nil {
 		t.Errorf("mailboxCustomStart returned error: %v", err)
 	}
@@ -115,17 +111,25 @@ func TestMailboxCustomStart_JavaBinaryPresent(t *testing.T) {
 // --- mailboxJavaBinary ---
 
 func TestMailboxJavaBinary_Missing(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	lc := map[string]string{
 		"mailboxd_java_home": "/nonexistent",
 	}
 
-	_, err := mailboxJavaBinary(context.Background(), lc)
+	_, err := ctl.mailboxJavaBinary(context.Background(), lc)
 	if err == nil {
 		t.Fatal("expected error for missing java binary")
 	}
 }
 
 func TestMailboxJavaBinary_FallbackPath(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	tmp := t.TempDir()
 	javaDir := filepath.Join(tmp, "lib", "jvm", "java", "bin")
 	if err := os.MkdirAll(javaDir, 0o755); err != nil {
@@ -136,12 +140,10 @@ func TestMailboxJavaBinary_FallbackPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldCommon := commonPath
-	commonPath = tmp
-	defer func() { commonPath = oldCommon }()
+	ctl.p.common = tmp
 
 	lc := map[string]string{}
-	bin, err := mailboxJavaBinary(context.Background(), lc)
+	bin, err := ctl.mailboxJavaBinary(context.Background(), lc)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -153,8 +155,12 @@ func TestMailboxJavaBinary_FallbackPath(t *testing.T) {
 // --- mailboxJavaArgs ---
 
 func TestMailboxJavaArgs_Defaults(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	lc := map[string]string{}
-	args := mailboxJavaArgs(lc)
+	args := ctl.mailboxJavaArgs(lc)
 
 	found := false
 	for _, a := range args {
@@ -168,13 +174,17 @@ func TestMailboxJavaArgs_Defaults(t *testing.T) {
 }
 
 func TestMailboxJavaArgs_CustomHeapAndOptions(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	lc := map[string]string{
 		"mailboxd_java_heap_size":  "2048",
 		"mailboxd_java_options":    "-Xss256k -Dtest=1",
 		"networkaddress_cache_ttl": "120",
 		"zimbra_log4j_properties":  "/opt/zextras/conf/log4j.properties",
 	}
-	args := mailboxJavaArgs(lc)
+	args := ctl.mailboxJavaArgs(lc)
 
 	has := func(s string) bool {
 		for _, a := range args {
@@ -199,11 +209,15 @@ func TestMailboxJavaArgs_CustomHeapAndOptions(t *testing.T) {
 }
 
 func TestMailboxJavaArgs_OptionsContainXss(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	lc := map[string]string{
 		"mailboxd_java_heap_size": "1024",
 		"mailboxd_java_options":   "-Xss512k",
 	}
-	args := mailboxJavaArgs(lc)
+	args := ctl.mailboxJavaArgs(lc)
 	for _, a := range args {
 		if a == "-Xss256k" {
 			t.Error("should not add default Xss when already in options")
@@ -212,6 +226,10 @@ func TestMailboxJavaArgs_OptionsContainXss(t *testing.T) {
 }
 
 func TestMailboxCustomStart_DirCreation(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -231,8 +249,7 @@ func TestMailboxCustomStart_DirCreation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldLC := loadConfig
-	loadConfig = func() (map[string]string, error) {
+	ctl.loadConfig = func() (map[string]string, error) {
 		return map[string]string{
 			"mailboxd_java_home":         filepath.Join(tmp, "jdk"),
 			"mailboxd_java_heap_size":    "256",
@@ -240,33 +257,20 @@ func TestMailboxCustomStart_DirCreation(t *testing.T) {
 			"mailboxd_thread_stack_size": "",
 		}, nil
 	}
-	defer func() { loadConfig = oldLC }()
 
-	oldMailboxd := mailboxdPath
-	mailboxdPath = filepath.Join(tmp, "mailboxd")
-	defer func() { mailboxdPath = oldMailboxd }()
+	ctl.p.mailboxd = filepath.Join(tmp, "mailboxd")
 
-	oldLog := logPath
-	logPath = logDir
-	defer func() { logPath = oldLog }()
+	ctl.p.log = logDir
 
-	oldMailbox := mailboxPath
-	mailboxPath = filepath.Join(tmp, "mailbox")
-	defer func() { mailboxPath = oldMailbox }()
+	ctl.p.mailbox = filepath.Join(tmp, "mailbox")
 
-	oldLib := libPath
-	libPath = filepath.Join(tmp, "lib")
-	defer func() { libPath = oldLib }()
+	ctl.p.lib = filepath.Join(tmp, "lib")
 
-	oldConf := confPath
-	confPath = filepath.Join(tmp, "conf")
-	defer func() { confPath = oldConf }()
+	ctl.p.conf = filepath.Join(tmp, "conf")
 
-	oldCommon := commonPath
-	commonPath = filepath.Join(tmp, "common")
-	defer func() { commonPath = oldCommon }()
+	ctl.p.common = filepath.Join(tmp, "common")
 
-	err := mailboxCustomStart(context.Background(), &ServiceDef{Name: "mailbox"})
+	err := ctl.mailboxCustomStart(context.Background(), &ServiceDef{Name: "mailbox"})
 	if err != nil {
 		t.Logf("mailboxCustomStart: %v (may fail if args issue)", err)
 	}
@@ -278,14 +282,22 @@ func TestMailboxCustomStart_DirCreation(t *testing.T) {
 }
 
 func TestMailboxCustomStart_ZeroHeapDefaults(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	lc := map[string]string{}
-	args := mailboxJavaArgs(lc)
+	args := ctl.mailboxJavaArgs(lc)
 	if len(args) == 0 {
 		t.Error("expected non-empty args")
 	}
 }
 
 func TestMailboxCustomStart_GCLogCreation(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -305,35 +317,23 @@ func TestMailboxCustomStart_GCLogCreation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldLC := loadConfig
-	loadConfig = func() (map[string]string, error) {
+	ctl.loadConfig = func() (map[string]string, error) {
 		return map[string]string{
 			"mailboxd_java_home": filepath.Join(tmp, "jdk"),
 		}, nil
 	}
-	defer func() { loadConfig = oldLC }()
 
-	oldMailboxd := mailboxdPath
-	mailboxdPath = filepath.Join(tmp, "mailboxd")
-	defer func() { mailboxdPath = oldMailboxd }()
+	ctl.p.mailboxd = filepath.Join(tmp, "mailboxd")
 
-	oldLog := logPath
-	logPath = logDir
-	defer func() { logPath = oldLog }()
+	ctl.p.log = logDir
 
-	oldLib := libPath
-	libPath = filepath.Join(tmp, "lib")
-	defer func() { libPath = oldLib }()
+	ctl.p.lib = filepath.Join(tmp, "lib")
 
-	oldConf := confPath
-	confPath = filepath.Join(tmp, "conf")
-	defer func() { confPath = oldConf }()
+	ctl.p.conf = filepath.Join(tmp, "conf")
 
-	oldMailbox := mailboxPath
-	mailboxPath = filepath.Join(tmp, "mailbox")
-	defer func() { mailboxPath = oldMailbox }()
+	ctl.p.mailbox = filepath.Join(tmp, "mailbox")
 
-	err := mailboxCustomStart(context.Background(), &ServiceDef{Name: "mailbox"})
+	err := ctl.mailboxCustomStart(context.Background(), &ServiceDef{Name: "mailbox"})
 	if err != nil {
 		t.Logf("mailboxCustomStart: %v", err)
 	}
@@ -347,30 +347,34 @@ func TestMailboxCustomStart_GCLogCreation(t *testing.T) {
 // --- mailboxCustomStop ---
 
 func TestMailboxCustomStop_NoProcessName(t *testing.T) {
-	oldLC := loadConfig
-	loadConfig = func() (map[string]string, error) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	ctl.loadConfig = func() (map[string]string, error) {
 		return map[string]string{}, nil
 	}
-	defer func() { loadConfig = oldLC }()
 
-	err := mailboxCustomStop(context.Background(), &ServiceDef{Name: "mailbox"})
+	err := ctl.mailboxCustomStop(context.Background(), &ServiceDef{Name: "mailbox"})
 	if err != nil {
 		t.Fatalf("expected nil when ProcessName is empty, got %v", err)
 	}
 }
 
 func TestMailboxCustomStop_WithProcessName(t *testing.T) {
-	oldLC := loadConfig
-	loadConfig = func() (map[string]string, error) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	ctl.loadConfig = func() (map[string]string, error) {
 		return map[string]string{}, nil
 	}
-	defer func() { loadConfig = oldLC }()
 
 	def := &ServiceDef{
 		Name:        "mailbox",
 		ProcessName: "nonexistent-mailboxd-process-xyz",
 	}
-	err := mailboxCustomStop(context.Background(), def)
+	err := ctl.mailboxCustomStop(context.Background(), def)
 	if err != nil {
 		t.Logf("mailboxCustomStop with ProcessName: %v (stopAppserverDB error is expected)", err)
 	}
@@ -379,6 +383,10 @@ func TestMailboxCustomStop_WithProcessName(t *testing.T) {
 // TestMailboxCustomStop_StopDBError verifies that when stopAppserverDB returns
 // an error, mailboxCustomStop propagates it (covers the return err branch).
 func TestMailboxCustomStop_StopDBError(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	tmp := t.TempDir()
 
 	// Create a pidfile with an invalid PID so stopMysqldByPidFile returns an error
@@ -387,12 +395,10 @@ func TestMailboxCustomStop_StopDBError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldPidFile := appserverDBPidFile
-	appserverDBPidFile = pidFile
-	defer func() { appserverDBPidFile = oldPidFile }()
+	ctl.p.appserverDBPidFile = pidFile
 
 	def := &ServiceDef{Name: "mailbox"}
-	err := mailboxCustomStop(context.Background(), def)
+	err := ctl.mailboxCustomStop(context.Background(), def)
 	if err == nil {
 		t.Error("expected error when stopAppserverDB fails with invalid pidfile")
 	}
@@ -401,6 +407,10 @@ func TestMailboxCustomStop_StopDBError(t *testing.T) {
 // TestMailboxJavaBinary_ZimbraJavaHome verifies the zimbra_java_home fallback
 // (when mailboxd_java_home is empty but zimbra_java_home is set).
 func TestMailboxJavaBinary_ZimbraJavaHome(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	tmp := t.TempDir()
 	javaDir := filepath.Join(tmp, "zimbra-jdk", "bin")
 	if err := os.MkdirAll(javaDir, 0o755); err != nil {
@@ -415,7 +425,7 @@ func TestMailboxJavaBinary_ZimbraJavaHome(t *testing.T) {
 		"mailboxd_java_home": "",
 		"zimbra_java_home":   filepath.Join(tmp, "zimbra-jdk"),
 	}
-	bin, err := mailboxJavaBinary(context.Background(), lc)
+	bin, err := ctl.mailboxJavaBinary(context.Background(), lc)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

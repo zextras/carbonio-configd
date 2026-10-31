@@ -126,7 +126,6 @@ func (p *parser) parseSection(mtaConfig *config.MtaConfig) error {
 	// Create new section
 	section := &config.MtaConfigSection{
 		Name:         sectionName,
-		Changed:      false,
 		Depends:      make(map[string]bool),
 		Rewrites:     make(map[string]config.RewriteEntry),
 		Restarts:     make(map[string]bool),

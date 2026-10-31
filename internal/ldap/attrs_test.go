@@ -12,6 +12,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
 
 func TestParseServerInheritedAttrs_RealExcerpt(t *testing.T) {
@@ -46,19 +48,23 @@ func TestParseServerInheritedAttrs_Malformed(t *testing.T) {
 }
 
 func TestAttrsFileCache_ReparsesOnChange(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "attrs.xml")
-	require.NoError(t, os.WriteFile(path, []byte(`<attrs><attr name="a" flags="serverInherited"/></attrs>`), 0o600))
+	t.Parallel()
+
+	f := systest.New()
+	dir := "/opt/zextras/conf/attrs"
+	path := dir + "/attrs.xml"
+	f.FS.PutDir(dir, 0o755)
+	f.FS.Put(path, []byte(`<attrs><attr name="a" flags="serverInherited"/></attrs>`), 0o600)
 
 	var c attrsFileCache
 
-	names, err := c.serverInheritedAttrs(dir)
+	names, err := c.serverInheritedAttrs(f.FS, dir)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"a"}, names)
 
-	require.NoError(t, os.WriteFile(path, []byte(`<attrs><attr name="b" flags="serverInherited"/><attr name="c" flags="serverInherited"/></attrs>`), 0o600))
+	f.FS.Put(path, []byte(`<attrs><attr name="b" flags="serverInherited"/><attr name="c" flags="serverInherited"/></attrs>`), 0o600)
 
-	names, err = c.serverInheritedAttrs(dir)
+	names, err = c.serverInheritedAttrs(f.FS, dir)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"b", "c"}, names)
 }

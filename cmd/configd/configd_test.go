@@ -6,129 +6,15 @@ package main
 
 import (
 	"context"
-	"errors"
-	"log/slog"
-	"net"
 	"os"
-	"os/exec"
-	"strings"
+	"slices"
 	"testing"
 
-	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/cli/cliutil"
+	"github.com/zextras/carbonio-configd/internal/cli/rewrite"
+	"github.com/zextras/carbonio-configd/internal/sys"
+	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
-
-func TestConfigureLogFormat(t *testing.T) {
-	tests := []struct {
-		name     string
-		envValue string
-		expected logger.LogFormat
-	}{
-		{
-			name:     "json format",
-			envValue: "json",
-			expected: logger.FormatJSON,
-		},
-		{
-			name:     "text format",
-			envValue: "text",
-			expected: logger.FormatText,
-		},
-		{
-			name:     "empty defaults to text",
-			envValue: "",
-			expected: logger.FormatText,
-		},
-		{
-			name:     "unknown defaults to text",
-			envValue: "invalid",
-			expected: logger.FormatText,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			os.Setenv("CONFIGD_LOG_FORMAT", tt.envValue)
-			defer os.Unsetenv("CONFIGD_LOG_FORMAT")
-
-			cfg := logger.DefaultConfig()
-			configureLogFormat(cfg)
-
-			if cfg.Format != tt.expected {
-				t.Errorf("expected format %v, got %v", tt.expected, cfg.Format)
-			}
-		})
-	}
-}
-
-func TestConfigureLogLevel(t *testing.T) {
-	tests := []struct {
-		name     string
-		envValue string
-		expected slog.Level
-	}{
-		{
-			name:     "debug level",
-			envValue: "debug",
-			expected: logger.LogLevelDebug,
-		},
-		{
-			name:     "info level",
-			envValue: "info",
-			expected: logger.LogLevelInfo,
-		},
-		{
-			name:     "warn level",
-			envValue: "warn",
-			expected: logger.LogLevelWarn,
-		},
-		{
-			name:     "warning level",
-			envValue: "warning",
-			expected: logger.LogLevelWarn,
-		},
-		{
-			name:     "error level",
-			envValue: "error",
-			expected: logger.LogLevelError,
-		},
-		{
-			name:     "empty defaults to info",
-			envValue: "",
-			expected: logger.LogLevelInfo,
-		},
-		{
-			name:     "unknown defaults to info",
-			envValue: "invalid",
-			expected: logger.LogLevelInfo,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			os.Setenv("CONFIGD_LOG_LEVEL", tt.envValue)
-			defer os.Unsetenv("CONFIGD_LOG_LEVEL")
-
-			cfg := logger.DefaultConfig()
-			configureLogLevel(cfg)
-
-			if cfg.Level != tt.expected {
-				t.Errorf("expected level %v, got %v", tt.expected, cfg.Level)
-			}
-		})
-	}
-}
-
-func TestInitializeLogging(t *testing.T) {
-	os.Setenv("CONFIGD_LOG_FORMAT", "json")
-	os.Setenv("CONFIGD_LOG_LEVEL", "debug")
-	defer os.Unsetenv("CONFIGD_LOG_FORMAT")
-	defer os.Unsetenv("CONFIGD_LOG_LEVEL")
-
-	ctx := initializeLogging()
-	if ctx == nil {
-		t.Error("expected non-nil context from initializeLogging")
-	}
-}
 
 func TestInitializeConfig(t *testing.T) {
 	os.Setenv("CONFIGD_LOG_FORMAT", "text")
@@ -136,7 +22,7 @@ func TestInitializeConfig(t *testing.T) {
 	defer os.Unsetenv("CONFIGD_LOG_FORMAT")
 	defer os.Unsetenv("CONFIGD_LOG_LEVEL")
 
-	initializeLogging()
+	cliutil.InitLogging(os.Stderr)
 
 	mainCfg, appState, ldapClient := initializeConfig()
 
@@ -147,206 +33,131 @@ func TestInitializeConfig(t *testing.T) {
 		t.Error("expected non-nil ldap client")
 	}
 
-	if appState.LocalConfig.Data.GetOr("zmconfigd_listen_port", "") != "7171" {
-		t.Errorf("expected listen port 7171, got %s", appState.LocalConfig.Data.GetOr("zmconfigd_listen_port", ""))
+	snap := appState.Snapshot()
+	if port, _ := snap.Local("zmconfigd_listen_port"); port != "7171" {
+		t.Errorf("expected listen port 7171, got %s", port)
 	}
-	if appState.LocalConfig.Data.GetOr("zimbraIPMode", "") != ipModeIPv4 {
-		t.Errorf("expected IP mode %s, got %s", ipModeIPv4, appState.LocalConfig.Data.GetOr("zimbraIPMode", ""))
+	if mode, _ := snap.Local("zimbraIPMode"); mode != rewrite.IPModeIPv4 {
+		t.Errorf("expected IP mode %s, got %s", rewrite.IPModeIPv4, mode)
 	}
 }
 
-func TestPerlArchname_ValidOutput(t *testing.T) {
-	if _, err := os.Stat("/usr/bin/perl"); err != nil {
-		t.Skip("perl not available")
-	}
+func TestPerlArchname(t *testing.T) {
+	t.Parallel()
 
-	result := perlArchname()
-	_ = result
-}
-
-func TestPerlArchname_ParseFormat(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    string
+		output   string
 		expected string
 	}{
-		{name: "standard perl output", input: "archname='x86_64-linux-thread-multi'\n", expected: "x86_64-linux-thread-multi"},
-		{name: "no quotes", input: "archname=\n", expected: ""},
-		{name: "single quote only start", input: "archname='value\n", expected: ""},
-		{name: "empty quotes", input: "archname=''\n", expected: ""},
-		{name: "multi segment", input: "archname='aarch64-linux-thread-multi'\n", expected: "aarch64-linux-thread-multi"},
+		{
+			name:     "standard perl output",
+			output:   "archname='x86_64-linux-thread-multi';\n",
+			expected: "x86_64-linux-thread-multi",
+		},
+		{name: "no quotes", output: "archname=\n", expected: ""},
+		{name: "single quote only start", output: "archname='value\n", expected: ""},
+		{name: "empty quotes", output: "archname='';\n", expected: ""},
+		{
+			name:     "multi segment",
+			output:   "archname='aarch64-linux-thread-multi';\n",
+			expected: "aarch64-linux-thread-multi",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := strings.TrimSpace(tt.input)
-			start := strings.IndexByte(s, '\'')
-			end := strings.LastIndexByte(s, '\'')
-			var got string
-			if start >= 0 && end > start {
-				got = s[start+1 : end]
+			t.Parallel()
+
+			fakes := systest.New()
+			fakes.Exec.OnPath("/usr/bin/perl", systest.Reply(tt.output))
+
+			if got := perlArchname(fakes.System()); got != tt.expected {
+				t.Errorf("perlArchname() = %q, want %q", got, tt.expected)
 			}
-			if got != tt.expected {
-				t.Errorf("parse result = %q, want %q", got, tt.expected)
+
+			if want := []string{"exec /usr/bin/perl -V:archname"}; !slices.Equal(fakes.Rec.Strings(), want) {
+				t.Errorf("ops = %v, want %v", fakes.Rec.Strings(), want)
 			}
 		})
+	}
+}
+
+func TestPerlArchname_PerlFails(t *testing.T) {
+	t.Parallel()
+
+	fakes := systest.New()
+	fakes.Exec.OnPath("/usr/bin/perl", systest.Fail(2, "boom"))
+
+	if got := perlArchname(fakes.System()); got != "" {
+		t.Errorf("perlArchname() = %q, want empty when perl fails", got)
 	}
 }
 
 func TestEnsureZextrasPerlEnv_PerlAlreadySet(t *testing.T) {
-	os.Setenv("PERL5LIB", "/existing/path")
-	defer os.Unsetenv("PERL5LIB")
+	t.Setenv("PERL5LIB", "/existing/path")
+	t.Setenv("PERLLIB", "")
 
-	originalPerlLib := os.Getenv("PERLLIB")
-	defer func() {
-		if originalPerlLib != "" {
-			os.Setenv("PERLLIB", originalPerlLib)
-		} else {
-			os.Unsetenv("PERLLIB")
-		}
-	}()
+	fakes := systest.New()
+	ensureZextrasPerlEnv(fakes.System())
 
-	ensureZextrasPerlEnv()
+	if got := os.Getenv("PERLLIB"); got != "" {
+		t.Errorf("PERLLIB = %q, want it untouched when PERL5LIB is already set", got)
+	}
 
-	perlLib := os.Getenv("PERLLIB")
-	if strings.Contains(perlLib, "/opt/zextras/common/lib/perl5") {
-		t.Error("PERLLIB should not be modified when PERL5LIB is already set")
+	if ops := fakes.Rec.Strings(); len(ops) != 0 {
+		t.Errorf("perl must not be run when PERL5LIB is set, got %v", ops)
 	}
 }
 
 func TestEnsureZextrasPerlEnv_PerlNotAvailable(t *testing.T) {
-	origPerl5Lib, hadPerl5Lib := os.LookupEnv("PERL5LIB")
-	os.Unsetenv("PERL5LIB")
-	defer func() {
-		if hadPerl5Lib {
-			os.Setenv("PERL5LIB", origPerl5Lib)
-		}
-	}()
+	unsetEnv(t, "PERL5LIB")
+	unsetEnv(t, "PERLLIB")
 
-	origPerlLib, hadPerlLib := os.LookupEnv("PERLLIB")
-	os.Unsetenv("PERLLIB")
-	defer func() {
-		if hadPerlLib {
-			os.Setenv("PERLLIB", origPerlLib)
-		} else {
-			os.Unsetenv("PERLLIB")
-		}
-	}()
+	fakes := systest.New()
+	fakes.Exec.FailStart(func(c *sys.Cmd) bool { return c.Path == "/usr/bin/perl" }, os.ErrNotExist)
 
-	if _, err := os.Stat("/usr/bin/perl"); err != nil {
-		ensureZextrasPerlEnv()
-		if os.Getenv("PERL5LIB") != "" {
-			t.Error("PERL5LIB should remain unset when perl is missing")
-		}
-		if os.Getenv("PERLLIB") != "" {
-			t.Error("PERLLIB should remain unset when perl is missing")
-		}
+	ensureZextrasPerlEnv(fakes.System())
+
+	if got := os.Getenv("PERL5LIB"); got != "" {
+		t.Errorf("PERL5LIB = %q, want it unset when perl is missing", got)
+	}
+
+	if got := os.Getenv("PERLLIB"); got != "" {
+		t.Errorf("PERLLIB = %q, want it unset when perl is missing", got)
 	}
 }
 
-// TestListenerAddress pins the legacy listener defaults: port 7171 over IPv4
-// unless localconfig sets zmconfigd_listen_port / zimbraIPMode.
-func TestListenerAddress(t *testing.T) {
-	tests := []struct {
-		name     string
-		lc       map[string]string
-		wantPort int
-		wantMode string
-	}{
-		{"defaults", map[string]string{}, 7171, ipModeIPv4},
-		{"unparsable port", map[string]string{"zmconfigd_listen_port": "x"}, 7171, ipModeIPv4},
-		{"configured", map[string]string{"zmconfigd_listen_port": "7172", "zimbraIPMode": "ipv6"}, 7172, "ipv6"},
+func TestEnsureZextrasPerlEnv_PerlSetsVars(t *testing.T) {
+	unsetEnv(t, "PERL5LIB")
+	unsetEnv(t, "PERLLIB")
+
+	fakes := systest.New()
+	fakes.Exec.OnPath("/usr/bin/perl", systest.Reply("archname='x86_64-linux-thread-multi';\n"))
+
+	ensureZextrasPerlEnv(fakes.System())
+
+	want := cliutil.BasePath("common", "lib", "perl5", "x86_64-linux-thread-multi") + ":" +
+		cliutil.BasePath("common", "lib", "perl5")
+
+	if got := os.Getenv("PERL5LIB"); got != want {
+		t.Errorf("PERL5LIB = %q, want %q", got, want)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			port, mode := listenerAddress(tt.lc)
-			if port != tt.wantPort || mode != tt.wantMode {
-				t.Errorf("listenerAddress = (%d, %q), want (%d, %q)", port, mode, tt.wantPort, tt.wantMode)
-			}
-		})
+	if got := os.Getenv("PERLLIB"); got != want {
+		t.Errorf("PERLLIB = %q, want %q", got, want)
 	}
 }
 
-// TestRewriteViaDaemon covers the legacy configrewrite contract: a reachable
-// daemon gets the REWRITE request and nothing runs in-process; an unreachable
-// or failing daemon falls back to a standalone rewrite whose exit code is
-// returned, instead of failing the caller (zmtlsctl, zmproxyctl, rewrite).
-func TestRewriteViaDaemon(t *testing.T) {
-	tests := []struct {
-		name           string
-		reply          string // "" = no listener on the port
-		wantStandalone bool
-		wantCode       int
-	}{
-		{name: "daemon accepts", reply: "SUCCESS REWRITE\n", wantStandalone: false, wantCode: 0},
-		{name: "daemon not running", reply: "", wantStandalone: true, wantCode: 3},
-		{name: "daemon answers error", reply: "ERROR busy\n", wantStandalone: true, wantCode: 3},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			port := fakeDaemon(t, tt.reply)
-
-			var gotArgs *Args
-
-			standalone := func(_ context.Context, a *Args) int {
-				gotArgs = a
-
-				return 3
-			}
-
-			args := &Args{ForcedConfigs: []string{"proxy", "mta"}}
-			code := rewriteViaDaemon(context.Background(), args, port, ipModeIPv4, standalone)
-
-			if code != tt.wantCode {
-				t.Errorf("exit code = %d, want %d", code, tt.wantCode)
-			}
-
-			if (gotArgs != nil) != tt.wantStandalone {
-				t.Fatalf("standalone ran = %v, want %v", gotArgs != nil, tt.wantStandalone)
-			}
-
-			if gotArgs != nil && strings.Join(gotArgs.ForcedConfigs, " ") != "proxy mta" {
-				t.Errorf("standalone configs = %v, want [proxy mta]", gotArgs.ForcedConfigs)
-			}
-		})
-	}
-}
-
-// fakeDaemon returns a port where one connection is answered with reply, or a
-// port with nothing listening when reply is empty.
-func fakeDaemon(t *testing.T, reply string) int {
+// unsetEnv removes key for the duration of the test and restores it after.
+func unsetEnv(t *testing.T, key string) {
 	t.Helper()
 
-	ln, err := net.Listen("tcp4", "127.0.0.1:0")
-	if err != nil {
+	t.Setenv(key, "")
+
+	if err := os.Unsetenv(key); err != nil {
 		t.Fatal(err)
 	}
-
-	port := ln.Addr().(*net.TCPAddr).Port
-
-	if reply == "" {
-		_ = ln.Close()
-
-		return port
-	}
-
-	t.Cleanup(func() { _ = ln.Close() })
-
-	go func() {
-		conn, err := ln.Accept()
-		if err != nil {
-			return
-		}
-		defer conn.Close()
-
-		buf := make([]byte, 256)
-		_, _ = conn.Read(buf)
-		_, _ = conn.Write([]byte(reply))
-	}()
-
-	return port
 }
 
 func TestSetupProfilingAndTracing_TracingEnabled(t *testing.T) {
@@ -355,14 +166,17 @@ func TestSetupProfilingAndTracing_TracingEnabled(t *testing.T) {
 	defer os.Unsetenv("CONFIGD_LOG_FORMAT")
 	defer os.Unsetenv("CONFIGD_LOG_LEVEL")
 
-	initializeLogging()
+	cliutil.InitLogging(os.Stderr)
 
 	args := &Args{
 		EnableTracing: true,
 		TracingOutput: t.TempDir() + "/trace.json",
 	}
 
-	pc, tc := setupProfilingAndTracing(context.Background(), args)
+	pc, tc, err := setupProfilingAndTracing(context.Background(), args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if pc != nil {
 		t.Error("expected nil ProfilingConfig when only tracing enabled")
 	}
@@ -373,62 +187,23 @@ func TestSetupProfilingAndTracing_TracingEnabled(t *testing.T) {
 	StopTracing(tc)
 }
 
-func TestEnsureZextrasPerlEnv_PerlSetsVars(t *testing.T) {
-	if _, err := os.Stat("/usr/bin/perl"); err != nil {
-		t.Skip("perl not available")
-	}
-
-	os.Unsetenv("PERL5LIB")
-	os.Unsetenv("PERLLIB")
-	defer os.Unsetenv("PERL5LIB")
-	defer os.Unsetenv("PERLLIB")
-
-	ensureZextrasPerlEnv()
-
-	perl5lib := os.Getenv("PERL5LIB")
-	perlLib := os.Getenv("PERLLIB")
-	if perl5lib == "" || perlLib == "" {
-		t.Errorf("expected PERL5LIB and PERLLIB to be set when perl is available, got PERL5LIB=%q PERLLIB=%q", perl5lib, perlLib)
-	}
-}
-
-func TestConfigureLogFormat_Unknown(t *testing.T) {
-	os.Setenv("CONFIGD_LOG_FORMAT", "unknown_format")
-	defer os.Unsetenv("CONFIGD_LOG_FORMAT")
-
-	cfg := logger.DefaultConfig()
-	configureLogFormat(cfg)
-	if cfg.Format != logger.FormatText {
-		t.Errorf("expected text format for unknown, got %v", cfg.Format)
-	}
-}
-
 // TestSetupProfilingAndTracing_ValidationFails verifies that an unwritable
-// profile path makes setupProfilingAndTracing exit with status 1 when profiling
-// is compiled in (os.Exit would kill the test binary, so it runs in a child
-// process). Without the profiling tag validation is a no-op and the child exits 0.
+// profile path makes setupProfilingAndTracing return the validation error (the
+// daemon then exits with status 1) when profiling is compiled in. Without the
+// profiling tag validation is a no-op and nothing fails.
 func TestSetupProfilingAndTracing_ValidationFails(t *testing.T) {
-	if os.Getenv("CONFIGD_TEST_VALIDATION_CHILD") == "1" {
-		initializeLogging()
-		setupProfilingAndTracing(context.Background(), &Args{CPUProfile: "/nonexistent/path/cpu.prof"})
+	cliutil.InitLogging(os.Stderr)
 
-		return
+	badPath := "/nonexistent/path/cpu.prof"
+	wantErr := ValidateProfilingConfig(&ProfilingConfig{CPUProfilePath: badPath}) != nil
+
+	pc, tc, err := setupProfilingAndTracing(context.Background(), &Args{CPUProfile: badPath})
+
+	if (err != nil) != wantErr {
+		t.Fatalf("setupProfilingAndTracing error = %v, want error: %v", err, wantErr)
 	}
 
-	cmd := exec.Command(os.Args[0], "-test.run=^TestSetupProfilingAndTracing_ValidationFails$")
-	cmd.Env = append(os.Environ(),
-		"CONFIGD_TEST_VALIDATION_CHILD=1",
-		"CONFIGD_LOG_FORMAT=text",
-		"CONFIGD_LOG_LEVEL=error",
-	)
-
-	err := cmd.Run()
-	if err == nil {
-		return
-	}
-
-	var exitErr *exec.ExitError
-	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
-		t.Fatalf("child failed unexpectedly: %v", err)
+	if wantErr && (pc != nil || tc != nil) {
+		t.Errorf("configs on failure = (%v, %v), want nil", pc, tc)
 	}
 }

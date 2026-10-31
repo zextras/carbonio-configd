@@ -12,8 +12,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/logger"
-	"github.com/zextras/carbonio-configd/internal/state"
 )
 
 // resolveCommentState implements the shared logic for comment/uncomment directives,
@@ -61,9 +61,9 @@ func (t *Transformer) resolveCommentState(
 		listed := !negate && err == nil && slices.Contains(strings.Split(parts[2], ","), lookupVal)
 		hit = missing || listed
 	case negate:
-		hit = state.IsFalseValue(lookupVal)
+		hit = config.IsFalseValue(lookupVal)
 	default:
-		hit = state.IsTrueValue(lookupVal)
+		hit = config.IsTrueValue(lookupVal)
 	}
 
 	if hit == isComment {
@@ -100,10 +100,10 @@ func (t *Transformer) lookupTruth(ctx context.Context, cmd, key string) bool {
 	}
 
 	if strings.HasPrefix(key, "!") {
-		return state.IsFalseValue(lookupVal)
+		return config.IsFalseValue(lookupVal)
 	}
 
-	return state.IsTrueValue(lookupVal)
+	return config.IsTrueValue(lookupVal)
 }
 
 // transformErr builds an ErrTransform for a directive the legacy code would

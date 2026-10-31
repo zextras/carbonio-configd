@@ -8,13 +8,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // Let's Encrypt integration, ported from legacy ProxyConfGen.java:
@@ -49,7 +48,7 @@ func (g *Generator) certbotDomainDirs() []string {
 
 	live := g.certbotLiveDir()
 
-	entries, err := os.ReadDir(live)
+	entries, err := g.env.FS.ReadDir(live)
 	if err != nil {
 		return nil
 	}
@@ -57,7 +56,7 @@ func (g *Generator) certbotDomainDirs() []string {
 	var names []string
 
 	for _, e := range entries {
-		if info, statErr := os.Stat(filepath.Join(live, e.Name())); statErr == nil && info.IsDir() {
+		if info, statErr := g.env.FS.Stat(filepath.Join(live, e.Name())); statErr == nil && info.IsDir() {
 			names = append(names, e.Name())
 		}
 	}
@@ -116,7 +115,7 @@ func (tp *TemplateProcessor) deleteCertbotConfigs(ctx context.Context, domains [
 	args := append([]string{"delete"}, kept...)
 
 	//nolint:gosec // G204: fixed binary under WorkingDir; names are directory entries passed as argv, no shell
-	if out, err := exec.CommandContext(ctx, g.certbotBinary(), args...).CombinedOutput(); err != nil {
+	if out, err := sys.CombinedOutput(ctx, g.env.Exec, g.certbotBinary(), args...); err != nil {
 		logger.WarnContext(ctx, "Unable to delete Let's Encrypt configurations",
 			"error", err, "output", truncateForLog(string(out)))
 	}
@@ -166,7 +165,7 @@ func (tp *TemplateProcessor) saveCertbotPairsToLDAP(
 	for i := range domains {
 		d := &domains[i]
 
-		pair, ok := readCertbotPair(g.certbotLiveDir(), d.Name)
+		pair, ok := readCertbotPair(g.env.FS, g.certbotLiveDir(), d.Name)
 		if !ok {
 			continue
 		}
@@ -196,16 +195,16 @@ type certbotPair struct{ cert, key string }
 
 // readCertbotPair returns the PEM files of a certbot-managed domain; ok is
 // false when the domain is not managed or either file is missing.
-func readCertbotPair(liveDir, domainName string) (certbotPair, bool) {
+func readCertbotPair(fsys sys.FS, liveDir, domainName string) (certbotPair, bool) {
 	dir := filepath.Join(liveDir, domainName)
-	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+	if info, err := fsys.Stat(dir); err != nil || !info.IsDir() {
 		return certbotPair{}, false
 	}
 
 	//nolint:gosec // G304: domainName passed validDomainName; liveDir is fixed
-	cert, certErr := os.ReadFile(filepath.Join(dir, certbotFullchainName))
+	cert, certErr := fsys.ReadFile(filepath.Join(dir, certbotFullchainName))
 	//nolint:gosec // G304: as above
-	key, keyErr := os.ReadFile(filepath.Join(dir, certbotPrivkeyName))
+	key, keyErr := fsys.ReadFile(filepath.Join(dir, certbotPrivkeyName))
 
 	if certErr != nil || keyErr != nil {
 		return certbotPair{}, false

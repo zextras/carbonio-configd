@@ -22,10 +22,15 @@ import (
 	"github.com/zextras/carbonio-configd/internal/ldap"
 	"github.com/zextras/carbonio-configd/internal/localconfig"
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/metrics"
 	"github.com/zextras/carbonio-configd/internal/mtaops"
+	"github.com/zextras/carbonio-configd/internal/plan"
 	"github.com/zextras/carbonio-configd/internal/redact"
+	"github.com/zextras/carbonio-configd/internal/restart"
 	"github.com/zextras/carbonio-configd/internal/services"
+	"github.com/zextras/carbonio-configd/internal/snapshot"
 	"github.com/zextras/carbonio-configd/internal/state"
+	"github.com/zextras/carbonio-configd/internal/sys"
 	"github.com/zextras/carbonio-configd/internal/transformer"
 )
 
@@ -80,45 +85,66 @@ type ConfigManager struct {
 	cachedLocalConfigMu     sync.RWMutex       // Protects cachedLocalConfigOutput
 	mtaExecutor             mtaops.Executor
 	mtaResolver             mtaops.OperationResolver
-	comparator              *Comparator
+	policy                  *restart.Policy
+	metrics                 *metrics.Registry // operational counters; exported only when configured
+
+	// The fields below belong to the (sequential) main loop: the plan of a
+	// cycle is a function of prev (the snapshot the last plan was computed
+	// from), tracked (the service tracking map) and carry (the actions the
+	// last execution did not complete).
+	prev    *snapshot.Snapshot
+	tracked map[string]string
+	carry   plan.Carry
+	env     sys.System // host boundary: filesystem, process execution, clock
+
+	// loadLocalConfigForLDAP is the localconfig loader used by initNativeLdapClient;
+	// tests inject deterministic maps so the URL-validation branches run without disk.
+	loadLocalConfigForLDAP func() (map[string]string, error)
+	// loadResolvedLocalConfig loads localconfig.xml merged with the LC.java
+	// defaults and interpolated, matching legacy `zmlocalconfig -s -x`.
+	loadResolvedLocalConfig func() (map[string]string, error)
 }
 
-// NewConfigManager creates a new ConfigManager instance.
+// NewConfigManager creates a new ConfigManager instance. Every host side effect
+// of the manager and of the components it builds (service control, MTA
+// operations, commands, proxy generation) goes through env.
 func NewConfigManager(ctx context.Context, mainCfg *config.Config,
-	appState *state.State, ldapClient *ldap.Ldap, cacheInstance *cache.ConfigCache) *ConfigManager {
+	appState *state.State, ldapClient *ldap.Ldap, cacheInstance *cache.ConfigCache,
+	env sys.System) *ConfigManager {
 	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
 	cm := &ConfigManager{
 		mainConfig:      mainCfg,
 		State:           appState,
 		LdapClient:      ldapClient,
 		Cache:           cacheInstance,
-		ServiceMgr:      services.NewServiceManager(), // Initialize service manager
-		CommandRegistry: commands.NewRegistry(mainCfg.BaseDir),
+		ServiceMgr:      services.NewServiceManager(services.NewController(env)),
+		CommandRegistry: commands.NewRegistry(mainCfg.BaseDir, env),
+		env:             env,
+
+		loadLocalConfigForLDAP:  localconfig.LoadLocalConfig,
+		loadResolvedLocalConfig: localconfig.LoadResolvedConfig,
 	}
-	cm.Transformer = transformer.NewTransformer(cm, appState)
-	cm.mtaExecutor = mtaops.NewExecutor(mainCfg.BaseDir, ldapClient)
-	cm.mtaResolver = mtaops.NewResolver(mainCfg.BaseDir)
+	cm.Transformer = transformer.NewTransformer(cm)
+	cm.mtaExecutor = mtaops.NewExecutor(mainCfg.BaseDir, ldapClient, env)
+	cm.mtaResolver = mtaops.NewResolver(mainCfg.BaseDir, env)
 	cm.initNativeLdapClient(ctx)
-	cm.comparator = NewComparator(cm, appState, cm.ServiceMgr)
+	cm.metrics = metrics.New()
+	cm.policy = restart.New(cm.ServiceMgr, env.Clock).WithMetrics(cm.metrics)
 
 	return cm
 }
 
-// loadLocalConfigForLDAP is the localconfig loader used by initNativeLdapClient.
-// Production points it at localconfig.LoadLocalConfig; tests override it to
-// inject deterministic localconfig maps so the URL-validation branches can be
-// exercised without touching disk.
-var loadLocalConfigForLDAP = localconfig.LoadLocalConfig
-
-// loadResolvedLocalConfig loads localconfig.xml merged with the LC.java
-// defaults and interpolated, matching legacy `zmlocalconfig -s -x`. Tests
-// override it.
-var loadResolvedLocalConfig = localconfig.LoadResolvedConfig
+// Metrics returns the registry the manager and the components it built record
+// into (restarts, load failures); the main loop adds the cycle metrics and
+// exports it.
+func (cm *ConfigManager) Metrics() *metrics.Registry {
+	return cm.metrics
+}
 
 // initNativeLdapClient initializes the native LDAP client from localconfig.
 // If initialization fails, it logs a warning and the manager will fall back to zmprov subprocess calls.
 func (cm *ConfigManager) initNativeLdapClient(ctx context.Context) {
-	localCfg, err := loadLocalConfigForLDAP()
+	localCfg, err := cm.loadLocalConfigForLDAP()
 	if err != nil {
 		logger.WarnContext(ctx, "Failed to load localconfig for native LDAP client - LDAP queries will fail",
 			"error", err)
@@ -165,6 +191,7 @@ func (cm *ConfigManager) initNativeLdapClient(ctx context.Context) {
 		BaseDN:   "cn=zimbra",
 		PoolSize: 5,
 		StartTLS: cm.mainConfig.LdapStartTLSRequired,
+		FS:       cm.env.FS,
 	})
 	if err != nil {
 		logger.WarnContext(ctx, "Failed to create native LDAP client - LDAP queries will fail",
@@ -218,6 +245,7 @@ func (cm *ConfigManager) initConfigLdapClient(ctx context.Context, localCfg map[
 		BaseDN:   ldap.ConfigBackendDN,
 		PoolSize: 1, // serialized low-volume reconcile writes
 		StartTLS: false,
+		FS:       cm.env.FS,
 	})
 	if err != nil {
 		logger.ErrorContext(ctx, "Failed to create config LDAP client - cn=config writes will fail",
@@ -234,25 +262,6 @@ func (cm *ConfigManager) initConfigLdapClient(ctx context.Context, localCfg map[
 		"bind_dn", ldap.ConfigBackendDN)
 }
 
-// lookupVarKey checks ServerConfig → MiscConfig → GlobalConfig for key.
-// A value stored on the server entry overrides the global one, matching the
-// legacy configd (state.py assigns global, misc, server; the last one wins).
-func (cm *ConfigManager) lookupVarKey(key string) (string, bool) {
-	if val, ok := cm.State.GetServerConfig().Data.Get(key); ok {
-		return val, true
-	}
-
-	if val, ok := cm.State.GetMiscConfig().Data.Get(key); ok {
-		return val, true
-	}
-
-	if val, ok := cm.State.GetGlobalConfig().Data.Get(key); ok {
-		return val, true
-	}
-
-	return "", false
-}
-
 // lookupFileKey returns the value for key from the file cache or disk.
 func (cm *ConfigManager) lookupFileKey(ctx context.Context, key string) (string, error) {
 	if val, ok := cm.State.LookupFile(key); ok {
@@ -264,7 +273,7 @@ func (cm *ConfigManager) lookupFileKey(ctx context.Context, key string) (string,
 	filePath := cm.mainConfig.BaseDir + "/conf/" + key
 
 	//nolint:gosec // G304: File path comes from trusted configuration
-	contentBytes, err := os.ReadFile(filePath)
+	contentBytes, err := cm.env.FS.ReadFile(filePath)
 	if err != nil {
 		logger.ErrorContext(ctx, "Error reading file", "file_path", filePath, "error", err)
 
@@ -307,7 +316,7 @@ func (cm *ConfigManager) lookupMappedFileKey(ctx context.Context, cfgType, key s
 
 	var value string
 
-	if _, err := os.Stat(fullPath); err == nil {
+	if _, err := cm.env.FS.Stat(fullPath); err == nil {
 		value = fullPath
 	} else if !os.IsNotExist(err) {
 		logger.ErrorContext(ctx, "Error stating file", "file_path", fullPath, "error", err)
@@ -335,9 +344,11 @@ func (cm *ConfigManager) LookUpConfig(ctx context.Context, cfgType, key string) 
 
 	switch cfgType {
 	case configTypeVAR:
-		value, found = cm.lookupVarKey(key)
+		// Server overrides misc overrides global, matching the legacy
+		// configd (state.py assigns global, misc, server; the last one wins).
+		value, found = cm.State.Snapshot().Var(key)
 	case configTypeLOCAL:
-		value, found = cm.State.GetLocalConfig().Data.Get(key)
+		value, found = cm.State.Snapshot().Local(key)
 	case configTypeFILE:
 		value, err = cm.lookupFileKey(ctx, key)
 		if err != nil {
@@ -353,13 +364,7 @@ func (cm *ConfigManager) LookUpConfig(ctx context.Context, cfgType, key string) 
 
 		found = true
 	case configTypeSERVICE:
-		if _, ok := cm.State.GetServerConfig().ServiceConfig.Get(key); ok {
-			value = constTRUE
-		} else {
-			value = constFALSE
-		}
-
-		found = true
+		value, found = cm.State.Snapshot().Value(configTypeSERVICE, key)
 	default:
 		logger.WarnContext(ctx, "Unknown config type", "config_type", cfgType, "key", key)
 
@@ -413,9 +418,4 @@ func (cm *ConfigManager) ClearLocalConfigCache(ctx context.Context) {
 
 		cm.cachedLocalConfigOutput = ""
 	}
-}
-
-// Comparator returns the embedded Comparator instance.
-func (cm *ConfigManager) Comparator() *Comparator {
-	return cm.comparator
 }

@@ -5,13 +5,18 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 
 	"github.com/alecthomas/kong"
 	"github.com/willabides/kongplete"
+	"github.com/zextras/carbonio-configd/internal/cli/cliutil"
+	"github.com/zextras/carbonio-configd/internal/cli/plancmd"
+	"github.com/zextras/carbonio-configd/internal/cli/rewrite"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/sdnotify"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // CLI is the root command struct parsed by Kong.
@@ -30,7 +35,9 @@ type CLI struct {
 	Proxy       ProxyCmd                     `cmd:"" help:"Proxy protocol management"`
 	TLS         TLSCmd                       `cmd:"" name:"tls" help:"Manage Carbonio mail mode (legacy zmtlsctl)"`
 	Rewrite     RewriteCmd                   `cmd:"" help:"Force configuration rewrite"`
-	Release     VersionCmd                   `cmd:"" help:"Show Carbonio release and package versions"`
+	Plan        PlanCmd                      `cmd:"" help:"Show what a rewrite would change, without changing anything"`
+	Shadow      ShadowCmd                    `cmd:"" help:"Run the cycle next to a real configd, without side effects"`
+	Release     ReleaseCmd                   `cmd:"" help:"Show Carbonio release and package versions"`
 	Completion  kongplete.InstallCompletions `cmd:"" help:"Install shell completions"`
 	Daemon      DaemonCmd                    `cmd:"" default:"1" hidden:""`
 }
@@ -39,10 +46,12 @@ type CLI struct {
 type DaemonCmd struct{}
 
 // Run executes the daemon command.
-func (c *DaemonCmd) Run(cli *CLI) error {
-	requireZextras()
+func (c *DaemonCmd) Run(cli *CLI, env sys.System) error {
+	if !cliutil.RequireZextras(os.Stderr) {
+		return exitStatus(1)
+	}
 
-	ctx := initializeLogging()
+	ctx := cliutil.InitLogging(os.Stderr)
 	ctx = logger.ContextWithComponent(ctx, "main")
 
 	notifier, err := sdnotify.New()
@@ -56,22 +65,23 @@ func (c *DaemonCmd) Run(cli *CLI) error {
 
 	args := cli.toArgs()
 
-	profilingConfig, tracingConfig := setupProfilingAndTracing(ctx, args)
+	profilingConfig, tracingConfig, err := setupProfilingAndTracing(ctx, args)
+	if err != nil {
+		return exitStatus(1)
+	}
 
 	mainCfg, appState, ldapClient := initializeConfig()
 
-	exitCode := RunMainLoop(ctx, mainCfg, appState, ldapClient, args, notifier)
+	exitCode := RunMainLoop(ctx, env, mainCfg, appState, ldapClient, args, notifier)
 
 	logger.InfoContext(ctx, "Process exited", "program", mainCfg.Progname)
 
-	// Stop profiling/tracing explicitly so os.Exit can't skip a deferred call
-	// (exitAfterDefer). Both helpers are nil-safe.
+	// Stop profiling/tracing explicitly before returning the exit status so the
+	// profile is flushed before main exits the process. Both helpers are nil-safe.
 	StopProfiling(profilingConfig)
 	StopTracing(tracingConfig)
 
-	os.Exit(exitCode)
-
-	return nil
+	return exitWith(exitCode)
 }
 
 // RewriteCmd sends a forced configuration rewrite to the running daemon.
@@ -80,18 +90,27 @@ type RewriteCmd struct {
 }
 
 // Run executes the rewrite command.
-//
-//nolint:unparam // Kong interface requires error return; failures exit with their code
-func (c *RewriteCmd) Run(_ *CLI) error {
-	requireZextras()
+func (c *RewriteCmd) Run(_ *CLI, env sys.System) error {
+	return exitWith(rewrite.Run(context.Background(), os.Stdout, os.Stderr, &rewrite.Options{
+		Configs:    c.ConfigNames,
+		Standalone: standaloneRewrite(env, false),
+	}))
+}
 
-	ctx := initializeLogging()
+// PlanCmd shows what a forced rewrite would change on this host.
+type PlanCmd struct {
+	Sections []string `arg:"" optional:"" help:"Sections to plan (default: all)"`
+	JSON     bool     `name:"json" help:"Print the plan as JSON"`
+}
 
-	if code := forcedRewrite(ctx, &Args{ForcedConfigs: c.ConfigNames}, runStandaloneRewrite); code != 0 {
-		os.Exit(code)
-	}
-
-	return nil
+// Run executes the plan command. The exit status is 0 when nothing would
+// change, 1 when a rewrite would change something and 2 on error.
+func (c *PlanCmd) Run(_ *CLI, env sys.System) error {
+	return exitWith(plancmd.Run(context.Background(), os.Stdout, os.Stderr, &plancmd.Options{
+		Sections: c.Sections,
+		JSON:     c.JSON,
+		Planner:  planOnHost(env),
+	}))
 }
 
 // toArgs converts the parsed CLI globals to an Args struct.

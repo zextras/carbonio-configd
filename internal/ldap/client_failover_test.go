@@ -26,23 +26,13 @@ var ldapBindSuccessPacket = []byte{
 	0x04, 0x00, // diagnosticMessage OCTET STRING ""
 }
 
-// withDefaultDial stubs the DialFirstReachable dialer for the duration of a
-// test, restoring the production dialer on cleanup.
-func withDefaultDial(t *testing.T, fn dialFn) {
-	t.Helper()
-
-	prev := defaultDial
-	t.Cleanup(func() { defaultDial = prev })
-
-	defaultDial = fn
-}
-
 func TestClient_Connect_AggregatesPerURLFailure(t *testing.T) {
-	withDefaultDial(t, func(url string, _ ...ldap.DialOpt) (*ldap.Conn, error) {
-		return nil, errors.New("dial " + url + " refused")
-	})
+	t.Parallel()
 
 	c := &Client{
+		dial: func(url string, _ ...ldap.DialOpt) (*ldap.Conn, error) {
+			return nil, errors.New("dial " + url + " refused")
+		},
 		urls:     []string{"ldap://a:389", "ldap://b:389", "ldaps://c:636"},
 		bindDN:   "uid=zimbra,cn=admins,cn=zimbra",
 		password: "secret",
@@ -78,6 +68,8 @@ func TestClient_Connect_AggregatesPerURLFailure(t *testing.T) {
 // maintenance mode) does not abort connect(): the next URL is tried and, if
 // it binds successfully, connect() returns its connection.
 func TestClient_Connect_FailsOverBindFailureToNextURL(t *testing.T) {
+	t.Parallel()
+
 	// url1: the "server" end of the pipe closes immediately, so the real
 	// *ldap.Conn's Bind() write fails and connect() must fail over.
 	badClient, badServer := net.Pipe()
@@ -93,7 +85,7 @@ func TestClient_Connect_FailsOverBindFailureToNextURL(t *testing.T) {
 		_, _ = goodServer.Write(ldapBindSuccessPacket)
 	}()
 
-	withDefaultDial(t, func(url string, _ ...ldap.DialOpt) (*ldap.Conn, error) {
+	dial := func(url string, _ ...ldap.DialOpt) (*ldap.Conn, error) {
 		switch url {
 		case "ldap://a:389":
 			conn := ldap.NewConn(badClient, false)
@@ -108,9 +100,10 @@ func TestClient_Connect_FailsOverBindFailureToNextURL(t *testing.T) {
 		default:
 			return nil, errors.New("unexpected url " + url)
 		}
-	})
+	}
 
 	c := &Client{
+		dial:     dial,
 		urls:     []string{"ldap://a:389", "ldap://b:389"},
 		bindDN:   "uid=zimbra,cn=admins,cn=zimbra",
 		password: "secret",

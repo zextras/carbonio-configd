@@ -21,6 +21,7 @@ type MockServiceManager struct {
 	ControlProcessFn        func(ctx context.Context, service string, action services.ServiceAction) error
 	IsRunningFn             func(ctx context.Context, service string) (bool, error)
 	AddRestartFn            func(ctx context.Context, service string) error
+	AddRestartWithReasonsFn func(ctx context.Context, service string, reasons []string) error
 	ProcessRestartsFn       func(ctx context.Context, configLookup func(string) string) error
 	ClearRestartsFn         func(ctx context.Context)
 	GetPendingRestartsFn    func() []string
@@ -51,6 +52,15 @@ func (m *MockServiceManager) IsRunning(ctx context.Context, service string) (boo
 func (m *MockServiceManager) AddRestart(ctx context.Context, service string) error {
 	if m.AddRestartFn != nil {
 		return m.AddRestartFn(ctx, service)
+	}
+
+	return nil
+}
+
+// AddRestartWithReasons delegates to AddRestartWithReasonsFn or returns nil.
+func (m *MockServiceManager) AddRestartWithReasons(ctx context.Context, service string, reasons []string) error {
+	if m.AddRestartWithReasonsFn != nil {
+		return m.AddRestartWithReasonsFn(ctx, service, reasons)
 	}
 
 	return nil

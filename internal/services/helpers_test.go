@@ -17,15 +17,19 @@ import (
 // --- openLogFile ---
 
 func TestOpenLogFile_CreatesFile(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "test.log")
 
-	f, err := openLogFile(path)
+	f, err := ctl.openLogFile(path)
 	if err != nil {
-		t.Fatalf("openLogFile() returned error: %v", err)
+		t.Fatalf("ctl.openLogFile() returned error: %v", err)
 	}
 	defer f.Close()
 
@@ -35,6 +39,10 @@ func TestOpenLogFile_CreatesFile(t *testing.T) {
 }
 
 func TestOpenLogFile_AppendsToExisting(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -46,9 +54,9 @@ func TestOpenLogFile_AppendsToExisting(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	f, err := openLogFile(path)
+	f, err := ctl.openLogFile(path)
 	if err != nil {
-		t.Fatalf("openLogFile() returned error: %v", err)
+		t.Fatalf("ctl.openLogFile() returned error: %v", err)
 	}
 	if _, writeErr := f.WriteString("appended\n"); writeErr != nil {
 		t.Fatalf("WriteString failed: %v", writeErr)
@@ -65,26 +73,38 @@ func TestOpenLogFile_AppendsToExisting(t *testing.T) {
 }
 
 func TestOpenLogFile_InvalidPath(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	_, err := openLogFile("/nonexistent/directory/test.log")
+	_, err := ctl.openLogFile("/nonexistent/directory/test.log")
 	if err == nil {
 		t.Error("expected error for invalid path")
 	}
 }
 
 func TestGracefulStopViaPidfile_NoPidfile(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	err := gracefulStopViaPidfile(context.Background(), "/nonexistent/x.pid", "svc", time.Second)
+	err := ctl.gracefulStopViaPidfile(context.Background(), "/nonexistent/x.pid", "svc", "", time.Second)
 	if err != nil {
 		t.Errorf("missing pidfile should be treated as stopped, got: %v", err)
 	}
 }
 
 func TestGracefulStopViaPidfile_InvalidPid(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -93,7 +113,7 @@ func TestGracefulStopViaPidfile_InvalidPid(t *testing.T) {
 	if err := os.WriteFile(pidFile, []byte("notapid\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := gracefulStopViaPidfile(context.Background(), pidFile, "svc", time.Second); err == nil {
+	if err := ctl.gracefulStopViaPidfile(context.Background(), pidFile, "svc", "", time.Second); err == nil {
 		t.Error("expected error for non-numeric pid")
 	}
 }
@@ -101,6 +121,10 @@ func TestGracefulStopViaPidfile_InvalidPid(t *testing.T) {
 // TestGracefulStopViaPidfile_TermExits verifies a child that handles SIGTERM
 // exits within the timeout (no SIGKILL escalation) and the pidfile is removed.
 func TestGracefulStopViaPidfile_TermExits(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: spawns a child process")
 	}
@@ -119,7 +143,7 @@ func TestGracefulStopViaPidfile_TermExits(t *testing.T) {
 	go func() { _, _ = cmd.Process.Wait() }()
 
 	start := time.Now()
-	if err := gracefulStopViaPidfile(context.Background(), pidFile, "svc", 5*time.Second); err != nil {
+	if err := ctl.gracefulStopViaPidfile(context.Background(), pidFile, "svc", "", 5*time.Second); err != nil {
 		t.Fatalf("graceful stop: %v", err)
 	}
 
@@ -137,11 +161,15 @@ func TestGracefulStopViaPidfile_TermExits(t *testing.T) {
 // TestWaitForProcessExit_AlreadyGone verifies a non-existent pid is reported as
 // exited immediately.
 func TestWaitForProcessExit_AlreadyGone(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
 	// PID 0x7FFFFFFF is effectively never a live process.
-	if !waitForProcessExit(context.Background(), 0x7FFFFFFF, time.Second) {
+	if !ctl.waitForProcessExit(context.Background(), 0x7FFFFFFF, time.Second) {
 		t.Error("expected non-existent pid to be reported as exited")
 	}
 }
@@ -150,6 +178,10 @@ func TestWaitForProcessExit_AlreadyGone(t *testing.T) {
 // the alive status when the context is cancelled while the process is still
 // running.
 func TestWaitForProcessExit_ContextCancelled(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: starts a real process")
 	}
@@ -167,7 +199,7 @@ func TestWaitForProcessExit_ContextCancelled(t *testing.T) {
 	// Cancel immediately so the ctx.Done() branch fires
 	cancel()
 
-	if waitForProcessExit(ctx, cmd.Process.Pid, 5*time.Second) {
+	if ctl.waitForProcessExit(ctx, cmd.Process.Pid, 5*time.Second) {
 		t.Error("expected false when context cancelled while process is alive")
 	}
 }
@@ -176,6 +208,10 @@ func TestWaitForProcessExit_ContextCancelled(t *testing.T) {
 // does not exist (ESRCH / ErrProcessDone on SIGTERM), the pidfile is removed
 // and nil is returned.
 func TestGracefulStopViaPidfile_SigTermEsrch(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -185,7 +221,7 @@ func TestGracefulStopViaPidfile_SigTermEsrch(t *testing.T) {
 	if err := os.WriteFile(pidFile, []byte("2147483647\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err := gracefulStopViaPidfile(context.Background(), pidFile, "svc", time.Second)
+	err := ctl.gracefulStopViaPidfile(context.Background(), pidFile, "svc", "", time.Second)
 	if err != nil {
 		t.Errorf("expected nil for non-existent pid, got: %v", err)
 	}
@@ -197,6 +233,10 @@ func TestGracefulStopViaPidfile_SigTermEsrch(t *testing.T) {
 // TestGracefulStopViaPidfile_KillEscalation verifies that a process ignoring
 // SIGTERM is escalated to SIGKILL after the timeout expires.
 func TestGracefulStopViaPidfile_KillEscalation(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: spawns a child process")
 	}
@@ -214,7 +254,7 @@ func TestGracefulStopViaPidfile_KillEscalation(t *testing.T) {
 	}
 
 	// Very short timeout so SIGKILL escalation is triggered quickly.
-	err := gracefulStopViaPidfile(context.Background(), pidFile, "svc", 100*time.Millisecond)
+	err := ctl.gracefulStopViaPidfile(context.Background(), pidFile, "svc", "", 100*time.Millisecond)
 	if err != nil {
 		t.Fatalf("expected nil after SIGKILL escalation, got: %v", err)
 	}

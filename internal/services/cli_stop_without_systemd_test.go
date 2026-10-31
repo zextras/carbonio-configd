@@ -11,6 +11,10 @@ import (
 
 // TestStopWithoutSystemd_CustomStop verifies CustomStop is called.
 func TestStopWithoutSystemd_CustomStop(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -23,7 +27,7 @@ func TestStopWithoutSystemd_CustomStop(t *testing.T) {
 		},
 	}
 
-	err := stopWithoutSystemd(context.Background(), "testservice", def)
+	err := ctl.stopWithoutSystemd(context.Background(), "testservice", def)
 	if err != nil {
 		t.Errorf("stopWithoutSystemd with CustomStop returned error: %v", err)
 	}
@@ -35,6 +39,10 @@ func TestStopWithoutSystemd_CustomStop(t *testing.T) {
 // TestStopWithoutSystemd_NoProcessName verifies error when neither CustomStop nor
 // ProcessName is configured.
 func TestStopWithoutSystemd_NoProcessName(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -42,7 +50,7 @@ func TestStopWithoutSystemd_NoProcessName(t *testing.T) {
 		Name: "testservice",
 	}
 
-	err := stopWithoutSystemd(context.Background(), "testservice", def)
+	err := ctl.stopWithoutSystemd(context.Background(), "testservice", def)
 	if err == nil {
 		t.Error("expected error when no CustomStop and no ProcessName")
 	}
@@ -50,6 +58,10 @@ func TestStopWithoutSystemd_NoProcessName(t *testing.T) {
 
 // TestStopWithoutSystemd_ProcessName verifies killProcess is called.
 func TestStopWithoutSystemd_ProcessName(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
@@ -58,7 +70,7 @@ func TestStopWithoutSystemd_ProcessName(t *testing.T) {
 		ProcessName: "carbonio-configd-test-needle-xyzzy-99999",
 	}
 
-	err := stopWithoutSystemd(context.Background(), "testservice", def)
+	err := ctl.stopWithoutSystemd(context.Background(), "testservice", def)
 	if err != nil {
 		t.Errorf("stopWithoutSystemd with ProcessName returned unexpected error: %v", err)
 	}

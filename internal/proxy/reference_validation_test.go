@@ -8,6 +8,7 @@ import (
 	"context"
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/config/configtest"
+	"github.com/zextras/carbonio-configd/internal/sys"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,7 +32,7 @@ func TestReferenceValidation(t *testing.T) {
 
 	// Copy all real templates to test directory
 	realTemplateDir := "../../conf/nginx/templates"
-	templates, err := discoverTemplatesInDir(realTemplateDir)
+	templates, err := discoverTemplatesInDir(sys.RealFS{}, realTemplateDir)
 	if err != nil || len(templates) == 0 {
 		t.Skip("Real templates not available, skipping")
 	}
@@ -99,6 +100,7 @@ func TestReferenceValidation(t *testing.T) {
 
 	// Create generator
 	gen := &Generator{
+		env:          sys.Real(),
 		Config:       baseConfig,
 		LocalConfig:  localConfig,
 		GlobalConfig: globalConfig,
@@ -274,7 +276,7 @@ func TestReferenceOutputStructure(t *testing.T) {
 
 	// Copy real templates
 	realTemplateDir := "../../conf/nginx/templates"
-	templates, err := discoverTemplatesInDir(realTemplateDir)
+	templates, err := discoverTemplatesInDir(sys.RealFS{}, realTemplateDir)
 	if err != nil || len(templates) == 0 {
 		t.Skip("Real templates not available, skipping")
 	}
@@ -297,6 +299,7 @@ func TestReferenceOutputStructure(t *testing.T) {
 	}
 
 	gen := &Generator{
+		env:          sys.Real(),
 		Config:       baseConfig,
 		LocalConfig:  &config.LocalConfig{Data: configtest.NewConfigMapFrom(map[string]string{})},
 		GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMap()},

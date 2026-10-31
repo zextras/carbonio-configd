@@ -10,6 +10,7 @@ import (
 
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/proxy"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // newMinimalGenerator creates a Generator with empty configs and nil LDAP/cache,
@@ -23,8 +24,7 @@ func newMinimalGenerator(t *testing.T) *proxy.Generator {
 	}
 
 	gen, err := proxy.LoadConfiguration(
-		context.Background(), cfg, nil, nil, nil, nil, nil,
-	)
+		context.Background(), sys.Real(), cfg, proxy.Sources{})
 	if err != nil {
 		t.Fatalf("LoadConfiguration failed: %v", err)
 	}

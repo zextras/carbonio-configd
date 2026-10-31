@@ -51,8 +51,7 @@ func (cm *ConfigManager) loadServerConfigWithRetry(ctx context.Context, maxRetri
 		return fmt.Errorf("server config load cancelled before publish: %w", err)
 	}
 
-	cm.State.ServerConfig.Data.Replace(configData.Data)
-	cm.State.ServerConfig.ServiceConfig.Replace(configData.ServiceConfig)
+	cm.sink(ctx).setServer(configData.Data, configData.ServiceConfig)
 
 	dt := time.Since(t1)
 	logger.DebugContext(ctx, "ServerConfig loaded",
@@ -63,14 +62,11 @@ func (cm *ConfigManager) loadServerConfigWithRetry(ctx context.Context, maxRetri
 
 // fetchServerConfig fetches fresh server config from LDAP (cache miss path)
 func (cm *ConfigManager) fetchServerConfig(ctx context.Context, maxRetries int) (*ServerConfigData, error) {
-	return retryWithBackoff(ctx, "ServerConfig", maxRetries, func() (*ServerConfigData, error) {
-		output, err := cm.executeLDAPCommand(ctx, "gs", cm.mainConfig.Hostname)
+	return retryWithBackoff(ctx, cm.env.Clock, "ServerConfig", maxRetries, func() (*ServerConfigData, error) {
+		configDataMap, err := cm.fetchServerAttrs(ctx)
 		if err != nil {
 			return nil, err
 		}
-
-		// Parse LDAP attribute output (key: value format)
-		configDataMap := parseLDAPCommandOutput(output)
 
 		configData := &ServerConfigData{
 			Data:          configDataMap,

@@ -15,6 +15,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/cache"
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/ldap"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // ValueType represents the type of a proxy configuration variable
@@ -151,6 +152,10 @@ type Generator struct {
 
 	// Cache is the configuration cache for LDAP queries
 	Cache *cache.ConfigCache
+
+	// env is the host boundary: every file, directory and certbot access goes
+	// through it.
+	env sys.System
 
 	// upstreamCache is the cache for upstream query results (nginx proxy backends)
 	// This prevents repeated expensive zmprov calls during template generation

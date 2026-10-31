@@ -12,6 +12,7 @@ import (
 
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/config/configtest"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // TestResolveAddHeadersDefault tests all branches of resolveAddHeadersDefault
@@ -60,6 +61,7 @@ func TestResolveAddHeadersDefault(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			g := &Generator{
+				env:          sys.Real(),
 				GlobalConfig: &config.GlobalConfig{Data: tt.globalData},
 			}
 			result, err := g.resolveAddHeadersDefault(context.Background())
@@ -121,6 +123,7 @@ func TestResolveProxyHTTPCompression(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			g := &Generator{
+				env:          sys.Real(),
 				ServerConfig: &config.ServerConfig{Data: tt.serverData},
 			}
 			result, err := g.resolveProxyHTTPCompression(context.Background())
@@ -181,6 +184,7 @@ func TestResolveHTTPEnabled(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			g := &Generator{
+				env:          sys.Real(),
 				GlobalConfig: &config.GlobalConfig{Data: tt.globalData},
 			}
 			result, err := g.resolveHTTPEnabled(context.Background())
@@ -231,6 +235,7 @@ func TestResolveHTTPSEnabled(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			g := &Generator{
+				env:          sys.Real(),
 				GlobalConfig: &config.GlobalConfig{Data: tt.globalData},
 			}
 			result, err := g.resolveHTTPSEnabled(context.Background())

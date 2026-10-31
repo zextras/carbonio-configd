@@ -12,6 +12,7 @@ import (
 
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/config/configtest"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // TestMakeLoginURLResolver tests all branches of makeLoginURLResolver
@@ -41,6 +42,7 @@ func TestMakeLoginURLResolver(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			g := &Generator{
+				env:          sys.Real(),
 				GlobalConfig: &config.GlobalConfig{Data: tt.globalData},
 			}
 			resolver := g.makeLoginURLResolver(tt.configKey)
@@ -82,6 +84,7 @@ func TestMakeLogoutRedirectResolver(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			g := &Generator{
+				env:          sys.Real(),
 				GlobalConfig: &config.GlobalConfig{Data: tt.globalData},
 			}
 			resolver := g.makeLogoutRedirectResolver(tt.configKey)
@@ -100,6 +103,7 @@ func TestMakeLogoutRedirectResolver(t *testing.T) {
 func TestResolveErrorPages(t *testing.T) {
 	t.Run("uses default static error pages when no URL configured", func(t *testing.T) {
 		g := &Generator{
+			env:          sys.Real(),
 			GlobalConfig: &config.GlobalConfig{Data: config.NewConfigMap()},
 		}
 		result, err := g.resolveErrorPages(context.Background())
@@ -117,6 +121,7 @@ func TestResolveErrorPages(t *testing.T) {
 
 	t.Run("uses custom error handler URL when configured", func(t *testing.T) {
 		g := &Generator{
+			env: sys.Real(),
 			GlobalConfig: &config.GlobalConfig{Data: configtest.NewConfigMapFrom(map[string]string{
 				"zimbraReverseProxyErrorHandlerURL": "/error-handler",
 			})},

@@ -12,7 +12,6 @@ import (
 	"testing"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
-	"github.com/zextras/carbonio-configd/internal/state"
 	"github.com/zextras/carbonio-configd/internal/testutil"
 )
 
@@ -89,7 +88,7 @@ func FuzzTransform(f *testing.F) {
 
 	// Directive warnings for unknown keys are expected noise on fuzz input.
 	ctx := logger.ContextWithLogger(context.Background(), slog.New(slog.DiscardHandler))
-	tr := NewTransformer(newFuzzLookup(), &state.State{})
+	tr := NewTransformer(newFuzzLookup())
 
 	f.Fuzz(func(t *testing.T, line string) {
 		out, err := tr.Transform(ctx, line)

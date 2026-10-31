@@ -8,12 +8,14 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"github.com/zextras/carbonio-configd/internal/cache"
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/mtaops"
+	"github.com/zextras/carbonio-configd/internal/plan"
 	"github.com/zextras/carbonio-configd/internal/state"
 )
 
@@ -44,230 +46,164 @@ func (m *mockMtaExecutorForMta) ExecuteMapfile(_ context.Context, op mtaops.Mapf
 	return m.mapfileErr
 }
 
+func (m *mockMtaExecutorForMta) ReadPostconf(_ context.Context, _ string, _ bool) (string, bool, error) {
+	return "", false, nil
+}
+
 func (m *mockMtaExecutorForMta) ExecuteLdapWrite(_ context.Context, op mtaops.LdapOperation) error {
 	return nil
 }
 
-// TestDoMapfileSection_HappyPath tests doMapfileSection with successful mapfile operations
-func TestDoMapfileSection_HappyPath(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
+// newMapfileCM builds a ConfigManager with a mock mapfile executor and a
+// configd.cf holding one section with the given required lookups.
+func newMapfileCM(t *testing.T, firstRun bool, mockExec *mockMtaExecutorForMta,
+	required map[string]string) *ConfigManager {
+	t.Helper()
 
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
-	// Setup ConfigManager
 	st := state.NewState()
-	st.FirstRun = true
+	st.SetFirstRun(firstRun)
+
 	cfg := &config.Config{
 		BaseDir:    tmpDir,
 		ConfigFile: filepath.Join(tmpDir, "zmconfigd.cf"),
 	}
-	cacheInstance := cache.New(ctx, false)
-	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance)
-
-	// Setup mock executor
-	mockExec := &mockMtaExecutorForMta{}
+	cm := NewConfigManager(ctx, cfg, st, nil, cache.New(ctx, false), hostEnv())
 	cm.mtaExecutor = mockExec
 
-	// Create a section with MAPFILE and MAPLOCAL variables
-	section := &config.MtaConfigSection{
-		Name:    "test_section",
-		Changed: true,
-		RequiredVars: map[string]string{
-			"zimbraSSLDHParam":    "MAPFILE",
-			"zimbraSSLCertPath":   "MAPLOCAL",
-			"zimbraMtaMyNetworks": "VAR", // Should be skipped
-		},
-	}
+	st.SetMtaConfig(&config.MtaConfig{Sections: map[string]*config.MtaConfigSection{
+		"test_section": {Name: "test_section", RequiredVars: required},
+	}})
 
-	// Execute doMapfileSection
-	errs := cm.doMapfileSection(ctx, section)
+	setServer(cm, nil, map[string]string{"test_section": "zimbraServiceEnabled"})
 
-	// Verify no errors
-	require.Empty(t, errs)
+	return cm
+}
 
-	// Verify mapfile operations were executed
-	require.Len(t, mockExec.mapfileOps, 2)
+// mapfileOpsFor returns the executed mapfile operations for key.
+func mapfileOpsFor(ops []mtaops.MapfileOperation, key string) []mtaops.MapfileOperation {
+	var out []mtaops.MapfileOperation
 
-	// Check that both MAPFILE and MAPLOCAL operations were recorded
-	// Note: map iteration order is not guaranteed, so check both operations exist
-	var foundMapfile, foundMaplocal bool
-	for _, op := range mockExec.mapfileOps {
-		if op.Key == "zimbraSSLDHParam" && !op.IsLocal {
-			foundMapfile = true
-		}
-		if op.Key == "zimbraSSLCertPath" && op.IsLocal {
-			foundMaplocal = true
+	for _, op := range ops {
+		if op.Key == key {
+			out = append(out, op)
 		}
 	}
-	require.True(t, foundMapfile, "Expected MAPFILE operation for zimbraSSLDHParam")
-	require.True(t, foundMaplocal, "Expected MAPLOCAL operation for zimbraSSLCertPath")
+
+	return out
 }
 
-// TestDoMapfileSection_ErrorPath tests doMapfileSection when executor returns errors
-func TestDoMapfileSection_ErrorPath(t *testing.T) {
+func planMapfileKeys(pl *plan.Plan) map[string]bool {
+	out := map[string]bool{}
+
+	for _, m := range pl.Mapfiles {
+		out[m.Key] = m.Local
+	}
+
+	return out
+}
+
+// TestMapfilePlan_HappyPath: a changed section plans one mapped-file operation
+// per MAPFILE/MAPLOCAL lookup (VAR lookups are skipped) and Execute runs them.
+func TestMapfilePlan_HappyPath(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
 
-	tmpDir := t.TempDir()
-	ctx := context.Background()
-
-	// Setup ConfigManager
-	st := state.NewState()
-	st.FirstRun = true
-	cfg := &config.Config{
-		BaseDir:    tmpDir,
-		ConfigFile: filepath.Join(tmpDir, "zmconfigd.cf"),
-	}
-	cacheInstance := cache.New(ctx, false)
-	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance)
-
-	// Setup mock executor that returns an error
-	mockExec := &mockMtaExecutorForMta{
-		mapfileErr: errors.New("mapfile execution failed"),
-	}
-	cm.mtaExecutor = mockExec
-
-	// Create a section with MAPFILE variables
-	section := &config.MtaConfigSection{
-		Name:    "test_section",
-		Changed: true,
-		RequiredVars: map[string]string{
-			"zimbraSSLDHParam": "MAPFILE",
-		},
-	}
-
-	// Execute doMapfileSection
-	errs := cm.doMapfileSection(ctx, section)
-
-	// Verify error was collected
-	require.Len(t, errs, 1)
-	require.Equal(t, "mapfile execution failed", errs[0].Error())
-}
-
-// TestDoMapfileSection_NoChanges tests doMapfileSection when section hasn't changed and not first run
-func TestDoMapfileSection_NoChanges(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
-
-	tmpDir := t.TempDir()
-	ctx := context.Background()
-
-	// Setup ConfigManager
-	st := state.NewState()
-	st.FirstRun = false // Not first run
-	cfg := &config.Config{
-		BaseDir:    tmpDir,
-		ConfigFile: filepath.Join(tmpDir, "zmconfigd.cf"),
-	}
-	cacheInstance := cache.New(ctx, false)
-	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance)
-
-	// Setup mock executor
 	mockExec := &mockMtaExecutorForMta{}
-	cm.mtaExecutor = mockExec
+	cm := newMapfileCM(t, true, mockExec, map[string]string{
+		"zimbraSSLDHParam":    "MAPFILE",
+		"zimbraSSLCertPath":   "MAPLOCAL",
+		"zimbraMtaMyNetworks": "VAR", // Should be skipped
+	})
 
-	// Create a section that hasn't changed
-	section := &config.MtaConfigSection{
-		Name:    "test_section",
-		Changed: false, // Not changed
-		RequiredVars: map[string]string{
-			"zimbraSSLDHParam": "MAPFILE",
-		},
-	}
+	pl := mustCycle(t, cm)
 
-	// Execute doMapfileSection
-	errs := cm.doMapfileSection(ctx, section)
+	require.Equal(t, map[string]bool{"zimbraSSLDHParam": false, "zimbraSSLCertPath": true}, planMapfileKeys(pl))
 
-	// Verify no operations were executed
-	require.Empty(t, errs)
-	require.Empty(t, mockExec.mapfileOps)
+	require.NotEmpty(t, mapfileOpsFor(mockExec.mapfileOps, "zimbraSSLDHParam"), "Expected MAPFILE operation")
+
+	maplocal := mapfileOpsFor(mockExec.mapfileOps, "zimbraSSLCertPath")
+	require.Len(t, maplocal, 1, "Expected MAPLOCAL operation")
+	require.True(t, maplocal[0].IsLocal)
+	require.Empty(t, mapfileOpsFor(mockExec.mapfileOps, "zimbraMtaMyNetworks"))
 }
 
-// TestDoMapfileSection_FirstRunNoChanges tests doMapfileSection on first run even if section hasn't changed
-func TestDoMapfileSection_FirstRunNoChanges(t *testing.T) {
+// TestMapfilePlan_ErrorPath: an executor failure is reported by Execute.
+func TestMapfilePlan_ErrorPath(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
 
-	tmpDir := t.TempDir()
-	ctx := context.Background()
+	mockExec := &mockMtaExecutorForMta{mapfileErr: errors.New("mapfile execution failed")}
+	cm := newMapfileCM(t, true, mockExec, map[string]string{"zimbraSSLDHParam": "MAPFILE"})
 
-	// Setup ConfigManager
-	st := state.NewState()
-	st.FirstRun = true // First run
-	cfg := &config.Config{
-		BaseDir:    tmpDir,
-		ConfigFile: filepath.Join(tmpDir, "zmconfigd.cf"),
+	_, err := runCycle(t, cm)
+
+	require.Error(t, err)
+	require.Equal(t, 1, strings.Count(err.Error(), "mapfile execution failed"))
+}
+
+// TestMapfilePlan_NoChanges: when the section did not change and it is not the
+// first run, no mapped-file write is planned. MAPLOCAL is never touched; the
+// MAPFILE is only healed (re-synced from the snapshot), which is not a change.
+func TestMapfilePlan_NoChanges(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: configmgr test may have retry delays")
 	}
-	cacheInstance := cache.New(ctx, false)
-	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance)
 
-	// Setup mock executor
 	mockExec := &mockMtaExecutorForMta{}
-	cm.mtaExecutor = mockExec
+	cm := newMapfileCM(t, true, mockExec, map[string]string{
+		"zimbraSSLDHParam":  "MAPFILE",
+		"zimbraSSLCertPath": "MAPLOCAL",
+	})
 
-	// Create a section that hasn't changed but it's first run
-	section := &config.MtaConfigSection{
-		Name:    "test_section",
-		Changed: false, // Not changed
-		RequiredVars: map[string]string{
-			"zimbraSSLDHParam": "MAPFILE",
-		},
-	}
+	mustCycle(t, cm) // first run: baseline
 
-	// Execute doMapfileSection
-	errs := cm.doMapfileSection(ctx, section)
+	cm.State.SetFirstRun(false)
 
-	// Verify operations were executed (because it's first run)
-	require.Empty(t, errs)
-	require.Len(t, mockExec.mapfileOps, 1)
+	mockExec.mapfileOps = nil
+
+	pl := mustCycle(t, cm)
+
+	require.Empty(t, pl.Mapfiles)
+	require.Empty(t, pl.Sections)
+	require.Empty(t, mapfileOpsFor(mockExec.mapfileOps, "zimbraSSLCertPath"))
 }
 
-// TestDoMapfileSection_MultipleErrors tests doMapfileSection collecting multiple errors
-func TestDoMapfileSection_MultipleErrors(t *testing.T) {
+// TestMapfilePlan_FirstRunNoChanges: the first run plans the mapped files even
+// if nothing changed.
+func TestMapfilePlan_FirstRunNoChanges(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: configmgr test may have retry delays")
 	}
 
-	tmpDir := t.TempDir()
-	ctx := context.Background()
+	mockExec := &mockMtaExecutorForMta{}
+	cm := newMapfileCM(t, true, mockExec, map[string]string{"zimbraSSLDHParam": "MAPFILE"})
 
-	// Setup ConfigManager
-	st := state.NewState()
-	st.FirstRun = true
-	cfg := &config.Config{
-		BaseDir:    tmpDir,
-		ConfigFile: filepath.Join(tmpDir, "zmconfigd.cf"),
-	}
-	cacheInstance := cache.New(ctx, false)
-	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance)
+	pl := mustCycle(t, cm)
 
-	// Setup mock executor that always fails
-	mockExec := &mockMtaExecutorForMta{
-		mapfileErr: errors.New("mapfile execution failed"),
-	}
-	cm.mtaExecutor = mockExec
+	require.Equal(t, map[string]bool{"zimbraSSLDHParam": false}, planMapfileKeys(pl))
+	require.NotEmpty(t, mapfileOpsFor(mockExec.mapfileOps, "zimbraSSLDHParam"))
+}
 
-	// Create a section with multiple MAPFILE variables
-	section := &config.MtaConfigSection{
-		Name:    "test_section",
-		Changed: true,
-		RequiredVars: map[string]string{
-			"zimbraSSLDHParam":  "MAPFILE",
-			"zimbraSSLCertPath": "MAPLOCAL",
-		},
+// TestMapfilePlan_MultipleErrors: every failing mapped-file operation is
+// reported.
+func TestMapfilePlan_MultipleErrors(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: configmgr test may have retry delays")
 	}
 
-	// Execute doMapfileSection
-	errs := cm.doMapfileSection(ctx, section)
+	mockExec := &mockMtaExecutorForMta{mapfileErr: errors.New("mapfile execution failed")}
+	cm := newMapfileCM(t, true, mockExec, map[string]string{
+		"zimbraSSLDHParam":  "MAPFILE",
+		"zimbraSSLCertPath": "MAPLOCAL",
+	})
 
-	// Verify both errors were collected
-	require.Len(t, errs, 2)
-	require.Equal(t, "mapfile execution failed", errs[0].Error())
-	require.Equal(t, "mapfile execution failed", errs[1].Error())
+	_, err := runCycle(t, cm)
+
+	require.Error(t, err)
+	require.Equal(t, 2, strings.Count(err.Error(), "mapfile execution failed"))
 }
