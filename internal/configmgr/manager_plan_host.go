@@ -128,12 +128,27 @@ func (cm *ConfigManager) observeHost(ctx context.Context, cand *plan.Plan) (*pla
 		}
 	}
 
+	if err := cm.observeActionDrift(ctx, cand, host); err != nil {
+		return nil, err
+	}
+
+	// The cn=config attributes written through LDAP cannot be read back, so
+	// they are always listed.
+	for i := range cand.Ldap {
+		host.Ldap[cand.Ldap[i].Key] = "cn=config value is not read by plan; the attribute would be written"
+	}
+
+	return host, nil
+}
+
+// observeActionDrift fills the rewrite, postconf and postconfd drift of host.
+func (cm *ConfigManager) observeActionDrift(ctx context.Context, cand *plan.Plan, host *plan.Host) error {
 	for i := range cand.Rewrites {
 		r := &cand.Rewrites[i]
 
 		drift, err := cm.rewriteDrift(ctx, r)
 		if err != nil {
-			return nil, err
+			return err
 		}
 
 		if drift != "" {
@@ -146,7 +161,7 @@ func (cm *ConfigManager) observeHost(ctx context.Context, cand *plan.Plan) (*pla
 
 		drift, err := cm.postconfDrift(ctx, p)
 		if err != nil {
-			return nil, err
+			return err
 		}
 
 		if drift != "" {
@@ -159,7 +174,7 @@ func (cm *ConfigManager) observeHost(ctx context.Context, cand *plan.Plan) (*pla
 
 		_, set, err := cm.mtaExecutor.ReadPostconf(ctx, key, true)
 		if err != nil {
-			return nil, fmt.Errorf("read postconf %s: %w", key, err)
+			return fmt.Errorf("read postconf %s: %w", key, err)
 		}
 
 		if set {
@@ -167,13 +182,7 @@ func (cm *ConfigManager) observeHost(ctx context.Context, cand *plan.Plan) (*pla
 		}
 	}
 
-	// The cn=config attributes written through LDAP cannot be read back, so
-	// they are always listed.
-	for i := range cand.Ldap {
-		host.Ldap[cand.Ldap[i].Key] = "cn=config value is not read by plan; the attribute would be written"
-	}
-
-	return host, nil
+	return nil
 }
 
 // mapfileDrift describes how the mapped file of m differs from the configured

@@ -53,7 +53,7 @@ ssl_certificate_key ${ssl.key.default};
 		Hostname: "test.example.com",
 	}
 
-	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
 	if err != nil {
 		if strings.Contains(err.Error(), "no templates found") {
 			t.Skip("Templates not available, skipping")
@@ -126,7 +126,7 @@ func TestProxyGeneratorWithRealTemplate(t *testing.T) {
 		Hostname: "test.example.com",
 	}
 
-	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
 	if err != nil {
 		t.Fatalf("NewGenerator(, nil) failed: %v", err)
 	}
@@ -194,7 +194,7 @@ func TestDryRunMode(t *testing.T) {
 		Hostname: "test.example.com",
 	}
 
-	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
 	if err != nil {
 		t.Fatalf("NewGenerator(, nil) failed: %v", err)
 	}
@@ -249,7 +249,7 @@ func TestVerboseMode(t *testing.T) {
 		Hostname: "test.example.com",
 	}
 
-	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
 	if err != nil {
 		t.Fatalf("NewGenerator(, nil) failed: %v", err)
 	}
@@ -306,7 +306,7 @@ error_log ${main.logfile};`
 		Hostname: "test.example.com",
 	}
 
-	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
 	if err != nil {
 		t.Fatalf("NewGenerator(, nil) failed: %v", err)
 	}
@@ -432,7 +432,7 @@ func TestFullStackIntegration(t *testing.T) {
 	}
 
 	// Create generator with full configuration using NewGenerator
-	gen, err := NewGenerator(context.Background(), sys.Real(), baseConfig, localConfig, globalConfig, serverConfig, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), baseConfig, Sources{Local: localConfig, Global: globalConfig, Server: serverConfig})
 	if err != nil {
 		t.Fatalf("NewGenerator(, nil) failed: %v", err)
 	}
@@ -663,7 +663,7 @@ server {
 		Hostname: "mail.example.com",
 	}
 
-	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
 	if err != nil {
 		t.Fatalf("NewGenerator(, nil) failed: %v", err)
 	}
@@ -831,7 +831,7 @@ func TestProxyConfGenOutputStructure(t *testing.T) {
 		Hostname: "mail.example.com",
 	}
 
-	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
 	if err != nil {
 		t.Fatalf("NewGenerator(, nil) failed: %v", err)
 	}

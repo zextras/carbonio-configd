@@ -18,13 +18,18 @@ import (
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
+// Sources groups the pre-loaded configuration and service handles a Generator
+// is built from. Zero-value fields are allowed (testing mode).
+type Sources struct {
+	Local  *config.LocalConfig
+	Global *config.GlobalConfig
+	Server *config.ServerConfig
+	Ldap   *ldap.Ldap
+	Cache  *cache.ConfigCache
+}
+
 // NewGenerator creates a new proxy configuration generator
-func NewGenerator(ctx context.Context, env sys.System, cfg *config.Config,
-	localCfg *config.LocalConfig,
-	globalCfg *config.GlobalConfig,
-	serverCfg *config.ServerConfig,
-	ldapClient *ldap.Ldap,
-	cacheInstance *cache.ConfigCache) (*Generator, error) {
+func NewGenerator(ctx context.Context, env sys.System, cfg *config.Config, src Sources) (*Generator, error) {
 	ctx = logger.ContextWithComponentOnce(ctx, "proxy")
 
 	if cfg == nil {
@@ -35,11 +40,11 @@ func NewGenerator(ctx context.Context, env sys.System, cfg *config.Config,
 	g := &Generator{
 		env:           env,
 		Config:        cfg,
-		LocalConfig:   localCfg,
-		GlobalConfig:  globalCfg,
-		ServerConfig:  serverCfg,
-		LdapClient:    ldapClient,
-		Cache:         cacheInstance,
+		LocalConfig:   src.Local,
+		GlobalConfig:  src.Global,
+		ServerConfig:  src.Server,
+		LdapClient:    src.Ldap,
+		Cache:         src.Cache,
 		upstreamCache: &upstreamQueryCache{},
 		WorkingDir:    cfg.BaseDir,
 		TemplateDir:   filepath.Join(cfg.BaseDir, "conf", "nginx", "templates"),
@@ -101,31 +106,26 @@ func NewGenerator(ctx context.Context, env sys.System, cfg *config.Config,
 // LoadConfiguration loads configurations from a ConfigManager's state.
 // This is a convenience function that creates a generator with pre-loaded configurations.
 // In production, this should be called with configs from ConfigManager.State.
-func LoadConfiguration(ctx context.Context, env sys.System, cfg *config.Config,
-	localCfg *config.LocalConfig,
-	globalCfg *config.GlobalConfig,
-	serverCfg *config.ServerConfig,
-	ldapClient *ldap.Ldap,
-	cacheInstance *cache.ConfigCache) (*Generator, error) {
+func LoadConfiguration(ctx context.Context, env sys.System, cfg *config.Config, src Sources) (*Generator, error) {
 	ctx = logger.ContextWithComponentOnce(ctx, "proxy")
 
 	logger.DebugContext(ctx, "Loading proxy configuration from environment")
 
 	// Use provided configs, or create empty ones if nil (for testing)
-	if localCfg == nil {
-		localCfg = &config.LocalConfig{Data: config.NewConfigMap()}
+	if src.Local == nil {
+		src.Local = &config.LocalConfig{Data: config.NewConfigMap()}
 
 		logger.DebugContext(ctx, "Using empty LocalConfig (testing mode)")
 	}
 
-	if globalCfg == nil {
-		globalCfg = &config.GlobalConfig{Data: config.NewConfigMap()}
+	if src.Global == nil {
+		src.Global = &config.GlobalConfig{Data: config.NewConfigMap()}
 
 		logger.DebugContext(ctx, "Using empty GlobalConfig (testing mode)")
 	}
 
-	if serverCfg == nil {
-		serverCfg = &config.ServerConfig{
+	if src.Server == nil {
+		src.Server = &config.ServerConfig{
 			Data:          config.NewConfigMap(),
 			ServiceConfig: config.NewConfigMap(),
 		}
@@ -134,11 +134,11 @@ func LoadConfiguration(ctx context.Context, env sys.System, cfg *config.Config,
 	}
 
 	logger.DebugContext(ctx, "Proxy configuration loaded",
-		"local_count", localCfg.Data.Len(),
-		"global_count", globalCfg.Data.Len(),
-		"server_count", serverCfg.Data.Len())
+		"local_count", src.Local.Data.Len(),
+		"global_count", src.Global.Data.Len(),
+		"server_count", src.Server.Data.Len())
 
-	return NewGenerator(ctx, env, cfg, localCfg, globalCfg, serverCfg, ldapClient, cacheInstance)
+	return NewGenerator(ctx, env, cfg, src)
 }
 
 // SetDryRun enables or disables dry-run mode

@@ -24,8 +24,7 @@ func newMinimalGenerator(t *testing.T) *proxy.Generator {
 	}
 
 	gen, err := proxy.LoadConfiguration(
-		context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil,
-	)
+		context.Background(), sys.Real(), cfg, proxy.Sources{})
 	if err != nil {
 		t.Fatalf("LoadConfiguration failed: %v", err)
 	}

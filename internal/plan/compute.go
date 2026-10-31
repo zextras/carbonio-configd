@@ -328,19 +328,7 @@ func (b *builder) mapfileOps(sn string, sec *config.MtaConfigSection, reasons []
 
 // compileSection gathers the actions of a processed section.
 func (b *builder) compileSection(sn string, sec *config.MtaConfigSection, reasons []Reason) {
-	for _, src := range slices.Sorted(maps.Keys(sec.Rewrites)) {
-		entry := sec.Rewrites[src]
-
-		r := b.rewrites[src]
-		if r == nil {
-			r = &Rewrite{Source: src}
-			b.rewrites[src] = r
-		}
-
-		r.Target, r.Mode = entry.Value, entry.Mode
-		r.Sections = appendUnique(r.Sections, sn)
-		r.Reasons = appendReasons(r.Reasons, reasons)
-	}
+	b.compileRewrites(sn, sec, reasons)
 
 	for _, key := range slices.Sorted(maps.Keys(sec.Postconf)) {
 		b.setPostconf(key, sec.Postconf[key], sn, reasons)
@@ -359,6 +347,40 @@ func (b *builder) compileSection(sn string, sec *config.MtaConfigSection, reason
 		b.proxygen.Reasons = appendReasons(b.proxygen.Reasons, reasons)
 	}
 
+	b.compileLdap(sn, sec, reasons)
+
+	for i := range sec.Conditionals {
+		b.compileConditional(sn, &sec.Conditionals[i], reasons)
+	}
+
+	// Restarts are not triggered on first run, nor for a section that was
+	// forced or requested: that restart would trigger the ExecStartPre REWRITE
+	// of the very service being restarted. The skip is section-scoped; a
+	// collateral section whose variables changed still restarts its services.
+	if !b.in.FirstRun && !b.forced[sn] && !b.requested[sn] {
+		b.compileSectionRestarts(sn, sec, reasons)
+	}
+}
+
+// compileRewrites gathers the REWRITE actions of a section.
+func (b *builder) compileRewrites(sn string, sec *config.MtaConfigSection, reasons []Reason) {
+	for _, src := range slices.Sorted(maps.Keys(sec.Rewrites)) {
+		entry := sec.Rewrites[src]
+
+		r := b.rewrites[src]
+		if r == nil {
+			r = &Rewrite{Source: src}
+			b.rewrites[src] = r
+		}
+
+		r.Target, r.Mode = entry.Value, entry.Mode
+		r.Sections = appendUnique(r.Sections, sn)
+		r.Reasons = appendReasons(r.Reasons, reasons)
+	}
+}
+
+// compileLdap gathers the LDAP writes of a section.
+func (b *builder) compileLdap(sn string, sec *config.MtaConfigSection, reasons []Reason) {
 	for _, key := range slices.Sorted(maps.Keys(sec.Ldap)) {
 		// An empty LDAP value means "no change" (legacy curLdap).
 		if sec.Ldap[key] == "" {
@@ -374,18 +396,6 @@ func (b *builder) compileSection(sn string, sec *config.MtaConfigSection, reason
 		l.Value = sec.Ldap[key]
 		l.Sections = appendUnique(l.Sections, sn)
 		l.Reasons = appendReasons(l.Reasons, reasons)
-	}
-
-	for i := range sec.Conditionals {
-		b.compileConditional(sn, &sec.Conditionals[i], reasons)
-	}
-
-	// Restarts are not triggered on first run, nor for a section that was
-	// forced or requested: that restart would trigger the ExecStartPre REWRITE
-	// of the very service being restarted. The skip is section-scoped; a
-	// collateral section whose variables changed still restarts its services.
-	if !b.in.FirstRun && !b.forced[sn] && !b.requested[sn] {
-		b.compileSectionRestarts(sn, sec, reasons)
 	}
 }
 
@@ -500,37 +510,7 @@ func (b *builder) trackServices() {
 		b.tracked = map[string]string{}
 	}
 
-	stopped := map[string]Restart{}
-
-	for _, svc := range slices.Sorted(maps.Keys(b.tracked)) {
-		if !b.cur.ServiceEnabled(svc) {
-			stopped[svc] = Restart{
-				Service: svc, Action: ActionStop,
-				Reasons: []Reason{{Kind: ReasonServiceDisabled, Service: svc}},
-			}
-		}
-	}
-
-	for _, svc := range b.cur.ServiceNames() {
-		if _, known := b.tracked[svc]; known {
-			continue
-		}
-
-		if b.in.FirstRun {
-			if config.IsTrueValue(b.cur.ServiceValue(svc)) {
-				b.tracked[svc] = "running"
-			} else {
-				b.tracked[svc] = "stopped"
-			}
-
-			continue
-		}
-
-		stopped[svc] = Restart{
-			Service: svc, Action: ActionStart,
-			Reasons: []Reason{{Kind: ReasonServiceEnabled, Service: svc}},
-		}
-	}
+	stopped := b.serviceToggles()
 
 	for _, svc := range slices.Sorted(maps.Keys(stopped)) {
 		st := stopped[svc]
@@ -546,6 +526,50 @@ func (b *builder) trackServices() {
 	}
 }
 
+// serviceToggles returns the stops of tracked services that are no longer
+// enabled and the starts of newly enabled ones; on first run it instead
+// records the status of the unknown services in the tracking map.
+func (b *builder) serviceToggles() map[string]Restart {
+	toggles := map[string]Restart{}
+
+	for _, svc := range slices.Sorted(maps.Keys(b.tracked)) {
+		if !b.cur.ServiceEnabled(svc) {
+			toggles[svc] = Restart{
+				Service: svc, Action: ActionStop,
+				Reasons: []Reason{{Kind: ReasonServiceDisabled, Service: svc}},
+			}
+		}
+	}
+
+	for _, svc := range b.cur.ServiceNames() {
+		if _, known := b.tracked[svc]; known {
+			continue
+		}
+
+		if b.in.FirstRun {
+			b.tracked[svc] = trackedStatus(config.IsTrueValue(b.cur.ServiceValue(svc)))
+
+			continue
+		}
+
+		toggles[svc] = Restart{
+			Service: svc, Action: ActionStart,
+			Reasons: []Reason{{Kind: ReasonServiceEnabled, Service: svc}},
+		}
+	}
+
+	return toggles
+}
+
+// trackedStatus maps a service's enabled flag to its tracked status.
+func trackedStatus(enabled bool) string {
+	if enabled {
+		return "running"
+	}
+
+	return "stopped"
+}
+
 // mergeCarry re-includes the actions the previous Execute did not complete.
 // A freshly computed action of the same key wins, as the legacy accumulated
 // map was overwritten by the new compile.
@@ -553,53 +577,10 @@ func (b *builder) mergeCarry() {
 	retry := Reason{Kind: ReasonRetry}
 	c := &b.in.Carry
 
-	for i := range c.Rewrites {
-		it := c.Rewrites[i]
-		if have := b.rewrites[it.Source]; have != nil {
-			have.Reasons = appendReason(have.Reasons, retry)
-
-			continue
-		}
-
-		it.Reasons = appendReason(slices.Clone(it.Reasons), retry)
-		b.rewrites[it.Source] = &it
-	}
-
-	for i := range c.Postconf {
-		it := c.Postconf[i]
-		if have := b.postconf[it.Key]; have != nil {
-			have.Reasons = appendReason(have.Reasons, retry)
-
-			continue
-		}
-
-		it.Reasons = appendReason(slices.Clone(it.Reasons), retry)
-		b.postconf[it.Key] = &it
-	}
-
-	for i := range c.Postconfd {
-		it := c.Postconfd[i]
-		if have := b.postconfd[it.Key]; have != nil {
-			have.Reasons = appendReason(have.Reasons, retry)
-
-			continue
-		}
-
-		it.Reasons = appendReason(slices.Clone(it.Reasons), retry)
-		b.postconfd[it.Key] = &it
-	}
-
-	for i := range c.Ldap {
-		it := c.Ldap[i]
-		if have := b.ldap[it.Key]; have != nil {
-			have.Reasons = appendReason(have.Reasons, retry)
-
-			continue
-		}
-
-		it.Reasons = appendReason(slices.Clone(it.Reasons), retry)
-		b.ldap[it.Key] = &it
-	}
+	carryItems(c.Rewrites, b.rewrites, func(it *Rewrite) (string, *[]Reason) { return it.Source, &it.Reasons }, &retry)
+	carryItems(c.Postconf, b.postconf, func(it *Postconf) (string, *[]Reason) { return it.Key, &it.Reasons }, &retry)
+	carryItems(c.Postconfd, b.postconfd, func(it *Postconfd) (string, *[]Reason) { return it.Key, &it.Reasons }, &retry)
+	carryItems(c.Ldap, b.ldap, func(it *Ldap) (string, *[]Reason) { return it.Key, &it.Reasons }, &retry)
 
 	if c.Proxygen != nil {
 		if b.proxygen == nil {
@@ -610,16 +591,25 @@ func (b *builder) mergeCarry() {
 		b.proxygen.Reasons = appendReason(slices.Clone(b.proxygen.Reasons), retry)
 	}
 
-	for i := range c.Restarts {
-		it := c.Restarts[i]
-		if have := b.restarts[it.Service]; have != nil {
-			have.Reasons = appendReason(have.Reasons, retry)
+	carryItems(c.Restarts, b.restarts, func(it *Restart) (string, *[]Reason) { return it.Service, &it.Reasons }, &retry)
+}
+
+// carryItems re-includes the carried items missing from dst, and marks the
+// ones already there as retried. ref returns an item's key and reasons.
+func carryItems[T any](items []T, dst map[string]*T, ref func(*T) (string, *[]Reason), retry *Reason) {
+	for i := range items {
+		it := items[i]
+		key, reasons := ref(&it)
+
+		if have := dst[key]; have != nil {
+			_, haveReasons := ref(have)
+			*haveReasons = appendReason(*haveReasons, *retry)
 
 			continue
 		}
 
-		it.Reasons = appendReason(slices.Clone(it.Reasons), retry)
-		b.restarts[it.Service] = &it
+		*reasons = appendReason(slices.Clone(*reasons), *retry)
+		dst[key] = &it
 	}
 }
 

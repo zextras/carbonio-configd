@@ -288,7 +288,7 @@ func TestGenerateAllIntegration(t *testing.T) {
 	// Create LDAP client (can be nil for this test)
 	var ldapClient *ldap.Ldap
 
-	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, localCfg, globalCfg, serverCfg, ldapClient, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{Local: localCfg, Global: globalCfg, Server: serverCfg, Ldap: ldapClient})
 	if err != nil {
 		t.Fatalf("NewGenerator failed: %v", err)
 	}
@@ -678,7 +678,7 @@ func TestLoadConfigurationNilConfigs(t *testing.T) {
 	}
 
 	// All three optional configs are nil — should create empty defaults and succeed
-	gen, err := LoadConfiguration(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
+	gen, err := LoadConfiguration(context.Background(), sys.Real(), cfg, Sources{})
 	if err != nil {
 		t.Fatalf("LoadConfiguration(nil configs) failed: %v", err)
 	}
@@ -701,7 +701,7 @@ func TestLoadConfigurationWithConfigs(t *testing.T) {
 		ServiceConfig: config.NewConfigMap(),
 	}
 
-	gen, err := LoadConfiguration(context.Background(), sys.Real(), cfg, localCfg, globalCfg, serverCfg, nil, nil)
+	gen, err := LoadConfiguration(context.Background(), sys.Real(), cfg, Sources{Local: localCfg, Global: globalCfg, Server: serverCfg})
 	if err != nil {
 		t.Fatalf("LoadConfiguration with configs failed: %v", err)
 	}

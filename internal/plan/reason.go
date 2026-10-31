@@ -87,6 +87,9 @@ func displayValue(key, val string) string {
 	return val
 }
 
+// sectionPrefix starts the section-scoped reason texts.
+const sectionPrefix = "section "
+
 // String renders the reason for humans, e.g.
 // "section mta changed because VAR zimbraMtaRestriction changed 'a'->'b'".
 func (r Reason) String() string {
@@ -94,11 +97,11 @@ func (r Reason) String() string {
 	case ReasonFirstRun:
 		return "first run: section " + r.Section + " rendered for the first time"
 	case ReasonForced:
-		return "section " + r.Section + " forced by REWRITE request"
+		return sectionPrefix + r.Section + " forced by REWRITE request"
 	case ReasonRequested:
-		return "section " + r.Section + " requested by REWRITE command"
+		return sectionPrefix + r.Section + " requested by REWRITE command"
 	case ReasonEvaluated:
-		return "section " + r.Section + " evaluated against the host state"
+		return sectionPrefix + r.Section + " evaluated against the host state"
 	case ReasonVarChanged:
 		return fmt.Sprintf("section %s changed because %s %s changed %s->%s",
 			r.Section, r.Type, r.Key, quoteValue(r.Old), quoteValue(r.New))

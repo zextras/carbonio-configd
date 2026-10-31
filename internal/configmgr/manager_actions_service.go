@@ -53,11 +53,13 @@ func (cm *ConfigManager) RunProxygenWithConfigs(ctx context.Context) error {
 		ctx,
 		cm.env,
 		cm.mainConfig,
-		snap.LocalConfig(),
-		snap.GlobalConfig(),
-		snap.ServerConfig(),
-		cm.LdapClient,
-		cm.Cache)
+		proxy.Sources{
+			Local:  snap.LocalConfig(),
+			Global: snap.GlobalConfig(),
+			Server: snap.ServerConfig(),
+			Ldap:   cm.LdapClient,
+			Cache:  cm.Cache,
+		})
 	initDuration := time.Since(initStart)
 	logger.DebugContext(ctx, "Proxy generator initialization completed",
 		"duration_seconds", initDuration.Seconds())

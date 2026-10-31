@@ -39,7 +39,7 @@ func BenchmarkVariableResolution(b *testing.B) {
 		Hostname: "test.example.com",
 	}
 
-	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
 	if err != nil {
 		b.Fatalf("NewGenerator(, nil) failed: %v", err)
 	}
@@ -98,7 +98,7 @@ proxy_send_timeout ${main.stimeout};
 		Hostname: "test.example.com",
 	}
 
-	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
 	if err != nil {
 		b.Fatalf("NewGenerator(, nil) failed: %v", err)
 	}
@@ -163,7 +163,7 @@ server { listen ${web.http.port}; ssl_certificate ${ssl.crt.default}; }`,
 			Hostname: "test.example.com",
 		}
 
-		gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
+		gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
 		if err != nil {
 			b.Fatalf("NewGenerator(, nil) failed: %v", err)
 		}
@@ -188,7 +188,7 @@ func BenchmarkVariableLookup(b *testing.B) {
 		Hostname: "test.example.com",
 	}
 
-	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
 	if err != nil {
 		b.Fatalf("NewGenerator(, nil) failed: %v", err)
 	}
@@ -207,7 +207,7 @@ func BenchmarkVariableExpansion(b *testing.B) {
 		Hostname: "test.example.com",
 	}
 
-	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
 	if err != nil {
 		b.Fatalf("NewGenerator(, nil) failed: %v", err)
 	}

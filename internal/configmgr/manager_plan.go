@@ -133,22 +133,7 @@ func (cm *ConfigManager) Plan(ctx context.Context) (*plan.Plan, error) {
 func logPlan(ctx context.Context, pl *plan.Plan, firstRun bool) {
 	for i := range pl.Sections {
 		for j := range pl.Sections[i].Reasons {
-			r := &pl.Sections[i].Reasons[j]
-			if r.Kind != plan.ReasonVarChanged {
-				continue
-			}
-
-			switch {
-			case r.New == "":
-				logger.InfoContext(ctx, "Variable changed to undefined",
-					"key", r.Key,
-					"previous_value", r.Old)
-			case !firstRun:
-				logger.InfoContext(ctx, "Variable changed",
-					"key", r.Key,
-					"previous_value", r.Old,
-					"current_value", r.New)
-			}
+			logVarChange(ctx, &pl.Sections[i].Reasons[j], firstRun)
 		}
 	}
 
@@ -156,15 +141,37 @@ func logPlan(ctx context.Context, pl *plan.Plan, firstRun bool) {
 		r := &pl.Restarts[i]
 
 		for j := range r.Reasons {
-			reason := &r.Reasons[j]
-			if reason.Kind == plan.ReasonServiceDisabled {
-				logger.InfoContext(ctx, "Service was disabled, need to stop", "service", r.Service)
-			}
-
-			if reason.Kind == plan.ReasonServiceEnabled {
-				logger.InfoContext(ctx, "Service was enabled, need to start", "service", r.Service)
-			}
+			logServiceToggle(ctx, r.Service, r.Reasons[j].Kind)
 		}
+	}
+}
+
+// logVarChange reports one variable-changed reason.
+func logVarChange(ctx context.Context, r *plan.Reason, firstRun bool) {
+	if r.Kind != plan.ReasonVarChanged {
+		return
+	}
+
+	switch {
+	case r.New == "":
+		logger.InfoContext(ctx, "Variable changed to undefined",
+			"key", r.Key,
+			"previous_value", r.Old)
+	case !firstRun:
+		logger.InfoContext(ctx, "Variable changed",
+			"key", r.Key,
+			"previous_value", r.Old,
+			"current_value", r.New)
+	}
+}
+
+// logServiceToggle reports a service enabled/disabled restart reason.
+func logServiceToggle(ctx context.Context, service string, kind plan.ReasonKind) {
+	switch kind {
+	case plan.ReasonServiceDisabled:
+		logger.InfoContext(ctx, "Service was disabled, need to stop", "service", service)
+	case plan.ReasonServiceEnabled:
+		logger.InfoContext(ctx, "Service was enabled, need to start", "service", service)
 	}
 }
 

@@ -151,7 +151,7 @@ func TestRealTemplatesWithExplode(t *testing.T) {
 
 			// Create generator with config
 			cfg := &config.Config{BaseDir: tempDir}
-			gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
+			gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
 			if err != nil {
 				t.Fatalf("Failed to create generator: %v", err)
 			}

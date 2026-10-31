@@ -130,30 +130,45 @@ func redactAttr(a slog.Attr, forced bool) (slog.Attr, bool) {
 
 	switch v.Kind() {
 	case slog.KindString:
-		s := v.String()
-		if s == "" {
-			return a, false
-		}
-
-		if secret {
-			return slog.String(a.Key, redact.Placeholder), true
-		}
-
-		if text, ok := redact.Text(s); ok {
-			return slog.String(a.Key, text), true
-		}
+		return redactString(a, v.String(), secret)
 	case slog.KindAny:
-		if secret && v.Any() != nil {
-			return slog.String(a.Key, redact.Placeholder), true
-		}
-
-		if err, ok := v.Any().(error); ok && err != nil {
-			if text, changed := redact.Text(err.Error()); changed {
-				return slog.String(a.Key, text), true
-			}
-		}
+		return redactAny(a, v, secret)
 	default:
 		// Numbers, bools, durations and times cannot carry a credential.
+	}
+
+	return a, false
+}
+
+// redactString masks a string attribute: wholly when secret, else any
+// credential embedded in its text.
+func redactString(a slog.Attr, s string, secret bool) (slog.Attr, bool) {
+	if s == "" {
+		return a, false
+	}
+
+	if secret {
+		return slog.String(a.Key, redact.Placeholder), true
+	}
+
+	if text, ok := redact.Text(s); ok {
+		return slog.String(a.Key, text), true
+	}
+
+	return a, false
+}
+
+// redactAny masks an any-valued attribute: wholly when secret, else the text
+// of an error value.
+func redactAny(a slog.Attr, v slog.Value, secret bool) (slog.Attr, bool) {
+	if secret && v.Any() != nil {
+		return slog.String(a.Key, redact.Placeholder), true
+	}
+
+	if err, ok := v.Any().(error); ok && err != nil {
+		if text, changed := redact.Text(err.Error()); changed {
+			return slog.String(a.Key, text), true
+		}
 	}
 
 	return a, false

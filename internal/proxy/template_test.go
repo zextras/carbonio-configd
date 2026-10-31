@@ -94,7 +94,7 @@ func TestTemplateProcessorVariableSubstitution(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &config.Config{BaseDir: "/tmp/test"}
-			gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
+			gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
 			if err != nil {
 				t.Fatalf("NewGenerator(, nil) error = %v", err)
 			}
@@ -116,7 +116,7 @@ func TestTemplateProcessorVariableSubstitution(t *testing.T) {
 // TestTemplateProcessorMultilineTemplate tests processing of multi-line templates
 func TestTemplateProcessorMultilineTemplate(t *testing.T) {
 	cfg := &config.Config{BaseDir: "/tmp/test"}
-	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
 	if err != nil {
 		t.Fatalf("NewGenerator(, nil) error = %v", err)
 	}
@@ -257,7 +257,7 @@ func TestFormatValue(t *testing.T) {
 // TestTemplateProcessorCustomFormatter tests custom formatters
 func TestTemplateProcessorCustomFormatter(t *testing.T) {
 	cfg := &config.Config{BaseDir: "/tmp/test"}
-	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
 	if err != nil {
 		t.Fatalf("NewGenerator(, nil) error = %v", err)
 	}
@@ -287,7 +287,7 @@ func TestTemplateProcessorCustomFormatter(t *testing.T) {
 // TestTemplateProcessorExplodeDirective tests detection of explode directives
 func TestTemplateProcessorExplodeDirective(t *testing.T) {
 	cfg := &config.Config{BaseDir: "/tmp/test"}
-	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
 	if err != nil {
 		t.Fatalf("NewGenerator(, nil) error = %v", err)
 	}
@@ -334,7 +334,7 @@ func TestTemplateProcessorProcessAllTemplates(t *testing.T) {
 	}
 
 	cfg := &config.Config{BaseDir: "/tmp/test"}
-	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
 	if err != nil {
 		t.Fatalf("NewGenerator(, nil) error = %v", err)
 	}
@@ -486,7 +486,7 @@ func TestTruncateString(t *testing.T) {
 // TestProcessEnablerLineTrueEnabler tests processEnablerLine when enabler variable is true
 func TestProcessEnablerLineTrueEnabler(t *testing.T) {
 	cfg := &config.Config{BaseDir: "/tmp/test"}
-	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
 	if err != nil {
 		t.Fatalf("NewGenerator: %v", err)
 	}
@@ -518,7 +518,7 @@ func TestProcessEnablerLineTrueEnabler(t *testing.T) {
 // TestProcessEnablerLineFalseEnabler tests processEnablerLine when enabler variable is false
 func TestProcessEnablerLineFalseEnabler(t *testing.T) {
 	cfg := &config.Config{BaseDir: "/tmp/test"}
-	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
 	if err != nil {
 		t.Fatalf("NewGenerator: %v", err)
 	}
@@ -547,7 +547,7 @@ func TestProcessEnablerLineFalseEnabler(t *testing.T) {
 // commented out, not just the first.
 func TestProcessEnablerLineFalseEnablerMultiLine(t *testing.T) {
 	cfg := &config.Config{BaseDir: "/tmp/test"}
-	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
 	if err != nil {
 		t.Fatalf("NewGenerator: %v", err)
 	}
@@ -584,7 +584,7 @@ func TestProcessEnablerLineFalseEnablerMultiLine(t *testing.T) {
 
 func TestProcessEnablerLineStringEnabler(t *testing.T) {
 	cfg := &config.Config{BaseDir: "/tmp/test"}
-	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
 	if err != nil {
 		t.Fatalf("NewGenerator: %v", err)
 	}
@@ -610,7 +610,7 @@ func TestProcessEnablerLineStringEnabler(t *testing.T) {
 // TestProcessEnablerLineIntEnabler tests processEnablerLine with int enabler
 func TestProcessEnablerLineIntEnabler(t *testing.T) {
 	cfg := &config.Config{BaseDir: "/tmp/test"}
-	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
 	if err != nil {
 		t.Fatalf("NewGenerator: %v", err)
 	}
@@ -638,7 +638,7 @@ func TestProcessEnablerLineIntEnabler(t *testing.T) {
 // branch (L131-135) when an enabler variable holds a non-bool/non-string/non-int value.
 func TestProcessEnablerLineUnexpectedType(t *testing.T) {
 	cfg := &config.Config{BaseDir: "/tmp/test"}
-	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
 	if err != nil {
 		t.Fatalf("NewGenerator: %v", err)
 	}
@@ -668,7 +668,7 @@ func TestProcessEnablerLineUnexpectedType(t *testing.T) {
 // TestProcessEnablerLineNotEnabler tests that a non-enabler variable in enabler position is ignored
 func TestProcessEnablerLineNotEnabler(t *testing.T) {
 	cfg := &config.Config{BaseDir: "/tmp/test"}
-	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
 	if err != nil {
 		t.Fatalf("NewGenerator: %v", err)
 	}
@@ -697,7 +697,7 @@ func TestProcessEnablerLineNotEnabler(t *testing.T) {
 // TestExpandVariableTimeTypes tests ExpandVariable with TIME and TimeInSec types
 func TestExpandVariableTimeTypes(t *testing.T) {
 	cfg := &config.Config{BaseDir: "/tmp/test"}
-	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
 	if err != nil {
 		t.Fatalf("NewGenerator: %v", err)
 	}
@@ -734,7 +734,7 @@ func TestExpandVariableTimeTypes(t *testing.T) {
 func TestWriteOutputDryRun(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &config.Config{BaseDir: tmpDir}
-	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
 	if err != nil {
 		t.Fatalf("NewGenerator: %v", err)
 	}
@@ -755,7 +755,7 @@ func TestWriteOutputDryRun(t *testing.T) {
 func TestWriteOutputDryRunVerbose(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &config.Config{BaseDir: tmpDir}
-	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
 	if err != nil {
 		t.Fatalf("NewGenerator: %v", err)
 	}
@@ -772,7 +772,7 @@ func TestWriteOutputDryRunVerbose(t *testing.T) {
 func TestWriteOutputVerbose(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &config.Config{BaseDir: tmpDir}
-	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
 	if err != nil {
 		t.Fatalf("NewGenerator: %v", err)
 	}
@@ -803,7 +803,7 @@ func TestWriteOutputNilGenerator(t *testing.T) {
 // TestProcessTemplateLinesSkipComments tests processTemplateLines with skipComments=true
 func TestProcessTemplateLinesSkipComments(t *testing.T) {
 	cfg := &config.Config{BaseDir: "/tmp/test"}
-	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
 	if err != nil {
 		t.Fatalf("NewGenerator: %v", err)
 	}
@@ -840,7 +840,7 @@ func TestProcessTemplateLinesSkipComments(t *testing.T) {
 // TestProcessTemplateLinesNoSkipComments tests processTemplateLines with skipComments=false
 func TestProcessTemplateLinesNoSkipComments(t *testing.T) {
 	cfg := &config.Config{BaseDir: "/tmp/test"}
-	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
 	if err != nil {
 		t.Fatalf("NewGenerator: %v", err)
 	}
@@ -866,7 +866,7 @@ func TestProcessTemplateLinesNoSkipComments(t *testing.T) {
 // TestProcessTemplateFileError tests ProcessTemplateFile when load fails
 func TestProcessTemplateFileError(t *testing.T) {
 	cfg := &config.Config{BaseDir: "/tmp/test"}
-	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
 	if err != nil {
 		t.Fatalf("NewGenerator: %v", err)
 	}
@@ -979,7 +979,7 @@ func TestProcessAllTemplatesWithError(t *testing.T) {
 	}
 
 	cfg := &config.Config{BaseDir: "/tmp/test"}
-	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
 	if err != nil {
 		t.Fatalf("NewGenerator: %v", err)
 	}
@@ -994,7 +994,7 @@ func TestProcessAllTemplatesWithError(t *testing.T) {
 // TestProcessAllTemplatesNonExistentDir tests ProcessAllTemplates when template dir does not exist
 func TestProcessAllTemplatesNonExistentDir(t *testing.T) {
 	cfg := &config.Config{BaseDir: "/tmp/test"}
-	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
 	if err != nil {
 		t.Fatalf("NewGenerator: %v", err)
 	}

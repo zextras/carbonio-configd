@@ -41,6 +41,10 @@ func testOrchestrator(
 	return &orchestrator{ctl: ctl, reporter: status.NewReporter(f.System(), ctl), svcStatus: ctl.ServiceStatus}, f
 }
 
+func newConsoleTo(out, errOut *bytes.Buffer) *cliutil.Console {
+	return cliutil.NewConsole(out, errOut)
+}
+
 func newConsole() (*cliutil.Console, *bytes.Buffer) {
 	var out bytes.Buffer
 

@@ -560,7 +560,7 @@ func proxygen(ctx context.Context, env sys.System, args []string) (string, error
 	// Load configuration and create generator
 	// Pass nil configs - LoadConfiguration will create empty ones for standalone mode
 	// When called from ConfigManager, it should use RunProxygenWithConfigs instead
-	gen, err := proxy.LoadConfiguration(ctx, env, cfg, nil, nil, nil, ldapClient, nil)
+	gen, err := proxy.LoadConfiguration(ctx, env, cfg, proxy.Sources{Ldap: ldapClient})
 	if err != nil {
 		logger.ErrorContext(ctx, "Failed to initialize proxy generator",
 			"error", err)

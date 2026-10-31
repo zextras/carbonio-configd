@@ -99,7 +99,7 @@ func TestValidateAllRealTemplates(t *testing.T) {
 
 	// Create generator with temp output directory and real template directory
 	outputDir := t.TempDir()
-	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, localCfg, globalCfg, serverCfg, mockLdap, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{Local: localCfg, Global: globalCfg, Server: serverCfg, Ldap: mockLdap})
 	if err != nil {
 		t.Fatalf("Failed to create generator: %v", err)
 	}

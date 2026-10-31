@@ -46,7 +46,7 @@ func TestVariableResolutionFromGlobalConfig(t *testing.T) {
 	}
 
 	// Create generator
-	gen, err := proxy.LoadConfiguration(context.Background(), sys.Real(), cfg, localCfg, globalCfg, serverCfg, nil, nil)
+	gen, err := proxy.LoadConfiguration(context.Background(), sys.Real(), cfg, proxy.Sources{Local: localCfg, Global: globalCfg, Server: serverCfg})
 	if err != nil {
 		t.Fatalf("Failed to create generator: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestVariableResolutionDefaults(t *testing.T) {
 	}
 
 	// Create generator
-	gen, err := proxy.LoadConfiguration(context.Background(), sys.Real(), cfg, localCfg, globalCfg, serverCfg, nil, nil)
+	gen, err := proxy.LoadConfiguration(context.Background(), sys.Real(), cfg, proxy.Sources{Local: localCfg, Global: globalCfg, Server: serverCfg})
 	if err != nil {
 		t.Fatalf("Failed to create generator: %v", err)
 	}

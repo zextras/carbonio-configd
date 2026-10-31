@@ -482,11 +482,12 @@ func TestE2E_ProxyConfigValidation(t *testing.T) {
 			context.Background(),
 			hostEnv(),
 			mainCfg,
-			snap.LocalConfig(),
-			snap.GlobalConfig(),
-			snap.ServerConfig(),
-			ldapClient,
-			nil, // No cache in test
+			proxy.Sources{
+				Local:  snap.LocalConfig(),
+				Global: snap.GlobalConfig(),
+				Server: snap.ServerConfig(),
+				Ldap:   ldapClient, // No cache in test
+			},
 		)
 		if err != nil {
 			t.Skipf("Cannot initialize proxy generator (expected in test env): %v", err)

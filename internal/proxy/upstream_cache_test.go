@@ -22,7 +22,7 @@ func TestUpstreamCacheInitialization(t *testing.T) {
 		Hostname: "test.example.com",
 	}
 
-	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, nil, nil, nil, nil, nil)
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
 	if err != nil {
 		t.Fatalf("NewGenerator failed: %v", err)
 	}

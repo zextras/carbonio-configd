@@ -21,6 +21,12 @@ import (
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
+// Recorded-operation formats shared by several FS methods.
+const (
+	fmtPathMode = "%s mode=%04o"
+	fmtPathPair = "%s -> %s"
+)
+
 type node struct {
 	data     []byte
 	mode     fs.FileMode // permission bits plus fs.ModeDir / fs.ModeSymlink
@@ -490,7 +496,7 @@ func (f *FS) Readlink(name string) (string, error) {
 
 // WriteFileAtomic implements sys.FS: the file ends up with exactly perm.
 func (f *FS) WriteFileAtomic(name string, data []byte, perm fs.FileMode) error {
-	f.rec.Recordf("fs.write-atomic", "%s mode=%04o", name, perm.Perm())
+	f.rec.Recordf("fs.write-atomic", fmtPathMode, name, perm.Perm())
 
 	if err := f.check("WriteFileAtomic", name); err != nil {
 		return err
@@ -505,7 +511,7 @@ func (f *FS) WriteFileAtomic(name string, data []byte, perm fs.FileMode) error {
 
 // CopyFile implements sys.FS.
 func (f *FS) CopyFile(_ context.Context, src, dst string) error {
-	f.rec.Recordf("fs.copy", "%s -> %s", src, dst)
+	f.rec.Recordf("fs.copy", fmtPathPair, src, dst)
 
 	if err := f.check("CopyFile", src); err != nil {
 		return err
@@ -526,7 +532,7 @@ func (f *FS) CopyFile(_ context.Context, src, dst string) error {
 
 // Rename implements sys.FS.
 func (f *FS) Rename(oldpath, newpath string) error {
-	f.rec.Recordf("fs.rename", "%s -> %s", oldpath, newpath)
+	f.rec.Recordf("fs.rename", fmtPathPair, oldpath, newpath)
 
 	if err := f.check("Rename", oldpath); err != nil {
 		return err
@@ -590,7 +596,7 @@ func (f *FS) RemoveAll(name string) error {
 
 // MkdirAll implements sys.FS.
 func (f *FS) MkdirAll(name string, perm fs.FileMode) error {
-	f.rec.Recordf("fs.mkdir", "%s mode=%04o", name, perm.Perm())
+	f.rec.Recordf("fs.mkdir", fmtPathMode, name, perm.Perm())
 
 	if err := f.check("MkdirAll", name); err != nil {
 		return err
@@ -610,7 +616,7 @@ func (f *FS) MkdirAll(name string, perm fs.FileMode) error {
 
 // Chmod implements sys.FS.
 func (f *FS) Chmod(name string, mode fs.FileMode) error {
-	f.rec.Recordf("fs.chmod", "%s mode=%04o", name, mode.Perm())
+	f.rec.Recordf("fs.chmod", fmtPathMode, name, mode.Perm())
 
 	if err := f.check("Chmod", name); err != nil {
 		return err
@@ -671,7 +677,7 @@ func (f *FS) Owner(name string) (uid, gid int, ok bool) {
 
 // Symlink implements sys.FS.
 func (f *FS) Symlink(oldname, newname string) error {
-	f.rec.Recordf("fs.symlink", "%s -> %s", newname, oldname)
+	f.rec.Recordf("fs.symlink", fmtPathPair, newname, oldname)
 
 	if err := f.check("Symlink", newname); err != nil {
 		return err
