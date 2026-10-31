@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"testing"
 	"time"
@@ -193,4 +194,32 @@ func TestCLI_ShadowDefaults(t *testing.T) {
 
 	assert.Empty(t, cli.Shadow.Dir)
 	assert.False(t, cli.Shadow.Once)
+}
+
+func TestRunShadow(t *testing.T) {
+	cfg := &config.Config{BaseDir: shadowBase, Hostname: "testhost", Interval: 60}
+
+	tests := []struct {
+		name     string
+		dir      string
+		loadErr  error
+		want     int
+		wantFile bool
+	}{
+		{"single cycle reports the plan", shadowOut, nil, 0, true},
+		{"report directory overlapping the install tree is refused", shadowBase, nil, 1, false},
+		{"failed single cycle exits with status 1", shadowOut, errors.New("ldap down"), 1, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newShadowFixture(t)
+			src := &shadowSource{ConfigManager: f.cm, state: f.appSt, load: func(context.Context) error { return tt.loadErr }}
+
+			got := runShadow(t.Context(), f.host.System(), cfg, f.appSt, src, &ShadowCmd{Dir: tt.dir, Once: true})
+
+			assert.Equal(t, tt.want, got)
+			assert.Equal(t, tt.wantFile, f.host.FS.Exists(shadowOut+"/plan-latest.json"))
+		})
+	}
 }
