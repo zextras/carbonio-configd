@@ -166,11 +166,12 @@ func (s *Shadow) wait(ctx context.Context, d time.Duration) bool {
 		return false
 	case <-s.opts.Reload:
 		logger.InfoContext(ctx, "Received reload signal, running the next shadow cycle now")
-
-		return true
 	case <-timer.C():
-		return true
 	}
+
+	// select picks at random among ready cases: a stop requested while the
+	// timer fired must still win, so no cycle starts after shutdown.
+	return ctx.Err() == nil
 }
 
 // Cycle runs one shadow cycle: load, plan, report. It never changes the host.
