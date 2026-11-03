@@ -32,11 +32,11 @@ depends__rocky_9=(
 )
 # The unit file moved here from carbonio-core (< 4.7.0). Conflicts+Replaces
 # (versioned) lets dpkg/rpm hand file ownership over in any install order.
-# Conflicts is the stronger form of deb Breaks.
-conflicts__apt=('carbonio-core (<< 4.7.0)')
+# yap 2.3 copies breaks/replaces/conflicts verbatim, so the deb entries use
+# Debian relation syntax. No Obsoletes: it would make dnf remove carbonio-core.
+breaks__apt=('carbonio-core (<< 4.7.0)')
 replaces__apt=('carbonio-core (<< 4.7.0)')
 conflicts__yum=('carbonio-core < 4.7.0')
-obsoletes__yum=('carbonio-core < 4.7.0')
 source=(
   "${pkgname}-completion.bash"
   "${pkgname}-wrappers-completion.bash"
