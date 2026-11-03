@@ -55,6 +55,7 @@ RUN apt-get update \
 
 # The layout configd reads with CONFIGD_LC_zmconfigd_template_dir=/opt/zextras/share/configd.
 RUN mkdir -p /staging/opt/zextras/share/configd/conf/zmconfigd /staging/etc \
+ && install -d -m 1777 /staging/tmp \
  && cd /core/opt/zextras/conf \
  && cp zmconfigd.cf *.in /staging/opt/zextras/share/configd/conf/ \
  && cp zmconfigd/*.cf /staging/opt/zextras/share/configd/conf/zmconfigd/ \
@@ -64,9 +65,9 @@ RUN mkdir -p /staging/opt/zextras/share/configd/conf/zmconfigd /staging/etc \
 
 FROM scratch
 
-COPY --from=installer /staging/etc/passwd /etc/passwd
-COPY --from=installer /staging/etc/group /etc/group
-COPY --from=installer /staging/opt /opt
+# passwd, group, the templates and /tmp (rewrites render into a temporary file
+# before they replace the target), with their modes.
+COPY --from=installer /staging/ /
 COPY --from=builder /out/configd /opt/zextras/bin/configd
 
 ENV CARBONIO_BASE_DIR=/opt/zextras \
