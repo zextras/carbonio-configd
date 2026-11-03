@@ -16,11 +16,11 @@ func (g *Generator) registerCoreVariables() {
 	g.registerVar("core.includes", g.IncludesDir,
 		withDescription("Include directory (relative to ${core.workdir}/conf)"),
 	)
-	g.registerVar("core.cprefix", nginxConfPrefix,
+	g.registerVar("core.cprefix", g.confPrefix(),
 		withValueType(ValueTypeString),
 		withDescription("Common config file prefix"),
 	)
-	g.registerVar("core.tprefix", nginxConfPrefix,
+	g.registerVar("core.tprefix", g.templatePrefix(),
 		withValueType(ValueTypeString),
 		withDescription("Common template file prefix"),
 	)

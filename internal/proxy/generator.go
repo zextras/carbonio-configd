@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
@@ -25,8 +26,6 @@ const (
 	// generatedFileMode is the mode of every generated proxy config file
 	// (legacy ProxyConfGen output is 0640 zextras:zextras).
 	generatedFileMode os.FileMode = 0o640
-	// coreConfName is the main nginx entry-point config inside ConfDir.
-	coreConfName = "nginx.conf"
 	// confGenSuccessMarker / confGenErrorMarker are the result markers legacy
 	// ProxyConfGen appends to nginx.conf for zmnginxctl.
 	confGenSuccessMarker = "__SUCCESS__"
@@ -188,6 +187,12 @@ func (g *Generator) GenerateAll(ctx context.Context) error {
 		return fmt.Errorf("failed to sync domain certificates: %w", err)
 	}
 
+	if g.ForceDNSResolution {
+		if err := g.checkVirtualHostnames(ctx, processor); err != nil {
+			return err
+		}
+	}
+
 	// Process each template
 	successCount := 0
 	errorCount := 0
@@ -201,8 +206,10 @@ func (g *Generator) GenerateAll(ctx context.Context) error {
 		logger.DebugContext(ctx, "Processing template",
 			"name", templateName)
 
-		// Generate output filename by removing .template suffix
-		outputName := strings.TrimSuffix(templateName, ".template")
+		outputName, ok := g.outputName(templateName)
+		if !ok {
+			continue
+		}
 
 		templateStart := time.Now()
 
@@ -267,7 +274,7 @@ func (g *Generator) appendConfGenResult(ctx context.Context, text string) {
 	}
 
 	//nolint:gosec // G304: path is ConfDir joined with a constant file name
-	f, err := g.env.FS.OpenFile(filepath.Join(g.ConfDir, coreConfName), os.O_WRONLY|os.O_APPEND, 0)
+	f, err := g.env.FS.OpenFile(filepath.Join(g.ConfDir, g.confPrefix()), os.O_WRONLY|os.O_APPEND, 0)
 	if err != nil {
 		return
 	}
@@ -400,7 +407,7 @@ func (g *Generator) ProcessTemplateWithProcessor(
 	// nginx.conf.template) must live in ConfDir — that's where nginx -c points.
 	// All other rendered templates go into the IncludesDir.
 	outputPath := filepath.Join(g.IncludesDir, outputName)
-	if outputName == coreConfName {
+	if outputName == g.confPrefix() {
 		outputPath = filepath.Join(g.ConfDir, outputName)
 	}
 
@@ -451,6 +458,45 @@ func (g *Generator) writeFile(ctx context.Context, path string, content []byte) 
 	logger.DebugContext(ctx, "Wrote file",
 		"byte_count", len(content),
 		"path", path)
+
+	return nil
+}
+
+// outputName maps a template file name to the file it generates: the
+// template prefix is replaced by the config prefix and the .template suffix
+// dropped. With a non-default template prefix only the templates of that
+// prefix are generated, as ProxyConfGen names them explicitly.
+func (g *Generator) outputName(templateName string) (string, bool) {
+	name := strings.TrimSuffix(templateName, ".template")
+	if g.templatePrefix() == nginxConfPrefix && g.confPrefix() == nginxConfPrefix {
+		return name, true
+	}
+
+	if name != g.templatePrefix() && !strings.HasPrefix(name, g.templatePrefix()+".") {
+		return "", false
+	}
+
+	return g.confPrefix() + strings.TrimPrefix(name, g.templatePrefix()), true
+}
+
+// checkVirtualHostnames fails when a domain's virtual hostname (or virtual IP
+// when set) does not resolve: legacy ProxyConfGen -f
+// (ProxyConfGen.fillVarsWithDomainAttrs, mEnforceDNSResolution).
+func (g *Generator) checkVirtualHostnames(ctx context.Context, processor *TemplateProcessor) error {
+	for _, d := range processor.getDomains(ctx) {
+		if d.VirtualHostname == "" {
+			continue
+		}
+
+		host := d.VirtualHostname
+		if d.VirtualIPAddress != "" {
+			host = d.VirtualIPAddress
+		}
+
+		if _, err := net.DefaultResolver.LookupHost(ctx, host); err != nil {
+			return fmt.Errorf("virtual host name %q is not resolvable: %w", d.VirtualHostname, err)
+		}
+	}
 
 	return nil
 }

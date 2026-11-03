@@ -52,7 +52,7 @@ func TestCommands_RefuseANonZextrasCaller(t *testing.T) {
 		{"service reload", func(env sys.System) error { return (&ServiceReloadCmd{Name: "mta"}).Run(env) }},
 		{"service start-systemd", func(env sys.System) error { return (&ServiceStartSystemdCmd{Name: "mta"}).Run(env) }},
 		{"service stop-systemd", func(env sys.System) error { return (&ServiceStopSystemdCmd{Name: "mta"}).Run(env) }},
-		{"proxy gen", func(env sys.System) error { return (&ProxyGenCmd{ExtraConfigs: []string{"mta"}}).Run(env) }},
+		{"proxy gen", func(env sys.System) error { return (&ProxyGenCmd{}).Run(env) }},
 		{"proxy rewrite", func(env sys.System) error { return (&ProxyRewriteCmd{}).Run(env) }},
 		{"proxy enable", func(env sys.System) error { return (&ProxyEnableCmd{Protocol: "imap"}).Run(env) }},
 		{"proxy disable", func(env sys.System) error { return (&ProxyDisableCmd{Protocol: "imap"}).Run(env) }},
@@ -75,7 +75,8 @@ func TestCommands_RefuseANonZextrasCaller(t *testing.T) {
 func TestProxyConfCmd_NginxNotInstalled(t *testing.T) {
 	t.Setenv("CARBONIO_BASE_DIR", "/nonexistent-base")
 
-	require.NoError(t, (&ProxyConfCmd{}).Run(systest.New().System()))
+	// legacy zmproxyconf prints the message on stdout and exits 1
+	assert.Equal(t, exitStatus(1), (&ProxyConfCmd{}).Run(systest.New().System()))
 }
 
 func TestServiceListCmd_ListsWithoutAnError(t *testing.T) {

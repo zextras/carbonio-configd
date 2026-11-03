@@ -183,7 +183,7 @@ func main() {
 	// (set by bash's `complete -C`) and print completions instead of running normally.
 	kongplete.Complete(parser)
 
-	ctx, parseErr := parser.Parse(os.Args[1:])
+	ctx, parseErr := parser.Parse(legacyProxyGenArgs(os.Args[1:]))
 	parser.FatalIfErrorf(parseErr)
 
 	os.Exit(exitCode(ctx.Run(cli), os.Stderr))
