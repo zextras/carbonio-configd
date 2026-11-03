@@ -397,6 +397,20 @@ func (l *Ldap) executeBatchModifyInternal(ctx context.Context, dn string, attrs 
 	return nil
 }
 
+// sleepCtx waits for d or until ctx is done, returning ctx's error in the
+// latter case.
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("wait interrupted: %w", ctx.Err())
+	case <-timer.C:
+		return nil
+	}
+}
+
 // withRetry executes an LDAP operation with exponential backoff retry logic.
 // This handles transient failures such as connection timeouts, temporary unavailability,
 // or network issues. Non-retryable errors (validation, permission) are returned immediately.
@@ -412,7 +426,11 @@ func (l *Ldap) withRetry(ctx context.Context, operation string, fn func() error)
 				"attempt", attempt,
 				"max_retries", l.MaxRetries,
 				"delay", delay)
-			time.Sleep(delay)
+
+			if err := sleepCtx(ctx, delay); err != nil {
+				return fmt.Errorf("operation %s aborted before retry %d: %w (last error: %w)",
+					operation, attempt, err, lastErr)
+			}
 
 			// Exponential backoff with cap
 			delay *= 2

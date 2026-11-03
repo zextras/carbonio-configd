@@ -184,14 +184,20 @@ func (cm *ConfigManager) initNativeLdapClient(ctx context.Context) {
 		return
 	}
 
+	// Transport security comes from the localconfig just loaded (the legacy
+	// Java rule, see ldap.ResolveTLS), not from mainConfig, which is only
+	// populated later by LoadAllConfigs.
+	tlsSetup := ldap.ResolveTLS(ctx, localCfg, cm.env.FS)
+
 	nativeClient, err := ldap.NewClient(&ldap.ClientConfig{
-		URLs:     ldapURLs,
-		BindDN:   bindDN,
-		Password: password,
-		BaseDN:   "cn=zimbra",
-		PoolSize: 5,
-		StartTLS: cm.mainConfig.LdapStartTLSRequired,
-		FS:       cm.env.FS,
+		URLs:      ldapURLs,
+		BindDN:    bindDN,
+		Password:  password,
+		BaseDN:    "cn=zimbra",
+		PoolSize:  5,
+		StartTLS:  tlsSetup.StartTLS,
+		TLSConfig: tlsSetup.Config,
+		FS:        cm.env.FS,
 	})
 	if err != nil {
 		logger.WarnContext(ctx, "Failed to create native LDAP client - LDAP queries will fail",
@@ -204,7 +210,8 @@ func (cm *ConfigManager) initNativeLdapClient(ctx context.Context) {
 
 	logger.InfoContext(ctx, "Native LDAP client initialized successfully",
 		"ldap_urls", ldapURLs,
-		"bind_dn", bindDN)
+		"bind_dn", bindDN,
+		"starttls", tlsSetup.StartTLS)
 
 	executor := commands.NewCommandExecutor(nativeClient)
 	cm.CommandRegistry.RegisterLDAPCommands(executor)

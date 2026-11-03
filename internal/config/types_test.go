@@ -164,9 +164,6 @@ func TestConfig_SetVals(t *testing.T) {
 				if cfg.LdapMasterURL != "ldap://master.example.com" {
 					t.Errorf("LdapMasterURL = %v, want ldap://master.example.com", cfg.LdapMasterURL)
 				}
-				if !cfg.LdapStartTLSRequired {
-					t.Error("LdapStartTLSRequired should be true")
-				}
 			},
 		},
 		{
@@ -293,9 +290,6 @@ func TestConfig_SetVals(t *testing.T) {
 				if !cfg.LdapIsMaster {
 					t.Error("LdapIsMaster should be true (case insensitive)")
 				}
-				if cfg.LdapStartTLSRequired {
-					t.Error("LdapStartTLSRequired should be false")
-				}
 				if cfg.Watchdog {
 					t.Error("Watchdog should be false")
 				}
@@ -350,15 +344,14 @@ func TestConfig_SetVals(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create a minimal config for testing
 			cfg := &Config{
-				Interval:             300,
-				WatchdogInterval:     120,
-				LogLevel:             3, // Info level
-				Watchdog:             true,
-				SkipIdlePolls:        true,
-				RestartConfig:        false,
-				Debug:                false,
-				LdapIsMaster:         false,
-				LdapStartTLSRequired: true, // default is true in SetVals
+				Interval:         300,
+				WatchdogInterval: 120,
+				LogLevel:         3, // Info level
+				Watchdog:         true,
+				SkipIdlePolls:    true,
+				RestartConfig:    false,
+				Debug:            false,
+				LdapIsMaster:     false,
 			}
 
 			cfg.SetVals(tt.localConfig)

@@ -6,13 +6,64 @@ package configmgr
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"testing"
+
+	goldap "github.com/go-ldap/ldap/v3"
 
 	"github.com/zextras/carbonio-configd/internal/commands"
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/ldap"
+	"github.com/zextras/carbonio-configd/internal/testutil/ldapfake"
+	"github.com/zextras/carbonio-configd/internal/testutil/pki"
 )
+
+// TestInitNativeLdapClient_StartTLSFromLoadedLocalconfig is the GCR-05
+// regression: the flag used to be read from mainConfig, which is only filled
+// by LoadAllConfigs after this client is built, so the daemon never attempted
+// StartTLS. It must follow the localconfig the client is built from.
+func TestInitNativeLdapClient_StartTLSFromLoadedLocalconfig(t *testing.T) {
+	t.Parallel()
+
+	pk := pki.NewServer(t, "127.0.0.1")
+	srv := ldapfake.New(t, ldapfake.Options{
+		TLS: &tls.Config{Certificates: []tls.Certificate{pk.Certificate}, MinVersion: tls.VersionTLS12},
+	})
+
+	load := func() (map[string]string, error) {
+		return map[string]string{
+			"ldap_url":                             srv.URL("ldap", "127.0.0.1"),
+			"zimbra_ldap_userdn":                   "uid=zimbra,cn=admins,cn=zimbra",
+			"zimbra_ldap_password":                 "secret",
+			"ldap_starttls_supported":              "1",
+			"zimbra_require_interprocess_security": "1",
+		}, nil
+	}
+
+	cm := &ConfigManager{
+		env:                    hostEnv(),
+		loadLocalConfigForLDAP: load,
+		mainConfig:             &config.Config{}, // not yet populated, as at construction time
+		CommandRegistry:        commands.NewRegistry("", hostEnv()),
+	}
+	cm.initNativeLdapClient(context.Background())
+
+	if cm.NativeLdapClient == nil {
+		t.Fatal("NativeLdapClient not initialised")
+	}
+
+	t.Cleanup(func() { _ = cm.NativeLdapClient.Close() })
+
+	if _, err := cm.NativeLdapClient.Search("cn=zimbra", "(objectClass=*)", []string{"cn"}, goldap.ScopeBaseObject); err != nil {
+		t.Fatalf("search: %v", err)
+	}
+
+	if srv.StartTLSOps() != 1 || srv.BindsInTLS() != srv.Binds() || srv.Binds() == 0 {
+		t.Errorf("startTLS=%d binds=%d bindsInTLS=%d: daemon must bind inside StartTLS",
+			srv.StartTLSOps(), srv.Binds(), srv.BindsInTLS())
+	}
+}
 
 func TestInitNativeLdapClient_LoadFails(t *testing.T) {
 	t.Parallel()

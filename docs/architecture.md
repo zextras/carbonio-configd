@@ -293,6 +293,30 @@ cannot be partitioned by section (it owns the whole cycle and port 7171; a force
 section starts a JVM and never restarts services). Shadow mode is the safety net instead;
 rolling back is installing the previous package.
 
+## LDAP transport security and timeouts
+
+Source: `internal/ldap/tls.go` (`ResolveTLS`), `internal/ldap/client.go`
+
+Every native LDAP client (daemon, `configd proxy`/`tls` writers, service discovery) derives its
+transport from localconfig with the rule of the legacy Java client
+(`LdapServerConfig.ZimbraLdapConfig`, `LdapSSLUtil`):
+
+| Setting | Meaning |
+|---|---|
+| `ldap_starttls_supported` = `1` **and** `ldap_starttls_required` (default `true`) **and** `zimbra_require_interprocess_security` = `1` | `ldap://` URLs are upgraded with StartTLS. A failed upgrade fails the connection: there is no clear-text fallback |
+| `ldaps://` URL | TLS from the first byte; StartTLS is never issued on it |
+| `ssl_allow_untrusted_certs` (default `true`) | `true` skips certificate verification, like the Java dummy trust manager. `false` verifies the server against the system roots plus `conf/ca/ca.pem` and `ssl/carbonio/commercial/commercial_ca.crt` under `zimbra_home` (the CAs `zmcertmgr` adds to the Java truststore) |
+
+Booleans follow Java `Boolean.valueOf`: only `true` (any case) is true; `ldap_starttls_supported` and
+`zimbra_require_interprocess_security` are compared with `"1"`. TLS 1.2 is the minimum and the TLS server
+name is the host of each URL. The `cn=config` client talks over `ldapi://` and never uses TLS.
+
+Timeouts: dial (`DialTimeout`, 10 s, ldaps handshake included), StartTLS plus bind (`BindTimeout`, 10 s,
+enforced by a watchdog that closes the connection, because go-ldap's StartTLS has no deadline), and each
+request (`OpTimeout`, 30 s). The pool lock is held only to pop or push an idle connection, never across
+network I/O, and `Client.Close` aborts connection attempts in flight. `Ldap.withRetry` backoff sleeps stop
+when the caller's context is cancelled.
+
 ## LDAP change detection (opt-in)
 
 Source: `internal/ldapwatch`, `cmd/configd/ldapwatch.go`
