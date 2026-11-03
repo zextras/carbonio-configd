@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"io/fs"
 	"net"
 	"syscall"
 
@@ -43,19 +42,11 @@ func (o *localconfigOpts) runReload(ctx context.Context) error {
 	return reloadLocalConfig(ctx, cfg)
 }
 
-// loadNodeConfig loads the default localconfig.xml with defaults and variables
-// resolved. A missing file is not an error (legacy only warns and uses defaults).
+// loadNodeConfig loads the node's localconfig.xml with defaults, the
+// CONFIGD_LC_* overlay and variables resolved. A missing file is not an error
+// (legacy only warns and uses defaults).
 func loadNodeConfig(path string) (map[string]string, error) {
-	cfg, err := lcfg.LoadResolvedConfigFromFile(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		cfg = make(map[string]string)
-		lcfg.MergeDefaults(cfg)
-		lcfg.Interpolate(cfg)
-
-		return cfg, nil
-	}
-
-	return cfg, err
+	return lcfg.LoadEffectiveFrom(path, nil)
 }
 
 // reloadLocalConfig sends ReloadLocalConfigRequest to the server named by cfg.

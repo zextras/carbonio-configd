@@ -34,7 +34,6 @@ func testOrchestrator(
 	ctl := services.NewController(f.System(),
 		services.WithBaseDir(testBase),
 		services.WithConfigLoader(load),
-		services.WithRawConfigLoader(load),
 		services.WithRegistry(registry),
 	)
 

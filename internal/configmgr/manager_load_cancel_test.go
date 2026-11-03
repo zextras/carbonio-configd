@@ -163,7 +163,7 @@ func TestParseLocalConfigOutput_ReplacesAndDefaults(t *testing.T) {
 // loadAllFixture wires the four loaders of a ConfigManager to fixed data; the
 // server loader fails when serverErr is set.
 func loadAllFixture(cm *ConfigManager, serverErr error) {
-	cm.loadResolvedLocalConfig = func() (map[string]string, error) {
+	cm.loadLocalConfig = func() (map[string]string, error) {
 		return map[string]string{"local_key": "new"}, nil
 	}
 	cm.CommandRegistry.GlobalAttrs = func(context.Context) (map[string]string, error) {

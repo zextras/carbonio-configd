@@ -16,7 +16,7 @@ import (
 
 	"github.com/zextras/carbonio-configd/internal/cache"
 	"github.com/zextras/carbonio-configd/internal/commands"
-	"github.com/zextras/carbonio-configd/internal/intern"
+	"github.com/zextras/carbonio-configd/internal/ldap"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/sys"
 	"github.com/zextras/carbonio-configd/internal/tracing"
@@ -354,7 +354,7 @@ func (cm *ConfigManager) fetchServerAttrs(ctx context.Context) (map[string]strin
 		return nil, fmt.Errorf("no data returned from gs")
 	}
 
-	return normalizeLDAPAttrs(attrs), nil
+	return ldap.NormalizeAttrs(attrs), nil
 }
 
 // fetchGlobalAttrs returns the global LDAP attributes via the registry,
@@ -373,7 +373,7 @@ func (cm *ConfigManager) fetchGlobalAttrs(ctx context.Context) (map[string]strin
 		return nil, fmt.Errorf("no data returned from gacf")
 	}
 
-	return normalizeLDAPAttrs(attrs), nil
+	return ldap.NormalizeAttrs(attrs), nil
 }
 
 // processCommonSSLConfig applies the standard SSL post-processing (sort + XML)
@@ -409,29 +409,4 @@ func processSortedSSLConfigForTarget(configData map[string]string, key string) {
 
 		configData[xmlKey] = strings.Join(xmlItems, "\n")
 	}
-}
-
-// normalizeLDAPAttrs returns a fresh config map from LDAP attributes
-// (multi-valued attributes already joined with newlines). Each value line is
-// trimmed of surrounding whitespace, matching the zmprov-text round trip this
-// replaces, and attribute names are interned.
-func normalizeLDAPAttrs(attrs map[string]string) map[string]string {
-	configData := make(map[string]string, len(attrs))
-
-	for key, value := range attrs {
-		if !strings.Contains(value, "\n") {
-			configData[intern.Attr(strings.TrimSpace(key))] = strings.TrimSpace(value)
-
-			continue
-		}
-
-		lines := strings.Split(value, "\n")
-		for i, line := range lines {
-			lines[i] = strings.TrimSpace(line)
-		}
-
-		configData[intern.Attr(strings.TrimSpace(key))] = strings.Join(lines, "\n")
-	}
-
-	return configData
 }

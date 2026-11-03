@@ -60,14 +60,6 @@ func BenchmarkGetGlobal(b *testing.B) {
 	}
 }
 
-// BenchmarkGetLocal benchmarks the native XML parser for localconfig.
-func BenchmarkGetLocal(b *testing.B) {
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, _ = getlocal(context.Background())
-	}
-}
-
 // BenchmarkGetAllServersWithAttribute benchmarks the native LDAP query
 // for servers with specific attributes (e.g., garpb).
 func BenchmarkGetAllServersWithAttribute(b *testing.B) {

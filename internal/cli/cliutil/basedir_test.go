@@ -10,14 +10,15 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/security"
 )
 
 func TestBasePath(t *testing.T) {
 	t.Setenv("CARBONIO_BASE_DIR", "")
 
-	if got := BaseDir(); got != defaultBaseDir {
-		t.Errorf("BaseDir() = %q, want %q", got, defaultBaseDir)
+	if got := BaseDir(); got != config.ZextrasBase {
+		t.Errorf("BaseDir() = %q, want %q", got, config.ZextrasBase)
 	}
 
 	t.Setenv("CARBONIO_BASE_DIR", "/tmp/cb/")

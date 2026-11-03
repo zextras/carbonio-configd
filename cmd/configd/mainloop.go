@@ -15,7 +15,6 @@ import (
 
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/configmgr"
-	"github.com/zextras/carbonio-configd/internal/ldap"
 	"github.com/zextras/carbonio-configd/internal/ldapwatch"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/network"
@@ -58,14 +57,9 @@ func (t *MainLoopActionTrigger) TriggerRewrite(ctx context.Context, configs []st
 }
 
 // runForcedMode processes forced rewrites and returns; the caller exits after.
-func runForcedMode(
-	ctx context.Context,
-	args *Args,
-	appState *state.State,
-	mainCfg *config.Config,
-	configManager *configmgr.ConfigManager,
-	serviceManager services.Manager,
-) {
+func runForcedMode(ctx context.Context, args *Args, rt *runtime) {
+	appState, mainCfg := rt.state, rt.cfg
+
 	logger.InfoContext(ctx, "Processing forced rewrites as standalone process")
 
 	for _, arg := range args.ForcedConfigs {
@@ -75,24 +69,20 @@ func runForcedMode(
 		appState.ForcedConfig[arg] = arg
 	}
 
-	if err := configManager.LoadAllConfigs(ctx); err != nil {
+	if _, _, err := runLoadAndParse(ctx, rt.cm, mainCfg); err != nil {
 		logger.FatalContext(ctx, "Failed to load configs for forced run", "error", err)
 	}
 
-	if err := configManager.ParseMtaConfig(ctx, mainCfg.ConfigFile); err != nil {
-		logger.FatalContext(ctx, "Failed to parse MTA config for forced run", "error", err)
-	}
+	buildServiceDependencies(ctx, rt.sm, appState)
 
-	buildServiceDependencies(ctx, serviceManager, appState)
-
-	pl, err := configManager.Plan(ctx)
+	pl, err := rt.cm.Plan(ctx)
 	if err != nil {
 		logger.ErrorContext(ctx, "Failed to plan forced config rewrites", "error", err)
 
 		return
 	}
 
-	if err := configManager.Execute(ctx, pl); err != nil {
+	if err := rt.cm.Execute(ctx, pl); err != nil {
 		logger.ErrorContext(ctx, "Error during forced config rewrites", "error", err)
 	}
 
@@ -299,6 +289,9 @@ type daemonLoopDeps struct {
 	notifier       *sdnotify.Notifier
 	trigger        *MainLoopActionTrigger
 	reloadChan     chan struct{}
+	// validate checks the service hooks against the first parsed zmconfigd.cf;
+	// a failure ends the daemon. Nil (hosts, tests) skips the check.
+	validate func(conf *config.MtaConfig, watchdogOn bool) error
 	// ldapSource replaces the LDAP client as the source the opt-in LDAP change
 	// watcher polls; production leaves it nil.
 	ldapSource ldapwatch.Source
@@ -311,6 +304,8 @@ type loopIterState struct {
 	reloadSignaled bool
 	server         *network.ThreadedStreamServer
 	ldapWatch      *ldapWatch // nil unless zmconfigd_ldap_change_trigger started it
+	hooksChecked   bool       // the service hooks were validated against the parsed config
+	exitCode       int        // the status the daemon exits with
 }
 
 // iterOutcome signals how runLoopIteration wants the caller to proceed.
@@ -321,8 +316,9 @@ const (
 	iterExit
 )
 
-// runDaemonLoop is the main event loop for the configd daemon.
-func runDaemonLoop(ctx context.Context, deps *daemonLoopDeps) {
+// runDaemonLoop is the main event loop for the configd daemon. It returns the
+// exit status: 1 when the service hooks do not cover the configuration.
+func runDaemonLoop(ctx context.Context, deps *daemonLoopDeps) int {
 	st := &loopIterState{}
 
 	defer func() {
@@ -336,7 +332,7 @@ func runDaemonLoop(ctx context.Context, deps *daemonLoopDeps) {
 	for {
 		outcome := runLoopIterationSafe(ctx, deps, st)
 		if outcome == iterExit {
-			return
+			return st.exitCode
 		}
 	}
 }
@@ -392,6 +388,10 @@ func runLoopIteration(ctx context.Context, deps *daemonLoopDeps, st *loopIterSta
 		return iterContinue
 	}
 
+	if !checkHooks(ctx, deps, st) {
+		return iterExit
+	}
+
 	st.server = maybeStartListener(ctx, deps.appState, deps.args, deps.trigger, st.server)
 	st.ldapWatch = syncLDAPWatch(ctx, deps, st.ldapWatch)
 
@@ -427,6 +427,27 @@ func runLoopIteration(ctx context.Context, deps *daemonLoopDeps, st *loopIterSta
 		restarts: restartsDur,
 		plan:     pl,
 	})
+}
+
+// checkHooks validates the service hooks against the parsed zmconfigd.cf once.
+// It returns false, with the exit status set to 1, when the hooks do not cover
+// the configuration.
+func checkHooks(ctx context.Context, deps *daemonLoopDeps, st *loopIterState) bool {
+	if st.hooksChecked || deps.validate == nil {
+		return true
+	}
+
+	if err := deps.validate(deps.appState.GetMtaConfig(), deps.cfg.Watchdog); err != nil {
+		logger.ErrorContext(ctx, "Service hooks do not cover the configuration, exiting", "error", err)
+
+		st.exitCode = 1
+
+		return false
+	}
+
+	st.hooksChecked = true
+
+	return true
 }
 
 // consumeReloadSignal drains a ctx-cancellation or reloadChan signal without
@@ -545,24 +566,16 @@ func finalizeIteration(
 
 // RunMainLoop contains the core logic of the configd daemon.
 // It returns an exit code: 0 for success, 1 for error.
-func RunMainLoop(
-	ctx context.Context,
-	env sys.System,
-	mainCfg *config.Config,
-	appState *state.State,
-	ldapClient *ldap.Ldap,
-	args *Args,
-	notifier *sdnotify.Notifier) int {
+func RunMainLoop(ctx context.Context, rt *runtime, args *Args, notifier *sdnotify.Notifier) int {
 	ctx = logger.ContextWithComponent(ctx, "mainloop")
 	// Create cancellable context for graceful shutdown
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// Bootstrap core dependencies
-	configManager, serviceManager, wd := bootstrapDependencies(ctx, env, mainCfg, appState, ldapClient, args)
+	wd := bootstrapWatchdog(ctx, rt)
 
 	// Bootstrap systemd integration
-	reloadChan := bootstrapSystemd(ctx, env, appState, cancel, notifier)
+	reloadChan := bootstrapSystemd(ctx, rt.env, rt.state, cancel, notifier)
 
 	// Start watchdog in daemon mode (not for forced configs)
 	if !args.HasForcedConfigs() {
@@ -572,29 +585,42 @@ func RunMainLoop(
 
 	mainLoopTrigger := &MainLoopActionTrigger{
 		ReloadChan: reloadChan,
-		State:      appState,
+		State:      rt.state,
 	}
 
 	if args.HasForcedConfigs() {
-		runForcedMode(ctx, args, appState, mainCfg, configManager, serviceManager)
+		runForcedMode(ctx, args, rt)
 		// Watchdog was never started in forced config mode, deferred wd.Stop() will not run
 		return 0
 	}
 
-	runDaemonLoop(ctx, &daemonLoopDeps{
-		env:            env,
-		cfg:            mainCfg,
-		appState:       appState,
-		configManager:  configManager,
-		serviceManager: serviceManager,
+	return runDaemonLoop(ctx, &daemonLoopDeps{
+		env:            rt.env,
+		cfg:            rt.cfg,
+		appState:       rt.state,
+		configManager:  rt.cm,
+		serviceManager: rt.sm,
 		wd:             wd,
 		args:           args,
 		notifier:       notifier,
 		trigger:        mainLoopTrigger,
 		reloadChan:     reloadChan,
+		validate:       rt.validateHooks,
 	})
+}
 
-	return 0
+// sectionDependencies maps each section to the services that depend on it
+// (its DEPENDS list): the table the service manager cascades restarts through.
+func sectionDependencies(sections map[string]*config.MtaConfigSection) map[string][]string {
+	deps := make(map[string][]string)
+
+	for name, section := range sections {
+		if len(section.Depends) > 0 {
+			deps[name] = slices.Sorted(maps.Keys(section.Depends))
+		}
+	}
+
+	return deps
 }
 
 // buildServiceDependencies extracts dependencies from MTA config sections and sets them in the service manager.
@@ -606,13 +632,7 @@ func buildServiceDependencies(ctx context.Context, serviceMgr services.Manager, 
 		return
 	}
 
-	deps := make(map[string][]string)
-
-	for name, section := range sections {
-		if len(section.Depends) > 0 {
-			deps[name] = slices.Sorted(maps.Keys(section.Depends))
-		}
-	}
+	deps := sectionDependencies(sections)
 
 	serviceMgr.SetDependencies(ctx, deps)
 	logger.DebugContext(ctx, "Set service dependencies",

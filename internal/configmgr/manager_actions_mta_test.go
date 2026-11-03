@@ -70,7 +70,7 @@ func newMapfileCM(t *testing.T, firstRun bool, mockExec *mockMtaExecutorForMta,
 		BaseDir:    tmpDir,
 		ConfigFile: filepath.Join(tmpDir, "zmconfigd.cf"),
 	}
-	cm := NewConfigManager(ctx, cfg, st, nil, cache.New(ctx, false), hostEnv())
+	cm := NewConfigManager(ctx, cfg, st, nil, cache.New(ctx, false), hostEnv(), hostServices())
 	cm.mtaExecutor = mockExec
 
 	st.SetMtaConfig(&config.MtaConfig{Sections: map[string]*config.MtaConfigSection{

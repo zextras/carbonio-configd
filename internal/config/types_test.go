@@ -4,32 +4,12 @@
 
 package config
 
-import (
-	"os"
-	"testing"
-)
+import "testing"
 
 func TestNewConfig(t *testing.T) {
-	// Save original environment
-	origZextrasHome := os.Getenv("ZEXTRAS_HOME")
-	origZimbraHostname := os.Getenv("zimbra_server_hostname")
-	defer func() {
-		if origZextrasHome != "" {
-			os.Setenv("ZEXTRAS_HOME", origZextrasHome)
-		} else {
-			os.Unsetenv("ZEXTRAS_HOME")
-		}
-		if origZimbraHostname != "" {
-			os.Setenv("zimbra_server_hostname", origZimbraHostname)
-		} else {
-			os.Unsetenv("zimbra_server_hostname")
-		}
-	}()
-
 	tests := []struct {
 		name             string
-		zextrasHome      string
-		zimbraHostname   string
+		baseDir          string
 		expectedBaseDir  string
 		expectedProgname string
 		expectedInterval int
@@ -38,8 +18,7 @@ func TestNewConfig(t *testing.T) {
 	}{
 		{
 			name:             "default configuration",
-			zextrasHome:      "",
-			zimbraHostname:   "",
+			baseDir:          "",
 			expectedBaseDir:  "/opt/zextras",
 			expectedProgname: "zmconfigd",
 			expectedInterval: 300,
@@ -47,9 +26,8 @@ func TestNewConfig(t *testing.T) {
 			expectedSkipIdle: false,
 		},
 		{
-			name:             "custom ZEXTRAS_HOME",
-			zextrasHome:      "/custom/path",
-			zimbraHostname:   "",
+			name:             "custom CARBONIO_BASE_DIR",
+			baseDir:          "/custom/path",
 			expectedBaseDir:  "/custom/path",
 			expectedProgname: "zmconfigd",
 			expectedInterval: 300,
@@ -57,9 +35,8 @@ func TestNewConfig(t *testing.T) {
 			expectedSkipIdle: false,
 		},
 		{
-			name:             "custom hostname override",
-			zextrasHome:      "/opt/zextras",
-			zimbraHostname:   "custom.example.com",
+			name:             "explicit default base dir",
+			baseDir:          "/opt/zextras",
 			expectedBaseDir:  "/opt/zextras",
 			expectedProgname: "zmconfigd",
 			expectedInterval: 300,
@@ -70,18 +47,7 @@ func TestNewConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Set environment
-			if tt.zextrasHome != "" {
-				os.Setenv("ZEXTRAS_HOME", tt.zextrasHome)
-			} else {
-				os.Unsetenv("ZEXTRAS_HOME")
-			}
-
-			if tt.zimbraHostname != "" {
-				os.Setenv("zimbra_server_hostname", tt.zimbraHostname)
-			} else {
-				os.Unsetenv("zimbra_server_hostname")
-			}
+			t.Setenv(BaseDirEnv, tt.baseDir)
 
 			cfg, err := NewConfig()
 			if err != nil {
@@ -128,10 +94,6 @@ func TestNewConfig(t *testing.T) {
 
 			if len(cfg.WdList) == 0 {
 				t.Error("WdList should not be empty")
-			}
-
-			if tt.zimbraHostname != "" && cfg.Hostname != tt.zimbraHostname {
-				t.Errorf("Hostname = %v, want %v", cfg.Hostname, tt.zimbraHostname)
 			}
 		})
 	}
@@ -517,4 +479,40 @@ func testConfigMap(src map[string]string) *ConfigMap {
 	}
 
 	return cm
+}
+
+func TestConfig_SetRuntimeVals(t *testing.T) {
+	c := &Config{BaseDir: "/opt/zextras", TemplateDir: "/opt/zextras", ConfigFile: "/opt/zextras/conf/zmconfigd.cf"}
+
+	c.SetRuntimeVals(&LocalConfig{Data: testConfigMap(map[string]string{"zmconfigd_template_dir": ""})})
+
+	if c.TemplateDir != "/opt/zextras" || c.ConfigFile != "/opt/zextras/conf/zmconfigd.cf" || len(c.Sections) != 0 {
+		t.Fatalf("empty keys must change nothing: %+v", c)
+	}
+
+	c.SetRuntimeVals(&LocalConfig{Data: testConfigMap(map[string]string{
+		"zmconfigd_template_dir":  "/share/configd",
+		"zmconfigd_sections":      " amavis  antivirus ",
+		"zmconfigd_service_hooks": "/etc/hooks.json",
+	})})
+
+	if c.TemplateDir != "/share/configd" || c.ConfigFile != "/share/configd/conf/zmconfigd.cf" {
+		t.Errorf("template dir not applied: %+v", c)
+	}
+
+	if len(c.Sections) != 2 || c.Sections[0] != "amavis" || c.Sections[1] != "antivirus" {
+		t.Errorf("Sections = %v", c.Sections)
+	}
+
+	if c.ServiceHooks != "/etc/hooks.json" {
+		t.Errorf("ServiceHooks = %q", c.ServiceHooks)
+	}
+
+	if got := c.TemplatePath("conf/x.in"); got != "/share/configd/conf/x.in" {
+		t.Errorf("TemplatePath = %q", got)
+	}
+
+	if got := (&Config{BaseDir: "/b"}).TemplatePath("conf/x.in"); got != "/b/conf/x.in" {
+		t.Errorf("TemplatePath without template dir = %q", got)
+	}
 }

@@ -46,7 +46,7 @@ func TestRewriteWorker_HappyPath(t *testing.T) {
 		ConfigFile: filepath.Join(tmpDir, "zmconfigd.cf"),
 	}
 	cacheInstance := cache.New(ctx, false)
-	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance, hostEnv())
+	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance, hostEnv(), hostServices())
 
 	// Create a rewrite entry
 	entry := config.RewriteEntry{
@@ -81,7 +81,7 @@ func TestRewriteWorker_ErrorPath(t *testing.T) {
 		ConfigFile: filepath.Join(tmpDir, "zmconfigd.cf"),
 	}
 	cacheInstance := cache.New(ctx, false)
-	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance, hostEnv())
+	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance, hostEnv(), hostServices())
 
 	// Create a rewrite entry pointing to non-existent source
 	entry := config.RewriteEntry{
@@ -135,7 +135,7 @@ func TestRewriteWorker_DebugLogging(t *testing.T) {
 		ConfigFile: filepath.Join(tmpDir, "zmconfigd.cf"),
 	}
 	cacheInstance := cache.New(ctx, false)
-	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance, hostEnv())
+	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance, hostEnv(), hostServices())
 
 	// Create a rewrite entry
 	entry := config.RewriteEntry{
@@ -262,7 +262,7 @@ func TestRewriteTransform(t *testing.T) {
 		ConfigFile: filepath.Join(tmpDir, "zmconfigd.cf"),
 	}
 	cacheInstance := cache.New(ctx, false)
-	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance, hostEnv())
+	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance, hostEnv(), hostServices())
 
 	// Execute rewriteTransform
 	lineCount, err := cm.rewriteTransform(ctx, srcPath, tmpFile)
@@ -299,7 +299,7 @@ func TestRewriteTransform_NonexistentSource(t *testing.T) {
 		ConfigFile: filepath.Join(tmpDir, "zmconfigd.cf"),
 	}
 	cacheInstance := cache.New(ctx, false)
-	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance, hostEnv())
+	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance, hostEnv(), hostServices())
 
 	// Execute rewriteTransform with non-existent source
 	_, err = cm.rewriteTransform(ctx, filepath.Join(tmpDir, "nonexistent.txt"), tmpFile)
@@ -327,7 +327,7 @@ func TestResolveValueSpec_FILE(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(fragDir, fragName), []byte(fragContent), 0644))
 		st := state.NewState()
 		cfg := &config.Config{BaseDir: tmpDir}
-		cm := NewConfigManager(ctx, cfg, st, nil, cache.New(ctx, false), hostEnv())
+		cm := NewConfigManager(ctx, cfg, st, nil, cache.New(ctx, false), hostEnv(), hostServices())
 		resolve := func(key, valueSpec string) (string, error) {
 			return cm.resolveValueSpec(ctx, key, valueSpec)
 		}

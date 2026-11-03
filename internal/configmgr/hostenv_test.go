@@ -8,6 +8,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/zextras/carbonio-configd/internal/services"
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
@@ -26,4 +27,10 @@ func hostEnv() sys.System {
 	env.Clock = instantSleepClock{env.Clock}
 
 	return env
+}
+
+// hostServices is the service manager the tests inject: the host backend
+// over hostEnv().
+func hostServices() services.Manager {
+	return services.NewServiceManager(services.NewController(hostEnv()))
 }

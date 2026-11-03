@@ -20,6 +20,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/configmgr"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/plan"
+	"github.com/zextras/carbonio-configd/internal/services"
 	"github.com/zextras/carbonio-configd/internal/shadow"
 	"github.com/zextras/carbonio-configd/internal/snapshot"
 	"github.com/zextras/carbonio-configd/internal/state"
@@ -70,7 +71,8 @@ func newShadowFixture(t *testing.T) *shadowFixture {
 
 	cfg := &config.Config{BaseDir: shadowBase, Hostname: "testhost", RestartConfig: true}
 	cm := configmgr.NewConfigManager(context.Background(), cfg, appState, nil,
-		cache.New(context.Background(), true), sys.ReadOnly(host.System()))
+		cache.New(context.Background(), true), sys.ReadOnly(host.System()),
+		services.NewServiceManager(services.NewController(sys.ReadOnly(host.System()))))
 
 	report := systest.New()
 	src := &shadowSource{ConfigManager: cm, state: appState, load: func(context.Context) error { return nil }}

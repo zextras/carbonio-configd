@@ -132,7 +132,7 @@ func TestMergeDefaults_DefaultAppliedForMissingKey(t *testing.T) {
 	}
 }
 
-func TestLoadResolvedConfigFromFile(t *testing.T) {
+func TestLoadEffectiveFrom(t *testing.T) {
 	xmlContent := `<?xml version="1.0" encoding="UTF-8"?>
 <localconfig>
   <key name="ldap_port">
@@ -146,9 +146,9 @@ func TestLoadResolvedConfigFromFile(t *testing.T) {
 	tmpFile := createResolveTestFile(t, xmlContent)
 	defer os.Remove(tmpFile)
 
-	config, err := LoadResolvedConfigFromFile(tmpFile)
+	config, err := LoadEffectiveFrom(tmpFile, nil)
 	if err != nil {
-		t.Fatalf("LoadResolvedConfigFromFile() failed: %v", err)
+		t.Fatalf("LoadEffectiveFrom() failed: %v", err)
 	}
 
 	// XML values present
@@ -171,7 +171,7 @@ func TestLoadResolvedConfigFromFile(t *testing.T) {
 	}
 }
 
-func TestLoadResolvedConfigFromFile_MailboxdJavaOptionsInterpolated(t *testing.T) {
+func TestLoadEffectiveFrom_MailboxdJavaOptionsInterpolated(t *testing.T) {
 	xmlContent := `<?xml version="1.0" encoding="UTF-8"?>
 <localconfig>
   <key name="ldap_port">
@@ -182,9 +182,9 @@ func TestLoadResolvedConfigFromFile_MailboxdJavaOptionsInterpolated(t *testing.T
 	tmpFile := createResolveTestFile(t, xmlContent)
 	defer os.Remove(tmpFile)
 
-	config, err := LoadResolvedConfigFromFile(tmpFile)
+	config, err := LoadEffectiveFrom(tmpFile, nil)
 	if err != nil {
-		t.Fatalf("LoadResolvedConfigFromFile() failed: %v", err)
+		t.Fatalf("LoadEffectiveFrom() failed: %v", err)
 	}
 
 	// mailboxd_java_options default contains ${networkaddress_cache_ttl} which should be resolved to 60
@@ -198,7 +198,7 @@ func TestLoadResolvedConfigFromFile_MailboxdJavaOptionsInterpolated(t *testing.T
 	}
 }
 
-func TestLoadResolvedConfigFromFile_XMLOverridesDefault(t *testing.T) {
+func TestLoadEffectiveFrom_XMLOverridesDefault(t *testing.T) {
 	xmlContent := `<?xml version="1.0" encoding="UTF-8"?>
 <localconfig>
   <key name="networkaddress_cache_ttl">
@@ -209,9 +209,9 @@ func TestLoadResolvedConfigFromFile_XMLOverridesDefault(t *testing.T) {
 	tmpFile := createResolveTestFile(t, xmlContent)
 	defer os.Remove(tmpFile)
 
-	config, err := LoadResolvedConfigFromFile(tmpFile)
+	config, err := LoadEffectiveFrom(tmpFile, nil)
 	if err != nil {
-		t.Fatalf("LoadResolvedConfigFromFile() failed: %v", err)
+		t.Fatalf("LoadEffectiveFrom() failed: %v", err)
 	}
 
 	// XML value should override the default of 60

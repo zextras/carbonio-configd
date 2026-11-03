@@ -103,7 +103,7 @@ func TestCategoriesDoNotShareStorage(t *testing.T) {
 
 func TestConcurrentCallersShareHandles(t *testing.T) {
 	const (
-		workers  = 32
+		workers   = 32
 		perWorker = 1000
 	)
 

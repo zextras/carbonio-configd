@@ -201,7 +201,7 @@ func TestDryRunMode(t *testing.T) {
 
 	gen.TemplateDir = templateDir
 	gen.ConfDir = outputDir
-	gen.SetDryRun(context.Background(), true) // Enable dry-run
+	gen.DryRun = true // Enable dry-run
 
 	if !gen.DryRun {
 		t.Error("Expected dry-run to be enabled")
@@ -256,7 +256,7 @@ func TestVerboseMode(t *testing.T) {
 
 	gen.TemplateDir = templateDir
 	gen.ConfDir = outputDir
-	gen.SetVerbose(context.Background(), true) // Enable verbose
+	gen.Verbose = true // Enable verbose
 
 	if !gen.Verbose {
 		t.Error("Expected verbose to be enabled")
@@ -313,8 +313,8 @@ error_log ${main.logfile};`
 
 	gen.TemplateDir = templateDir
 	gen.ConfDir = outputDir
-	gen.SetDryRun(context.Background(), true)  // Enable dry-run
-	gen.SetVerbose(context.Background(), true) // Enable verbose
+	gen.DryRun = true  // Enable dry-run
+	gen.Verbose = true // Enable verbose
 
 	if !gen.DryRun {
 		t.Error("Expected dry-run to be enabled")
@@ -440,7 +440,7 @@ func TestFullStackIntegration(t *testing.T) {
 	// Override directories
 	gen.TemplateDir = templateDir
 	gen.ConfDir = includesDir
-	gen.SetVerbose(context.Background(), true)
+	gen.Verbose = true
 
 	// Generate all configurations
 	t.Log("Generating all nginx configurations...")

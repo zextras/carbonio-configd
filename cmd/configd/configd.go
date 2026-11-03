@@ -15,51 +15,19 @@ import (
 	"github.com/alecthomas/kong"
 	"github.com/willabides/kongplete"
 	"github.com/zextras/carbonio-configd/internal/cli/cliutil"
-	"github.com/zextras/carbonio-configd/internal/cli/rewrite"
-	"github.com/zextras/carbonio-configd/internal/config"
-	"github.com/zextras/carbonio-configd/internal/ldap"
 	"github.com/zextras/carbonio-configd/internal/logger"
-	"github.com/zextras/carbonio-configd/internal/snapshot"
-	"github.com/zextras/carbonio-configd/internal/state"
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
-
-func initializeConfig() (*config.Config, *state.State, *ldap.Ldap) {
-	mainCfg, appState, ldapClient, err := newRuntime(context.Background())
-	if err != nil {
-		logger.FatalContext(context.Background(), "Failed to initialize config", "error", err)
-	}
-
-	return mainCfg, appState, ldapClient
-}
-
-// newRuntime builds the configuration, the state and the LDAP client shared by
-// the daemon and the standalone commands.
-func newRuntime(ctx context.Context) (*config.Config, *state.State, *ldap.Ldap, error) {
-	mainCfg, err := config.NewConfig()
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("initialize config: %w", err)
-	}
-
-	appState := state.NewState()
-	ldapClient := ldap.NewLdap(ctx, mainCfg)
-
-	// Initial local config, replaced by the first load: the listen port and
-	// IP mode for contact_service.
-	appState.Publish(snapshot.New(snapshot.Parts{Local: map[string]string{
-		"zmconfigd_listen_port": "7171",
-		"zimbraIPMode":          rewrite.IPModeIPv4,
-	}}))
-
-	return mainCfg, appState, ldapClient, nil
-}
 
 // runStandaloneRewrite runs one forced cycle in this process, as the legacy
 // "zmconfigd <configs>" standalone mode does.
 func runStandaloneRewrite(ctx context.Context, env sys.System, args *Args) int {
-	mainCfg, appState, ldapClient := initializeConfig()
+	rt, err := buildRuntime(ctx, env, &runtimeOpts{disableRestarts: args.DisableRestarts})
+	if err != nil {
+		logger.FatalContext(ctx, "Failed to initialize config", "error", err)
+	}
 
-	return RunMainLoop(ctx, env, mainCfg, appState, ldapClient, args, nil)
+	return RunMainLoop(ctx, rt, args, nil)
 }
 
 // setupProfilingAndTracing sets up profiling and tracing if requested in args.

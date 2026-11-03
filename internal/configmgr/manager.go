@@ -81,7 +81,7 @@ type ConfigManager struct {
 	Transformer             *transformer.Transformer
 	ServiceMgr              services.Manager   // Service manager interface
 	CommandRegistry         *commands.Registry // Command registry for this instance
-	cachedLocalConfigOutput string             // Cached output from zmlocalconfig -s command
+	cachedLocalConfigOutput string             // Cached resolved localconfig output
 	cachedLocalConfigMu     sync.RWMutex       // Protects cachedLocalConfigOutput
 	mtaExecutor             mtaops.Executor
 	mtaResolver             mtaops.OperationResolver
@@ -97,32 +97,32 @@ type ConfigManager struct {
 	carry   plan.Carry
 	env     sys.System // host boundary: filesystem, process execution, clock
 
-	// loadLocalConfigForLDAP is the localconfig loader used by initNativeLdapClient;
-	// tests inject deterministic maps so the URL-validation branches run without disk.
-	loadLocalConfigForLDAP func() (map[string]string, error)
-	// loadResolvedLocalConfig loads localconfig.xml merged with the LC.java
-	// defaults and interpolated, matching legacy `zmlocalconfig -s -x`.
-	loadResolvedLocalConfig func() (map[string]string, error)
+	// loadLocalConfig loads the effective localconfig: the LC.java defaults
+	// under localconfig.xml under the CONFIGD_LC_* environment overlay,
+	// interpolated once (legacy `zmlocalconfig -s -x` plus the overlay). The
+	// `lc` loader and the LDAP client seams all read through it; tests inject
+	// deterministic maps so no disk is needed.
+	loadLocalConfig func() (map[string]string, error)
 }
 
 // NewConfigManager creates a new ConfigManager instance. Every host side effect
-// of the manager and of the components it builds (service control, MTA
-// operations, commands, proxy generation) goes through env.
+// of the manager and of the components it builds (MTA operations, commands,
+// proxy generation) goes through env. serviceMgr is the one service manager of
+// the process: restarts, the watchdog and status checks all share it.
 func NewConfigManager(ctx context.Context, mainCfg *config.Config,
 	appState *state.State, ldapClient *ldap.Ldap, cacheInstance *cache.ConfigCache,
-	env sys.System) *ConfigManager {
+	env sys.System, serviceMgr services.Manager) *ConfigManager {
 	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
 	cm := &ConfigManager{
 		mainConfig:      mainCfg,
 		State:           appState,
 		LdapClient:      ldapClient,
 		Cache:           cacheInstance,
-		ServiceMgr:      services.NewServiceManager(services.NewController(env)),
-		CommandRegistry: commands.NewRegistry(mainCfg.BaseDir, env),
+		ServiceMgr:      serviceMgr,
+		CommandRegistry: commands.NewRegistry(),
 		env:             env,
 
-		loadLocalConfigForLDAP:  localconfig.LoadLocalConfig,
-		loadResolvedLocalConfig: localconfig.LoadResolvedConfig,
+		loadLocalConfig: localconfig.LoadEffective,
 	}
 	cm.Transformer = transformer.NewTransformer(cm)
 	cm.mtaExecutor = mtaops.NewExecutor(mainCfg.BaseDir, ldapClient, env)
@@ -142,9 +142,9 @@ func (cm *ConfigManager) Metrics() *metrics.Registry {
 }
 
 // initNativeLdapClient initializes the native LDAP client from localconfig.
-// If initialization fails, it logs a warning and the manager will fall back to zmprov subprocess calls.
+// If initialization fails, it logs a warning and the LDAP lookups fail until a later cycle can build the client.
 func (cm *ConfigManager) initNativeLdapClient(ctx context.Context) {
-	localCfg, err := cm.loadLocalConfigForLDAP()
+	localCfg, err := cm.loadLocalConfig()
 	if err != nil {
 		logger.WarnContext(ctx, "Failed to load localconfig for native LDAP client - LDAP queries will fail",
 			"error", err)
@@ -152,47 +152,20 @@ func (cm *ConfigManager) initNativeLdapClient(ctx context.Context) {
 		return
 	}
 
-	// Extract LDAP connection parameters. ldap_url may be a single URL or a
-	// space-separated list of URLs (Carbonio HA convention) — ParseURLs
-	// normalises both forms (CO-3565).
-	ldapURL, ok := localCfg["ldap_url"]
-	if !ok || ldapURL == "" {
-		logger.WarnContext(ctx, "LDAP URL not found in localconfig - LDAP queries will fail")
+	// ldap_url may be a single URL or a space-separated list of URLs
+	// (Carbonio HA convention): ParamsFrom normalises both forms (CO-3565).
+	params, err := ldap.ParamsFrom(localCfg, ldap.PurposeRead)
+	if err != nil {
+		logger.WarnContext(ctx, "LDAP connection parameters missing in localconfig - LDAP queries will fail",
+			"error", err)
 
 		return
 	}
 
-	ldapURLs := ldap.ParseURLs(ldapURL)
-	if len(ldapURLs) == 0 {
-		logger.WarnContext(ctx, "LDAP URL is empty after parsing - LDAP queries will fail",
-			"ldap_url", ldapURL)
+	params.StartTLS = cm.mainConfig.LdapStartTLSRequired
+	params.FS = cm.env.FS
 
-		return
-	}
-
-	bindDN, ok := localCfg["zimbra_ldap_userdn"]
-	if !ok || bindDN == "" {
-		logger.WarnContext(ctx, "LDAP user DN not found in localconfig - LDAP queries will fail")
-
-		return
-	}
-
-	password, ok := localCfg["zimbra_ldap_password"]
-	if !ok || password == "" {
-		logger.WarnContext(ctx, "LDAP password not found in localconfig - LDAP queries will fail")
-
-		return
-	}
-
-	nativeClient, err := ldap.NewClient(&ldap.ClientConfig{
-		URLs:     ldapURLs,
-		BindDN:   bindDN,
-		Password: password,
-		BaseDN:   "cn=zimbra",
-		PoolSize: 5,
-		StartTLS: cm.mainConfig.LdapStartTLSRequired,
-		FS:       cm.env.FS,
-	})
+	nativeClient, err := ldap.NewClient(params)
 	if err != nil {
 		logger.WarnContext(ctx, "Failed to create native LDAP client - LDAP queries will fail",
 			"error", err)
@@ -203,8 +176,8 @@ func (cm *ConfigManager) initNativeLdapClient(ctx context.Context) {
 	cm.NativeLdapClient = nativeClient
 
 	logger.InfoContext(ctx, "Native LDAP client initialized successfully",
-		"ldap_urls", ldapURLs,
-		"bind_dn", bindDN)
+		"ldap_urls", params.URLs,
+		"bind_dn", params.BindDN)
 
 	executor := commands.NewCommandExecutor(nativeClient)
 	cm.CommandRegistry.RegisterLDAPCommands(executor)
@@ -221,8 +194,8 @@ func (cm *ConfigManager) initNativeLdapClient(ctx context.Context) {
 // require binding as the cn=config rootDN over the local ldapi socket; the
 // data-suffix client (uid=zimbra) cannot write cn=config (LDAP code 50).
 //
-// Failure here is asymmetric to the data client: the data client degrades to
-// zmprov on failure, but the config client is the only correct write path, so
+// Failure here is asymmetric to the data client: the data client logs a
+// warning on failure, but the config client is the only correct write path, so
 // a missing root password is logged at error level and writes will fail fast
 // at call time (ModifyAttribute returns a config error) rather than silently
 // using the wrong identity.
@@ -270,7 +243,7 @@ func (cm *ConfigManager) lookupFileKey(ctx context.Context, key string) (string,
 		return val, nil
 	}
 
-	filePath := cm.mainConfig.BaseDir + "/conf/" + key
+	filePath := cm.mainConfig.TemplatePath("conf/" + key)
 
 	//nolint:gosec // G304: File path comes from trusted configuration
 	contentBytes, err := cm.env.FS.ReadFile(filePath)

@@ -18,19 +18,28 @@ Source: `cmd/configd/cli.go` (`DaemonCmd.Run`), `cmd/configd/configd.go`, `cmd/c
    variable is unset the notifier is a no-op; no code path fails because of its absence.
 4. **Profiling/tracing setup** — CPU, memory, and trace profiles started if flags are present
    (profiling build only).
-5. **Config init** — `config.NewConfig()` reads `localconfig.xml`, merges defaults, resolves
-   `${variable}` references, and populates `state.State`. An LDAP client is constructed but
-   not yet connected.
+5. **Runtime** — `buildRuntime` (`cmd/configd/runtime.go`) is the one builder shared by the
+   daemon, `shadow`, `plan` and the forced/standalone rewrite. `config.NewConfig()` only sets
+   defaults (base dir, hostname from `/etc/hostname`/`zimbra_server_hostname`, intervals); it does
+   not read localconfig. `buildRuntime` loads the resolved localconfig (`localconfig.xml` over
+   the built-in defaults, `${variable}` expanded) and applies the keys that shape the wiring
+   (`zmconfigd_template_dir`, `zmconfigd_sections`, `zmconfigd_service_hooks`); the remaining
+   keys are applied by the first cycle's load. It also builds the (not yet connected) LDAP
+   client, the service backend and the one `services.ServiceManager`, applies
+   `--disable-restarts`, and constructs `state.State` and the `ConfigManager`.
 6. **Main loop** — `RunMainLoop` is called. It does not return until the process is asked to
    shut down.
 
 Inside `RunMainLoop` before the first iteration:
 
-- `configmgr.NewConfigManager` and `services.NewServiceManager(services.NewController(env))` are
-  constructed. `env` is the `sys.System` built once in `main` (`sys.Real()`).
-- `systemd.NewManager(env).IsSystemdEnabled` checks whether Carbonio systemd targets exist;
-  the service manager itself gates on this internally via `Controller.IsSystemdMode()` — there
-  is no per-instance mode flag to set.
+- The one `services.ServiceManager` (built by `buildRuntime` and injected into
+  `configmgr.NewConfigManager`) serves the restart policy, the watchdog and status checks. Its
+  `services.Backend` is the host `*Controller`, or a `services.HookBackend` when
+  `zmconfigd_service_hooks` is set (see below). `env` is the `sys.System` built once in `main`
+  (`sys.Real()`).
+- On a host, `systemd.NewManager(env).IsSystemdEnabled` checks whether Carbonio systemd targets
+  exist; the controller gates on this internally via `Controller.IsSystemdMode()` — there is no
+  per-instance mode flag to set.
 - A watchdog goroutine is started.
 - Signal handlers are registered (SIGTERM/SIGINT → cancel context; SIGHUP → reload channel).
 - The systemd watchdog keep-alive goroutine is started when `WATCHDOG_USEC` is set, pinging
@@ -116,6 +125,18 @@ only the named sections are rewritten.
 requested section. Config files are rewritten but the section's services are not restarted.
 See [restart-behavior.md](restart-behavior.md) for the full rule.
 
+## Service backend and hooks
+
+`services.ServiceManager` (restart queue, dependency cascade, start order, failed-restart limit,
+`--disable-restarts`) drives a `services.Backend` (`ServiceStart`/`Stop`/`Restart`/`Status` and
+`LookupService`). `*services.Controller` is the host backend. `services.HookBackend`
+(`internal/services/hooks.go`) is selected by `zmconfigd_service_hooks` and implements the actions
+with `sys.Proc.Signal` and `sys.Exec` instead, so it is covered by `sys.ReadOnly` (shadow) and the
+`systest` fakes like everything else. `buildRuntime` creates the one `ServiceManager` and injects it
+into `configmgr.NewConfigManager`; the config-driven restarts, the watchdog and status checks share
+it. The hooks are validated against the first parsed `zmconfigd.cf` (`runtime.validateHooks`); a
+gap ends the daemon with status 1.
+
 ## Config loading pipeline
 
 Source: `internal/configmgr/manager_load.go` (`LoadAllConfigs`)
@@ -124,7 +145,7 @@ Four goroutines run concurrently, one per config source:
 
 | Goroutine name | Function | What it loads |
 |---|---|---|
-| `lc` | `LoadLocalConfig` | `localconfig.xml` via the Go native reader |
+| `lc` | `LoadLocalConfig` | the effective localconfig (`localconfig.LoadEffective`): defaults, `localconfig.xml` (optional) and the `CONFIGD_LC_<key>` environment, via the Go native reader |
 | `gc` | `LoadGlobalConfig` | Global config attributes via native LDAP client |
 | `mc` | `LoadMiscConfig` | Miscellaneous service states (SERVICE_* keys) |
 | `sc` | `LoadServerConfig` | Per-server attributes via native LDAP client |

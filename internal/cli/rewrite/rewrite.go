@@ -58,7 +58,7 @@ func Run(_ context.Context, _, stderr io.Writer, opts *Options) int {
 func Forced(ctx context.Context, configs []string, standalone Standalone) int {
 	// An unreadable localconfig leaves the legacy defaults; the standalone run
 	// reports the real error when it loads the configuration itself.
-	lc, _ := localconfig.LoadResolvedConfig()
+	lc, _ := localconfig.LoadEffective()
 	listenPort, ipMode := ListenerAddress(lc)
 
 	return viaDaemon(ctx, configs, listenPort, ipMode, standalone)

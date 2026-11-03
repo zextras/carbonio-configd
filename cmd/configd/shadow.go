@@ -11,7 +11,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/zextras/carbonio-configd/internal/cache"
 	"github.com/zextras/carbonio-configd/internal/cli/cliutil"
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/configmgr"
@@ -47,23 +46,26 @@ func (c *ShadowCmd) Run(cli *CLI, env sys.System) error {
 	ctx := cliutil.InitLogging(os.Stderr)
 	ctx = logger.ContextWithComponent(ctx, "main")
 
-	mainCfg, appState, ldapClient := initializeConfig()
+	// The runtime gets the read-only system: whatever the manager, or anything
+	// it calls (the service hooks included), tries to write, run or signal
+	// fails with sys.ErrReadOnly. The only writable filesystem is the one the
+	// shadow report goes through.
+	rt, err := buildRuntime(ctx, env, &runtimeOpts{readOnly: true})
+	if err != nil {
+		logger.FatalContext(ctx, "Failed to initialize config", "error", err)
+	}
 
-	// The ConfigManager gets the read-only system: whatever it, or anything it
-	// calls, tries to write, run or signal fails with sys.ErrReadOnly. The
-	// only writable filesystem is the one the shadow report goes through.
-	cm := configmgr.NewConfigManager(ctx, mainCfg, appState, ldapClient, cache.New(ctx, false), sys.ReadOnly(env))
 	src := &shadowSource{
-		ConfigManager: cm,
-		state:         appState,
+		ConfigManager: rt.cm,
+		state:         rt.state,
 		load: func(ctx context.Context) error {
-			_, _, err := runLoadAndParse(ctx, cm, mainCfg)
+			_, _, err := runLoadAndParse(ctx, rt.cm, rt.cfg)
 
 			return err
 		},
 	}
 
-	return exitWith(runShadow(ctx, env, mainCfg, appState, src, c))
+	return exitWith(runShadow(ctx, env, rt.cfg, rt.state, src, c))
 }
 
 // rejectSideEffectFlags refuses the profiling and tracing outputs.

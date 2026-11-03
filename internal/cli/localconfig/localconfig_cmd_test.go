@@ -47,7 +47,7 @@ func TestLocalconfigCmd_Edit(t *testing.T) {
 	}
 	require.Zero(t, Run(context.Background(), io.Discard, io.Discard, cmd))
 
-	cfg, err := lcfg.LoadResolvedConfigFromFile(path)
+	cfg, err := lcfg.LoadEffectiveFrom(path, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "new", cfg["existing"])
 	assert.Equal(t, "fresh", cfg["added"])
@@ -64,7 +64,7 @@ func TestLocalconfigCmd_EditDangerousKeyWithForce(t *testing.T) {
 	}
 	require.Zero(t, Run(context.Background(), io.Discard, io.Discard, cmd))
 
-	cfg, err := lcfg.LoadResolvedConfigFromFile(path)
+	cfg, err := lcfg.LoadEffectiveFrom(path, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "ldap://localhost:389", cfg["ldap_url"])
 }
@@ -80,7 +80,7 @@ func TestLocalconfigCmd_EditRandom(t *testing.T) {
 	}
 	require.Zero(t, Run(context.Background(), io.Discard, io.Discard, cmd))
 
-	cfg, err := lcfg.LoadResolvedConfigFromFile(path)
+	cfg, err := lcfg.LoadEffectiveFrom(path, nil)
 	require.NoError(t, err)
 	assert.NotEmpty(t, cfg["my_generated_password"], "random edit must generate a value")
 }
@@ -95,7 +95,7 @@ func TestLocalconfigCmd_Unset(t *testing.T) {
 	}
 	require.Zero(t, Run(context.Background(), io.Discard, io.Discard, cmd))
 
-	cfg, err := lcfg.LoadResolvedConfigFromFile(path)
+	cfg, err := lcfg.LoadEffectiveFrom(path, nil)
 	require.NoError(t, err)
 	assert.NotContains(t, cfg, "doomed")
 	assert.Equal(t, "stays", cfg["keeper"])
