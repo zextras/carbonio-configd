@@ -7,57 +7,70 @@ package rewrite
 import (
 	"bytes"
 	"context"
-	"net"
 	"os/user"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zextras/carbonio-configd/internal/security"
 )
 
-// TestListenerAddress pins the legacy listener defaults: port 7171 over IPv4
-// unless localconfig sets zmconfigd_listen_port / zimbraIPMode.
+// TestListenerAddress pins the legacy listener defaults: port 7171 unless
+// localconfig sets zmconfigd_listen_port, and the legacy configrewrite timeout.
 func TestListenerAddress(t *testing.T) {
 	tests := []struct {
-		name     string
-		lc       map[string]string
-		wantPort int
-		wantMode string
+		name string
+		lc   map[string]string
+		want Endpoint
 	}{
-		{"defaults", map[string]string{}, 7171, IPModeIPv4},
-		{"unparsable port", map[string]string{"zmconfigd_listen_port": "x"}, 7171, IPModeIPv4},
-		{"configured", map[string]string{"zmconfigd_listen_port": "7172", "zimbraIPMode": "ipv6"}, 7172, "ipv6"},
+		{"defaults", map[string]string{}, Endpoint{Port: 7171}},
+		{"unparsable port", map[string]string{"zmconfigd_listen_port": "x"}, Endpoint{Port: 7171}},
+		{
+			"configured",
+			map[string]string{
+				"zmconfigd_listen_port":        "7172",
+				"zimbraIPMode":                 "ipv6",
+				"zimbra_configrewrite_timeout": "30",
+			},
+			Endpoint{Port: 7172, IPMode: "ipv6", Timeout: 30 * time.Second},
+		},
+		{"bad timeout", map[string]string{"zimbra_configrewrite_timeout": "-1"}, Endpoint{Port: 7171}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			port, mode := ListenerAddress(tt.lc)
-			if port != tt.wantPort || mode != tt.wantMode {
-				t.Errorf("ListenerAddress = (%d, %q), want (%d, %q)", port, mode, tt.wantPort, tt.wantMode)
+			if got := ListenerAddress(tt.lc); got != tt.want {
+				t.Errorf("ListenerAddress = %+v, want %+v", got, tt.want)
 			}
 		})
 	}
 }
 
-// TestViaDaemon covers the legacy configrewrite contract: a reachable daemon
-// gets the REWRITE request and nothing runs in-process; an unreachable or
-// failing daemon falls back to a standalone rewrite whose exit code is
-// returned, instead of failing the caller (zmtlsctl, zmproxyctl, rewrite).
+// TestViaDaemon covers the REWRITE contract of "configd rewrite": a daemon
+// that processed the request means nothing runs in-process; a daemon that
+// answers ERROR fails the command without a competing standalone rewrite; only
+// when nothing listens does a standalone rewrite run and set the exit code.
 func TestViaDaemon(t *testing.T) {
 	tests := []struct {
 		name           string
-		reply          string // "" = no listener on the port
+		network        string
+		reply          string // "" = no listener
 		wantStandalone bool
 		wantCode       int
 	}{
-		{name: "daemon accepts", reply: "SUCCESS REWRITE\n", wantStandalone: false, wantCode: 0},
-		{name: "daemon not running", reply: "", wantStandalone: true, wantCode: 3},
-		{name: "daemon answers error", reply: "ERROR busy\n", wantStandalone: true, wantCode: 3},
+		{name: "daemon accepts", network: networkTCP4, reply: "SUCCESS REWRITES COMPLETE", wantCode: 0},
+		{name: "daemon on the other family", network: networkTCP6, reply: "SUCCESS REWRITES COMPLETE", wantCode: 0},
+		{name: "daemon not running", wantStandalone: true, wantCode: 3},
+		{name: "daemon answers error", network: networkTCP4, reply: "ERROR REWRITE TIMEOUT", wantCode: 1},
+		{name: "daemon on the other family answers error", network: networkTCP6, reply: "ERROR REWRITE TIMEOUT", wantCode: 1},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			port := fakeDaemon(t, tt.reply)
+			port := closedPort(t)
+			if tt.reply != "" {
+				port, _ = listenLoopback(t, tt.network, tt.reply, 0)
+			}
 
 			var gotConfigs []string
 
@@ -69,7 +82,7 @@ func TestViaDaemon(t *testing.T) {
 				return 3
 			}
 
-			code := viaDaemon(context.Background(), []string{"proxy", "mta"}, port, IPModeIPv4, standalone)
+			code := viaDaemon(context.Background(), []string{"proxy", "mta"}, Endpoint{Port: port}, standalone)
 
 			if code != tt.wantCode {
 				t.Errorf("exit code = %d, want %d", code, tt.wantCode)
@@ -115,39 +128,4 @@ func TestRun_NotZextras(t *testing.T) {
 	if stdout.Len() != 0 {
 		t.Errorf("stdout = %q, want empty", stdout.String())
 	}
-}
-
-// fakeDaemon returns a port where one connection is answered with reply, or a
-// port with nothing listening when reply is empty.
-func fakeDaemon(t *testing.T, reply string) int {
-	t.Helper()
-
-	ln, err := net.Listen("tcp4", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	port := ln.Addr().(*net.TCPAddr).Port
-
-	if reply == "" {
-		_ = ln.Close()
-
-		return port
-	}
-
-	t.Cleanup(func() { _ = ln.Close() })
-
-	go func() {
-		conn, err := ln.Accept()
-		if err != nil {
-			return
-		}
-		defer conn.Close()
-
-		buf := make([]byte, 256)
-		_, _ = conn.Read(buf)
-		_, _ = conn.Write([]byte(reply))
-	}()
-
-	return port
 }

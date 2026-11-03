@@ -8,6 +8,7 @@ package initcmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 
@@ -78,11 +79,13 @@ func run(
 		return 1
 	}
 
-	listenPort, ipMode := rewrite.ListenerAddress(lc)
-
-	if rewrite.ContactService("REWRITE", []string{component}, listenPort, ipMode) {
-		_, _ = fmt.Fprintln(stderr, "Error: configd daemon is not running. Start it first:")
-		_, _ = fmt.Fprintln(stderr, "  systemctl start carbonio-configd.service")
+	if _, err := rewrite.Request(ctx, "REWRITE", []string{component}, rewrite.ListenerAddress(lc)); err != nil {
+		if errors.Is(err, rewrite.ErrUnreachable) {
+			_, _ = fmt.Fprintln(stderr, "Error: configd daemon is not running. Start it first:")
+			_, _ = fmt.Fprintln(stderr, "  systemctl start carbonio-configd.service")
+		} else {
+			_, _ = fmt.Fprintf(stderr, "Error: configuration rewrite of %s failed: %v\n", component, err)
+		}
 
 		return 1
 	}
