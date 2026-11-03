@@ -34,6 +34,7 @@ type CLI struct {
 	Init        InitCmd                      `cmd:"" help:"Initialize components"`
 	Proxy       ProxyCmd                     `cmd:"" help:"Proxy protocol management"`
 	TLS         TLSCmd                       `cmd:"" name:"tls" help:"Manage Carbonio mail mode (legacy zmtlsctl)"`
+	LDAP        LDAPCmd                      `cmd:"" name:"ldap" help:"Query and modify LDAP (zmprov verbs, no JVM)"`
 	Rewrite     RewriteCmd                   `cmd:"" help:"Force configuration rewrite"`
 	Plan        PlanCmd                      `cmd:"" help:"Show what a rewrite would change, without changing anything"`
 	Shadow      ShadowCmd                    `cmd:"" help:"Run the cycle next to a real configd, without side effects"`
