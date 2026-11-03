@@ -26,12 +26,14 @@ Source: `cmd/configd/cli.go` (`DaemonCmd.Run`), `cmd/configd/configd.go`, `cmd/c
 
 Inside `RunMainLoop` before the first iteration:
 
-- `configmgr.NewConfigManager` and `services.NewServiceManager(services.NewController(env))` are
-  constructed. `env` is the `sys.System` built once in `main` (`sys.Real()`).
-- `systemd.NewManager(env).IsSystemdEnabled` checks whether Carbonio systemd targets exist;
-  the service manager itself gates on this internally via `Controller.IsSystemdMode()` — there
-  is no per-instance mode flag to set.
-- A watchdog goroutine is started.
+- `configmgr.NewConfigManager` is constructed; it builds the one `services.ServiceManager`
+  (over `services.NewController(env)`) that the restart policy and the watchdog share. `env` is
+  the `sys.System` built once in `main` (`sys.Real()`).
+- The service manager gates on `Controller.IsSystemdMode()` (a Carbonio systemd target is
+  enabled) — there is no per-instance mode flag to set. The mode selects the restart policy
+  (heavy services only flagged, others `try-reload-or-restart`) and turns the watchdog into a
+  no-op; see [restart-behavior.md](restart-behavior.md).
+- A watchdog goroutine is started (it does nothing on systemd hosts).
 - Signal handlers are registered (SIGTERM/SIGINT → cancel context; SIGHUP → reload channel).
 - The systemd watchdog keep-alive goroutine is started when `WATCHDOG_USEC` is set, pinging
   at half the declared interval.
@@ -69,7 +71,7 @@ Each iteration runs the following phases in order:
 | Start listener | `network.NewThreadedStreamServer` | First run only; skipped in `--once` mode |
 | LDAP watcher | `syncLDAPWatch` | Right after the load, every iteration: with `zmconfigd_ldap_change_trigger=TRUE` starts the LDAP change watcher (once) or stops it when the key turns `FALSE`; with the key off (default) it does nothing and no goroutine exists. See [LDAP change detection](#ldap-change-detection-opt-in) |
 | Parse MTA config | `configManager.ParseMtaConfig` | Reads `conf/zmconfigd.cf` |
-| Build dependencies | `buildServiceDependencies` | Extracts DEPENDS entries from MTA sections for the watchdog's service manager (config-driven restarts do not cascade, see restart-behavior.md) |
+| Build dependencies | `buildServiceDependencies` | Extracts DEPENDS entries from MTA sections for the shared service manager's watchdog cascade (config-driven restarts do not cascade, see restart-behavior.md) |
 | Snapshot + Observe | `configManager.Plan` (first half) | Freezes the loaded configs into an immutable `snapshot.Snapshot`, resolves every lookup `configd.cf` requires and publishes the result |
 | Plan | `plan.Compute` (via `configManager.Plan`) | Pure, deterministic: previous snapshot vs. current snapshot gives a `plan.Plan` whose every entry carries its reasons |
 | Execute | `configManager.Execute` | Mapfiles first (self-heal included), then proxygen, rewrites, postconf, postconfd and LDAP concurrently |
@@ -175,10 +177,11 @@ Load ─► Snapshot ─► Observe ─► Plan ─► Execute ─► ApplyResta
    An action that fails is kept in the carry and re-enters the next plan with a `retry`
    reason, so failures are retried until they succeed.
 6. **ApplyRestarts** (`internal/restart`) — `ConfigManager.ApplyRestarts` hands the plan's
-   restarts to `restart.Policy.Apply`, which queues the
-   restarts (without a DEPENDS cascade, as in the legacy zmconfigd), applies the enabled-only rule, the
-   `zmconfigd_enable_config_restarts` switch, the failed-restart limit and the optional
-   debounce. Restarts it does not consume are carried to the next cycle.
+   restarts to `restart.Policy.Apply`. On legacy hosts it queues the
+   restarts (without a DEPENDS cascade, as in the legacy zmconfigd); on systemd hosts it only
+   flags heavy services as restart pending and runs `systemctl try-reload-or-restart` for the
+   others. It applies the `zmconfigd_enable_config_restarts` switch, the failed-restart limit and
+   the optional debounce. Restarts it does not consume are carried to the next cycle.
 
 When every service looks disabled `Compute` returns `plan.ErrAllServicesDisabled`; nothing is
 consumed, the previous snapshot stays the baseline and the requested sections stay queued.
@@ -352,7 +355,7 @@ and how many changes were coalesced, the baseline and each observed change at de
 | `internal/state` | Process state; holds the current snapshot behind an `atomic.Pointer` plus first-run, forced and requested bookkeeping |
 | `internal/plan` | Pure `Compute`, plan types, reasons, text/JSON rendering |
 | `internal/configmgr` | Loaders, `Observe`, `Plan`, `Execute`, `ApplyRestarts`, `PlanHost` (host observation for `configd plan`) |
-| `internal/restart` | Restart policy: enabled-only, debounce, max failed restarts |
+| `internal/restart` | Restart policy: systemd hybrid (pending-restart / try-reload-or-restart) or legacy queue, debounce, max failed restarts |
 | `internal/ldapwatch` | Opt-in LDAP change watcher: polls `entryCSN`/`modifyTimestamp` fingerprints, coalesces bursts, backs off on errors, requests an early cycle |
 | `internal/services` | Service registry and manager (start order, retries, MTA reload) |
 | `internal/cli/plancmd` | `configd plan` command |
