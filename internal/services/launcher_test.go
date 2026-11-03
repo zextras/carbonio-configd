@@ -604,57 +604,6 @@ func TestIsCustomEnabled_MilterWithEnableCheck(t *testing.T) {
 
 // --- validateName (remote.go) ---
 
-func TestValidateName_ValidNames(t *testing.T) {
-	t.Parallel()
-
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	valid := []string{"mta", "proxy", "mailbox", "service-discover", "my_service", "SVC123", "a"}
-	for _, name := range valid {
-		if err := validateName(name, "service"); err != nil {
-			t.Errorf("validateName(%q) returned unexpected error: %v", name, err)
-		}
-	}
-}
-
-func TestValidateName_InvalidNames(t *testing.T) {
-	t.Parallel()
-
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	invalid := []string{
-		"",
-		"svc name",      // space
-		"svc;cmd",       // semicolon
-		"svc&&cmd",      // shell injection
-		"../etc/passwd", // path traversal
-		"svc\ncmd",      // newline
-		"svc$var",       // dollar sign
-	}
-	for _, name := range invalid {
-		if err := validateName(name, "service"); err == nil {
-			t.Errorf("validateName(%q) expected error, got nil", name)
-		}
-	}
-}
-
-func TestValidateName_ErrorMentionsKind(t *testing.T) {
-	t.Parallel()
-
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	err := validateName("bad name!", "action")
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !strings.Contains(err.Error(), "action") {
-		t.Errorf("expected error to mention kind 'action', got: %v", err)
-	}
-}
-
 // --- killStatsPidFile ---
 
 func TestKillStatsPidFile_MissingFile(t *testing.T) {

@@ -366,30 +366,6 @@ func TestRun_ActionsLocal(t *testing.T) {
 	}
 }
 
-func TestRun_RemoteHostConnectFailure(t *testing.T) {
-	for _, action := range []Action{ActionStart, ActionStop, ActionRestart, ActionStatus} {
-		t.Run(string(action), func(t *testing.T) {
-			fe := newFlowEnv(t, nil, nil)
-
-			var stdout, stderr bytes.Buffer
-
-			code := fe.o.run(context.Background(), &stdout, &stderr, &Options{Action: action, Host: "remote.example.com"})
-
-			if code != 1 {
-				t.Errorf("code = %d, want 1", code)
-			}
-
-			if !strings.HasPrefix(stderr.String(), "Error: failed to connect to remote.example.com") {
-				t.Errorf("stderr = %q, want connect failure", stderr.String())
-			}
-
-			if len(fe.calls) != 0 {
-				t.Errorf("remote action must not touch local services: %v", fe.calls)
-			}
-		})
-	}
-}
-
 func TestControlStatus_DiscoveryFailureShowsRegistryAndFails(t *testing.T) {
 	o, _ := testOrchestrator(
 		map[string]*services.ServiceDef{

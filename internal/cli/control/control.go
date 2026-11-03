@@ -3,8 +3,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Package control implements "configd control": the zmcontrol-compatible
-// start/stop/restart/status of every service enabled on this host, or of a
-// remote host over SSH.
+// start/stop/restart/status of every service enabled on this host. Remote
+// hosts (zmcontrol -H) are the caller's business: the zmcontrol wrapper runs
+// the command there through zmrc.
 package control
 
 import (
@@ -34,8 +35,6 @@ const (
 // Options are the parsed arguments of "configd control".
 type Options struct {
 	Action Action
-	// Host, when set, runs the action on that remote host over SSH.
-	Host string
 }
 
 // orchestrator carries what one "configd control" invocation drives: the
@@ -68,7 +67,7 @@ func (o *orchestrator) run(ctx context.Context, stdout, stderr io.Writer, opts *
 
 	c := cliutil.NewConsole(stdout, stderr)
 
-	if opts.Action == ActionStatus && opts.Host == "" {
+	if opts.Action == ActionStatus {
 		// Legacy parity: control.pl:doStatus returns 1 when a service is
 		// stopped. Return it directly so stderr stays free of an "Error:"
 		// line legacy never printed.
@@ -87,25 +86,17 @@ func (o *orchestrator) run(ctx context.Context, stdout, stderr io.Writer, opts *
 func (o *orchestrator) dispatch(ctx context.Context, c *cliutil.Console, opts *Options) error {
 	switch opts.Action {
 	case ActionStart:
-		return o.start(ctx, c, opts.Host)
+		return o.start(ctx, c)
 	case ActionStop:
-		return o.stop(ctx, c, opts.Host)
+		return o.stop(ctx, c)
 	case ActionRestart:
-		return o.restart(ctx, c, opts.Host)
-	case ActionStatus:
-		_, err := o.ctl.RemoteHostStatus(ctx, opts.Host, "all")
-
-		return err
+		return o.restart(ctx, c)
 	default:
 		return fmt.Errorf("unknown control action: %q", opts.Action)
 	}
 }
 
-func (o *orchestrator) start(ctx context.Context, c *cliutil.Console, host string) error {
-	if host != "" {
-		return o.ctl.RemoteHostStart(ctx, host, "all")
-	}
-
+func (o *orchestrator) start(ctx context.Context, c *cliutil.Console) error {
 	if o.controlStart(ctx, c) != 0 {
 		return errors.New("some services failed to start")
 	}
@@ -113,11 +104,7 @@ func (o *orchestrator) start(ctx context.Context, c *cliutil.Console, host strin
 	return nil
 }
 
-func (o *orchestrator) stop(ctx context.Context, c *cliutil.Console, host string) error {
-	if host != "" {
-		return o.ctl.RemoteHostStop(ctx, host, "all")
-	}
-
+func (o *orchestrator) stop(ctx context.Context, c *cliutil.Console) error {
 	if o.controlStop(ctx, c) != 0 {
 		return errors.New("some services failed to stop")
 	}
@@ -125,18 +112,10 @@ func (o *orchestrator) stop(ctx context.Context, c *cliutil.Console, host string
 	return nil
 }
 
-func (o *orchestrator) restart(ctx context.Context, c *cliutil.Console, host string) error {
-	if host != "" {
-		if err := o.ctl.RemoteHostStop(ctx, host, "all"); err != nil {
-			return err
-		}
-
-		return o.ctl.RemoteHostStart(ctx, host, "all")
-	}
-
+func (o *orchestrator) restart(ctx context.Context, c *cliutil.Console) error {
 	// Legacy parity: control.pl doRestart runs doShutdown then doStartup
 	// unconditionally; the stop result is deliberately not consulted.
 	o.controlStop(ctx, c)
 
-	return o.start(ctx, c, "")
+	return o.start(ctx, c)
 }
