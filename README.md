@@ -104,6 +104,14 @@ unit: the daemon runs in legacy mode, started by `zmcontrol`.
 `configd rewrite <section>...` sends a REWRITE command to the already-running daemon
 via TCP (port 7171) and exits. It does not start a daemon.
 
+The command is synchronous: the daemon answers `SUCCESS REWRITES COMPLETE` only after its
+main loop has rewritten the requested sections, and `ERROR REWRITE TIMEOUT` when that takes
+longer than 60 s (the request stays queued and is processed by a later cycle). The client
+exits `0` on success and `1` on any `ERROR` reply, timeout or lost connection. Only when
+nothing listens on the daemon port (on either loopback family, so IPv4-only and IPv6-only
+hosts both work) does it fall back to a standalone forced rewrite in its own process; a daemon that is alive but failing is never bypassed.
+A standalone run exits `1` when its plan or a rewrite failed.
+
 ```bash
 # Rewrite proxy and MTA configs on the running daemon
 configd rewrite proxy mta
@@ -306,7 +314,10 @@ fails with `option 'X' can not be used with option 'Y'` (or `invalid option 'X'`
 
 ## systemd Integration
 
-- **Type=notify** with `READY=1` after first successful config cycle
+- **Type=notify** with `READY=1` sent once the first config pass (load, plan, rewrites, restarts)
+  has completed; the TCP listener starts at the same point, so a `REWRITE` is never accepted
+  before the daemon has configured the host. Use a `TimeoutStartSec` that covers a slow first
+  pass. After a SIGHUP reload (`RELOADING=1`), `READY=1` is sent again when the reload cycle ends
 - **WatchdogSec=120** with automatic keep-alive pings
 - **ExecReload** via SIGHUP for immediate config re-evaluation
 - **Security hardening** (score 1.5 OK): syscall filtering, empty capability bounding set, restricted namespaces

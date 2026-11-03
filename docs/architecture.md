@@ -66,15 +66,17 @@ Each iteration runs the following phases in order:
 | Shutdown check | — | Checks context cancellation before starting work |
 | Idle check | — | Only with `zmconfigd_skip_idle_polls=TRUE` (off by default, as legacy): skips to sleep if no REWRITE events and not first run and no reload signal |
 | Load configs | `configManager.LoadAllConfigs` | Four concurrent goroutines; see Config loading pipeline below |
-| Start listener | `network.NewThreadedStreamServer` | First run only; skipped in `--once` mode |
 | LDAP watcher | `syncLDAPWatch` | Right after the load, every iteration: with `zmconfigd_ldap_change_trigger=TRUE` starts the LDAP change watcher (once) or stops it when the key turns `FALSE`; with the key off (default) it does nothing and no goroutine exists. See [LDAP change detection](#ldap-change-detection-opt-in) |
 | Parse MTA config | `configManager.ParseMtaConfig` | Reads `conf/zmconfigd.cf` |
 | Build dependencies | `buildServiceDependencies` | Extracts DEPENDS entries from MTA sections for the watchdog's service manager (config-driven restarts do not cascade, see restart-behavior.md) |
 | Snapshot + Observe | `configManager.Plan` (first half) | Freezes the loaded configs into an immutable `snapshot.Snapshot`, resolves every lookup `configd.cf` requires and publishes the result |
 | Plan | `plan.Compute` (via `configManager.Plan`) | Pure, deterministic: previous snapshot vs. current snapshot gives a `plan.Plan` whose every entry carries its reasons |
 | Execute | `configManager.Execute` | Mapfiles first (self-heal included), then proxygen, rewrites, postconf, postconfd and LDAP concurrently |
-| Apply restarts | `configManager.ApplyRestarts` | `restart.Policy.Apply`: runs every cycle; honours `zmconfigd_enable_config_restarts`, debounce and `--disable-restarts` |
-| READY=1 | `notifier.Ready()` | Sent after every loop; first iteration transitions systemd from activating → active |
+| Release REWRITE clients | `MainLoopActionTrigger.completeWaiters` | Right after Execute (also when a rewrite step failed, as legacy `notifyAll` in `finally`): TCP clients whose sections this cycle planned get `SUCCESS REWRITES COMPLETE`. If Plan fails the clients stay queued for the next cycle |
+| Apply restarts | `configManager.ApplyRestarts` | `restart.Policy.Apply`: runs every cycle; honours `zmconfigd_enable_config_restarts`, debounce and `--disable-restarts`. Skipped when the rewrite phase failed (legacy skips `doRestarts`); the plan's restarts stay in the carry for the next cycle |
+| Start listener | `network.NewThreadedStreamServer` | Only after the first pass completed (legacy `configd.py` starts it after the first rewrite); skipped in `--once` mode |
+| READY=1 | `notifier.Ready()` | First time after the first completed pass (so systemd stays `activating` until the host is configured); sent again when a cycle ends after a SIGHUP reload (`RELOADING=1`), also when that cycle backed off |
+| Back-off | `backOff` | A failed load, a rejected plan or a failed rewrite sleeps 60 s (interruptible by a reload) and retries without starting the listener or sending READY=1 if the first pass has not completed |
 | Sleep | `SleepWithContext` | Default 300 s; woken early by SIGHUP, TCP REWRITE or, when enabled, an LDAP change |
 
 Forced mode (`configd rewrite`-style standalone runs) uses the same Plan and Execute and
@@ -105,11 +107,15 @@ RESPONSE = RESULT_STRING NEWLINE
 | Command | Example | Response |
 |---|---|---|
 | `STATUS` | `STATUS\n` | `SUCCESS ACTIVE\n` |
-| `REWRITE [section ...]` | `REWRITE proxy mta\n` | `SUCCESS REWRITES COMPLETE\n` |
+| `REWRITE [section ...]` | `REWRITE proxy mta\n` | `SUCCESS REWRITES COMPLETE\n` once the main loop processed the sections; `ERROR REWRITE TIMEOUT\n` after 60 s (the request stays queued); `ERROR SHUTTING DOWN\n` if the daemon stops meanwhile |
 | _(unknown)_ | `FOO\n` | `ERROR UNKNOWN COMMAND\n` |
 
-`REWRITE` with no section arguments triggers a rewrite of all sections. With arguments,
-only the named sections are rewritten.
+`REWRITE` blocks the connection until the main loop has handled it (`listener.py`
+`lAction.wait`, 60 s). With arguments, the named sections are queued as `requested` and
+rewritten by the next cycle. With no arguments no section is requested: the call only wakes
+the loop for a normal cycle, which rewrites what changed. The `configd rewrite` client and
+`configd init` use the same exchange (`internal/cli/rewrite.Request`) and dial both loopback
+families.
 
 **REWRITE skips restarts**: the TCP REWRITE command queues the named sections as
 `requested`. `plan.Compute` still renders them, but compiles no service restart for a
@@ -117,6 +123,10 @@ requested section. Config files are rewritten but the section's services are not
 See [restart-behavior.md](restart-behavior.md) for the full rule.
 
 ## Config loading pipeline
+
+The server hostname used to select this host's LDAP server entry comes from the
+`zimbra_server_hostname` environment variable, else the `zimbra_server_hostname` key of
+`localconfig.xml` (legacy `zmhostname`), else `/etc/hostname`.
 
 Source: `internal/configmgr/manager_load.go` (`LoadAllConfigs`)
 
