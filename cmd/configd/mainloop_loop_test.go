@@ -253,10 +253,7 @@ func TestRunConfigPhases_EmptyState(t *testing.T) {
 	// Arm the reload channel so a Plan back-off sleep cannot hang the test.
 	deps.reloadChan <- struct{}{}
 
-	timings, pl, skipIter := runConfigPhases(
-		context.Background(), deps.env.Clock, deps.cfg, deps.appState, deps.configManager,
-		deps.serviceManager, deps.wd, deps.reloadChan,
-	)
+	timings, pl, skipIter := runConfigPhases(context.Background(), deps)
 	assert.False(t, skipIter, "empty state must not trigger the back-off path")
 	assert.NotNil(t, pl)
 	assert.GreaterOrEqual(t, timings.plan, time.Duration(0))
@@ -416,10 +413,11 @@ func TestRunConfigPhases_PlanErrorBacksOff(t *testing.T) {
 	deps := newLoopFixture(t)
 	fake := systest.New()
 	run := func(reload chan struct{}) (*plan.Plan, bool) {
-		_, pl, skip := runConfigPhases(
-			context.Background(), fake.Clock, deps.cfg, deps.appState, deps.configManager,
-			deps.serviceManager, deps.wd, reload,
-		)
+		d := *deps
+		d.env.Clock = fake.Clock
+		d.reloadChan = reload
+
+		_, pl, skip := runConfigPhases(context.Background(), &d)
 
 		return pl, skip
 	}

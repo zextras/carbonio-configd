@@ -231,16 +231,11 @@ type phaseTimings struct {
 // runConfigPhases executes the per-iteration dependency, plan and execute phases.
 // Returns phase timings, the plan of the cycle and skipIter=true when the caller should
 // continue the outer loop (after a planning failure and the 60s back-off sleep).
-func runConfigPhases(
-	ctx context.Context,
-	clock sys.Clock,
-	mainCfg *config.Config,
-	appState *state.State,
-	configManager *configmgr.ConfigManager,
-	serviceManager services.Manager,
-	wd *watchdog.Watchdog,
-	reloadChan chan struct{},
-) (timings phaseTimings, pl *plan.Plan, skipIter bool) {
+func runConfigPhases(ctx context.Context, deps *daemonLoopDeps) (timings phaseTimings, pl *plan.Plan, skipIter bool) {
+	clock, mainCfg, appState := deps.env.Clock, deps.cfg, deps.appState
+	configManager, serviceManager := deps.configManager, deps.serviceManager
+	wd, reloadChan := deps.wd, deps.reloadChan
+
 	phaseStart := time.Now()
 
 	buildServiceDependencies(ctx, serviceManager, appState)
@@ -408,10 +403,7 @@ func runLoopIteration(ctx context.Context, deps *daemonLoopDeps, st *loopIterSta
 		notifyReady(ctx, deps.notifier, st.loopCount)
 	}
 
-	timings, pl, skipIter := runConfigPhases(
-		ctx, deps.env.Clock, deps.cfg, deps.appState, deps.configManager,
-		deps.serviceManager, deps.wd, deps.reloadChan,
-	)
+	timings, pl, skipIter := runConfigPhases(ctx, deps)
 	if skipIter {
 		exportMetrics(ctx, deps)
 
