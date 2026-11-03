@@ -133,8 +133,18 @@ type RewriteEntry struct {
 	Mode  string
 }
 
-// NewConfig initializes a new Config with default values.
+// NewConfig initializes a new Config with default values. The hostname comes
+// from the zimbra_server_hostname environment variable, else /etc/hostname;
+// use NewConfigWithHostname to also honor the localconfig value.
 func NewConfig() (*Config, error) {
+	return NewConfigWithHostname("")
+}
+
+// NewConfigWithHostname is NewConfig with the zimbra_server_hostname value of
+// localconfig (legacy zmhostname) as an additional hostname source. Precedence
+// is the legacy one: the zimbra_server_hostname environment variable, then
+// lcHostname, then /etc/hostname when neither is set.
+func NewConfigWithHostname(lcHostname string) (*Config, error) {
 	// Determine base directory from environment or default
 	baseDir := os.Getenv("ZEXTRAS_HOME")
 	if baseDir == "" {
@@ -161,21 +171,35 @@ func NewConfig() (*Config, error) {
 		LdapChangeDebounceSeconds: defaultLdapChangeDebounceSeconds,
 	}
 
-	// Get hostname, similar to os.popen("/opt/zextras/bin/zmhostname").readline().strip()
-	// This will be replaced with actual command execution later.
-	hostnameBytes, err := os.ReadFile("/etc/hostname") // Placeholder for zmhostname command
+	hostname, err := resolveHostname(lcHostname)
 	if err != nil {
-		return nil, fmt.Errorf("could not determine hostname: %w", err)
+		return nil, err
 	}
 
-	c.Hostname = strings.TrimSpace(string(hostnameBytes))
-
-	// Override hostname if zimbra_server_hostname environment variable is set
-	if os.Getenv("zimbra_server_hostname") != "" {
-		c.Hostname = os.Getenv("zimbra_server_hostname")
-	}
+	c.Hostname = hostname
 
 	return c, nil
+}
+
+// resolveHostname picks the server hostname: legacy conf.py uses the
+// zimbra_server_hostname environment variable, else zmhostname (the
+// zimbra_server_hostname localconfig key). /etc/hostname is the fallback for
+// hosts whose localconfig does not carry the key.
+func resolveHostname(lcHostname string) (string, error) {
+	if h := strings.TrimSpace(os.Getenv("zimbra_server_hostname")); h != "" {
+		return h, nil
+	}
+
+	if h := strings.TrimSpace(lcHostname); h != "" {
+		return h, nil
+	}
+
+	hostnameBytes, err := os.ReadFile("/etc/hostname")
+	if err != nil {
+		return "", fmt.Errorf("could not determine hostname: %w", err)
+	}
+
+	return strings.TrimSpace(string(hostnameBytes)), nil
 }
 
 // localStr sets *dst to data[key] when the key is present.

@@ -6,6 +6,7 @@ package config
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -517,4 +518,29 @@ func testConfigMap(src map[string]string) *ConfigMap {
 	}
 
 	return cm
+}
+
+// TestNewConfigWithHostname_Precedence: the environment wins, then the
+// localconfig zimbra_server_hostname, then /etc/hostname (D4).
+func TestNewConfigWithHostname_Precedence(t *testing.T) {
+	t.Setenv("zimbra_server_hostname", "env.example.com")
+
+	c, err := NewConfigWithHostname("lc.example.com")
+	if err != nil || c.Hostname != "env.example.com" {
+		t.Fatalf("env must win: got %v, %v", c, err)
+	}
+
+	t.Setenv("zimbra_server_hostname", "")
+
+	c, err = NewConfigWithHostname("  lc.example.com\n")
+	if err != nil || c.Hostname != "lc.example.com" {
+		t.Fatalf("localconfig value (trimmed) must win over /etc/hostname: got %v, %v", c, err)
+	}
+
+	if data, readErr := os.ReadFile("/etc/hostname"); readErr == nil {
+		c, err = NewConfigWithHostname("")
+		if want := strings.TrimSpace(string(data)); err != nil || c.Hostname != want {
+			t.Fatalf("must fall back to /etc/hostname %q: got %v, %v", want, c, err)
+		}
+	}
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/cli/rewrite"
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/ldap"
+	"github.com/zextras/carbonio-configd/internal/localconfig"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/snapshot"
 	"github.com/zextras/carbonio-configd/internal/state"
@@ -36,7 +37,7 @@ func initializeConfig() (*config.Config, *state.State, *ldap.Ldap) {
 // newRuntime builds the configuration, the state and the LDAP client shared by
 // the daemon and the standalone commands.
 func newRuntime(ctx context.Context) (*config.Config, *state.State, *ldap.Ldap, error) {
-	mainCfg, err := config.NewConfig()
+	mainCfg, err := config.NewConfigWithHostname(localHostname())
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("initialize config: %w", err)
 	}
@@ -52,6 +53,21 @@ func newRuntime(ctx context.Context) (*config.Config, *state.State, *ldap.Ldap, 
 	}}))
 
 	return mainCfg, appState, ldapClient, nil
+}
+
+// localHostname returns the zimbra_server_hostname key of localconfig.xml,
+// which legacy zmhostname prints, or "" when localconfig is unreadable or does
+// not set it (the LC.java default "localhost" is deliberately not used: it
+// would hide the real hostname on hosts whose localconfig predates the key).
+func localHostname() string {
+	raw, err := localconfig.LoadLocalConfigFromFile(localconfig.DefaultConfigPath)
+	if err != nil {
+		return ""
+	}
+
+	localconfig.Interpolate(raw)
+
+	return raw[cliutil.LCKeyZimbraServerHostname]
 }
 
 // runStandaloneRewrite runs one forced cycle in this process, as the legacy
