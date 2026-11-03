@@ -29,3 +29,9 @@ func buildDefaults() map[string]string {
 func IsProtected(key string) bool {
 	return lcProtected[key]
 }
+
+// IsNullKey reports whether key is a known KnownKey whose Java default is
+// null: it has no value unless localconfig.xml sets one.
+func IsNullKey(key string) bool {
+	return lcNullKeys[key]
+}
