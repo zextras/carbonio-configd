@@ -80,8 +80,8 @@ func TestRun_ConfNginxNotInstalled(t *testing.T) {
 
 	code := Run(context.Background(), systest.New().System(), &stdout, &stderr, &Options{Action: ActionConf})
 
-	if code != 0 || stdout.String() != "Nginx not installed, exiting\n" {
-		t.Errorf("code=%d stdout=%q, want 0 and the not-installed line", code, stdout.String())
+	if code != 1 || stdout.String() != "Nginx not installed, exiting\n" {
+		t.Errorf("code=%d stdout=%q, want 1 and the not-installed line", code, stdout.String())
 	}
 }
 

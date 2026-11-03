@@ -154,3 +154,46 @@ Example:
     server mailbox1.example.com:7071;
     server mailbox2.example.com:7071;
 ```
+
+## Command line: `configd proxy gen` and `configd proxy conf`
+
+Source: `cmd/configd/proxycli.go`, `cmd/configd/proxygen.go`, `internal/cli/proxy/gen.go`
+
+### `configd proxy gen` (legacy `zmproxyconfgen`)
+
+`zmproxyconfgen` is `exec configd proxy gen "$@"`. The command loads the configuration
+from LDAP and localconfig and runs the same generator as the daemon's `PROXYGEN` directive
+**synchronously in the calling process**; the files are on disk when it returns. It does
+not talk to the daemon. It takes the flags of the Java `ProxyConfGen`:
+
+| Flag | Meaning |
+|---|---|
+| `-h`, `--help` | Show the usage (kong help) |
+| `-v`, `--verbose` | Debug logging (the default is INFO on stderr) |
+| `-w`, `--workdir <dir>` | Working directory, default `/opt/zextras` (`core.workdir`, `<dir>/conf` is the conf dir) |
+| `-t`, `--templatedir <dir>` | Template directory, default `<workdir>/conf/nginx/templates` |
+| `-n`, `--dry-run` | Render everything, write nothing |
+| `-d`, `--defaults` | Print the default variable map and exit; reads no LDAP |
+| `-D`, `--definitions` | Load the configuration, apply `-c`, print the variable map and exit |
+| `-p`, `--prefix <name>` | Prefix of the generated files, default `nginx.conf` |
+| `-P`, `--template-prefix <name>` | Prefix of the templates, default the config prefix; only templates of that prefix are generated |
+| `-i`, `--include-dir <dir>` | Directory of the included files relative to `<workdir>/conf`, default `nginx/includes` |
+| `-s`, `--server <name>` | Generate from this server object instead of the local server |
+| `-f`, `--force-dns-resolution` | Fail when the virtual hostname (or virtual IP) of a domain does not resolve |
+| `-c`, `--config name=value` | Override the text a variable expands to. Unknown names and entries without `=` are logged and ignored. `-c a=b c=d` works as in commons-cli: every extra `name=value` argument is one more override |
+
+Exit status: `0` on success, `-d`, `-D`, `-h` and when stray positional arguments only make
+it print the usage; `1` on any error (configuration not loadable, unknown `-s` server,
+template or write failure, `-f` failure, not run as `zextras` when files would be written;
+`-n`, `-d` and `-D` do not require `zextras`).
+
+`-v` is rewritten to `--verbose` before parsing, because the root command owns `-v`
+(`--version`). Differences from the Java tool: `-f` checks the domains before rendering
+and only with `-f` (Java also warns without it); `-d`/`-D` list the Go variable names
+sorted by keyword.
+
+### `configd proxy conf` (legacy `zmproxyconf`/`zmnginxconf`)
+
+Flags: `-m`/`--markers`, `-i`/`--indent`, `-n`/`--nocomments` (alias `--no-comments`),
+`-e`/`--noempty` (alias `--no-empty`), optional `NGINX-CONF-FILE`. Exit status `1` with
+`Nginx not installed, exiting` on stdout when the nginx binary is missing, as `proxyconf.pl`.
