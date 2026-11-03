@@ -138,6 +138,27 @@ spec:
             }
         }
 
+        // The carbonio-configd image: the static binary plus the carbonio-core
+        // templates (docker/configd/Dockerfile). It needs a docker-capable node, which
+        // the golang pod is not.
+        stage('Publish docker image') {
+            agent {
+                node {
+                    label 'base'
+                }
+            }
+            steps {
+                checkout scm
+                gitMetadata()
+                dockerStage([
+                    dockerfile: 'docker/configd/Dockerfile',
+                    imageName: 'carbonio-configd',
+                    ocLabels: [title: 'Carbonio configd'],
+                    platforms: ['linux/amd64', 'linux/arm64'] as Set,
+                ])
+            }
+        }
+
         stage('Upload artifacts') {
             when {
                 expression { return uploadStage.shouldUpload() }

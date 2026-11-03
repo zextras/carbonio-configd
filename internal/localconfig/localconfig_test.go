@@ -236,19 +236,6 @@ func TestFormatAsKeyValue_SortedOrder(t *testing.T) {
 	}
 }
 
-// TestLoadLocalConfig_UsesDefaultPath tests that LoadLocalConfig uses the default path
-func TestLoadLocalConfig_UsesDefaultPath(t *testing.T) {
-	// This test will only pass if running in actual Carbonio environment
-	// In test environment, it should fail gracefully
-	_, err := LoadLocalConfig()
-
-	// We expect an error in test environment (file doesn't exist)
-	// This is fine - we're just testing that it tries to read from the right path
-	if err != nil && !strings.Contains(err.Error(), "failed to read localconfig file") {
-		t.Errorf("Expected 'failed to read localconfig file' error, got: %v", err)
-	}
-}
-
 // TestLoadLocalConfigFromFile_SpecialCharacters tests handling of special characters in values
 func TestLoadLocalConfigFromFile_SpecialCharacters(t *testing.T) {
 	xmlContent := `<?xml version="1.0" encoding="UTF-8"?>
@@ -336,8 +323,8 @@ func BenchmarkLoadLocalConfigFromFile(b *testing.B) {
 	}
 }
 
-// TestLoadResolvedConfigFromFile_Basic tests the LoadResolvedConfigFromFile function
-func TestLoadResolvedConfigFromFile_Basic(t *testing.T) {
+// TestLoadEffectiveFrom_Basic tests the LoadEffectiveFrom function
+func TestLoadEffectiveFrom_Basic(t *testing.T) {
 	t.Run("resolves variable references", func(t *testing.T) {
 		xmlContent := `<?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <localconfig>
@@ -354,9 +341,9 @@ func TestLoadResolvedConfigFromFile_Basic(t *testing.T) {
 			t.Fatalf("Failed to write test file: %v", err)
 		}
 
-		result, err := LoadResolvedConfigFromFile(tmpFile)
+		result, err := LoadEffectiveFrom(tmpFile, nil)
 		if err != nil {
-			t.Fatalf("LoadResolvedConfigFromFile() failed: %v", err)
+			t.Fatalf("LoadEffectiveFrom() failed: %v", err)
 		}
 
 		// Variable reference should be resolved
@@ -378,9 +365,9 @@ func TestLoadResolvedConfigFromFile_Basic(t *testing.T) {
 			t.Fatalf("Failed to write test file: %v", err)
 		}
 
-		result, err := LoadResolvedConfigFromFile(tmpFile)
+		result, err := LoadEffectiveFrom(tmpFile, nil)
 		if err != nil {
-			t.Fatalf("LoadResolvedConfigFromFile() failed: %v", err)
+			t.Fatalf("LoadEffectiveFrom() failed: %v", err)
 		}
 
 		// Result should contain the explicit key
@@ -394,10 +381,14 @@ func TestLoadResolvedConfigFromFile_Basic(t *testing.T) {
 		}
 	})
 
-	t.Run("returns error for missing file", func(t *testing.T) {
-		_, err := LoadResolvedConfigFromFile("/nonexistent/path/localconfig.xml")
-		if err == nil {
-			t.Error("Expected error for missing file")
+	t.Run("missing file is an empty layer", func(t *testing.T) {
+		result, err := LoadEffectiveFrom("/nonexistent/path/localconfig.xml", nil)
+		if err != nil {
+			t.Fatalf("missing file must not be an error: %v", err)
+		}
+
+		if result["zimbra_home"] != Defaults["zimbra_home"] {
+			t.Errorf("defaults not merged: zimbra_home = %q", result["zimbra_home"])
 		}
 	})
 
@@ -407,26 +398,11 @@ func TestLoadResolvedConfigFromFile_Basic(t *testing.T) {
 			t.Fatalf("Failed to write test file: %v", err)
 		}
 
-		_, err := LoadResolvedConfigFromFile(tmpFile)
+		_, err := LoadEffectiveFrom(tmpFile, nil)
 		if err == nil {
 			t.Error("Expected error for invalid XML")
 		}
 	})
-}
-
-// TestLoadResolvedConfig_DefaultPathErrors tests that LoadResolvedConfig errors gracefully in test env
-func TestLoadResolvedConfig_DefaultPathErrors(t *testing.T) {
-	// In the test environment, the default path does not exist.
-	// The function body (calling LoadResolvedConfigFromFile) still executes and returns an error.
-	_, err := LoadResolvedConfig()
-	if err == nil {
-		// In a real Carbonio installation the file exists and this succeeds; skip gracefully.
-		t.Skip("Default localconfig.xml exists — skipping error path test")
-	}
-	// Error is expected in test environments where /opt/zextras is not present.
-	if !strings.Contains(err.Error(), "failed to read localconfig file") {
-		t.Errorf("Unexpected error message: %v", err)
-	}
 }
 
 // BenchmarkFormatAsKeyValue benchmarks key=value formatting

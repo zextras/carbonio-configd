@@ -100,8 +100,3 @@ func TestLookupFileKey_ReadsFromTemplateDir(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "from-templates", got)
 }
-
-func TestAttrsDir_FollowsTemplateDir(t *testing.T) {
-	assert.Equal(t, "", attrsDir(map[string]string{}))
-	assert.Equal(t, "/share/configd/conf/attrs", attrsDir(map[string]string{"zmconfigd_template_dir": "/share/configd"}))
-}

@@ -6,8 +6,12 @@ package configmgr
 
 import (
 	"context"
+	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/zextras/carbonio-configd/internal/localconfig"
 )
 
 // TestLoadLocalConfigWithRetry_Success tests successful local config loading
@@ -46,40 +50,35 @@ func TestLoadLocalConfigWithRetry_Success(t *testing.T) {
 	}
 }
 
-// TestLoadLocalConfigWithRetry_XMLNotAvailable tests behavior when XML file is unavailable
+// TestLoadLocalConfigWithRetry_XMLNotAvailable tests that a missing localconfig.xml
+// is an empty layer: the effective localconfig is the defaults and the environment.
 func TestLoadLocalConfigWithRetry_XMLNotAvailable(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: has retry delays")
-	}
-
 	cm := newTestConfigManager(t)
-
-	// Don't set cachedLocalConfigOutput, so it will try to read the XML file
-	// which doesn't exist in the test environment
-
-	err := cm.loadLocalConfigWithRetry(context.Background(), 1)
-	if err == nil {
-		t.Fatal("Expected error when XML file not available")
+	cm.loadLocalConfig = func() (map[string]string, error) {
+		return localconfig.LoadEffectiveFrom(filepath.Join(t.TempDir(), "absent.xml"), nil)
 	}
 
-	if !strings.Contains(err.Error(), "failed to load localconfig") {
-		t.Errorf("Unexpected error message: %v", err)
+	if err := cm.loadLocalConfigWithRetry(context.Background(), 1); err != nil {
+		t.Fatalf("a missing localconfig.xml must not fail the load: %v", err)
 	}
 }
 
-// TestLoadLocalConfigWithRetry_CommandFails tests retry logic on XML file read failure
+// TestLoadLocalConfigWithRetry_CommandFails tests the error of a loader that fails
+// (an unreadable or malformed localconfig.xml).
 func TestLoadLocalConfigWithRetry_CommandFails(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: has retry delays")
 	}
 
 	cm := newTestConfigManager(t)
+	cm.loadLocalConfig = func() (map[string]string, error) {
+		return nil, errors.New("parse error")
+	}
 
-	// Don't set cachedLocalConfigOutput, so it will try to read XML each time
 	// With only 1 retry to keep the test fast
 	err := cm.loadLocalConfigWithRetry(context.Background(), 1)
 	if err == nil {
-		t.Fatal("Expected error when XML file unavailable")
+		t.Fatal("Expected error when the localconfig loader fails")
 	}
 
 	if !strings.Contains(err.Error(), "failed to load localconfig") {

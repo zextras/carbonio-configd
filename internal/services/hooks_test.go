@@ -150,7 +150,7 @@ func TestHookBackend_ReadOnlyHostRecordsNothing(t *testing.T) {
 
 	f := systest.New()
 	ctl := NewController(withMode(sys.ReadOnly(f.System()), false),
-		WithConfigLoader(emptyConfig), WithRawConfigLoader(emptyConfig))
+		WithConfigLoader(emptyConfig))
 	runService(t, ctl, f, svcAmavis, 4100)
 	f.Rec.Reset()
 

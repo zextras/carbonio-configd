@@ -145,7 +145,7 @@ Four goroutines run concurrently, one per config source:
 
 | Goroutine name | Function | What it loads |
 |---|---|---|
-| `lc` | `LoadLocalConfig` | `localconfig.xml` via the Go native reader |
+| `lc` | `LoadLocalConfig` | the effective localconfig (`localconfig.LoadEffective`): defaults, `localconfig.xml` (optional) and the `CONFIGD_LC_<key>` environment, via the Go native reader |
 | `gc` | `LoadGlobalConfig` | Global config attributes via native LDAP client |
 | `mc` | `LoadMiscConfig` | Miscellaneous service states (SERVICE_* keys) |
 | `sc` | `LoadServerConfig` | Per-server attributes via native LDAP client |

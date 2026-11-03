@@ -17,8 +17,6 @@ import (
 const (
 	// CacheTTL defines the default time-to-live for cache entries in seconds.
 	CacheTTL = 300
-	// defaultBaseDir is the default base directory for Zextras installation.
-	defaultBaseDir = ZextrasBase
 	// programName is the name of the configd program.
 	programName = "zmconfigd"
 	// defaultLdapChangePollSeconds and defaultLdapChangeDebounceSeconds are the
@@ -144,13 +142,11 @@ type RewriteEntry struct {
 	Mode  string
 }
 
-// NewConfig initializes a new Config with default values.
+// NewConfig initializes a new Config with default values. The base directory
+// is BaseDir (CARBONIO_BASE_DIR); the hostname is /etc/hostname, which a
+// CONFIGD_LC_zimbra_server_hostname overlay replaces in the caller.
 func NewConfig() (*Config, error) {
-	// Determine base directory from environment or default
-	baseDir := os.Getenv("ZEXTRAS_HOME")
-	if baseDir == "" {
-		baseDir = defaultBaseDir
-	}
+	baseDir := BaseDir()
 
 	c := &Config{
 		Progname:         programName,
@@ -181,11 +177,6 @@ func NewConfig() (*Config, error) {
 	}
 
 	c.Hostname = strings.TrimSpace(string(hostnameBytes))
-
-	// Override hostname if zimbra_server_hostname environment variable is set
-	if os.Getenv("zimbra_server_hostname") != "" {
-		c.Hostname = os.Getenv("zimbra_server_hostname")
-	}
 
 	return c, nil
 }

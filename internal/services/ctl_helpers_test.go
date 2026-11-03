@@ -56,7 +56,7 @@ func newFakeController(t *testing.T, opts ...Option) (*Controller, *systest.Fake
 
 	f := systest.New()
 	ctl := NewController(withMode(f.System(), false),
-		append([]Option{WithConfigLoader(emptyConfig), WithRawConfigLoader(emptyConfig)}, opts...)...)
+		append([]Option{WithConfigLoader(emptyConfig)}, opts...)...)
 
 	return ctl, f
 }
@@ -74,7 +74,6 @@ func newRealController(t *testing.T, opts ...Option) *Controller {
 	defaults := []Option{
 		WithRunDir(t.TempDir()),
 		WithConfigLoader(emptyConfig),
-		WithRawConfigLoader(emptyConfig),
 	}
 
 	return NewController(env, append(defaults, opts...)...)

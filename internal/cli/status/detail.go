@@ -25,14 +25,14 @@ import (
 type Reporter struct {
 	env sys.System
 	ctl *services.Controller
-	// loadLocalConfig reads the raw localconfig for the Advanced status probe.
+	// loadLocalConfig reads the effective localconfig for the Advanced status probe.
 	loadLocalConfig func() (map[string]string, error)
 }
 
 // NewReporter returns a Reporter that probes services through ctl and the host
 // through env.
 func NewReporter(env sys.System, ctl *services.Controller) *Reporter {
-	return &Reporter{env: env, ctl: ctl, loadLocalConfig: localconfig.LoadLocalConfig}
+	return &Reporter{env: env, ctl: ctl, loadLocalConfig: localconfig.LoadEffective}
 }
 
 // PrintServiceStatus reports one service's state plus PID/uptime detail.

@@ -34,7 +34,7 @@ type runtimeOpts struct {
 	// disableRestarts is --disable-restarts.
 	disableRestarts bool
 	// loadLocal loads the effective localconfig; nil means
-	// localconfig.LoadResolvedConfig. Tests inject it.
+	// localconfig.LoadEffective. Tests inject it.
 	loadLocal func() (map[string]string, error)
 }
 
@@ -110,7 +110,7 @@ func buildRuntime(ctx context.Context, env sys.System, opts *runtimeOpts) (*runt
 func applyRuntimeKeys(ctx context.Context, cfg *config.Config, opts *runtimeOpts) {
 	load := opts.loadLocal
 	if load == nil {
-		load = localconfig.LoadResolvedConfig
+		load = localconfig.LoadEffective
 	}
 
 	data, err := load()
@@ -121,6 +121,13 @@ func applyRuntimeKeys(ctx context.Context, cfg *config.Config, opts *runtimeOpts
 	}
 
 	cfg.SetRuntimeVals(snapshot.New(snapshot.Parts{Local: data}).LocalConfig())
+
+	// The server hostname is /etc/hostname unless the environment overlay
+	// (CONFIGD_LC_zimbra_server_hostname) names it, as in a pod whose hostname
+	// is not the LDAP server entry's.
+	if host, ok := localconfig.EnvOverride("zimbra_server_hostname"); ok && host != "" {
+		cfg.Hostname = host
+	}
 }
 
 // loadHooks reads and checks the hooks file.

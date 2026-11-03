@@ -20,8 +20,11 @@ import (
 )
 
 // defaultAttrsDir is the directory holding the attribute schema files the Java
-// AttributeManager loads (every *.xml in it, attrs.xml included).
-const defaultAttrsDir = config.ZextrasBase + "/conf/attrs"
+// AttributeManager loads (every *.xml in it, attrs.xml included), under the
+// install root (config.BaseDir).
+func defaultAttrsDir() string {
+	return config.BaseDir() + "/conf/attrs"
+}
 
 // flagServerInherited is the attrs.xml flag marking an attribute whose value
 // on a server entry defaults to the global config value.

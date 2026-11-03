@@ -22,10 +22,10 @@ func TestInitNativeLdapClient_LoadFails(t *testing.T) {
 	}
 
 	cm := &ConfigManager{
-		env:                    hostEnv(),
-		loadLocalConfigForLDAP: load,
-		mainConfig:             &config.Config{},
-		CommandRegistry:        commands.NewRegistry(),
+		env:             hostEnv(),
+		loadLocalConfig: load,
+		mainConfig:      &config.Config{},
+		CommandRegistry: commands.NewRegistry(),
 	}
 	cm.initNativeLdapClient(context.Background())
 
@@ -45,10 +45,10 @@ func TestInitNativeLdapClient_MissingURL(t *testing.T) {
 	}
 
 	cm := &ConfigManager{
-		env:                    hostEnv(),
-		loadLocalConfigForLDAP: load,
-		mainConfig:             &config.Config{},
-		CommandRegistry:        commands.NewRegistry(),
+		env:             hostEnv(),
+		loadLocalConfig: load,
+		mainConfig:      &config.Config{},
+		CommandRegistry: commands.NewRegistry(),
 	}
 	cm.initNativeLdapClient(context.Background())
 
@@ -69,10 +69,10 @@ func TestInitNativeLdapClient_WhitespaceURL(t *testing.T) {
 	}
 
 	cm := &ConfigManager{
-		env:                    hostEnv(),
-		loadLocalConfigForLDAP: load,
-		mainConfig:             &config.Config{},
-		CommandRegistry:        commands.NewRegistry(),
+		env:             hostEnv(),
+		loadLocalConfig: load,
+		mainConfig:      &config.Config{},
+		CommandRegistry: commands.NewRegistry(),
 	}
 	cm.initNativeLdapClient(context.Background())
 
@@ -92,10 +92,10 @@ func TestInitNativeLdapClient_MissingBindDN(t *testing.T) {
 	}
 
 	cm := &ConfigManager{
-		env:                    hostEnv(),
-		loadLocalConfigForLDAP: load,
-		mainConfig:             &config.Config{},
-		CommandRegistry:        commands.NewRegistry(),
+		env:             hostEnv(),
+		loadLocalConfig: load,
+		mainConfig:      &config.Config{},
+		CommandRegistry: commands.NewRegistry(),
 	}
 	cm.initNativeLdapClient(context.Background())
 
@@ -115,10 +115,10 @@ func TestInitNativeLdapClient_MissingPassword(t *testing.T) {
 	}
 
 	cm := &ConfigManager{
-		env:                    hostEnv(),
-		loadLocalConfigForLDAP: load,
-		mainConfig:             &config.Config{},
-		CommandRegistry:        commands.NewRegistry(),
+		env:             hostEnv(),
+		loadLocalConfig: load,
+		mainConfig:      &config.Config{},
+		CommandRegistry: commands.NewRegistry(),
 	}
 	cm.initNativeLdapClient(context.Background())
 
@@ -142,10 +142,10 @@ func TestInitNativeLdapClient_MultiURLSucceedsBuilding(t *testing.T) {
 	// so no global cleanup is needed.
 
 	cm := &ConfigManager{
-		env:                    hostEnv(),
-		loadLocalConfigForLDAP: load,
-		mainConfig:             &config.Config{},
-		CommandRegistry:        commands.NewRegistry(),
+		env:             hostEnv(),
+		loadLocalConfig: load,
+		mainConfig:      &config.Config{},
+		CommandRegistry: commands.NewRegistry(),
 	}
 	cm.initNativeLdapClient(context.Background())
 
@@ -167,11 +167,11 @@ func TestInitNativeLdapClient_ConfigClientWiredWithRootPassword(t *testing.T) {
 	}
 
 	cm := &ConfigManager{
-		env:                    hostEnv(),
-		loadLocalConfigForLDAP: load,
-		mainConfig:             &config.Config{},
-		CommandRegistry:        commands.NewRegistry(),
-		LdapClient:             ldap.NewLdap(context.Background(), &config.Config{}),
+		env:             hostEnv(),
+		loadLocalConfig: load,
+		mainConfig:      &config.Config{},
+		CommandRegistry: commands.NewRegistry(),
+		LdapClient:      ldap.NewLdap(context.Background(), &config.Config{}),
 	}
 	cm.initNativeLdapClient(context.Background())
 
@@ -199,11 +199,11 @@ func TestInitNativeLdapClient_ConfigClientNilWithoutRootPassword(t *testing.T) {
 	}
 
 	cm := &ConfigManager{
-		env:                    hostEnv(),
-		loadLocalConfigForLDAP: load,
-		mainConfig:             &config.Config{},
-		CommandRegistry:        commands.NewRegistry(),
-		LdapClient:             ldap.NewLdap(context.Background(), &config.Config{}),
+		env:             hostEnv(),
+		loadLocalConfig: load,
+		mainConfig:      &config.Config{},
+		CommandRegistry: commands.NewRegistry(),
+		LdapClient:      ldap.NewLdap(context.Background(), &config.Config{}),
 	}
 	cm.initNativeLdapClient(context.Background())
 

@@ -14,6 +14,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/zextras/carbonio-configd/internal/ldap"
 )
 
 // attrs builds the LDAP attribute map the native client returns from
@@ -52,32 +54,32 @@ func readFixtureMap(t *testing.T, name string) map[string]string {
 	return m
 }
 
-// TestNormalizeLDAPAttrs_MatchesFormerTextRoundTrip pins the typed path to the
+// TestNormalizeAttrs_MatchesFormerTextRoundTrip pins the typed path to the
 // ConfigMap the removed ldap.FormatAsZmprovOutput -> parseLDAPCommandOutput
 // text round trip produced. Fixtures: "_in" is the attribute map of
 // `zmprov -l gs`/`gacf` captured from a Carbonio 4.6.7 server (secrets
 // replaced by REDACTED-* placeholders, plus synthetic edge cases for colon
 // values, empty and padded values, blank and "key: value"-looking lines);
 // "_exp" is what the old round trip returned for exactly that input.
-func TestNormalizeLDAPAttrs_MatchesFormerTextRoundTrip(t *testing.T) {
+func TestNormalizeAttrs_MatchesFormerTextRoundTrip(t *testing.T) {
 	for _, name := range []string{"gs", "gacf"} {
 		t.Run(name, func(t *testing.T) {
 			in := readFixtureMap(t, name+"_in.json")
 			want := readFixtureMap(t, name+"_exp.json")
 
-			assert.Equal(t, want, normalizeLDAPAttrs(in))
+			assert.Equal(t, want, ldap.NormalizeAttrs(in))
 		})
 	}
 }
 
-func TestNormalizeLDAPAttrs_DoesNotAliasInput(t *testing.T) {
+func TestNormalizeAttrs_DoesNotAliasInput(t *testing.T) {
 	in := map[string]string{"zimbraFoo": " a \n b "}
-	got := normalizeLDAPAttrs(in)
+	got := ldap.NormalizeAttrs(in)
 
 	got["zimbraFoo"] = "changed"
 
 	assert.Equal(t, " a \n b ", in["zimbraFoo"])
-	assert.Equal(t, map[string]string{"zimbraFoo": "a\nb"}, normalizeLDAPAttrs(in))
+	assert.Equal(t, map[string]string{"zimbraFoo": "a\nb"}, ldap.NormalizeAttrs(in))
 }
 
 func TestFetchAttrs_UnregisteredAndEmpty(t *testing.T) {
