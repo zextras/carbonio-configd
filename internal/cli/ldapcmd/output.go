@@ -122,19 +122,24 @@ func printEntries(w io.Writer, entries []*goldap.Entry, asJSON bool) error {
 			}
 		}
 
-		if _, err := fmt.Fprintf(w, "dn: %s\n", entry.DN); err != nil {
-			return err
-		}
-
-		flat := make(map[string]string, len(entry.Attributes))
-		for name, values := range entry.Attributes {
-			flat[name] = strings.Join(values, "\n")
-		}
-
-		if err := printAttrs(w, flat, false); err != nil {
+		if err := printEntry(w, entry); err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+// printEntry writes one search result as its DN line and "attr: value" lines.
+func printEntry(w io.Writer, entry searchEntry) error {
+	if _, err := fmt.Fprintf(w, "dn: %s\n", entry.DN); err != nil {
+		return err
+	}
+
+	flat := make(map[string]string, len(entry.Attributes))
+	for name, values := range entry.Attributes {
+		flat[name] = strings.Join(values, "\n")
+	}
+
+	return printAttrs(w, flat, false)
 }

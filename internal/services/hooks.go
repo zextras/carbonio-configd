@@ -99,29 +99,41 @@ func NewHookBackend(ctl *Controller, hooks Hooks) (*HookBackend, error) {
 			return nil, fmt.Errorf("%w: unknown service %q", ErrHooks, svc)
 		}
 
-		b.hooks[name] = map[string][]hookSpec{}
-
-		for action, specs := range actions {
-			if !slices.Contains([]string{hookStart, hookStop, hookRestart, hookStatus}, action) {
-				return nil, fmt.Errorf("%w: service %q: unknown action %q", ErrHooks, svc, action)
-			}
-
-			if len(specs) == 0 {
-				return nil, fmt.Errorf("%w: service %q: %s has no hook", ErrHooks, svc, action)
-			}
-
-			for _, raw := range specs {
-				spec, err := parseHookSpec(ctl, action, raw)
-				if err != nil {
-					return nil, fmt.Errorf("%w: service %q %s: %w", ErrHooks, svc, action, err)
-				}
-
-				b.hooks[name][action] = append(b.hooks[name][action], spec)
-			}
+		parsed, err := parseServiceHooks(ctl, svc, actions)
+		if err != nil {
+			return nil, err
 		}
+
+		b.hooks[name] = parsed
 	}
 
 	return b, nil
+}
+
+// parseServiceHooks parses the per-action hook lists of service svc.
+func parseServiceHooks(ctl *Controller, svc string, actions map[string][]string) (map[string][]hookSpec, error) {
+	parsed := make(map[string][]hookSpec, len(actions))
+
+	for action, specs := range actions {
+		if !slices.Contains([]string{hookStart, hookStop, hookRestart, hookStatus}, action) {
+			return nil, fmt.Errorf("%w: service %q: unknown action %q", ErrHooks, svc, action)
+		}
+
+		if len(specs) == 0 {
+			return nil, fmt.Errorf("%w: service %q: %s has no hook", ErrHooks, svc, action)
+		}
+
+		for _, raw := range specs {
+			spec, err := parseHookSpec(ctl, action, raw)
+			if err != nil {
+				return nil, fmt.Errorf("%w: service %q %s: %w", ErrHooks, svc, action, err)
+			}
+
+			parsed[action] = append(parsed[action], spec)
+		}
+	}
+
+	return parsed, nil
 }
 
 // parseHookSpec parses one hook specification valid for action.

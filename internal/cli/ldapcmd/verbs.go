@@ -44,42 +44,61 @@ func parseMcf(args []string) (*mcfChange, error) {
 	}
 
 	for i := 0; i < len(args); i += 2 {
-		name, value := args[i], args[i+1]
-
-		switch {
-		case strings.HasPrefix(name, "+"):
-			attr := name[1:]
-			if attr == "" || value == "" {
-				return nil, fmt.Errorf("mcf: %q needs an attribute and a non-empty value", name)
-			}
-
-			c.add[attr] = append(c.add[attr], value)
-		case strings.HasPrefix(name, "-"):
-			attr := name[1:]
-			if attr == "" {
-				return nil, fmt.Errorf("mcf: %q has no attribute", name)
-			}
-
-			// An empty value list removes the attribute outright.
-			if value == "" {
-				c.del[attr] = nil
-			} else if values, whole := c.del[attr]; !whole || len(values) > 0 {
-				c.del[attr] = append(values, value)
-			}
-		default:
-			if name == "" {
-				return nil, errors.New("mcf: empty attribute name")
-			}
-
-			if value == "" {
-				c.replace[name] = nil
-			} else {
-				c.replace[name] = append(c.replace[name], value)
-			}
+		if err := c.addPair(args[i], args[i+1]); err != nil {
+			return nil, err
 		}
 	}
 
 	return c, nil
+}
+
+// addPair records one "[+|-]attr value" pair.
+func (c *mcfChange) addPair(name, value string) error {
+	switch {
+	case strings.HasPrefix(name, "+"):
+		return c.addValue(name, value)
+	case strings.HasPrefix(name, "-"):
+		return c.delValue(name, value)
+	default:
+		if name == "" {
+			return errors.New("mcf: empty attribute name")
+		}
+
+		if value == "" {
+			c.replace[name] = nil
+		} else {
+			c.replace[name] = append(c.replace[name], value)
+		}
+
+		return nil
+	}
+}
+
+func (c *mcfChange) addValue(name, value string) error {
+	attr := name[1:]
+	if attr == "" || value == "" {
+		return fmt.Errorf("mcf: %q needs an attribute and a non-empty value", name)
+	}
+
+	c.add[attr] = append(c.add[attr], value)
+
+	return nil
+}
+
+// delValue records a "-attr value"; an empty value removes the attribute outright.
+func (c *mcfChange) delValue(name, value string) error {
+	attr := name[1:]
+	if attr == "" {
+		return fmt.Errorf("mcf: %q has no attribute", name)
+	}
+
+	if value == "" {
+		c.del[attr] = nil
+	} else if values, whole := c.del[attr]; !whole || len(values) > 0 {
+		c.del[attr] = append(values, value)
+	}
+
+	return nil
 }
 
 func modifyConfig(conn Conn, args []string) error {
