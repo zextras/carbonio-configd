@@ -352,7 +352,9 @@ func (t *Transformer) xformLocalConfig(ctx context.Context, match string) (strin
 			return "", fmt.Errorf("%w: @@%s %s@@: key is not set in localconfig", ErrTransform, funcName, lookupKey)
 		}
 
-		logger.WarnContext(ctx, "Could not look up local config key",
+		// Legacy renders "" silently (jylibs xformLocalConfig logs only at level 5), so an
+		// unset key is expected for optional @@KEY@@ references, not a warning.
+		logger.DebugContext(ctx, "Could not look up local config key",
 			"key", lookupKey,
 			"error", err)
 

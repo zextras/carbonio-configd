@@ -5,9 +5,12 @@
 package transformer
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"testing"
 
+	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/testutil"
 )
 
@@ -259,5 +262,40 @@ func TestBinaryTrueFalse_NegatedKey(t *testing.T) {
 		if got := mustTransform(t, tr, context.Background(), tt.input); got != tt.want {
 			t.Errorf("Transform(%q) = %q, want %q", tt.input, got, tt.want)
 		}
+	}
+}
+
+// state.py xformLocalConfig / xformConfig render "" for an unset localconfig
+// key or an unknown variable and log nothing above level 5 (debug). Warning on
+// every cycle for optional keys (postfix_submission_smtpd_tls_*_file,
+// amavis_sslversion, zimbraSpamSubjectTag, ...) is noise, so these lookups
+// must stay below WARN while still rendering an empty value.
+func TestTransform_UnsetKeysRenderEmptyWithoutWarning(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+
+	ctx := logger.ContextWithLogger(context.Background(),
+		slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
+
+	tr := newParityTransformer()
+
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"unset localconfig key", "k=@@postfix_submission_smtpd_tls_key_file@@;", "k=;\n"},
+		{"unknown variable", "k=%%zimbraSpamSubjectTag%%;", "k=;\n"},
+	}
+
+	for _, tt := range tests {
+		if got := mustTransform(t, tr, ctx, tt.input); got != tt.want {
+			t.Errorf("%s: Transform(%q) = %q, want %q", tt.name, tt.input, got, tt.want)
+		}
+	}
+
+	if buf.Len() != 0 {
+		t.Errorf("expected no log output at INFO and above, got: %s", buf.String())
 	}
 }
