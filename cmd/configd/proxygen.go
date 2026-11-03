@@ -9,14 +9,10 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/zextras/carbonio-configd/internal/cache"
 	"github.com/zextras/carbonio-configd/internal/cli/proxy"
 	"github.com/zextras/carbonio-configd/internal/config"
-	"github.com/zextras/carbonio-configd/internal/configmgr"
-	"github.com/zextras/carbonio-configd/internal/ldap"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	proxygen "github.com/zextras/carbonio-configd/internal/proxy"
-	"github.com/zextras/carbonio-configd/internal/state"
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
@@ -32,20 +28,7 @@ func generateProxy(env sys.System) proxy.GenFunc {
 }
 
 func runProxyGen(ctx context.Context, env sys.System, stdout io.Writer, o *proxy.GenOptions) error {
-	mainCfg, appState, ldapClient, err := newRuntime(ctx)
-	if err != nil {
-		return err
-	}
-
-	if o.WorkDir != "" {
-		mainCfg.BaseDir = o.WorkDir
-	}
-
-	if o.Server != "" {
-		mainCfg.Hostname = o.Server
-	}
-
-	gen, err := newProxyGenerator(ctx, env, mainCfg, appState, ldapClient, o)
+	gen, err := newProxyGenerator(ctx, env, o)
 	if err != nil {
 		return err
 	}
@@ -79,24 +62,44 @@ func proxySettings(o *proxy.GenOptions) *proxygen.Settings {
 	}
 }
 
+// adjustForProxyGen applies the -w (work dir) and -s (server) flags.
+func adjustForProxyGen(o *proxy.GenOptions) func(*config.Config) {
+	return func(cfg *config.Config) {
+		if o.WorkDir != "" {
+			cfg.BaseDir = o.WorkDir
+		}
+
+		if o.Server != "" {
+			cfg.Hostname = o.Server
+		}
+	}
+}
+
 // newProxyGenerator builds the generator over the configuration loaded from
 // LDAP. -d needs no configuration, so the generator then holds the defaults
 // and nothing is loaded (legacy -d never reads LDAP).
-func newProxyGenerator(
-	ctx context.Context, env sys.System, mainCfg *config.Config, appState *state.State, ldapClient *ldap.Ldap,
-	o *proxy.GenOptions,
-) (*proxygen.Generator, error) {
+func newProxyGenerator(ctx context.Context, env sys.System, o *proxy.GenOptions) (*proxygen.Generator, error) {
+	opts := &runtimeOpts{adjust: adjustForProxyGen(o)}
+
 	if o.Defaults {
-		return proxygen.LoadConfiguration(ctx, env, mainCfg, proxygen.Sources{Settings: proxySettings(o)})
+		cfg, err := newConfig(ctx, opts)
+		if err != nil {
+			return nil, err
+		}
+
+		return proxygen.LoadConfiguration(ctx, env, cfg, proxygen.Sources{Settings: proxySettings(o)})
 	}
 
-	cm := configmgr.NewConfigManager(ctx, mainCfg, appState, ldapClient, cache.New(ctx, false), env)
+	rt, err := buildRuntime(ctx, env, opts)
+	if err != nil {
+		return nil, err
+	}
 
-	logger.InfoContext(ctx, "Loading server object: "+mainCfg.Hostname)
+	logger.InfoContext(ctx, "Loading server object: "+rt.cfg.Hostname)
 
-	if err := cm.LoadAllConfigs(ctx); err != nil {
+	if err := rt.cm.LoadAllConfigs(ctx); err != nil {
 		return nil, fmt.Errorf("cannot load the configuration (make sure the server specified with -s exists): %w", err)
 	}
 
-	return cm.NewProxyGenerator(ctx, *proxySettings(o))
+	return rt.cm.NewProxyGenerator(ctx, *proxySettings(o))
 }

@@ -14,7 +14,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/tracing"
 )
 
-// LoadServerConfig loads server-specific configuration from LDAP using zmprov gs.
+// LoadServerConfig loads server-specific configuration from the server entry in LDAP.
 func (cm *ConfigManager) LoadServerConfig(ctx context.Context) error {
 	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
 

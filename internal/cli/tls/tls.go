@@ -55,7 +55,7 @@ func Run(_ context.Context, stdout, stderr io.Writer, opts *Options) int {
 	ctx := cliutil.InitLogging(stderr)
 	ctx = logger.ContextWithComponent(ctx, "tls")
 
-	lc, err := localconfig.LoadResolvedConfig()
+	lc, err := localconfig.LoadEffective()
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "Error loading localconfig: %v\n", err)
 

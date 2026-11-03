@@ -156,7 +156,7 @@ func contactDaemon(stderr io.Writer, opts *Options) int {
 // withLDAP loads localconfig, dials LDAP and runs fn against the connection.
 // Failures are reported on stderr and yield exit status 1.
 func withLDAP(stdout, stderr io.Writer, fn func(stdout, stderr io.Writer, conn ldapConn, serverDN string) int) int {
-	lc, err := localconfig.LoadResolvedConfig()
+	lc, err := localconfig.LoadEffective()
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "Error loading localconfig: %v\n", err)
 

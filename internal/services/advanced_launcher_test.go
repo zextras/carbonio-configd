@@ -118,7 +118,7 @@ func TestMailboxAdvancedStatusHook_LocalConfigMissing(t *testing.T) {
 	t.Parallel()
 
 	ctl := newRealController(t)
-	ctl.loadRawConfig = func() (map[string]string, error) { return nil, errors.New("localconfig.xml missing") }
+	ctl.loadConfig = func() (map[string]string, error) { return nil, errors.New("localconfig.xml missing") }
 
 	tmpDir := t.TempDir()
 	ctl.p.advancedJARDir = tmpDir

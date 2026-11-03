@@ -34,6 +34,7 @@ type CLI struct {
 	Init        InitCmd                      `cmd:"" help:"Initialize components"`
 	Proxy       ProxyCmd                     `cmd:"" help:"Proxy protocol management"`
 	TLS         TLSCmd                       `cmd:"" name:"tls" help:"Manage Carbonio mail mode (legacy zmtlsctl)"`
+	LDAP        LDAPCmd                      `cmd:"" name:"ldap" help:"Query and modify LDAP (zmprov verbs, no JVM)"`
 	Rewrite     RewriteCmd                   `cmd:"" help:"Force configuration rewrite"`
 	Plan        PlanCmd                      `cmd:"" help:"Show what a rewrite would change, without changing anything"`
 	Shadow      ShadowCmd                    `cmd:"" help:"Run the cycle next to a real configd, without side effects"`
@@ -70,11 +71,14 @@ func (c *DaemonCmd) Run(cli *CLI, env sys.System) error {
 		return exitStatus(1)
 	}
 
-	mainCfg, appState, ldapClient := initializeConfig()
+	rt, err := buildRuntime(ctx, env, &runtimeOpts{disableRestarts: args.DisableRestarts})
+	if err != nil {
+		logger.FatalContext(ctx, "Failed to initialize config", "error", err)
+	}
 
-	exitCode := RunMainLoop(ctx, env, mainCfg, appState, ldapClient, args, notifier)
+	exitCode := RunMainLoop(ctx, rt, args, notifier)
 
-	logger.InfoContext(ctx, "Process exited", "program", mainCfg.Progname)
+	logger.InfoContext(ctx, "Process exited", "program", rt.cfg.Progname)
 
 	// Stop profiling/tracing explicitly before returning the exit status so the
 	// profile is flushed before main exits the process. Both helpers are nil-safe.

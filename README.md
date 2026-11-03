@@ -55,6 +55,8 @@ internal/
 build/
   configd/           PKGBUILD, systemd unit, polkit policy
   yap.json           YAP packaging configuration
+docker/
+  configd/           Dockerfile of the carbonio-configd image (binary + templates)
 ```
 
 ## Prerequisites
@@ -246,11 +248,26 @@ interval poll keeps running as the safety net. See
 [docs/architecture.md](docs/architecture.md#ldap-change-detection-opt-in) and
 [docs/localconfig.md](docs/localconfig.md#configd-only-keys-not-in-the-defaults-registry).
 
+### Sections, template directory and service hooks
+
+Three localconfig keys adapt configd to containers (see
+[docs/localconfig.md](docs/localconfig.md#configd-only-keys-not-in-the-defaults-registry)); with none
+of them set the behaviour is that of the legacy daemon:
+
+- `zmconfigd_sections` limits every cycle (daemon, forced, `shadow`, `plan`) to the listed sections.
+- `zmconfigd_template_dir` reads the templates (`REWRITE` sources, `conf/zmconfigd/*.cf`,
+  `conf/zmconfigd.cf`, `conf/attrs`) from another directory; outputs stay under `ZEXTRAS_HOME`.
+- `zmconfigd_service_hooks` names a JSON file that replaces systemd / `zm*ctl` with
+  `signal:`, `exec:` and `skip` hooks per service and action. The daemon exits at startup listing the
+  services whose restart (or watchdog status) is not covered.
+
 ### Localconfig subcommand
 
-Drop-in replacement for the Java `zmlocalconfig` CLI. Reads `localconfig.xml`,
-applies hardcoded defaults, resolves `${variable}` references, and supports
-read/write operations. Eliminates the 2-4 second JVM startup on every call.
+Drop-in replacement for the Java `zmlocalconfig` CLI. Reads the effective localconfig
+(hardcoded defaults, `localconfig.xml`, then `CONFIGD_LC_<key>` environment variables; see
+[docs/localconfig.md](docs/localconfig.md#effective-localconfig-layers)), resolves `${variable}`
+references, and supports read/write operations. A key set by `CONFIGD_LC_<key>` is shown with its
+environment value and is refused by `-e`/`-u`. Eliminates the 2-4 second JVM startup on every call.
 
 A `zmlocalconfig` compatibility wrapper is installed at `/opt/zextras/bin/zmlocalconfig`.
 
@@ -285,7 +302,7 @@ Flags:
 -m mode          Output mode: plain (default), shell, export, nokey, xml
 -k key           Key to retrieve (repeatable; omit for all keys)
 -q               Quiet mode (suppress warnings)
--c path          Path to localconfig.xml (default: /opt/zextras/conf/localconfig.xml)
+-c path          Path to localconfig.xml (default: $CARBONIO_BASE_DIR/conf/localconfig.xml, /opt/zextras/conf/localconfig.xml)
 -s               Show password values (default: keys containing "password" print '*' in plain/xml/nokey; shell and export never mask)
 -d               Show default values instead of current
 -n               Show only keys changed from defaults
@@ -316,6 +333,48 @@ fails with `option 'X' can not be used with option 'Y'` (or `invalid option 'X'`
 | `-p` | `-q -c` |
 | `-n`, `-d`, none (print) | `-q -s -c -m -x` |
 | `-l` | not checked |
+
+### LDAP subcommand (zmprov without the JVM)
+
+`configd ldap` speaks to LDAP directly, for the few zmprov verbs configd and its callers use.
+It does not require the `zextras` user. The credentials come from the effective localconfig, so a
+pod without `localconfig.xml` sets them in the environment:
+
+```bash
+export CONFIGD_LC_ldap_url=ldap://carbonio-openldap:1389
+export CONFIGD_LC_zimbra_ldap_userdn=uid=zimbra,cn=admins,cn=zimbra
+export CONFIGD_LC_zimbra_ldap_password=...
+export CONFIGD_LC_ldap_starttls_supported=0        # plain ldap:// (the default); StartTLS needs this =1 and zimbra_require_interprocess_security=1
+
+configd ldap gacf                                  # zmprov gacf: the global config
+configd ldap gcf zimbraMtaRestriction zimbraMailMode
+configd ldap gs [server]                           # zmprov gs, global values inherited; default: zimbra_server_hostname
+configd ldap mcf +zimbraMtaRestriction reject_x    # zmprov mcf: + adds, - removes, none replaces
+configd ldap mcf -zimbraMtaRestriction reject_x
+configd ldap search --base cn=servers,cn=zimbra --scope one --filter '(cn=mail*)' --attr zimbraServiceEnabled
+```
+
+Connection flags go before the verb and override the localconfig keys: `--url` (repeatable; failover
+list), `--bind-dn` and `--password-file` (the password is never a flag). `--json` prints JSON instead
+of zmprov's `attr: value` lines (one line per value, attribute names sorted). `mcf` is idempotent:
+adding a value that is present, or removing one that is absent, succeeds. `gs` reads the inherited
+attributes from `conf/attrs` under `zmconfigd_template_dir` (default `CARBONIO_BASE_DIR`). A failure prints `Error: <message>`
+and exits 1.
+
+## Container image
+
+`docker/configd/Dockerfile` builds the `carbonio-configd` image (`FROM scratch`, about 14 MB): the static
+`/opt/zextras/bin/configd`, a `zextras:999` user, and the templates of the Carbonio debs under
+`/opt/zextras/share/configd/conf/{zmconfigd.cf,*.in,zmconfigd/*.cf,attrs/}` (`carbonio-core`, and
+`carbonio-common-appserver-conf` for `attrs/`). The image sets `CARBONIO_BASE_DIR=/opt/zextras` and
+`CONFIGD_LC_zmconfigd_template_dir=/opt/zextras/share/configd`, so the daemon and `configd ldap gs` find
+their templates and attrs there. The Jenkinsfile publishes it with `dockerStage`.
+Use it as a container, or as a layer (`COPY --from=<registry>/carbonio-configd:main /opt/zextras/ /opt/zextras/`)
+into an image that needs a co-located binary. Build it from the repository root:
+
+```bash
+docker build -f docker/configd/Dockerfile -t carbonio-configd .
+```
 
 ## systemd Integration
 

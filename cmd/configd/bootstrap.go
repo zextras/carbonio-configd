@@ -9,15 +9,11 @@ import (
 	"context"
 	"time"
 
-	"github.com/zextras/carbonio-configd/internal/cache"
-	"github.com/zextras/carbonio-configd/internal/config"
-	"github.com/zextras/carbonio-configd/internal/configmgr"
-	"github.com/zextras/carbonio-configd/internal/ldap"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/sdnotify"
-	"github.com/zextras/carbonio-configd/internal/services"
 	"github.com/zextras/carbonio-configd/internal/state"
 	"github.com/zextras/carbonio-configd/internal/sys"
+	"github.com/zextras/carbonio-configd/internal/systemd"
 	"github.com/zextras/carbonio-configd/internal/watchdog"
 )
 
@@ -47,65 +43,49 @@ func startSdWatchdogKeepAlive(
 	}()
 }
 
-// bootstrapDependencies initializes the core dependencies for the daemon:
-// config manager, service manager, and watchdog.
-// Returns the initialized managers and watchdog instance.
-func bootstrapDependencies(
-	ctx context.Context,
-	env sys.System,
-	mainCfg *config.Config,
-	appState *state.State,
-	ldapClient *ldap.Ldap,
-	args *Args,
-) (*configmgr.ConfigManager, services.Manager, *watchdog.Watchdog) {
-	cacheInstance := cache.New(ctx, false) // skipCache=false to enable caching
-
-	configManager := configmgr.NewConfigManager(ctx, mainCfg, appState, ldapClient, cacheInstance, env)
-	// One service manager serves the config restarts and the watchdog: two
-	// independent managers could restart the same service concurrently and
-	// the watchdog's dependency map was written by the main loop while the
-	// watchdog goroutine read it.
-	serviceManager := configManager.Services()
-
-	systemdMode := serviceManager.IsSystemdMode()
-	if systemdMode {
-		logger.InfoContext(ctx, "Detected systemd-enabled environment",
-			"use_systemctl", true,
-			"fallback", "zm*ctl")
+// bootstrapWatchdog builds the watchdog on the runtime's one service manager.
+func bootstrapWatchdog(ctx context.Context, rt *runtime) *watchdog.Watchdog {
+	if rt.hooks == nil {
+		systemdManager := systemd.NewManager(rt.env)
+		if systemdManager.IsSystemdEnabled(ctx) {
+			logger.InfoContext(ctx, "Detected systemd-enabled environment",
+				"use_systemctl", true,
+				"fallback", "zm*ctl")
+		} else {
+			logger.InfoContext(ctx, "Detected traditional environment",
+				"use_systemctl", false,
+				"scripts_only", "zm*ctl")
+		}
 	} else {
-		logger.InfoContext(ctx, "Detected traditional environment",
-			"use_systemctl", false,
-			"scripts_only", "zm*ctl")
+		logger.InfoContext(ctx, "Service control through hooks", "hooks_file", rt.cfg.ServiceHooks)
 	}
 
-	configManager.SetDisableRestarts(args.DisableRestarts)
-
-	watchdogInterval := time.Duration(mainCfg.WatchdogInterval) * time.Second
+	watchdogInterval := time.Duration(rt.cfg.WatchdogInterval) * time.Second
 	if watchdogInterval == 0 {
 		watchdogInterval = 120 * time.Second
 	}
 
 	wd := watchdog.NewWatchdog(watchdog.Config{
 		CheckInterval:  watchdogInterval,
-		ServiceManager: serviceManager,
-		State:          appState,
-		Clock:          env.Clock,
-		Snapshots:      serviceManager,
-		SystemdMode:    systemdMode,
+		ServiceManager: rt.sm,
+		State:          rt.state,
+		Clock:          rt.env.Clock,
+		Snapshots:      rt.sm,
+		SystemdMode:    rt.sm.IsSystemdMode(),
 		ConfigLookup: func(key string) string {
-			val, _ := appState.Snapshot().Local(key)
+			val, _ := rt.state.Snapshot().Local(key)
 
 			return val
 		},
 	})
 
-	wd.SetMetrics(configManager.Metrics())
+	wd.SetMetrics(rt.cm.Metrics())
 
 	// A service restarted on purpose is not the watchdog's to restart: it stops
 	// watching it until a later check sees it running again.
-	serviceManager.BeforeRestart = func(service string) { wd.RemoveService(ctx, service) }
+	rt.sm.BeforeRestart = func(service string) { wd.RemoveService(ctx, service) }
 
-	return configManager, serviceManager, wd
+	return wd
 }
 
 // bootstrapSystemd initializes systemd integration: signal handlers and watchdog keep-alive.

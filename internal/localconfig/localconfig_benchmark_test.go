@@ -33,13 +33,13 @@ func BenchmarkOldApproach_Subprocess(b *testing.B) {
 // BenchmarkNewApproach_DirectParsing benchmarks the new direct XML parsing approach.
 func BenchmarkNewApproach_DirectParsing(b *testing.B) {
 	// Check if localconfig.xml exists
-	if _, err := os.Stat(DefaultConfigPath); os.IsNotExist(err) {
+	if _, err := os.Stat(DefaultConfigPath()); os.IsNotExist(err) {
 		b.Skip("localconfig.xml not found - skipping direct parsing benchmark")
 	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		config, err := LoadLocalConfig()
+		config, err := LoadLocalConfigFromFile(DefaultConfigPath())
 		if err != nil {
 			b.Fatalf("LoadLocalConfig failed: %v", err)
 		}
@@ -49,13 +49,13 @@ func BenchmarkNewApproach_DirectParsing(b *testing.B) {
 
 // BenchmarkNewApproach_WithFormatting benchmarks direct parsing + formatting to key=value.
 func BenchmarkNewApproach_WithFormatting(b *testing.B) {
-	if _, err := os.Stat(DefaultConfigPath); os.IsNotExist(err) {
+	if _, err := os.Stat(DefaultConfigPath()); os.IsNotExist(err) {
 		b.Skip("localconfig.xml not found - skipping benchmark")
 	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		config, err := LoadLocalConfig()
+		config, err := LoadLocalConfigFromFile(DefaultConfigPath())
 		if err != nil {
 			b.Fatalf("LoadLocalConfig failed: %v", err)
 		}

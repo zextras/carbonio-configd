@@ -39,7 +39,7 @@ func newTestConfigManager(t *testing.T) *ConfigManager {
 	ctx := context.Background()
 	cacheInstance := cache.New(ctx, false)
 
-	return NewConfigManager(ctx, cfg, st, nil, cacheInstance, hostEnv())
+	return NewConfigManager(ctx, cfg, st, nil, cacheInstance, hostEnv(), hostServices())
 }
 
 // realFSConfigManager is a ConfigManager that only carries the real host

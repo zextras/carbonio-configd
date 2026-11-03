@@ -103,7 +103,7 @@ test-integration:
 	@echo "Running integration tests..."
 	$(GOTEST) -v -tags integration ./...
 
-# Self-contained LDAP integration suite: configd loaders, plan and Execute against
+# Self-contained LDAP integration suite: configd loaders, plan, Execute and `configd ldap` against
 # an OpenLDAP container (needs docker or podman, plus network for the alpine image
 # and its slapd packages; skips when no container runtime is reachable). With podman
 # and no DOCKER_HOST, the rootless podman socket is used when present.
@@ -111,7 +111,7 @@ test-integration-ldap:
 	@echo "Running LDAP container integration tests..."
 	@sock="$${XDG_RUNTIME_DIR:-/run/user/$$(id -u)}/podman/podman.sock"; \
 	if [ -z "$$DOCKER_HOST" ] && [ -S "$$sock" ]; then export DOCKER_HOST="unix://$$sock"; fi; \
-	$(GOTEST) -v -count=1 -tags integration -run '^TestOpenLDAP_' ./internal/configmgr
+	$(GOTEST) -v -count=1 -tags integration -run '^Test(OpenLDAP|Container)_' ./internal/configmgr ./internal/cli/ldapcmd
 
 # Run tests with coverage (all build tag combinations merged)
 test-coverage:

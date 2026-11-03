@@ -135,9 +135,9 @@ func newCycleFixture(t *testing.T) *cycleFixture {
 		Interval:      0,
 		RestartConfig: true,
 	}
-	cm := configmgr.NewConfigManager(ctx, cfg, appState, nil, cache.New(ctx, true), env)
 	ctl := services.NewController(env)
 	sm := services.NewServiceManager(ctl)
+	cm := configmgr.NewConfigManager(ctx, cfg, appState, nil, cache.New(ctx, true), env, sm)
 	wd := watchdog.NewWatchdog(watchdog.Config{
 		CheckInterval:  time.Minute,
 		ServiceManager: sm,

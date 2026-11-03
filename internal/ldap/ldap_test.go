@@ -453,7 +453,7 @@ func TestLdap_IsRetryableError(t *testing.T) {
 			wantRetryable: false,
 		},
 		{
-			name:          "wrapped_permanent_ldap_error_not_retryable",
+			name: "wrapped_permanent_ldap_error_not_retryable",
 			err: fmt.Errorf("modify %s on %s: %w", "olcLogLevel", "cn=config",
 				ldap.NewError(ldap.LDAPResultInvalidCredentials, errors.New("bad creds"))),
 			wantRetryable: false,
@@ -464,7 +464,7 @@ func TestLdap_IsRetryableError(t *testing.T) {
 			wantRetryable: true,
 		},
 		{
-			name:          "wrapped_transient_ldap_error_retryable",
+			name: "wrapped_transient_ldap_error_retryable",
 			err: fmt.Errorf("operation failed after %d retries: %w", 3,
 				ldap.NewError(ldap.LDAPResultServerDown, errors.New("server down"))),
 			wantRetryable: true,

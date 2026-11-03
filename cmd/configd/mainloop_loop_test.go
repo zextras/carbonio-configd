@@ -43,9 +43,9 @@ func newLoopFixture(t *testing.T) *daemonLoopDeps {
 		Interval:   0,
 	}
 	env := sys.Real()
-	cm := configmgr.NewConfigManager(ctx, cfg, appState, nil, cache.New(ctx, true), env)
 	ctl := services.NewController(env)
 	sm := services.NewServiceManager(ctl)
+	cm := configmgr.NewConfigManager(ctx, cfg, appState, nil, cache.New(ctx, true), env, sm)
 	wd := watchdog.NewWatchdog(watchdog.Config{
 		CheckInterval:  time.Minute,
 		ServiceManager: sm,
@@ -405,7 +405,13 @@ func TestRunMainLoop_CancelledContextReturnsZero(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	code := RunMainLoop(ctx, sys.Real(), cfg, appState, nil, &Args{Once: true}, notifier)
+	env := sys.Real()
+	ctl := services.NewController(env)
+	sm := services.NewServiceManager(ctl)
+	cm := configmgr.NewConfigManager(ctx, cfg, appState, nil, cache.New(ctx, true), env, sm)
+	rt := &runtime{cfg: cfg, state: appState, cm: cm, sm: sm, ctl: ctl, env: env}
+
+	code := RunMainLoop(ctx, rt, &Args{Once: true}, notifier)
 	assert.Equal(t, 0, code)
 }
 

@@ -39,25 +39,17 @@ func (c *Controller) DiscoverEnabledServices(ctx context.Context) ([]string, err
 		return nil, fmt.Errorf("zimbra_server_hostname not set in localconfig")
 	}
 
-	tlsSetup := carboldap.ResolveTLS(ctx, lc, c.env.FS)
-
-	// ldap_master_url may be space-separated multi-URL (Carbonio HA) — let
-	// ParseURLs split it so we get connect-time failover (CO-3565).
-	masterURLs := carboldap.ParseURLs(lc["ldap_master_url"])
-	if len(masterURLs) == 0 {
+	// ldap_master_url may be space-separated multi-URL (Carbonio HA): the
+	// parameters carry the failover list (CO-3565) and the transport security
+	// of the legacy Java rule (ResolveTLS).
+	params, err := carboldap.ParamsFrom(ctx, lc, carboldap.PurposeDiscovery, c.env.FS)
+	if err != nil {
 		logger.WarnContext(ctx, "ldap_master_url is empty in localconfig, trying cache")
 
 		return c.readCache(ctx)
 	}
 
-	client, err := carboldap.NewClient(&carboldap.ClientConfig{
-		URLs:      masterURLs,
-		BindDN:    lc["zimbra_ldap_userdn"],
-		Password:  lc["zimbra_ldap_password"],
-		StartTLS:  tlsSetup.StartTLS,
-		TLSConfig: tlsSetup.Config,
-		FS:        c.env.FS,
-	})
+	client, err := carboldap.NewClient(params)
 	if err != nil {
 		logger.WarnContext(ctx, "LDAP connect failed, trying cache", "error", err)
 

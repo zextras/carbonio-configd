@@ -6,50 +6,35 @@ package cliutil
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	carboldap "github.com/zextras/carbonio-configd/internal/ldap"
 )
 
-// Localconfig keys read to reach LDAP.
-const (
-	// LCKeyZimbraServerHostname is the hostname of the local server entry.
-	LCKeyZimbraServerHostname = "zimbra_server_hostname"
+// LCKeyZimbraServerHostname is the localconfig key of the local server entry's
+// hostname.
+const LCKeyZimbraServerHostname = "zimbra_server_hostname"
 
-	lcKeyZimbraLDAPPassword = "zimbra_ldap_password"
-	lcKeyZimbraLDAPUserDN   = "zimbra_ldap_userdn"
-	lcKeyLDAPURL            = "ldap_url"
-	lcKeyLDAPMasterURL      = "ldap_master_url"
-)
-
-// OpenWriteLDAPClient dials a write-capable LDAP client from a resolved
-// localconfig map. It reads ldap_master_url (writes require the master),
-// falling back to ldap_url when the master URL is unset. Both keys may carry
-// space-separated multi-URL values; ParseURLs is used at both layers so
+// OpenWriteLDAPClient dials a write-capable LDAP client from the effective
+// localconfig lc (ldap.ParamsFrom with PurposeWrite): ldap_master_url, falling
+// back to ldap_url. Both keys may carry space-separated multi-URL values so
 // connect-time failover works regardless of which key holds the list
 // (CO-3565). Transport security follows the legacy Java rule (ResolveTLS):
 // StartTLS only when ldap_starttls_supported/required and
 // zimbra_require_interprocess_security say so, certificate verification per
 // ssl_allow_untrusted_certs. Shared by the proxy and tls commands.
 func OpenWriteLDAPClient(lc map[string]string) (*carboldap.Client, error) {
-	urls := carboldap.ParseURLs(lc[lcKeyLDAPMasterURL])
-	if len(urls) == 0 {
-		urls = carboldap.ParseURLs(lc[lcKeyLDAPURL])
+	params, err := carboldap.ParamsFrom(context.Background(), lc, carboldap.PurposeWrite, nil)
+	if errors.Is(err, carboldap.ErrNoURL) {
+		return nil, errors.New("LDAP not configured (ldap_master_url and ldap_url are both empty)")
 	}
 
-	if len(urls) == 0 {
-		return nil, fmt.Errorf("LDAP not configured (%s and %s are both empty)", lcKeyLDAPMasterURL, lcKeyLDAPURL)
+	if err != nil {
+		return nil, fmt.Errorf("connecting to LDAP: %w", err)
 	}
 
-	tlsSetup := carboldap.ResolveTLS(context.Background(), lc, nil)
-
-	client, err := carboldap.NewClient(&carboldap.ClientConfig{
-		URLs:      urls,
-		BindDN:    lc[lcKeyZimbraLDAPUserDN],
-		Password:  lc[lcKeyZimbraLDAPPassword],
-		StartTLS:  tlsSetup.StartTLS,
-		TLSConfig: tlsSetup.Config,
-	})
+	client, err := carboldap.NewClient(params)
 	if err != nil {
 		return nil, fmt.Errorf("connecting to LDAP: %w", err)
 	}

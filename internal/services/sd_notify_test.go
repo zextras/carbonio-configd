@@ -31,7 +31,7 @@ func newSDController(t *testing.T) (*Controller, *systest.Fakes) {
 
 	ctl := NewController(withMode(env, false),
 		WithBaseDir(t.TempDir()), WithRunDir(t.TempDir()),
-		WithConfigLoader(emptyConfig), WithRawConfigLoader(emptyConfig))
+		WithConfigLoader(emptyConfig))
 
 	return ctl, f
 }
@@ -165,7 +165,7 @@ func TestStartWithSDNotify_ChildExitFailsFast(t *testing.T) {
 	env.Clock = f.Clock
 
 	ctl := NewController(withMode(env, false), WithBaseDir(t.TempDir()), WithRunDir(t.TempDir()),
-		WithConfigLoader(emptyConfig), WithRawConfigLoader(emptyConfig))
+		WithConfigLoader(emptyConfig))
 
 	_, err := ctl.startWithSDNotify(context.Background(), &sys.Cmd{Path: "slapd"}, "test-exit")
 	if err == nil || !strings.Contains(err.Error(), "exited during startup before signaling READY=1") {

@@ -62,10 +62,25 @@ func (c *Controller) ServiceTryReloadOrRestart(ctx context.Context, name string)
 	return nil
 }
 
+// hostBackend is what only the host Controller offers: the systemd mode, the
+// systemd restart verb and the shared process snapshot. A hook backend (pods)
+// replaces the host service control, so none of it applies there.
+type hostBackend interface {
+	IsSystemdMode() bool
+	ServiceTryReloadOrRestart(ctx context.Context, name string) error
+	WithProcessSnapshot(ctx context.Context) context.Context
+}
+
+var _ hostBackend = (*Controller)(nil)
+
 // IsSystemdMode reports whether the services are managed through systemd
-// units (a Carbonio role target is enabled); see Controller.IsSystemdMode.
+// units (a Carbonio role target is enabled); see Controller.IsSystemdMode. A
+// manager over a hook backend is never in systemd mode: the hooks decide what
+// a restart does.
 func (sm *ServiceManager) IsSystemdMode() bool {
-	return sm.ctl.IsSystemdMode()
+	host, ok := sm.ctl.(hostBackend)
+
+	return ok && host.IsSystemdMode()
 }
 
 // ApplySystemd carries out one plan entry on a systemd host, the way the
@@ -87,7 +102,12 @@ func (sm *ServiceManager) ApplySystemd(ctx context.Context, service string, acti
 
 	switch action {
 	case plan.ActionRestart:
-		return sm.ctl.ServiceTryReloadOrRestart(ctx, service)
+		host, ok := sm.ctl.(hostBackend)
+		if !ok {
+			return fmt.Errorf("service %s: the backend has no systemd restart", service)
+		}
+
+		return host.ServiceTryReloadOrRestart(ctx, service)
 	case plan.ActionStart:
 		return sm.ctl.ServiceStart(ctx, service)
 	case plan.ActionStop:
@@ -102,5 +122,9 @@ func (sm *ServiceManager) ApplySystemd(ctx context.Context, service string, acti
 // WithProcessSnapshot returns ctx carrying a process-table snapshot shared by
 // the status probes made with it; see Controller.WithProcessSnapshot.
 func (sm *ServiceManager) WithProcessSnapshot(ctx context.Context) context.Context {
-	return sm.ctl.WithProcessSnapshot(ctx)
+	if host, ok := sm.ctl.(hostBackend); ok {
+		return host.WithProcessSnapshot(ctx)
+	}
+
+	return ctx
 }

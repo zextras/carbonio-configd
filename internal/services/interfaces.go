@@ -41,6 +41,23 @@ func (a ServiceAction) String() string {
 	}
 }
 
+// Backend is what a ServiceManager drives: the lifecycle of one service. The
+// *Controller implements it for hosts (systemd or the legacy process control);
+// HookBackend implements it with signals and commands for pods, where the
+// service runs in another container.
+type Backend interface {
+	// ServiceStart, ServiceStop and ServiceRestart act on the service.
+	ServiceStart(ctx context.Context, name string) error
+	ServiceStop(ctx context.Context, name string) error
+	ServiceRestart(ctx context.Context, name string) error
+	// ServiceStatus reports whether the service is running.
+	ServiceStatus(ctx context.Context, name string) (bool, error)
+	// LookupService resolves a service (or alias) in the registry; nil when unknown.
+	LookupService(name string) *ServiceDef
+}
+
+var _ Backend = (*Controller)(nil)
+
 // Manager defines the interface for service management operations.
 type Manager interface {
 	// ControlProcess performs an action on a service.

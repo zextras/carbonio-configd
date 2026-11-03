@@ -278,9 +278,9 @@ func FuzzLoadLocalConfigFromFile(f *testing.F) {
 			t.Fatalf("non-deterministic load: %v / %v (err %v)", cfg, again, err)
 		}
 
-		resolved, err := LoadResolvedConfigFromFile(path)
+		resolved, err := LoadEffectiveFrom(path, nil)
 		if err != nil {
-			t.Fatalf("LoadResolvedConfigFromFile failed after successful load: %v", err)
+			t.Fatalf("LoadEffectiveFrom failed after successful load: %v", err)
 		}
 
 		for k := range cfg {

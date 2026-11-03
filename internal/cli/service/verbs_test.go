@@ -25,7 +25,6 @@ func legacyRunner(lc map[string]string, opts *Options) (*runner, *systest.Fakes)
 	ctl := services.NewController(f.System(),
 		services.WithBaseDir("/zx"),
 		services.WithConfigLoader(load),
-		services.WithRawConfigLoader(load),
 		services.WithLDAPProbe(func(context.Context, []string) error { return nil }),
 		services.WithNoRewrite(noRewrite(opts)),
 	)

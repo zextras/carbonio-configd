@@ -42,6 +42,42 @@ To add or change a default, edit the `lcDefaults` map in
 `internal/localconfig/lcdefaults.go` to match the corresponding `KnownKey` entry in
 `LC.java` exactly.
 
+## Effective localconfig layers
+
+Source: `internal/localconfig/effective.go` (`LoadEffective`, `LoadEffectiveFrom`). Every
+consumer (the cycle's loaders, the service controller, `configd rewrite/proxy/tls/status/init`,
+`configd ldap`, the `getlocal` command) reads localconfig through this one function. The layers,
+lowest precedence first:
+
+1. the `LC.java` defaults (`lcDefaults`);
+2. `localconfig.xml` (`${CARBONIO_BASE_DIR:-/opt/zextras}/conf/localconfig.xml`). A **missing file
+   is an empty layer**, so a pod needs none; an unreadable or malformed file is an error;
+3. the environment: `CONFIGD_LC_<key>=<value>` sets the key `<key>`. Values are used verbatim (not
+   trimmed), and an empty value counts as set;
+4. per-command flag overrides (for example `configd ldap --url/--bind-dn/--password-file`).
+
+`${key}` references are then expanded **once** over the merged map, so a value of any layer may
+refer to a key of any other layer. With no `CONFIGD_LC_*` variable set and a `localconfig.xml`
+present, the result is exactly the former `defaults + xml + interpolation`.
+
+The installation root is `CARBONIO_BASE_DIR` (default `/opt/zextras`); it locates
+`localconfig.xml`, `conf/zmconfigd.cf`, `conf/attrs`, the templates and the service scripts.
+`ZEXTRAS_HOME` is no longer read.
+
+Environment-set keys are read-only for the CLI. `configd localconfig -e`/`-u` refuse such a key
+(`Error: key <key> is set by environment CONFIGD_LC_<key>`) and save nothing, and the read modes
+print the effective value, environment included.
+
+Keys a pod without `localconfig.xml` sets (the Kubernetes deployment):
+
+| Variable | Used for |
+|---|---|
+| `CONFIGD_LC_ldap_url` | LDAP URL(s) of the cycle's data client and of `configd ldap` (space-separated for failover) |
+| `CONFIGD_LC_ldap_master_url` | Write URL(s); falls back to `ldap_url` |
+| `CONFIGD_LC_zimbra_ldap_userdn` / `CONFIGD_LC_zimbra_ldap_password` | Bind DN and password |
+| `CONFIGD_LC_ldap_starttls_supported`, `CONFIGD_LC_zimbra_require_interprocess_security` | A plain `ldap://` directory is the default (`0`). StartTLS is used only when `ldap_starttls_supported=1`, `ldap_starttls_required` (default true) **and** `zimbra_require_interprocess_security=1`; every LDAP client of configd (cycle data, writes, discovery, `configd ldap`) follows that one rule |
+| `CONFIGD_LC_zimbra_server_hostname` | The server entry this node renders (otherwise `/etc/hostname`) |
+
 ## configd-only keys (not in the defaults registry)
 
 `lcDefaults` mirrors `LC.java`, so keys that exist only in configd are read straight from
@@ -58,6 +94,38 @@ one of them, and so is:
 | `zmconfigd_ldap_change_trigger` | `FALSE` (off) | When `TRUE` (case-insensitive; any other value is off), a watcher polls the LDAP entries a cycle reads and wakes the main loop for an immediate full cycle as soon as one changes, instead of waiting for the next `zmconfigd_interval`. The interval poll keeps running as the safety net. Watched: the global config (`cn=config,cn=zimbra`), the server entries under `cn=servers,cn=zimbra` (this server's own attributes and services, the upstream servers the proxy generates, and the servers `gamau`, `garpu` and `garpb` enumerate) and the `zimbraDomain` entries the proxy generator reads. Off, no watcher goroutine exists and nothing about a cycle changes. Read every cycle: `FALSE` stops a running watcher, but a key that is merely deleted keeps its last value until configd restarts (as for `zmconfigd_skip_idle_polls`). Ignored in single-run (`--once`) mode, and with a warning when configd has no native LDAP client. See [architecture.md](architecture.md#ldap-change-detection-opt-in). |
 | `zmconfigd_ldap_change_poll_seconds` | `5` | Poll interval of the change watcher (values below 1 mean 5). Each poll is three searches that return only `entryCSN` and `modifyTimestamp`; the domains search walks every `zimbraDomain`, so on a directory with many thousands of domains raise this value. Read when the watcher starts: a change needs a configd restart (or the key set to `FALSE` for one cycle and back to `TRUE`). |
 | `zmconfigd_ldap_change_debounce_seconds` | `2` | Quiet window that coalesces a burst of directory writes into one cycle: the cycle is requested once nothing changed for that long, or after ten windows of continuous writes at the latest. `0` requests the cycle in the poll that sees the change. Read when the watcher starts, like the poll seconds. |
+| `zmconfigd_template_dir` | the base dir (`ZEXTRAS_HOME`) | Directory the templates are read from: the `REWRITE` sources, the `FILE` fragments (`conf/zmconfigd/*.cf`), `conf/zmconfigd.cf` and the LDAP attribute schemas (`conf/attrs`). Outputs (rewritten files, mapped files, postfix configuration) always stay under the base dir. Unset, nothing changes. For containers whose output volume hides the templates. |
+| `zmconfigd_sections` | empty (all sections) | Space-separated section names. Every cycle (daemon, forced rewrite, `shadow`, `plan`) is limited to them (`plan.Input.Scope`); `configd plan <sections>` must name sections inside it, otherwise it fails. |
+| `zmconfigd_service_hooks` | empty (host service control) | Path of a JSON file that replaces the host service control (systemd / legacy `zm*ctl`) with signals and commands; see below. |
+
+### Service hooks (`zmconfigd_service_hooks`)
+
+The file maps a registry service name (or `*`) to an action list, for the actions `start`, `stop`,
+`restart` and `status`. A service entry wins over `*` for the same action. Each action is an ordered
+list; the first failing hook fails the action.
+
+```json
+{
+  "antivirus": { "restart": ["signal:TERM", "signal:TERM@freshclam"], "status": ["process"] },
+  "amavis":    { "restart": ["signal:TERM"] },
+  "mta":       { "restart": ["skip"] },
+  "*":         { "start": ["skip"], "stop": ["skip"] }
+}
+```
+
+| Hook | Valid for | Effect |
+|---|---|---|
+| `signal:<SIG>[@<service>]` | start, stop, restart | Sends `<SIG>` (HUP, INT, QUIT, TERM, KILL, USR1, USR2, optional `SIG` prefix) to the main process of the service, or of `<service>`. The PID comes from the registry's pid file validated against its process identity, or a scan of the process table (needs a shared process namespace and the same UID). No process is an error, so the restart is retried like any failed restart. |
+| `exec:<argv...>` | all | Runs the command (whitespace-split, no shell) with a 30 s timeout. For `status`, exit 0 is running and a non-zero exit is not running. |
+| `skip` | start, stop, restart | Logs `service action not managed by this process` at INFO and succeeds. Never implied: it only applies where declared. |
+| `process` | status | The service is running when its process is found as above. |
+
+An unknown service, action or hook is a startup error. After the first parse of `zmconfigd.cf` the
+daemon also checks that every service named by a `RESTART` line of an in-scope section, and every
+service a restart of those cascades into through `DEPENDS` (e.g. `amavis` from `antivirus`), has a
+`restart` hook and, when the watchdog is on (`zmconfigd_watchdog`), that every watchdog service has a
+`status` hook. It exits with status 1 listing what is missing (`restart:<svc>`, `status:<svc>`)
+instead of retrying forever. A missing `start`/`stop` hook fails only when that action is attempted.
 
 ## CLI behavior (legacy `LocalConfigCLI` parity)
 
@@ -81,7 +149,8 @@ Source: `internal/cli/localconfig` (flag mapping in `cmd/configd/localconfig.go`
   default containing `${...}` therefore always counts as changed. A listed key with no value
   warns `null valued key '<key>'`; `-d` warns `not a known key '<key>'` and plain print warns
   `null valued key '<key>'`.
-- `-e`/`-u` validate every argument first and write once (`SetKeys`/`RemoveKeys`): a
+- `-e`/`-u` refuse a key set by `CONFIGD_LC_<key>` (`key <key> is set by environment
+  CONFIGD_LC_<key>`), and reads show the effective value. Beyond that, `-e`/`-u` validate every argument first and write once (`SetKeys`/`RemoveKeys`): a
   protected key without `-f`, a malformed `key=value` or an unset key leaves the file untouched.
 - Values are raw (`${key}` left as is) unless `-x`; the `shell` and `export` modes always expand.
   Writes never freeze references: `-e` stores exactly what it is given, and
@@ -133,8 +202,9 @@ Resolution rules:
 - Pattern: `\$\{([^}]+)\}` — matches any `${name}` token.
 - Up to **10 passes** are performed to resolve transitive references
   (e.g. `${zimbra_home}` inside `${zimbra_log_directory}` inside another key).
-- XML values are merged first; defaults fill in only missing keys. This means an XML value
-  always takes precedence over the hardcoded default for the same key.
+- The merged map is expanded once, after every layer (defaults, `localconfig.xml`, the
+  `CONFIGD_LC_*` environment, flag overrides) is in; a key set in a higher layer always takes
+  precedence over a lower one (see [Effective localconfig layers](#effective-localconfig-layers)).
 - Self-references are detected per-pass and left unresolved to avoid infinite loops.
 - After 10 passes, any remaining `${...}` tokens are left as-is in the output.
 

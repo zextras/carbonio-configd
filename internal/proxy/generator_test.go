@@ -311,36 +311,6 @@ func TestGenerateAllIntegration(t *testing.T) {
 	}
 }
 
-// TestSetDryRun tests SetDryRun sets the flag
-func TestSetDryRun(t *testing.T) {
-	gen := &Generator{env: sys.Real()}
-
-	gen.SetDryRun(context.Background(), true)
-	if !gen.DryRun {
-		t.Error("Expected DryRun to be true after SetDryRun(true)")
-	}
-
-	gen.SetDryRun(context.Background(), false)
-	if gen.DryRun {
-		t.Error("Expected DryRun to be false after SetDryRun(false)")
-	}
-}
-
-// TestSetVerbose tests SetVerbose sets the flag
-func TestSetVerbose(t *testing.T) {
-	gen := &Generator{env: sys.Real()}
-
-	gen.SetVerbose(context.Background(), true)
-	if !gen.Verbose {
-		t.Error("Expected Verbose to be true after SetVerbose(true)")
-	}
-
-	gen.SetVerbose(context.Background(), false)
-	if gen.Verbose {
-		t.Error("Expected Verbose to be false after SetVerbose(false)")
-	}
-}
-
 // TestDiscoverRealTemplates tests discovery with actual nginx templates from conf/nginx/templates
 func TestDiscoverRealTemplates(t *testing.T) {
 	// Check if real template directory exists

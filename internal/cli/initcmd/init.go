@@ -46,7 +46,7 @@ func Run(ctx context.Context, env sys.System, stdout, stderr io.Writer, opts *Op
 		return 1
 	}
 
-	return run(ctx, env, services.NewController(env), stdout, stderr, opts, localconfig.LoadResolvedConfig)
+	return run(ctx, env, services.NewController(env), stdout, stderr, opts, localconfig.LoadEffective)
 }
 
 func run(

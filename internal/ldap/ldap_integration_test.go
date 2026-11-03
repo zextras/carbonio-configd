@@ -18,7 +18,7 @@ import (
 
 func TestNativeClient_RealLDAP_GlobalConfig(t *testing.T) {
 	// Load connection info from localconfig
-	config, err := localconfig.LoadLocalConfig()
+	config, err := localconfig.LoadEffective()
 	if err != nil {
 		t.Fatalf("Failed to load localconfig: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestNativeClient_RealLDAP_GlobalConfig(t *testing.T) {
 
 func TestNativeClient_RealLDAP_ServerConfig(t *testing.T) {
 	// Load connection info
-	config, err := localconfig.LoadLocalConfig()
+	config, err := localconfig.LoadEffective()
 	if err != nil {
 		t.Fatalf("Failed to load localconfig: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestNativeClient_RealLDAP_ServerConfig(t *testing.T) {
 
 func TestNativeClient_RealLDAP_AllServers(t *testing.T) {
 	// Load connection info
-	config, err := localconfig.LoadLocalConfig()
+	config, err := localconfig.LoadEffective()
 	if err != nil {
 		t.Fatalf("Failed to load localconfig: %v", err)
 	}
@@ -198,7 +198,7 @@ func TestNativeClient_RealLDAP_AllServers(t *testing.T) {
 
 func TestNativeClient_RealLDAP_Domains(t *testing.T) {
 	// Load connection info
-	config, err := localconfig.LoadLocalConfig()
+	config, err := localconfig.LoadEffective()
 	if err != nil {
 		t.Fatalf("Failed to load localconfig: %v", err)
 	}
@@ -260,7 +260,7 @@ func TestNativeClient_RealLDAP_Domains(t *testing.T) {
 
 func TestLdap_QueryDomains_Integration(t *testing.T) {
 	// Load connection info
-	config, err := localconfig.LoadLocalConfig()
+	config, err := localconfig.LoadEffective()
 	if err != nil {
 		t.Fatalf("Failed to load localconfig: %v", err)
 	}
@@ -304,7 +304,7 @@ func TestLdap_QueryDomains_Integration(t *testing.T) {
 
 func TestLdap_QueryServers_Integration(t *testing.T) {
 	// Load connection info
-	config, err := localconfig.LoadLocalConfig()
+	config, err := localconfig.LoadEffective()
 	if err != nil {
 		t.Fatalf("Failed to load localconfig: %v", err)
 	}

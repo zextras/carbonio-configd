@@ -48,7 +48,6 @@ func newFixture(systemd bool, registry map[string]*services.ServiceDef) *fixture
 	ctl := services.NewController(f.System(),
 		services.WithBaseDir(testBase),
 		services.WithConfigLoader(load),
-		services.WithRawConfigLoader(load),
 		services.WithRegistry(registry),
 	)
 

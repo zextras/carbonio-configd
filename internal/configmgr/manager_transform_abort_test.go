@@ -86,3 +86,17 @@ func TestLookupFileKey_TransformErrorIsNotCached(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "a=head", got)
 }
+
+// A FILE fragment is read from zmconfigd_template_dir when it is set.
+func TestLookupFileKey_ReadsFromTemplateDir(t *testing.T) {
+	cm, _ := newTestCMWithExecutor(t)
+	tplDir := t.TempDir()
+	cm.mainConfig.TemplateDir = tplDir
+
+	require.NoError(t, os.MkdirAll(filepath.Join(tplDir, "conf"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(tplDir, "conf", "frag.cf"), []byte("from-templates\n"), 0o644))
+
+	got, err := cm.lookupFileKey(context.Background(), "frag.cf")
+	require.NoError(t, err)
+	assert.Equal(t, "from-templates", got)
+}

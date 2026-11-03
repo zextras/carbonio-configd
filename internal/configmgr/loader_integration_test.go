@@ -32,7 +32,7 @@ func TestConfigLoader_RetryLogic(t *testing.T) {
 	mainCfg.Hostname = "test-host.example.com"
 	appState := state.NewState()
 	ldapClient := ldap.NewLdap(context.Background(), mainCfg)
-	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv())
+	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv(), hostServices())
 
 	t.Run("LocalConfig retry on failure", func(t *testing.T) {
 		// This will fail in test environment (no zmlocalconfig binary)
@@ -91,7 +91,7 @@ func TestConfigLoader_TimeoutHandling(t *testing.T) {
 	})
 
 	ldapClient := ldap.NewLdap(context.Background(), mainCfg)
-	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv())
+	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv(), hostServices())
 
 	t.Run("Timeout detection", func(t *testing.T) {
 		err := cm.LoadAllConfigs(context.Background())
@@ -144,7 +144,7 @@ func TestConfigLoader_CompareWithReference(t *testing.T) {
 	mainCfg.Hostname = "test-host.example.com"
 	appState := state.NewState()
 	ldapClient := ldap.NewLdap(context.Background(), mainCfg)
-	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv())
+	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv(), hostServices())
 
 	if err := cm.LoadAllConfigs(context.Background()); err != nil {
 		t.Fatalf("Failed to load configs: %v", err)
@@ -229,7 +229,7 @@ func TestConfigLoader_PostProcessing(t *testing.T) {
 	mainCfg.Hostname = "test-host.example.com"
 	appState := state.NewState()
 	ldapClient := ldap.NewLdap(context.Background(), mainCfg)
-	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv())
+	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv(), hostServices())
 
 	t.Run("SSL protocol sorting", func(t *testing.T) {
 		// Simulate unsorted SSL protocols

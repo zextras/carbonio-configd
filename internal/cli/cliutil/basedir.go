@@ -6,24 +6,16 @@ package cliutil
 
 import (
 	"io"
-	"os"
 	"path/filepath"
 
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/security"
 )
 
-// defaultBaseDir is the on-disk root of a Zextras/Carbonio installation.
-const defaultBaseDir = config.ZextrasBase
-
-// BaseDir returns CARBONIO_BASE_DIR when set, otherwise the default
-// installation root.
+// BaseDir returns the installation root (config.BaseDir: CARBONIO_BASE_DIR
+// when set, otherwise /opt/zextras).
 func BaseDir() string {
-	if v := os.Getenv("CARBONIO_BASE_DIR"); v != "" {
-		return v
-	}
-
-	return defaultBaseDir
+	return config.BaseDir()
 }
 
 // BasePath joins BaseDir() with elem and cleans the result.

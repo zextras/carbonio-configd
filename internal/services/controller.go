@@ -39,12 +39,9 @@ type Controller struct {
 
 	registry map[string]*ServiceDef
 
-	// loadConfig loads the resolved localconfig (localconfig.LoadResolvedConfig
-	// by default).
+	// loadConfig loads the effective localconfig (localconfig.LoadEffective by
+	// default): defaults, localconfig.xml and the CONFIGD_LC_* overlay.
 	loadConfig func() (map[string]string, error)
-	// loadRawConfig loads the unresolved localconfig the Advanced status hook
-	// hands to the admin client (localconfig.LoadLocalConfig by default).
-	loadRawConfig func() (map[string]string, error)
 	// ldapProbe answers whether slapd serves queries at urls. The default
 	// dials the network, which stays real.
 	ldapProbe func(ctx context.Context, urls []string) error
@@ -67,7 +64,7 @@ type Controller struct {
 // Option configures a Controller.
 type Option func(*Controller)
 
-// WithBaseDir roots the install layout at dir instead of config.ZextrasBase.
+// WithBaseDir roots the install layout at dir instead of config.BaseDir().
 func WithBaseDir(dir string) Option {
 	return func(c *Controller) { c.baseDir = dir }
 }
@@ -78,15 +75,9 @@ func WithRunDir(dir string) Option {
 	return func(c *Controller) { c.runDir = dir }
 }
 
-// WithConfigLoader replaces the resolved-localconfig loader.
+// WithConfigLoader replaces the effective-localconfig loader.
 func WithConfigLoader(load func() (map[string]string, error)) Option {
 	return func(c *Controller) { c.loadConfig = load }
-}
-
-// WithRawConfigLoader replaces the unresolved-localconfig loader used by the
-// Advanced status hook.
-func WithRawConfigLoader(load func() (map[string]string, error)) Option {
-	return func(c *Controller) { c.loadRawConfig = load }
 }
 
 // WithRegistry replaces the default service registry with reg. The map is used
@@ -112,8 +103,8 @@ func WithLDAPProbe(probe func(ctx context.Context, urls []string) error) Option 
 }
 
 // NewController returns a Controller acting through env. Without options it
-// is the production controller: install base config.ZextrasBase, runtime
-// directory /run/carbonio, resolved localconfig, a fresh copy of the default
+// is the production controller: install base config.BaseDir(), runtime
+// directory /run/carbonio, effective localconfig, a fresh copy of the default
 // registry whose hooks are bound to the Controller.
 func NewController(env sys.System, opts ...Option) *Controller {
 	c := &Controller{env: env, systemd: systemd.NewManager(env)}
@@ -121,10 +112,9 @@ func NewController(env sys.System, opts ...Option) *Controller {
 	// The production defaults are expressed as the same options callers use to
 	// tailor a Controller; caller options are applied after, so they win.
 	defaults := []Option{
-		WithBaseDir(config.ZextrasBase),
+		WithBaseDir(config.BaseDir()),
 		WithRunDir(defaultRunDir),
-		WithConfigLoader(localconfig.LoadResolvedConfig),
-		WithRawConfigLoader(localconfig.LoadLocalConfig),
+		WithConfigLoader(localconfig.LoadEffective),
 		WithLDAPProbe(probeLDAPReady),
 		WithKillTimeout(defaultKillProcessTimeout),
 	}

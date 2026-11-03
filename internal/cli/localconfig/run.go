@@ -212,22 +212,37 @@ func (o *localconfigOpts) loadConfigFile() (map[string]string, error) {
 
 	switch {
 	case err == nil:
-		// Legacy expands every key while loading: one bad reference fails
-		// every invocation, even -e.
-		if err := lcfg.NewLegacy(configured).Validate(); err != nil {
-			return nil, failDetail("failed with error in config file", err)
-		}
-
-		return configured, nil
 	case errors.Is(err, fs.ErrNotExist), errors.Is(err, fs.ErrPermission):
 		o.warnf("local config file `%s' is not readable", o.configPath)
 
-		return map[string]string{}, nil
+		configured = map[string]string{}
 	default:
 		o.warnf("Problem parsing local config file '%s'", o.configPath)
 
 		return nil, failDetail("failed when reading config file", err)
 	}
+
+	// Reads show the effective values: the CONFIGD_LC_<key> environment
+	// overlay wins over the file. Writes never touch it (see rejectEnvKey).
+	maps.Copy(configured, lcfg.EnvOverrides())
+
+	// Legacy expands every key while loading: one bad reference fails every
+	// invocation, even -e.
+	if err := lcfg.NewLegacy(configured).Validate(); err != nil {
+		return nil, failDetail("failed with error in config file", err)
+	}
+
+	return configured, nil
+}
+
+// rejectEnvKey fails when key is set by the CONFIGD_LC_<key> overlay: a write to
+// the file could not change the effective value and would silently do nothing.
+func rejectEnvKey(key string) error {
+	if _, ok := lcfg.EnvOverride(key); ok {
+		return failf("key %s is set by environment %s", key, lcfg.EnvVar(key))
+	}
+
+	return nil
 }
 
 // warnf prints a legacy Logging.warn line on stderr unless -q is set.
@@ -258,6 +273,10 @@ func (o *localconfigOpts) runEdit() error {
 	for _, arg := range o.keys {
 		key, value, err := resolveEditKeyValue(arg, o.random)
 		if err != nil {
+			return err
+		}
+
+		if err := rejectEnvKey(key); err != nil {
 			return err
 		}
 
@@ -304,6 +323,12 @@ func (o *localconfigOpts) runUnset() error {
 
 	if len(o.keys) == 0 {
 		return failf("insufficient arguments")
+	}
+
+	for _, key := range o.keys {
+		if err := rejectEnvKey(key); err != nil {
+			return err
+		}
 	}
 
 	err := lcfg.RemoveKeys(o.configPath, o.keys)

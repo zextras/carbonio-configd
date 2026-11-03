@@ -171,7 +171,9 @@ func TestPlanHost_FailuresAreReturned(t *testing.T) {
 	}{
 		{
 			"template cannot be rendered",
-			func(f *planHostFixture) { f.cm.State.MtaConfig.Sections["mta"].Rewrites["conf/main.cf.in"] = config.RewriteEntry{Value: "conf/main.cf", Mode: "bad"} },
+			func(f *planHostFixture) {
+				f.cm.State.MtaConfig.Sections["mta"].Rewrites["conf/main.cf.in"] = config.RewriteEntry{Value: "conf/main.cf", Mode: "bad"}
+			},
 			"invalid file mode bad",
 		},
 		{

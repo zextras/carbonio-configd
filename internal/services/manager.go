@@ -38,8 +38,8 @@ type ServiceManager struct {
 	// mu guards RestartQueue, restartReasons and Dependencies, and serializes
 	// restart processing.
 	mu sync.Mutex
-	// ctl is the Controller whose lifecycle methods ControlProcess and IsRunning drive.
-	ctl *Controller
+	// ctl is the Backend whose lifecycle methods ControlProcess and IsRunning drive.
+	ctl Backend
 	// RestartQueue holds services pending restart
 	RestartQueue map[string]bool
 	// restartReasons holds, per queued service, the merged de-duplicated
@@ -63,7 +63,7 @@ type ServiceManager struct {
 }
 
 // NewServiceManager creates a ServiceManager that controls services through ctl.
-func NewServiceManager(ctl *Controller) *ServiceManager {
+func NewServiceManager(ctl Backend) *ServiceManager {
 	return &ServiceManager{
 		ctl:               ctl,
 		RestartQueue:      make(map[string]bool),
@@ -486,6 +486,42 @@ func (sm *ServiceManager) addDependencyRestarts(
 	for _, depService := range deps {
 		sm.queueDependencyRestart(ctx, strings.ToLower(depService), reason, configLookup)
 	}
+}
+
+// DependencyClosure returns, sorted, every service that restarting roots can
+// cascade into through deps (the map SetDependencies takes): the dependents of
+// each restarted service, and theirs in turn. roots themselves are not
+// included. It ignores whether a dependent is enabled, so it is the superset
+// AddDependencyRestarts can queue.
+func DependencyClosure(deps map[string][]string, roots []string) []string {
+	seen := make(map[string]bool, len(roots))
+	for _, r := range roots {
+		seen[r] = true
+	}
+
+	var out []string
+
+	queue := slices.Clone(roots)
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+
+		for _, dep := range deps[cur] {
+			dep = strings.ToLower(dep)
+			if seen[dep] {
+				continue
+			}
+
+			seen[dep] = true
+
+			out = append(out, dep)
+			queue = append(queue, dep)
+		}
+	}
+
+	slices.Sort(out)
+
+	return out
 }
 
 // queueDependencyRestart decides whether to queue a restart for a single dependency.

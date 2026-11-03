@@ -100,10 +100,10 @@ func TestOpenLDAP_StartTLS(t *testing.T) {
 
 	t.Run("daemon client (initNativeLdapClient)", func(t *testing.T) {
 		cm := &ConfigManager{
-			env:                    hostEnv(),
-			loadLocalConfigForLDAP: func() (map[string]string, error) { return lc, nil },
-			mainConfig:             &config.Config{},
-			CommandRegistry:        commands.NewRegistry("", hostEnv()),
+			env:             hostEnv(),
+			loadLocalConfig: func() (map[string]string, error) { return lc, nil },
+			mainConfig:      &config.Config{},
+			CommandRegistry: commands.NewRegistry(),
 		}
 		cm.initNativeLdapClient(context.Background())
 		require.NotNil(t, cm.NativeLdapClient)
