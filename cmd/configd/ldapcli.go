@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"io"
 	"os"
 
 	"github.com/zextras/carbonio-configd/internal/cli/ldapcmd"
@@ -27,6 +28,11 @@ type LDAPCmd struct {
 	Gs     LDAPGsCmd     `cmd:"" help:"Print a server entry with global inheritance (zmprov gs)"`
 	Mcf    LDAPMcfCmd    `cmd:"" passthrough:"" help:"Modify the global config: [+|-]attr value ... (zmprov mcf)"`
 	Search LDAPSearchCmd `cmd:"" help:"Search LDAP"`
+
+	// dial and stdout are the seams of the tests: the connection opener and
+	// where the verbs print. Unset, the verbs use a pooled client and os.Stdout.
+	dial   ldapcmd.Dial
+	stdout io.Writer
 }
 
 // LDAPGacfCmd is "configd ldap gacf".
@@ -34,7 +40,7 @@ type LDAPGacfCmd struct{}
 
 // Run executes "configd ldap gacf".
 func (c *LDAPGacfCmd) Run(parent *LDAPCmd, env sys.System) error {
-	return runLDAP(env, parent.options(ldapcmd.VerbGacf, nil))
+	return parent.run(env, parent.options(ldapcmd.VerbGacf, nil))
 }
 
 // LDAPGcfCmd is "configd ldap gcf".
@@ -44,7 +50,7 @@ type LDAPGcfCmd struct {
 
 // Run executes "configd ldap gcf".
 func (c *LDAPGcfCmd) Run(parent *LDAPCmd, env sys.System) error {
-	return runLDAP(env, parent.options(ldapcmd.VerbGcf, c.Attrs))
+	return parent.run(env, parent.options(ldapcmd.VerbGcf, c.Attrs))
 }
 
 // LDAPGsCmd is "configd ldap gs".
@@ -59,7 +65,7 @@ func (c *LDAPGsCmd) Run(parent *LDAPCmd, env sys.System) error {
 		args = []string{c.Server}
 	}
 
-	return runLDAP(env, parent.options(ldapcmd.VerbGs, args))
+	return parent.run(env, parent.options(ldapcmd.VerbGs, args))
 }
 
 // LDAPMcfCmd is "configd ldap mcf". Its arguments are taken verbatim, so a
@@ -76,7 +82,7 @@ func (c *LDAPMcfCmd) Run(parent *LDAPCmd, env sys.System) error {
 		changes = changes[1:]
 	}
 
-	return runLDAP(env, parent.options(ldapcmd.VerbMcf, changes))
+	return parent.run(env, parent.options(ldapcmd.VerbMcf, changes))
 }
 
 // LDAPSearchCmd is "configd ldap search".
@@ -92,7 +98,7 @@ func (c *LDAPSearchCmd) Run(parent *LDAPCmd, env sys.System) error {
 	opts := parent.options(ldapcmd.VerbSearch, nil)
 	opts.Base, opts.Filter, opts.Scope, opts.Attrs = c.Base, c.Filter, c.Scope, c.Attr
 
-	return runLDAP(env, opts)
+	return parent.run(env, opts)
 }
 
 func (c *LDAPCmd) options(verb ldapcmd.Verb, args []string) *ldapcmd.Options {
@@ -103,11 +109,19 @@ func (c *LDAPCmd) options(verb ldapcmd.Verb, args []string) *ldapcmd.Options {
 		BindDN:       c.BindDN,
 		PasswordFile: c.PasswordFile,
 		JSON:         c.JSON,
+		Dial:         c.dial,
 	}
 }
 
-func runLDAP(env sys.System, opts *ldapcmd.Options) error {
+// run executes one verb on env's filesystem and turns its status into main's
+// exit error.
+func (c *LDAPCmd) run(env sys.System, opts *ldapcmd.Options) error {
 	opts.FS = env.FS
 
-	return exitWith(ldapcmd.Run(context.Background(), os.Stdout, os.Stderr, opts))
+	stdout := c.stdout
+	if stdout == nil {
+		stdout = os.Stdout
+	}
+
+	return exitWith(ldapcmd.Run(context.Background(), stdout, os.Stderr, opts))
 }
