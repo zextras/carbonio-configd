@@ -421,21 +421,11 @@ func (l *Ldap) withRetry(ctx context.Context, operation string, fn func() error)
 
 	for attempt := 0; attempt <= l.MaxRetries; attempt++ {
 		if attempt > 0 {
-			logger.DebugContext(ctx, "Retrying LDAP operation",
-				"operation", operation,
-				"attempt", attempt,
-				"max_retries", l.MaxRetries,
-				"delay", delay)
+			var err error
 
-			if err := sleepCtx(ctx, delay); err != nil {
-				return fmt.Errorf("operation %s aborted before retry %d: %w (last error: %w)",
-					operation, attempt, err, lastErr)
-			}
-
-			// Exponential backoff with cap
-			delay *= 2
-			if delay > l.MaxRetryDelay {
-				delay = l.MaxRetryDelay
+			delay, err = l.backoffBeforeRetry(ctx, operation, attempt, delay, lastErr)
+			if err != nil {
+				return err
 			}
 		}
 
@@ -472,6 +462,26 @@ func (l *Ldap) withRetry(ctx context.Context, operation string, fn func() error)
 		"error", lastErr)
 
 	return fmt.Errorf("operation %s failed after %d retries: %w", operation, l.MaxRetries, lastErr)
+}
+
+// backoffBeforeRetry sleeps for delay before retry attempt and returns the next
+// (doubled, capped) delay. It fails if ctx is done during the wait.
+func (l *Ldap) backoffBeforeRetry(
+	ctx context.Context, operation string, attempt int, delay time.Duration, lastErr error,
+) (time.Duration, error) {
+	logger.DebugContext(ctx, "Retrying LDAP operation",
+		"operation", operation,
+		"attempt", attempt,
+		"max_retries", l.MaxRetries,
+		"delay", delay)
+
+	if err := sleepCtx(ctx, delay); err != nil {
+		return delay, fmt.Errorf("operation %s aborted before retry %d: %w (last error: %w)",
+			operation, attempt, err, lastErr)
+	}
+
+	// Exponential backoff with cap
+	return min(delay*2, l.MaxRetryDelay), nil
 }
 
 // isRetryableError determines if an error is transient and should be retried.

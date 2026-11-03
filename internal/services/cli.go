@@ -19,6 +19,7 @@ import (
 const (
 	serviceCliComponent = "service-cli"
 	errUnknownService   = "unknown service: %s"
+	errMemberFmt        = "%s: %w"
 )
 
 // systemctlBin is the absolute systemctl path (no PATH lookup).
@@ -209,7 +210,7 @@ func (c *Controller) startComposite(ctx context.Context, def *ServiceDef) error 
 
 	for _, member := range c.applicableMembers(ctx, def) {
 		if err := c.ServiceStart(memberCtx, member); err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", member, err))
+			errs = append(errs, fmt.Errorf(errMemberFmt, member, err))
 		}
 	}
 
@@ -230,7 +231,7 @@ func (c *Controller) stopComposite(ctx context.Context, def *ServiceDef, leaf bo
 		}
 
 		if err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", member, err))
+			errs = append(errs, fmt.Errorf(errMemberFmt, member, err))
 		}
 	}
 
@@ -261,7 +262,7 @@ func (c *Controller) ServiceStartSystemd(ctx context.Context, name string) error
 
 		for _, member := range c.applicableMembers(ctx, def) {
 			if err := c.ServiceStartSystemd(ctx, member); err != nil {
-				errs = append(errs, fmt.Errorf("%s: %w", member, err))
+				errs = append(errs, fmt.Errorf(errMemberFmt, member, err))
 			}
 		}
 

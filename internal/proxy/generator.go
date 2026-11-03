@@ -194,52 +194,9 @@ func (g *Generator) GenerateAll(ctx context.Context) error {
 	}
 
 	// Process each template
-	successCount := 0
-	errorCount := 0
-
-	var firstErr error
-
-	totalProcessingTime := time.Duration(0)
-
-	for _, templatePath := range templates {
-		templateName := filepath.Base(templatePath)
-		logger.DebugContext(ctx, "Processing template",
-			"name", templateName)
-
-		outputName, ok := g.outputName(templateName)
-		if !ok {
-			continue
-		}
-
-		templateStart := time.Now()
-
-		if err := g.ProcessTemplateWithProcessor(ctx, processor, templatePath, outputName); err != nil {
-			logger.ErrorContext(ctx, "Failed to process template",
-				"name", templateName,
-				"error", err)
-
-			errorCount++
-
-			if firstErr == nil {
-				firstErr = err
-			}
-
-			continue
-		}
-
-		templateDuration := time.Since(templateStart)
-		totalProcessingTime += templateDuration
-		logger.DebugContext(ctx, "Timing: Template processing time",
-			"name", templateName,
-			"duration_seconds", templateDuration.Seconds())
-
-		successCount++
-
-		if g.Verbose {
-			logger.DebugContext(ctx, "Successfully generated file",
-				"name", outputName)
-		}
-	}
+	res := g.processTemplates(ctx, processor, templates)
+	successCount, errorCount, firstErr := res.success, res.failed, res.firstErr
+	totalProcessingTime := res.elapsed
 
 	totalDuration := time.Since(startTime)
 	logger.DebugContext(ctx, "Timing: Template generation totals",
@@ -262,6 +219,64 @@ func (g *Generator) GenerateAll(ctx context.Context) error {
 	g.appendConfGenResult(ctx, confGenSuccessMarker)
 
 	return nil
+}
+
+// templateRunResult summarizes a pass over all templates.
+type templateRunResult struct {
+	success  int
+	failed   int
+	firstErr error
+	elapsed  time.Duration // time spent in successful template renders
+}
+
+// processTemplates renders every template, continuing past failures and
+// recording the first error.
+func (g *Generator) processTemplates(
+	ctx context.Context, processor *TemplateProcessor, templates []string,
+) templateRunResult {
+	var res templateRunResult
+
+	for _, templatePath := range templates {
+		templateName := filepath.Base(templatePath)
+		logger.DebugContext(ctx, "Processing template",
+			"name", templateName)
+
+		outputName, ok := g.outputName(templateName)
+		if !ok {
+			continue
+		}
+
+		templateStart := time.Now()
+
+		if err := g.ProcessTemplateWithProcessor(ctx, processor, templatePath, outputName); err != nil {
+			logger.ErrorContext(ctx, "Failed to process template",
+				"name", templateName,
+				"error", err)
+
+			res.failed++
+
+			if res.firstErr == nil {
+				res.firstErr = err
+			}
+
+			continue
+		}
+
+		templateDuration := time.Since(templateStart)
+		res.elapsed += templateDuration
+		logger.DebugContext(ctx, "Timing: Template processing time",
+			"name", templateName,
+			"duration_seconds", templateDuration.Seconds())
+
+		res.success++
+
+		if g.Verbose {
+			logger.DebugContext(ctx, "Successfully generated file",
+				"name", outputName)
+		}
+	}
+
+	return res
 }
 
 // appendConfGenResult appends "\n#<text>\n" to ConfDir/nginx.conf so that

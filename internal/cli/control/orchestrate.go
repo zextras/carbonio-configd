@@ -135,19 +135,7 @@ func (o *orchestrator) startBootstrapServices(ctx context.Context, c *cliutil.Co
 func (o *orchestrator) startEnabledServices(
 	ctx context.Context, c *cliutil.Console, enabledSet map[string]bool, threshold int,
 ) int {
-	toStart := make([]string, 0, len(enabledSet))
-
-	for _, name := range o.ctl.ControlServiceNames() {
-		if name == ldapServiceName || name == configdServiceName {
-			continue
-		}
-
-		if !enabledSet[name] && !o.ctl.IsCustomEnabled(ctx, name) {
-			continue
-		}
-
-		toStart = append(toStart, name)
-	}
+	toStart := o.servicesToStart(ctx, enabledSet)
 
 	if err := o.ctl.RewriteConfigsFor(ctx, toStart); err != nil {
 		c.Warn("Configuration rewrite failed: %v", err)
@@ -162,24 +150,52 @@ func (o *orchestrator) startEnabledServices(
 			continue
 		}
 
-		o.ctl.CheckServiceDiskSpace(name, threshold)
-
-		if name == proxyServiceName {
-			if err := o.ctl.RegenerateResolvers(ctx); err != nil {
-				c.Printf("resolvers.conf file generation failed.\n")
-			}
-		}
-
-		done := c.Progress("Starting", def.DisplayName)
-		startErr := o.ctl.ServiceStart(startCtx, name)
-		done(startErr)
-
-		if startErr != nil {
+		if !o.startOne(ctx, startCtx, c, name, def.DisplayName, threshold) {
 			rc = 1
 		}
 	}
 
 	return rc
+}
+
+// servicesToStart returns the control services (minus ldap and configd) that
+// are enabled by LDAP or by a custom-enable marker, in control order.
+func (o *orchestrator) servicesToStart(ctx context.Context, enabledSet map[string]bool) []string {
+	toStart := make([]string, 0, len(enabledSet))
+
+	for _, name := range o.ctl.ControlServiceNames() {
+		if name == ldapServiceName || name == configdServiceName {
+			continue
+		}
+
+		if !enabledSet[name] && !o.ctl.IsCustomEnabled(ctx, name) {
+			continue
+		}
+
+		toStart = append(toStart, name)
+	}
+
+	return toStart
+}
+
+// startOne runs the pre-start checks and starts a single service, reporting
+// whether the start succeeded.
+func (o *orchestrator) startOne(
+	ctx, startCtx context.Context, c *cliutil.Console, name, displayName string, threshold int,
+) bool {
+	o.ctl.CheckServiceDiskSpace(name, threshold)
+
+	if name == proxyServiceName {
+		if err := o.ctl.RegenerateResolvers(ctx); err != nil {
+			c.Printf("resolvers.conf file generation failed.\n")
+		}
+	}
+
+	done := c.Progress("Starting", displayName)
+	startErr := o.ctl.ServiceStart(startCtx, name)
+	done(startErr)
+
+	return startErr == nil
 }
 
 func (o *orchestrator) controlStop(ctx context.Context, c *cliutil.Console) int {
@@ -285,31 +301,9 @@ func (o *orchestrator) controlStatus(ctx context.Context, c *cliutil.Console) in
 	// /proc is walked once.
 	ctx = o.ctl.WithProcessSnapshot(ctx)
 
-	type discResult struct {
-		set    map[string]bool
-		failed bool
-	}
-
 	discCh := make(chan discResult, 1)
 
-	go func() {
-		list, err := o.ctl.DiscoverEnabledServices(ctx)
-		if err != nil {
-			discCh <- discResult{set: nil, failed: true}
-			return
-		}
-
-		s := make(map[string]bool, len(list)+1)
-		for _, n := range list {
-			s[services.MapLDAPServiceToRegistry(n)] = true
-		}
-
-		// Legacy parity: zmcontrol/control.pl always inserted "zmconfigd"
-		// regardless of LDAP state, so configd is always shown.
-		s[configdServiceName] = true
-
-		discCh <- discResult{set: s, failed: false}
-	}()
+	go func() { discCh <- o.discoverStatusSet(ctx) }()
 
 	type svcRow struct {
 		services.ServiceInfo
@@ -348,15 +342,45 @@ func (o *orchestrator) controlStatus(ctx context.Context, c *cliutil.Console) in
 	counted := o.ctl.StatusListServices()
 
 	for _, r := range rows {
-		counts := r.Name != "stats" && r.Name != "logger"
-		if counted != nil {
-			counts = counted[r.Name]
-		}
-
-		if !r.Running && counts {
+		if !r.Running && statusCounts(counted, r.Name) {
 			return 1
 		}
 	}
 
 	return 0
+}
+
+// discResult is the outcome of enabled-service discovery for controlStatus.
+type discResult struct {
+	set    map[string]bool
+	failed bool
+}
+
+// discoverStatusSet resolves the set of registry services to display.
+func (o *orchestrator) discoverStatusSet(ctx context.Context) discResult {
+	list, err := o.ctl.DiscoverEnabledServices(ctx)
+	if err != nil {
+		return discResult{set: nil, failed: true}
+	}
+
+	s := make(map[string]bool, len(list)+1)
+	for _, n := range list {
+		s[services.MapLDAPServiceToRegistry(n)] = true
+	}
+
+	// Legacy parity: zmcontrol/control.pl always inserted "zmconfigd"
+	// regardless of LDAP state, so configd is always shown.
+	s[configdServiceName] = true
+
+	return discResult{set: s, failed: false}
+}
+
+// statusCounts reports whether a stopped service name fails the status: the
+// configured status list when set, else every service but stats and logger.
+func statusCounts(counted map[string]bool, name string) bool {
+	if counted != nil {
+		return counted[name]
+	}
+
+	return name != "stats" && name != "logger"
 }

@@ -73,6 +73,44 @@ func (c *Controller) ServiceRotate(ctx context.Context, name string) (SignalRepo
 	return def.Rotate(ctx)
 }
 
+// readStatsPid reads a stats pidfile, logging and reporting false when it is
+// unreadable or holds no valid pid.
+func (c *Controller) readStatsPid(ctx context.Context, pidPath string) (int, bool) {
+	data, err := c.env.FS.ReadFile(pidPath)
+	if err != nil {
+		logger.WarnContext(ctx, "Failed to read stats PID file", "path", pidPath, "error", err)
+
+		return 0, false
+	}
+
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || pid <= 0 {
+		logger.WarnContext(ctx, "Invalid PID in stats PID file", "path", pidPath)
+
+		return 0, false
+	}
+
+	return pid, true
+}
+
+// hupStatsPid sends SIGHUP to pid (through sudo when not permitted) and
+// reports whether the process was signaled; false means it is not running.
+func (c *Controller) hupStatsPid(ctx context.Context, pid int) bool {
+	if !c.processAlive(pid) {
+		return false
+	}
+
+	if sigErr := c.env.Proc.Signal(pid, syscall.SIGHUP); sigErr != nil {
+		if !errors.Is(sigErr, syscall.EPERM) {
+			return false
+		}
+
+		c.sudoKill(ctx, pid, "HUP", false)
+	}
+
+	return true
+}
+
 // statsRotate sends SIGHUP to the pid of every stats collector pidfile (legacy
 // statctl.pl rotate). Pids that are gone are reported, not an error. A
 // root-owned collector (sudo-spawned zmstat-fd) is signaled through sudo.
@@ -92,41 +130,18 @@ func (c *Controller) statsRotate(ctx context.Context) (SignalReport, error) {
 			continue
 		}
 
-		pidPath := filepath.Join(c.p.statsPidDir, entry.Name())
-
-		data, readErr := c.env.FS.ReadFile(pidPath)
-		if readErr != nil {
-			logger.WarnContext(ctx, "Failed to read stats PID file", "path", pidPath, "error", readErr)
-
-			continue
-		}
-
-		pid, convErr := strconv.Atoi(strings.TrimSpace(string(data)))
-		if convErr != nil || pid <= 0 {
-			logger.WarnContext(ctx, "Invalid PID in stats PID file", "path", pidPath)
-
+		pid, ok := c.readStatsPid(ctx, filepath.Join(c.p.statsPidDir, entry.Name()))
+		if !ok {
 			continue
 		}
 
 		found = true
 
-		if !c.processAlive(pid) {
+		if c.hupStatsPid(ctx, pid) {
+			report.Signaled = append(report.Signaled, pid)
+		} else {
 			report.NotRunning = append(report.NotRunning, pid)
-
-			continue
 		}
-
-		if sigErr := c.env.Proc.Signal(pid, syscall.SIGHUP); sigErr != nil {
-			if !errors.Is(sigErr, syscall.EPERM) {
-				report.NotRunning = append(report.NotRunning, pid)
-
-				continue
-			}
-
-			c.sudoKill(ctx, pid, "HUP", false)
-		}
-
-		report.Signaled = append(report.Signaled, pid)
 	}
 
 	if !found {
