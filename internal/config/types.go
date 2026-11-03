@@ -29,12 +29,23 @@ const (
 
 // Config holds the application-wide configuration parameters.
 type Config struct {
-	Progname         string
-	Hostname         string
-	WdAll            bool
-	Debug            bool
-	BaseDir          string
-	ConfigFile       string
+	Progname   string
+	Hostname   string
+	WdAll      bool
+	Debug      bool
+	BaseDir    string
+	ConfigFile string
+	// TemplateDir is zmconfigd_template_dir: where the templates (REWRITE
+	// sources, conf/zmconfigd/*.cf fragments, zmconfigd.cf, conf/attrs) are
+	// read from. It defaults to BaseDir; outputs are always written under BaseDir.
+	TemplateDir string
+	// Sections is zmconfigd_sections: when non-empty every cycle is limited to
+	// these sections.
+	Sections []string
+	// ServiceHooks is zmconfigd_service_hooks: the path of the JSON file that
+	// replaces the host service control with signals/commands. Empty selects
+	// the host service control.
+	ServiceHooks     string
 	LogFile          string
 	Interval         int
 	WatchdogInterval int  // Watchdog check interval in seconds
@@ -147,6 +158,7 @@ func NewConfig() (*Config, error) {
 		Debug:            false,
 		BaseDir:          baseDir,
 		ConfigFile:       baseDir + "/conf/zmconfigd.cf",
+		TemplateDir:      baseDir,
 		LogFile:          baseDir + "/log/zmconfigd.log",
 		Interval:         300,   // Increased from 60s to 5min (300s) to reduce zm* process spawns
 		WatchdogInterval: 120,   // Check services every 2 minutes instead of 60s
@@ -208,6 +220,44 @@ func localBoolNotFalse(data *ConfigMap, key string, dst *bool) {
 	}
 }
 
+// SetRuntimeVals applies the keys that shape how the process is wired (the
+// template root, the section scope, the service hooks). They are read when the
+// runtime is built, before the first full load, and again by every SetVals.
+func (c *Config) SetRuntimeVals(localConfig *LocalConfig) {
+	data := localConfig.Data
+
+	c.setTemplateDir(data)
+
+	if v, ok := data.Get("zmconfigd_sections"); ok {
+		c.Sections = strings.Fields(v)
+	}
+
+	localStr(data, "zmconfigd_service_hooks", &c.ServiceHooks)
+}
+
+// setTemplateDir applies zmconfigd_template_dir. An unset or empty key leaves
+// the template root (and the zmconfigd.cf path) as they are.
+func (c *Config) setTemplateDir(data *ConfigMap) {
+	v, ok := data.Get("zmconfigd_template_dir")
+	if !ok || v == "" {
+		return
+	}
+
+	c.TemplateDir = v
+	c.ConfigFile = v + "/conf/zmconfigd.cf"
+}
+
+// TemplatePath returns the path of rel (e.g. "conf/nginx.conf.in") under the
+// template root, which is the base dir unless zmconfigd_template_dir is set.
+func (c *Config) TemplatePath(rel string) string {
+	root := c.TemplateDir
+	if root == "" {
+		root = c.BaseDir
+	}
+
+	return root + "/" + rel
+}
+
 // SetVals updates config values based on provided local configuration.
 // This function mirrors the setVals method in conf.py.
 func (c *Config) SetVals(localConfig *LocalConfig) {
@@ -239,6 +289,8 @@ func (c *Config) SetVals(localConfig *LocalConfig) {
 	localBoolTrue(data, "zmconfigd_ldap_change_trigger", &c.LdapChangeTrigger)
 	localInt(data, "zmconfigd_ldap_change_poll_seconds", &c.LdapChangePollSeconds)
 	localInt(data, "zmconfigd_ldap_change_debounce_seconds", &c.LdapChangeDebounceSeconds)
+
+	c.SetRuntimeVals(localConfig)
 
 	if v, ok := data.Get("zmconfigd_watchdog_services"); ok {
 		c.WdList = strings.Fields(v)

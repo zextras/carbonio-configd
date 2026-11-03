@@ -17,7 +17,6 @@ import (
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/plan"
 	"github.com/zextras/carbonio-configd/internal/restart"
-	"github.com/zextras/carbonio-configd/internal/services"
 	"github.com/zextras/carbonio-configd/internal/snapshot"
 	"github.com/zextras/carbonio-configd/internal/state"
 )
@@ -107,6 +106,7 @@ func (cm *ConfigManager) Plan(ctx context.Context) (*plan.Plan, error) {
 		Prev:      cm.prev,
 		Cur:       cur,
 		Conf:      conf,
+		Scope:     cm.mainConfig.Sections,
 		Forced:    cm.State.ForcedSections(),
 		Requested: requested,
 		FirstRun:  firstRun,
@@ -278,14 +278,6 @@ func (cm *ConfigManager) ApplyRestarts(ctx context.Context, pl *plan.Plan) {
 		Enabled:  cm.mainConfig.RestartConfig,
 		Debounce: debounceOf(cm.mainConfig),
 	})
-}
-
-// SetDisableRestarts makes the manager that runs config-driven restarts skip
-// every restart ("--disable-restarts").
-func (cm *ConfigManager) SetDisableRestarts(disable bool) {
-	if sm, ok := cm.ServiceMgr.(*services.ServiceManager); ok {
-		sm.DisableRestarts = disable
-	}
 }
 
 // debounceOf returns the restart debounce period configured in localconfig.

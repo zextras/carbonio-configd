@@ -56,6 +56,37 @@ one of them, and so is:
 | `zmconfigd_ldap_change_trigger` | `FALSE` (off) | When `TRUE` (case-insensitive; any other value is off), a watcher polls the LDAP entries a cycle reads and wakes the main loop for an immediate full cycle as soon as one changes, instead of waiting for the next `zmconfigd_interval`. The interval poll keeps running as the safety net. Watched: the global config (`cn=config,cn=zimbra`), the server entries under `cn=servers,cn=zimbra` (this server's own attributes and services, the upstream servers the proxy generates, and the servers `gamau`, `garpu` and `garpb` enumerate) and the `zimbraDomain` entries the proxy generator reads. Off, no watcher goroutine exists and nothing about a cycle changes. Read every cycle: `FALSE` stops a running watcher, but a key that is merely deleted keeps its last value until configd restarts (as for `zmconfigd_skip_idle_polls`). Ignored in single-run (`--once`) mode, and with a warning when configd has no native LDAP client. See [architecture.md](architecture.md#ldap-change-detection-opt-in). |
 | `zmconfigd_ldap_change_poll_seconds` | `5` | Poll interval of the change watcher (values below 1 mean 5). Each poll is three searches that return only `entryCSN` and `modifyTimestamp`; the domains search walks every `zimbraDomain`, so on a directory with many thousands of domains raise this value. Read when the watcher starts: a change needs a configd restart (or the key set to `FALSE` for one cycle and back to `TRUE`). |
 | `zmconfigd_ldap_change_debounce_seconds` | `2` | Quiet window that coalesces a burst of directory writes into one cycle: the cycle is requested once nothing changed for that long, or after ten windows of continuous writes at the latest. `0` requests the cycle in the poll that sees the change. Read when the watcher starts, like the poll seconds. |
+| `zmconfigd_template_dir` | the base dir (`ZEXTRAS_HOME`) | Directory the templates are read from: the `REWRITE` sources, the `FILE` fragments (`conf/zmconfigd/*.cf`), `conf/zmconfigd.cf` and the LDAP attribute schemas (`conf/attrs`). Outputs (rewritten files, mapped files, postfix configuration) always stay under the base dir. Unset, nothing changes. For containers whose output volume hides the templates. |
+| `zmconfigd_sections` | empty (all sections) | Space-separated section names. Every cycle (daemon, forced rewrite, `shadow`, `plan`) is limited to them (`plan.Input.Scope`); `configd plan <sections>` must name sections inside it, otherwise it fails. |
+| `zmconfigd_service_hooks` | empty (host service control) | Path of a JSON file that replaces the host service control (systemd / legacy `zm*ctl`) with signals and commands; see below. |
+
+### Service hooks (`zmconfigd_service_hooks`)
+
+The file maps a registry service name (or `*`) to an action list, for the actions `start`, `stop`,
+`restart` and `status`. A service entry wins over `*` for the same action. Each action is an ordered
+list; the first failing hook fails the action.
+
+```json
+{
+  "antivirus": { "restart": ["signal:TERM", "signal:TERM@freshclam"], "status": ["process"] },
+  "amavis":    { "restart": ["signal:TERM"] },
+  "mta":       { "restart": ["skip"] },
+  "*":         { "start": ["skip"], "stop": ["skip"] }
+}
+```
+
+| Hook | Valid for | Effect |
+|---|---|---|
+| `signal:<SIG>[@<service>]` | start, stop, restart | Sends `<SIG>` (HUP, INT, QUIT, TERM, KILL, USR1, USR2, optional `SIG` prefix) to the main process of the service, or of `<service>`. The PID comes from the registry's pid file validated against its process identity, or a scan of the process table (needs a shared process namespace and the same UID). No process is an error, so the restart is retried like any failed restart. |
+| `exec:<argv...>` | all | Runs the command (whitespace-split, no shell) with a 30 s timeout. For `status`, exit 0 is running and a non-zero exit is not running. |
+| `skip` | start, stop, restart | Logs `service action not managed by this process` at INFO and succeeds. Never implied: it only applies where declared. |
+| `process` | status | The service is running when its process is found as above. |
+
+An unknown service, action or hook is a startup error. After the first parse of `zmconfigd.cf` the
+daemon also checks that every service named by a `RESTART` line of an in-scope section has a
+`restart` hook and, when the watchdog is on (`zmconfigd_watchdog`), that every watchdog service has a
+`status` hook. It exits with status 1 listing what is missing (`restart:<svc>`, `status:<svc>`)
+instead of retrying forever. A missing `start`/`stop` hook fails only when that action is attempted.
 
 ## CLI behavior (legacy `LocalConfigCLI` parity)
 

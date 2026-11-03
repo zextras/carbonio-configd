@@ -286,7 +286,7 @@ func (cm *ConfigManager) rewriteAtomicCommit(ctx context.Context, tmpFileName, d
 
 // processRewrite processes a single file rewrite.
 func (cm *ConfigManager) processRewrite(ctx context.Context, filePath string, rewriteEntry config.RewriteEntry) error {
-	srcPath := cm.mainConfig.BaseDir + "/" + filePath
+	srcPath := cm.mainConfig.TemplatePath(filePath)
 	destPath := cm.mainConfig.BaseDir + "/" + rewriteEntry.Value
 
 	tmpFile, err := cm.env.FS.CreateTemp("", "zmconfigd-rewrite-")

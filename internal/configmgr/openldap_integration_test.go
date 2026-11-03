@@ -172,7 +172,7 @@ func newOpenLDAPHarness(t *testing.T) *olHarness {
 	ldapMgr.SetNativeClient(ctx, client)
 	ldapMgr.SetConfigClient(ctx, configClient)
 
-	registry := commands.NewRegistry(olBaseDir, env)
+	registry := commands.NewRegistry()
 	registry.RegisterLDAPCommands(commands.NewCommandExecutor(client))
 
 	h.cm = &ConfigManager{

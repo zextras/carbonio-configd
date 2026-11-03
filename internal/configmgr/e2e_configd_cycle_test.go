@@ -54,7 +54,7 @@ func TestE2E_ConfigdCycleWithProxy(t *testing.T) {
 	ldapClient := ldap.NewLdap(context.Background(), mainCfg)
 
 	// Create ConfigManager
-	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv())
+	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv(), hostServices())
 
 	// Create Service Manager
 	env := hostEnv()
@@ -312,7 +312,7 @@ func TestE2E_NetworkCommandsWithProxy(t *testing.T) {
 	ldapClient := ldap.NewLdap(context.Background(), mainCfg)
 
 	// Create ConfigManager
-	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv())
+	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv(), hostServices())
 
 	// Load initial configs
 	err = cm.LoadAllConfigs(context.Background())
@@ -455,7 +455,7 @@ func TestE2E_ProxyConfigValidation(t *testing.T) {
 
 	// Load configs
 	ldapClient := ldap.NewLdap(context.Background(), mainCfg)
-	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv())
+	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv(), hostServices())
 
 	err = cm.LoadAllConfigs(context.Background())
 	if err != nil {

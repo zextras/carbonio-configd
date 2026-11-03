@@ -24,16 +24,21 @@ func TestInitializeConfig(t *testing.T) {
 
 	cliutil.InitLogging(os.Stderr)
 
-	mainCfg, appState, ldapClient := initializeConfig()
+	rt, err := buildRuntime(context.Background(), systest.New().System(), &runtimeOpts{
+		loadLocal: func() (map[string]string, error) { return map[string]string{}, nil },
+	})
+	if err != nil {
+		t.Fatalf("buildRuntime: %v", err)
+	}
 
-	if mainCfg == nil {
+	if rt.cfg == nil {
 		t.Error("expected non-nil config")
 	}
-	if ldapClient == nil {
+	if rt.ldap == nil {
 		t.Error("expected non-nil ldap client")
 	}
 
-	snap := appState.Snapshot()
+	snap := rt.state.Snapshot()
 	if port, _ := snap.Local("zmconfigd_listen_port"); port != "7171" {
 		t.Errorf("expected listen port 7171, got %s", port)
 	}

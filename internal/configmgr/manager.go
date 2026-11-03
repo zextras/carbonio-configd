@@ -81,7 +81,7 @@ type ConfigManager struct {
 	Transformer             *transformer.Transformer
 	ServiceMgr              services.Manager   // Service manager interface
 	CommandRegistry         *commands.Registry // Command registry for this instance
-	cachedLocalConfigOutput string             // Cached output from zmlocalconfig -s command
+	cachedLocalConfigOutput string             // Cached resolved localconfig output
 	cachedLocalConfigMu     sync.RWMutex       // Protects cachedLocalConfigOutput
 	mtaExecutor             mtaops.Executor
 	mtaResolver             mtaops.OperationResolver
@@ -106,19 +106,20 @@ type ConfigManager struct {
 }
 
 // NewConfigManager creates a new ConfigManager instance. Every host side effect
-// of the manager and of the components it builds (service control, MTA
-// operations, commands, proxy generation) goes through env.
+// of the manager and of the components it builds (MTA operations, commands,
+// proxy generation) goes through env. serviceMgr is the one service manager of
+// the process: restarts, the watchdog and status checks all share it.
 func NewConfigManager(ctx context.Context, mainCfg *config.Config,
 	appState *state.State, ldapClient *ldap.Ldap, cacheInstance *cache.ConfigCache,
-	env sys.System) *ConfigManager {
+	env sys.System, serviceMgr services.Manager) *ConfigManager {
 	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
 	cm := &ConfigManager{
 		mainConfig:      mainCfg,
 		State:           appState,
 		LdapClient:      ldapClient,
 		Cache:           cacheInstance,
-		ServiceMgr:      services.NewServiceManager(services.NewController(env)),
-		CommandRegistry: commands.NewRegistry(mainCfg.BaseDir, env),
+		ServiceMgr:      serviceMgr,
+		CommandRegistry: commands.NewRegistry(),
 		env:             env,
 
 		loadLocalConfigForLDAP:  localconfig.LoadLocalConfig,
@@ -142,7 +143,7 @@ func (cm *ConfigManager) Metrics() *metrics.Registry {
 }
 
 // initNativeLdapClient initializes the native LDAP client from localconfig.
-// If initialization fails, it logs a warning and the manager will fall back to zmprov subprocess calls.
+// If initialization fails, it logs a warning and the LDAP lookups fail until a later cycle can build the client.
 func (cm *ConfigManager) initNativeLdapClient(ctx context.Context) {
 	localCfg, err := cm.loadLocalConfigForLDAP()
 	if err != nil {
@@ -192,6 +193,7 @@ func (cm *ConfigManager) initNativeLdapClient(ctx context.Context) {
 		PoolSize: 5,
 		StartTLS: cm.mainConfig.LdapStartTLSRequired,
 		FS:       cm.env.FS,
+		AttrsDir: attrsDir(localCfg),
 	})
 	if err != nil {
 		logger.WarnContext(ctx, "Failed to create native LDAP client - LDAP queries will fail",
@@ -221,8 +223,8 @@ func (cm *ConfigManager) initNativeLdapClient(ctx context.Context) {
 // require binding as the cn=config rootDN over the local ldapi socket; the
 // data-suffix client (uid=zimbra) cannot write cn=config (LDAP code 50).
 //
-// Failure here is asymmetric to the data client: the data client degrades to
-// zmprov on failure, but the config client is the only correct write path, so
+// Failure here is asymmetric to the data client: the data client logs a
+// warning on failure, but the config client is the only correct write path, so
 // a missing root password is logged at error level and writes will fail fast
 // at call time (ModifyAttribute returns a config error) rather than silently
 // using the wrong identity.
@@ -262,6 +264,16 @@ func (cm *ConfigManager) initConfigLdapClient(ctx context.Context, localCfg map[
 		"bind_dn", ldap.ConfigBackendDN)
 }
 
+// attrsDir is the attrs schema directory under zmconfigd_template_dir, or ""
+// (the base dir default) when the key is unset.
+func attrsDir(localCfg map[string]string) string {
+	if dir := localCfg["zmconfigd_template_dir"]; dir != "" {
+		return dir + "/conf/attrs"
+	}
+
+	return ""
+}
+
 // lookupFileKey returns the value for key from the file cache or disk.
 func (cm *ConfigManager) lookupFileKey(ctx context.Context, key string) (string, error) {
 	if val, ok := cm.State.LookupFile(key); ok {
@@ -270,7 +282,7 @@ func (cm *ConfigManager) lookupFileKey(ctx context.Context, key string) (string,
 		return val, nil
 	}
 
-	filePath := cm.mainConfig.BaseDir + "/conf/" + key
+	filePath := cm.mainConfig.TemplatePath("conf/" + key)
 
 	//nolint:gosec // G304: File path comes from trusted configuration
 	contentBytes, err := cm.env.FS.ReadFile(filePath)

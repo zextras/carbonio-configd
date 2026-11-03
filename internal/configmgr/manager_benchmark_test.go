@@ -29,7 +29,7 @@ func BenchmarkConfigManager_LoadAllConfigs(b *testing.B) {
 	appState := state.NewState()
 	ldapClient := ldap.NewLdap(context.Background(), mainCfg)
 
-	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv())
+	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv(), hostServices())
 
 	// Try initial load to check if Carbonio tools are available
 	err = cm.LoadAllConfigs(context.Background())
@@ -60,7 +60,7 @@ func BenchmarkConfigManager_LoadLocalConfig(b *testing.B) {
 	appState := state.NewState()
 	ldapClient := ldap.NewLdap(context.Background(), mainCfg)
 
-	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv())
+	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv(), hostServices())
 
 	// Try initial load to check if Carbonio tools are available
 	err = cm.LoadLocalConfig(context.Background())
@@ -91,7 +91,7 @@ func BenchmarkConfigManager_LoadGlobalConfig(b *testing.B) {
 	appState := state.NewState()
 	ldapClient := ldap.NewLdap(context.Background(), mainCfg)
 
-	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv())
+	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv(), hostServices())
 
 	// Load local config first (needed for LDAP connection)
 	if err := cm.LoadLocalConfig(context.Background()); err != nil {
@@ -128,7 +128,7 @@ func BenchmarkConfigManager_Plan(b *testing.B) {
 	appState := state.NewState()
 	ldapClient := ldap.NewLdap(context.Background(), mainCfg)
 
-	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv())
+	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv(), hostServices())
 
 	// Load initial configuration
 	if err := cm.LoadAllConfigs(context.Background()); err != nil {
@@ -157,7 +157,7 @@ func BenchmarkConfigManager_LookUpConfig(b *testing.B) {
 	appState := state.NewState()
 	ldapClient := ldap.NewLdap(context.Background(), mainCfg)
 
-	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv())
+	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv(), hostServices())
 
 	// Load initial configuration
 	if err := cm.LoadAllConfigs(context.Background()); err != nil {
@@ -187,7 +187,7 @@ func BenchmarkConfigManager_LookUpConfig_Parallel(b *testing.B) {
 	appState := state.NewState()
 	ldapClient := ldap.NewLdap(context.Background(), mainCfg)
 
-	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv())
+	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv(), hostServices())
 
 	// Load initial configuration
 	if err := cm.LoadAllConfigs(context.Background()); err != nil {
@@ -223,7 +223,7 @@ func BenchmarkConfigManager_FullCycle(b *testing.B) {
 	ldapClient := ldap.NewLdap(context.Background(), mainCfg)
 
 	// Test initial load to check if Carbonio tools are available
-	testCM := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv())
+	testCM := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv(), hostServices())
 	if err := testCM.LoadAllConfigs(context.Background()); err != nil {
 		b.Skipf("Skipping benchmark - requires live Carbonio environment: %v", err)
 	}
@@ -232,7 +232,7 @@ func BenchmarkConfigManager_FullCycle(b *testing.B) {
 
 	for b.Loop() {
 		// Create fresh ConfigManager for each cycle
-		cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv())
+		cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv(), hostServices())
 
 		// Load all configurations
 		err := cm.LoadAllConfigs(context.Background())
@@ -277,7 +277,7 @@ func BenchmarkConfigManager_MemoryUsage(b *testing.B) {
 	appState := state.NewState()
 	ldapClient := ldap.NewLdap(context.Background(), mainCfg)
 
-	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv())
+	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv(), hostServices())
 
 	// Try initial load to check if Carbonio tools are available
 	if err := cm.LoadAllConfigs(context.Background()); err != nil {
@@ -320,7 +320,7 @@ func BenchmarkConfigManager_ConcurrentFullCycle(b *testing.B) {
 	appState := state.NewState()
 	ldapClient := ldap.NewLdap(context.Background(), mainCfg)
 
-	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv())
+	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv(), hostServices())
 
 	// Load initial configuration
 	if err := cm.LoadAllConfigs(context.Background()); err != nil {
@@ -365,7 +365,7 @@ func BenchmarkFullLoop(b *testing.B) {
 	ldapClient := ldap.NewLdap(context.Background(), mainCfg)
 
 	// Try initial load to check if Carbonio environment is available
-	testCM := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv())
+	testCM := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv(), hostServices())
 	if err := testCM.LoadAllConfigs(context.Background()); err != nil {
 		b.Skipf("Skipping benchmark - requires live Carbonio environment: %v", err)
 	}
@@ -380,7 +380,7 @@ func BenchmarkFullLoop(b *testing.B) {
 
 	for b.Loop() {
 		// Create fresh ConfigManager for each iteration to match main loop behavior
-		cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv())
+		cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv(), hostServices())
 
 		// Load all configurations (local, LDAP, global, misc, server)
 		err := cm.LoadAllConfigs(context.Background())
@@ -435,7 +435,7 @@ func BenchmarkFullLoop_FirstRun(b *testing.B) {
 
 	// Check environment availability
 	appState := state.NewState()
-	testCM := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv())
+	testCM := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv(), hostServices())
 	if err := testCM.LoadAllConfigs(context.Background()); err != nil {
 		b.Skipf("Skipping benchmark - requires live Carbonio environment: %v", err)
 	}
@@ -450,7 +450,7 @@ func BenchmarkFullLoop_FirstRun(b *testing.B) {
 		// Create fresh state and manager for each iteration to simulate first run
 		freshState := state.NewState()
 		freshState.SetFirstRun(true) // Explicitly set FirstRun flag
-		cm := NewConfigManager(ctx, mainCfg, freshState, ldapClient, nil, hostEnv())
+		cm := NewConfigManager(ctx, mainCfg, freshState, ldapClient, nil, hostEnv(), hostServices())
 
 		// Execute full loop with FirstRun=true
 		_ = cm.LoadAllConfigs(context.Background())

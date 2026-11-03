@@ -159,7 +159,7 @@ func (cm *ConfigManager) fetchMiscCommand(ctx context.Context, cmdName string) (
 	return output, nil
 }
 
-// LoadGlobalConfig loads global configuration from LDAP using zmprov gacf.
+// LoadGlobalConfig loads global configuration from LDAP (cn=config).
 func (cm *ConfigManager) LoadGlobalConfig(ctx context.Context) error {
 	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
 

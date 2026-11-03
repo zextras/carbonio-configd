@@ -16,7 +16,8 @@ import (
 	"github.com/zextras/carbonio-configd/internal/tracing"
 )
 
-// LoadLocalConfig loads local configuration using zmlocalconfig command.
+// LoadLocalConfig loads local configuration from the resolved localconfig
+// (localconfig.xml over the built-in defaults).
 func (cm *ConfigManager) LoadLocalConfig(ctx context.Context) error {
 	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
 
@@ -80,7 +81,7 @@ func (cm *ConfigManager) executeLocalConfigCommand(ctx context.Context) (string,
 		return "", fmt.Errorf("failed to load localconfig: %w", err)
 	}
 
-	// Convert to key=value format matching old zmlocalconfig -s output
+	// Convert to key=value format for the parser
 	output := localconfig.FormatAsKeyValue(localCfg)
 
 	// Cache the output for subsequent runs

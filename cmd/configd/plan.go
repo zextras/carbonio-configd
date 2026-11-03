@@ -8,9 +8,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/zextras/carbonio-configd/internal/cache"
 	"github.com/zextras/carbonio-configd/internal/cli/plancmd"
-	"github.com/zextras/carbonio-configd/internal/configmgr"
 	"github.com/zextras/carbonio-configd/internal/plan"
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
@@ -20,22 +18,16 @@ import (
 // without writing anything.
 func planOnHost(env sys.System) plancmd.Planner {
 	return func(ctx context.Context, sections []string) (*plan.Plan, error) {
-		mainCfg, appState, ldapClient, err := newRuntime(ctx)
+		// A plan must not leave a cache behind, so caching is off.
+		rt, err := buildRuntime(ctx, env, &runtimeOpts{skipCache: true})
 		if err != nil {
 			return nil, err
 		}
 
-		// A plan must not leave a cache behind, so caching is off.
-		cm := configmgr.NewConfigManager(ctx, mainCfg, appState, ldapClient, cache.New(ctx, true), env)
-
-		if err := cm.LoadAllConfigs(ctx); err != nil {
-			return nil, fmt.Errorf("load configs: %w", err)
+		if _, _, err := runLoadAndParse(ctx, rt.cm, rt.cfg); err != nil {
+			return nil, fmt.Errorf("load configuration: %w", err)
 		}
 
-		if err := cm.ParseMtaConfig(ctx, mainCfg.ConfigFile); err != nil {
-			return nil, fmt.Errorf("parse %s: %w", mainCfg.ConfigFile, err)
-		}
-
-		return cm.PlanHost(ctx, sections)
+		return rt.cm.PlanHost(ctx, sections)
 	}
 }

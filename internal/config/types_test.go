@@ -518,3 +518,39 @@ func testConfigMap(src map[string]string) *ConfigMap {
 
 	return cm
 }
+
+func TestConfig_SetRuntimeVals(t *testing.T) {
+	c := &Config{BaseDir: "/opt/zextras", TemplateDir: "/opt/zextras", ConfigFile: "/opt/zextras/conf/zmconfigd.cf"}
+
+	c.SetRuntimeVals(&LocalConfig{Data: testConfigMap(map[string]string{"zmconfigd_template_dir": ""})})
+
+	if c.TemplateDir != "/opt/zextras" || c.ConfigFile != "/opt/zextras/conf/zmconfigd.cf" || len(c.Sections) != 0 {
+		t.Fatalf("empty keys must change nothing: %+v", c)
+	}
+
+	c.SetRuntimeVals(&LocalConfig{Data: testConfigMap(map[string]string{
+		"zmconfigd_template_dir":  "/share/configd",
+		"zmconfigd_sections":      " amavis  antivirus ",
+		"zmconfigd_service_hooks": "/etc/hooks.json",
+	})})
+
+	if c.TemplateDir != "/share/configd" || c.ConfigFile != "/share/configd/conf/zmconfigd.cf" {
+		t.Errorf("template dir not applied: %+v", c)
+	}
+
+	if len(c.Sections) != 2 || c.Sections[0] != "amavis" || c.Sections[1] != "antivirus" {
+		t.Errorf("Sections = %v", c.Sections)
+	}
+
+	if c.ServiceHooks != "/etc/hooks.json" {
+		t.Errorf("ServiceHooks = %q", c.ServiceHooks)
+	}
+
+	if got := c.TemplatePath("conf/x.in"); got != "/share/configd/conf/x.in" {
+		t.Errorf("TemplatePath = %q", got)
+	}
+
+	if got := (&Config{BaseDir: "/b"}).TemplatePath("conf/x.in"); got != "/b/conf/x.in" {
+		t.Errorf("TemplatePath without template dir = %q", got)
+	}
+}

@@ -40,6 +40,11 @@ func (cm *ConfigManager) PlanHost(ctx context.Context, scope []string) (*plan.Pl
 
 	conf := cm.State.GetMtaConfig()
 
+	scope, err := cm.narrowScope(scope)
+	if err != nil {
+		return nil, err
+	}
+
 	for _, name := range scope {
 		if _, ok := conf.Sections[name]; !ok {
 			return nil, fmt.Errorf("%w %q (known: %s)", ErrUnknownSection, name,
@@ -91,6 +96,31 @@ func (cm *ConfigManager) PlanHost(ctx context.Context, scope []string) (*plan.Pl
 	}
 
 	return &pruned, nil
+}
+
+// ErrOutOfScope is returned by PlanHost for a section outside zmconfigd_sections.
+var ErrOutOfScope = errors.New("section not in zmconfigd_sections")
+
+// narrowScope intersects the requested sections with zmconfigd_sections: no
+// request plans every configured section, and a requested section that is not
+// configured is an error rather than an empty (= unrestricted) scope.
+func (cm *ConfigManager) narrowScope(requested []string) ([]string, error) {
+	configured := cm.mainConfig.Sections
+	if len(configured) == 0 {
+		return requested, nil
+	}
+
+	if len(requested) == 0 {
+		return configured, nil
+	}
+
+	for _, name := range requested {
+		if !slices.Contains(configured, name) {
+			return nil, fmt.Errorf("%w: %q (configured: %s)", ErrOutOfScope, name, strings.Join(configured, " "))
+		}
+	}
+
+	return requested, nil
 }
 
 // proxygenDrift explains why proxygen would run, or returns "" when none of
@@ -262,7 +292,7 @@ func (cm *ConfigManager) RenderRewrite(
 
 	var out strings.Builder
 
-	if _, err = cm.rewriteTransform(ctx, cm.mainConfig.BaseDir+"/"+r.Source, &out); err != nil {
+	if _, err = cm.rewriteTransform(ctx, cm.mainConfig.TemplatePath(r.Source), &out); err != nil {
 		return nil, 0, fmt.Errorf("render %s: %w", r.Source, err)
 	}
 

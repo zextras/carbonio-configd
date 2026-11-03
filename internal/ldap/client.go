@@ -104,8 +104,9 @@ type ClientConfig struct {
 	DialTimeout   time.Duration // Per-attempt dial timeout (default: 10s)
 	OpTimeout     time.Duration // Per-request timeout for search/modify (default: 30s)
 	TLSConfig     *tls.Config   // TLS configuration (optional)
-	StartTLS      bool          // Upgrade ldap:// connections with StartTLS (default: true)
+	StartTLS      bool          // Upgrade ldap:// connections with StartTLS (zero value: false)
 	FS            sys.FS        // Filesystem the attrs schema is read from (default: sys.RealFS)
+	AttrsDir      string        // Directory of the attrs schema files (default: <base>/conf/attrs)
 }
 
 // defaultDialTimeout bounds a single LDAP dial attempt when
@@ -178,6 +179,7 @@ func NewClient(config *ClientConfig) (*Client, error) {
 		opTimeout:     config.OpTimeout,
 		tlsConfig:     tlsConfig,
 		fs:            config.FS,
+		attrsDir:      config.AttrsDir,
 		pool:          make([]*ldap.Conn, 0, config.PoolSize),
 		closed:        make(chan struct{}),
 	}

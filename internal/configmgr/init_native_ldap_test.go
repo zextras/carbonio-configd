@@ -25,7 +25,7 @@ func TestInitNativeLdapClient_LoadFails(t *testing.T) {
 		env:                    hostEnv(),
 		loadLocalConfigForLDAP: load,
 		mainConfig:             &config.Config{},
-		CommandRegistry:        commands.NewRegistry("", hostEnv()),
+		CommandRegistry:        commands.NewRegistry(),
 	}
 	cm.initNativeLdapClient(context.Background())
 
@@ -48,7 +48,7 @@ func TestInitNativeLdapClient_MissingURL(t *testing.T) {
 		env:                    hostEnv(),
 		loadLocalConfigForLDAP: load,
 		mainConfig:             &config.Config{},
-		CommandRegistry:        commands.NewRegistry("", hostEnv()),
+		CommandRegistry:        commands.NewRegistry(),
 	}
 	cm.initNativeLdapClient(context.Background())
 
@@ -72,7 +72,7 @@ func TestInitNativeLdapClient_WhitespaceURL(t *testing.T) {
 		env:                    hostEnv(),
 		loadLocalConfigForLDAP: load,
 		mainConfig:             &config.Config{},
-		CommandRegistry:        commands.NewRegistry("", hostEnv()),
+		CommandRegistry:        commands.NewRegistry(),
 	}
 	cm.initNativeLdapClient(context.Background())
 
@@ -95,7 +95,7 @@ func TestInitNativeLdapClient_MissingBindDN(t *testing.T) {
 		env:                    hostEnv(),
 		loadLocalConfigForLDAP: load,
 		mainConfig:             &config.Config{},
-		CommandRegistry:        commands.NewRegistry("", hostEnv()),
+		CommandRegistry:        commands.NewRegistry(),
 	}
 	cm.initNativeLdapClient(context.Background())
 
@@ -118,7 +118,7 @@ func TestInitNativeLdapClient_MissingPassword(t *testing.T) {
 		env:                    hostEnv(),
 		loadLocalConfigForLDAP: load,
 		mainConfig:             &config.Config{},
-		CommandRegistry:        commands.NewRegistry("", hostEnv()),
+		CommandRegistry:        commands.NewRegistry(),
 	}
 	cm.initNativeLdapClient(context.Background())
 
@@ -145,7 +145,7 @@ func TestInitNativeLdapClient_MultiURLSucceedsBuilding(t *testing.T) {
 		env:                    hostEnv(),
 		loadLocalConfigForLDAP: load,
 		mainConfig:             &config.Config{},
-		CommandRegistry:        commands.NewRegistry("", hostEnv()),
+		CommandRegistry:        commands.NewRegistry(),
 	}
 	cm.initNativeLdapClient(context.Background())
 
@@ -170,7 +170,7 @@ func TestInitNativeLdapClient_ConfigClientWiredWithRootPassword(t *testing.T) {
 		env:                    hostEnv(),
 		loadLocalConfigForLDAP: load,
 		mainConfig:             &config.Config{},
-		CommandRegistry:        commands.NewRegistry("", hostEnv()),
+		CommandRegistry:        commands.NewRegistry(),
 		LdapClient:             ldap.NewLdap(context.Background(), &config.Config{}),
 	}
 	cm.initNativeLdapClient(context.Background())
@@ -202,7 +202,7 @@ func TestInitNativeLdapClient_ConfigClientNilWithoutRootPassword(t *testing.T) {
 		env:                    hostEnv(),
 		loadLocalConfigForLDAP: load,
 		mainConfig:             &config.Config{},
-		CommandRegistry:        commands.NewRegistry("", hostEnv()),
+		CommandRegistry:        commands.NewRegistry(),
 		LdapClient:             ldap.NewLdap(context.Background(), &config.Config{}),
 	}
 	cm.initNativeLdapClient(context.Background())

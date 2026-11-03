@@ -27,8 +27,8 @@ import (
 // the restart-queue bookkeeping consumed by watchdog and configmgr's
 // restart cascade.
 type ServiceManager struct {
-	// ctl is the Controller whose lifecycle methods ControlProcess and IsRunning drive.
-	ctl *Controller
+	// ctl is the Backend whose lifecycle methods ControlProcess and IsRunning drive.
+	ctl Backend
 	// RestartQueue holds services pending restart
 	RestartQueue map[string]bool
 	// restartReasons holds, per queued service, the merged de-duplicated
@@ -46,7 +46,7 @@ type ServiceManager struct {
 }
 
 // NewServiceManager creates a ServiceManager that controls services through ctl.
-func NewServiceManager(ctl *Controller) *ServiceManager {
+func NewServiceManager(ctl Backend) *ServiceManager {
 	return &ServiceManager{
 		ctl:               ctl,
 		RestartQueue:      make(map[string]bool),

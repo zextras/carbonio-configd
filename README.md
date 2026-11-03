@@ -236,6 +236,19 @@ interval poll keeps running as the safety net. See
 [docs/architecture.md](docs/architecture.md#ldap-change-detection-opt-in) and
 [docs/localconfig.md](docs/localconfig.md#configd-only-keys-not-in-the-defaults-registry).
 
+### Sections, template directory and service hooks
+
+Three localconfig keys adapt configd to containers (see
+[docs/localconfig.md](docs/localconfig.md#configd-only-keys-not-in-the-defaults-registry)); with none
+of them set the behaviour is that of the legacy daemon:
+
+- `zmconfigd_sections` limits every cycle (daemon, forced, `shadow`, `plan`) to the listed sections.
+- `zmconfigd_template_dir` reads the templates (`REWRITE` sources, `conf/zmconfigd/*.cf`,
+  `conf/zmconfigd.cf`, `conf/attrs`) from another directory; outputs stay under `ZEXTRAS_HOME`.
+- `zmconfigd_service_hooks` names a JSON file that replaces systemd / `zm*ctl` with
+  `signal:`, `exec:` and `skip` hooks per service and action. The daemon exits at startup listing the
+  services whose restart (or watchdog status) is not covered.
+
 ### Localconfig subcommand
 
 Drop-in replacement for the Java `zmlocalconfig` CLI. Reads `localconfig.xml`,
