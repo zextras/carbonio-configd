@@ -40,27 +40,49 @@ func LoadLocalConfig() (map[string]string, error) {
 // LoadLocalConfigFromFile reads and parses localconfig.xml from a custom path.
 // Returns a map of key=value pairs matching zmlocalconfig -s output format.
 func LoadLocalConfigFromFile(path string) (map[string]string, error) {
-	// Read file
+	values, _, err := LoadLocalConfigFile(path)
+
+	return values, err
+}
+
+// LoadLocalConfigFile is LoadLocalConfigFromFile that also returns the names of
+// the keys that have no <value> element. Legacy treats those as configured
+// keys with a null value: they never print, but -n lists (and warns about)
+// them. An empty <value/> is the empty string, not null.
+func LoadLocalConfigFile(path string) (values map[string]string, nullKeys []string, err error) {
 	// #nosec G304 - path is intentionally provided by caller for flexibility in testing and deployment
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read localconfig file: %w", err)
+		return nil, nil, fmt.Errorf("failed to read localconfig file: %w", err)
 	}
 
-	// Parse XML
-	var lc LocalConfig
+	var lc struct {
+		XMLName xml.Name `xml:"localconfig"`
+		Keys    []struct {
+			Name  string  `xml:"name,attr"`
+			Value *string `xml:"value"`
+		} `xml:"key"`
+	}
+
 	if err := xml.Unmarshal(data, &lc); err != nil {
-		return nil, fmt.Errorf("failed to parse localconfig XML: %w", err)
+		return nil, nil, fmt.Errorf("failed to parse localconfig XML: %w", err)
 	}
 
-	// Convert to map. Local-config keys are interned so every downstream map
-	// keyed on them shares the same backing storage across the process.
-	result := make(map[string]string, len(lc.Keys))
+	// Local-config keys are interned so every downstream map keyed on them
+	// shares the same backing storage across the process.
+	values = make(map[string]string, len(lc.Keys))
+
 	for _, key := range lc.Keys {
-		result[intern.Key(key.Name)] = strings.TrimSpace(key.Value)
+		if key.Value == nil {
+			nullKeys = append(nullKeys, key.Name)
+
+			continue
+		}
+
+		values[intern.Key(key.Name)] = strings.TrimSpace(*key.Value)
 	}
 
-	return result, nil
+	return values, nullKeys, nil
 }
 
 // LoadResolvedConfig loads localconfig.xml, merges defaults, and resolves

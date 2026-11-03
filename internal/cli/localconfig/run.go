@@ -79,10 +79,14 @@ type localconfigOpts struct {
 	unset          bool
 	random         bool
 	force          bool
-	info           bool
-	all            bool
-	reload         bool
-	keys           []string
+	expand         bool
+
+	// nullKeys are the keys of the file without a <value>.
+	nullKeys []string
+	info     bool
+	all      bool
+	reload   bool
+	keys     []string
 
 	// given lists the legacy option ids present on the command line.
 	given []string
@@ -157,6 +161,7 @@ func (c *Options) command(stdout, stderr io.Writer) *localconfigOpts {
 		unset:          c.Unset,
 		random:         c.Random,
 		force:          c.Force,
+		expand:         c.Expand,
 		info:           c.Info,
 		all:            c.All,
 		reload:         c.Reload,
@@ -202,10 +207,17 @@ func (o *localconfigOpts) execute(ctx context.Context) error {
 // LocalConfig constructor: a missing or unreadable file only warns (and means
 // an empty configuration); a malformed one is fatal.
 func (o *localconfigOpts) loadConfigFile() (map[string]string, error) {
-	configured, err := lcfg.LoadLocalConfigFromFile(o.configPath)
+	configured, nullKeys, err := lcfg.LoadLocalConfigFile(o.configPath)
+	o.nullKeys = nullKeys
 
 	switch {
 	case err == nil:
+		// Legacy expands every key while loading: one bad reference fails
+		// every invocation, even -e.
+		if err := lcfg.NewLegacy(configured).Validate(); err != nil {
+			return nil, failDetail("failed with error in config file", err)
+		}
+
 		return configured, nil
 	case errors.Is(err, fs.ErrNotExist), errors.Is(err, fs.ErrPermission):
 		o.warnf("local config file `%s' is not readable", o.configPath)
@@ -330,11 +342,36 @@ func (o *localconfigOpts) runPrint(configured map[string]string) error {
 
 	config := o.selectValues(configured)
 
-	if !o.showPasswords {
+	// Legacy ConfigWriter: shell and export never hide passwords.
+	if o.hidePasswords() {
 		config = lcfg.MaskPasswords(config)
 	}
 
 	return writeOutput(config, o)
+}
+
+// expandValues reports whether values are printed expanded: always for the
+// shell and export writers, otherwise only with -x.
+func (o *localconfigOpts) expandValues() bool {
+	return o.expand || o.mode == modeShell || o.mode == modeExport
+}
+
+// hidePasswords reports whether "password" keys are masked: every writer but
+// shell and export, unless -s.
+func (o *localconfigOpts) hidePasswords() bool {
+	return !o.showPasswords && o.mode != modeShell && o.mode != modeExport
+}
+
+// value is the legacy writer.expand() ? get(key) : getRaw(key); ok is false
+// for a key without a value.
+func (o *localconfigOpts) value(lc *lcfg.Legacy, key string) (string, bool) {
+	if o.expandValues() {
+		v, ok, _ := lc.Expand(key) // validated at load time
+
+		return v, ok
+	}
+
+	return lc.Raw(key)
 }
 
 // printOption returns the legacy main option of the print branch ("" for the
@@ -353,38 +390,38 @@ func (o *localconfigOpts) printOption() string {
 // selectValues picks the entries printed by the legacy printChanged,
 // printDefaults or print, given the keys configured in the file.
 func (o *localconfigOpts) selectValues(configured map[string]string) map[string]string {
+	lc := lcfg.NewLegacy(configured)
+
 	switch {
 	case o.showChanged:
-		return o.changedValues(configured)
+		return o.changedValues(lc, configured)
 	case o.showDefaults:
-		return o.defaultValues()
+		return o.defaultValues(lc)
 	default:
-		return o.currentValues(configured)
+		return o.currentValues(lc)
 	}
 }
 
-// resolve returns the configured keys over the compiled-in defaults, with every
-// ${variable} expanded (legacy mExpanded + KnownKey.getValue).
-func resolve(configured map[string]string) map[string]string {
-	resolved := maps.Clone(configured)
-	lcfg.MergeDefaults(resolved)
-	lcfg.Interpolate(resolved)
-
-	return resolved
-}
-
 // currentValues is legacy LocalConfig.print: every known or configured key, or
-// the listed ones (a key with no value warns "null valued key").
-func (o *localconfigOpts) currentValues(configured map[string]string) map[string]string {
-	resolved := resolve(configured)
+// the listed ones (a listed key with no value warns "null valued key"; in the
+// full listing such keys are silently skipped).
+func (o *localconfigOpts) currentValues(lc *lcfg.Legacy) map[string]string {
 	if len(o.keys) == 0 {
-		return resolved
+		all := make(map[string]string)
+
+		for _, key := range lc.Keys() {
+			if v, ok := o.value(lc, key); ok {
+				all[key] = v
+			}
+		}
+
+		return all
 	}
 
 	picked := make(map[string]string, len(o.keys))
 
 	for _, key := range o.keys {
-		if value, ok := resolved[key]; ok {
+		if value, ok := o.value(lc, key); ok {
 			picked[key] = value
 		} else {
 			o.warnf("null valued key '%s'", key)
@@ -394,23 +431,29 @@ func (o *localconfigOpts) currentValues(configured map[string]string) map[string
 	return picked
 }
 
-// defaultValues is legacy LocalConfig.printDefaults: the raw compiled-in
-// defaults of every known key, or of the listed ones (others warn).
-func (o *localconfigOpts) defaultValues() map[string]string {
-	defaults := make(map[string]string)
-	lcfg.MergeDefaults(defaults)
-
-	if len(o.keys) == 0 {
-		return defaults
+// defaultValues is legacy LocalConfig.printDefaults: the compiled-in defaults
+// of every known key, or of the listed ones (others warn). A null default is
+// skipped silently. With -x the default is expanded against the configured
+// values, like legacy.
+func (o *localconfigOpts) defaultValues(lc *lcfg.Legacy) map[string]string {
+	keys := o.keys
+	if len(keys) == 0 {
+		keys = slices.Sorted(maps.Keys(lcfg.Defaults))
 	}
 
-	picked := make(map[string]string, len(o.keys))
+	picked := make(map[string]string, len(keys))
 
-	for _, key := range o.keys {
-		if value, ok := defaults[key]; ok {
-			picked[key] = value
-		} else {
+	for _, key := range keys {
+		def, ok := lcfg.Defaults[key]
+
+		switch {
+		case !ok && lcfg.IsNullKey(key):
+		case !ok:
 			o.warnf("not a known key '%s'", key)
+		case o.expandValues():
+			picked[key], _, _ = lc.Expand(key)
+		default:
+			picked[key] = def
 		}
 	}
 
@@ -421,22 +464,23 @@ func (o *localconfigOpts) defaultValues() map[string]string {
 // configured in the file (or the listed ones, configured or not); a known key
 // is dropped when its expanded configured value equals its raw, unexpanded
 // default, so a default containing ${...} is reported as changed.
-func (o *localconfigOpts) changedValues(configured map[string]string) map[string]string {
-	resolved := resolve(configured)
-
+func (o *localconfigOpts) changedValues(lc *lcfg.Legacy, configured map[string]string) map[string]string {
 	keys := o.keys
 	if len(keys) == 0 {
 		keys = slices.Sorted(maps.Keys(configured))
+		keys = slices.Sorted(slices.Values(append(keys, o.nullKeys...)))
 	}
 
 	changed := make(map[string]string, len(keys))
 
 	for _, key := range keys {
-		if def, known := lcfg.Defaults[key]; known && resolved[key] == def {
-			continue
+		if def, known := lcfg.Defaults[key]; known {
+			if expanded, ok, _ := lc.Expand(key); ok && expanded == def {
+				continue
+			}
 		}
 
-		if value, ok := resolved[key]; ok {
+		if value, ok := o.value(lc, key); ok {
 			changed[key] = value
 		} else {
 			o.warnf("null valued key '%s'", key)
@@ -462,17 +506,18 @@ func checkMode(mode string) error {
 func writeOutput(config map[string]string, opts *localconfigOpts) error {
 	w := opts.out()
 
+	// Listed keys print in the order they were given; no keys: sorted.
 	switch opts.mode {
 	case modePlain, "":
-		lcfg.FormatPlain(w, config)
+		lcfg.FormatPlain(w, config, opts.keys)
 	case modeShell:
-		lcfg.FormatShell(w, config)
+		lcfg.FormatShell(w, config, opts.keys)
 	case modeExport:
-		lcfg.FormatExport(w, config)
+		lcfg.FormatExport(w, config, opts.keys)
 	case modeNokey:
 		lcfg.FormatNokey(w, config, opts.keys)
 	case modeXML:
-		return lcfg.FormatXML(w, config)
+		return lcfg.FormatXML(w, config, opts.keys)
 	default:
 		return checkMode(opts.mode)
 	}

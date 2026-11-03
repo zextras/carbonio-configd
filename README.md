@@ -255,6 +255,9 @@ configd localconfig -k mailboxd_java_options -k ldap_port
 configd localconfig -m export -k zimbra_home
 # Output: export zimbra_home='/opt/zextras';
 
+# Several keys print in the order given; a key with no value (e.g. a null
+# default like mysql_bind_address) prints nothing and warns "null valued key"
+
 # Edit keys
 configd localconfig -e smtp_port=587
 configd localconfig -e -r ldap_root_password    # random password
@@ -273,10 +276,10 @@ Flags:
 -k key           Key to retrieve (repeatable; omit for all keys)
 -q               Quiet mode (suppress warnings)
 -c path          Path to localconfig.xml (default: /opt/zextras/conf/localconfig.xml)
--s               Show password values (default: masked)
+-s               Show password values (default: keys containing "password" print '*' in plain/xml/nokey; shell and export never mask)
 -d               Show default values instead of current
 -n               Show only keys changed from defaults
--x               Expand variables (accepted for compatibility, always on)
+-x               Expand ${var} references (default: raw values; shell and export always expand)
 -e               Edit: set key=value pairs (all keys are validated first, then saved once)
 -u               Unset (remove) keys (all-or-nothing, like -e)
 -r               Set key to random password (use with -e)
