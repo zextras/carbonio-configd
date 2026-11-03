@@ -11,6 +11,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/zextras/carbonio-configd/internal/cli/cliutil"
@@ -26,9 +27,14 @@ type Options struct {
 	Packages bool
 }
 
+// rpmQueryFormat renders a package as `dnf list installed` does, which is what
+// legacy zmcontrol -V printed: "<name>.<arch> [<epoch>:]<version>-<release>".
+const rpmQueryFormat = `%{NAME}.%{ARCH} %|EPOCH?{%{EPOCH}:}|%{VERSION}-%{RELEASE}\n`
+
 // installedPackages lists the installed carbonio packages, one
-// "<name> <version>" per line, for the distribution with the given os-release
-// ID. A package manager that fails to run yields no output.
+// "<name> <version>" per line (rpm: "<name>.<arch> <version>-<release>",
+// sorted), for the distribution with the given os-release ID. A package
+// manager that fails to run yields no output.
 func installedPackages(ctx context.Context, x sys.Exec, distroID string) []byte {
 	var out []byte
 
@@ -36,10 +42,24 @@ func installedPackages(ctx context.Context, x sys.Exec, distroID string) []byte 
 	case "ubuntu", "debian":
 		out, _ = sys.Output(ctx, x, "dpkg-query", "-W", "-f", "${Package} ${Version}\n", "carbonio*")
 	default:
-		out, _ = sys.Output(ctx, x, "rpm", "-qa", "--qf", "%{NAME} %{VERSION}-%{RELEASE}\n", "carbonio*")
+		out, _ = sys.Output(ctx, x, "rpm", "-qa", "--qf", rpmQueryFormat, "carbonio*")
+		out = sortLines(out)
 	}
 
 	return out
+}
+
+// sortLines returns out with its lines in byte order (rpm -qa lists in
+// database order, `dnf list installed` alphabetically).
+func sortLines(out []byte) []byte {
+	lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
+	if len(lines) == 1 && lines[0] == "" {
+		return out
+	}
+
+	slices.Sort(lines)
+
+	return []byte(strings.Join(lines, "\n") + "\n")
 }
 
 // Run prints the release and returns the process exit status (always 0, like
@@ -57,10 +77,15 @@ func Run(ctx context.Context, env sys.System, stdout, stderr io.Writer, opts *Op
 	}
 
 	out := installedPackages(ctx, env.Exec, distroID(env.FS, osReleasePath))
-	if len(out) > 0 {
-		_, _ = fmt.Fprintln(stdout, "\nInstalled packages:")
-		_, _ = fmt.Fprint(stdout, string(out))
+	if len(out) == 0 {
+		// Legacy displayPackagesVersion ends the release line with a blank one.
+		_, _ = fmt.Fprintln(stdout)
+
+		return 0
 	}
+
+	_, _ = fmt.Fprintln(stdout, "\nInstalled packages:")
+	_, _ = fmt.Fprint(stdout, string(out))
 
 	return 0
 }

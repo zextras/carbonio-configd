@@ -66,6 +66,7 @@ func (cm *ConfigManager) PlanHost(ctx context.Context, scope []string) (*plan.Pl
 		Tracked:       tracked,
 		Scope:         scope,
 		AssumeChanged: true,
+		Systemd:       cm.systemdMode(),
 	}
 
 	candidate, err := plan.Compute(in)

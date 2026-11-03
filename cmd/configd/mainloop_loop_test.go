@@ -192,8 +192,8 @@ func TestNotifyReady_NotifierDisabled(t *testing.T) {
 	// Without NOTIFY_SOCKET the notifier is disabled and Ready() is a no-op.
 	notifier, err := sdnotify.New()
 	require.NoError(t, err)
-	notifyReady(context.Background(), notifier, 0)
-	notifyReady(context.Background(), notifier, 1)
+	notifyReady(context.Background(), notifier, true)
+	notifyReady(context.Background(), notifier, false)
 }
 
 func TestRunLoadAndParse_LoadFailure(t *testing.T) {
@@ -253,8 +253,8 @@ func TestRunConfigPhases_EmptyState(t *testing.T) {
 	// Arm the reload channel so a Plan back-off sleep cannot hang the test.
 	deps.reloadChan <- struct{}{}
 
-	timings, pl, skipIter := runConfigPhases(context.Background(), deps)
-	assert.False(t, skipIter, "empty state must not trigger the back-off path")
+	timings, pl, result := runConfigPhases(context.Background(), deps)
+	assert.Equal(t, phasesCompleted, result, "empty state must not trigger the back-off path")
 	assert.NotNil(t, pl)
 	assert.GreaterOrEqual(t, timings.plan, time.Duration(0))
 }
@@ -415,59 +415,29 @@ func TestRunMainLoop_CancelledContextReturnsZero(t *testing.T) {
 	assert.Equal(t, 0, code)
 }
 
-func TestRunConfigPhases_PlanErrorBacksOff(t *testing.T) {
+// TestRunConfigPhases_PlanErrorReportsFailure: a rejected plan (every tracked
+// service disappearing) is reported so the loop backs off, and the requests
+// stay queued.
+func TestRunConfigPhases_PlanErrorReportsFailure(t *testing.T) {
 	deps := newLoopFixture(t)
-	fake := systest.New()
-	run := func(reload chan struct{}) (*plan.Plan, bool) {
-		d := *deps
-		d.env.Clock = fake.Clock
-		d.reloadChan = reload
-
-		_, pl, skip := runConfigPhases(context.Background(), &d)
-
-		return pl, skip
-	}
 
 	// Cycle 1: two enabled services become tracked.
 	deps.appState.Publish(snapshot.New(snapshot.Parts{
 		Services: map[string]string{"mta": "TRUE", "proxy": "TRUE"},
 	}))
 
-	pl, skip := run(make(chan struct{}))
-	require.False(t, skip)
+	_, pl, result := runConfigPhases(context.Background(), deps)
+	require.Equal(t, phasesCompleted, result)
 	require.NotNil(t, pl)
 
 	// Cycle 2: every tracked service disappears, which the plan rejects.
 	deps.appState.Publish(snapshot.New(snapshot.Parts{}))
+	deps.appState.AddRequestedConfigs(context.Background(), []string{"mta"})
 
-	type result struct {
-		pl   *plan.Plan
-		skip bool
-	}
-
-	done := make(chan result, 1)
-
-	go func() {
-		pl, skip := run(make(chan struct{}))
-		done <- result{pl, skip}
-	}()
-
-	require.Eventually(t, func() bool { return fake.Clock.Waiters() == 1 },
-		5*time.Second, time.Millisecond, "60s back-off must be armed on the fake clock")
-
-	fake.Clock.Advance(59 * time.Second)
-
-	select {
-	case <-done:
-		t.Fatal("returned before the 60s back-off elapsed")
-	case <-time.After(50 * time.Millisecond):
-	}
-
-	fake.Clock.Advance(time.Second)
-
-	r := <-done
-	assert.True(t, r.skip)
-	assert.Nil(t, r.pl)
+	_, pl, result = runConfigPhases(context.Background(), deps)
+	assert.Equal(t, phasesPlanFailed, result)
+	assert.Nil(t, pl)
+	assert.Equal(t, []string{"mta"}, deps.appState.TakeRequestedConfigs())
 }
 
 func TestMaybeStartListener_ReadsSnapshot(t *testing.T) {

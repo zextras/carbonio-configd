@@ -24,7 +24,8 @@ func TestMapLDAPServiceToRegistry(t *testing.T) {
 		expected string
 	}{
 		{"directory-server", "ldap"},
-		{"service", "mailbox"},
+		{"service", "store"},
+		{"mailbox", "store"},
 		{"zmconfigd", "configd"},
 		{"mta", "mta"},
 		{"proxy", "proxy"},
@@ -355,70 +356,7 @@ func TestWriteReadCache_RoundTrip(t *testing.T) {
 }
 
 // TestCarbonioCATLSConfig_MissingCA verifies fallback when CA file is absent.
-func TestCarbonioCATLSConfig_MissingCA(t *testing.T) {
-	t.Parallel()
-
-	ctl := newRealController(t)
-
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	dir := t.TempDir()
-
-	ctl.p.conf = dir
-
-	// No ca/ca.pem created — should return nil
-	cfg := ctl.carbonioCATLSConfig()
-	if cfg != nil {
-		t.Error("ctl.carbonioCATLSConfig() should return nil when CA file is missing")
-	}
-}
-
 // TestCarbonioCATLSConfig_ValidCA verifies TLS config is returned with valid PEM.
-func TestCarbonioCATLSConfig_ValidCA(t *testing.T) {
-	t.Parallel()
-
-	ctl := newRealController(t)
-
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	dir := t.TempDir()
-
-	// Create the ca subdirectory and a minimal PEM file.
-	caDir := filepath.Join(dir, "ca")
-	if err := os.MkdirAll(caDir, 0o755); err != nil {
-		t.Fatalf("failed to create ca dir: %v", err)
-	}
-
-	// A self-signed test CA cert (minimal valid PEM).
-	// We use a known test certificate from the Go standard library test data.
-	// For unit test purposes a PEM block that passes AppendCertsFromPEM is sufficient.
-	testCAPEM := `-----BEGIN CERTIFICATE-----
-MIICpDCCAYwCCQDU+pQ4pHgSpDANBgkqhkiG9w0BAQsFADAUMRIwEAYDVQQDDAls
-b2NhbGhvc3QwHhcNMjMwMTAxMDAwMDAwWhcNMjQwMTAxMDAwMDAwWjAUMRIwEAYD
-VQQDDAlsb2NhbGhvc3QwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQC7
-o4qne60TB3pJsHNhFDMrMFCbMSXhAh/BBpJd2JoNMFy+A0RNT1bRuXGNlmMHLkh
-fLqHGAIAvLHk5AAAAAAAAAAAAAAAAAAAAAAAAAAAAmS0KlAAAAAAAAAAAAAAAAAA
-AAAAAAAAAAAAwIDAQABMA0GCSqGSIb3DQEBCwUAA4IBAQCabc123fakefakefake
------END CERTIFICATE-----
-`
-	if err := os.WriteFile(filepath.Join(caDir, "ca.pem"), []byte(testCAPEM), 0o644); err != nil {
-		t.Fatalf("failed to write CA PEM: %v", err)
-	}
-
-	ctl.p.conf = dir
-
-	// Even if the PEM is not a valid certificate, AppendCertsFromPEM will
-	// silently ignore it. The important thing is the function reads the file
-	// and returns a non-nil *tls.Config.
-	cfg := ctl.carbonioCATLSConfig()
-	// With an invalid PEM cert the pool will be empty but cfg is still returned non-nil.
-	if cfg == nil {
-		t.Error("ctl.carbonioCATLSConfig() should return non-nil config when CA file exists")
-	}
-}
-
 // TestIsLDAPLocal_HostnameInURL verifies true when hostname appears in ldap_url.
 func TestIsLDAPLocal_HostnameInURL(t *testing.T) {
 	t.Parallel()
@@ -532,35 +470,3 @@ func TestDiscoverEnabledServices_EmptyHostname(t *testing.T) {
 }
 
 // TestCarbonioCATLSConfig_ValidPEM verifies TLS config with a parseable PEM block.
-func TestCarbonioCATLSConfig_ValidPEM(t *testing.T) {
-	t.Parallel()
-
-	ctl := newRealController(t)
-
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	dir := t.TempDir()
-	caDir := filepath.Join(dir, "ca")
-
-	if err := os.MkdirAll(caDir, 0o755); err != nil {
-		t.Fatalf("failed to create ca dir: %v", err)
-	}
-
-	// Write a file that exists but contains no valid PEM blocks — pool will be empty.
-	if err := os.WriteFile(filepath.Join(caDir, "ca.pem"), []byte("not-a-pem\n"), 0o644); err != nil {
-		t.Fatalf("failed to write CA file: %v", err)
-	}
-
-	ctl.p.conf = dir
-
-	cfg := ctl.carbonioCATLSConfig()
-	if cfg == nil {
-		t.Error("ctl.carbonioCATLSConfig() should return non-nil *tls.Config when the file is readable")
-		return
-	}
-
-	if cfg.MinVersion == 0 {
-		t.Error("ctl.carbonioCATLSConfig() should set MinVersion")
-	}
-}

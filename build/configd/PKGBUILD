@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 
 pkgname="carbonio-configd"
-pkgver="1.0.0"
+pkgver="1.1.0"
 pkgrel="1"
 pkgdesc="High-performance configuration daemon for Carbonio with service management and legacy wrappers"
 arch=('aarch64' 'x86_64')
@@ -38,9 +38,9 @@ source=(
 )
 sha256sums=(
   'a16bbcc3f76bacb1d1d630c2163055b444f8154c3e2b98100c395758cf9cc6bb'
-  '57fd0c840d4fcc30e900d44119b0b1d2e763ec14da0818f25661ee4464a0e521'
+  '0e9d0ca5fc781a0f06fdb3e806b8d612d2e347e584934755043a53840987c5ca'
   '2852da97671727f9ddd10d07289f25976d4032364bae8912687186bc4ae3d4ad'
-  'fdbc1b0dcd143a06cc087e6d31784a117eced0379606b9d59aebee39af9582f8'
+  '6970f8c188a77b69f33c050201aab17cbdcba70b38a54510c7c698d7a0cccd90'
 )
 
 _kill_legacy_zmconfigd() {
@@ -79,7 +79,7 @@ _package_common() {
 
 _package_systemd() {
   install -Dm644 "${srcdir}/${pkgname}.service" \
-    "${pkgdir}/lib/systemd/system/carbonio-configd.service"
+    "${pkgdir}/usr/lib/systemd/system/carbonio-configd.service"
 }
 
 build() {
@@ -111,16 +111,28 @@ package__ubuntu_noble() {
   _package_systemd
 }
 
+_enable_start() {
+  # Fresh install: configd is configured before carbonio-core (dependency
+  # order), so the zextras user and systemd-envscript may not exist yet.
+  # Only start when they do; otherwise enable and let the stack start it.
+  # --no-block: never stall the package manager on LDAP readiness.
+  if id zextras &>/dev/null && [ -x /opt/zextras/bin/systemd-envscript ]; then
+    systemctl enable --now --no-block carbonio-configd.service &>/dev/null || :
+  else
+    systemctl enable carbonio-configd.service &>/dev/null || :
+  fi
+}
+
 postinst__rocky_9() {
   if [ -d /run/systemd/system ]; then
     systemctl daemon-reload &>/dev/null || :
     _kill_legacy_zmconfigd
     if [ $1 -eq 1 ]; then
       # Fresh install: enable and start
-      systemctl enable --now carbonio-configd.service &>/dev/null || :
+      _enable_start
     else
       # Upgrade (Go→Go or Jython→Go): already enabled, restart to pick up new binary
-      systemctl restart carbonio-configd.service &>/dev/null || :
+      systemctl restart --no-block carbonio-configd.service &>/dev/null || :
     fi
   fi
 }
@@ -131,12 +143,20 @@ postinst__ubuntu_noble() {
     _kill_legacy_zmconfigd
     if [ "$1" = "configure" ] && [ -z "$2" ]; then
       # Fresh install: enable and start
-      systemctl enable --now carbonio-configd.service &>/dev/null || :
+      _enable_start
     else
       # Upgrade (Go→Go or Jython→Go): already enabled, restart to pick up new binary
-      systemctl restart carbonio-configd.service &>/dev/null || :
+      systemctl restart --no-block carbonio-configd.service &>/dev/null || :
     fi
   fi
+}
+
+postinst__rocky_8() {
+  _kill_legacy_zmconfigd
+}
+
+postinst__ubuntu_jammy() {
+  _kill_legacy_zmconfigd
 }
 
 postrm() {

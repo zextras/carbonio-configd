@@ -22,7 +22,7 @@ func TestRun_MutatingActionsNotZextras(t *testing.T) {
 	}
 
 	for _, action := range []Action{
-		ActionStart, ActionStop, ActionRestart, ActionReload, ActionStartSystemd, ActionStopSystemd,
+		ActionStart, ActionStop, ActionRestart, ActionReload, ActionStartSystemd, ActionStopSystemd, ActionRestartSystemd,
 	} {
 		t.Run(string(action), func(t *testing.T) {
 			t.Parallel()
@@ -114,7 +114,7 @@ func TestRun_UnknownAction(t *testing.T) {
 }
 
 // TestNoRewrite_OnlyForStartAndRestart: --no-rewrite reaches the Controller
-// built for the invocation only for start and restart.
+// built for the invocation only for start, restart and reload.
 func TestNoRewrite_OnlyForStartAndRestart(t *testing.T) {
 	t.Parallel()
 
@@ -127,7 +127,9 @@ func TestNoRewrite_OnlyForStartAndRestart(t *testing.T) {
 		{ActionRestart, true, true},
 		{ActionRestart, false, false},
 		{ActionStop, true, false},
-		{ActionReload, true, false},
+		{ActionReload, true, true},
+		{ActionKill, true, false},
+		{ActionRefresh, true, false},
 	} {
 		t.Run(string(tc.action), func(t *testing.T) {
 			t.Parallel()

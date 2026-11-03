@@ -196,6 +196,10 @@ func (g *Generator) ExpandVariable(ctx context.Context, name string) (string, er
 			"value_type", v.ValueType)
 	}
 
+	if v.ConfigText != nil {
+		return *v.ConfigText, nil
+	}
+
 	// Use CustomFormatter if available
 	if v.CustomFormatter != nil {
 		return v.CustomFormatter(v.Value)

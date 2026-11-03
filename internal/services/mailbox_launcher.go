@@ -23,21 +23,12 @@ import (
 // `pgrep -f com.zextras.mailbox.Mailbox`, as an exact argv token.
 const mailboxMainClass = "com.zextras.mailbox.Mailbox"
 
-// mailboxCustomStart starts the appserver mariadb and then the mailboxd JVM,
-// in that order. Matches legacy zmstorectl START_ORDER="mysql.server
-// zmmailboxdctl". The DB is not a separate registered service — keeping
-// `zmcontrol status` aligned with the legacy %allservices list — so its
-// lifecycle is stitched in here.
+// mailboxCustomStart starts the mailboxd JVM and waits until it serves its
+// mail port (legacy zmmailboxdctl start). It starts the JVM only: the database
+// is the appserver-db service (the store composite starts both, and mailbox
+// Wants appserver-db), and the zmtlsctl configuration set runs as the
+// service's ConfigRewrite, skipped by `norewrite`.
 func (c *Controller) mailboxCustomStart(ctx context.Context, def *ServiceDef) error {
-	if err := c.startAppserverDB(ctx); err != nil {
-		// Match legacy zmstorectl: log the DB failure but proceed with
-		// mailboxd start. The daemon reconnects on its own once the DB
-		// recovers, and blocking the JVM on an intermittent DB failure
-		// would be a bigger outage than degraded operation.
-		logger.WarnContext(ctx, "Appserver DB failed to start; continuing with mailbox",
-			"error", err)
-	}
-
 	lc, err := c.loadConfig()
 	if err != nil {
 		return fmt.Errorf("failed to load localconfig: %w", err)
@@ -68,30 +59,25 @@ func (c *Controller) mailboxCustomStart(ctx context.Context, def *ServiceDef) er
 		}
 	}
 
-	return c.startJavaDetached(ctx, "mailbox", javaBin, c.p.log+"/zmmailboxd.out", args,
-		"heap", lc["mailboxd_java_heap_size"]+"m")
-}
-
-// mailboxCustomStop terminates mailboxd and then the appserver mariadb in
-// that order. Matches legacy zmstorectl STOP_ORDER="zmmailboxdctl
-// mysql.server": the JVM exits first so in-flight writes are flushed by the
-// application, then stopAppserverDB runs the InnoDB dirty-page flush and
-// shuts mariadb down cleanly. DB errors are logged but do not fail the stop
-// so `zmcontrol stop` still makes forward progress on the rest of the
-// shutdown sequence.
-func (c *Controller) mailboxCustomStop(ctx context.Context, def *ServiceDef) error {
-	if def.ProcessName != "" {
-		if err := c.killProcess(ctx, def.ProcessName); err != nil {
-			logger.WarnContext(ctx, "Failed to signal mailbox JVM; proceeding to DB stop",
-				"error", err)
-		}
+	if err := c.startJavaDetached(ctx, "mailbox", javaBin, c.p.log+"/zmmailboxd.out", args,
+		"heap", lc["mailboxd_java_heap_size"]+"m"); err != nil {
+		return err
 	}
 
-	if err := c.stopAppserverDB(ctx); err != nil {
-		logger.WarnContext(ctx, "Failed to stop appserver DB",
-			"error", err)
+	return c.mailboxReady(ctx, lc)
+}
 
-		return err
+// mailboxCustomStop terminates the mailboxd JVM (SIGTERM, bounded wait, then
+// SIGKILL). The database is left running: stopping it is the store
+// composite's job, after the JVM is gone (legacy zmmailboxdctl stop only ever
+// touches the JVM).
+func (c *Controller) mailboxCustomStop(ctx context.Context, def *ServiceDef) error {
+	if def.ProcessName == "" {
+		return nil
+	}
+
+	if err := c.killProcess(ctx, def.ProcessName); err != nil {
+		return fmt.Errorf("stop mailbox JVM: %w", err)
 	}
 
 	return nil

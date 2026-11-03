@@ -30,7 +30,7 @@ func TestConfigManager_BasicIntegration(t *testing.T) {
 	// Initialize logger for testing
 
 	// Create test configuration
-	mainCfg, err := config.NewConfig()
+	mainCfg, err := config.NewConfigWithHostname("")
 	if err != nil {
 		t.Fatalf("NewConfig failed: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestConfigManager_ConcurrentAccess_Integration(t *testing.T) {
 	ctx := context.Background()
 
 	// Create test components
-	mainCfg, err := config.NewConfig()
+	mainCfg, err := config.NewConfigWithHostname("")
 	if err != nil {
 		t.Fatalf("NewConfig failed: %v", err)
 	}
@@ -174,7 +174,7 @@ func TestConfigManager_ErrorHandling_Integration(t *testing.T) {
 	ctx := context.Background()
 
 	// Create test components
-	mainCfg, err := config.NewConfig()
+	mainCfg, err := config.NewConfigWithHostname("")
 	if err != nil {
 		t.Fatalf("NewConfig failed: %v", err)
 	}

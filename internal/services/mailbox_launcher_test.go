@@ -380,30 +380,6 @@ func TestMailboxCustomStop_WithProcessName(t *testing.T) {
 	}
 }
 
-// TestMailboxCustomStop_StopDBError verifies that when stopAppserverDB returns
-// an error, mailboxCustomStop propagates it (covers the return err branch).
-func TestMailboxCustomStop_StopDBError(t *testing.T) {
-	t.Parallel()
-
-	ctl := newRealController(t)
-
-	tmp := t.TempDir()
-
-	// Create a pidfile with an invalid PID so stopMysqldByPidFile returns an error
-	pidFile := filepath.Join(tmp, "mysql.pid")
-	if err := os.WriteFile(pidFile, []byte("not-a-pid\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	ctl.p.appserverDBPidFile = pidFile
-
-	def := &ServiceDef{Name: "mailbox"}
-	err := ctl.mailboxCustomStop(context.Background(), def)
-	if err == nil {
-		t.Error("expected error when stopAppserverDB fails with invalid pidfile")
-	}
-}
-
 // TestMailboxJavaBinary_ZimbraJavaHome verifies the zimbra_java_home fallback
 // (when mailboxd_java_home is empty but zimbra_java_home is set).
 func TestMailboxJavaBinary_ZimbraJavaHome(t *testing.T) {

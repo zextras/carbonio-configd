@@ -33,6 +33,30 @@ func (cm *ConfigManager) ProcessIsNotRunning(ctx context.Context, service string
 	return !cm.ProcessIsRunning(ctx, service)
 }
 
+// NewProxyGenerator builds a proxy generator over the configs of the current
+// snapshot, with the legacy ProxyConfGen location/prefix settings.
+func (cm *ConfigManager) NewProxyGenerator(ctx context.Context, settings proxy.Settings) (*proxy.Generator, error) {
+	snap := cm.State.Snapshot()
+
+	gen, err := proxy.LoadConfiguration(
+		ctx,
+		cm.env,
+		cm.mainConfig,
+		proxy.Sources{
+			Local:    snap.LocalConfig(),
+			Global:   snap.GlobalConfig(),
+			Server:   snap.ServerConfig(),
+			Ldap:     cm.LdapClient,
+			Cache:    cm.Cache,
+			Settings: &settings,
+		})
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize proxy generator: %w", err)
+	}
+
+	return gen, nil
+}
+
 // RunProxygenWithConfigs executes proxy configuration generation with loaded configs.
 // This method provides loaded LocalConfig, GlobalConfig, and ServerConfig to the proxy generator,
 // allowing it to resolve variables from actual LDAP data.
@@ -46,26 +70,14 @@ func (cm *ConfigManager) RunProxygenWithConfigs(ctx context.Context) error {
 	// and passed to the proxy generator. Cache invalidation should only happen
 	// when SIGHUP/network reload is explicitly requested (see LoadAllConfigsWithRetry).
 
-	// Create proxy generator with the configs of the current snapshot
-	snap := cm.State.Snapshot()
 	initStart := time.Now()
-	gen, err := proxy.LoadConfiguration(
-		ctx,
-		cm.env,
-		cm.mainConfig,
-		proxy.Sources{
-			Local:  snap.LocalConfig(),
-			Global: snap.GlobalConfig(),
-			Server: snap.ServerConfig(),
-			Ldap:   cm.LdapClient,
-			Cache:  cm.Cache,
-		})
+	gen, err := cm.NewProxyGenerator(ctx, proxy.Settings{})
 	initDuration := time.Since(initStart)
 	logger.DebugContext(ctx, "Proxy generator initialization completed",
 		"duration_seconds", initDuration.Seconds())
 
 	if err != nil {
-		return fmt.Errorf("failed to initialize proxy generator: %w", err)
+		return err
 	}
 
 	// Generate all nginx configuration files

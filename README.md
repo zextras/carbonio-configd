@@ -106,6 +106,14 @@ unit: the daemon runs in legacy mode, started by `zmcontrol`.
 `configd rewrite <section>...` sends a REWRITE command to the already-running daemon
 via TCP (port 7171) and exits. It does not start a daemon.
 
+The command is synchronous: the daemon answers `SUCCESS REWRITES COMPLETE` only after its
+main loop has rewritten the requested sections, and `ERROR REWRITE TIMEOUT` when that takes
+longer than 60 s (the request stays queued and is processed by a later cycle). The client
+exits `0` on success and `1` on any `ERROR` reply, timeout or lost connection. Only when
+nothing listens on the daemon port (on either loopback family, so IPv4-only and IPv6-only
+hosts both work) does it fall back to a standalone forced rewrite in its own process; a daemon that is alive but failing is never bypassed.
+A standalone run exits `1` when its plan or a rewrite failed.
+
 ```bash
 # Rewrite proxy and MTA configs on the running daemon
 configd rewrite proxy mta
@@ -142,6 +150,8 @@ Limitations:
   proxy files themselves are not rendered by `plan`.
 - Restarts shown are those the drifted sections would trigger. The running daemon restarts
   services only on variable changes, and a forced rewrite (`configd rewrite`) never restarts.
+- On a systemd host the heavy services (mailbox, appserver-db, store, ldap) show as
+  `pending-restart`: the daemon never restarts them, it only logs that a restart is pending.
 
 ### Shadow mode (QA nodes)
 
@@ -272,6 +282,9 @@ configd localconfig -k mailboxd_java_options -k ldap_port
 configd localconfig -m export -k zimbra_home
 # Output: export zimbra_home='/opt/zextras';
 
+# Several keys print in the order given; a key with no value (e.g. a null
+# default like mysql_bind_address) prints nothing and warns "null valued key"
+
 # Edit keys
 configd localconfig -e smtp_port=587
 configd localconfig -e -r ldap_root_password    # random password
@@ -290,10 +303,10 @@ Flags:
 -k key           Key to retrieve (repeatable; omit for all keys)
 -q               Quiet mode (suppress warnings)
 -c path          Path to localconfig.xml (default: $CARBONIO_BASE_DIR/conf/localconfig.xml, /opt/zextras/conf/localconfig.xml)
--s               Show password values (default: masked)
+-s               Show password values (default: keys containing "password" print '*' in plain/xml/nokey; shell and export never mask)
 -d               Show default values instead of current
 -n               Show only keys changed from defaults
--x               Expand variables (accepted for compatibility, always on)
+-x               Expand ${var} references (default: raw values; shell and export always expand)
 -e               Edit: set key=value pairs (all keys are validated first, then saved once)
 -u               Unset (remove) keys (all-or-nothing, like -e)
 -r               Set key to random password (use with -e)
@@ -331,7 +344,7 @@ pod without `localconfig.xml` sets them in the environment:
 export CONFIGD_LC_ldap_url=ldap://carbonio-openldap:1389
 export CONFIGD_LC_zimbra_ldap_userdn=uid=zimbra,cn=admins,cn=zimbra
 export CONFIGD_LC_zimbra_ldap_password=...
-export CONFIGD_LC_ldap_starttls_supported=0        # plain ldap://
+export CONFIGD_LC_ldap_starttls_supported=0        # plain ldap:// (the default); StartTLS needs this =1 and zimbra_require_interprocess_security=1
 
 configd ldap gacf                                  # zmprov gacf: the global config
 configd ldap gcf zimbraMtaRestriction zimbraMailMode
@@ -365,7 +378,10 @@ docker build -f docker/configd/Dockerfile -t carbonio-configd .
 
 ## systemd Integration
 
-- **Type=notify** with `READY=1` after first successful config cycle
+- **Type=notify** with `READY=1` sent once the first config pass (load, plan, rewrites, restarts)
+  has completed; the TCP listener starts at the same point, so a `REWRITE` is never accepted
+  before the daemon has configured the host. Use a `TimeoutStartSec` that covers a slow first
+  pass. After a SIGHUP reload (`RELOADING=1`), `READY=1` is sent again when the reload cycle ends
 - **WatchdogSec=120** with automatic keep-alive pings
 - **ExecReload** via SIGHUP for immediate config re-evaluation
 - **Security hardening** (score 1.5 OK): syscall filtering, empty capability bounding set, restricted namespaces

@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/zextras/carbonio-configd/internal/sdnotify"
+	"github.com/zextras/carbonio-configd/internal/services"
 	"github.com/zextras/carbonio-configd/internal/state"
 	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
@@ -43,4 +44,32 @@ func TestBootstrapSystemd_ReturnsBufferedReloadChan(t *testing.T) {
 	reloadChan := bootstrapSystemd(context.Background(), systest.New().System(), state.NewState(), cancel, notifier)
 	require.NotNil(t, reloadChan)
 	require.Equal(t, 1, cap(reloadChan))
+}
+
+// TestBootstrapDependencies_OneServiceManagerForConfigAndWatchdog pins the
+// shared service manager: config-driven restarts and the watchdog must not own
+// independent managers (concurrent restarts of one service, DEPENDS written
+// by the main loop while the watchdog goroutine reads it), and a restart run
+// by the manager must stop the watchdog watching that service.
+func TestBootstrapWatchdog_OneServiceManagerForConfigAndWatchdog(t *testing.T) {
+	ctx := context.Background()
+
+	rt, err := buildRuntime(ctx, systest.New().System(), &runtimeOpts{
+		disableRestarts: true,
+		loadLocal:       func() (map[string]string, error) { return map[string]string{}, nil },
+	})
+	require.NoError(t, err)
+
+	wd := bootstrapWatchdog(ctx, rt)
+
+	require.Same(t, rt.sm, rt.cm.Services(), "the config manager and the daemon must share one service manager")
+	require.Same(t, rt.cm.ServiceMgr, services.Manager(rt.sm))
+	require.True(t, rt.sm.DisableRestarts, "--disable-restarts reaches the shared manager")
+
+	wd.AddService(ctx, "antivirus")
+	require.True(t, wd.IsServiceTracked("antivirus"))
+
+	rt.sm.BeforeRestart("antivirus")
+
+	require.False(t, wd.IsServiceTracked("antivirus"), "a service restarted on purpose is no longer watched")
 }

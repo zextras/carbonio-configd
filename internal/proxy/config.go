@@ -26,6 +26,26 @@ type Sources struct {
 	Server *config.ServerConfig
 	Ldap   *ldap.Ldap
 	Cache  *cache.ConfigCache
+
+	// Settings holds the legacy ProxyConfGen location/prefix options; the
+	// zero value keeps the defaults.
+	Settings *Settings
+}
+
+// Settings are the ProxyConfGen options that decide where templates are read
+// and files are written. Empty fields keep the legacy defaults.
+type Settings struct {
+	// TemplateDir is the template directory (-t), default <workdir>/conf/nginx/templates.
+	TemplateDir string
+	// IncludeDir is the directory of the included files relative to
+	// <workdir>/conf (-i), default nginx/includes.
+	IncludeDir string
+	// ConfPrefix is the generated file prefix (-p), default nginx.conf.
+	ConfPrefix string
+	// TemplatePrefix is the template file prefix (-P), default ConfPrefix.
+	TemplatePrefix string
+	// ForceDNSResolution is -f.
+	ForceDNSResolution bool
 }
 
 // NewGenerator creates a new proxy configuration generator
@@ -53,6 +73,8 @@ func NewGenerator(ctx context.Context, env sys.System, cfg *config.Config, src S
 		Hostname:      cfg.Hostname,
 		DryRun:        false,
 	}
+
+	g.applySettings(src.Settings)
 
 	logger.DebugContext(ctx, "Initializing proxy generator",
 		"workdir", g.WorkingDir,
@@ -139,4 +161,70 @@ func LoadConfiguration(ctx context.Context, env sys.System, cfg *config.Config, 
 		"server_count", src.Server.Data.Len())
 
 	return NewGenerator(ctx, env, cfg, src)
+}
+
+// SetDryRun enables or disables dry-run mode
+func (g *Generator) SetDryRun(ctx context.Context, dryRun bool) {
+	ctx = logger.ContextWithComponentOnce(ctx, "proxy")
+
+	g.DryRun = dryRun
+	if dryRun {
+		logger.InfoContext(ctx, "Proxy generator in dry-run mode - no files will be written")
+	}
+}
+
+// SetVerbose enables or disables verbose logging mode
+func (g *Generator) SetVerbose(ctx context.Context, verbose bool) {
+	ctx = logger.ContextWithComponentOnce(ctx, "proxy")
+
+	g.Verbose = verbose
+	if verbose {
+		logger.InfoContext(ctx, "Proxy generator in verbose mode - detailed logging enabled")
+	}
+}
+
+// applySettings overlays the ProxyConfGen location/prefix options on the
+// defaults NewGenerator derived from the base directory.
+func (g *Generator) applySettings(s *Settings) {
+	if s == nil {
+		s = &Settings{}
+	}
+
+	g.ConfPrefix = nginxConfPrefix
+	if s.ConfPrefix != "" {
+		g.ConfPrefix = s.ConfPrefix
+	}
+
+	g.TemplatePrefix = g.ConfPrefix
+	if s.TemplatePrefix != "" {
+		g.TemplatePrefix = s.TemplatePrefix
+	}
+
+	if s.TemplateDir != "" {
+		g.TemplateDir = s.TemplateDir
+	}
+
+	if s.IncludeDir != "" {
+		g.IncludesDir = filepath.Join(g.ConfDir, s.IncludeDir)
+	}
+
+	g.ForceDNSResolution = s.ForceDNSResolution
+}
+
+// confPrefix is the generated file prefix, nginx.conf unless -p was given.
+func (g *Generator) confPrefix() string {
+	if g.ConfPrefix == "" {
+		return nginxConfPrefix
+	}
+
+	return g.ConfPrefix
+}
+
+// templatePrefix is the template file prefix, the config prefix unless -P was given.
+func (g *Generator) templatePrefix() string {
+	if g.TemplatePrefix == "" {
+		return g.confPrefix()
+	}
+
+	return g.TemplatePrefix
 }

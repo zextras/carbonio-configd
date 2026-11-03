@@ -16,7 +16,7 @@ Type=notify
 User=zextras
 EnvironmentFile=-/opt/zextras/data/systemd.env
 ExecStartPre=/opt/zextras/bin/systemd-envscript
-ExecStartPre=/bin/bash -c 'for i in $(seq 1 30); do nc -z $ldap_domain $ldap_port && exit 0; sleep 2; done; echo "LDAP not reachable after 60s"; exit 1'
+ExecStartPre=/usr/bin/timeout 120 /bin/bash -c 'until (exec 3<>"/dev/tcp/$1/$2") 2>/dev/null; do sleep 2; done' _ $ldap_domain $ldap_port
 ExecStart=/opt/zextras/bin/configd
 ExecReload=/bin/kill -HUP $MAINPID
 NotifyAccess=main
@@ -27,7 +27,7 @@ WatchdogSec=120
 
 # Startup may take long on first run (LDAP queries, config rewrites).
 # configd sends READY=1 after the first successful loop iteration.
-TimeoutStartSec=120
+TimeoutStartSec=300
 TimeoutStopSec=10
 KillMode=mixed
 KillSignal=SIGTERM
@@ -49,7 +49,7 @@ OOMScoreAdjust=-500
 
 # ── Security: Filesystem ──────────────────────────────────────────────
 ProtectSystem=strict
-ReadWritePaths=/opt/zextras/conf /opt/zextras/log /opt/zextras/data /opt/zextras/common/conf /run/carbonio
+ReadWritePaths=-/opt/zextras/conf -/opt/zextras/log -/opt/zextras/data -/opt/zextras/common/conf -/run/carbonio
 ProtectHome=yes
 PrivateTmp=yes
 UMask=0027
@@ -66,6 +66,8 @@ ProtectProc=invisible
 ProcSubset=pid
 
 # ── Security: Privilege restrictions ──────────────────────────────────
+# sudo is only used by legacy (non-systemd) and CustomStart paths, which the
+# daemon never takes in systemd mode (systemctl via polkit instead).
 NoNewPrivileges=yes
 RestrictRealtime=yes
 RestrictSUIDSGID=yes

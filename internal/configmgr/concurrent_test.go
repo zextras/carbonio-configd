@@ -26,7 +26,7 @@ func TestConfigManager_ConcurrentLoading(t *testing.T) {
 		t.Skip("Skipping concurrent loading test in short mode")
 	}
 
-	mainCfg, err := config.NewConfig()
+	mainCfg, err := config.NewConfigWithHostname("")
 	if err != nil {
 		t.Fatalf("NewConfig failed: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestConfigManager_ConcurrentLoadAndLookup(t *testing.T) {
 		t.Skip("Skipping concurrent load and lookup test in short mode")
 	}
 
-	mainCfg, err := config.NewConfig()
+	mainCfg, err := config.NewConfigWithHostname("")
 	if err != nil {
 		t.Fatalf("NewConfig failed: %v", err)
 	}
@@ -246,7 +246,7 @@ func TestConfigManager_ConcurrentObserve(t *testing.T) {
 		t.Skip("Skipping concurrent observe test in short mode")
 	}
 
-	mainCfg, err := config.NewConfig()
+	mainCfg, err := config.NewConfigWithHostname("")
 	if err != nil {
 		t.Fatalf("NewConfig failed: %v", err)
 	}
@@ -315,7 +315,7 @@ func TestConfigManager_RaceConditions(t *testing.T) {
 		t.Skip("Skipping race condition test in short mode")
 	}
 
-	mainCfg, err := config.NewConfig()
+	mainCfg, err := config.NewConfigWithHostname("")
 	if err != nil {
 		t.Fatalf("NewConfig failed: %v", err)
 	}

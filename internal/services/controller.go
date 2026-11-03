@@ -46,6 +46,13 @@ type Controller struct {
 	// dials the network, which stays real.
 	ldapProbe func(ctx context.Context, urls []string) error
 
+	// mailboxReady waits until a freshly started mailboxd serves its mail port
+	// (waitForMailboxPort by default); configdReady waits until a freshly
+	// started configd daemon answers STATUS (waitForConfigd by default). Both
+	// reach the network, which stays real; tests replace them.
+	mailboxReady func(ctx context.Context, lc map[string]string) error
+	configdReady func(ctx context.Context) error
+
 	noRewrite   bool
 	killTimeout time.Duration
 
@@ -117,6 +124,14 @@ func NewController(env sys.System, opts ...Option) *Controller {
 	}
 
 	c.p = newPaths(c.baseDir, c.runDir)
+
+	if c.mailboxReady == nil {
+		c.mailboxReady = c.waitForMailboxPort
+	}
+
+	if c.configdReady == nil {
+		c.configdReady = c.waitForConfigd
+	}
 
 	if c.registry == nil {
 		WithRegistry(c.defaultRegistry())(c)

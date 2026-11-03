@@ -48,6 +48,9 @@ type Input struct {
 	// Host, when set, prunes the plan to the actions whose target differs
 	// from what the host currently holds.
 	Host *Host
+	// Systemd marks a host managed through systemd units: restarts of heavy
+	// services are planned as ActionPendingRestart (see Classify).
+	Systemd bool
 }
 
 // Host is the read-only observation of the host that "configd plan" compares
@@ -782,6 +785,10 @@ func (b *builder) finish() Plan {
 	p.Restarts = collectSorted(b.restarts, p.Restarts, func(a, c *Restart) int {
 		return strings.Compare(a.Service, c.Service)
 	})
+
+	for i := range p.Restarts {
+		p.Restarts[i].Action = Classify(p.Restarts[i].Action, p.Restarts[i].Service, b.in.Systemd)
+	}
 
 	if b.proxygen != nil {
 		pg := *b.proxygen

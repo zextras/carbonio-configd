@@ -8,7 +8,7 @@ import "testing"
 
 // The LDAP change watcher is opt-in: an absent or non-TRUE key leaves it off.
 func TestLdapChangeTriggerDefaultsOff(t *testing.T) {
-	cfg, err := NewConfig()
+	cfg, err := NewConfigWithHostname("")
 	if err != nil {
 		t.Fatalf("NewConfig failed: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestLdapChangeTriggerKeys(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg, err := NewConfig()
+			cfg, err := NewConfigWithHostname("")
 			if err != nil {
 				t.Fatalf("NewConfig failed: %v", err)
 			}
@@ -86,7 +86,7 @@ func TestLdapChangeTriggerKeys(t *testing.T) {
 // next cycle (SetVals runs every cycle). Like zmconfigd_skip_idle_polls, a key
 // that is merely removed keeps its previous value until configd restarts.
 func TestLdapChangeTriggerFollowsLocalconfigEachCycle(t *testing.T) {
-	cfg, err := NewConfig()
+	cfg, err := NewConfigWithHostname("")
 	if err != nil {
 		t.Fatalf("NewConfig failed: %v", err)
 	}

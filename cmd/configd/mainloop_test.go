@@ -128,7 +128,7 @@ func TestUpdateWatchdogServices_EmptyList(t *testing.T) {
 	ctx := context.Background()
 	appState := state.NewState()
 	tracked := map[string]string{}
-	mainCfg, _ := config.NewConfig()
+	mainCfg, _ := config.NewConfigWithHostname("")
 	mainCfg.WdList = []string{}
 
 	wd := watchdog.NewWatchdog(watchdog.Config{
@@ -147,7 +147,7 @@ func TestUpdateWatchdogServices_WithList(t *testing.T) {
 	ctx := context.Background()
 	appState := state.NewState()
 	tracked := map[string]string{}
-	mainCfg, _ := config.NewConfig()
+	mainCfg, _ := config.NewConfigWithHostname("")
 	mainCfg.WdList = []string{"antivirus", "mta"}
 
 	wd := watchdog.NewWatchdog(watchdog.Config{
@@ -164,7 +164,7 @@ func TestUpdateWatchdogServices_WithList(t *testing.T) {
 func TestUpdateWatchdogServices_ServiceInWatchdogList(t *testing.T) {
 	ctx := context.Background()
 	appState := state.NewState()
-	mainCfg, _ := config.NewConfig()
+	mainCfg, _ := config.NewConfigWithHostname("")
 	mainCfg.WdList = []string{"antivirus"}
 
 	// Add a service to the plan's tracked set so we exercise the slices.Contains path

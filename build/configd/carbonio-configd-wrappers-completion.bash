@@ -28,7 +28,7 @@ _zmlocalconfig_completions() {
 }
 complete -F _zmlocalconfig_completions zmlocalconfig
 
-# zmconfigdctl — delegates to systemctl for carbonio-configd.service
+# zmconfigdctl — wrapper for `configd service <verb> configd`
 _zmconfigdctl_completions() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
   COMPREPLY=($(compgen -W "start stop restart reload status" -- "$cur"))

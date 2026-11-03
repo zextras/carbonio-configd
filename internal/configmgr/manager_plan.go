@@ -112,6 +112,7 @@ func (cm *ConfigManager) Plan(ctx context.Context) (*plan.Plan, error) {
 		FirstRun:  firstRun,
 		Tracked:   cm.tracked,
 		Carry:     cm.carry,
+		Systemd:   cm.systemdMode(),
 	})
 	if err != nil {
 		// Keep the requests for the next attempt.
@@ -278,6 +279,14 @@ func (cm *ConfigManager) ApplyRestarts(ctx context.Context, pl *plan.Plan) {
 		Enabled:  cm.mainConfig.RestartConfig,
 		Debounce: debounceOf(cm.mainConfig),
 	})
+}
+
+// systemdMode reports whether the services are managed through systemd units;
+// a manager without that notion (a test double) is never in systemd mode.
+func (cm *ConfigManager) systemdMode() bool {
+	m, ok := cm.ServiceMgr.(interface{ IsSystemdMode() bool })
+
+	return ok && m.IsSystemdMode()
 }
 
 // debounceOf returns the restart debounce period configured in localconfig.

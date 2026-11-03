@@ -8,6 +8,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 
@@ -32,15 +33,33 @@ const (
 	ActionStatus       Action = "status"
 	ActionStartSystemd Action = "start-systemd"
 	ActionStopSystemd  Action = "stop-systemd"
+	// ActionRestartSystemd is stop-systemd then start-systemd (legacy
+	// zmstatctl restart-systemd).
+	ActionRestartSystemd Action = "restart-systemd"
+	// ActionKill is the legacy alias of stop. ActionRefresh and ActionRotate
+	// are the signal verbs (milter refresh, stats rotate).
+	ActionKill    Action = "kill"
+	ActionRefresh Action = "refresh"
+	ActionRotate  Action = "rotate"
+	// ActionUsage is an empty or unknown verb: print the verb list, fail.
+	ActionUsage Action = "usage"
 )
+
+// usageLine is what an empty or unknown verb prints, like the legacy
+// `$0 start|stop|kill|restart|reload|status[|refresh|rotate]`.
+const usageLine = "Usage: configd service start|stop|kill|restart|reload|status|refresh|rotate <service> [norewrite]"
 
 // Options are the parsed arguments of "configd service".
 type Options struct {
 	Action Action
 	// Name is the service to act on; unused by ActionList.
 	Name string
-	// NoRewrite skips config regeneration on start and restart.
+	// NoRewrite skips config regeneration on start, restart and reload.
 	NoRewrite bool
+	// Extra are the arguments the legacy wrapper forwarded after the service
+	// name; only "norewrite" is meaningful (NoRewrite is derived from it by the
+	// caller), the rest is accepted and ignored.
+	Extra []string
 }
 
 // mutation describes a service-mutating action: the verb used in the error
@@ -59,9 +78,15 @@ type runner struct {
 }
 
 // noRewrite reports whether the invocation skips the REWRITE round-trip.
-// --no-rewrite is read by the Controller's start and restart paths only.
+// `norewrite` is honored by start, restart and reload only (legacy scripts
+// ignore it on every other verb).
 func noRewrite(opts *Options) bool {
-	return opts.NoRewrite && (opts.Action == ActionStart || opts.Action == ActionRestart)
+	switch opts.Action {
+	case ActionStart, ActionRestart, ActionReload:
+		return opts.NoRewrite
+	default:
+		return false
+	}
 }
 
 func newRunner(env sys.System, opts *Options) *runner {
@@ -73,10 +98,18 @@ func newRunner(env sys.System, opts *Options) *runner {
 		mutations: map[Action]mutation{
 			ActionStart:        {"start", ctl.ServiceStart},
 			ActionStop:         {"stop", ctl.ServiceStop},
+			ActionKill:         {"kill", ctl.ServiceStop},
 			ActionRestart:      {"restart", ctl.ServiceRestart},
 			ActionReload:       {"reload", ctl.ServiceReload},
 			ActionStartSystemd: {"start", ctl.ServiceStartSystemd},
 			ActionStopSystemd:  {"stop", ctl.ServiceStopSystemd},
+			ActionRestartSystemd: {"restart", func(ctx context.Context, name string) error {
+				if err := ctl.ServiceStopSystemd(ctx, name); err != nil {
+					return err
+				}
+
+				return ctl.ServiceStartSystemd(ctx, name)
+			}},
 		},
 	}
 }
@@ -86,7 +119,10 @@ func newRunner(env sys.System, opts *Options) *runner {
 func Run(ctx context.Context, env sys.System, stdout, stderr io.Writer, opts *Options) int {
 	r := newRunner(env, opts)
 
-	if _, mutating := r.mutations[opts.Action]; mutating && !cliutil.RequireZextras(stderr) {
+	_, mutating := r.mutations[opts.Action]
+	signaling := opts.Action == ActionRefresh || opts.Action == ActionRotate
+
+	if (mutating || signaling) && !cliutil.RequireZextras(stderr) {
 		return 1
 	}
 
@@ -98,16 +134,57 @@ func (r *runner) run(ctx context.Context, stdout, stderr io.Writer, opts *Option
 
 	c := cliutil.NewConsole(stdout, stderr)
 
+	if r.ldapReplicaRefused(c, opts) {
+		return 1
+	}
+
 	switch opts.Action {
 	case ActionList:
 		r.list(ctx, c)
 
 		return 0
+	case ActionUsage:
+		_, _ = fmt.Fprintln(stderr, usageLine)
+
+		return 1
 	case ActionStatus:
-		return report(stderr, r.reporter.PrintServiceStatus(ctx, c, opts.Name))
+		err := r.reporter.PrintServiceStatus(ctx, c, opts.Name)
+		if errors.Is(err, status.ErrNotRunning) {
+			// "<service> is not running." is already on stdout: legacy scripts
+			// stop at the exit status.
+			return 1
+		}
+
+		return report(stderr, err)
+	case ActionRefresh:
+		return report(stderr, r.signal(ctx, c, opts, r.ctl.ServiceRefresh))
+	case ActionRotate:
+		return report(stderr, r.signal(ctx, c, opts, r.ctl.ServiceRotate))
 	default:
 		return report(stderr, r.mutate(ctx, opts))
 	}
+}
+
+// ldapReplicaRefused applies legacy ldap.sh's guard: on an ldap replica whose
+// ldap_url is its ldap_master_url every verb but stop is refused.
+func (r *runner) ldapReplicaRefused(c *cliutil.Console, opts *Options) bool {
+	switch opts.Action {
+	case ActionList, ActionUsage, ActionStop, ActionKill, ActionStopSystemd:
+		return false
+	}
+
+	def := r.ctl.LookupService(opts.Name)
+	if def == nil || def.Name != "ldap" {
+		return false
+	}
+
+	if err := r.ctl.LDAPReplicaGuard(); err != nil {
+		c.Println(err.Error())
+
+		return true
+	}
+
+	return false
 }
 
 // report prints err as the "Error:" line main used to print for a failing Kong
@@ -120,6 +197,43 @@ func report(stderr io.Writer, err error) int {
 	_, _ = fmt.Fprintf(stderr, "Error: %v\n", err)
 
 	return 1
+}
+
+// signal runs the refresh or rotate verb and prints what it did, in the words
+// of the legacy scripts.
+func (r *runner) signal(
+	ctx context.Context, c *cliutil.Console, opts *Options,
+	fn func(context.Context, string) (services.SignalReport, error),
+) error {
+	report, err := fn(ctx, opts.Name)
+
+	for _, pid := range report.Signaled {
+		c.Printf("Sending %s to process %d\n", signalName(opts.Action), pid)
+	}
+
+	for _, pid := range report.NotRunning {
+		c.Printf("PID %d was not running\n", pid)
+	}
+
+	if err != nil {
+		return fmt.Errorf("failed to %s service %s: %w", opts.Action, opts.Name, err)
+	}
+
+	if opts.Action == ActionRefresh && len(report.Signaled) == 0 {
+		def := r.ctl.LookupService(opts.Name)
+		c.Printf("%s is not currently running\n", def.DisplayName)
+	}
+
+	return nil
+}
+
+// signalName is the signal a signal verb sends, as the legacy scripts name it.
+func signalName(a Action) string {
+	if a == ActionRotate {
+		return "HUP"
+	}
+
+	return "CONT"
 }
 
 // mutate runs a service-mutating action, wrapping any error with the verb and
@@ -138,7 +252,7 @@ func (r *runner) mutate(ctx context.Context, opts *Options) error {
 }
 
 func (r *runner) list(ctx context.Context, c *cliutil.Console) {
-	for _, info := range r.ctl.ServiceListStatus(ctx) {
+	for _, info := range r.ctl.ServiceListStatus(ctx, true) {
 		c.Status(info.DisplayName, info.Running, "")
 	}
 }

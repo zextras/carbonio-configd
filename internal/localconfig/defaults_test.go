@@ -82,11 +82,10 @@ func TestDefaults_NoUnresolvedReferences(t *testing.T) {
 	}
 }
 
-// TestDefaults_JavaNullDefaultsAreEmpty covers keys whose LC.java default is
-// the Java null literal. They must still be present in Defaults with an empty
-// string value so that "configd localconfig <key>" reports an empty value
-// rather than a "key not found" warning.
-func TestDefaults_JavaNullDefaultsAreEmpty(t *testing.T) {
+// TestDefaults_JavaNullDefaultsAreAbsent covers keys whose LC.java default is
+// the Java null literal: legacy LocalConfig gives them no value, so they are
+// known (IsNullKey) but not in Defaults.
+func TestDefaults_JavaNullDefaultsAreAbsent(t *testing.T) {
 	keys := []string{
 		"mysql_bind_address",
 		"mailboxd_java_heap_size",
@@ -97,12 +96,12 @@ func TestDefaults_JavaNullDefaultsAreEmpty(t *testing.T) {
 
 	for _, key := range keys {
 		t.Run(key, func(t *testing.T) {
-			value, ok := Defaults[key]
-			if !ok {
-				t.Fatalf("expected %s to be present in Defaults", key)
+			if _, ok := Defaults[key]; ok {
+				t.Errorf("%s must not have a default (Java null)", key)
 			}
-			if value != "" {
-				t.Errorf("expected %s default to be empty (Java null), got %q", key, value)
+
+			if !IsNullKey(key) {
+				t.Errorf("%s must be a known null-default key", key)
 			}
 		})
 	}

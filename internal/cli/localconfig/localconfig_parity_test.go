@@ -446,7 +446,7 @@ func TestChanged_ListedKeys(t *testing.T) {
 		Keys: []string{"zimbra_home", "zimbra_log_directory", "no_such_key"},
 	})
 	require.NoError(t, err)
-	assert.Equal(t, "zimbra_log_directory = /opt/zextras/log\n", stdout)
+	assert.Equal(t, "zimbra_log_directory = ${zimbra_home}/log\n", stdout) // raw without -x
 	assert.Equal(t, "Warning: null valued key 'no_such_key'\n", stderr)
 }
 

@@ -10,6 +10,7 @@ import (
 	"maps"
 	"slices"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -30,14 +31,34 @@ import (
 const componentAntivirus = "antivirus"
 
 // MainLoopActionTrigger implements the network.ActionTrigger interface.
+//
+// REWRITE clients wait for the main loop (jylibs/listener.py holds them on
+// lAction until the rewrite phase of the cycle that took their sections
+// finished). A client is registered in waiting when it arrives. The loop moves
+// the waiting clients to inflight just before it plans (claimWaiters), because
+// Plan takes the requested sections; once the cycle's rewrite phase is over
+// the inflight clients are released (completeWaiters), and when the cycle did
+// not get to rewrite they go back to waiting (requeueWaiters), their sections
+// still queued, for the next cycle. A client that arrives mid-cycle stays in
+// waiting for the next one.
 type MainLoopActionTrigger struct {
 	ReloadChan   chan struct{}
 	State        *state.State
 	EventCounter atomic.Int64 // Track number of events received since last poll
+
+	mu       sync.Mutex
+	waiting  []*rewriteWaiter
+	inflight []*rewriteWaiter
 }
 
-// TriggerRewrite is called by the network handler to signal a rewrite.
-func (t *MainLoopActionTrigger) TriggerRewrite(ctx context.Context, configs []string) {
+// rewriteWaiter is one REWRITE client waiting for the main loop.
+type rewriteWaiter struct {
+	done chan struct{}
+}
+
+// TriggerRewrite is called by the network handler to signal a rewrite. The
+// returned wait is released once the main loop has processed the sections.
+func (t *MainLoopActionTrigger) TriggerRewrite(ctx context.Context, configs []string) *network.RewriteWait {
 	ctx = logger.ContextWithComponent(ctx, "mainloop")
 	logger.DebugContext(ctx, "Triggering rewrite for configs", "configs", configs)
 
@@ -45,8 +66,16 @@ func (t *MainLoopActionTrigger) TriggerRewrite(ctx context.Context, configs []st
 		logger.DebugContext(ctx, "Processing rewrite request", "config", cfg)
 	}
 
+	// The sections are queued before the client registers: a loop that claims
+	// the client has then certainly not planned yet without them.
 	t.State.AddRequestedConfigs(ctx, configs)
 	t.EventCounter.Add(1) // Track that we received an event
+
+	w := &rewriteWaiter{done: make(chan struct{})}
+
+	t.mu.Lock()
+	t.waiting = append(t.waiting, w)
+	t.mu.Unlock()
 
 	select {
 	case t.ReloadChan <- struct{}{}:
@@ -54,10 +83,57 @@ func (t *MainLoopActionTrigger) TriggerRewrite(ctx context.Context, configs []st
 	default:
 		logger.DebugContext(ctx, "Reload channel blocked, main loop already processing or not ready")
 	}
+
+	return &network.RewriteWait{Done: w.done, Cancel: func() { t.forget(w) }}
 }
 
-// runForcedMode processes forced rewrites and returns; the caller exits after.
-func runForcedMode(ctx context.Context, args *Args, rt *runtime) {
+// forget drops a client that gave up (timeout, shutdown). Its sections stay
+// queued, as in legacy.
+func (t *MainLoopActionTrigger) forget(w *rewriteWaiter) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.waiting = slices.DeleteFunc(t.waiting, func(o *rewriteWaiter) bool { return o == w })
+	t.inflight = slices.DeleteFunc(t.inflight, func(o *rewriteWaiter) bool { return o == w })
+}
+
+// claimWaiters marks the clients registered so far as depending on the cycle
+// about to plan.
+func (t *MainLoopActionTrigger) claimWaiters() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.inflight = append(t.inflight, t.waiting...)
+	t.waiting = nil
+}
+
+// completeWaiters releases the clients of the cycle whose rewrite phase ended.
+func (t *MainLoopActionTrigger) completeWaiters() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	for _, w := range t.inflight {
+		close(w.done)
+	}
+
+	t.inflight = nil
+}
+
+// requeueWaiters hands the claimed clients back to the next cycle, for a cycle
+// that did not reach the rewrite phase.
+func (t *MainLoopActionTrigger) requeueWaiters() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.waiting = append(t.inflight, t.waiting...)
+	t.inflight = nil
+}
+
+// runForcedMode processes forced rewrites and returns the exit status: 0 when
+// the rewrite ran, 1 when planning or a rewrite step failed (configd.py exits 1
+// on a failed forced run, and callers such as zmtlsctl test the status). The
+// caller exits after.
+func runForcedMode(ctx context.Context, args *Args, rt *runtime) int {
 	appState, mainCfg := rt.state, rt.cfg
 
 	logger.InfoContext(ctx, "Processing forced rewrites as standalone process")
@@ -75,19 +151,30 @@ func runForcedMode(ctx context.Context, args *Args, rt *runtime) {
 
 	buildServiceDependencies(ctx, rt.sm, appState)
 
-	pl, err := rt.cm.Plan(ctx)
+	return executeForced(ctx, rt.cm, mainCfg.Progname)
+}
+
+// executeForced plans and executes the forced rewrites of a loaded
+// configuration. It returns the process exit status: 1 when the plan or a
+// rewrite failed, so scripts and the REWRITE standalone fallback see it.
+func executeForced(ctx context.Context, configManager *configmgr.ConfigManager, progname string) int {
+	pl, err := configManager.Plan(ctx)
 	if err != nil {
 		logger.ErrorContext(ctx, "Failed to plan forced config rewrites", "error", err)
 
-		return
+		return 1
 	}
 
-	if err := rt.cm.Execute(ctx, pl); err != nil {
+	if err := configManager.Execute(ctx, pl); err != nil {
 		logger.ErrorContext(ctx, "Error during forced config rewrites", "error", err)
+
+		return 1
 	}
 
 	// No restarts on forced rewrites in Jython, so the plan's restarts are not applied here.
-	logger.InfoContext(ctx, "Completed forced run", "program", mainCfg.Progname)
+	logger.InfoContext(ctx, "Completed forced run", "program", progname)
+
+	return 0
 }
 
 // isIdlePoll returns true when the loop should skip a config reload due to inactivity.
@@ -201,13 +288,33 @@ func maybeStartListener(
 	return srv
 }
 
-// notifyReady sends sd_notify READY=1 after each loop completion.
-// On first loop this transitions from "activating" to "active"; subsequent calls are no-ops per spec.
-func notifyReady(ctx context.Context, notifier *sdnotify.Notifier, loopCount int) {
+// notifyReady sends sd_notify READY=1. The first one moves the unit from
+// "activating" to "active"; later ones acknowledge a reload (the RELOADING=1
+// sent by the signal handler needs a READY=1 to end the reload).
+func notifyReady(ctx context.Context, notifier *sdnotify.Notifier, first bool) {
 	if err := notifier.Ready(); err != nil {
 		logger.ErrorContext(ctx, "Failed to send sd_notify READY", "error", err)
-	} else if notifier.Enabled() && loopCount == 0 {
-		logger.InfoContext(ctx, "Sent sd_notify READY=1 to systemd")
+	} else if notifier.Enabled() {
+		if first {
+			logger.InfoContext(ctx, "Sent sd_notify READY=1 to systemd")
+		} else {
+			logger.DebugContext(ctx, "Sent sd_notify READY=1 to systemd after reload")
+		}
+	}
+}
+
+// signalReady sends READY=1 once the daemon is serving (the listener only
+// starts after the first completed config pass, as in configd.py) and again
+// whenever a reload was handled, whether it succeeded or not: systemd stays in
+// "reloading" until it sees READY=1.
+func signalReady(ctx context.Context, deps *daemonLoopDeps, st *loopIterState) {
+	switch {
+	case !st.ready && st.server != nil:
+		st.ready = true
+
+		notifyReady(ctx, deps.notifier, true)
+	case st.ready && st.reloadSignaled:
+		notifyReady(ctx, deps.notifier, false)
 	}
 }
 
@@ -218,13 +325,30 @@ type phaseTimings struct {
 	rewrites  time.Duration
 }
 
+// phaseResult is how the dependency, plan and execute phases of a cycle ended.
+type phaseResult int
+
+const (
+	// phasesCompleted: the plan was executed without error.
+	phasesCompleted phaseResult = iota
+	// phasesPlanFailed: planning failed; nothing ran and the requests stay queued.
+	phasesPlanFailed
+	// phasesRewriteFailed: the plan ran but a rewrite step failed. The failed
+	// actions and the plan's restarts are carried to the next cycle.
+	phasesRewriteFailed
+)
+
 // runConfigPhases executes the per-iteration dependency, plan and execute phases.
-// Returns phase timings, the plan of the cycle and skipIter=true when the caller should
-// continue the outer loop (after a planning failure and the 60s back-off sleep).
-func runConfigPhases(ctx context.Context, deps *daemonLoopDeps) (timings phaseTimings, pl *plan.Plan, skipIter bool) {
-	clock, mainCfg, appState := deps.env.Clock, deps.cfg, deps.appState
+// It returns the phase timings, the plan of the cycle and how the phases ended;
+// the caller backs off after phasesPlanFailed and phasesRewriteFailed. REWRITE
+// clients are released once the rewrite phase is over, as lAction.notifyAll()
+// does in configd.py, even when it failed.
+func runConfigPhases(
+	ctx context.Context, deps *daemonLoopDeps,
+) (timings phaseTimings, pl *plan.Plan, result phaseResult) {
+	mainCfg, appState := deps.cfg, deps.appState
 	configManager, serviceManager := deps.configManager, deps.serviceManager
-	wd, reloadChan := deps.wd, deps.reloadChan
+	wd := deps.wd
 
 	phaseStart := time.Now()
 
@@ -238,12 +362,18 @@ func runConfigPhases(ctx context.Context, deps *daemonLoopDeps) (timings phaseTi
 
 	phaseStart = time.Now()
 
+	// Plan takes the requested sections: the clients registered until now wait
+	// for this cycle.
+	deps.trigger.claimWaiters()
+
 	pl, err := configManager.Plan(ctx)
 	if err != nil {
 		logger.ErrorContext(ctx, "Configuration inconsistency detected (sleeping 60s)", "error", err)
-		SleepWithContext(ctx, clock, 60*time.Second, reloadChan)
+		// The sections were queued again: legacy leaves the clients waiting
+		// until the request is processed or they time out.
+		deps.trigger.requeueWaiters()
 
-		return timings, nil, true
+		return timings, nil, phasesPlanFailed
 	}
 
 	timings.plan = time.Since(phaseStart)
@@ -264,9 +394,15 @@ func runConfigPhases(ctx context.Context, deps *daemonLoopDeps) (timings phaseTi
 
 	phaseStart = time.Now()
 
+	result = phasesCompleted
+
 	if err := configManager.Execute(ctx, pl); err != nil {
 		logger.ErrorContext(ctx, "Error during config rewrites", "error", err)
+
+		result = phasesRewriteFailed
 	}
+
+	deps.trigger.completeWaiters()
 
 	timings.rewrites = time.Since(phaseStart)
 
@@ -274,7 +410,7 @@ func runConfigPhases(ctx context.Context, deps *daemonLoopDeps) (timings phaseTi
 		"duration_seconds", timings.rewrites.Seconds(),
 		"operation", "execute_plan")
 
-	return timings, pl, false
+	return timings, pl, result
 }
 
 // daemonLoopDeps bundles dependencies of the daemon main loop.
@@ -304,8 +440,11 @@ type loopIterState struct {
 	reloadSignaled bool
 	server         *network.ThreadedStreamServer
 	ldapWatch      *ldapWatch // nil unless zmconfigd_ldap_change_trigger started it
-	hooksChecked   bool       // the service hooks were validated against the parsed config
-	exitCode       int        // the status the daemon exits with
+	// ready records that READY=1 was sent: the listener is up, which only
+	// happens after the first completed config pass.
+	ready        bool
+	hooksChecked bool // the service hooks were validated against the parsed config
+	exitCode     int  // the status the daemon exits with
 }
 
 // iterOutcome signals how runLoopIteration wants the caller to proceed.
@@ -383,7 +522,7 @@ func runLoopIteration(ctx context.Context, deps *daemonLoopDeps, st *loopIterSta
 	loadDur, parseDur, err := runLoadAndParse(ctx, deps.configManager, deps.cfg)
 	if err != nil {
 		exportMetrics(ctx, deps)
-		SleepWithContext(ctx, deps.env.Clock, 60*time.Second, deps.reloadChan)
+		backOff(ctx, deps, st)
 
 		return iterContinue
 	}
@@ -392,20 +531,24 @@ func runLoopIteration(ctx context.Context, deps *daemonLoopDeps, st *loopIterSta
 		return iterExit
 	}
 
-	st.server = maybeStartListener(ctx, deps.appState, deps.args, deps.trigger, st.server)
 	st.ldapWatch = syncLDAPWatch(ctx, deps, st.ldapWatch)
 
-	// Signal readiness as soon as the IPC listener is serving on 7171. The first
-	// config rewrite is steady-state reconciliation (re-run every interval), not a
-	// startup precondition, so gating READY=1 on it needlessly delays "active" by
-	// the rewrite duration and creates a startup race for external orchestrators.
-	if st.server != nil && st.loopCount == 0 {
-		notifyReady(ctx, deps.notifier, st.loopCount)
-	}
+	return runCycle(ctx, deps, st, &loopPhaseDurations{t1: t1, load: loadDur, parse: parseDur})
+}
 
-	timings, pl, skipIter := runConfigPhases(ctx, deps)
-	if skipIter {
+// runCycle runs the plan, rewrite and restart phases of an iteration whose
+// configuration was loaded and parsed, then starts the listener and finalizes.
+// dur carries the timings measured so far; the later phases are added to it.
+func runCycle(ctx context.Context, deps *daemonLoopDeps, st *loopIterState, dur *loopPhaseDurations) iterOutcome {
+	timings, pl, result := runConfigPhases(ctx, deps)
+	if result != phasesCompleted {
 		exportMetrics(ctx, deps)
+
+		if result == phasesRewriteFailed && deps.args.Once {
+			return iterExit
+		}
+
+		backOff(ctx, deps, st)
 
 		return iterContinue
 	}
@@ -419,14 +562,29 @@ func runLoopIteration(ctx context.Context, deps *daemonLoopDeps, st *loopIterSta
 
 	restartsDur := runRestartsPhase(ctx, deps.configManager, pl)
 
-	return finalizeIteration(ctx, deps, st, &loopPhaseDurations{
-		t1:       t1,
-		load:     loadDur,
-		parse:    parseDur,
-		config:   timings,
-		restarts: restartsDur,
-		plan:     pl,
-	})
+	// As in configd.py, the listener starts only after the first rewrite and
+	// restart pass, so a start script waiting on the service (READY=1, STATUS)
+	// does not return before the configuration files are written.
+	st.server = maybeStartListener(ctx, deps.appState, deps.args, deps.trigger, st.server)
+
+	dur.config = timings
+	dur.restarts = restartsDur
+	dur.plan = pl
+
+	return finalizeIteration(ctx, deps, st, dur)
+}
+
+// backOff ends a cycle that failed to load, plan or rewrite: configd.py
+// sleeps 60s and tries again. A failed rewrite phase skips the restarts of the
+// cycle (the plan's restarts are carried to the retry) and the failed cycle
+// does not start the listener. A reload that was being handled is
+// acknowledged to systemd before the sleep.
+func backOff(ctx context.Context, deps *daemonLoopDeps, st *loopIterState) {
+	signalReady(ctx, deps, st)
+
+	if SleepWithContext(ctx, deps.env.Clock, 60*time.Second, deps.reloadChan) {
+		st.reloadSignaled = true
+	}
 }
 
 // checkHooks validates the service hooks against the parsed zmconfigd.cf once.
@@ -529,8 +687,10 @@ func finalizeIteration(
 
 	lt := time.Since(dur.t1)
 
-	// READY=1 is sent earlier (post-listener, in runLoopIteration). The first
-	// rewrite pass is steady-state reconciliation, not a readiness gate.
+	// The first completed pass makes the daemon ready; a handled reload is
+	// acknowledged (READY=1 again) before the flag is cleared.
+	signalReady(ctx, deps, st)
+
 	st.reloadSignaled = false
 	st.loopCount++
 
@@ -589,9 +749,8 @@ func RunMainLoop(ctx context.Context, rt *runtime, args *Args, notifier *sdnotif
 	}
 
 	if args.HasForcedConfigs() {
-		runForcedMode(ctx, args, rt)
 		// Watchdog was never started in forced config mode, deferred wd.Stop() will not run
-		return 0
+		return runForcedMode(ctx, args, rt)
 	}
 
 	return runDaemonLoop(ctx, &daemonLoopDeps{

@@ -57,6 +57,7 @@ func newFakeController(t *testing.T, opts ...Option) (*Controller, *systest.Fake
 	f := systest.New()
 	ctl := NewController(withMode(f.System(), false),
 		append([]Option{WithConfigLoader(emptyConfig)}, opts...)...)
+	stubReadiness(ctl)
 
 	return ctl, f
 }
@@ -76,7 +77,19 @@ func newRealController(t *testing.T, opts ...Option) *Controller {
 		WithConfigLoader(emptyConfig),
 	}
 
-	return NewController(env, append(defaults, opts...)...)
+	ctl := NewController(env, append(defaults, opts...)...)
+	stubReadiness(ctl)
+
+	return ctl
+}
+
+// stubReadiness replaces the post-start readiness waits (mailbox port up to 3
+// minutes, configd STATUS) with instant successes: the launcher tests are not
+// about them, and the readiness tests call waitForMailboxPort / waitForConfigd
+// directly.
+func stubReadiness(ctl *Controller) {
+	ctl.mailboxReady = func(context.Context, map[string]string) error { return nil }
+	ctl.configdReady = func(context.Context) error { return nil }
 }
 
 // pumpClock advances clk by step in a loop until the returned stop function is

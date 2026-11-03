@@ -86,6 +86,10 @@ type Variable struct {
 	// CustomResolver is an optional function to resolve the value.
 	// Resolvers are methods on *Generator, so the generator is available via the receiver.
 	CustomResolver func(context.Context) (any, error)
+
+	// ConfigText, when set, is the literal text templates get for this
+	// variable (legacy "-c name=value" override); it bypasses Value formatting.
+	ConfigText *string
 }
 
 // DomainAttr represents domain-specific attributes for virtual host configuration
@@ -193,6 +197,19 @@ type Generator struct {
 
 	// Hostname is the hostname to generate configuration for
 	Hostname string
+
+	// ConfPrefix is the prefix of every generated file (legacy -p, default
+	// "nginx.conf"). The core config is <ConfDir>/<ConfPrefix>, the rest
+	// <IncludesDir>/<ConfPrefix>.<name>.
+	ConfPrefix string
+
+	// TemplatePrefix is the prefix of the template files (legacy -P, default
+	// ConfPrefix).
+	TemplatePrefix string
+
+	// ForceDNSResolution makes generation fail when the virtual hostname of a
+	// domain does not resolve (legacy -f); otherwise nothing is checked.
+	ForceDNSResolution bool
 }
 
 // UpstreamServer represents an upstream server in an nginx upstream block
