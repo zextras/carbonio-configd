@@ -5,6 +5,7 @@
 package cliutil
 
 import (
+	"context"
 	"fmt"
 
 	carboldap "github.com/zextras/carbonio-configd/internal/ldap"
@@ -26,7 +27,10 @@ const (
 // falling back to ldap_url when the master URL is unset. Both keys may carry
 // space-separated multi-URL values; ParseURLs is used at both layers so
 // connect-time failover works regardless of which key holds the list
-// (CO-3565). Shared by the proxy and tls commands.
+// (CO-3565). Transport security follows the legacy Java rule (ResolveTLS):
+// StartTLS only when ldap_starttls_supported/required and
+// zimbra_require_interprocess_security say so, certificate verification per
+// ssl_allow_untrusted_certs. Shared by the proxy and tls commands.
 func OpenWriteLDAPClient(lc map[string]string) (*carboldap.Client, error) {
 	urls := carboldap.ParseURLs(lc[lcKeyLDAPMasterURL])
 	if len(urls) == 0 {
@@ -37,11 +41,14 @@ func OpenWriteLDAPClient(lc map[string]string) (*carboldap.Client, error) {
 		return nil, fmt.Errorf("LDAP not configured (%s and %s are both empty)", lcKeyLDAPMasterURL, lcKeyLDAPURL)
 	}
 
+	tlsSetup := carboldap.ResolveTLS(context.Background(), lc, nil)
+
 	client, err := carboldap.NewClient(&carboldap.ClientConfig{
-		URLs:     urls,
-		BindDN:   lc[lcKeyZimbraLDAPUserDN],
-		Password: lc[lcKeyZimbraLDAPPassword],
-		StartTLS: true,
+		URLs:      urls,
+		BindDN:    lc[lcKeyZimbraLDAPUserDN],
+		Password:  lc[lcKeyZimbraLDAPPassword],
+		StartTLS:  tlsSetup.StartTLS,
+		TLSConfig: tlsSetup.Config,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("connecting to LDAP: %w", err)

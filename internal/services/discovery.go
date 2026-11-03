@@ -6,8 +6,6 @@ package services
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"fmt"
 	"io/fs"
 	"os"
@@ -41,12 +39,7 @@ func (c *Controller) DiscoverEnabledServices(ctx context.Context) ([]string, err
 		return nil, fmt.Errorf("zimbra_server_hostname not set in localconfig")
 	}
 
-	startTLS := lc["ldap_starttls_supported"] != "0" && lc["ldap_starttls_supported"] != ""
-
-	var tlsConfig *tls.Config
-	if startTLS {
-		tlsConfig = c.carbonioCATLSConfig()
-	}
+	tlsSetup := carboldap.ResolveTLS(ctx, lc, c.env.FS)
 
 	// ldap_master_url may be space-separated multi-URL (Carbonio HA) — let
 	// ParseURLs split it so we get connect-time failover (CO-3565).
@@ -61,8 +54,8 @@ func (c *Controller) DiscoverEnabledServices(ctx context.Context) ([]string, err
 		URLs:      masterURLs,
 		BindDN:    lc["zimbra_ldap_userdn"],
 		Password:  lc["zimbra_ldap_password"],
-		StartTLS:  startTLS,
-		TLSConfig: tlsConfig,
+		StartTLS:  tlsSetup.StartTLS,
+		TLSConfig: tlsSetup.Config,
 		FS:        c.env.FS,
 	})
 	if err != nil {
@@ -163,25 +156,6 @@ func (c *Controller) writeCache(ctx context.Context, services []string) {
 	// #nosec G306 - cache file needs to be readable by zextras group
 	if err := writeFile(c.env.FS, c.p.cacheFile, []byte(content), 0o600); err != nil {
 		logger.WarnContext(ctx, "Failed to write service cache", "error", err)
-	}
-}
-
-// carbonioCATLSConfig returns a TLS config that trusts Carbonio's self-signed CA.
-// Falls back to system roots if the CA cert cannot be loaded.
-func (c *Controller) carbonioCATLSConfig() *tls.Config {
-	caPath := c.p.conf + "/ca/ca.pem"
-
-	caPEM, err := c.env.FS.ReadFile(caPath)
-	if err != nil {
-		return nil // fall back to system roots
-	}
-
-	pool := x509.NewCertPool()
-	pool.AppendCertsFromPEM(caPEM)
-
-	return &tls.Config{
-		RootCAs:    pool,
-		MinVersion: tls.VersionTLS12,
 	}
 }
 

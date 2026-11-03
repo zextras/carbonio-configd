@@ -57,9 +57,6 @@ type Config struct {
 	LdapIsMaster     bool
 	LdapRootPassword string
 	LdapMasterURL    string
-	// LdapStartTLSRequired indicates whether LDAP connections must use StartTLS.
-	// Defaults to true for security; set to false only for development/testing.
-	LdapStartTLSRequired bool
 
 	// LdapChangeTrigger is zmconfigd_ldap_change_trigger: when true a watcher
 	// polls the LDAP entries a cycle reads and wakes the main loop as soon as
@@ -216,10 +213,6 @@ func (c *Config) SetVals(localConfig *LocalConfig) {
 	localBoolTrue(data, "ldap_is_master", &c.LdapIsMaster)
 	localStr(data, "ldap_root_password", &c.LdapRootPassword)
 	localStr(data, "ldap_master_url", &c.LdapMasterURL)
-
-	// Default to true for security. Only disable if explicitly set to FALSE.
-	c.LdapStartTLSRequired = true
-	localBoolNotFalse(data, "ldap_starttls_required", &c.LdapStartTLSRequired)
 
 	localInt(data, "zmconfigd_log_level", &c.LogLevel)
 	localInt(data, "zmconfigd_interval", &c.Interval)
