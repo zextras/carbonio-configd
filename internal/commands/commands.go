@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"iter"
 	"maps"
-	"os"
 	"slices"
 	"strings"
 	"time"
@@ -26,10 +25,6 @@ import (
 	"github.com/zextras/carbonio-configd/internal/proxy"
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
-
-// defaultZextrasHome is the fallback installation root when neither
-// ZEXTRAS_HOME nor CARBONIO_BASE_DIR is set.
-const defaultZextrasHome = config.ZextrasBase
 
 // Configuration key constants
 const (
@@ -305,10 +300,10 @@ func (e *CommandExecutor) GlobalAttrs(ctx context.Context) (map[string]string, e
 }
 
 func getlocal(ctx context.Context, args ...string) (string, error) {
-	logger.DebugContext(ctx, "Loading localconfig (XML + defaults + interpolation)")
+	logger.DebugContext(ctx, "Loading effective localconfig (defaults + XML + environment, interpolated)")
 
 	// Load configuration with defaults and ${variable} interpolation
-	localCfg, err := localconfig.LoadResolvedConfig()
+	localCfg, err := localconfig.LoadEffective()
 	if err != nil {
 		return "", fmt.Errorf("failed to load localconfig: %w", err)
 	}
@@ -543,10 +538,7 @@ func proxygen(ctx context.Context, env sys.System, args []string) (string, error
 	logger.DebugContext(ctx, "Running Go proxy configuration generator",
 		"hostname", hostname)
 
-	baseDir := os.Getenv("ZEXTRAS_HOME")
-	if baseDir == "" {
-		baseDir = defaultZextrasHome
-	}
+	baseDir := config.BaseDir()
 
 	// Create base configuration
 	cfg := &config.Config{
@@ -622,7 +614,7 @@ func makePostconfExec(x sys.Exec, postconfSpec string) func(ctx context.Context,
 	}
 }
 
-// Registry holds command executables and command definitions for a specific ZEXTRAS_HOME.
+// Registry holds command executables and command definitions for a specific install root.
 // It replaces the former package-level globals (Exe, Commands) to enable
 // per-instance initialization and path overrides.
 type Registry struct {
@@ -636,7 +628,7 @@ type Registry struct {
 
 // NewRegistry creates a new Registry with executable paths and commands initialized
 // based on the provided zextrasHome directory. If zextrasHome is empty, defaults to
-// "/opt/zextras". Every external command runs through env.Exec and proxygen writes
+// config.BaseDir(). Every external command runs through env.Exec and proxygen writes
 // through env. The registry is safe for concurrent use after construction.
 func NewRegistry(zextrasHome string, env sys.System) *Registry {
 	r := &Registry{
@@ -646,7 +638,7 @@ func NewRegistry(zextrasHome string, env sys.System) *Registry {
 
 	baseDir := zextrasHome
 	if baseDir == "" {
-		baseDir = defaultZextrasHome
+		baseDir = config.BaseDir()
 	}
 
 	binDir := baseDir + "/bin"

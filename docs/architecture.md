@@ -18,9 +18,11 @@ Source: `cmd/configd/cli.go` (`DaemonCmd.Run`), `cmd/configd/configd.go`, `cmd/c
    variable is unset the notifier is a no-op; no code path fails because of its absence.
 4. **Profiling/tracing setup** — CPU, memory, and trace profiles started if flags are present
    (profiling build only).
-5. **Config init** — `config.NewConfig()` reads `localconfig.xml`, merges defaults, resolves
-   `${variable}` references, and populates `state.State`. An LDAP client is constructed but
-   not yet connected.
+5. **Config init** — `config.NewConfig()` builds the static parameters (base directory,
+   `/etc/hostname`, paths) without reading localconfig; `newRuntime` then lets the environment
+   overlay name the server (`CONFIGD_LC_zimbra_server_hostname`). Localconfig itself is read each
+   cycle by `localconfig.LoadEffective` (see [localconfig.md](localconfig.md#effective-localconfig-layers)).
+   An LDAP client is constructed but not yet connected.
 6. **Main loop** — `RunMainLoop` is called. It does not return until the process is asked to
    shut down.
 
@@ -124,7 +126,7 @@ Four goroutines run concurrently, one per config source:
 
 | Goroutine name | Function | What it loads |
 |---|---|---|
-| `lc` | `LoadLocalConfig` | `localconfig.xml` via the Go native reader |
+| `lc` | `LoadLocalConfig` | the effective localconfig (`localconfig.LoadEffective`): defaults, `localconfig.xml` (optional) and the `CONFIGD_LC_<key>` environment, via the Go native reader |
 | `gc` | `LoadGlobalConfig` | Global config attributes via native LDAP client |
 | `mc` | `LoadMiscConfig` | Miscellaneous service states (SERVICE_* keys) |
 | `sc` | `LoadServerConfig` | Per-server attributes via native LDAP client |

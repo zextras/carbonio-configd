@@ -40,6 +40,42 @@ To add or change a default, edit the `lcDefaults` map in
 `internal/localconfig/lcdefaults.go` to match the corresponding `KnownKey` entry in
 `LC.java` exactly.
 
+## Effective localconfig layers
+
+Source: `internal/localconfig/effective.go` (`LoadEffective`, `LoadEffectiveFrom`). Every
+consumer (the cycle's loaders, the service controller, `configd rewrite/proxy/tls/status/init`,
+`configd ldap`, the `getlocal` command) reads localconfig through this one function. The layers,
+lowest precedence first:
+
+1. the `LC.java` defaults (`lcDefaults`);
+2. `localconfig.xml` (`${CARBONIO_BASE_DIR:-/opt/zextras}/conf/localconfig.xml`). A **missing file
+   is an empty layer**, so a pod needs none; an unreadable or malformed file is an error;
+3. the environment: `CONFIGD_LC_<key>=<value>` sets the key `<key>`. Values are used verbatim (not
+   trimmed), and an empty value counts as set;
+4. per-command flag overrides (for example `configd ldap --url/--bind-dn/--password-file`).
+
+`${key}` references are then expanded **once** over the merged map, so a value of any layer may
+refer to a key of any other layer. With no `CONFIGD_LC_*` variable set and a `localconfig.xml`
+present, the result is exactly the former `defaults + xml + interpolation`.
+
+The installation root is `CARBONIO_BASE_DIR` (default `/opt/zextras`); it locates
+`localconfig.xml`, `conf/zmconfigd.cf`, `conf/attrs`, the templates and the service scripts.
+`ZEXTRAS_HOME` is no longer read.
+
+Environment-set keys are read-only for the CLI. `configd localconfig -e`/`-u` refuse such a key
+(`Error: key <key> is set by environment CONFIGD_LC_<key>`) and save nothing, and the read modes
+print the effective value, environment included.
+
+Keys a pod without `localconfig.xml` sets (the Kubernetes deployment):
+
+| Variable | Used for |
+|---|---|
+| `CONFIGD_LC_ldap_url` | LDAP URL(s) of the cycle's data client and of `configd ldap` (space-separated for failover) |
+| `CONFIGD_LC_ldap_master_url` | Write URL(s); falls back to `ldap_url` |
+| `CONFIGD_LC_zimbra_ldap_userdn` / `CONFIGD_LC_zimbra_ldap_password` | Bind DN and password |
+| `CONFIGD_LC_ldap_starttls_supported` | `0` for a plain `ldap://` directory (the default) |
+| `CONFIGD_LC_zimbra_server_hostname` | The server entry this node renders (otherwise `/etc/hostname`) |
+
 ## configd-only keys (not in the defaults registry)
 
 `lcDefaults` mirrors `LC.java`, so keys that exist only in configd are read straight from
@@ -79,7 +115,8 @@ Source: `internal/cli/localconfig` (flag mapping in `cmd/configd/localconfig.go`
   default containing `${...}` therefore always counts as changed. A listed key with no value
   warns `null valued key '<key>'`; `-d` warns `not a known key '<key>'` and plain print warns
   `null valued key '<key>'`.
-- `-e`/`-u` validate every argument first and write once (`SetKeys`/`RemoveKeys`): a
+- `-e`/`-u` refuse a key set by `CONFIGD_LC_<key>` (`key <key> is set by environment
+  CONFIGD_LC_<key>`), and reads show the effective value. Beyond that, `-e`/`-u` validate every argument first and write once (`SetKeys`/`RemoveKeys`): a
   protected key without `-f`, a malformed `key=value` or an unset key leaves the file untouched.
 - Errors go to stderr as `Error: <message>` (legacy `Logging.error`), exit status 1; `-q`
   silences the message, not the status. Messages: `can not edit key <key>`,
@@ -116,8 +153,9 @@ Resolution rules:
 - Pattern: `\$\{([^}]+)\}` — matches any `${name}` token.
 - Up to **10 passes** are performed to resolve transitive references
   (e.g. `${zimbra_home}` inside `${zimbra_log_directory}` inside another key).
-- XML values are merged first; defaults fill in only missing keys. This means an XML value
-  always takes precedence over the hardcoded default for the same key.
+- The merged map is expanded once, after every layer (defaults, `localconfig.xml`, the
+  `CONFIGD_LC_*` environment, flag overrides) is in; a key set in a higher layer always takes
+  precedence over a lower one (see [Effective localconfig layers](#effective-localconfig-layers)).
 - Self-references are detected per-pass and left unresolved to avoid infinite loops.
 - After 10 passes, any remaining `${...}` tokens are left as-is in the output.
 

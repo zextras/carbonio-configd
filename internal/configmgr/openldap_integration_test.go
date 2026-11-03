@@ -176,18 +176,18 @@ func newOpenLDAPHarness(t *testing.T) *olHarness {
 	registry.RegisterLDAPCommands(commands.NewCommandExecutor(client))
 
 	h.cm = &ConfigManager{
-		env:                     env,
-		mainConfig:              mainCfg,
-		State:                   st,
-		LdapClient:              ldapMgr,
-		NativeLdapClient:        client,
-		ConfigLdapClient:        configClient,
-		CommandRegistry:         registry,
-		ServiceMgr:              &testutil.MockServiceManager{},
-		Cache:                   cache.New(ctx, false),
-		mtaExecutor:             mtaops.NewExecutor(olBaseDir, ldapMgr, env),
-		mtaResolver:             mtaops.NewResolver(olBaseDir, env),
-		loadResolvedLocalConfig: h.loadLocal,
+		env:              env,
+		mainConfig:       mainCfg,
+		State:            st,
+		LdapClient:       ldapMgr,
+		NativeLdapClient: client,
+		ConfigLdapClient: configClient,
+		CommandRegistry:  registry,
+		ServiceMgr:       &testutil.MockServiceManager{},
+		Cache:            cache.New(ctx, false),
+		mtaExecutor:      mtaops.NewExecutor(olBaseDir, ldapMgr, env),
+		mtaResolver:      mtaops.NewResolver(olBaseDir, env),
+		loadLocalConfig:  h.loadLocal,
 	}
 	h.cm.Transformer = transformer.NewTransformer(h.cm)
 	h.cm.policy = restart.New(h.cm.ServiceMgr, env.Clock)

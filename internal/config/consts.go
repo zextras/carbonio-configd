@@ -4,10 +4,28 @@
 
 package config
 
-import "strings"
+import (
+	"os"
+	"strings"
+)
 
 // ZextrasBase is the default root directory for Carbonio installation.
 const ZextrasBase = "/opt/zextras"
+
+// BaseDirEnv is the environment variable that relocates the installation root.
+// It is the only base-directory override: every component that resolves a path
+// under the install root derives it from BaseDir.
+const BaseDirEnv = "CARBONIO_BASE_DIR"
+
+// BaseDir returns the installation root: $CARBONIO_BASE_DIR when set, otherwise
+// ZextrasBase.
+func BaseDir() string {
+	if v := os.Getenv(BaseDirEnv); v != "" {
+		return v
+	}
+
+	return ZextrasBase
+}
 
 // ZextrasUser is the default system user and group for Carbonio processes.
 const ZextrasUser = "zextras"

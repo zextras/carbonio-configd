@@ -104,7 +104,7 @@ type ClientConfig struct {
 	DialTimeout   time.Duration // Per-attempt dial timeout (default: 10s)
 	OpTimeout     time.Duration // Per-request timeout for search/modify (default: 30s)
 	TLSConfig     *tls.Config   // TLS configuration (optional)
-	StartTLS      bool          // Upgrade ldap:// connections with StartTLS (default: true)
+	StartTLS      bool          // Upgrade ldap:// connections with StartTLS (zero value: false, plaintext)
 	FS            sys.FS        // Filesystem the attrs schema is read from (default: sys.RealFS)
 }
 
@@ -449,6 +449,10 @@ func isLDAPErrorRetryable(err error) bool {
 		case ldap.LDAPResultObjectClassViolation:
 			// Schema violation - don't retry
 			return false
+		case ldap.LDAPResultAttributeOrValueExists, ldap.LDAPResultNoSuchAttribute:
+			// The modification contradicts the entry's state; repeating the
+			// request cannot change that (ModifyValues treats both as converged)
+			return false
 		case ldap.LDAPResultServerDown:
 			// Server down - retry
 			return true
@@ -651,7 +655,7 @@ func (c *Client) GetServerConfig(hostname string) (map[string]string, error) {
 
 	dir := c.attrsDir
 	if dir == "" {
-		dir = defaultAttrsDir
+		dir = defaultAttrsDir()
 	}
 
 	inherited, err := c.attrsCache.serverInheritedAttrs(c.fs, dir)

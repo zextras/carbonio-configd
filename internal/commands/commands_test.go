@@ -264,7 +264,7 @@ func TestDummyFunctions(t *testing.T) {
 			name:     "getlocal",
 			fn:       getlocal,
 			args:     []string{},
-			wantErr:  true, // Will fail since zmlocalconfig doesn't exist in test env
+			wantErr:  false, // a missing localconfig.xml is an empty layer: the defaults load
 			contains: "",
 		},
 		{

@@ -3,7 +3,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Package localconfig provides direct access to Carbonio local configuration
-// by parsing /opt/zextras/conf/localconfig.xml, eliminating the need for zmlocalconfig subprocess.
+// by parsing localconfig.xml (and the CONFIGD_LC_<key> environment overlay, see
+// LoadEffective), eliminating the need for zmlocalconfig subprocess.
 package localconfig
 
 import (
@@ -16,8 +17,11 @@ import (
 	"github.com/zextras/carbonio-configd/internal/intern"
 )
 
-// DefaultConfigPath is the standard location of localconfig.xml in Carbonio.
-const DefaultConfigPath = config.ZextrasBase + "/conf/localconfig.xml"
+// DefaultConfigPath is the standard location of localconfig.xml in Carbonio,
+// under the install root (config.BaseDir).
+func DefaultConfigPath() string {
+	return config.BaseDir() + "/conf/localconfig.xml"
+}
 
 // LocalConfig represents the root of localconfig.xml.
 type LocalConfig struct {
@@ -29,12 +33,6 @@ type LocalConfig struct {
 type Key struct {
 	Name  string `xml:"name,attr"`
 	Value string `xml:"value"`
-}
-
-// LoadLocalConfig reads and parses localconfig.xml from the default location.
-// Returns a map of key=value pairs matching zmlocalconfig -s output format.
-func LoadLocalConfig() (map[string]string, error) {
-	return LoadLocalConfigFromFile(DefaultConfigPath)
 }
 
 // LoadLocalConfigFromFile reads and parses localconfig.xml from a custom path.
@@ -61,26 +59,6 @@ func LoadLocalConfigFromFile(path string) (map[string]string, error) {
 	}
 
 	return result, nil
-}
-
-// LoadResolvedConfig loads localconfig.xml, merges defaults, and resolves
-// ${variable} references.
-func LoadResolvedConfig() (map[string]string, error) {
-	return LoadResolvedConfigFromFile(DefaultConfigPath)
-}
-
-// LoadResolvedConfigFromFile loads localconfig from a custom path, merges
-// defaults, and resolves ${variable} references.
-func LoadResolvedConfigFromFile(path string) (map[string]string, error) {
-	resolved, err := LoadLocalConfigFromFile(path)
-	if err != nil {
-		return nil, err
-	}
-
-	MergeDefaults(resolved)
-	Interpolate(resolved)
-
-	return resolved, nil
 }
 
 // FormatAsKeyValue converts a map to key=value format matching zmlocalconfig -s output.

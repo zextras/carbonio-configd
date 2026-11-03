@@ -31,8 +31,8 @@ func TestExecuteLocalConfigCommand_IncludesDefaults(t *testing.T) {
 	}
 
 	cm := newTestConfigManager(t)
-	cm.loadResolvedLocalConfig = func() (map[string]string, error) {
-		return localconfig.LoadResolvedConfigFromFile(path)
+	cm.loadLocalConfig = func() (map[string]string, error) {
+		return localconfig.LoadEffectiveFrom(path, nil)
 	}
 
 	out, err := cm.executeLocalConfigCommand(context.Background())

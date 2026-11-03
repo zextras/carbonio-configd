@@ -10,7 +10,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
 
-// TestNewRegistry_DifferentPaths tests that two registries with different ZEXTRAS_HOME
+// TestNewRegistry_DifferentPaths tests that two registries with different base directories
 // paths have different executable paths.
 func TestNewRegistry_DifferentPaths(t *testing.T) {
 	registry1 := NewRegistry("/opt/zextras", systest.New().System())
@@ -18,7 +18,7 @@ func TestNewRegistry_DifferentPaths(t *testing.T) {
 
 	// Verify that the registries have different paths
 	if registry1.Exe["AMAVIS"] == registry2.Exe["AMAVIS"] {
-		t.Errorf("Expected different AMAVIS paths for different ZEXTRAS_HOME, got same: %s", registry1.Exe["AMAVIS"])
+		t.Errorf("Expected different AMAVIS paths for different base directories, got same: %s", registry1.Exe["AMAVIS"])
 	}
 
 	// Verify the paths are correct

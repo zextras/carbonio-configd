@@ -18,6 +18,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/cli/rewrite"
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/ldap"
+	"github.com/zextras/carbonio-configd/internal/localconfig"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/snapshot"
 	"github.com/zextras/carbonio-configd/internal/state"
@@ -39,6 +40,13 @@ func newRuntime(ctx context.Context) (*config.Config, *state.State, *ldap.Ldap, 
 	mainCfg, err := config.NewConfig()
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("initialize config: %w", err)
+	}
+
+	// The server hostname is /etc/hostname unless the environment overlay
+	// (CONFIGD_LC_zimbra_server_hostname) names it, as in a pod whose hostname
+	// is not the LDAP server entry's.
+	if host, ok := localconfig.EnvOverride("zimbra_server_hostname"); ok && host != "" {
+		mainCfg.Hostname = host
 	}
 
 	appState := state.NewState()

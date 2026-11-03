@@ -26,7 +26,7 @@ func (c *Controller) MailboxAdvancedStatusHook(ctx context.Context, _ *ServiceMa
 		return nil
 	}
 
-	cfg, err := c.loadRawConfig()
+	cfg, err := c.loadConfig()
 	if err != nil {
 		logger.DebugContext(ctx, "Advanced status hook: localconfig load failed", "error", err)
 
