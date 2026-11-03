@@ -9,6 +9,11 @@ import "github.com/zextras/carbonio-configd/internal/config"
 // Service name identifiers used across the package.
 const (
 	svcAmavis          = "amavis"
+	svcAppserverDB     = "appserver-db"
+	svcAntispamDB      = "antispam-db"
+	svcMysql           = "mysql"
+	svcMariadb         = "mariadb"
+	svcStore           = "store"
 	svcAntispam        = "antispam"
 	svcAntivirus       = "antivirus"
 	svcCbpolicyd       = "cbpolicyd"
@@ -48,14 +53,15 @@ const (
 
 // Carbonio systemd unit names.
 const (
-	unitMailthreat = "carbonio-mailthreat.service"
-	unitAntivirus  = "carbonio-antivirus.service"
-	unitPolicyd    = "carbonio-policyd.service"
-	unitOpenldap   = "carbonio-openldap.service"
-	unitAppserver  = "carbonio-appserver.service"
-	unitPostfix    = "carbonio-postfix.service"
-	unitOpendkim   = "carbonio-opendkim.service"
-	unitNginx      = "carbonio-nginx.service"
+	unitMailthreat  = "carbonio-mailthreat.service"
+	unitAntivirus   = "carbonio-antivirus.service"
+	unitPolicyd     = "carbonio-policyd.service"
+	unitOpenldap    = "carbonio-openldap.service"
+	unitAppserver   = "carbonio-appserver.service"
+	unitAppserverDB = "carbonio-appserver-db.service"
+	unitPostfix     = "carbonio-postfix.service"
+	unitOpendkim    = "carbonio-opendkim.service"
+	unitNginx       = "carbonio-nginx.service"
 )
 
 // Postfix LDAP table file names.

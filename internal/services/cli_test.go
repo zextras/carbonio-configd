@@ -310,7 +310,7 @@ func TestServiceListStatus_ReturnsAllServices(t *testing.T) {
 		t.Skip("slow: may invoke real system commands")
 	}
 	ctx := context.Background()
-	result := ctl.ServiceListStatus(ctx)
+	result := ctl.ServiceListStatus(ctx, true)
 	if len(result) == 0 {
 		t.Fatal("expected at least one service in ServiceListStatus result")
 	}
@@ -556,7 +556,7 @@ func TestServiceListStatusStream_Cancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	ch := ctl.ServiceListStatusStream(ctx)
+	ch := ctl.ServiceListStatusStream(ctx, true)
 	count := 0
 	for range ch {
 		count++
@@ -573,7 +573,7 @@ func TestServiceListStatusStream_Default(t *testing.T) {
 		t.Skip("slow: may invoke real system commands")
 	}
 	ctx := context.Background()
-	ch := ctl.ServiceListStatusStream(ctx)
+	ch := ctl.ServiceListStatusStream(ctx, true)
 
 	entries := 0
 	for info := range ch {

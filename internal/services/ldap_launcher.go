@@ -6,6 +6,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -174,6 +175,25 @@ func probeLDAPReady(ctx context.Context, urls []string) error {
 
 	if _, err := conn.Search(req); err != nil {
 		return fmt.Errorf("rootDSE probe search failed: %w", err)
+	}
+
+	return nil
+}
+
+// ErrLDAPReplicaMisconfigured is returned by LDAPReplicaGuard.
+var ErrLDAPReplicaMisconfigured = errors.New("ldap_url and ldap_master_url cannot be the same on an ldap replica")
+
+// LDAPReplicaGuard reports a replica whose ldap_url equals ldap_master_url: it
+// would replicate from itself. Legacy ldap.sh refuses every verb but stop on
+// such a host (exit 1, this message); the CLI applies the same rule.
+func (c *Controller) LDAPReplicaGuard() error {
+	lc, err := c.loadConfig()
+	if err != nil {
+		return nil //nolint:nilerr // unreadable localconfig: no basis to refuse
+	}
+
+	if lc["ldap_is_master"] == "false" && lc["ldap_url"] == lc["ldap_master_url"] {
+		return ErrLDAPReplicaMisconfigured
 	}
 
 	return nil

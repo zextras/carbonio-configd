@@ -353,6 +353,12 @@ func (c *Controller) pidFromProcessName(ctx context.Context, name string) int {
 // An unreadable pidfile (postfix master.pid is root:root 0600) or a stale one
 // both fall through to the scan, as legacy amavisdctl/memcachedctl do.
 func (c *Controller) runningPID(ctx context.Context, def *ServiceDef) int {
+	if def.DetailMember != "" {
+		if member := c.registry[def.DetailMember]; member != nil {
+			return c.runningPID(ctx, member)
+		}
+	}
+
 	if def.PidFile != "" {
 		if pid, ok := c.readPidFile(def.PidFile); ok && c.pidBelongsTo(ctx, pid, def.ProcessName) {
 			return pid

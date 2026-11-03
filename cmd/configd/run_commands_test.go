@@ -43,15 +43,28 @@ func TestCommands_RefuseANonZextrasCaller(t *testing.T) {
 		{"shadow", func(env sys.System) error { return (&ShadowCmd{Once: true}).Run(cli, env) }},
 		{"rewrite", func(env sys.System) error { return (&RewriteCmd{ConfigNames: []string{"mta"}}).Run(cli, env) }},
 		{"plan", func(env sys.System) error { return (&PlanCmd{JSON: true}).Run(cli, env) }},
-		{"service start", func(env sys.System) error { return (&ServiceStartCmd{Name: "mta"}).Run(env) }},
+		{"service start", func(env sys.System) error { return (&ServiceStartCmd{serviceArgs: serviceArgs{Name: "mta"}}).Run(env) }},
 		{"service start norewrite", func(env sys.System) error {
-			return (&ServiceStartCmd{Name: "mta", Extra: []string{norewriteArg}}).Run(env)
+			return (&ServiceStartCmd{serviceArgs: serviceArgs{Name: "mta", Extra: []string{norewriteArg}}}).Run(env)
 		}},
-		{"service stop", func(env sys.System) error { return (&ServiceStopCmd{Name: "mta"}).Run(env) }},
-		{"service restart", func(env sys.System) error { return (&ServiceRestartCmd{Name: "mta", NoRewrite: true}).Run(env) }},
-		{"service reload", func(env sys.System) error { return (&ServiceReloadCmd{Name: "mta"}).Run(env) }},
-		{"service start-systemd", func(env sys.System) error { return (&ServiceStartSystemdCmd{Name: "mta"}).Run(env) }},
-		{"service stop-systemd", func(env sys.System) error { return (&ServiceStopSystemdCmd{Name: "mta"}).Run(env) }},
+		{"service stop", func(env sys.System) error { return (&ServiceStopCmd{serviceArgs: serviceArgs{Name: "mta"}}).Run(env) }},
+		{"service restart", func(env sys.System) error {
+			return (&ServiceRestartCmd{serviceArgs: serviceArgs{Name: "mta"}, NoRewrite: true}).Run(env)
+		}},
+		{"service kill", func(env sys.System) error { return (&ServiceKillCmd{serviceArgs: serviceArgs{Name: "mta"}}).Run(env) }},
+		{"service refresh", func(env sys.System) error {
+			return (&ServiceRefreshCmd{serviceArgs: serviceArgs{Name: "milter"}}).Run(env)
+		}},
+		{"service rotate", func(env sys.System) error {
+			return (&ServiceRotateCmd{serviceArgs: serviceArgs{Name: "stats"}}).Run(env)
+		}},
+		{"service reload", func(env sys.System) error { return (&ServiceReloadCmd{serviceArgs: serviceArgs{Name: "mta"}}).Run(env) }},
+		{"service start-systemd", func(env sys.System) error {
+			return (&ServiceStartSystemdCmd{serviceArgs: serviceArgs{Name: "mta"}}).Run(env)
+		}},
+		{"service stop-systemd", func(env sys.System) error {
+			return (&ServiceStopSystemdCmd{serviceArgs: serviceArgs{Name: "mta"}}).Run(env)
+		}},
 		{"proxy gen", func(env sys.System) error { return (&ProxyGenCmd{ExtraConfigs: []string{"mta"}}).Run(env) }},
 		{"proxy rewrite", func(env sys.System) error { return (&ProxyRewriteCmd{}).Run(env) }},
 		{"proxy enable", func(env sys.System) error { return (&ProxyEnableCmd{Protocol: "imap"}).Run(env) }},
@@ -87,7 +100,7 @@ func TestServiceListCmd_ListsWithoutAnError(t *testing.T) {
 func TestServiceStatusCmd_UnknownServiceFails(t *testing.T) {
 	t.Setenv("CARBONIO_BASE_DIR", "/nonexistent-base")
 
-	err := (&ServiceStatusCmd{Name: "nosuch"}).Run(systest.New().System())
+	err := (&ServiceStatusCmd{serviceArgs: serviceArgs{Name: "nosuch"}}).Run(systest.New().System())
 
 	assert.Equal(t, exitStatus(1), err)
 }

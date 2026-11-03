@@ -124,12 +124,17 @@ func (c *Controller) IsLDAPLocal() bool {
 }
 
 // MapLDAPServiceToRegistry maps an LDAP zimbraServiceEnabled value to its
-// canonical Registry key by resolving it through the shared ServiceAliases
-// table (registry.go) — the same aliasing LookupService uses. Falls back to
+// canonical Registry key: the LDAP-only names of ldapServiceNames ("mailbox"
+// is the store composite) first, then the shared ServiceAliases table
+// (registry.go) — the same aliasing LookupService uses. Falls back to
 // ldapName unchanged when no alias applies (e.g. it's already a canonical
 // registry name, or an LDAP-only name with no service-side control
 // equivalent).
 func MapLDAPServiceToRegistry(ldapName string) string {
+	if canonical, ok := ldapServiceNames[ldapName]; ok {
+		return canonical
+	}
+
 	if canonical, ok := ServiceAliases[ldapName]; ok {
 		return canonical
 	}

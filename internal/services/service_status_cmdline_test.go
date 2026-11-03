@@ -51,7 +51,7 @@ func TestServiceStatus_IgnoresProcessesMentioningTheName(t *testing.T) {
 		{svcOpendkim, []string{"vi", "/opt/zextras/conf/opendkim.conf"}},
 		{svcFreshclam, []string{"tail", "-f", "/opt/zextras/log/freshclam.log"}},
 		{svcSaslauthd, []string{"consul", "connect", "envoy", "-sidecar-for", "carbonio-saslauthd"}},
-		{svcAntivirus, []string{"tail", "-f", "/opt/zextras/log/clamd.log"}},
+		{svcClamd, []string{"tail", "-f", "/opt/zextras/log/clamd.log"}},
 		{svcLdap, []string{"less", "/opt/zextras/log/slapd.log"}},
 	} {
 		t.Run(tc.service, func(t *testing.T) {

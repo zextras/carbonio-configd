@@ -43,6 +43,15 @@ type paths struct {
 	cbpolicydInitBin string
 	clamdDir         string
 
+	// amavisDir is amavisd's data directory (quarantine, tmp, var,
+	// .spamassassin); amavisMC and altermime are the amavis-mc daemon and the
+	// libexec script regenerating the altermime disclaimer config.
+	amavisDir string
+	amavisMC  string
+	altermime string
+	// resolverctl is the wrapper that regenerates nginx's resolvers.conf.
+	resolverctl string
+
 	mysqldSafeBin      string
 	mysqldSafeLedir    string
 	mysqldMallocLib    string
@@ -89,6 +98,10 @@ func newPaths(base, run string) paths {
 	p.cbpolicydDB = p.data + "/cbpolicyd/db/cbpolicyd.sqlitedb"
 	p.cbpolicydInitBin = p.libexec + "/zmcbpolicydinit"
 	p.clamdDir = p.data + "/clamav/db"
+	p.amavisDir = p.data + "/amavisd"
+	p.amavisMC = p.common + "/sbin/amavis-mc"
+	p.altermime = p.libexec + "/zmaltermimeconfig"
+	p.resolverctl = p.bin + "/zmresolverctl"
 
 	p.mysqldSafeBin = p.common + "/bin/mysqld_safe"
 	p.mysqldSafeLedir = p.common + "/sbin"

@@ -59,6 +59,68 @@ func (c *Controller) IsSystemdMode() bool {
 	return c.systemdMode
 }
 
+// noRewriteKey marks a context whose start skips config regeneration for this
+// service only (legacy `norewrite` argument), as opposed to the Controller-wide
+// WithNoRewrite.
+type noRewriteKey struct{}
+
+// WithNoRewriteContext returns ctx marked so that a ServiceStart/ServiceRestart run
+// with it skips the service's config rewrite and pre-start regeneration
+// (zmaltermimeconfig). Composite services pass it on to their members.
+func WithNoRewriteContext(ctx context.Context) context.Context {
+	return context.WithValue(ctx, noRewriteKey{}, true)
+}
+
+// rewriteSkipped reports whether this start must not regenerate configuration.
+func (c *Controller) rewriteSkipped(ctx context.Context) bool {
+	if c.noRewrite {
+		return true
+	}
+
+	skipped, _ := ctx.Value(noRewriteKey{}).(bool)
+
+	return skipped
+}
+
+// ServiceDisabled reports whether name is an IdleWhenDisabled service that is
+// not enabled on this host: every lifecycle verb is then a successful no-op and
+// status has nothing to report (legacy zmantispamctl).
+func (c *Controller) ServiceDisabled(ctx context.Context, name string) bool {
+	def := c.LookupService(name)
+
+	return def != nil && c.idleWhenDisabled(ctx, def)
+}
+
+func (c *Controller) idleWhenDisabled(ctx context.Context, def *ServiceDef) bool {
+	return def.IdleWhenDisabled && def.EnableCheck != nil && !def.EnableCheck(ctx)
+}
+
+// applicableMembers returns def's members that take part on this host, in
+// start order.
+func (c *Controller) applicableMembers(ctx context.Context, def *ServiceDef) []string {
+	members := make([]string, 0, len(def.Members))
+
+	for _, m := range def.Members {
+		if def.MemberApplies == nil || def.MemberApplies(ctx, m) {
+			members = append(members, m)
+		}
+	}
+
+	return members
+}
+
+// stopOrder returns the members of def in the order they are stopped.
+func (def *ServiceDef) stopOrder(members []string) []string {
+	if def.StopMembersForward {
+		return members
+	}
+
+	reversed := slices.Clone(members)
+	slices.Reverse(reversed)
+
+	return reversed
+}
+
 // ServiceStart starts a service by name, handling dependencies, config rewrite, and hooks.
 func (c *Controller) ServiceStart(ctx context.Context, name string) error {
 	ctx = logger.ContextWithComponentOnce(ctx, serviceCliComponent)
@@ -66,6 +128,16 @@ func (c *Controller) ServiceStart(ctx context.Context, name string) error {
 	def := c.LookupService(name)
 	if def == nil {
 		return fmt.Errorf(errUnknownService, name)
+	}
+
+	if c.idleWhenDisabled(ctx, def) {
+		logger.DebugContext(ctx, "Service is not enabled on this host; nothing to start", "service", name)
+
+		return nil
+	}
+
+	if len(def.Members) > 0 {
+		return c.startComposite(ctx, def)
 	}
 
 	// Skip if already running — avoids redundant starts and dependency hangs
@@ -82,11 +154,13 @@ func (c *Controller) ServiceStart(ctx context.Context, name string) error {
 		return nil
 	}
 
+	c.startWanted(ctx, name, def)
+
 	if err := c.startEnabledDependencies(ctx, name, def); err != nil {
 		return err
 	}
 
-	if !c.noRewrite && len(def.ConfigRewrite) > 0 {
+	if !c.rewriteSkipped(ctx) && len(def.ConfigRewrite) > 0 {
 		c.rewriteConfigs(ctx, def)
 	}
 
@@ -105,6 +179,66 @@ func (c *Controller) ServiceStart(ctx context.Context, name string) error {
 	return nil
 }
 
+// startWanted starts the Wants of def. A failure is logged, never fatal:
+// mailbox must still try to come up when the database is slow, as legacy
+// zmstorectl did.
+func (c *Controller) startWanted(ctx context.Context, name string, def *ServiceDef) {
+	for _, want := range def.Wants {
+		logger.InfoContext(ctx, "Starting wanted service", "wants", want, "for", name)
+
+		if err := c.ServiceStart(ctx, want); err != nil {
+			logger.WarnContext(ctx, "Wanted service failed to start; continuing",
+				"wants", want, "for", name, "error", err)
+		}
+	}
+}
+
+// startComposite starts a composite service: its own ConfigRewrite once, then
+// every applicable member in order. A failing member does not stop the others
+// (legacy zmstorectl/zmantivirusctl run every script and keep the last bad
+// status); the errors are joined.
+func (c *Controller) startComposite(ctx context.Context, def *ServiceDef) error {
+	if !c.rewriteSkipped(ctx) && len(def.ConfigRewrite) > 0 {
+		c.rewriteConfigs(ctx, def)
+	}
+
+	memberCtx := ctx
+	if def.ForceMembersNoRewrite {
+		memberCtx = WithNoRewriteContext(ctx)
+	}
+
+	var errs []error
+
+	for _, member := range c.applicableMembers(ctx, def) {
+		if err := c.ServiceStart(memberCtx, member); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", member, err))
+		}
+	}
+
+	return errors.Join(errs...)
+}
+
+// stopComposite stops the applicable members of def in its stop order,
+// continuing past failures.
+func (c *Controller) stopComposite(ctx context.Context, def *ServiceDef, leaf bool) error {
+	var errs []error
+
+	for _, member := range def.stopOrder(c.applicableMembers(ctx, def)) {
+		var err error
+		if leaf {
+			err = c.ServiceStopSystemd(ctx, member)
+		} else {
+			err = c.ServiceStop(ctx, member)
+		}
+
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", member, err))
+		}
+	}
+
+	return errors.Join(errs...)
+}
+
 // ServiceStartSystemd is the leaf start path invoked from the carbonio-*.service
 // unit's ExecStart (via the zm*ctl wrapper -> `configd service start-systemd
 // <name>`). It launches the service in-process through the legacy/custom
@@ -118,6 +252,22 @@ func (c *Controller) ServiceStartSystemd(ctx context.Context, name string) error
 	def := c.LookupService(name)
 	if def == nil {
 		return fmt.Errorf(errUnknownService, name)
+	}
+
+	if c.idleWhenDisabled(ctx, def) {
+		return nil
+	}
+
+	if len(def.Members) > 0 {
+		var errs []error
+
+		for _, member := range c.applicableMembers(ctx, def) {
+			if err := c.ServiceStartSystemd(ctx, member); err != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", member, err))
+			}
+		}
+
+		return errors.Join(errs...)
 	}
 
 	sm := NewServiceManager(c)
@@ -180,6 +330,14 @@ func (c *Controller) ServiceStop(ctx context.Context, name string) error {
 		return fmt.Errorf(errUnknownService, name)
 	}
 
+	if c.idleWhenDisabled(ctx, def) {
+		return nil
+	}
+
+	if len(def.Members) > 0 {
+		return c.stopComposite(ctx, def, false)
+	}
+
 	sm := NewServiceManager(c)
 
 	for _, hook := range def.PreStop {
@@ -222,6 +380,14 @@ func (c *Controller) ServiceStopSystemd(ctx context.Context, name string) error 
 		return fmt.Errorf(errUnknownService, name)
 	}
 
+	if c.idleWhenDisabled(ctx, def) {
+		return nil
+	}
+
+	if len(def.Members) > 0 {
+		return c.stopComposite(ctx, def, true)
+	}
+
 	sm := NewServiceManager(c)
 
 	for _, hook := range def.PreStop {
@@ -248,7 +414,7 @@ func (c *Controller) ServiceRestart(ctx context.Context, name string) error {
 
 	// MTA restart is converted to reload for graceful handling
 	if name == serviceMTA {
-		if !c.noRewrite && len(def.ConfigRewrite) > 0 {
+		if !c.rewriteSkipped(ctx) && len(def.ConfigRewrite) > 0 {
 			c.rewriteConfigs(ctx, def)
 		}
 
@@ -281,6 +447,11 @@ func (c *Controller) ServiceReload(ctx context.Context, name string) error {
 		logger.DebugContext(ctx, "Service is externally managed, not reloading", "service", name)
 
 		return nil
+	}
+
+	if len(def.Members) > 0 {
+		// Legacy zmstorectl/zmantivirusctl reload is a restart of every member.
+		return c.ServiceRestart(ctx, name)
 	}
 
 	if !c.IsSystemdMode() {
@@ -328,11 +499,27 @@ func (c *Controller) ServiceStatus(ctx context.Context, name string) (bool, erro
 		return false, fmt.Errorf(errUnknownService, name)
 	}
 
+	if len(def.Members) > 0 {
+		return c.compositeStatus(ctx, def)
+	}
+
 	if c.IsSystemdMode() || def.UseSystemdForStatus {
 		return c.systemdUnitsActive(ctx, def.SystemdUnits)
 	}
 
-	return c.runningPID(ctx, def) > 0, nil
+	return c.runningPID(ctx, def) > 0 && c.companionsRunning(ctx, def), nil
+}
+
+// compositeStatus reports whether every applicable member of def is running.
+func (c *Controller) compositeStatus(ctx context.Context, def *ServiceDef) (bool, error) {
+	for _, member := range c.applicableMembers(ctx, def) {
+		running, err := c.ServiceStatus(ctx, member)
+		if err != nil || !running {
+			return false, err
+		}
+	}
+
+	return true, nil
 }
 
 // systemdUnitsActive reports whether every unit is active. A non-zero
@@ -367,13 +554,18 @@ func (c *Controller) RunningPID(ctx context.Context, def *ServiceDef) int {
 	return c.runningPID(ctx, def)
 }
 
-// ServiceListStatusStream emits ServiceInfo entries on the returned channel
+// ServiceListStatusStream emits ServiceInfo entries (every service when
+// includeComponents is set, else only those `control` orchestrates) on the returned channel
 // as each service's probe completes, allowing callers to render rows
 // incrementally without waiting for the full scan to finish. The channel is
 // closed when all services have been probed. The legacy-mode ProcessName
 // probes share a single /proc snapshot taken at the first one.
-func (c *Controller) ServiceListStatusStream(ctx context.Context) <-chan ServiceInfo {
-	names := c.AllServiceNames()
+func (c *Controller) ServiceListStatusStream(ctx context.Context, includeComponents bool) <-chan ServiceInfo {
+	names := c.ControlServiceNames()
+	if includeComponents {
+		names = c.AllServiceNames()
+	}
+
 	ch := make(chan ServiceInfo, len(names))
 
 	// One /proc walk serves every ProcessName probe of this listing.
@@ -401,11 +593,12 @@ func (c *Controller) ServiceListStatusStream(ctx context.Context) <-chan Service
 	return ch
 }
 
-// ServiceListStatus returns all services with their running status.
-func (c *Controller) ServiceListStatus(ctx context.Context) []ServiceInfo {
+// ServiceListStatus returns the services with their running status; see
+// ServiceListStatusStream for includeComponents.
+func (c *Controller) ServiceListStatus(ctx context.Context, includeComponents bool) []ServiceInfo {
 	result := make([]ServiceInfo, 0, len(c.registry))
 
-	for info := range c.ServiceListStatusStream(ctx) {
+	for info := range c.ServiceListStatusStream(ctx, includeComponents) {
 		result = append(result, info)
 	}
 
@@ -415,23 +608,114 @@ func (c *Controller) ServiceListStatus(ctx context.Context) []ServiceInfo {
 func (c *Controller) rewriteConfigs(ctx context.Context, def *ServiceDef) {
 	logger.InfoContext(ctx, "Rewriting configuration files", "service", def.Name, "configs", def.ConfigRewrite)
 
-	// Use configrewrite script if available (legacy path)
+	if err := c.rewriteSections(ctx, def.ConfigRewrite); err != nil {
+		logger.WarnContext(ctx, "Config rewrite failed",
+			"service", def.Name, "configs", def.ConfigRewrite, "error", err)
+	}
+}
+
+// rewriteSections regenerates the given configuration sections: through the
+// legacy configrewrite script when it is installed, else through the running
+// configd daemon (REWRITE protocol).
+func (c *Controller) rewriteSections(ctx context.Context, sections []string) error {
 	configrewrite := c.p.configrewrite
 	if _, err := c.env.FS.Stat(configrewrite); err == nil {
 		// #nosec G204 - args come from internal registry
-		if output, err := sys.CombinedOutput(ctx, c.env.Exec, configrewrite, def.ConfigRewrite...); err != nil {
-			logger.WarnContext(ctx, "Config rewrite failed",
-				"service", def.Name, "error", err, "output", string(output))
+		if output, err := sys.CombinedOutput(ctx, c.env.Exec, configrewrite, sections...); err != nil {
+			return fmt.Errorf("%s: %s: %w", configrewrite, strings.TrimSpace(string(output)), err)
 		}
 
-		return
+		return nil
 	}
 
-	// Fall back to the running configd daemon via the REWRITE TCP protocol
-	if err := c.rewriteViaConfigd(ctx, def.ConfigRewrite); err != nil {
-		logger.WarnContext(ctx, "Config rewrite via configd failed",
-			"service", def.Name, "configs", def.ConfigRewrite, "error", err)
+	return c.rewriteViaConfigd(ctx, sections)
+}
+
+// RewriteConfigsFor regenerates, once, the union of the ConfigRewrite sections
+// of the named services and of their composite members. `control start` calls
+// it before starting the services `norewrite`.
+func (c *Controller) RewriteConfigsFor(ctx context.Context, names []string) error {
+	ctx = logger.ContextWithComponentOnce(ctx, serviceCliComponent)
+
+	var sections []string
+
+	seen := map[string]bool{}
+
+	var collect func(name string)
+
+	collect = func(name string) {
+		def := c.LookupService(name)
+		if def == nil || seen[def.Name] {
+			return
+		}
+
+		seen[def.Name] = true
+
+		for _, section := range def.ConfigRewrite {
+			if !slices.Contains(sections, section) {
+				sections = append(sections, section)
+			}
+		}
+
+		for _, member := range def.Members {
+			collect(member)
+		}
 	}
+
+	for _, name := range names {
+		collect(name)
+	}
+
+	if len(sections) == 0 {
+		return nil
+	}
+
+	logger.InfoContext(ctx, "Rewriting configuration files", "services", names, "configs", sections)
+
+	return c.rewriteSections(ctx, sections)
+}
+
+// RegenerateResolvers regenerates nginx's resolvers.conf by running
+// zmresolverctl, as legacy zmcontrol does before it starts proxy. A host
+// without the wrapper has nothing to regenerate.
+func (c *Controller) RegenerateResolvers(ctx context.Context) error {
+	if _, err := c.env.FS.Stat(c.p.resolverctl); err != nil {
+		return nil //nolint:nilerr // wrapper not installed: nothing to do
+	}
+
+	if out, err := sys.CombinedOutput(ctx, c.env.Exec, c.p.resolverctl); err != nil {
+		return fmt.Errorf("%s: %s: %w", c.p.resolverctl, strings.TrimSpace(string(out)), err)
+	}
+
+	return nil
+}
+
+// StatusListServices returns the set of canonical service names whose stopped
+// state fails `control status`, from LC zmcontrol_service_status_list (legacy
+// names, LDAP names and aliases accepted). It returns nil when the key is unset
+// or empty: the caller then applies the default (every service but stats and
+// logger).
+func (c *Controller) StatusListServices() map[string]bool {
+	lc, err := c.loadConfig()
+	if err != nil {
+		return nil
+	}
+
+	fields := strings.Fields(lc["zmcontrol_service_status_list"])
+	if len(fields) == 0 {
+		return nil
+	}
+
+	set := make(map[string]bool, len(fields))
+
+	for _, f := range fields {
+		set[MapLDAPServiceToRegistry(f)] = true
+		if def := c.LookupService(f); def != nil {
+			set[def.Name] = true
+		}
+	}
+
+	return set
 }
 
 // rewriteViaConfigd sends a REWRITE command to the running configd daemon.
