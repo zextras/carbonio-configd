@@ -21,7 +21,7 @@ func BenchmarkConfigManager_LoadAllConfigs(b *testing.B) {
 	ctx := context.Background()
 
 	// Create test components
-	mainCfg, err := config.NewConfig()
+	mainCfg, err := config.NewConfigWithHostname("")
 	if err != nil {
 		b.Fatalf("NewConfig failed: %v", err)
 	}
@@ -52,7 +52,7 @@ func BenchmarkConfigManager_LoadAllConfigs(b *testing.B) {
 func BenchmarkConfigManager_LoadLocalConfig(b *testing.B) {
 	ctx := context.Background()
 
-	mainCfg, err := config.NewConfig()
+	mainCfg, err := config.NewConfigWithHostname("")
 	if err != nil {
 		b.Fatalf("NewConfig failed: %v", err)
 	}
@@ -83,7 +83,7 @@ func BenchmarkConfigManager_LoadLocalConfig(b *testing.B) {
 func BenchmarkConfigManager_LoadGlobalConfig(b *testing.B) {
 	ctx := context.Background()
 
-	mainCfg, err := config.NewConfig()
+	mainCfg, err := config.NewConfigWithHostname("")
 	if err != nil {
 		b.Fatalf("NewConfig failed: %v", err)
 	}
@@ -120,7 +120,7 @@ func BenchmarkConfigManager_LoadGlobalConfig(b *testing.B) {
 func BenchmarkConfigManager_Plan(b *testing.B) {
 	ctx := context.Background()
 
-	mainCfg, err := config.NewConfig()
+	mainCfg, err := config.NewConfigWithHostname("")
 	if err != nil {
 		b.Fatalf("NewConfig failed: %v", err)
 	}
@@ -149,7 +149,7 @@ func BenchmarkConfigManager_Plan(b *testing.B) {
 func BenchmarkConfigManager_LookUpConfig(b *testing.B) {
 	ctx := context.Background()
 
-	mainCfg, err := config.NewConfig()
+	mainCfg, err := config.NewConfigWithHostname("")
 	if err != nil {
 		b.Fatalf("NewConfig failed: %v", err)
 	}
@@ -179,7 +179,7 @@ func BenchmarkConfigManager_LookUpConfig(b *testing.B) {
 func BenchmarkConfigManager_LookUpConfig_Parallel(b *testing.B) {
 	ctx := context.Background()
 
-	mainCfg, err := config.NewConfig()
+	mainCfg, err := config.NewConfigWithHostname("")
 	if err != nil {
 		b.Fatalf("NewConfig failed: %v", err)
 	}
@@ -214,7 +214,7 @@ func BenchmarkConfigManager_LookUpConfig_Parallel(b *testing.B) {
 func BenchmarkConfigManager_FullCycle(b *testing.B) {
 	ctx := context.Background()
 
-	mainCfg, err := config.NewConfig()
+	mainCfg, err := config.NewConfigWithHostname("")
 	if err != nil {
 		b.Fatalf("NewConfig failed: %v", err)
 	}
@@ -269,7 +269,7 @@ func BenchmarkConfigManager_FullCycle(b *testing.B) {
 func BenchmarkConfigManager_MemoryUsage(b *testing.B) {
 	ctx := context.Background()
 
-	mainCfg, err := config.NewConfig()
+	mainCfg, err := config.NewConfigWithHostname("")
 	if err != nil {
 		b.Fatalf("NewConfig failed: %v", err)
 	}
@@ -312,7 +312,7 @@ func BenchmarkConfigManager_MemoryUsage(b *testing.B) {
 func BenchmarkConfigManager_ConcurrentFullCycle(b *testing.B) {
 	ctx := context.Background()
 
-	mainCfg, err := config.NewConfig()
+	mainCfg, err := config.NewConfigWithHostname("")
 	if err != nil {
 		b.Fatalf("NewConfig failed: %v", err)
 	}
@@ -355,7 +355,7 @@ func BenchmarkConfigManager_ConcurrentFullCycle(b *testing.B) {
 func BenchmarkFullLoop(b *testing.B) {
 	ctx := context.Background()
 
-	mainCfg, err := config.NewConfig()
+	mainCfg, err := config.NewConfigWithHostname("")
 	if err != nil {
 		b.Fatalf("NewConfig failed: %v", err)
 	}
@@ -425,7 +425,7 @@ func BenchmarkFullLoop(b *testing.B) {
 func BenchmarkFullLoop_FirstRun(b *testing.B) {
 	ctx := context.Background()
 
-	mainCfg, err := config.NewConfig()
+	mainCfg, err := config.NewConfigWithHostname("")
 	if err != nil {
 		b.Fatalf("NewConfig failed: %v", err)
 	}

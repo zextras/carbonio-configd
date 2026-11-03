@@ -84,7 +84,7 @@ func TestNewConfig(t *testing.T) {
 				os.Unsetenv("zimbra_server_hostname")
 			}
 
-			cfg, err := NewConfig()
+			cfg, err := NewConfigWithHostname("")
 			if err != nil {
 				t.Fatalf("NewConfig failed: %v", err)
 			}

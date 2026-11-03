@@ -18,7 +18,7 @@ Source: `cmd/configd/cli.go` (`DaemonCmd.Run`), `cmd/configd/configd.go`, `cmd/c
    variable is unset the notifier is a no-op; no code path fails because of its absence.
 4. **Profiling/tracing setup** — CPU, memory, and trace profiles started if flags are present
    (profiling build only).
-5. **Config init** — `config.NewConfig()` reads `localconfig.xml`, merges defaults, resolves
+5. **Config init** — `config.NewConfigWithHostname()` reads `localconfig.xml`, merges defaults, resolves
    `${variable}` references, and populates `state.State`. An LDAP client is constructed but
    not yet connected.
 6. **Main loop** — `RunMainLoop` is called. It does not return until the process is asked to

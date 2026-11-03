@@ -390,8 +390,8 @@ func TestRewriteViaConfigd_NoPortFallsToDefault(t *testing.T) {
 		t.Fatal("expected error when configd is not reachable")
 	}
 
-	if !strings.Contains(err.Error(), "configd not reachable") {
-		t.Errorf("error = %q, want containing %q", err.Error(), "configd not reachable")
+	if !strings.Contains(err.Error(), "not reachable") {
+		t.Errorf("error = %q, want containing %q", err.Error(), "not reachable")
 	}
 }
 
@@ -440,8 +440,8 @@ func TestRewriteViaConfigd_ErrorFromListener(t *testing.T) {
 		t.Fatal("expected error when configd returns ERROR")
 	}
 
-	if !strings.Contains(err.Error(), "configd returned error") {
-		t.Errorf("error = %q, want containing %q", err.Error(), "configd returned error")
+	if !strings.Contains(err.Error(), "returned ERROR") {
+		t.Errorf("error = %q, want containing %q", err.Error(), "returned ERROR")
 	}
 }
 

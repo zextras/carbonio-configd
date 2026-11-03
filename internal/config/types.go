@@ -130,17 +130,10 @@ type RewriteEntry struct {
 	Mode  string
 }
 
-// NewConfig initializes a new Config with default values. The hostname comes
-// from the zimbra_server_hostname environment variable, else /etc/hostname;
-// use NewConfigWithHostname to also honor the localconfig value.
-func NewConfig() (*Config, error) {
-	return NewConfigWithHostname("")
-}
-
-// NewConfigWithHostname is NewConfig with the zimbra_server_hostname value of
-// localconfig (legacy zmhostname) as an additional hostname source. Precedence
-// is the legacy one: the zimbra_server_hostname environment variable, then
-// lcHostname, then /etc/hostname when neither is set.
+// NewConfigWithHostname initializes a new Config with default values. The
+// hostname comes from the zimbra_server_hostname environment variable, then
+// lcHostname (the localconfig zimbra_server_hostname, legacy zmhostname), then
+// /etc/hostname when neither is set.
 func NewConfigWithHostname(lcHostname string) (*Config, error) {
 	// Determine base directory from environment or default
 	baseDir := os.Getenv("ZEXTRAS_HOME")

@@ -160,7 +160,7 @@ func TestRewriteViaConfigd_ServerReturnsError(t *testing.T) {
 	}
 
 	err = ctl.rewriteViaConfigd(context.Background(), []string{"bogus"})
-	if err == nil || !strings.Contains(err.Error(), "configd returned error") {
+	if err == nil || !strings.Contains(err.Error(), "returned ERROR") {
 		t.Errorf("expected configd error response, got %v", err)
 	}
 }

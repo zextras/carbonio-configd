@@ -40,7 +40,7 @@ func TestE2E_ConfigdCycleWithProxy(t *testing.T) {
 	// Initialize logger for testing
 
 	// Create test configuration
-	mainCfg, err := config.NewConfig()
+	mainCfg, err := config.NewConfigWithHostname("")
 	if err != nil {
 		t.Fatalf("NewConfig failed: %v", err)
 	}
@@ -299,7 +299,7 @@ func TestE2E_NetworkCommandsWithProxy(t *testing.T) {
 	ctx := context.Background()
 
 	// Create test configuration
-	mainCfg, err := config.NewConfig()
+	mainCfg, err := config.NewConfigWithHostname("")
 	if err != nil {
 		t.Fatalf("NewConfig failed: %v", err)
 	}
@@ -447,7 +447,7 @@ func TestE2E_ProxyConfigValidation(t *testing.T) {
 	ctx := context.Background()
 
 	// Create test configuration
-	mainCfg, err := config.NewConfig()
+	mainCfg, err := config.NewConfigWithHostname("")
 	if err != nil {
 		t.Fatalf("NewConfig failed: %v", err)
 	}

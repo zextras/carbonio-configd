@@ -5,7 +5,6 @@
 package services
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -14,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zextras/carbonio-configd/internal/cli/rewrite"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
@@ -31,9 +31,10 @@ const (
 	mailboxDialInterval = 5 * time.Second
 	mailboxDialTimeout  = 2 * time.Second
 
-	// configdReadyAttempts x configdReadyInterval: zmconfigdctl start waits up
-	// to 10 x 3s for the daemon to answer STATUS.
-	configdReadyAttempts = 10
+	// configdReadyAttempts x configdReadyInterval: the daemon answers STATUS
+	// only after its first (synchronous) rewrite pass, so wait as long as the
+	// unit's TimeoutStartSec (300s).
+	configdReadyAttempts = 100
 	configdReadyInterval = 3 * time.Second
 	configdProbeTimeout  = 3 * time.Second
 
@@ -115,43 +116,21 @@ func parseMailPort(out string) string {
 	return ""
 }
 
-// configdPort is the TCP port the configd daemon listens on
+// configdEndpoint is where the configd daemon listens, from localconfig
 // (zmconfigd_listen_port, default 7171).
-func (c *Controller) configdPort() int {
-	if lc, err := c.loadConfig(); err == nil {
-		if p, convErr := strconv.Atoi(lc["zmconfigd_listen_port"]); convErr == nil && p > 0 {
-			return p
-		}
-	}
+func (c *Controller) configdEndpoint() rewrite.Endpoint {
+	lc, _ := c.loadConfig()
 
-	return defaultConfigdPort
+	return rewrite.ListenerAddress(lc)
 }
 
 // configdStatus asks the running configd daemon for STATUS and returns its
 // one-line answer.
 func (c *Controller) configdStatus(ctx context.Context) (string, error) {
-	addr := net.JoinHostPort("localhost", strconv.Itoa(c.configdPort()))
-	dialer := &net.Dialer{Timeout: configdProbeTimeout}
+	ep := c.configdEndpoint()
+	ep.Timeout = configdProbeTimeout
 
-	conn, err := dialer.DialContext(ctx, "tcp4", addr)
-	if err != nil {
-		return "", fmt.Errorf("configd not reachable at %s: %w", addr, err)
-	}
-
-	defer func() { _ = conn.Close() }()
-
-	_ = conn.SetDeadline(time.Now().Add(configdProbeTimeout))
-
-	if _, err := conn.Write([]byte("STATUS\n")); err != nil {
-		return "", fmt.Errorf("send STATUS: %w", err)
-	}
-
-	line, err := bufio.NewReader(conn).ReadString('\n')
-	if err != nil && line == "" {
-		return "", fmt.Errorf("read STATUS reply: %w", err)
-	}
-
-	return strings.TrimSpace(line), nil
+	return rewrite.Request(ctx, "STATUS", nil, ep)
 }
 
 // waitForConfigd polls the configd daemon's STATUS until it answers

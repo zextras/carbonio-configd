@@ -173,7 +173,7 @@ func configdServer(t *testing.T, reply string) (port int, requests <-chan string
 
 	t.Cleanup(func() { _ = l.Close() })
 
-	reqs := make(chan string, 64)
+	reqs := make(chan string, 4*configdReadyAttempts)
 
 	go func() {
 		for {
@@ -243,10 +243,10 @@ func TestConfigdPort_DefaultAndOverride(t *testing.T) {
 	t.Parallel()
 
 	ctl, _ := newFakeController(t)
-	assert.Equal(t, defaultConfigdPort, ctl.configdPort())
+	assert.Equal(t, defaultConfigdPort, ctl.configdEndpoint().Port)
 
 	ctl2, _ := configdController(t, 7272)
-	assert.Equal(t, 7272, ctl2.configdPort())
+	assert.Equal(t, 7272, ctl2.configdEndpoint().Port)
 }
 
 func TestWaitForConfigd_Active(t *testing.T) {

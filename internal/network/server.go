@@ -184,18 +184,6 @@ func (s *ThreadedStreamServer) ServeForever(ctx context.Context) error {
 	return nil
 }
 
-// Addr returns the address the server listens on, or "" before ServeForever.
-func (s *ThreadedStreamServer) Addr() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.listener == nil {
-		return ""
-	}
-
-	return s.listener.Addr().String()
-}
-
 // acceptLoop accepts connections until shutdown, ctx cancellation, or a
 // permanent listener failure.
 func (s *ThreadedStreamServer) acceptLoop(ctx context.Context, listener net.Listener) {

@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -119,6 +120,7 @@ func newCycleFixture(t *testing.T) *cycleFixture {
 	ctx := context.Background()
 	rec, notifier := newNotifyRecorder(t)
 	fakes := systest.New()
+	fakes.Exec.OnCmdline("systemctl is-enabled", systest.Fail(1, "")) // legacy (non-systemd) restart mode
 	env := fakes.System()
 	env.Clock = sys.Real().Clock
 
@@ -461,12 +463,23 @@ func TestRewriteOverTCP_ReleasedByCycle(t *testing.T) {
 	f := newCycleFixture(t)
 	st := &loopIterState{}
 
+	// Reserve a free port: the server API does not expose its bound address.
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	port := l.Addr().(*net.TCPAddr).Port
+	require.NoError(t, l.Close())
+
+	f.deps.appState.Publish(snapshot.New(snapshot.Parts{
+		Local: map[string]string{"zmconfigd_listen_port": strconv.Itoa(port)},
+	}))
+
 	runCycleOnce(t, f, st)
 	require.NotNil(t, st.server)
 
 	t.Cleanup(func() { st.server.Shutdown(context.Background()) })
 
-	addr := st.server.Addr()
+	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
 
 	reply := make(chan string, 1)
 

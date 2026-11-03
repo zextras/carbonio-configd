@@ -8,12 +8,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"slices"
-	"strconv"
 	"strings"
-	"time"
 
+	"github.com/zextras/carbonio-configd/internal/cli/rewrite"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
@@ -718,42 +716,14 @@ func (c *Controller) StatusListServices() map[string]bool {
 	return set
 }
 
-// rewriteViaConfigd sends a REWRITE command to the running configd daemon.
+// rewriteViaConfigd sends a REWRITE command to the running configd daemon and
+// waits for it to finish (synchronous, both loopback families, bounded by
+// zimbra_configrewrite_timeout). Unlike "configd rewrite" it never falls back
+// to an in-process rewrite: callers here only want the running daemon to do it.
 func (c *Controller) rewriteViaConfigd(ctx context.Context, configs []string) error {
-	port := 7171
-
-	lc, err := c.loadConfig()
-	if err == nil {
-		if p, err := strconv.Atoi(lc["zmconfigd_listen_port"]); err == nil && p > 0 {
-			port = p
-		}
-	}
-
-	addr := net.JoinHostPort("localhost", strconv.Itoa(port))
-	dialer := &net.Dialer{Timeout: 5 * time.Second}
-
-	conn, err := dialer.DialContext(ctx, "tcp4", addr)
+	resp, err := rewrite.Request(ctx, "REWRITE", configs, c.configdEndpoint())
 	if err != nil {
-		return fmt.Errorf("configd not reachable at %s: %w", addr, err)
-	}
-
-	defer func() { _ = conn.Close() }()
-
-	message := "REWRITE " + strings.Join(configs, " ") + "\n"
-	if _, err := conn.Write([]byte(message)); err != nil {
-		return fmt.Errorf("failed to send REWRITE: %w", err)
-	}
-
-	buf := make([]byte, 2048)
-
-	n, err := conn.Read(buf)
-	if err != nil {
-		return fmt.Errorf("failed to read response: %w", err)
-	}
-
-	resp := strings.TrimSpace(string(buf[:n]))
-	if strings.HasPrefix(resp, "ERROR") {
-		return fmt.Errorf("configd returned error: %s", resp)
+		return fmt.Errorf("configd REWRITE: %w", err)
 	}
 
 	logger.InfoContext(ctx, "Config rewrite via configd succeeded", "configs", configs, "response", resp)
