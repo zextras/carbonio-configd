@@ -140,23 +140,3 @@ func LoadConfiguration(ctx context.Context, env sys.System, cfg *config.Config, 
 
 	return NewGenerator(ctx, env, cfg, src)
 }
-
-// SetDryRun enables or disables dry-run mode
-func (g *Generator) SetDryRun(ctx context.Context, dryRun bool) {
-	ctx = logger.ContextWithComponentOnce(ctx, "proxy")
-
-	g.DryRun = dryRun
-	if dryRun {
-		logger.InfoContext(ctx, "Proxy generator in dry-run mode - no files will be written")
-	}
-}
-
-// SetVerbose enables or disables verbose logging mode
-func (g *Generator) SetVerbose(ctx context.Context, verbose bool) {
-	ctx = logger.ContextWithComponentOnce(ctx, "proxy")
-
-	g.Verbose = verbose
-	if verbose {
-		logger.InfoContext(ctx, "Proxy generator in verbose mode - detailed logging enabled")
-	}
-}

@@ -4,12 +4,6 @@
 
 package commands
 
-// CLI flags
-const (
-	flagDryRun  = "--dry-run"
-	flagVerbose = "--verbose"
-)
-
 // LDAP/Zimbra attributes
 const (
 	attrZimbraReverseProxyLookupTarget = "zimbraReverseProxyLookupTarget"
@@ -33,25 +27,7 @@ const mailModeHTTP = "http"
 
 // Command names
 const (
-	cmdAmavis      = "amavis"
-	cmdAntispam    = "antispam"
-	cmdAntivirus   = "antivirus"
-	cmdCBPolicyd   = "cbpolicyd"
-	cmdGAMAU       = "gamau"
-	cmdGARPB       = "garpb"
-	cmdGARPU       = "garpu"
-	cmdLDAP        = "ldap"
-	cmdLocalconfig = "localconfig"
-	cmdMailbox     = "mailbox"
-	cmdMailboxd    = "mailboxd"
-	cmdMemcached   = "memcached"
-	cmdMTA         = "mta"
-	cmdOpenDKIM    = "opendkim"
-	cmdPostconf    = "postconf"
-	cmdPostconfd   = "postconfd"
-	cmdProxy       = "proxy"
-	cmdProxygen    = "proxygen"
-	cmdSASL        = "sasl"
-	cmdService     = "service"
-	cmdStats       = "stats"
+	cmdGAMAU = "gamau"
+	cmdGARPB = "garpb"
+	cmdGARPU = "garpu"
 )

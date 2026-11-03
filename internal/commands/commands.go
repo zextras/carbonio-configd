@@ -2,10 +2,9 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Package commands provides a framework for executing external commands and internal functions.
-// It supports both shell command execution and Go function calls with consistent error handling,
-// logging, and output management. This package is used throughout configd for running
-// system commands, provisioning functions, and configuration management operations.
+// Package commands holds the LDAP-backed provisioning lookups the config
+// manager reads (garpu, garpb, gamau and the typed server/global attributes)
+// behind a small Command wrapper with status, output and error tracking.
 package commands
 
 import (
@@ -14,22 +13,13 @@ import (
 	"fmt"
 	"iter"
 	"maps"
-	"os"
 	"slices"
 	"strings"
 	"time"
 
-	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/ldap"
-	"github.com/zextras/carbonio-configd/internal/localconfig"
 	"github.com/zextras/carbonio-configd/internal/logger"
-	"github.com/zextras/carbonio-configd/internal/proxy"
-	"github.com/zextras/carbonio-configd/internal/sys"
 )
-
-// defaultZextrasHome is the fallback installation root when neither
-// ZEXTRAS_HOME nor CARBONIO_BASE_DIR is set.
-const defaultZextrasHome = config.ZextrasBase
 
 // Configuration key constants
 const (
@@ -76,14 +66,8 @@ func (e *CommandExecutor) requireLDAP() error {
 
 // Command represents a command to be executed, mirroring jylibs/commands.py Command class.
 type Command struct {
-	Desc string // Description of the command
-	Name string // Name of the command
-	// Binary path for command execution (no shell interpolation)
-	Binary  string   // nolint: lll // Binary is intentionally short for alignment
-	CmdArgs []string // Additional arguments prepended before runtime args
-	// Exec runs Binary; it must be set on every Command that has a Binary.
-	// NewRegistry wires it from its sys.System.
-	Exec sys.Exec
+	Desc string                                                    // Description of the command
+	Name string                                                    // Name of the command
 	Func func(ctx context.Context, args ...string) (string, error) // Go function to execute
 	Args []string
 	// State tracking fields
@@ -100,14 +84,13 @@ func NewCommand(
 	cmdArgs ...string,
 ) *Command {
 	c := &Command{
-		Desc:    desc,
-		Name:    name,
-		Func:    fn,
-		Args:    cmdArgs,
-		Status:  0,
-		Output:  "",
-		Error:   "",
-		CmdArgs: nil, // Initialize as empty slice
+		Desc:   desc,
+		Name:   name,
+		Func:   fn,
+		Args:   cmdArgs,
+		Status: 0,
+		Output: "",
+		Error:  "",
 	}
 	c.resetState()
 
@@ -146,28 +129,15 @@ func (c *Command) ExecuteWithContext(ctx context.Context, args ...string) (exitC
 	t1 := time.Now()
 
 	var (
-		output    string
-		stderrOut string
-		err       error
-		rc        int
+		output string
+		err    error
+		rc     int
 	)
 
-	switch {
-	case c.Binary != "":
-		rc, output, stderrOut, err = c.runBinaryCapture(ctx, args)
-		// Legacy commands.py execute(): any rc >= 0 keeps output/error and is
-		// reported through the status; only spawn failures and death by signal
-		// (rc < 0) are errors.
-		if _, isExit := stderrors.AsType[*sys.ExitError](err); isExit && rc >= 0 {
-			err = nil
-		}
-	case c.Func != nil:
-		// Go function execution
+	if c.Func != nil {
 		output, err = c.Func(ctx, args...)
 		if err != nil {
 			rc = 1 // Indicate error
-		} else {
-			rc = 0 // Indicate success
 		}
 	}
 
@@ -187,14 +157,10 @@ func (c *Command) ExecuteWithContext(ctx context.Context, args ...string) (exitC
 		output = "UNKNOWN OUTPUT"
 	}
 
-	c.Error = stderrOut
-
-	if c.Error == "" {
-		if rc == 0 {
-			c.Error = "OK"
-		} else {
-			c.Error = "UNKNOWN ERROR"
-		}
+	if rc == 0 {
+		c.Error = "OK"
+	} else {
+		c.Error = "UNKNOWN ERROR"
 	}
 
 	c.Output = output
@@ -217,42 +183,6 @@ func (c *Command) ExecuteWithContext(ctx context.Context, args ...string) (exitC
 	}
 
 	return c.Status, c.Output, c.Error
-}
-
-// runBinaryWithContext executes a command using the structured Binary+CmdArgs pattern
-// and returns stdout and stderr combined. A non-zero exit is reported as an error.
-func (c *Command) runBinaryWithContext(ctx context.Context, args []string) (exitCode int, output string, err error) {
-	exitCode, stdout, stderr, err := c.runBinaryCapture(ctx, args)
-
-	return exitCode, stdout + stderr, err
-}
-
-// runBinaryCapture executes the binary and returns stdout and stderr separately,
-// plus the raw error from the Exec (a *sys.ExitError for non-zero exits).
-func (c *Command) runBinaryCapture(
-	ctx context.Context, args []string,
-) (exitCode int, stdout, stderr string, err error) {
-	cmdArgs := make([]string, 0, len(c.CmdArgs)+len(args))
-	cmdArgs = append(cmdArgs, c.CmdArgs...)
-	cmdArgs = append(cmdArgs, args...)
-
-	logger.DebugContext(ctx, "Executing command",
-		"binary", c.Binary, "args", cmdArgs)
-
-	res, cmdErr := c.Exec.Run(ctx, &sys.Cmd{Path: c.Binary, Args: cmdArgs})
-	stdout, stderr = string(res.Stdout), string(res.Stderr)
-
-	if cmdErr != nil {
-		if exitErr, ok := stderrors.AsType[*sys.ExitError](cmdErr); ok {
-			exitCode = exitErr.ExitCode()
-		} else {
-			exitCode = 1
-		}
-
-		return exitCode, stdout, stderr, cmdErr
-	}
-
-	return 0, stdout, stderr, nil
 }
 
 func (c *Command) String() string {
@@ -302,24 +232,6 @@ func (e *CommandExecutor) GlobalAttrs(ctx context.Context) (map[string]string, e
 		"attr_count", len(globalAttrs))
 
 	return globalAttrs, nil
-}
-
-func getlocal(ctx context.Context, args ...string) (string, error) {
-	logger.DebugContext(ctx, "Loading localconfig (XML + defaults + interpolation)")
-
-	// Load configuration with defaults and ${variable} interpolation
-	localCfg, err := localconfig.LoadResolvedConfig()
-	if err != nil {
-		return "", fmt.Errorf("failed to load localconfig: %w", err)
-	}
-
-	// Convert to key=value format matching old zmlocalconfig -s output
-	output := localconfig.FormatAsKeyValue(localCfg)
-
-	logger.DebugContext(ctx, "Localconfig loaded successfully",
-		"key_count", len(localCfg))
-
-	return output, nil
 }
 
 // sortedServers yields server attribute maps ordered by server name (cn).
@@ -500,133 +412,10 @@ func (e *CommandExecutor) garpb(ctx context.Context, args ...string) (string, er
 	return strings.Join(backends, " "), nil
 }
 
-// parseProxygenArgs parses the proxygen argument list and returns hostname, dryRun, verbose.
-func parseProxygenArgs(args []string) (hostname string, dryRun, verbose bool) {
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "-s":
-			if i+1 < len(args) {
-				hostname = args[i+1]
-				i++
-			}
-		case "-d", flagDryRun:
-			dryRun = true
-		case "-v", flagVerbose:
-			verbose = true
-		default:
-			if hostname == "" && !strings.HasPrefix(args[i], "-") {
-				hostname = args[i]
-			}
-		}
-	}
-
-	return hostname, dryRun, verbose
-}
-
-// makeProxygen returns the proxygen command function writing through env.
-func makeProxygen(env sys.System) func(ctx context.Context, args ...string) (string, error) {
-	return func(ctx context.Context, args ...string) (string, error) {
-		return proxygen(ctx, env, args)
-	}
-}
-
-func proxygen(ctx context.Context, env sys.System, args []string) (string, error) {
-	logger.DebugContext(ctx, "Executing proxygen command",
-		"args", args)
-
-	hostname, dryRun, verbose := parseProxygenArgs(args)
-
-	if hostname == "" {
-		return "", fmt.Errorf("hostname required for proxygen (use -s hostname)")
-	}
-
-	logger.DebugContext(ctx, "Running Go proxy configuration generator",
-		"hostname", hostname)
-
-	baseDir := os.Getenv("ZEXTRAS_HOME")
-	if baseDir == "" {
-		baseDir = defaultZextrasHome
-	}
-
-	// Create base configuration
-	cfg := &config.Config{
-		BaseDir:  baseDir,
-		Hostname: hostname,
-	}
-
-	// Initialize LDAP client (nil for now - will be implemented later)
-	var ldapClient *ldap.Ldap
-
-	// Load configuration and create generator
-	// Pass nil configs - LoadConfiguration will create empty ones for standalone mode
-	// When called from ConfigManager, it should use RunProxygenWithConfigs instead
-	gen, err := proxy.LoadConfiguration(ctx, env, cfg, proxy.Sources{Ldap: ldapClient})
-	if err != nil {
-		logger.ErrorContext(ctx, "Failed to initialize proxy generator",
-			"error", err)
-
-		return "", fmt.Errorf("proxy generator initialization failed: %w", err)
-	}
-
-	// Set dry-run and verbose modes if requested
-	gen.SetDryRun(ctx, dryRun)
-	gen.SetVerbose(ctx, verbose)
-
-	// Generate all nginx configuration files
-	logger.DebugContext(ctx, "Generating nginx proxy configuration files")
-
-	if err := gen.GenerateAll(ctx); err != nil {
-		logger.ErrorContext(ctx, "Proxy configuration generation failed",
-			"error", err)
-
-		return "", fmt.Errorf("proxy configuration generation failed: %w", err)
-	}
-
-	successMsg := "Proxy configuration generated successfully"
-	if dryRun {
-		successMsg += " (dry-run mode - no files written)"
-	}
-
-	if verbose {
-		successMsg += " (verbose mode - detailed logging enabled)"
-	}
-
-	logger.DebugContext(ctx, successMsg,
-		"dry_run", dryRun,
-		"verbose", verbose)
-
-	return successMsg, nil
-}
-
-// postconfExec executes postconf with proper argument handling.
-// Args format: "key=value" (the caller should format as key=value without extra quotes)
-func makePostconfExec(x sys.Exec, postconfSpec string) func(ctx context.Context, args ...string) (string, error) {
-	return func(ctx context.Context, args ...string) (string, error) {
-		if len(args) == 0 {
-			return "", fmt.Errorf("postconf requires arguments")
-		}
-
-		fields := strings.Fields(postconfSpec)
-		if len(fields) == 0 {
-			return "", fmt.Errorf("postconf executable path not configured")
-		}
-
-		cmd := &Command{Binary: fields[0], CmdArgs: []string{"-e"}, Exec: x}
-
-		_, output, err := cmd.runBinaryWithContext(ctx, args[:1])
-		if err != nil {
-			return output, fmt.Errorf("postconf command failed: %w (output: %s)", err, output)
-		}
-
-		return output, nil
-	}
-}
-
-// Registry holds command executables and command definitions for a specific ZEXTRAS_HOME.
-// It replaces the former package-level globals (Exe, Commands) to enable
-// per-instance initialization and path overrides.
+// Registry holds the LDAP-backed lookups the config manager reads: the typed
+// server/global attribute getters and the garpu/garpb/gamau misc commands. It
+// is empty until RegisterLDAPCommands is called.
 type Registry struct {
-	Exe      map[string]string
 	Commands map[string]*Command
 	// ServerAttrs and GlobalAttrs return typed LDAP attributes straight from
 	// the native client; nil until RegisterLDAPCommands is called.
@@ -634,64 +423,10 @@ type Registry struct {
 	GlobalAttrs func(ctx context.Context) (map[string]string, error)
 }
 
-// NewRegistry creates a new Registry with executable paths and commands initialized
-// based on the provided zextrasHome directory. If zextrasHome is empty, defaults to
-// "/opt/zextras". Every external command runs through env.Exec and proxygen writes
-// through env. The registry is safe for concurrent use after construction.
-func NewRegistry(zextrasHome string, env sys.System) *Registry {
-	r := &Registry{
-		Exe:      make(map[string]string),
-		Commands: make(map[string]*Command),
-	}
-
-	baseDir := zextrasHome
-	if baseDir == "" {
-		baseDir = defaultZextrasHome
-	}
-
-	binDir := baseDir + "/bin"
-
-	r.Exe = map[string]string{
-		"AMAVIS":    binDir + "/zmamavisdctl",
-		"ANTISPAM":  binDir + "/zmantispamctl",
-		"ANTIVIRUS": binDir + "/zmclamdctl",
-		"CBPOLICYD": binDir + "/zmcbpolicydctl",
-		"LDAP":      binDir + "/ldap",
-		"MAILBOX":   binDir + "/zmstorectl",
-		"MAILBOXD":  binDir + "/zmmailboxdctl",
-		"MEMCACHED": binDir + "/zmmemcachedctl",
-		"MTA":       binDir + "/zmmtactl",
-		"OPENDKIM":  baseDir + "/bin/zmopendkimctl", // Assuming also in bin
-		"POSTCONF":  binDir + "/postconf -e",
-		"POSTCONFD": binDir + "/postconf -X",
-		"PROXY":     binDir + "/zmproxyctl",
-		"SASL":      binDir + "/zmsaslauthdctl",
-		"SERVICE":   binDir + "/zmmailboxdctl",
-		"STATS":     binDir + "/zmstatctl",
-	}
-
-	r.Commands = map[string]*Command{
-		cmdAmavis:      {Desc: cmdAmavis, Name: cmdAmavis, Binary: r.Exe["AMAVIS"], Exec: env.Exec},
-		cmdAntispam:    {Desc: cmdAntispam, Name: cmdAntispam, Binary: r.Exe["ANTISPAM"], Exec: env.Exec},
-		cmdAntivirus:   {Desc: cmdAntivirus, Name: cmdAntivirus, Binary: r.Exe["ANTIVIRUS"], Exec: env.Exec},
-		cmdCBPolicyd:   {Desc: cmdCBPolicyd, Name: cmdCBPolicyd, Binary: r.Exe["CBPOLICYD"], Exec: env.Exec},
-		cmdLDAP:        {Desc: cmdLDAP, Name: cmdLDAP, Binary: r.Exe["LDAP"], Exec: env.Exec},
-		cmdLocalconfig: {Desc: "Local server configuration", Name: cmdLocalconfig, Func: getlocal},
-		cmdMailbox:     {Desc: cmdMailbox, Name: cmdMailbox, Binary: r.Exe["MAILBOX"], Exec: env.Exec},
-		cmdMailboxd:    {Desc: cmdMailboxd, Name: cmdMailboxd, Binary: r.Exe["MAILBOXD"], Exec: env.Exec},
-		cmdMemcached:   {Desc: cmdMemcached, Name: cmdMemcached, Binary: r.Exe["MEMCACHED"], Exec: env.Exec},
-		cmdMTA:         {Desc: cmdMTA, Name: cmdMTA, Binary: r.Exe["MTA"], Exec: env.Exec},
-		cmdOpenDKIM:    {Desc: cmdOpenDKIM, Name: cmdOpenDKIM, Binary: r.Exe["OPENDKIM"], Exec: env.Exec},
-		cmdPostconf:    {Desc: cmdPostconf, Name: cmdPostconf, Func: makePostconfExec(env.Exec, r.Exe["POSTCONF"])},
-		cmdPostconfd:   {Desc: cmdPostconfd, Name: cmdPostconfd, Binary: r.Exe["POSTCONFD"], Exec: env.Exec},
-		cmdProxy:       {Desc: cmdProxy, Name: cmdProxy, Binary: r.Exe["PROXY"], Exec: env.Exec},
-		cmdProxygen:    {Desc: cmdProxygen, Name: cmdProxygen, Func: makeProxygen(env)},
-		cmdSASL:        {Desc: cmdSASL, Name: cmdSASL, Binary: r.Exe["SASL"], Exec: env.Exec},
-		cmdService:     {Desc: cmdService, Name: cmdService, Binary: r.Exe["SERVICE"], Exec: env.Exec},
-		cmdStats:       {Desc: cmdStats, Name: cmdStats, Binary: r.Exe["STATS"], Exec: env.Exec},
-	}
-
-	return r
+// NewRegistry creates an empty Registry. The registry is safe for concurrent
+// use after RegisterLDAPCommands.
+func NewRegistry() *Registry {
+	return &Registry{Commands: make(map[string]*Command)}
 }
 
 // RegisterLDAPCommands registers LDAP-dependent commands using the given CommandExecutor.
