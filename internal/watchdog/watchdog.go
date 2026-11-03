@@ -9,6 +9,8 @@ package watchdog
 
 import (
 	"context"
+	"maps"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -71,6 +73,10 @@ type Watchdog struct {
 
 	// metrics counts watchdog restarts; nil records nothing.
 	metrics *metrics.Registry
+
+	// systemdMode makes the watchdog a no-op: on a systemd host the units'
+	// Restart= policy recovers crashed services.
+	systemdMode bool
 }
 
 const (
@@ -136,10 +142,15 @@ type Config struct {
 	// *services.Controller behind ServiceManager). Nil makes every probe read
 	// the live process table.
 	Snapshots SnapshotProvider
+
+	// SystemdMode marks a host whose services are managed through systemd
+	// units. The watchdog then does nothing (Start and Stop are no-ops): the
+	// units' Restart= handles crashes, as legacy zmconfigd relied on it.
+	SystemdMode bool
 }
 
 // NewWatchdog creates a new Watchdog instance.
-func NewWatchdog(cfg Config) *Watchdog {
+func NewWatchdog(cfg Config) *Watchdog { //nolint:gocritic // hugeParam: construction-time value object
 	if cfg.CheckInterval == 0 {
 		cfg.CheckInterval = 60 * time.Second // Default: 60 seconds
 	}
@@ -154,6 +165,7 @@ func NewWatchdog(cfg Config) *Watchdog {
 		configLookup:   cfg.ConfigLookup,
 		clock:          cfg.Clock,
 		snapshots:      cfg.Snapshots,
+		systemdMode:    cfg.SystemdMode,
 	}
 }
 
@@ -163,9 +175,16 @@ func (w *Watchdog) SetMetrics(reg *metrics.Registry) {
 	w.metrics = reg
 }
 
-// Start begins the watchdog monitoring loop.
+// Start begins the watchdog monitoring loop. In systemd mode it only logs that
+// the watchdog is off.
 func (w *Watchdog) Start(ctx context.Context) {
 	ctx = logger.ContextWithComponentOnce(ctx, "watchdog")
+
+	if w.systemdMode {
+		logger.InfoContext(ctx, "Watchdog disabled in systemd mode: unit Restart= policies recover crashed services")
+
+		return
+	}
 
 	w.mu.Lock()
 
@@ -193,6 +212,10 @@ func (w *Watchdog) Start(ctx context.Context) {
 // once its current cycle completes. Start may be called again afterwards.
 func (w *Watchdog) Stop(ctx context.Context) {
 	ctx = logger.ContextWithComponentOnce(ctx, "watchdog")
+
+	if w.systemdMode {
+		return
+	}
 
 	w.mu.Lock()
 
@@ -297,6 +320,21 @@ func (w *Watchdog) checkServices(ctx context.Context) {
 
 	for _, service := range w.getTrackedServices() {
 		w.checkOneService(ctx, probeCtx, service, observed)
+	}
+
+	w.rearmRunningServices(ctx, observed)
+}
+
+// rearmRunningServices starts watching again every monitored service this tick
+// saw running that is not tracked. A service leaves the tracking when it is
+// restarted on purpose (the service manager's BeforeRestart); as in legacy
+// configd, the next status check that sees it running makes it eligible for
+// restarts again. A service seen down is left alone: whoever stopped it owns it.
+func (w *Watchdog) rearmRunningServices(ctx context.Context, observed map[string]bool) {
+	for _, service := range slices.Sorted(maps.Keys(observed)) {
+		if observed[service] && !w.IsServiceTracked(service) {
+			w.AddService(ctx, service)
+		}
 	}
 }
 
@@ -410,13 +448,23 @@ func (w *Watchdog) checkOneService(ctx, probeCtx context.Context, service string
 		return
 	}
 
+	// A config-driven restart may have taken the service over since the
+	// probe; the service manager untracked it then.
+	if !w.IsServiceTracked(service) {
+		logger.DebugContext(ctx, "Service is being restarted elsewhere, skipping", "service", service)
+
+		return
+	}
+
 	w.restartDownService(ctx, service)
 }
 
-// restartDownService removes the service from watchdog tracking, queues a restart,
-// and re-adds it on success. On failure the service stays untracked, as in legacy
-// configd: controlProcess drops it from watchdogProcess on restart and it only
-// becomes eligible again once a later status check sees it running.
+// restartDownService removes the service from watchdog tracking, queues a restart
+// and watches the service again once the attempt is over, whether it succeeded
+// or not: a service that is still down after a failed restart must stay
+// eligible so a later tick retries it (the untracking only keeps the watchdog
+// from queueing a second restart while this one runs). A shutdown interrupting
+// the attempt leaves the service untracked; nothing runs afterwards.
 func (w *Watchdog) restartDownService(ctx context.Context, service string) {
 	logger.WarnContext(ctx, "Service not running, attempting restart", "service", service)
 
@@ -425,6 +473,7 @@ func (w *Watchdog) restartDownService(ctx context.Context, service string) {
 	if err := w.serviceManager.AddRestart(ctx, service); err != nil {
 		logger.ErrorContext(ctx, "Failed to queue restart", "service", service, "error", err)
 		w.metrics.WatchdogRestart(service, false)
+		w.AddService(ctx, service)
 
 		return
 	}
@@ -438,6 +487,7 @@ func (w *Watchdog) restartDownService(ctx context.Context, service string) {
 
 		logger.ErrorContext(ctx, "Failed to restart service", "service", service, "error", err)
 		w.metrics.WatchdogRestart(service, false)
+		w.AddService(ctx, service)
 
 		return
 	}

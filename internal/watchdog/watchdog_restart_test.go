@@ -21,8 +21,7 @@ import (
 
 // TestRestartDownService_FailureNotLoggedAsSuccess verifies that when
 // ProcessRestarts reports a failure the watchdog logs an error, never claims
-// success, and leaves the service untracked (legacy configd only re-tracks a
-// service once a later status check sees it running).
+// success, and keeps watching the service so a later tick retries it.
 func TestRestartDownService_FailureNotLoggedAsSuccess(t *testing.T) {
 	t.Parallel()
 
@@ -50,8 +49,8 @@ func TestRestartDownService_FailureNotLoggedAsSuccess(t *testing.T) {
 		t.Errorf("expected an ERROR 'Failed to restart service' line, got:\n%s", out)
 	}
 
-	if wd.IsServiceTracked("amavis") {
-		t.Error("service must stay untracked after a failed restart")
+	if !wd.IsServiceTracked("amavis") {
+		t.Error("service must be watched again after a failed restart so a later tick retries it")
 	}
 }
 

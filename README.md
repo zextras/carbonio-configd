@@ -148,6 +148,8 @@ Limitations:
   proxy files themselves are not rendered by `plan`.
 - Restarts shown are those the drifted sections would trigger. The running daemon restarts
   services only on variable changes, and a forced rewrite (`configd rewrite`) never restarts.
+- On a systemd host the heavy services (mailbox, appserver-db, store, ldap) show as
+  `pending-restart`: the daemon never restarts them, it only logs that a restart is pending.
 
 ### Shadow mode (QA nodes)
 

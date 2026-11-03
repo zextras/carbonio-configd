@@ -112,12 +112,13 @@ func NewConfigManager(ctx context.Context, mainCfg *config.Config,
 	appState *state.State, ldapClient *ldap.Ldap, cacheInstance *cache.ConfigCache,
 	env sys.System) *ConfigManager {
 	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
+	serviceMgr := services.NewServiceManager(services.NewController(env))
 	cm := &ConfigManager{
 		mainConfig:      mainCfg,
 		State:           appState,
 		LdapClient:      ldapClient,
 		Cache:           cacheInstance,
-		ServiceMgr:      services.NewServiceManager(services.NewController(env)),
+		ServiceMgr:      serviceMgr,
 		CommandRegistry: commands.NewRegistry(mainCfg.BaseDir, env),
 		env:             env,
 
@@ -129,9 +130,17 @@ func NewConfigManager(ctx context.Context, mainCfg *config.Config,
 	cm.mtaResolver = mtaops.NewResolver(mainCfg.BaseDir, env)
 	cm.initNativeLdapClient(ctx)
 	cm.metrics = metrics.New()
-	cm.policy = restart.New(cm.ServiceMgr, env.Clock).WithMetrics(cm.metrics)
+	cm.policy = restart.New(serviceMgr, env.Clock).WithSystemd(serviceMgr).WithMetrics(cm.metrics)
 
 	return cm
+}
+
+// Services returns the service manager that runs the config-driven restarts;
+// the daemon shares it with the watchdog.
+func (cm *ConfigManager) Services() *services.ServiceManager {
+	sm, _ := cm.ServiceMgr.(*services.ServiceManager)
+
+	return sm
 }
 
 // Metrics returns the registry the manager and the components it built record
