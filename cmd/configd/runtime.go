@@ -151,7 +151,8 @@ func loadHooks(env sys.System, ctl *services.Controller, path string) (*services
 }
 
 // validateHooks checks that the hooks file covers what this process will do:
-// a restart hook for every service a RESTART line of an in-scope section names,
+// a restart hook for every service a RESTART line of an in-scope section names
+// and every service a restart of those cascades into (DEPENDS),
 // and a status hook for every service the watchdog monitors. It must run on
 // the parsed zmconfigd.cf. It is a no-op on a host.
 func (rt *runtime) validateHooks(conf *config.MtaConfig, watchdogOn bool) error {
@@ -169,6 +170,11 @@ func (rt *runtime) validateHooks(conf *config.MtaConfig, watchdogOn bool) error 
 		for svc := range sec.Restarts {
 			restart[strings.ToLower(svc)] = true
 		}
+	}
+
+	// A restart cascades through the DEPENDS table the service manager uses.
+	for _, dep := range services.DependencyClosure(sectionDependencies(conf.Sections), slices.Sorted(maps.Keys(restart))) {
+		restart[dep] = true
 	}
 
 	var status []string

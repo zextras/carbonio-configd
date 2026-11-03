@@ -121,6 +121,20 @@ func TestValidateHooks_ListsMissingRestartHooksOfInScopeSections(t *testing.T) {
 	require.NoError(t, rt.validateHooks(conf, false))
 }
 
+func TestValidateHooks_ListsCascadedDependencyRestarts(t *testing.T) {
+	t.Parallel()
+
+	rt, _ := podRuntime(t, `{"antivirus":{"restart":["skip"]}}`, map[string]string{"zmconfigd_sections": "antivirus"})
+	conf := mtaConfig(map[string][]string{"antivirus": {"antivirus"}})
+	conf.Sections["antivirus"].Depends = map[string]bool{"amavis": true}
+	conf.Sections["amavis"] = &config.MtaConfigSection{Name: "amavis", Depends: map[string]bool{"mta": true}}
+
+	err := rt.validateHooks(conf, false)
+
+	require.ErrorIs(t, err, services.ErrHooksMissing)
+	assert.Equal(t, "service hooks missing: restart:amavis, restart:mta", err.Error())
+}
+
 func TestValidateHooks_WatchdogNeedsStatusHooks(t *testing.T) {
 	t.Parallel()
 

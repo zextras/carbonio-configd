@@ -119,7 +119,8 @@ list; the first failing hook fails the action.
 | `process` | status | The service is running when its process is found as above. |
 
 An unknown service, action or hook is a startup error. After the first parse of `zmconfigd.cf` the
-daemon also checks that every service named by a `RESTART` line of an in-scope section has a
+daemon also checks that every service named by a `RESTART` line of an in-scope section, and every
+service a restart of those cascades into through `DEPENDS` (e.g. `amavis` from `antivirus`), has a
 `restart` hook and, when the watchdog is on (`zmconfigd_watchdog`), that every watchdog service has a
 `status` hook. It exits with status 1 listing what is missing (`restart:<svc>`, `status:<svc>`)
 instead of retrying forever. A missing `start`/`stop` hook fails only when that action is attempted.

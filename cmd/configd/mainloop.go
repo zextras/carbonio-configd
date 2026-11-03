@@ -609,6 +609,20 @@ func RunMainLoop(ctx context.Context, rt *runtime, args *Args, notifier *sdnotif
 	})
 }
 
+// sectionDependencies maps each section to the services that depend on it
+// (its DEPENDS list): the table the service manager cascades restarts through.
+func sectionDependencies(sections map[string]*config.MtaConfigSection) map[string][]string {
+	deps := make(map[string][]string)
+
+	for name, section := range sections {
+		if len(section.Depends) > 0 {
+			deps[name] = slices.Sorted(maps.Keys(section.Depends))
+		}
+	}
+
+	return deps
+}
+
 // buildServiceDependencies extracts dependencies from MTA config sections and sets them in the service manager.
 func buildServiceDependencies(ctx context.Context, serviceMgr services.Manager, appState *state.State) {
 	ctx = logger.ContextWithComponent(ctx, "mainloop")
@@ -618,13 +632,7 @@ func buildServiceDependencies(ctx context.Context, serviceMgr services.Manager, 
 		return
 	}
 
-	deps := make(map[string][]string)
-
-	for name, section := range sections {
-		if len(section.Depends) > 0 {
-			deps[name] = slices.Sorted(maps.Keys(section.Depends))
-		}
-	}
+	deps := sectionDependencies(sections)
 
 	serviceMgr.SetDependencies(ctx, deps)
 	logger.DebugContext(ctx, "Set service dependencies",
