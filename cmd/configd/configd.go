@@ -189,6 +189,7 @@ func main() {
 		kong.Description("Configuration management daemon for Carbonio"),
 		kong.Vars{"version": formatVersion()},
 		kong.Bind(env),
+		kong.Exit(exitKong),
 	)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

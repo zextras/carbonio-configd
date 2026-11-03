@@ -29,7 +29,7 @@ type LocalconfigCmd struct {
 	Unset         bool     `short:"u" help:"Unset (remove) keys"`
 	Random        bool     `short:"r" help:"Set key to random password (use with -e)"`
 	Force         bool     `short:"f" name:"force" help:"Allow editing dangerous keys (legacy zmlocalconfig -f)"`
-	Expand        bool     `short:"x" hidden:"" help:"Expand variables (accepted for compatibility)"`
+	Expand        bool     `short:"x" help:"Expand $${key} references (shell and export always expand)"`
 	Info          bool     `short:"i" name:"info" help:"Show documentation for the keys listed in [args]"`
 	All           bool     `name:"all" hidden:"" help:"Show documentation for all keys, including unsupported ones"`
 	Reload        bool     `short:"l" name:"reload" help:"Send a SOAP request to the server to reload its local config"`

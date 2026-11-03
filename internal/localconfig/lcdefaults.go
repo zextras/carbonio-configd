@@ -7,7 +7,7 @@
 package localconfig
 
 // lcDefaults is a verbatim port of every KnownKey default declared in
-// carbonio-mailbox (tag 4.36.6) common/src/main/java/com/zimbra/common/localconfig/LC.java.
+// carbonio-mailbox (tag v4.38.16) common/src/main/java/com/zimbra/common/localconfig/LC.java.
 //
 // configd is the only local-config implementation left on a Carbonio node: the
 // Java LocalConfigCLI is gone and both /opt/zextras/bin/zmlocalconfig and
@@ -19,7 +19,9 @@ package localconfig
 // therefore ported, not a hand-picked subset.
 //
 // Conversion rules applied to the Java declarations:
-//   - Java null defaults become "" (LC.get uses Strings.nullToEmpty).
+//   - Java null defaults are not in lcDefaults: they are listed in lcNullKeys.
+//     Legacy LocalConfig skips such a key in every listing and warns
+//     "null valued key" when it is asked for by name.
 //   - Numeric and boolean defaults become their decimal / "true"|"false" text.
 //   - Constants.MILLIS_PER_*, Integer.MAX_VALUE and constant arithmetic are
 //     evaluated to their literal result.
@@ -38,7 +40,6 @@ var lcDefaults = map[string]string{
 	"antispam_mysql_data_directory":                              "${zimbra_home}/data/amavisd/mysql/data",
 	"antispam_mysql_enabled":                                     "false",
 	"antispam_mysql_errlogfile":                                  "${zimbra_home}/log/antispam-mysqld.log",
-	"antispam_mysql_host":                                        "",
 	"antispam_mysql_mycnf":                                       "${zimbra_home}/conf/antispam-my.cnf",
 	"antispam_mysql_password":                                    "",
 	"antispam_mysql_port":                                        "7308",
@@ -117,9 +118,6 @@ var lcDefaults = map[string]string{
 	"filter_null_env_sender_for_dsn_redirect":                    "true",
 	"folder_tag_cache_lock_timeout_seconds":                      "10",
 	"freebusy_disable_nodata_status":                             "false",
-	"freebusy_exchange_cn1":                                      "",
-	"freebusy_exchange_cn2":                                      "",
-	"freebusy_exchange_cn3":                                      "",
 	"freebusy_queue_directory":                                   "${zimbra_home}/fbqueue/",
 	"gal_group_cache_maxage":                                     "10080",
 	"gal_group_cache_maxsize_domains":                            "10",
@@ -154,7 +152,6 @@ var lcDefaults = map[string]string{
 	"imap_max_consecutive_error":                                 "5",
 	"imap_max_idle_time":                                         "60",
 	"imap_max_items_in_copy":                                     "1000",
-	"imap_max_message_size":                                      "",
 	"imap_max_nesting_in_search_request":                         "100",
 	"imap_max_request_size":                                      "10240",
 	"imap_max_time_to_wait_for_catchup_millis":                   "30000",
@@ -286,12 +283,13 @@ var lcDefaults = map[string]string{
 	"lock_based_cache_invalidation_enabled":                      "true",
 	"logger_data_directory":                                      "${zimbra_home}/logger/db/data",
 	"logger_zmrrdfetch_port":                                     "10663",
+	"mailbox_authz_api_bind_address":                             "127.78.0.7",
+	"mailbox_authz_api_port":                                     "10001",
 	"mailbox_healthcheck_touchpoint_file":                        "/opt/zextras/healthcheck_touchpoint",
 	"mailbox_internal_api_bind_address":                          "127.78.0.7",
 	"mailbox_internal_api_port":                                  "10000",
 	"mailboxd_directory":                                         "${zimbra_home}/mailboxd",
 	"mailboxd_java_heap_new_size_percent":                        "25",
-	"mailboxd_java_heap_size":                                    "",
 	"mailboxd_java_options":                                      "-server -Dhttps.protocols=TLSv1.2,TLSv1.3 -Djdk.tls.client.protocols=TLSv1.2,TLSv1.3 -Djava.awt.headless=true -Djava.net.preferIPv4Stack=true -Dsun.net.inetaddr.ttl=${networkaddress_cache_ttl} -Dorg.apache.jasper.compiler.disablejsr199=true -XX:+UseG1GC -XX:SoftRefLRUPolicyMSPerMB=1 -XX:+UnlockExperimentalVMOptions -XX:G1NewSizePercent=15 -XX:G1MaxNewSizePercent=45 -XX:-OmitStackTraceInFastThrow -verbose:gc -Xlog:gc*=info,safepoint=info:file=/opt/zextras/log/gc.log:time:filecount=20,filesize=10m -Djava.security.egd=file:/dev/./urandom --add-opens java.base/java.lang=ALL-UNNAMED",
 	"mailboxd_keystore":                                          "${mailboxd_directory}/etc/keystore",
 	"mailboxd_keystore_base":                                     "${zimbra_home}/conf/keystore.base",
@@ -305,7 +303,6 @@ var lcDefaults = map[string]string{
 	"mailboxd_truststore":                                        "${zimbra_java_home}/lib/security/cacerts",
 	"mailboxd_truststore_password":                               "changeit",
 	"max_image_size_to_resize":                                   "10485760",
-	"milter_bind_address":                                        "",
 	"milter_bind_port":                                           "0",
 	"milter_in_process_mode":                                     "false",
 	"milter_max_idle_time":                                       "3630",
@@ -320,17 +317,12 @@ var lcDefaults = map[string]string{
 	"mime_promote_empty_multipart":                               "true",
 	"mime_split_address_at_semicolon":                            "true",
 	"mysql_backup_retention":                                     "0",
-	"mysql_bind_address":                                         "",
 	"mysql_data_directory":                                       "${zimbra_db_directory}/data",
 	"mysql_errlogfile":                                           "/opt/zextras/log/mysql_error.log",
-	"mysql_innodb_log_buffer_size":                               "",
-	"mysql_innodb_log_file_size":                                 "",
 	"mysql_memory_percent":                                       "30",
 	"mysql_mycnf":                                                "/opt/zextras/conf/my.cnf",
 	"mysql_port":                                                 "7306",
-	"mysql_read_buffer_size":                                     "",
 	"mysql_root_password":                                        "zimbra",
-	"mysql_sort_buffer_size":                                     "",
 	"networkaddress_cache_ttl":                                   "60",
 	"nio_imap_enabled":                                           "true",
 	"nio_max_write_queue_size":                                   "10000",
@@ -463,7 +455,6 @@ var lcDefaults = map[string]string{
 	"yauth_baseuri":                                              "https://login.yahoo.com/WSLogin/V1",
 	"zimbraPrefCalenderScaling":                                  "false",
 	"zimbra_active_waitset_timeout_minutes":                      "20",
-	"zimbra_activesync_autodiscover_url":                         "",
 	"zimbra_activesync_autodiscover_use_service_url":             "false",
 	"zimbra_activesync_contact_image_size":                       "2097152",
 	"zimbra_activesync_general_cache_size":                       "500",
@@ -647,6 +638,23 @@ var lcDefaults = map[string]string{
 	"zmstat_disk_interval":                                       "6000",
 	"zmstat_interval":                                            "30",
 	"zmstat_max_retention":                                       "365",
+}
+
+// lcNullKeys are the known keys whose Java default is null.
+var lcNullKeys = map[string]bool{
+	"antispam_mysql_host":                true,
+	"freebusy_exchange_cn1":              true,
+	"freebusy_exchange_cn2":              true,
+	"freebusy_exchange_cn3":              true,
+	"imap_max_message_size":              true,
+	"mailboxd_java_heap_size":            true,
+	"milter_bind_address":                true,
+	"mysql_bind_address":                 true,
+	"mysql_innodb_log_buffer_size":       true,
+	"mysql_innodb_log_file_size":         true,
+	"mysql_read_buffer_size":             true,
+	"mysql_sort_buffer_size":             true,
+	"zimbra_activesync_autodiscover_url": true,
 }
 
 // lcProtected is the set of keys declared .protect() in LC.java

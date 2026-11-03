@@ -14,7 +14,7 @@ func TestFormatPlain(t *testing.T) {
 	config := map[string]string{"b_key": "val2", "a_key": "val1"}
 
 	var buf bytes.Buffer
-	FormatPlain(&buf, config)
+	FormatPlain(&buf, config, nil)
 
 	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
 	if len(lines) != 2 {
@@ -34,7 +34,7 @@ func TestFormatShell(t *testing.T) {
 	config := map[string]string{"zimbra_home": "/opt/zextras"}
 
 	var buf bytes.Buffer
-	FormatShell(&buf, config)
+	FormatShell(&buf, config, nil)
 
 	expected := "zimbra_home='/opt/zextras';\n"
 	if buf.String() != expected {
@@ -46,7 +46,7 @@ func TestFormatShell_SingleQuoteEscaping(t *testing.T) {
 	config := map[string]string{"key": "it's a test"}
 
 	var buf bytes.Buffer
-	FormatShell(&buf, config)
+	FormatShell(&buf, config, nil)
 
 	expected := "key='it'\\''s a test';\n"
 	if buf.String() != expected {
@@ -58,7 +58,7 @@ func TestFormatExport(t *testing.T) {
 	config := map[string]string{"zimbra_home": "/opt/zextras"}
 
 	var buf bytes.Buffer
-	FormatExport(&buf, config)
+	FormatExport(&buf, config, nil)
 
 	expected := "export zimbra_home='/opt/zextras';\n"
 	if buf.String() != expected {
@@ -70,7 +70,7 @@ func TestFormatExport_MultipleKeys(t *testing.T) {
 	config := map[string]string{"b": "2", "a": "1"}
 
 	var buf bytes.Buffer
-	FormatExport(&buf, config)
+	FormatExport(&buf, config, nil)
 
 	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
 	if len(lines) != 2 {
@@ -118,7 +118,7 @@ func TestFormatXML(t *testing.T) {
 	config := map[string]string{"zimbra_home": "/opt/zextras"}
 
 	var buf bytes.Buffer
-	err := FormatXML(&buf, config)
+	err := FormatXML(&buf, config, nil)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -144,29 +144,32 @@ func TestMaskPasswords(t *testing.T) {
 		"zimbra_ldap_password": "secret123",
 		"ldap_root_secret":     "topsecret",
 		"mailboxd_java_pass":   "javapass",
-		"normal_key":           "normalval",
+		"My_PASSWORD_Upper":    "upper",
+		"some_passwd":          "passwd",
 	}
 
 	masked := MaskPasswords(config)
 
-	if masked["zimbra_home"] != "/opt/zextras" {
-		t.Error("non-sensitive key should not be masked")
+	if masked["zimbra_ldap_password"] != "*" {
+		t.Errorf("password key should be masked with *, got %q", masked["zimbra_ldap_password"])
 	}
 
-	if masked["normal_key"] != "normalval" {
-		t.Error("non-sensitive key should not be masked")
+	// Legacy rule: only the case-sensitive substring "password".
+	for _, k := range []string{"zimbra_home", "ldap_root_secret", "mailboxd_java_pass", "My_PASSWORD_Upper", "some_passwd"} {
+		if masked[k] != config[k] {
+			t.Errorf("%s must not be masked, got %q", k, masked[k])
+		}
 	}
+}
 
-	if masked["zimbra_ldap_password"] != "**********" {
-		t.Errorf("password key should be masked, got %q", masked["zimbra_ldap_password"])
-	}
+func TestFormat_ExplicitOrderAndRepeats(t *testing.T) {
+	config := map[string]string{"a": "1", "b": "2", "c": "3"}
 
-	if masked["ldap_root_secret"] != "**********" {
-		t.Errorf("secret key should be masked, got %q", masked["ldap_root_secret"])
-	}
+	var buf bytes.Buffer
+	FormatShell(&buf, config, []string{"c", "zz", "a", "c"})
 
-	if masked["mailboxd_java_pass"] != "**********" {
-		t.Errorf("_pass key should be masked, got %q", masked["mailboxd_java_pass"])
+	if want := "c='3';\na='1';\nc='3';\n"; buf.String() != want {
+		t.Errorf("got %q, want %q", buf.String(), want)
 	}
 }
 
@@ -202,7 +205,7 @@ func TestShellEscape(t *testing.T) {
 
 func TestFormatPlain_Empty(t *testing.T) {
 	var buf bytes.Buffer
-	FormatPlain(&buf, map[string]string{})
+	FormatPlain(&buf, map[string]string{}, nil)
 
 	if buf.Len() != 0 {
 		t.Errorf("expected empty output for empty config, got %q", buf.String())
