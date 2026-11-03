@@ -18,7 +18,6 @@ import (
 	"github.com/zextras/carbonio-configd/internal/services"
 	"github.com/zextras/carbonio-configd/internal/state"
 	"github.com/zextras/carbonio-configd/internal/sys"
-	"github.com/zextras/carbonio-configd/internal/systemd"
 	"github.com/zextras/carbonio-configd/internal/watchdog"
 )
 
@@ -62,11 +61,14 @@ func bootstrapDependencies(
 	cacheInstance := cache.New(ctx, false) // skipCache=false to enable caching
 
 	configManager := configmgr.NewConfigManager(ctx, mainCfg, appState, ldapClient, cacheInstance, env)
-	controller := services.NewController(env)
-	serviceManager := services.NewServiceManager(controller)
+	// One service manager serves the config restarts and the watchdog: two
+	// independent managers could restart the same service concurrently and
+	// the watchdog's dependency map was written by the main loop while the
+	// watchdog goroutine read it.
+	serviceManager := configManager.Services()
 
-	systemdManager := systemd.NewManager(env)
-	if systemdManager.IsSystemdEnabled(ctx) {
+	systemdMode := serviceManager.IsSystemdMode()
+	if systemdMode {
 		logger.InfoContext(ctx, "Detected systemd-enabled environment",
 			"use_systemctl", true,
 			"fallback", "zm*ctl")
@@ -76,7 +78,6 @@ func bootstrapDependencies(
 			"scripts_only", "zm*ctl")
 	}
 
-	serviceManager.DisableRestarts = args.DisableRestarts
 	configManager.SetDisableRestarts(args.DisableRestarts)
 
 	watchdogInterval := time.Duration(mainCfg.WatchdogInterval) * time.Second
@@ -89,7 +90,8 @@ func bootstrapDependencies(
 		ServiceManager: serviceManager,
 		State:          appState,
 		Clock:          env.Clock,
-		Snapshots:      controller,
+		Snapshots:      serviceManager,
+		SystemdMode:    systemdMode,
 		ConfigLookup: func(key string) string {
 			val, _ := appState.Snapshot().Local(key)
 
@@ -98,6 +100,10 @@ func bootstrapDependencies(
 	})
 
 	wd.SetMetrics(configManager.Metrics())
+
+	// A service restarted on purpose is not the watchdog's to restart: it stops
+	// watching it until a later check sees it running again.
+	serviceManager.BeforeRestart = func(service string) { wd.RemoveService(ctx, service) }
 
 	return configManager, serviceManager, wd
 }

@@ -892,63 +892,33 @@ func TestApplyRestarts_ProcessRestartsError(t *testing.T) {
 	cm.ApplyRestarts(context.Background(), &plan.Plan{})
 }
 
-// captureRestartLookup applies an empty plan whose snapshot enables the given
-// services and returns the configLookup handed to ProcessRestarts.
-func captureRestartLookup(t *testing.T, enabled ...string) func(string) string {
-	t.Helper()
+// TestApplyRestarts_ProcessRestartsGetsNoCascadeLookup pins the legacy
+// semantics: config-driven restarts never cascade through DEPENDS, so the
+// restart policy hands the (watchdog-shared) manager no enabled-service lookup.
+func TestApplyRestarts_ProcessRestartsGetsNoCascadeLookup(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: configmgr test may have retry delays")
+	}
 
-	var captured func(string) string
+	called := false
 
 	mgr := &testutil.MockServiceManager{
 		ProcessRestartsFn: func(_ context.Context, configLookup func(string) string) error {
-			captured = configLookup
+			called = true
+
+			if configLookup != nil {
+				t.Error("config-driven restarts must not cascade: want a nil configLookup")
+			}
+
 			return nil
 		},
 	}
 	cm := newRestartTestCM(mgr)
 
-	cm.ApplyRestarts(context.Background(), &plan.Plan{Enabled: enabled})
+	cm.ApplyRestarts(context.Background(), &plan.Plan{Enabled: []string{"mta", "nginx"}})
 
-	if captured == nil {
-		t.Fatal("expected ProcessRestarts to be called with a configLookup")
-	}
-
-	return captured
-}
-
-// TestApplyRestarts_ConfigLookup_ServiceEnabled exercises the SERVICE_ lookup
-// of the cascade: services enabled in the plan answer "enabled", every other
-// key "disabled".
-func TestApplyRestarts_ConfigLookup_ServiceEnabled(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
-
-	lookup := captureRestartLookup(t, "mta", "nginx")
-
-	if got := lookup("SERVICE_MTA"); got != "enabled" {
-		t.Errorf("expected 'enabled' for SERVICE_MTA (service enabled), got %q", got)
-	}
-	if got := lookup("SERVICE_NGINX"); got != "enabled" {
-		t.Errorf("SERVICE_NGINX lookup: got %q, want %q", got, "enabled")
-	}
-
-	// Non-SERVICE_ prefix — "disabled"
-	if got := lookup("SHORT"); got != "disabled" {
-		t.Errorf("expected 'disabled' for short key, got %q", got)
-	}
-	if got := lookup("OTHER_KEY"); got != "disabled" {
-		t.Errorf("OTHER_KEY lookup: got %q, want %q", got, "disabled")
-	}
-
-	// SERVICE_ key of a service that is not enabled — "disabled"
-	if got := lookup("SERVICE_PROXY"); got != "disabled" {
-		t.Errorf("expected 'disabled' for disabled service, got %q", got)
-	}
-
-	// "SERVICE_" without a service name — "disabled"
-	if got := lookup("SERVICE_"); got != "disabled" {
-		t.Errorf("SERVICE_ (empty suffix) lookup: got %q, want %q", got, "disabled")
+	if !called {
+		t.Fatal("expected ProcessRestarts to be called")
 	}
 }
 
