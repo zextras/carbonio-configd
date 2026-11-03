@@ -129,9 +129,23 @@ func NewConfigManager(ctx context.Context, mainCfg *config.Config,
 	cm.mtaResolver = mtaops.NewResolver(mainCfg.BaseDir, env)
 	cm.initNativeLdapClient(ctx)
 	cm.metrics = metrics.New()
-	cm.policy = restart.New(cm.ServiceMgr, env.Clock).WithMetrics(cm.metrics)
+	cm.policy = restart.New(serviceMgr, env.Clock).WithMetrics(cm.metrics)
+
+	// A manager that can drive systemd units (the host backend) gets the
+	// systemd restart rules; a hook backend or a test double never does.
+	if sd, ok := serviceMgr.(restart.Systemd); ok {
+		cm.policy.WithSystemd(sd)
+	}
 
 	return cm
+}
+
+// Services returns the service manager that runs the config-driven restarts;
+// the daemon shares it with the watchdog.
+func (cm *ConfigManager) Services() *services.ServiceManager {
+	sm, _ := cm.ServiceMgr.(*services.ServiceManager)
+
+	return sm
 }
 
 // Metrics returns the registry the manager and the components it built record
@@ -154,16 +168,16 @@ func (cm *ConfigManager) initNativeLdapClient(ctx context.Context) {
 
 	// ldap_url may be a single URL or a space-separated list of URLs
 	// (Carbonio HA convention): ParamsFrom normalises both forms (CO-3565).
-	params, err := ldap.ParamsFrom(localCfg, ldap.PurposeRead)
+	// Transport security comes from the localconfig just loaded (the legacy
+	// Java rule, see ldap.ResolveTLS), not from mainConfig, which is only
+	// populated later by LoadAllConfigs.
+	params, err := ldap.ParamsFrom(ctx, localCfg, ldap.PurposeRead, cm.env.FS)
 	if err != nil {
 		logger.WarnContext(ctx, "LDAP connection parameters missing in localconfig - LDAP queries will fail",
 			"error", err)
 
 		return
 	}
-
-	params.StartTLS = cm.mainConfig.LdapStartTLSRequired
-	params.FS = cm.env.FS
 
 	nativeClient, err := ldap.NewClient(params)
 	if err != nil {
@@ -177,7 +191,8 @@ func (cm *ConfigManager) initNativeLdapClient(ctx context.Context) {
 
 	logger.InfoContext(ctx, "Native LDAP client initialized successfully",
 		"ldap_urls", params.URLs,
-		"bind_dn", params.BindDN)
+		"bind_dn", params.BindDN,
+		"starttls", params.StartTLS)
 
 	executor := commands.NewCommandExecutor(nativeClient)
 	cm.CommandRegistry.RegisterLDAPCommands(executor)

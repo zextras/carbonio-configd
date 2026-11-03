@@ -12,6 +12,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/intern"
@@ -26,7 +27,17 @@ import (
 // bifurcated internally on Controller.IsSystemdMode(). ServiceManager itself only owns
 // the restart-queue bookkeeping consumed by watchdog and configmgr's
 // restart cascade.
+//
+// A ServiceManager is shared by the config manager's restart policy (main
+// loop goroutine) and the watchdog (its own goroutine), so the exported
+// methods are safe for concurrent use: they serialize on mu, and
+// ProcessRestarts holds it for the whole run so two restart passes never
+// interleave. The exported fields are for construction time and tests; set
+// them before the manager is shared.
 type ServiceManager struct {
+	// mu guards RestartQueue, restartReasons and Dependencies, and serializes
+	// restart processing.
+	mu sync.Mutex
 	// ctl is the Backend whose lifecycle methods ControlProcess and IsRunning drive.
 	ctl Backend
 	// RestartQueue holds services pending restart
@@ -43,6 +54,12 @@ type ServiceManager struct {
 	Dependencies map[string][]string
 	// DisableRestarts globally disables all service restarts (dry-run mode)
 	DisableRestarts bool
+	// BeforeRestart, when set, is called with the service name right before
+	// ProcessRestarts restarts it. The watchdog uses it to stop watching a
+	// service that is being restarted on purpose (legacy state.py untracks on
+	// stop/restart) so it does not queue a second restart while the first one
+	// runs. It runs with the manager locked: it must not call the manager.
+	BeforeRestart func(service string)
 }
 
 // NewServiceManager creates a ServiceManager that controls services through ctl.
@@ -70,12 +87,16 @@ func getDefaultStartOrder() map[string]int {
 		svcLdap:            0,
 		svcConfigd:         10,
 		svcServiceDiscover: 20,
+		svcAppserverDB:     48,
+		svcStore:           49,
 		svcMailbox:         50,
 		svcMemcached:       60,
 		svcProxy:           70,
 		svcAmavis:          75,
+		svcAntispamDB:      79,
 		svcAntispam:        80,
 		svcAntivirus:       90,
+		svcClamd:           91,
 		svcFreshclam:       92,
 		svcOpendkim:        100,
 		svcCbpolicyd:       120,
@@ -151,6 +172,14 @@ func (sm *ServiceManager) AddRestart(ctx context.Context, service string) error 
 // earlier request for the same service still in the queue, and are logged
 // once when the restart is attempted.
 func (sm *ServiceManager) AddRestartWithReasons(ctx context.Context, service string, reasons []string) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	return sm.addRestartLocked(ctx, service, reasons)
+}
+
+// addRestartLocked is AddRestartWithReasons for a caller holding sm.mu.
+func (sm *ServiceManager) addRestartLocked(ctx context.Context, service string, reasons []string) error {
 	ctx = logger.ContextWithComponentOnce(ctx, "services")
 	service = intern.Service(strings.ToLower(service))
 	sm.RestartQueue[service] = true
@@ -190,9 +219,12 @@ func (sm *ServiceManager) reasonsOf(service string) []string {
 func (sm *ServiceManager) ProcessRestarts(ctx context.Context, configLookup func(string) string) error {
 	ctx = logger.ContextWithComponentOnce(ctx, "services")
 
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
 	if sm.DisableRestarts {
 		sm.logDryRunRestarts(ctx)
-		sm.ClearRestarts(ctx)
+		sm.clearRestartsLocked(ctx)
 
 		return nil
 	}
@@ -301,6 +333,10 @@ func (sm *ServiceManager) attemptServiceRestart(
 ) bool {
 	logger.InfoContext(ctx, "Restarting service", "service", service, "reasons", sm.reasonsOf(service))
 
+	if sm.BeforeRestart != nil {
+		sm.BeforeRestart(service)
+	}
+
 	err := sm.ControlProcess(ctx, service, ActionRestart)
 	if err == nil {
 		delete(sm.RestartQueue, service)
@@ -310,7 +346,7 @@ func (sm *ServiceManager) attemptServiceRestart(
 		logger.InfoContext(ctx, "Successfully restarted service", "service", service)
 
 		if configLookup != nil {
-			sm.AddDependencyRestarts(ctx, service, configLookup)
+			sm.addDependencyRestarts(ctx, service, configLookup)
 		}
 
 		return true
@@ -371,6 +407,14 @@ func (sm *ServiceManager) startOrderOf(service string) int {
 
 // ClearRestarts clears all queued restarts.
 func (sm *ServiceManager) ClearRestarts(ctx context.Context) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	sm.clearRestartsLocked(ctx)
+}
+
+// clearRestartsLocked is ClearRestarts for a caller holding sm.mu.
+func (sm *ServiceManager) clearRestartsLocked(ctx context.Context) {
 	ctx = logger.ContextWithComponentOnce(ctx, "services")
 	sm.RestartQueue = make(map[string]bool)
 	sm.restartReasons = make(map[string][]string)
@@ -380,6 +424,9 @@ func (sm *ServiceManager) ClearRestarts(ctx context.Context) {
 
 // GetPendingRestarts returns the list of services pending restart.
 func (sm *ServiceManager) GetPendingRestarts() []string {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
 	services := make([]string, 0, len(sm.RestartQueue))
 	for service := range sm.RestartQueue {
 		services = append(services, service)
@@ -400,6 +447,10 @@ func (sm *ServiceManager) HasCommand(service string) bool {
 // The map key is a section name, and the value is a slice of service names that depend on it.
 func (sm *ServiceManager) SetDependencies(ctx context.Context, deps map[string][]string) {
 	ctx = logger.ContextWithComponentOnce(ctx, "services")
+
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
 	sm.Dependencies = deps
 	logger.DebugContext(ctx, "Set dependencies",
 		"section_count", len(deps))
@@ -409,6 +460,16 @@ func (sm *ServiceManager) SetDependencies(ctx context.Context, deps map[string][
 // It checks if each dependent service is enabled via the configLookup function before queueing.
 // Special case: "amavis" is always queued regardless of enabled status.
 func (sm *ServiceManager) AddDependencyRestarts(
+	ctx context.Context, sectionName string, configLookup func(string) string,
+) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	sm.addDependencyRestarts(ctx, sectionName, configLookup)
+}
+
+// addDependencyRestarts is AddDependencyRestarts for a caller holding sm.mu.
+func (sm *ServiceManager) addDependencyRestarts(
 	ctx context.Context, sectionName string, configLookup func(string) string,
 ) {
 	ctx = logger.ContextWithComponentOnce(ctx, "services")
@@ -485,7 +546,7 @@ func (sm *ServiceManager) queueDependencyRestart(
 
 // addRestartLogged calls AddRestartWithReasons and logs the outcome.
 func (sm *ServiceManager) addRestartLogged(ctx context.Context, service, reason, logLabel string) {
-	if err := sm.AddRestartWithReasons(ctx, service, []string{reason}); err != nil {
+	if err := sm.addRestartLocked(ctx, service, []string{reason}); err != nil {
 		logger.WarnContext(ctx, "Failed to add restart for service",
 			"service", logLabel,
 			"error", err)

@@ -20,14 +20,26 @@ type MockActionTrigger struct {
 	mu               sync.Mutex
 	rewriteCallCount int
 	lastConfigs      []string
+	// wait is returned by TriggerRewrite; nil means the main loop processes
+	// the request at once.
+	wait *RewriteWait
 }
 
-func (m *MockActionTrigger) TriggerRewrite(ctx context.Context, configs []string) {
+func (m *MockActionTrigger) TriggerRewrite(ctx context.Context, configs []string) *RewriteWait {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.rewriteCallCount++
 	m.lastConfigs = make([]string, len(configs))
 	copy(m.lastConfigs, configs)
+
+	if m.wait != nil {
+		return m.wait
+	}
+
+	done := make(chan struct{})
+	close(done)
+
+	return &RewriteWait{Done: done}
 }
 
 func (m *MockActionTrigger) GetRewriteCallCount() int {

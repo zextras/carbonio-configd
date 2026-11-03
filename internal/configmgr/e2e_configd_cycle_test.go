@@ -40,7 +40,7 @@ func TestE2E_ConfigdCycleWithProxy(t *testing.T) {
 	// Initialize logger for testing
 
 	// Create test configuration
-	mainCfg, err := config.NewConfig()
+	mainCfg, err := config.NewConfigWithHostname("")
 	if err != nil {
 		t.Fatalf("NewConfig failed: %v", err)
 	}
@@ -299,7 +299,7 @@ func TestE2E_NetworkCommandsWithProxy(t *testing.T) {
 	ctx := context.Background()
 
 	// Create test configuration
-	mainCfg, err := config.NewConfig()
+	mainCfg, err := config.NewConfigWithHostname("")
 	if err != nil {
 		t.Fatalf("NewConfig failed: %v", err)
 	}
@@ -447,7 +447,7 @@ func TestE2E_ProxyConfigValidation(t *testing.T) {
 	ctx := context.Background()
 
 	// Create test configuration
-	mainCfg, err := config.NewConfig()
+	mainCfg, err := config.NewConfigWithHostname("")
 	if err != nil {
 		t.Fatalf("NewConfig failed: %v", err)
 	}
@@ -680,7 +680,7 @@ type MockActionTrigger struct {
 	State      *state.State
 }
 
-func (t *MockActionTrigger) TriggerRewrite(ctx context.Context, configs []string) {
+func (t *MockActionTrigger) TriggerRewrite(ctx context.Context, configs []string) *network.RewriteWait {
 	// Mock implementation: update state and signal reload
 	t.State.AddRequestedConfigs(ctx, configs)
 	select {
@@ -689,4 +689,9 @@ func (t *MockActionTrigger) TriggerRewrite(ctx context.Context, configs []string
 	default:
 		// Reload channel full
 	}
+
+	done := make(chan struct{})
+	close(done)
+
+	return &network.RewriteWait{Done: done}
 }

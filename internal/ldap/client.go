@@ -51,6 +51,12 @@ type Client struct {
 	// hung LDAP server cannot block a config cycle indefinitely.
 	dialTimeout time.Duration
 
+	// bindTimeout bounds the connection set-up that follows a successful dial:
+	// StartTLS negotiation (including the TLS handshake) plus the bind. The
+	// go-ldap StartTLS call has no deadline of its own, so a server that
+	// accepts TCP but never answers would otherwise hang the caller forever.
+	bindTimeout time.Duration
+
 	// opTimeout bounds each individual LDAP request (search/modify) once a
 	// connection is established, so a server that accepts the connection but
 	// then stalls mid-operation cannot block a config cycle indefinitely.
@@ -102,9 +108,10 @@ type ClientConfig struct {
 	RetryDelay    time.Duration // Initial retry delay (default: 100ms)
 	MaxRetryDelay time.Duration // Max retry delay (default: 5s)
 	DialTimeout   time.Duration // Per-attempt dial timeout (default: 10s)
+	BindTimeout   time.Duration // Per-attempt StartTLS+bind timeout (default: 10s)
 	OpTimeout     time.Duration // Per-request timeout for search/modify (default: 30s)
-	TLSConfig     *tls.Config   // TLS configuration (optional)
-	StartTLS      bool          // Upgrade ldap:// connections with StartTLS (zero value: false)
+	TLSConfig     *tls.Config   // Base TLS config for StartTLS/ldaps:// (optional; ServerName set per URL)
+	StartTLS      bool          // Upgrade ldap:// connections with StartTLS (see ResolveTLS for the legacy rule)
 	FS            sys.FS        // Filesystem the attrs schema is read from (default: sys.RealFS)
 	AttrsDir      string        // Directory of the attrs schema files (default: <base>/conf/attrs)
 }
@@ -112,6 +119,10 @@ type ClientConfig struct {
 // defaultDialTimeout bounds a single LDAP dial attempt when
 // ClientConfig.DialTimeout is left unset.
 const defaultDialTimeout = 10 * time.Second
+
+// defaultBindTimeout bounds the StartTLS negotiation plus bind of one
+// connection attempt when ClientConfig.BindTimeout is left unset.
+const defaultBindTimeout = 10 * time.Second
 
 // defaultOpTimeout bounds a single LDAP request (search/modify) when
 // ClientConfig.OpTimeout is left unset.
@@ -141,6 +152,10 @@ func NewClient(config *ClientConfig) (*Client, error) {
 
 	if config.DialTimeout == 0 {
 		config.DialTimeout = defaultDialTimeout
+	}
+
+	if config.BindTimeout == 0 {
+		config.BindTimeout = defaultBindTimeout
 	}
 
 	if config.OpTimeout == 0 {
@@ -176,6 +191,7 @@ func NewClient(config *ClientConfig) (*Client, error) {
 		retryDelay:    config.RetryDelay,
 		maxRetryDelay: config.MaxRetryDelay,
 		dialTimeout:   config.DialTimeout,
+		bindTimeout:   config.BindTimeout,
 		opTimeout:     config.OpTimeout,
 		tlsConfig:     tlsConfig,
 		fs:            config.FS,
@@ -190,26 +206,33 @@ func NewClient(config *ClientConfig) (*Client, error) {
 // BaseDN returns the base DN the client was configured with (cn=zimbra).
 func (c *Client) BaseDN() string { return c.baseDN }
 
-// getConnection gets a connection from the pool or creates a new one.
+// getConnection gets a connection from the pool or creates a new one. The
+// pool lock is held only to pop an idle connection: dialing, StartTLS and bind
+// run unlocked so a slow or hung server cannot stall every other caller.
 func (c *Client) getConnection() (*ldap.Conn, error) {
+	if conn := c.popIdle(); conn != nil {
+		return conn, nil
+	}
+
+	return c.connect()
+}
+
+// popIdle returns a healthy pooled connection, or nil when none is available.
+// Unhealthy connections found on the way are dropped.
+func (c *Client) popIdle() *ldap.Conn {
 	c.poolMu.Lock()
 	defer c.poolMu.Unlock()
 
-	if len(c.pool) > 0 {
+	for len(c.pool) > 0 {
 		conn := c.pool[len(c.pool)-1]
 		c.pool = c.pool[:len(c.pool)-1]
 
 		if conn != nil && !conn.IsClosing() {
-			return conn, nil
+			return conn
 		}
 	}
 
-	conn, err := c.connect()
-	if err != nil {
-		return nil, err
-	}
-
-	return conn, nil
+	return nil
 }
 
 // returnConnection returns a connection to the pool.
@@ -221,10 +244,23 @@ func (c *Client) returnConnection(conn *ldap.Conn) {
 	c.poolMu.Lock()
 	defer c.poolMu.Unlock()
 
-	if len(c.pool) < c.poolSize {
-		c.pool = append(c.pool, conn)
-	} else {
+	if c.isClosed() || len(c.pool) >= c.poolSize {
 		_ = conn.Close() // Best effort close
+
+		return
+	}
+
+	c.pool = append(c.pool, conn)
+}
+
+// isClosed reports whether Close has been called. A zero-value Client (nil
+// channel) is never closed.
+func (c *Client) isClosed() bool {
+	select {
+	case <-c.closed:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -257,34 +293,102 @@ func (c *Client) connect() (*ldap.Conn, error) {
 // using the dial seam (ldap.DialURL unless a test replaced it). Returns a bound connection on success;
 // on any failure it closes any partial connection and returns the wrapped
 // error so connect can fail over to the next URL.
-func (c *Client) dialAndBind(url string) (*ldap.Conn, error) {
+//
+// The dial is bounded by dialTimeout (ldaps:// handshake included). StartTLS
+// and bind are bounded by bindTimeout through a watchdog that closes the
+// connection, because go-ldap's StartTLS waits for the server reply without a
+// deadline; Close on the client aborts them too.
+func (c *Client) dialAndBind(rawURL string) (*ldap.Conn, error) {
 	dialer := ldap.DialWithDialer(&net.Dialer{Timeout: c.dialTimeout})
+	tlsConfig := c.tlsConfigFor(rawURL)
 
 	dial := c.dial
 	if dial == nil {
 		dial = ldap.DialURL
 	}
 
-	conn, err := dial(url, dialer, ldap.DialWithTLSConfig(c.tlsConfig))
+	conn, err := dial(rawURL, dialer, ldap.DialWithTLSConfig(tlsConfig))
 	if err != nil {
 		return nil, fmt.Errorf("dial: %w", err)
 	}
 
-	if strings.HasPrefix(url, "ldap://") && c.startTLS {
-		if err := conn.StartTLS(c.tlsConfig); err != nil {
-			_ = conn.Close()
+	budget := c.bindTimeout
+	if budget <= 0 {
+		budget = defaultBindTimeout
+	}
 
-			return nil, fmt.Errorf("StartTLS: %w", err)
+	conn.SetTimeout(budget)
+
+	release := c.watchdog(conn, budget)
+
+	err = c.upgradeAndBind(conn, rawURL, tlsConfig)
+
+	if release() {
+		if err == nil {
+			err = context.DeadlineExceeded
+		}
+
+		return nil, fmt.Errorf("%w: StartTLS/bind did not finish within %s (or client closed): %w",
+			errConnectAborted, budget, err)
+	}
+
+	if err != nil {
+		_ = conn.Close()
+
+		return nil, err
+	}
+
+	return conn, nil
+}
+
+// errConnectAborted marks a connection attempt that the watchdog cut short.
+var errConnectAborted = errors.New("ldap connect aborted")
+
+// upgradeAndBind runs StartTLS (ldap:// URLs when enabled) and the bind.
+func (c *Client) upgradeAndBind(conn *ldap.Conn, rawURL string, tlsConfig *tls.Config) error {
+	if c.startTLS && urlScheme(rawURL) == "ldap" {
+		if err := conn.StartTLS(tlsConfig); err != nil {
+			return fmt.Errorf("StartTLS: %w", err)
 		}
 	}
 
 	if err := conn.Bind(c.bindDN, c.password); err != nil {
-		_ = conn.Close()
-
-		return nil, fmt.Errorf("bind: %w", err)
+		return fmt.Errorf("bind: %w", err)
 	}
 
-	return conn, nil
+	return nil
+}
+
+// watchdog closes conn when budget elapses or the client is closed. The
+// returned release stops the watchdog and reports whether it already fired
+// (in which case conn is closed and the attempt must be treated as failed).
+func (c *Client) watchdog(conn *ldap.Conn, budget time.Duration) (release func() (fired bool)) {
+	timer := time.NewTimer(budget)
+	done := make(chan struct{})
+	firedCh := make(chan bool, 1)
+
+	go func() {
+		defer timer.Stop()
+
+		select {
+		case <-timer.C:
+		case <-c.closed:
+		case <-done:
+			firedCh <- false
+
+			return
+		}
+
+		_ = conn.Close()
+
+		firedCh <- true
+	}()
+
+	return func() bool {
+		close(done)
+
+		return <-firedCh
+	}
 }
 
 // Close closes all connections in the pool.

@@ -3,7 +3,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Package proxy implements "configd proxy": nginx configuration printing
-// (zmproxyconf), proxy config generation (zmproxyconfgen) and protocol
+// (zmproxyconf), synchronous proxy config generation (zmproxyconfgen, see
+// gen.go) and protocol
 // enable/disable/status (zmproxyctl). The cmd/configd subcommands only map
 // parsed flags onto Options.
 package proxy
@@ -65,8 +66,12 @@ type Options struct {
 	// enable/disable: protocol name.
 	Protocol string
 
-	// gen/rewrite: additional config names to regenerate.
+	// rewrite: additional config names to regenerate.
 	ExtraConfigs []string
+
+	// gen: the legacy ProxyConfGen flags and the in-process generator.
+	Gen      *GenOptions
+	Generate GenFunc
 
 	// Standalone is the in-process rewrite used when no daemon answers.
 	Standalone rewrite.Standalone
@@ -82,13 +87,15 @@ type ldapConn interface {
 
 // Run executes the proxy action and returns the process exit status.
 // conf and status do not require the zextras user, as in the legacy tools.
-func Run(_ context.Context, env sys.System, stdout, stderr io.Writer, opts *Options) int {
+func Run(ctx context.Context, env sys.System, stdout, stderr io.Writer, opts *Options) int {
 	switch opts.Action {
 	case ActionConf:
 		return runConf(env.FS, stdout, stderr, opts)
 	case ActionStatus:
 		return withLDAP(stdout, stderr, showProxyStatus)
-	case ActionGen, ActionRewrite:
+	case ActionGen:
+		return runGen(ctx, stdout, stderr, opts)
+	case ActionRewrite:
 		if !cliutil.RequireZextras(stderr) {
 			return 1
 		}
@@ -123,7 +130,7 @@ func runConf(fsys sys.FS, stdout, stderr io.Writer, opts *Options) int {
 	if _, err := fsys.Stat(cliutil.BasePath("common", "sbin", "nginx")); err != nil {
 		_, _ = fmt.Fprintln(stdout, "Nginx not installed, exiting")
 
-		return 0
+		return 1
 	}
 
 	printNginxConf(stdout, conf, 0, &nginxConfOpts{
@@ -139,7 +146,7 @@ func runConf(fsys sys.FS, stdout, stderr io.Writer, opts *Options) int {
 
 // contactDaemon sends a REWRITE request for the proxy configs to the running
 // configd daemon, rewriting in-process when it is not running (legacy
-// configrewrite). Shared by gen and rewrite.
+// configrewrite).
 func contactDaemon(stderr io.Writer, opts *Options) int {
 	ctx := cliutil.InitLogging(stderr)
 

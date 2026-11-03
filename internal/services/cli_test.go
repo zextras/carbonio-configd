@@ -310,7 +310,7 @@ func TestServiceListStatus_ReturnsAllServices(t *testing.T) {
 		t.Skip("slow: may invoke real system commands")
 	}
 	ctx := context.Background()
-	result := ctl.ServiceListStatus(ctx)
+	result := ctl.ServiceListStatus(ctx, true)
 	if len(result) == 0 {
 		t.Fatal("expected at least one service in ServiceListStatus result")
 	}
@@ -390,8 +390,8 @@ func TestRewriteViaConfigd_NoPortFallsToDefault(t *testing.T) {
 		t.Fatal("expected error when configd is not reachable")
 	}
 
-	if !strings.Contains(err.Error(), "configd not reachable") {
-		t.Errorf("error = %q, want containing %q", err.Error(), "configd not reachable")
+	if !strings.Contains(err.Error(), "not reachable") {
+		t.Errorf("error = %q, want containing %q", err.Error(), "not reachable")
 	}
 }
 
@@ -440,8 +440,8 @@ func TestRewriteViaConfigd_ErrorFromListener(t *testing.T) {
 		t.Fatal("expected error when configd returns ERROR")
 	}
 
-	if !strings.Contains(err.Error(), "configd returned error") {
-		t.Errorf("error = %q, want containing %q", err.Error(), "configd returned error")
+	if !strings.Contains(err.Error(), "returned ERROR") {
+		t.Errorf("error = %q, want containing %q", err.Error(), "returned ERROR")
 	}
 }
 
@@ -556,7 +556,7 @@ func TestServiceListStatusStream_Cancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	ch := ctl.ServiceListStatusStream(ctx)
+	ch := ctl.ServiceListStatusStream(ctx, true)
 	count := 0
 	for range ch {
 		count++
@@ -573,7 +573,7 @@ func TestServiceListStatusStream_Default(t *testing.T) {
 		t.Skip("slow: may invoke real system commands")
 	}
 	ctx := context.Background()
-	ch := ctl.ServiceListStatusStream(ctx)
+	ch := ctl.ServiceListStatusStream(ctx, true)
 
 	entries := 0
 	for info := range ch {

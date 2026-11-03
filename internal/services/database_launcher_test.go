@@ -14,80 +14,6 @@ import (
 
 // --- stopMysqldByPidFile ---
 
-func TestStopMysqldByPidFile_Missing(t *testing.T) {
-	t.Parallel()
-
-	ctl := newRealController(t)
-
-	tmp := t.TempDir()
-	pidfile := filepath.Join(tmp, "mysql.pid")
-
-	err := ctl.stopMysqldByPidFile(context.Background(), "test-db", pidfile)
-	if err != nil {
-		t.Fatalf("expected nil for missing pidfile, got %v", err)
-	}
-}
-
-func TestStopMysqldByPidFile_InvalidPID(t *testing.T) {
-	t.Parallel()
-
-	ctl := newRealController(t)
-
-	tmp := t.TempDir()
-	pidfile := filepath.Join(tmp, "mysql.pid")
-	if err := os.WriteFile(pidfile, []byte("not-a-number\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	err := ctl.stopMysqldByPidFile(context.Background(), "test-db", pidfile)
-	if err == nil {
-		t.Fatal("expected error for invalid pid")
-	}
-
-	if _, statErr := os.Stat(pidfile); !os.IsNotExist(statErr) {
-		t.Error("expected pidfile to be removed after invalid pid")
-	}
-}
-
-func TestStopMysqldByPidFile_ReadError(t *testing.T) {
-	t.Parallel()
-
-	ctl := newRealController(t)
-
-	tmp := t.TempDir()
-	pidfile := filepath.Join(tmp, "subdir", "mysql.pid")
-
-	_, err := os.Stat(pidfile)
-	if !os.IsNotExist(err) {
-		t.Skip("skipping: parent dir must not exist")
-	}
-
-	result := ctl.stopMysqldByPidFile(context.Background(), "test-db", pidfile)
-	if result != nil {
-		t.Errorf("expected nil for missing parent dir (IsNotExist), got %v", result)
-	}
-}
-
-func TestStopMysqldByPidFile_InvalidPidRemovesFile(t *testing.T) {
-	t.Parallel()
-
-	ctl := newRealController(t)
-
-	tmp := t.TempDir()
-	pidFile := filepath.Join(tmp, "mysql.pid")
-	if err := os.WriteFile(pidFile, []byte("notanumber\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	err := ctl.stopMysqldByPidFile(context.Background(), "test-db", pidFile)
-	if err == nil {
-		t.Fatal("expected error for invalid pid")
-	}
-	if _, statErr := os.Stat(pidFile); !os.IsNotExist(statErr) {
-		t.Error("expected pidfile to be removed after invalid pid")
-	}
-}
-
 // --- flushAppserverDBDirtyPages ---
 
 func TestFlushAppserverDBDirtyPages_LoadConfigFails(t *testing.T) {
@@ -298,7 +224,7 @@ func TestStopAppserverDB_MissingPidfile(t *testing.T) {
 		return map[string]string{}, nil
 	}
 
-	err := ctl.stopAppserverDB(context.Background())
+	err := ctl.stopAppserverDB(context.Background(), ctl.registry[svcAppserverDB])
 	if err != nil {
 		t.Fatalf("expected nil for missing pidfile, got %v", err)
 	}
@@ -396,7 +322,7 @@ func TestStopAntispamDB_MissingPidfile(t *testing.T) {
 	tmp := t.TempDir()
 	ctl.p.antispamDBPidFile = filepath.Join(tmp, "missing.pid")
 
-	err := ctl.stopAntispamDB(context.Background())
+	err := ctl.stopAntispamDB(context.Background(), ctl.registry[svcAntispamDB])
 	if err != nil {
 		t.Fatalf("expected nil for missing pidfile, got %v", err)
 	}

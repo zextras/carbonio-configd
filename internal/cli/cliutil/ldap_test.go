@@ -5,9 +5,111 @@
 package cliutil
 
 import (
+	"crypto/tls"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/go-ldap/ldap/v3"
+
+	"github.com/zextras/carbonio-configd/internal/testutil/ldapfake"
+	"github.com/zextras/carbonio-configd/internal/testutil/pki"
 )
+
+// searchOnce runs a base search so the client dials, upgrades and binds.
+func searchOnce(t *testing.T, lc map[string]string) error {
+	t.Helper()
+
+	client, err := OpenWriteLDAPClient(lc)
+	if err != nil {
+		t.Fatalf("OpenWriteLDAPClient: %v", err)
+	}
+
+	defer func() { _ = client.Close() }()
+
+	_, err = client.Search("cn=zimbra", "(objectClass=*)", []string{"cn"}, ldap.ScopeBaseObject)
+
+	return err //nolint:wrapcheck // test helper
+}
+
+// TestOpenWriteLDAPClient_StartTLSFollowsLocalconfig is the GCR-01 regression:
+// the client used to hard-code StartTLS with no TLS config, which crypto/tls
+// rejects ("either ServerName or InsecureSkipVerify must be specified"), and
+// ignored the localconfig switches the legacy Java client honours.
+func TestOpenWriteLDAPClient_StartTLSFollowsLocalconfig(t *testing.T) {
+	pk := pki.NewServer(t, "127.0.0.1")
+	srv := ldapfake.New(t, ldapfake.Options{
+		TLS: &tls.Config{Certificates: []tls.Certificate{pk.Certificate}, MinVersion: tls.VersionTLS12},
+	})
+
+	base := map[string]string{
+		"ldap_master_url":      srv.URL("ldap", "127.0.0.1"),
+		"zimbra_ldap_userdn":   "uid=zimbra,cn=admins,cn=zimbra",
+		"zimbra_ldap_password": "secret",
+	}
+
+	// Legacy defaults: no StartTLS, clear text bind.
+	if err := searchOnce(t, base); err != nil {
+		t.Fatalf("plain search: %v", err)
+	}
+
+	if srv.StartTLSOps() != 0 || srv.Binds() != 1 || srv.BindsInTLS() != 0 {
+		t.Fatalf("defaults: startTLS=%d binds=%d inTLS=%d, want 0/1/0", srv.StartTLSOps(), srv.Binds(), srv.BindsInTLS())
+	}
+
+	// All three legacy switches on: StartTLS, bind inside TLS. Certificates
+	// are unverified by default (ssl_allow_untrusted_certs=true).
+	secure := map[string]string{
+		"ldap_starttls_supported":              "1",
+		"zimbra_require_interprocess_security": "1",
+	}
+	for k, v := range base {
+		secure[k] = v
+	}
+
+	if err := searchOnce(t, secure); err != nil {
+		t.Fatalf("StartTLS search: %v", err)
+	}
+
+	if srv.StartTLSOps() != 1 || srv.BindsInTLS() != 1 {
+		t.Fatalf("secure: startTLS=%d bindsInTLS=%d, want 1/1", srv.StartTLSOps(), srv.BindsInTLS())
+	}
+}
+
+func TestOpenWriteLDAPClient_VerifiesWithCarbonioCA(t *testing.T) {
+	pk := pki.NewServer(t, "127.0.0.1")
+	srv := ldapfake.New(t, ldapfake.Options{
+		TLS: &tls.Config{Certificates: []tls.Certificate{pk.Certificate}, MinVersion: tls.VersionTLS12},
+	})
+
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, "conf", "ca"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	lc := map[string]string{
+		"ldap_url":                             srv.URL("ldap", "127.0.0.1"),
+		"zimbra_ldap_userdn":                   "uid=zimbra,cn=admins,cn=zimbra",
+		"zimbra_ldap_password":                 "secret",
+		"ldap_starttls_supported":              "1",
+		"zimbra_require_interprocess_security": "1",
+		"ssl_allow_untrusted_certs":            "false",
+		"zimbra_home":                          home,
+	}
+
+	if err := searchOnce(t, lc); err == nil {
+		t.Fatal("self-signed server accepted although its CA is not trusted")
+	}
+
+	if err := os.WriteFile(filepath.Join(home, "conf", "ca", "ca.pem"), pk.CAPEM, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := searchOnce(t, lc); err != nil {
+		t.Fatalf("search with conf/ca/ca.pem trusted: %v", err)
+	}
+}
 
 func TestOpenWriteLDAPClient_NoURLs(t *testing.T) {
 	_, err := OpenWriteLDAPClient(map[string]string{})

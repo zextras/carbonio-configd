@@ -9,7 +9,7 @@ package localconfig
 // lcDocs holds the documentation printed by the legacy "zmlocalconfig -i"
 // and "zmlocalconfig --all": the default-locale ZsMsg.properties text of every
 // KnownKey declared in LC.java, with its @Supported and @Reloadable flags
-// (carbonio-mailbox tag 4.36.6).
+// (carbonio-mailbox tag v4.38.16).
 var lcDocs = map[string]KeyDoc{
 	"antispam_backup_retention": {
 		Doc:       "Number of revisions of the antispam database backup to retain.",

@@ -18,12 +18,20 @@ package plan
 // Action is what a Restart entry asks of a service.
 type Action string
 
-// Restart actions. The executor treats every entry as a restart (legacy
-// behavior); the action documents why the entry exists.
+// Restart actions. Outside systemd mode the executor treats every entry as a
+// restart (legacy behavior) and the action only documents why the entry
+// exists. In systemd mode ActionRestart is a "try-reload-or-restart" of the
+// service's units, ActionStart and ActionStop are carried out as such, and
+// ActionPendingRestart (see Classify) is never executed: the restart of a
+// heavy service is only flagged and left to the operator.
 const (
 	ActionRestart Action = "restart"
 	ActionStop    Action = "stop"
 	ActionStart   Action = "start"
+	// ActionPendingRestart marks a restart of a heavy service (HeavyService)
+	// on a systemd host: config changes never restart it automatically, the
+	// restart stays pending until the operator performs it.
+	ActionPendingRestart Action = "pending-restart"
 )
 
 // Plan is the complete set of effects of one cycle. Every slice is non-nil and

@@ -12,43 +12,56 @@ import (
 	"strings"
 )
 
-// FormatPlain writes config in "key = value" format, sorted alphabetically.
-func FormatPlain(w io.Writer, config map[string]string) {
-	for _, k := range sortedKeys(config) {
+// orderedKeys returns the keys to print: order verbatim (an explicit key list
+// keeps its order and repeats, keys without a value are skipped, like legacy
+// ConfigWriter.add on a null value), or every key sorted when order is empty.
+func orderedKeys(config map[string]string, order []string) []string {
+	if len(order) == 0 {
+		return sortedKeys(config)
+	}
+
+	keys := make([]string, 0, len(order))
+
+	for _, k := range order {
+		if _, ok := config[k]; ok {
+			keys = append(keys, k)
+		}
+	}
+
+	return keys
+}
+
+// FormatPlain writes config in "key = value" format, in the order of order
+// (alphabetical when empty).
+func FormatPlain(w io.Writer, config map[string]string, order []string) {
+	for _, k := range orderedKeys(config, order) {
 		_, _ = fmt.Fprintf(w, "%s = %s\n", k, config[k])
 	}
 }
 
 // FormatShell writes config in shell-eval format: key='value';
-func FormatShell(w io.Writer, config map[string]string) {
-	for _, k := range sortedKeys(config) {
+func FormatShell(w io.Writer, config map[string]string, order []string) {
+	for _, k := range orderedKeys(config, order) {
 		_, _ = fmt.Fprintf(w, "%s='%s';\n", k, ShellEscape(config[k]))
 	}
 }
 
 // FormatExport writes config in shell export format: export key='value';
-func FormatExport(w io.Writer, config map[string]string) {
-	for _, k := range sortedKeys(config) {
+func FormatExport(w io.Writer, config map[string]string, order []string) {
+	for _, k := range orderedKeys(config, order) {
 		_, _ = fmt.Fprintf(w, "export %s='%s';\n", k, ShellEscape(config[k]))
 	}
 }
 
 // FormatNokey writes values only (no keys), one per line.
-// When orderedKeys is provided, output follows that order; otherwise alphabetical.
-func FormatNokey(w io.Writer, config map[string]string, orderedKeys []string) {
-	if len(orderedKeys) == 0 {
-		orderedKeys = sortedKeys(config)
-	}
-
-	for _, k := range orderedKeys {
-		if v, ok := config[k]; ok {
-			_, _ = fmt.Fprintln(w, v)
-		}
+func FormatNokey(w io.Writer, config map[string]string, order []string) {
+	for _, k := range orderedKeys(config, order) {
+		_, _ = fmt.Fprintln(w, config[k])
 	}
 }
 
 // FormatXML writes config as a localconfig XML document.
-func FormatXML(w io.Writer, config map[string]string) error {
+func FormatXML(w io.Writer, config map[string]string, order []string) error {
 	type xmlValue struct {
 		XMLName xml.Name `xml:"key"`
 		Name    string   `xml:"name,attr"`
@@ -61,11 +74,12 @@ func FormatXML(w io.Writer, config map[string]string) error {
 	}
 
 	xc := xmlConfig{}
-	for _, k := range sortedKeys(config) {
-		xc.Keys = append(xc.Keys, xmlValue{Name: k, Value: config[k]})
+	for _, k := range orderedKeys(config, order) {
+		xc.Keys = append(xc.Keys, xmlValue{Name: k, Value: normalizeSpace(config[k])})
 	}
 
-	_, _ = fmt.Fprint(w, xml.Header)
+	// dom4j prints a blank line after the declaration.
+	_, _ = fmt.Fprint(w, xml.Header, "\n")
 
 	enc := xml.NewEncoder(w)
 	enc.Indent("", "  ")
@@ -104,19 +118,17 @@ func sortedKeys(m map[string]string) []string {
 	return keys
 }
 
-// maskedValue is the placeholder used to hide sensitive configuration
-// values when logging or exporting configuration.
-const maskedValue = "**********"
+// maskedValue is what the legacy ConfigWriter prints instead of a password.
+const maskedValue = "*"
 
-// MaskPasswords replaces values of sensitive keys with a masked string.
-// Sensitive keys contain "password", "secret", or "_pass" in their name.
+// MaskPasswords replaces the value of every key whose name contains the
+// case-sensitive substring "password" with "*": exactly the legacy
+// ConfigWriter.add rule (secret-looking keys such as api_secret or ldap_pass
+// are not masked).
 func MaskPasswords(config map[string]string) map[string]string {
 	masked := make(map[string]string, len(config))
 	for k, v := range config {
-		lower := strings.ToLower(k)
-		if strings.Contains(lower, "password") ||
-			strings.Contains(lower, "secret") ||
-			strings.Contains(lower, "_pass") {
+		if strings.Contains(k, "password") {
 			masked[k] = maskedValue
 		} else {
 			masked[k] = v
@@ -124,4 +136,10 @@ func MaskPasswords(config map[string]string) map[string]string {
 	}
 
 	return masked
+}
+
+// normalizeSpace collapses every whitespace run to one space and trims the
+// ends: what the dom4j pretty printer does to element text.
+func normalizeSpace(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }

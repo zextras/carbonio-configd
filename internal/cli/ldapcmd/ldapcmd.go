@@ -116,7 +116,7 @@ func Run(ctx context.Context, stdout, stderr io.Writer, opts *Options) int {
 	return 0
 }
 
-func execute(_ context.Context, stdout io.Writer, opts *Options) error {
+func execute(ctx context.Context, stdout io.Writer, opts *Options) error {
 	if err := validate(opts); err != nil {
 		return err
 	}
@@ -131,7 +131,7 @@ func execute(_ context.Context, stdout io.Writer, opts *Options) error {
 		return err
 	}
 
-	params, err := carboldap.ParamsFrom(lc, carboldap.PurposeWrite)
+	params, err := carboldap.ParamsFrom(ctx, lc, carboldap.PurposeWrite, fsys)
 	if errors.Is(err, carboldap.ErrNoURL) {
 		return errors.New("no LDAP URL: pass --url or set CONFIGD_LC_ldap_url")
 	}
@@ -139,11 +139,6 @@ func execute(_ context.Context, stdout io.Writer, opts *Options) error {
 	if err != nil {
 		return err
 	}
-
-	// The command reaches whatever the URLs say; StartTLS follows what the
-	// directory advertises (ldap_starttls_supported), not the write default.
-	params.StartTLS = carboldap.StartTLSSupported(lc)
-	params.FS = fsys
 
 	dial := opts.Dial
 	if dial == nil {

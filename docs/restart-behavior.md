@@ -44,6 +44,18 @@ For each `RESTART` service of a restarting section the plan records:
 Services that became enabled or disabled since the previous cycle add `start`/`stop`
 entries with the reasons `service-enabled`/`service-disabled`.
 
+On a **systemd host** (a Carbonio systemd target is enabled, `IsSystemdMode()`) the plan also
+classifies each `restart` entry (`plan.Classify`, input `plan.Input.Systemd`): a restart of a
+**heavy service** becomes the action `pending-restart` (see
+[Systemd hosts](#systemd-hosts-hybrid-restart-policy)). `configd plan` and its JSON show it as a
+distinct action:
+
+```
+pending-restart mailboxd
+    because: section mailbox changed because VAR zimbraX changed 'a'->'b'
+restart      memcached
+```
+
 ## Reasons
 
 Every plan restart carries the reasons that caused it, and so does every other plan entry:
@@ -72,6 +84,38 @@ the merged reasons.
 
 `configd plan` prints the same reasons without changing anything; see the README.
 
+## Systemd hosts: hybrid restart policy
+
+Source: `internal/plan/heavy.go`, `internal/restart/policy.go` (`Policy.Apply`, `dispatch`),
+`internal/services/systemd_restart.go`
+
+How a plan entry is carried out depends on `IsSystemdMode()`:
+
+| Host | `restart` of a light service | `restart` of a heavy service | `start` / `stop` |
+|---|---|---|---|
+| systemd | `systemctl try-reload-or-restart <units>` (one call with all units of the service; units that support reload reload, the others restart, a stopped unit stays stopped) | **never executed**, flagged *restart pending* | `systemctl start` / `systemctl stop` of the units |
+| legacy (no systemd target: jammy, rocky-8, containers) | queued on the service manager: stop+start, `mta` converted to reload | same as light: restarted | queued as restarts (unchanged) |
+
+**Heavy services** (`plan.HeavyService`, any alias): `mailbox` (`mailboxd`, `service`),
+`appserver-db` (`mysql`, `mariadb`), `store` and `ldap` (`directory`, `directory-server`).
+Restarting them interrupts every user or risks the data store, so a config change never does it
+on a systemd host. The policy logs one INFO line per service and cycle and consumes the entry (it
+is not carried):
+
+```
+level=INFO msg="Restart pending: service is not restarted automatically, restart it manually" service=mailboxd reasons=[...]
+```
+
+`zmconfigd_enable_config_restarts=false` still disables everything: no plan restart (pending
+ones included) is consumed, they are carried to the next cycle, and nothing is logged or run.
+`--disable-restarts` is a dry-run: nothing is executed through systemctl either.
+
+A failing systemd action (`try-reload-or-restart`, `start`, `stop`) is carried and retried by the
+next cycles, up to 3 attempts, then dropped with an ERROR line; the units' own `Restart=` handles
+crashes. Debounce applies as for legacy restarts (the action is decided once the quiet period
+elapsed). Systemd actions run in plan order (sorted by service name), not in start order; ordering
+between units is systemd's (`After=`/`Requires=`).
+
 ## Restart settings
 
 Source: `internal/restart/policy.go` (`Policy.Apply`)
@@ -85,17 +129,42 @@ manager drain what it already holds.
 | `zmconfigd_enable_config_restarts` (default `true`) | When `false` no plan restart is consumed; they are carried to the next cycle |
 | `zmconfigd_restart_debounce_seconds` (default `0` = off) | When > 0, requests are coalesced across cycles: each request restarts the service's quiet window and the service restarts once no new request arrived for that many seconds (trailing edge). State is in memory and lost on process restart |
 | `MaxFailedRestarts` (service manager, `3`) | Retry limit, see Dependency cascading |
-| `--disable-restarts` | Dry-run: the service manager skips every restart |
+| `--disable-restarts` | Dry-run: no restart is executed, on legacy (service manager) and systemd (systemctl) hosts |
 
 **Config-driven restarts do not cascade.** The legacy zmconfigd queues the `DEPENDS` of a
 service only after a successful stop or start, never after a restart, and a config change
-restarts exactly the services of the changed sections, once each. The config manager's
-service manager therefore never receives the `DEPENDS` map (only the watchdog's does), so a
-config change restarts the services named by `RESTART` and nothing else.
+restarts exactly the services of the changed sections, once each. The restart policy therefore
+calls `ProcessRestarts` without a service-enabled lookup, which turns the cascade off for that
+run (the `DEPENDS` map is set on the shared service manager for the watchdog), so a config
+change restarts the services named by `RESTART` and nothing else.
 
-**Deliberate correction.** `--disable-restarts` now also reaches the config manager's service
-manager (`SetDisableRestarts`); previously only the watchdog honoured it and a config change
-still restarted services.
+**One service manager.** The restart policy and the watchdog share a single
+`services.ServiceManager` (built by `configmgr.NewConfigManager`, reused by
+`bootstrapDependencies`). Its exported methods are safe for concurrent use and
+`ProcessRestarts` serializes whole passes, so the two never restart the same service
+concurrently and the main loop's `SetDependencies` does not race the watchdog's reads. When the
+manager restarts a service it calls `BeforeRestart`, which makes the watchdog stop watching it
+(see Watchdog).
+
+**Deliberate correction.** `--disable-restarts` now also reaches the config-driven restarts;
+previously only the watchdog honoured it and a config change still restarted services.
+
+## Watchdog
+
+Source: `internal/watchdog/watchdog.go`
+
+- **systemd host:** the watchdog is a no-op (`Start`/`Stop` do nothing, one INFO line says so):
+  the units' `Restart=` recovers crashed services.
+- **legacy host:** every `zmconfigd_watchdog_interval` seconds it probes the services of
+  `zmconfigd_watchdog_services` (default `antivirus`) enabled on the node and restarts a tracked
+  one that is down (`AddRestart` + `ProcessRestarts`, which cascades through `DEPENDS`).
+  Tracking rules (legacy `state.py`/`configd.py`):
+  - a restart run by the service manager (a config change, or the watchdog itself) untracks the
+    service first (`BeforeRestart`), so the watchdog never queues a second restart while one runs;
+  - a tick that sees a monitored service **running** tracks it again;
+  - after the watchdog's own restart attempt, successful or not, the service is tracked again: a
+    service still down after a failed restart is retried by the next tick (previously it was left
+    untracked and never retried).
 
 ## Service control priority
 
@@ -136,11 +205,16 @@ control path, not a per-instance flag — each of those functions bifurcates int
 | Service name | Unit(s) |
 |---|---|
 | `amavis` | `carbonio-mailthreat.service` |
-| `antispam` | `carbonio-antispam.service` |
-| `antivirus` | `carbonio-antivirus.service` |
+| `antispam` (composite: `antispam-db` + `amavis`) | `carbonio-antispam.service`, `carbonio-mailthreat.service` |
+| `antispam-db` | `carbonio-antispam.service` |
+| `antivirus` (composite: `amavis` + `clamd` + `freshclam`) | `carbonio-mailthreat.service`, `carbonio-antivirus.service`, `carbonio-freshclam.service` |
+| `appserver-db` | `carbonio-appserver-db.service` |
 | `cbpolicyd` | `carbonio-policyd.service` |
+| `clamd` | `carbonio-antivirus.service` |
+| `freshclam` | `carbonio-freshclam.service` |
 | `ldap` | `carbonio-openldap.service` |
-| `mailbox` | `carbonio-appserver-db.service`, `carbonio-appserver.service` |
+| `mailbox` (the JVM only) | `carbonio-appserver.service` |
+| `store` (composite: `appserver-db` + `mailbox`) | `carbonio-appserver-db.service`, `carbonio-appserver.service` |
 | `memcached` | `carbonio-memcached.service` |
 | `milter` | `carbonio-milter.service` |
 | `mta` | `carbonio-postfix.service` |
@@ -150,10 +224,61 @@ control path, not a per-instance flag — each of those functions bifurcates int
 | `stats` | `carbonio-stats.service` |
 
 Alternative names — including LDAP `zimbraServiceEnabled` values (`directory-server`,
-`service`, `zmconfigd`) and legacy CLI aliases (`clamd`, `mailboxd`, `directory`,
-`config-service`) — resolve to these canonical entries through the single
+`service`, `zmconfigd`) and legacy CLI aliases (`mailboxd`→`mailbox`,
+`mysql`/`mariadb`→`appserver-db`, `directory`→`ldap`, `config-service`/`zmconfigd`→`configd`,
+`service`→`store`) — resolve to these canonical entries through the single
 `services.ServiceAliases` table (`registry.go`), consumed by `LookupService` and, for the
-LDAP-facing names, by `services.MapLDAPServiceToRegistry` (`discovery.go`).
+LDAP-facing names, by `services.MapLDAPServiceToRegistry` (`discovery.go`). The LDAP value
+`mailbox` (the whole store host) maps to the `store` composite, not to the `mailbox` JVM.
+`clamd` is a service of its own (`zmclamdctl`), not an alias of `antivirus`.
+
+**Composites and components.** `store`, `antivirus` and `antispam` are composites
+(`ServiceDef.Members`): `start` runs the members in order, `stop` in reverse, a failed
+member stop does not prevent the others from stopping (the errors are joined), and
+`status` reports the members. Their members (`appserver-db`, `mailbox`, `amavis`, `clamd`,
+`freshclam`, `antispam-db`) are *components*: addressable with `configd service <verb>
+<name>` but not iterated by `configd control` (`ControlServiceNames` excludes them).
+`mailbox` declares `appserver-db` as `Wants`: a failing database start is logged and the JVM
+start goes on, as legacy `zmmailboxdctl` does. `antispam` is idle (every verb a successful
+no-op, silent `status`) when LDAP does not list `antispam` for this host.
+
+**Safe MariaDB stop.** `appserver-db` (and `antispam-db`) stop with SIGTERM and a bounded wait
+(`zimbra_mysql_shutdown_timeout`, default 60 s) and are never sent SIGKILL: a MariaDB killed
+mid-flush needs InnoDB crash recovery. A server that outlives the wait is an error, and is
+left running. Before the stop, `appserver-db` flushes InnoDB dirty pages
+(`innodb_max_dirty_pages_pct=0`, polling `show engine innodb status` for up to 600 s) as a
+`PreStop` hook, so both orchestration modes get it.
+
+**Mailbox start.** Legacy mode and the systemd leaf wait for `zimbraMailPort` to accept
+connections (zmprov, then TCP, up to 3 minutes). `service start mailbox` regenerates the
+zmtlsctl set of configs (`sasl webxml mailbox service zextras zextrasAdmin zimlet`) unless
+`norewrite` is given.
+
+## CLI verbs
+
+`configd service <verb> <name> [args...]` mirrors the legacy `zm*ctl` verbs; the core
+wrappers run `exec configd service "${1:-}" <name> "${@:2}"`.
+
+| Verb | Behavior |
+|---|---|
+| `start`, `restart`, `reload` | `norewrite` (or `--no-rewrite`) skips the config regeneration |
+| `stop`, `kill` | stop (kill is a legacy alias) |
+| `status` | stopped: `<name> is not running.` on stdout, exit 1, nothing on stderr |
+| `refresh` | signals the service to re-read its config: `milter` gets SIGCONT; a stopped service prints `<name> is not currently running` (exit 0) |
+| `rotate` | `stats`: SIGHUP to every collector in the stats pidfile directory; no pidfile → exit 1 |
+| anything else | usage line on stderr, exit 1 |
+
+Trailing arguments are accepted on every verb; only `norewrite` is interpreted. `ldap` on a
+replica whose `ldap_url` equals `ldap_master_url` refuses every verb but `stop`/`kill` with
+`ldap_url and ldap_master_url cannot be the same on an ldap replica`.
+
+`configd control start` regenerates the configuration once for the union of the services it
+is going to start, then starts each of them `norewrite`; it runs `zmresolverctl` before
+`proxy`, and waits for the freshly started configd to report `SUCCESS ACTIVE`.
+`configd control status` fails (exit 1) when a service listed in the localconfig key
+`zmcontrol_service_status_list` is stopped — every service but `stats` and `logger` when the key
+is empty. `configd control -H <host>` (remote control over SSH) no longer exists: `zmcontrol
+-H` is the wrapper's job.
 
 ## MTA: restart converted to reload
 
@@ -182,10 +307,10 @@ Source: `internal/services/manager.go` (`AddDependencyRestarts`, `ProcessRestart
 After a service restarts successfully, the service manager checks whether that service has
 any dependents registered in the `Dependencies` map. Dependents come from `DEPENDS` entries
 in `zmconfigd.cf` sections, loaded by `buildServiceDependencies` at the start of each loop and
-set on the watchdog's service manager only. A dependent restarted this way is queued with the
-reason `dependency of <service>`. Restarts derived from a config change (`ConfigManager`)
-use a separate service manager without dependencies and never cascade, as in the legacy
-zmconfigd; `configd plan` therefore lists exactly the services the sections name.
+set on the shared service manager. A dependent restarted this way is queued with the
+reason `dependency of <service>`. Only watchdog restarts cascade: restarts derived from a config
+change run without the enabled-service lookup and never cascade, as in the legacy zmconfigd;
+`configd plan` therefore lists exactly the services the sections name.
 
 For each dependent service:
 
@@ -196,8 +321,9 @@ For each dependent service:
 Dependencies are processed in `StartOrder` sequence (lower number = earlier):
 
 ```
-ldap(0) → configd(10) → mailbox(50) → memcached(60) → proxy(70) →
-amavis(75) → antispam(80) → antivirus(90) → opendkim(100) →
+ldap(0) → configd(10) → appserver-db(48) → store(49) → mailbox(50) → memcached(60) →
+proxy(70) → amavis(75) → antispam-db(79) → antispam(80) → antivirus(90) → clamd(91) →
+freshclam(92) → opendkim(100) →
 cbpolicyd(120) → saslauthd(130) → milter(140) → mta(150) → stats(160)
 ```
 
@@ -214,8 +340,8 @@ antivirus → amavis → mta (reloaded, not restarted) → opendkim.
 Failed restarts are retried up to `MaxFailedRestarts` times (default: 3). After that the
 service is removed from the queue and processing continues. `ProcessRestarts` then returns an
 error wrapping `ErrRestartsFailed` that lists, sorted by name, every service that was dropped or
-left queued without progress. The watchdog logs that as a failed restart and leaves the service
-untracked until a later status check sees it running (legacy parity); configmgr logs it at ERROR.
+left queued without progress. The watchdog logs that as a failed restart and keeps watching the service so the next tick
+retries it; configmgr logs it at ERROR.
 Services with equal start order (including all those missing from `StartOrder`) restart in name order.
 
 **Shutdown.** When the context is cancelled (SIGTERM/SIGINT) while restarts are being processed,

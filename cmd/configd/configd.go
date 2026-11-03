@@ -15,9 +15,31 @@ import (
 	"github.com/alecthomas/kong"
 	"github.com/willabides/kongplete"
 	"github.com/zextras/carbonio-configd/internal/cli/cliutil"
+	"github.com/zextras/carbonio-configd/internal/localconfig"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
+
+// localHostname returns the server hostname the localconfig layers name: the
+// CONFIGD_LC_zimbra_server_hostname overlay (a pod whose hostname is not the
+// LDAP server entry's), else the zimbra_server_hostname key of localconfig.xml,
+// which legacy zmhostname prints. It is "" when neither sets it (the LC.java
+// default "localhost" is deliberately not used: it would hide the real
+// hostname on hosts whose localconfig predates the key).
+func localHostname() string {
+	if host, ok := localconfig.EnvOverride(cliutil.LCKeyZimbraServerHostname); ok && host != "" {
+		return host
+	}
+
+	raw, err := localconfig.LoadLocalConfigFromFile(localconfig.DefaultConfigPath())
+	if err != nil {
+		return ""
+	}
+
+	localconfig.Interpolate(raw)
+
+	return raw[cliutil.LCKeyZimbraServerHostname]
+}
 
 // runStandaloneRewrite runs one forced cycle in this process, as the legacy
 // "zmconfigd <configs>" standalone mode does.
@@ -141,6 +163,7 @@ func main() {
 		kong.Description("Configuration management daemon for Carbonio"),
 		kong.Vars{"version": formatVersion()},
 		kong.Bind(env),
+		kong.Exit(exitKong),
 	)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -151,7 +174,7 @@ func main() {
 	// (set by bash's `complete -C`) and print completions instead of running normally.
 	kongplete.Complete(parser)
 
-	ctx, parseErr := parser.Parse(os.Args[1:])
+	ctx, parseErr := parser.Parse(legacyProxyGenArgs(os.Args[1:]))
 	parser.FatalIfErrorf(parseErr)
 
 	os.Exit(exitCode(ctx.Run(cli), os.Stderr))

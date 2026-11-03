@@ -19,36 +19,35 @@ type ControlCmd struct {
 	Shutdown ControlStopCmd    `cmd:"" help:"Stop all services"`
 	Restart  ControlRestartCmd `cmd:"" help:"Restart all services"`
 	Status   ControlStatusCmd  `cmd:"" help:"Show status of enabled services"`
-	Host     string            `name:"host" short:"H" help:"Execute command on remote host via SSH"`
 }
 
 // runControl executes one "configd control" action.
-func runControl(env sys.System, action control.Action, host string) error {
-	opts := &control.Options{Action: action, Host: host}
+func runControl(env sys.System, action control.Action) error {
+	opts := &control.Options{Action: action}
 
 	return exitWith(control.Run(context.Background(), env, os.Stdout, os.Stderr, opts))
 }
 
 type ControlStartCmd struct{}
 
-func (c *ControlStartCmd) Run(parent *ControlCmd, env sys.System) error {
-	return runControl(env, control.ActionStart, parent.Host)
+func (c *ControlStartCmd) Run(_ *ControlCmd, env sys.System) error {
+	return runControl(env, control.ActionStart)
 }
 
 type ControlStopCmd struct{}
 
-func (c *ControlStopCmd) Run(parent *ControlCmd, env sys.System) error {
-	return runControl(env, control.ActionStop, parent.Host)
+func (c *ControlStopCmd) Run(_ *ControlCmd, env sys.System) error {
+	return runControl(env, control.ActionStop)
 }
 
 type ControlRestartCmd struct{}
 
-func (c *ControlRestartCmd) Run(parent *ControlCmd, env sys.System) error {
-	return runControl(env, control.ActionRestart, parent.Host)
+func (c *ControlRestartCmd) Run(_ *ControlCmd, env sys.System) error {
+	return runControl(env, control.ActionRestart)
 }
 
 type ControlStatusCmd struct{}
 
-func (c *ControlStatusCmd) Run(parent *ControlCmd, env sys.System) error {
-	return runControl(env, control.ActionStatus, parent.Host)
+func (c *ControlStatusCmd) Run(_ *ControlCmd, env sys.System) error {
+	return runControl(env, control.ActionStatus)
 }

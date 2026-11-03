@@ -35,6 +35,10 @@ func Run(ctx context.Context, env sys.System, stdout, stderr io.Writer, opts *Op
 	ctl := services.NewController(env)
 
 	if err := run(ctx, ctl, NewReporter(env, ctl), c, opts); err != nil {
+		if errors.Is(err, ErrNotRunning) {
+			return 1
+		}
+
 		_, _ = fmt.Fprintf(stderr, "Error: %v\n", err)
 
 		return 1
@@ -54,7 +58,7 @@ func run(ctx context.Context, ctl *services.Controller, r *Reporter, c *cliutil.
 
 	allRunning := true
 
-	infos := ctl.ServiceListStatus(ctx)
+	infos := ctl.ServiceListStatus(ctx, false)
 	for _, info := range infos {
 		c.Status(info.DisplayName, info.Running, "")
 

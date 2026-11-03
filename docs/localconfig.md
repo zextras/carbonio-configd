@@ -11,9 +11,9 @@ SPDX-License-Identifier: AGPL-3.0-only
 Source: `internal/localconfig/lcdefaults.go` (map `lcDefaults`), exposed via
 `internal/localconfig/defaults.go` as `Defaults = buildDefaults()` (a defensive copy).
 
-`lcDefaults` is a verbatim port of **all 619** `KnownKey` defaults declared in
+`lcDefaults` is a verbatim port of **all 623** `KnownKey` defaults declared in
 carbonio-mailbox's `common/src/main/java/com/zimbra/common/localconfig/LC.java`
-(branch `CO-3358`). configd is now the only local-config implementation present on a
+(tag `v4.38.16`, pinned in `scripts/lc-mailbox-tag`). configd is now the only local-config implementation present on a
 node: the Java `LocalConfigCLI` has been retired, `/opt/zextras/bin/zmlocalconfig` is a
 bash shim over `configd localconfig`, and `zmsetvars` (`bin/shutil.sh`) evals
 `configd localconfig -q -s -m export`. There is no fallback path to a Java-backed
@@ -26,7 +26,9 @@ change.
 
 The port applies these conversions to each `KnownKey` default:
 
-- Java `null` -> `""`, matching `LC.get`'s `Strings.nullToEmpty` behavior.
+- Java `null` -> no default (13 keys, `lcNullKeys`): legacy `LocalConfig` skips such a key in
+  every listing and warns `null valued key '<key>'` when it is named, unless `localconfig.xml`
+  sets it.
 - Numeric and boolean literals -> decimal text (e.g. `7025`) or `"true"`/`"false"`.
 - `Constants.MILLIS_PER_*`, `Integer.MAX_VALUE`, and constant arithmetic expressions are
   evaluated to their literal result (e.g. `Constants.MILLIS_PER_MINUTE * 30` becomes the
@@ -73,7 +75,7 @@ Keys a pod without `localconfig.xml` sets (the Kubernetes deployment):
 | `CONFIGD_LC_ldap_url` | LDAP URL(s) of the cycle's data client and of `configd ldap` (space-separated for failover) |
 | `CONFIGD_LC_ldap_master_url` | Write URL(s); falls back to `ldap_url` |
 | `CONFIGD_LC_zimbra_ldap_userdn` / `CONFIGD_LC_zimbra_ldap_password` | Bind DN and password |
-| `CONFIGD_LC_ldap_starttls_supported` | `0` for a plain `ldap://` directory (the default) |
+| `CONFIGD_LC_ldap_starttls_supported`, `CONFIGD_LC_zimbra_require_interprocess_security` | A plain `ldap://` directory is the default (`0`). StartTLS is used only when `ldap_starttls_supported=1`, `ldap_starttls_required` (default true) **and** `zimbra_require_interprocess_security=1`; every LDAP client of configd (cycle data, writes, discovery, `configd ldap`) follows that one rule |
 | `CONFIGD_LC_zimbra_server_hostname` | The server entry this node renders (otherwise `/etc/hostname`) |
 
 ## configd-only keys (not in the defaults registry)
@@ -127,7 +129,7 @@ instead of retrying forever. A missing `start`/`stop` hook fails only when that 
 
 ## CLI behavior (legacy `LocalConfigCLI` parity)
 
-Source: `internal/cli/localconfig` (flag mapping in `cmd/configd/localconfig.go`). Reference: carbonio-mailbox `4.36.6`
+Source: `internal/cli/localconfig` (flag mapping in `cmd/configd/localconfig.go`). Reference: carbonio-mailbox `v4.38.16`
 `LocalConfigCLI.java`, `LocalConfig.java`, `ConfigWriter.java`.
 
 - Dispatch order, like legacy: `-i`, `--all` (no config needed), then the config file is loaded,
@@ -150,6 +152,21 @@ Source: `internal/cli/localconfig` (flag mapping in `cmd/configd/localconfig.go`
 - `-e`/`-u` refuse a key set by `CONFIGD_LC_<key>` (`key <key> is set by environment
   CONFIGD_LC_<key>`), and reads show the effective value. Beyond that, `-e`/`-u` validate every argument first and write once (`SetKeys`/`RemoveKeys`): a
   protected key without `-f`, a malformed `key=value` or an unset key leaves the file untouched.
+- Values are raw (`${key}` left as is) unless `-x`; the `shell` and `export` modes always expand.
+  Writes never freeze references: `-e` stores exactly what it is given, and
+  `v=$(zmlocalconfig -m nokey k); zmlocalconfig -e "k=$v -Dx"` keeps the `${...}` of `k`.
+- Passwords: only the plain, xml and nokey modes hide values, and only for keys containing the
+  case-sensitive substring `password` (printed as `*`); `-s` shows them. `shell` and `export`
+  never mask (`eval "$(zmlocalconfig -q -m shell ...)"` must see the real password). Names like
+  `api_secret` or `ldap_pass` are not masked.
+- Keys named on the command line print in the order given (repeats included), in every mode; no
+  keys: sorted. A key with no value (null default, or a `<key>` without `<value>`) is skipped,
+  with `Warning: null valued key` when named; an empty `<value/>` is the empty string.
+- The whole file is validated while loading, like legacy `expandAll`: a `${}` cycle or a
+  reference to a key without a value fails every invocation, even `-e`
+  (`Error: failed with error in config file`, exit 1).
+- A command line parse error (unknown flag, missing option argument) exits 1, like the legacy
+  tool, not Kong's 80.
 - Errors go to stderr as `Error: <message>` (legacy `Logging.error`), exit status 1; `-q`
   silences the message, not the status. Messages: `can not edit key <key>`,
   `argument '<arg>' not in key=value form`, `insufficient arguments`, `key <key> is not set`,

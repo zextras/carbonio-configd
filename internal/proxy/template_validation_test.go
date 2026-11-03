@@ -91,7 +91,7 @@ func TestValidateAllRealTemplates(t *testing.T) {
 		}),
 	}
 
-	cfg, err := config.NewConfig()
+	cfg, err := config.NewConfigWithHostname("")
 	if err != nil {
 		t.Fatalf("NewConfig failed: %v", err)
 	}

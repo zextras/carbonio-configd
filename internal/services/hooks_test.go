@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/zextras/carbonio-configd/internal/plan"
 	"github.com/zextras/carbonio-configd/internal/sys"
 	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
@@ -45,7 +46,8 @@ func TestHookBackend_SignalTermsTheServiceAndNamedProcess(t *testing.T) {
 	t.Parallel()
 
 	ctl, f := newFakeController(t)
-	runService(t, ctl, f, svcAntivirus, 4001)
+	// antivirus is a composite: its own process is its detail member (clamd).
+	runService(t, ctl, f, svcClamd, 4001)
 	runService(t, ctl, f, svcFreshclam, 4002)
 
 	b := newHooks(t, ctl, `{"antivirus":{"restart":["signal:TERM","signal:HUP@freshclam"]}}`)
@@ -206,4 +208,19 @@ func TestNewHookBackend_RejectsInvalidSpecs(t *testing.T) {
 
 	_, err := ParseHooks([]byte(`{`))
 	require.ErrorIs(t, err, ErrHooks)
+}
+
+// TestServiceManager_OverHookBackendHasNoSystemdMode pins the hybrid restart
+// policy's boundary: only the host Controller can be in systemd mode, so a
+// manager over hooks (pods) always restarts through the hooks, and the systemd
+// restart verb is refused rather than run against the host.
+func TestServiceManager_OverHookBackendHasNoSystemdMode(t *testing.T) {
+	t.Parallel()
+
+	ctl, _ := newFakeController(t)
+	sm := NewServiceManager(newHooks(t, ctl, `{"*":{"restart":["skip"]}}`))
+
+	assert.False(t, sm.IsSystemdMode())
+	require.Error(t, sm.ApplySystemd(context.Background(), "mta", plan.ActionRestart))
+	require.Error(t, sm.ApplySystemd(context.Background(), "mta", plan.ActionPendingRestart), "never executed")
 }

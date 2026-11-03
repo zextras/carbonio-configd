@@ -6,8 +6,6 @@ package services
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"fmt"
 	"io/fs"
 	"os"
@@ -42,19 +40,14 @@ func (c *Controller) DiscoverEnabledServices(ctx context.Context) ([]string, err
 	}
 
 	// ldap_master_url may be space-separated multi-URL (Carbonio HA): the
-	// parameters carry the failover list (CO-3565).
-	params, err := carboldap.ParamsFrom(lc, carboldap.PurposeDiscovery)
+	// parameters carry the failover list (CO-3565) and the transport security
+	// of the legacy Java rule (ResolveTLS).
+	params, err := carboldap.ParamsFrom(ctx, lc, carboldap.PurposeDiscovery, c.env.FS)
 	if err != nil {
 		logger.WarnContext(ctx, "ldap_master_url is empty in localconfig, trying cache")
 
 		return c.readCache(ctx)
 	}
-
-	if params.StartTLS {
-		params.TLSConfig = c.carbonioCATLSConfig()
-	}
-
-	params.FS = c.env.FS
 
 	client, err := carboldap.NewClient(params)
 	if err != nil {
@@ -116,12 +109,17 @@ func (c *Controller) IsLDAPLocal() bool {
 }
 
 // MapLDAPServiceToRegistry maps an LDAP zimbraServiceEnabled value to its
-// canonical Registry key by resolving it through the shared ServiceAliases
-// table (registry.go) — the same aliasing LookupService uses. Falls back to
+// canonical Registry key: the LDAP-only names of ldapServiceNames ("mailbox"
+// is the store composite) first, then the shared ServiceAliases table
+// (registry.go) — the same aliasing LookupService uses. Falls back to
 // ldapName unchanged when no alias applies (e.g. it's already a canonical
 // registry name, or an LDAP-only name with no service-side control
 // equivalent).
 func MapLDAPServiceToRegistry(ldapName string) string {
+	if canonical, ok := ldapServiceNames[ldapName]; ok {
+		return canonical
+	}
+
 	if canonical, ok := ServiceAliases[ldapName]; ok {
 		return canonical
 	}
@@ -155,25 +153,6 @@ func (c *Controller) writeCache(ctx context.Context, services []string) {
 	// #nosec G306 - cache file needs to be readable by zextras group
 	if err := writeFile(c.env.FS, c.p.cacheFile, []byte(content), 0o600); err != nil {
 		logger.WarnContext(ctx, "Failed to write service cache", "error", err)
-	}
-}
-
-// carbonioCATLSConfig returns a TLS config that trusts Carbonio's self-signed CA.
-// Falls back to system roots if the CA cert cannot be loaded.
-func (c *Controller) carbonioCATLSConfig() *tls.Config {
-	caPath := c.p.conf + "/ca/ca.pem"
-
-	caPEM, err := c.env.FS.ReadFile(caPath)
-	if err != nil {
-		return nil // fall back to system roots
-	}
-
-	pool := x509.NewCertPool()
-	pool.AppendCertsFromPEM(caPEM)
-
-	return &tls.Config{
-		RootCAs:    pool,
-		MinVersion: tls.VersionTLS12,
 	}
 }
 

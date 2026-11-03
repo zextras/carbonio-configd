@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
@@ -25,8 +26,6 @@ const (
 	// generatedFileMode is the mode of every generated proxy config file
 	// (legacy ProxyConfGen output is 0640 zextras:zextras).
 	generatedFileMode os.FileMode = 0o640
-	// coreConfName is the main nginx entry-point config inside ConfDir.
-	coreConfName = "nginx.conf"
 	// confGenSuccessMarker / confGenErrorMarker are the result markers legacy
 	// ProxyConfGen appends to nginx.conf for zmnginxctl.
 	confGenSuccessMarker = "__SUCCESS__"
@@ -188,51 +187,16 @@ func (g *Generator) GenerateAll(ctx context.Context) error {
 		return fmt.Errorf("failed to sync domain certificates: %w", err)
 	}
 
-	// Process each template
-	successCount := 0
-	errorCount := 0
-
-	var firstErr error
-
-	totalProcessingTime := time.Duration(0)
-
-	for _, templatePath := range templates {
-		templateName := filepath.Base(templatePath)
-		logger.DebugContext(ctx, "Processing template",
-			"name", templateName)
-
-		// Generate output filename by removing .template suffix
-		outputName := strings.TrimSuffix(templateName, ".template")
-
-		templateStart := time.Now()
-
-		if err := g.ProcessTemplateWithProcessor(ctx, processor, templatePath, outputName); err != nil {
-			logger.ErrorContext(ctx, "Failed to process template",
-				"name", templateName,
-				"error", err)
-
-			errorCount++
-
-			if firstErr == nil {
-				firstErr = err
-			}
-
-			continue
-		}
-
-		templateDuration := time.Since(templateStart)
-		totalProcessingTime += templateDuration
-		logger.DebugContext(ctx, "Timing: Template processing time",
-			"name", templateName,
-			"duration_seconds", templateDuration.Seconds())
-
-		successCount++
-
-		if g.Verbose {
-			logger.DebugContext(ctx, "Successfully generated file",
-				"name", outputName)
+	if g.ForceDNSResolution {
+		if err := g.checkVirtualHostnames(ctx, processor); err != nil {
+			return err
 		}
 	}
+
+	// Process each template
+	res := g.processTemplates(ctx, processor, templates)
+	successCount, errorCount, firstErr := res.success, res.failed, res.firstErr
+	totalProcessingTime := res.elapsed
 
 	totalDuration := time.Since(startTime)
 	logger.DebugContext(ctx, "Timing: Template generation totals",
@@ -257,6 +221,64 @@ func (g *Generator) GenerateAll(ctx context.Context) error {
 	return nil
 }
 
+// templateRunResult summarizes a pass over all templates.
+type templateRunResult struct {
+	success  int
+	failed   int
+	firstErr error
+	elapsed  time.Duration // time spent in successful template renders
+}
+
+// processTemplates renders every template, continuing past failures and
+// recording the first error.
+func (g *Generator) processTemplates(
+	ctx context.Context, processor *TemplateProcessor, templates []string,
+) templateRunResult {
+	var res templateRunResult
+
+	for _, templatePath := range templates {
+		templateName := filepath.Base(templatePath)
+		logger.DebugContext(ctx, "Processing template",
+			"name", templateName)
+
+		outputName, ok := g.outputName(templateName)
+		if !ok {
+			continue
+		}
+
+		templateStart := time.Now()
+
+		if err := g.ProcessTemplateWithProcessor(ctx, processor, templatePath, outputName); err != nil {
+			logger.ErrorContext(ctx, "Failed to process template",
+				"name", templateName,
+				"error", err)
+
+			res.failed++
+
+			if res.firstErr == nil {
+				res.firstErr = err
+			}
+
+			continue
+		}
+
+		templateDuration := time.Since(templateStart)
+		res.elapsed += templateDuration
+		logger.DebugContext(ctx, "Timing: Template processing time",
+			"name", templateName,
+			"duration_seconds", templateDuration.Seconds())
+
+		res.success++
+
+		if g.Verbose {
+			logger.DebugContext(ctx, "Successfully generated file",
+				"name", outputName)
+		}
+	}
+
+	return res
+}
+
 // appendConfGenResult appends "\n#<text>\n" to ConfDir/nginx.conf so that
 // zmnginxctl restart can detect generation problems. Legacy
 // ProxyConfGen.appendConfGenResultToConf: skipped on dry-run and when the file
@@ -267,7 +289,7 @@ func (g *Generator) appendConfGenResult(ctx context.Context, text string) {
 	}
 
 	//nolint:gosec // G304: path is ConfDir joined with a constant file name
-	f, err := g.env.FS.OpenFile(filepath.Join(g.ConfDir, coreConfName), os.O_WRONLY|os.O_APPEND, 0)
+	f, err := g.env.FS.OpenFile(filepath.Join(g.ConfDir, g.confPrefix()), os.O_WRONLY|os.O_APPEND, 0)
 	if err != nil {
 		return
 	}
@@ -400,7 +422,7 @@ func (g *Generator) ProcessTemplateWithProcessor(
 	// nginx.conf.template) must live in ConfDir — that's where nginx -c points.
 	// All other rendered templates go into the IncludesDir.
 	outputPath := filepath.Join(g.IncludesDir, outputName)
-	if outputName == coreConfName {
+	if outputName == g.confPrefix() {
 		outputPath = filepath.Join(g.ConfDir, outputName)
 	}
 
@@ -451,6 +473,45 @@ func (g *Generator) writeFile(ctx context.Context, path string, content []byte) 
 	logger.DebugContext(ctx, "Wrote file",
 		"byte_count", len(content),
 		"path", path)
+
+	return nil
+}
+
+// outputName maps a template file name to the file it generates: the
+// template prefix is replaced by the config prefix and the .template suffix
+// dropped. With a non-default template prefix only the templates of that
+// prefix are generated, as ProxyConfGen names them explicitly.
+func (g *Generator) outputName(templateName string) (string, bool) {
+	name := strings.TrimSuffix(templateName, ".template")
+	if g.templatePrefix() == nginxConfPrefix && g.confPrefix() == nginxConfPrefix {
+		return name, true
+	}
+
+	if name != g.templatePrefix() && !strings.HasPrefix(name, g.templatePrefix()+".") {
+		return "", false
+	}
+
+	return g.confPrefix() + strings.TrimPrefix(name, g.templatePrefix()), true
+}
+
+// checkVirtualHostnames fails when a domain's virtual hostname (or virtual IP
+// when set) does not resolve: legacy ProxyConfGen -f
+// (ProxyConfGen.fillVarsWithDomainAttrs, mEnforceDNSResolution).
+func (g *Generator) checkVirtualHostnames(ctx context.Context, processor *TemplateProcessor) error {
+	for _, d := range processor.getDomains(ctx) {
+		if d.VirtualHostname == "" {
+			continue
+		}
+
+		host := d.VirtualHostname
+		if d.VirtualIPAddress != "" {
+			host = d.VirtualIPAddress
+		}
+
+		if _, err := net.DefaultResolver.LookupHost(ctx, host); err != nil {
+			return fmt.Errorf("virtual host name %q is not resolvable: %w", d.VirtualHostname, err)
+		}
+	}
 
 	return nil
 }

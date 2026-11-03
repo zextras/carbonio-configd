@@ -426,7 +426,9 @@ func (t *Transformer) handleDefaultLookup(ctx context.Context, sr string) string
 		return lookupVal
 	}
 
-	logger.WarnContext(ctx, "Unknown directive or config key", "directive", sr)
+	// Legacy xformConfig renders "" without logging when VAR and LOCAL both miss;
+	// optional attributes absent from the LDAP schema are routine.
+	logger.DebugContext(ctx, "Unknown directive or config key", "directive", sr)
 
 	return "" // Return empty string if not found
 }

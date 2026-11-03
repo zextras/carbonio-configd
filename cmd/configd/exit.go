@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strconv"
 
 	"github.com/zextras/carbonio-configd/internal/cli/rewrite"
@@ -30,6 +31,22 @@ func exitWith(code int) error {
 	}
 
 	return exitStatus(code)
+}
+
+// kongParseFailure is the status kong's FatalIfErrorf exits with on a command
+// line parse error.
+const kongParseFailure = 80
+
+// exitKong is kong's exit hook: a command line parse error exits 1, the status
+// of the legacy Java/Perl/Jython tools (and of every other failure of this
+// binary), instead of kong's 80. Other statuses (help, version: 0) pass
+// through.
+func exitKong(code int) {
+	if code == kongParseFailure {
+		code = 1
+	}
+
+	os.Exit(code)
 }
 
 // standaloneRewrite returns the in-process rewrite the cli commands fall back

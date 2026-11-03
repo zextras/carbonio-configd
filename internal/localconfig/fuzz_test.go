@@ -315,7 +315,7 @@ func isXMLText(s string) bool {
 }
 
 // FuzzFormatXMLRoundTrip checks FormatXML followed by LoadLocalConfigFromFile:
-// every key and (whitespace-trimmed) value must survive, whatever markup
+// every key and (whitespace-normalised, like dom4j) value must survive, whatever markup
 // characters, entities or CRLF they contain.
 func FuzzFormatXMLRoundTrip(f *testing.F) {
 	f.Add("zimbra_home", "/opt/zextras", "ldap_url", "ldap://[::1]:389 ldap://h:389")
@@ -337,7 +337,7 @@ func FuzzFormatXMLRoundTrip(f *testing.F) {
 		}
 
 		var buf bytes.Buffer
-		if err := FormatXML(&buf, in); err != nil {
+		if err := FormatXML(&buf, in, nil); err != nil {
 			t.Fatalf("FormatXML: %v", err)
 		}
 
@@ -352,7 +352,7 @@ func FuzzFormatXMLRoundTrip(f *testing.F) {
 
 		want := make(map[string]string, len(in))
 		for k, v := range in {
-			want[k] = strings.TrimSpace(v)
+			want[k] = normalizeSpace(v)
 		}
 
 		if !maps.Equal(want, got) {

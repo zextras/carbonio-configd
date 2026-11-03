@@ -218,7 +218,7 @@ func TestAntispamCustomStart_Disabled(t *testing.T) {
 		}, nil
 	}
 
-	err := ctl.antispamCustomStart(context.Background(), nil)
+	err := ctl.antispamDBCustomStart(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("expected nil when disabled, got %v", err)
 	}
@@ -235,7 +235,7 @@ func TestAntispamCustomStop_Disabled(t *testing.T) {
 		}, nil
 	}
 
-	err := ctl.antispamCustomStop(context.Background(), nil)
+	err := ctl.antispamDBCustomStop(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("expected nil when disabled, got %v", err)
 	}
@@ -261,7 +261,7 @@ func TestAntispamCustomStart_EnabledButLocal(t *testing.T) {
 
 	ctl.p.antispamDBPidFile = pidFile
 
-	err := ctl.antispamCustomStart(context.Background(), nil)
+	err := ctl.antispamDBCustomStart(context.Background(), nil)
 	t.Logf("antispamCustomStart returned: %v", err)
 }
 

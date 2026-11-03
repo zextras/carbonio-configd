@@ -4,7 +4,11 @@
 
 package config
 
-import "testing"
+import (
+	"os"
+	"strings"
+	"testing"
+)
 
 func TestNewConfig(t *testing.T) {
 	tests := []struct {
@@ -49,7 +53,7 @@ func TestNewConfig(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv(BaseDirEnv, tt.baseDir)
 
-			cfg, err := NewConfig()
+			cfg, err := NewConfigWithHostname("")
 			if err != nil {
 				t.Fatalf("NewConfig failed: %v", err)
 			}
@@ -124,9 +128,6 @@ func TestConfig_SetVals(t *testing.T) {
 				}
 				if cfg.LdapMasterURL != "ldap://master.example.com" {
 					t.Errorf("LdapMasterURL = %v, want ldap://master.example.com", cfg.LdapMasterURL)
-				}
-				if !cfg.LdapStartTLSRequired {
-					t.Error("LdapStartTLSRequired should be true")
 				}
 			},
 		},
@@ -254,9 +255,6 @@ func TestConfig_SetVals(t *testing.T) {
 				if !cfg.LdapIsMaster {
 					t.Error("LdapIsMaster should be true (case insensitive)")
 				}
-				if cfg.LdapStartTLSRequired {
-					t.Error("LdapStartTLSRequired should be false")
-				}
 				if cfg.Watchdog {
 					t.Error("Watchdog should be false")
 				}
@@ -311,15 +309,14 @@ func TestConfig_SetVals(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create a minimal config for testing
 			cfg := &Config{
-				Interval:             300,
-				WatchdogInterval:     120,
-				LogLevel:             3, // Info level
-				Watchdog:             true,
-				SkipIdlePolls:        true,
-				RestartConfig:        false,
-				Debug:                false,
-				LdapIsMaster:         false,
-				LdapStartTLSRequired: true, // default is true in SetVals
+				Interval:         300,
+				WatchdogInterval: 120,
+				LogLevel:         3, // Info level
+				Watchdog:         true,
+				SkipIdlePolls:    true,
+				RestartConfig:    false,
+				Debug:            false,
+				LdapIsMaster:     false,
 			}
 
 			cfg.SetVals(tt.localConfig)
@@ -479,6 +476,31 @@ func testConfigMap(src map[string]string) *ConfigMap {
 	}
 
 	return cm
+}
+
+// TestNewConfigWithHostname_Precedence: the environment wins, then the
+// localconfig zimbra_server_hostname, then /etc/hostname (D4).
+func TestNewConfigWithHostname_Precedence(t *testing.T) {
+	t.Setenv("zimbra_server_hostname", "env.example.com")
+
+	c, err := NewConfigWithHostname("lc.example.com")
+	if err != nil || c.Hostname != "env.example.com" {
+		t.Fatalf("env must win: got %v, %v", c, err)
+	}
+
+	t.Setenv("zimbra_server_hostname", "")
+
+	c, err = NewConfigWithHostname("  lc.example.com\n")
+	if err != nil || c.Hostname != "lc.example.com" {
+		t.Fatalf("localconfig value (trimmed) must win over /etc/hostname: got %v, %v", c, err)
+	}
+
+	if data, readErr := os.ReadFile("/etc/hostname"); readErr == nil {
+		c, err = NewConfigWithHostname("")
+		if want := strings.TrimSpace(string(data)); err != nil || c.Hostname != want {
+			t.Fatalf("must fall back to /etc/hostname %q: got %v, %v", want, c, err)
+		}
+	}
 }
 
 func TestConfig_SetRuntimeVals(t *testing.T) {

@@ -224,7 +224,7 @@ TOKEN_PARTS = [
 ]
 TOKEN = re.compile(r"\s*(?:" + "|".join(f"(?P<{name}>{pat})" for name, pat in TOKEN_PARTS) + ")")
 
-ID_LITERALS = {"true": "True", "false": "False", "null": "''", "Integer.MAX_VALUE": "2147483647"}
+ID_LITERALS = {"true": "True", "false": "False", "null": "None", "Integer.MAX_VALUE": "2147483647"}
 
 
 def translate_id(tok, expr, strings, consts):
@@ -269,6 +269,8 @@ def eval_default(expr, strings, consts):
         kind = m.lastgroup
         parts.append(translate_token(kind, m.group(kind).strip(), expr, strings, consts))
     val = eval(" ".join(parts), {"__builtins__": {}})
+    if val is None:
+        return None
     if isinstance(val, bool):
         return "true" if val else "false"
     return str(val)
@@ -339,7 +341,9 @@ def render_defaults(defaults, protected, tag):
         "// therefore ported, not a hand-picked subset.\n"
         "//\n"
         "// Conversion rules applied to the Java declarations:\n"
-        "//   - Java null defaults become \"\" (LC.get uses Strings.nullToEmpty).\n"
+        "//   - Java null defaults are not in lcDefaults: they are listed in lcNullKeys.\n"
+        "//     Legacy LocalConfig skips such a key in every listing and warns\n"
+        "//     \"null valued key\" when it is asked for by name.\n"
         "//   - Numeric and boolean defaults become their decimal / \"true\"|\"false\" text.\n"
         "//   - Constants.MILLIS_PER_*, Integer.MAX_VALUE and constant arithmetic are\n"
         "//     evaluated to their literal result.\n"
@@ -347,8 +351,14 @@ def render_defaults(defaults, protected, tag):
         "//     localconfig.xml overrides are merged.\n"
         "var lcDefaults = map[string]string{\n"
     ]
-    for key in sorted(defaults):
+    for key in sorted(k for k in defaults if defaults[k] is not None):
         out.append(f"\t{json.dumps(key)}: {json.dumps(defaults[key], ensure_ascii=False)},\n")
+    out.append(
+        "}\n\n"
+        "// lcNullKeys are the known keys whose Java default is null.\n"
+        "var lcNullKeys = map[string]bool{\n")
+    for key in sorted(k for k in defaults if defaults[k] is None):
+        out.append(f"\t{json.dumps(key)}: true,\n")
     out.append(
         "}\n\n"
         "// lcProtected is the set of keys declared .protect() in LC.java\n"
@@ -391,7 +401,7 @@ def main():
     print(f"{docs}: {len(entries)} keys", file=sys.stderr)
     defs = os.path.join(args.outdir, "lcdefaults.go")
     write_go(defs, render_defaults(defaults, protected, args.tag))
-    print(f"{defs}: {len(defaults)} keys, {len(protected)} protected", file=sys.stderr)
+    print(f"{defs}: {len(defaults)} keys ({sum(v is None for v in defaults.values())} null), {len(protected)} protected", file=sys.stderr)
 
 
 if __name__ == "__main__":

@@ -33,6 +33,10 @@ type runtimeOpts struct {
 	skipCache bool
 	// disableRestarts is --disable-restarts.
 	disableRestarts bool
+	// adjust, when set, edits the configuration after the localconfig keys are
+	// applied and before the managers are built on it ("configd proxy gen"
+	// -w/-s).
+	adjust func(*config.Config)
 	// loadLocal loads the effective localconfig; nil means
 	// localconfig.LoadEffective. Tests inject it.
 	loadLocal func() (map[string]string, error)
@@ -63,16 +67,14 @@ type runtime struct {
 func buildRuntime(ctx context.Context, env sys.System, opts *runtimeOpts) (*runtime, error) {
 	ctx = logger.ContextWithComponentOnce(ctx, "main")
 
-	cfg, err := config.NewConfig()
+	cfg, err := newConfig(ctx, opts)
 	if err != nil {
-		return nil, fmt.Errorf("initialize config: %w", err)
+		return nil, err
 	}
 
 	if opts.readOnly {
 		env = sys.ReadOnly(env)
 	}
-
-	applyRuntimeKeys(ctx, cfg, opts)
 
 	appState := state.NewState()
 	ldapClient := ldap.NewLdap(ctx, cfg)
@@ -104,6 +106,23 @@ func buildRuntime(ctx context.Context, env sys.System, opts *runtimeOpts) (*runt
 	return &runtime{cfg: cfg, state: appState, ldap: ldapClient, cm: cm, sm: sm, ctl: ctl, hooks: hooks, env: env}, nil
 }
 
+// newConfig builds the configuration: the defaults, the hostname the
+// localconfig layers name and the runtime keys of the effective localconfig.
+func newConfig(ctx context.Context, opts *runtimeOpts) (*config.Config, error) {
+	cfg, err := config.NewConfigWithHostname(localHostname())
+	if err != nil {
+		return nil, fmt.Errorf("initialize config: %w", err)
+	}
+
+	applyRuntimeKeys(ctx, cfg, opts)
+
+	if opts.adjust != nil {
+		opts.adjust(cfg)
+	}
+
+	return cfg, nil
+}
+
 // applyRuntimeKeys reads the keys that shape the wiring (template dir, scope,
 // hooks) from the effective localconfig. A load failure leaves the defaults:
 // the cycle's own load retries and reports it.
@@ -121,13 +140,6 @@ func applyRuntimeKeys(ctx context.Context, cfg *config.Config, opts *runtimeOpts
 	}
 
 	cfg.SetRuntimeVals(snapshot.New(snapshot.Parts{Local: data}).LocalConfig())
-
-	// The server hostname is /etc/hostname unless the environment overlay
-	// (CONFIGD_LC_zimbra_server_hostname) names it, as in a pod whose hostname
-	// is not the LDAP server entry's.
-	if host, ok := localconfig.EnvOverride("zimbra_server_hostname"); ok && host != "" {
-		cfg.Hostname = host
-	}
 }
 
 // loadHooks reads and checks the hooks file.

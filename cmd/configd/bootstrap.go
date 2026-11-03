@@ -70,7 +70,8 @@ func bootstrapWatchdog(ctx context.Context, rt *runtime) *watchdog.Watchdog {
 		ServiceManager: rt.sm,
 		State:          rt.state,
 		Clock:          rt.env.Clock,
-		Snapshots:      rt.ctl,
+		Snapshots:      rt.sm,
+		SystemdMode:    rt.sm.IsSystemdMode(),
 		ConfigLookup: func(key string) string {
 			val, _ := rt.state.Snapshot().Local(key)
 
@@ -79,6 +80,10 @@ func bootstrapWatchdog(ctx context.Context, rt *runtime) *watchdog.Watchdog {
 	})
 
 	wd.SetMetrics(rt.cm.Metrics())
+
+	// A service restarted on purpose is not the watchdog's to restart: it stops
+	// watching it until a later check sees it running again.
+	rt.sm.BeforeRestart = func(service string) { wd.RemoveService(ctx, service) }
 
 	return wd
 }

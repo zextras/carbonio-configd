@@ -25,7 +25,7 @@ func TestConfigLoader_RetryLogic(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	mainCfg, err := config.NewConfig()
+	mainCfg, err := config.NewConfigWithHostname("")
 	if err != nil {
 		t.Fatalf("NewConfig failed: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestConfigLoader_TimeoutHandling(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	mainCfg, err := config.NewConfig()
+	mainCfg, err := config.NewConfigWithHostname("")
 	if err != nil {
 		t.Fatalf("NewConfig failed: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestConfigLoader_CompareWithReference(t *testing.T) {
 	}
 
 	// Load actual configuration
-	mainCfg, err := config.NewConfig()
+	mainCfg, err := config.NewConfigWithHostname("")
 	if err != nil {
 		t.Fatalf("NewConfig failed: %v", err)
 	}
@@ -222,7 +222,7 @@ func TestConfigLoader_PostProcessing(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	mainCfg, err := config.NewConfig()
+	mainCfg, err := config.NewConfigWithHostname("")
 	if err != nil {
 		t.Fatalf("NewConfig failed: %v", err)
 	}

@@ -66,9 +66,6 @@ type Config struct {
 	LdapIsMaster     bool
 	LdapRootPassword string
 	LdapMasterURL    string
-	// LdapStartTLSRequired indicates whether LDAP connections must use StartTLS.
-	// Defaults to true for security; set to false only for development/testing.
-	LdapStartTLSRequired bool
 
 	// LdapChangeTrigger is zmconfigd_ldap_change_trigger: when true a watcher
 	// polls the LDAP entries a cycle reads and wakes the main loop as soon as
@@ -142,10 +139,12 @@ type RewriteEntry struct {
 	Mode  string
 }
 
-// NewConfig initializes a new Config with default values. The base directory
-// is BaseDir (CARBONIO_BASE_DIR); the hostname is /etc/hostname, which a
-// CONFIGD_LC_zimbra_server_hostname overlay replaces in the caller.
-func NewConfig() (*Config, error) {
+// NewConfigWithHostname initializes a new Config with default values. The base
+// directory is BaseDir (CARBONIO_BASE_DIR). The hostname comes from the
+// zimbra_server_hostname environment variable, then lcHostname (the
+// zimbra_server_hostname of the localconfig layers, legacy zmhostname), then
+// /etc/hostname when neither is set.
+func NewConfigWithHostname(lcHostname string) (*Config, error) {
 	baseDir := BaseDir()
 
 	c := &Config{
@@ -169,16 +168,35 @@ func NewConfig() (*Config, error) {
 		LdapChangeDebounceSeconds: defaultLdapChangeDebounceSeconds,
 	}
 
-	// Get hostname, similar to os.popen("/opt/zextras/bin/zmhostname").readline().strip()
-	// This will be replaced with actual command execution later.
-	hostnameBytes, err := os.ReadFile("/etc/hostname") // Placeholder for zmhostname command
+	hostname, err := resolveHostname(lcHostname)
 	if err != nil {
-		return nil, fmt.Errorf("could not determine hostname: %w", err)
+		return nil, err
 	}
 
-	c.Hostname = strings.TrimSpace(string(hostnameBytes))
+	c.Hostname = hostname
 
 	return c, nil
+}
+
+// resolveHostname picks the server hostname: legacy conf.py uses the
+// zimbra_server_hostname environment variable, else zmhostname (the
+// zimbra_server_hostname localconfig key). /etc/hostname is the fallback for
+// hosts whose localconfig does not carry the key.
+func resolveHostname(lcHostname string) (string, error) {
+	if h := strings.TrimSpace(os.Getenv("zimbra_server_hostname")); h != "" {
+		return h, nil
+	}
+
+	if h := strings.TrimSpace(lcHostname); h != "" {
+		return h, nil
+	}
+
+	hostnameBytes, err := os.ReadFile("/etc/hostname")
+	if err != nil {
+		return "", fmt.Errorf("could not determine hostname: %w", err)
+	}
+
+	return strings.TrimSpace(string(hostnameBytes)), nil
 }
 
 // localStr sets *dst to data[key] when the key is present.
@@ -257,10 +275,6 @@ func (c *Config) SetVals(localConfig *LocalConfig) {
 	localBoolTrue(data, "ldap_is_master", &c.LdapIsMaster)
 	localStr(data, "ldap_root_password", &c.LdapRootPassword)
 	localStr(data, "ldap_master_url", &c.LdapMasterURL)
-
-	// Default to true for security. Only disable if explicitly set to FALSE.
-	c.LdapStartTLSRequired = true
-	localBoolNotFalse(data, "ldap_starttls_required", &c.LdapStartTLSRequired)
 
 	localInt(data, "zmconfigd_log_level", &c.LogLevel)
 	localInt(data, "zmconfigd_interval", &c.Interval)

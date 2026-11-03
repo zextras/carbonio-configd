@@ -6,7 +6,10 @@ package services
 
 import (
 	"context"
+	"crypto/tls"
+	"errors"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -74,6 +77,12 @@ const ldapReadyTimeout = 30 * time.Second
 
 // ldapProbeInterval is the poll cadence for the readiness probe.
 const ldapProbeInterval = 250 * time.Millisecond
+
+// ldapProbeDialTimeout and ldapProbeRequestTimeout bound one readiness probe.
+const (
+	ldapProbeDialTimeout    = 5 * time.Second
+	ldapProbeRequestTimeout = 5 * time.Second
+)
 
 // ldapStopTimeout is ServiceDef.GracefulStop for slapd: the SIGTERM wait before
 // escalating to SIGKILL. slapd must flush and cleanly close its LMDB backing
@@ -159,13 +168,26 @@ func (c *Controller) startThenProbe(ctx context.Context, cmd *sys.Cmd, bindURL s
 // rootDSE base search. Success means slapd is accepting connections AND serving
 // queries — a half-open listener that hasn't finished initializing fails the
 // search, so this does not false-positive. No credentials are required.
+//
+// The probe carries no credentials and only asks whether slapd serves queries,
+// so ldaps:// URLs skip certificate verification (the local self-signed
+// chain must not make a healthy slapd look dead). Dial and request are bounded
+// so a wedged listener cannot stall the start sequence.
 func probeLDAPReady(ctx context.Context, urls []string) error {
-	conn, _, err := carboldap.DialFirstReachable(ctx, urls)
+	conn, _, err := carboldap.DialFirstReachable(ctx, urls,
+		ldap.DialWithDialer(&net.Dialer{Timeout: ldapProbeDialTimeout}),
+		ldap.DialWithTLSConfig(&tls.Config{
+			MinVersion:         tls.VersionTLS12,
+			InsecureSkipVerify: true, //nolint:gosec // G402: anonymous readiness probe, no secrets exchanged
+		}),
+	)
 	if err != nil {
 		return err
 	}
 
 	defer func() { _ = conn.Close() }()
+
+	conn.SetTimeout(ldapProbeRequestTimeout)
 
 	req := ldap.NewSearchRequest(
 		"", ldap.ScopeBaseObject, ldap.NeverDerefAliases, 1, 5, false,
@@ -174,6 +196,25 @@ func probeLDAPReady(ctx context.Context, urls []string) error {
 
 	if _, err := conn.Search(req); err != nil {
 		return fmt.Errorf("rootDSE probe search failed: %w", err)
+	}
+
+	return nil
+}
+
+// ErrLDAPReplicaMisconfigured is returned by LDAPReplicaGuard.
+var ErrLDAPReplicaMisconfigured = errors.New("ldap_url and ldap_master_url cannot be the same on an ldap replica")
+
+// LDAPReplicaGuard reports a replica whose ldap_url equals ldap_master_url: it
+// would replicate from itself. Legacy ldap.sh refuses every verb but stop on
+// such a host (exit 1, this message); the CLI applies the same rule.
+func (c *Controller) LDAPReplicaGuard() error {
+	lc, err := c.loadConfig()
+	if err != nil {
+		return nil //nolint:nilerr // unreadable localconfig: no basis to refuse
+	}
+
+	if lc["ldap_is_master"] == "false" && lc["ldap_url"] == lc["ldap_master_url"] {
+		return ErrLDAPReplicaMisconfigured
 	}
 
 	return nil

@@ -667,11 +667,12 @@ func TestWatchdog_RestartFailure(t *testing.T) {
 	h.start()
 	defer h.stop()
 
-	// One check cycle drops the failed service from tracking
+	// One check cycle: the failed restart leaves the service watched, so the
+	// next tick retries it
 	h.cycle()
 
-	if wd.IsServiceTracked("opendkim") {
-		t.Fatal("service must be removed from tracking after a failed restart attempt")
+	if !wd.IsServiceTracked("opendkim") {
+		t.Fatal("service must stay watched after a failed restart attempt")
 	}
 
 	// Verify restart was attempted (AddRestart should have been called)
@@ -894,9 +895,9 @@ func TestWatchdog_FailedRestartLeavesUntracked(t *testing.T) {
 		t.Error("ProcessRestarts should have been called")
 	}
 
-	// Service should be removed from tracking after failed restart
-	if wd.IsServiceTracked("amavis") {
-		t.Error("Service should be removed from tracking after failed restart")
+	// Service stays watched after a failed restart so a later tick retries it
+	if !wd.IsServiceTracked("amavis") {
+		t.Error("Service should stay tracked after failed restart")
 	}
 
 	// Service should still be down

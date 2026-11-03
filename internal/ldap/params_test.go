@@ -5,6 +5,7 @@
 package ldap
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -25,7 +26,7 @@ func baseLC() map[string]string {
 func TestParamsFrom_Read(t *testing.T) {
 	t.Parallel()
 
-	cfg, err := ParamsFrom(baseLC(), PurposeRead)
+	cfg, err := ParamsFrom(context.Background(), baseLC(), PurposeRead, nil)
 	require.NoError(t, err)
 
 	assert.Equal(t, []string{"ldap://replica:389", "ldap://replica2:389"}, cfg.URLs)
@@ -33,7 +34,8 @@ func TestParamsFrom_Read(t *testing.T) {
 	assert.Equal(t, "secret", cfg.Password)
 	assert.Equal(t, "cn=zimbra", cfg.BaseDN)
 	assert.Equal(t, 5, cfg.PoolSize)
-	assert.False(t, cfg.StartTLS, "the cycle decides StartTLS for the read client")
+	assert.False(t, cfg.StartTLS, "StartTLS needs ldap_starttls_supported AND zimbra_require_interprocess_security")
+	require.NotNil(t, cfg.TLSConfig)
 }
 
 func TestParamsFrom_ReadErrors(t *testing.T) {
@@ -50,7 +52,7 @@ func TestParamsFrom_ReadErrors(t *testing.T) {
 		lc := baseLC()
 		lc[tc.drop] = ""
 
-		_, err := ParamsFrom(lc, PurposeRead)
+		_, err := ParamsFrom(context.Background(), lc, PurposeRead, nil)
 		assert.True(t, errors.Is(err, tc.want), "%s: got %v", tc.drop, err)
 	}
 }
@@ -58,11 +60,10 @@ func TestParamsFrom_ReadErrors(t *testing.T) {
 func TestParamsFrom_Write(t *testing.T) {
 	t.Parallel()
 
-	cfg, err := ParamsFrom(baseLC(), PurposeWrite)
+	cfg, err := ParamsFrom(context.Background(), baseLC(), PurposeWrite, nil)
 	require.NoError(t, err)
 
 	assert.Equal(t, []string{"ldaps://master:636"}, cfg.URLs)
-	assert.True(t, cfg.StartTLS)
 }
 
 func TestParamsFrom_WriteFallsBackToReplica(t *testing.T) {
@@ -71,47 +72,60 @@ func TestParamsFrom_WriteFallsBackToReplica(t *testing.T) {
 	lc := baseLC()
 	lc["ldap_master_url"] = ""
 
-	cfg, err := ParamsFrom(lc, PurposeWrite)
+	cfg, err := ParamsFrom(context.Background(), lc, PurposeWrite, nil)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"ldap://replica:389", "ldap://replica2:389"}, cfg.URLs)
 
 	lc["ldap_url"] = ""
-	_, err = ParamsFrom(lc, PurposeWrite)
+	_, err = ParamsFrom(context.Background(), lc, PurposeWrite, nil)
 	assert.ErrorIs(t, err, ErrNoURL)
 }
 
 func TestParamsFrom_Discovery(t *testing.T) {
 	t.Parallel()
 
-	cfg, err := ParamsFrom(baseLC(), PurposeDiscovery)
+	cfg, err := ParamsFrom(context.Background(), baseLC(), PurposeDiscovery, nil)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"ldaps://master:636"}, cfg.URLs)
-	assert.True(t, cfg.StartTLS)
 
 	lc := baseLC()
-	lc["ldap_starttls_supported"] = "0"
-
-	cfg, err = ParamsFrom(lc, PurposeDiscovery)
-	require.NoError(t, err)
-	assert.False(t, cfg.StartTLS)
-
 	lc["ldap_master_url"] = ""
-	_, err = ParamsFrom(lc, PurposeDiscovery)
+	_, err = ParamsFrom(context.Background(), lc, PurposeDiscovery, nil)
 	assert.ErrorIs(t, err, ErrNoURL, "discovery never falls back to the replica")
 }
 
-func TestStartTLSSupported(t *testing.T) {
+// TestParamsFrom_StartTLSFollowsLegacyRule pins that every purpose takes its
+// transport security from ResolveTLS: StartTLS needs ldap_starttls_supported=1,
+// ldap_starttls_required (default true) and zimbra_require_interprocess_security=1.
+func TestParamsFrom_StartTLSFollowsLegacyRule(t *testing.T) {
 	t.Parallel()
 
-	for value, want := range map[string]bool{"": false, "0": false, "1": true, "true": true} {
-		assert.Equal(t, want, StartTLSSupported(map[string]string{"ldap_starttls_supported": value}), value)
+	for _, purpose := range []Purpose{PurposeRead, PurposeWrite, PurposeDiscovery} {
+		lc := baseLC()
+
+		cfg, err := ParamsFrom(context.Background(), lc, purpose, nil)
+		require.NoError(t, err)
+		assert.False(t, cfg.StartTLS, "interprocess security is off")
+		require.NotNil(t, cfg.TLSConfig)
+
+		lc["zimbra_require_interprocess_security"] = "1"
+
+		cfg, err = ParamsFrom(context.Background(), lc, purpose, nil)
+		require.NoError(t, err)
+		assert.True(t, cfg.StartTLS)
+
+		lc["ldap_starttls_supported"] = "0"
+
+		cfg, err = ParamsFrom(context.Background(), lc, purpose, nil)
+		require.NoError(t, err)
+		assert.False(t, cfg.StartTLS, "the directory does not advertise StartTLS")
 	}
 }
 
 func TestParamsFrom_AttrsDirFollowsTemplateDir(t *testing.T) {
 	t.Parallel()
 
-	cfg, err := ParamsFrom(baseLC(), PurposeRead)
+	cfg, err := ParamsFrom(context.Background(), baseLC(), PurposeRead, nil)
 	require.NoError(t, err)
 	assert.Empty(t, cfg.AttrsDir)
 
@@ -119,7 +133,7 @@ func TestParamsFrom_AttrsDirFollowsTemplateDir(t *testing.T) {
 	lc["zmconfigd_template_dir"] = "/share/configd"
 
 	for _, purpose := range []Purpose{PurposeRead, PurposeWrite, PurposeDiscovery} {
-		cfg, err = ParamsFrom(lc, purpose)
+		cfg, err = ParamsFrom(context.Background(), lc, purpose, nil)
 		require.NoError(t, err)
 		assert.Equal(t, "/share/configd/conf/attrs", cfg.AttrsDir)
 	}

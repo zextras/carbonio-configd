@@ -120,34 +120,19 @@ func TestApply_EnabledQueuesWithReasons(t *testing.T) {
 	require.Equal(t, 1, h.process)
 }
 
-func TestApply_LookupHonorsEnabled(t *testing.T) {
+// TestApply_NoCascadeLookup pins that config-driven restarts never cascade
+// through DEPENDS: the manager (shared with the watchdog, which does cascade)
+// is given no enabled-service lookup.
+func TestApply_NoCascadeLookup(t *testing.T) {
 	t.Parallel()
-
-	tests := []struct {
-		key  string
-		want string
-	}{
-		{"SERVICE_MTA", "enabled"},
-		{"SERVICE_PROXY", "enabled"},
-		{"SERVICE_ANTIVIRUS", "disabled"},
-		{"SERVICE_", "disabled"},
-		{"OTHER_MTA", "disabled"},
-		{"mta", "disabled"},
-	}
 
 	h := newHarness()
 	pl := &plan.Plan{Enabled: []string{"mta", "proxy"}}
 
 	h.policy.Apply(t.Context(), pl, restart.Settings{Enabled: true})
-	require.NotNil(t, h.lookup)
 
-	for _, tc := range tests {
-		t.Run(tc.key, func(t *testing.T) {
-			t.Parallel()
-
-			assert.Equal(t, tc.want, h.lookup(tc.key))
-		})
-	}
+	require.Equal(t, 1, h.process)
+	assert.Nil(t, h.lookup)
 }
 
 func TestApply_AddRestartErrorIsCarried(t *testing.T) {

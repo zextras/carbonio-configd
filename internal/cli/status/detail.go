@@ -35,18 +35,30 @@ func NewReporter(env sys.System, ctl *services.Controller) *Reporter {
 	return &Reporter{env: env, ctl: ctl, loadLocalConfig: localconfig.LoadEffective}
 }
 
+// ErrNotRunning is returned by PrintServiceStatus for a stopped service. The
+// "<service> is not running." line is already printed, so callers turn the
+// error into exit status 1 without an "Error:" line, as legacy scripts do.
+var ErrNotRunning = errors.New("not running")
+
 // PrintServiceStatus reports one service's state plus PID/uptime detail.
 // Shared by `configd service status <name>` and `configd status <name>`.
 func (r *Reporter) PrintServiceStatus(ctx context.Context, c *cliutil.Console, name string) error {
 	// The status verdict and the PID shown beside it come from one snapshot.
 	ctx = r.ctl.WithProcessSnapshot(ctx)
 
+	def := r.ctl.LookupService(name)
+
+	// A service that is not enabled on this host has nothing to report (legacy
+	// zmantispamctl status is silent and succeeds there).
+	if def != nil && r.ctl.ServiceDisabled(ctx, name) {
+		return nil
+	}
+
 	running, err := r.ctl.ServiceStatus(ctx, name)
 	if err != nil {
 		return fmt.Errorf("failed to get status for service %s: %w", name, err)
 	}
 
-	def := r.ctl.LookupService(name)
 	if def == nil {
 		return fmt.Errorf("unknown service: %s", name)
 	}
@@ -54,7 +66,7 @@ func (r *Reporter) PrintServiceStatus(ctx context.Context, c *cliutil.Console, n
 	if !running {
 		c.Printf("%s is not running.\n", def.DisplayName)
 
-		return fmt.Errorf("service %s is not running", name)
+		return fmt.Errorf("service %s: %w", name, ErrNotRunning)
 	}
 
 	c.Printf("%s is running.\n", def.DisplayName)
