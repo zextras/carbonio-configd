@@ -25,8 +25,15 @@ const (
 	errUnknownCommand    = "ERROR UNKNOWN COMMAND"
 	respSuccessActive    = "SUCCESS ACTIVE"
 	respRewritesComplete = "SUCCESS REWRITES COMPLETE"
+	errRewriteTimeout    = "ERROR REWRITE TIMEOUT"
+	errShuttingDown      = "ERROR SHUTTING DOWN"
 	errNoServicesListed  = "ERROR NO SERVICES LISTED"
 	acceptErrorBackoff   = 100 * time.Millisecond
+
+	// DefaultRewriteTimeout is how long a REWRITE client is held on the socket
+	// (jylibs/listener.py REWRITE_TIMEOUT). It must stay below the systemd
+	// TimeoutStartSec of units that probe the daemon from ExecStartPre (CO-4290).
+	DefaultRewriteTimeout = 60 * time.Second
 
 	// defaultConnReadTimeout bounds how long a single connection may take to
 	// send its command line. Without it, a stalled client holds a goroutine
@@ -63,9 +70,20 @@ var (
 	errAlreadyServing = errors.New("server is already serving")
 )
 
+// RewriteWait lets a REWRITE request wait for the main loop.
+type RewriteWait struct {
+	// Done is closed once the main loop has processed the requested sections.
+	Done <-chan struct{}
+	// Cancel drops the request's interest in Done, when the client gave up.
+	// The sections stay queued. It may be nil.
+	Cancel func()
+}
+
 // ActionTrigger defines the interface for triggering actions in the main application logic.
 type ActionTrigger interface {
-	TriggerRewrite(ctx context.Context, configs []string)
+	// TriggerRewrite queues the sections, wakes the main loop, and returns
+	// the wait that ends when the loop has processed them.
+	TriggerRewrite(ctx context.Context, configs []string) *RewriteWait
 }
 
 // RequestHandler defines the interface for handling incoming requests.
@@ -94,6 +112,9 @@ type ThreadedStreamServer struct {
 	mu       sync.Mutex
 	listener net.Listener
 	closed   bool
+	// cancelConns releases the connections still waiting on the main loop
+	// (REWRITE) when the server shuts down.
+	cancelConns context.CancelFunc
 }
 
 // NewThreadedStreamServer creates a new ThreadedStreamServer.
@@ -151,6 +172,8 @@ func (s *ThreadedStreamServer) ServeForever(ctx context.Context) error {
 
 	s.listener = listener
 
+	ctx, s.cancelConns = context.WithCancel(ctx)
+
 	logger.InfoContext(ctx, "Socket listener running",
 		"address", listenAddr)
 
@@ -159,6 +182,18 @@ func (s *ThreadedStreamServer) ServeForever(ctx context.Context) error {
 	})
 
 	return nil
+}
+
+// Addr returns the address the server listens on, or "" before ServeForever.
+func (s *ThreadedStreamServer) Addr() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.listener == nil {
+		return ""
+	}
+
+	return s.listener.Addr().String()
 }
 
 // acceptLoop accepts connections until shutdown, ctx cancellation, or a
@@ -270,6 +305,10 @@ func (s *ThreadedStreamServer) Shutdown(ctx context.Context) {
 		s.closed = true
 
 		close(s.shutdownCh)
+
+		if s.cancelConns != nil {
+			s.cancelConns()
+		}
 
 		if s.listener != nil {
 			if err := s.listener.Close(); err != nil {
@@ -387,6 +426,10 @@ func (s *ThreadedStreamServer) writeResponse(ctx context.Context, conn net.Conn,
 // ConfigdRequestHandler implements the RequestHandler interface for configd.
 type ConfigdRequestHandler struct {
 	ActionTrigger ActionTrigger
+
+	// RewriteTimeout bounds how long REWRITE waits for the main loop; zero
+	// means DefaultRewriteTimeout.
+	RewriteTimeout time.Duration
 }
 
 // HandleRequest processes incoming commands.
@@ -406,18 +449,49 @@ func (h *ConfigdRequestHandler) HandleRequest(ctx context.Context, command strin
 			return errNoServicesListed
 		}
 
-		if h.ActionTrigger != nil {
-			h.ActionTrigger.TriggerRewrite(ctx, args)
-			logger.DebugContext(ctx, "Triggered REWRITE command",
-				"args", args)
+		return h.rewrite(ctx, args)
+	default:
+		return errUnknownCommand
+	}
+}
 
-			return respRewritesComplete
-		}
-
+// rewrite queues the sections and, like listener.py, holds the client until
+// the main loop has processed them: callers run "configrewrite X && start X",
+// so the reply must not precede the written files. After the timeout the
+// request stays queued and runs on the next cycle.
+func (h *ConfigdRequestHandler) rewrite(ctx context.Context, sections []string) string {
+	if h.ActionTrigger == nil {
 		logger.ErrorContext(ctx, "ActionTrigger not set for REWRITE command")
 
 		return "ERROR INTERNAL ERROR"
-	default:
-		return errUnknownCommand
+	}
+
+	wait := h.ActionTrigger.TriggerRewrite(ctx, sections)
+	logger.DebugContext(ctx, "Triggered REWRITE command",
+		"args", sections)
+
+	if wait.Cancel != nil {
+		defer wait.Cancel()
+	}
+
+	timeout := h.RewriteTimeout
+	if timeout <= 0 {
+		timeout = DefaultRewriteTimeout
+	}
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	select {
+	case <-wait.Done:
+		return respRewritesComplete
+	case <-timer.C:
+		logger.ErrorContext(ctx, "Rewrite request timed out",
+			"timeout_seconds", timeout.Seconds(),
+			"sections", sections)
+
+		return errRewriteTimeout
+	case <-ctx.Done():
+		return errShuttingDown
 	}
 }

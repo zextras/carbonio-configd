@@ -680,7 +680,7 @@ type MockActionTrigger struct {
 	State      *state.State
 }
 
-func (t *MockActionTrigger) TriggerRewrite(ctx context.Context, configs []string) {
+func (t *MockActionTrigger) TriggerRewrite(ctx context.Context, configs []string) *network.RewriteWait {
 	// Mock implementation: update state and signal reload
 	t.State.AddRequestedConfigs(ctx, configs)
 	select {
@@ -689,4 +689,9 @@ func (t *MockActionTrigger) TriggerRewrite(ctx context.Context, configs []string
 	default:
 		// Reload channel full
 	}
+
+	done := make(chan struct{})
+	close(done)
+
+	return &network.RewriteWait{Done: done}
 }
