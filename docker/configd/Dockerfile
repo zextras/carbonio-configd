@@ -32,30 +32,17 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
 # Templates, extracted from the Carbonio debs of the same release: carbonio-core
 # (zmconfigd.cf and the conf/*.in templates) and carbonio-common-appserver-conf
 # (the LDAP attrs schema, conf/attrs, which carbonio-core does not ship).
+# Both are Architecture: all, so they are fetched once on the build platform
+# for every target.
 FROM --platform=$BUILDPLATFORM docker.io/library/ubuntu:jammy AS installer
-
-ARG TARGETARCH
-ARG BUILDARCH=amd64
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates \
- && if [ "${TARGETARCH}" != "${BUILDARCH}" ]; then \
-      dpkg --add-architecture ${TARGETARCH} \
-      && sed -i 's|^deb |deb [arch='"${BUILDARCH}"'] |' /etc/apt/sources.list \
-      && printf '%s\n' \
-           'Types: deb' \
-           'URIs: http://ports.ubuntu.com/ubuntu-ports/' \
-           'Suites: jammy jammy-updates jammy-security' \
-           'Components: main restricted universe multiverse' \
-           "Architectures: ${TARGETARCH}" \
-           'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg' \
-         > /etc/apt/sources.list.d/ports-${TARGETARCH}.sources; \
-    fi \
- && printf 'deb [arch=%s trusted=yes] https://repo.zextras.tools/repository/ubuntu-devel-jammy jammy main\n' "${TARGETARCH}" \
+ && printf 'deb [trusted=yes] https://repo.zextras.tools/repository/ubuntu-devel-jammy jammy main\n' \
     > /etc/apt/sources.list.d/zextras.list \
  && apt-get update \
  && mkdir -p /core /tmp/debs && cd /tmp/debs \
- && apt-get download carbonio-core:${TARGETARCH} carbonio-common-appserver-conf:${TARGETARCH} \
+ && apt-get download carbonio-core carbonio-common-appserver-conf \
  && for deb in /tmp/debs/*.deb; do dpkg -x "$deb" /core; done \
  && rm -rf /tmp/debs
 
