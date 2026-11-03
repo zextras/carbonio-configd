@@ -16,6 +16,7 @@ import (
 const (
 	ldapServiceName    = "ldap"
 	configdServiceName = "configd"
+	proxyServiceName   = "proxy"
 )
 
 // controlStart implements the legacy `zmcontrol start` orchestration:
@@ -25,8 +26,11 @@ const (
 //     starts have a daemon to talk to. Without this every dependent service
 //     would fail to regenerate its config.
 //  3. Then iterate the rest of the registered services in legacy %startorder
-//     (mailbox, memcached, proxy, amavis, ..., mta, stats), filtering by what
-//     LDAP says is enabled on this host.
+//     (store, memcached, proxy, antispam, ..., mta, stats), filtering by what
+//     LDAP says is enabled on this host. The configuration of all of them is
+//     regenerated once up front; each service then starts `norewrite` (legacy
+//     zmcontrol passes norewrite to every zm*ctl it runs). The resolver file
+//     (zmresolverctl) is regenerated right before proxy.
 func (o *orchestrator) controlStart(ctx context.Context, c *cliutil.Console) int {
 	c.Header()
 
@@ -131,9 +135,9 @@ func (o *orchestrator) startBootstrapServices(ctx context.Context, c *cliutil.Co
 func (o *orchestrator) startEnabledServices(
 	ctx context.Context, c *cliutil.Console, enabledSet map[string]bool, threshold int,
 ) int {
-	rc := 0
+	toStart := make([]string, 0, len(enabledSet))
 
-	for _, name := range o.ctl.AllServiceNames() {
+	for _, name := range o.ctl.ControlServiceNames() {
 		if name == ldapServiceName || name == configdServiceName {
 			continue
 		}
@@ -142,6 +146,17 @@ func (o *orchestrator) startEnabledServices(
 			continue
 		}
 
+		toStart = append(toStart, name)
+	}
+
+	if err := o.ctl.RewriteConfigsFor(ctx, toStart); err != nil {
+		c.Warn("Configuration rewrite failed: %v", err)
+	}
+
+	startCtx := services.WithNoRewriteContext(ctx)
+	rc := 0
+
+	for _, name := range toStart {
 		def := o.ctl.LookupService(name)
 		if def == nil {
 			continue
@@ -149,8 +164,14 @@ func (o *orchestrator) startEnabledServices(
 
 		o.ctl.CheckServiceDiskSpace(name, threshold)
 
+		if name == proxyServiceName {
+			if err := o.ctl.RegenerateResolvers(ctx); err != nil {
+				c.Printf("resolvers.conf file generation failed.\n")
+			}
+		}
+
 		done := c.Progress("Starting", def.DisplayName)
-		startErr := o.ctl.ServiceStart(ctx, name)
+		startErr := o.ctl.ServiceStart(startCtx, name)
 		done(startErr)
 
 		if startErr != nil {
@@ -165,7 +186,7 @@ func (o *orchestrator) controlStop(ctx context.Context, c *cliutil.Console) int 
 	c.Header()
 
 	rc := 0
-	ordered := o.ctl.AllServiceNames()
+	ordered := o.ctl.ControlServiceNames()
 
 	// Reverse order for stop
 	for i, j := 0, len(ordered)-1; i < j; i, j = i+1, j-1 {
@@ -253,7 +274,8 @@ func (o *orchestrator) stopLDAPIfLocal(ctx context.Context, c *cliutil.Console, 
 // resort (LDAP and cache both unavailable) we degrade to the full registry
 // view rather than printing nothing — operators must still see something.
 //
-// Exit code: rc=1 if any displayed service except stats/logger is
+// Exit code: rc=1 if any displayed service of the status list (LC
+// zmcontrol_service_status_list; default: all but stats/logger) is
 // Stopped/Failed or discovery failed, else rc=0 (legacy doStatus).
 func (o *orchestrator) controlStatus(ctx context.Context, c *cliutil.Console) int {
 	c.Header()
@@ -296,7 +318,7 @@ func (o *orchestrator) controlStatus(ctx context.Context, c *cliutil.Console) in
 
 	var rows []svcRow
 
-	stream := o.ctl.ServiceListStatusStream(ctx)
+	stream := o.ctl.ServiceListStatusStream(ctx, false)
 	disc := <-discCh
 
 	for info := range stream {
@@ -320,9 +342,18 @@ func (o *orchestrator) controlStatus(ctx context.Context, c *cliutil.Console) in
 		return 1
 	}
 
+	// Legacy %serviceStatusList: the services whose stopped state fails the
+	// status. zmcontrol_service_status_list names them; unset, every service
+	// but stats and logger counts.
+	counted := o.ctl.StatusListServices()
+
 	for _, r := range rows {
-		// Legacy %serviceStatusList excludes stats and logger by default.
-		if !r.Running && r.Name != "stats" && r.Name != "logger" {
+		counts := r.Name != "stats" && r.Name != "logger"
+		if counted != nil {
+			counts = counted[r.Name]
+		}
+
+		if !r.Running && counts {
 			return 1
 		}
 	}

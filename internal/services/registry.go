@@ -8,8 +8,10 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/zextras/carbonio-configd/internal/sys"
@@ -108,6 +110,63 @@ type ServiceDef struct {
 	// it in doStartup, omits it from %allservices/%stoporder, and only ever
 	// runs `systemctl is-active service-discover.service` for status.
 	ExternallyManaged bool
+
+	// Members makes the service a composite: its lifecycle is the lifecycle of
+	// the listed registry services, started in this order (legacy zmstorectl
+	// START_ORDER, zmantivirusctl SCRIPTS). A composite has no process of its
+	// own: it is running when every applicable member is, and its
+	// SystemdUnits are the union of the members' units (for observers only;
+	// start/stop go through the members).
+	Members []string
+	// StopMembersForward stops the members in start order, as the legacy
+	// zmantivirusctl/zmantispamctl do, instead of in reverse (zmstorectl:
+	// the JVM before the database).
+	StopMembersForward bool
+	// ForceMembersNoRewrite starts the members with norewrite: the composite
+	// regenerates its own ConfigRewrite once up front (legacy zmstorectl and
+	// zmantivirusctl start their children `norewrite`).
+	ForceMembersNoRewrite bool
+	// MemberApplies reports whether a member takes part in this host's
+	// lifecycle (zmantivirusctl skips amavisd when it is not installed). Nil
+	// means every member applies.
+	MemberApplies func(ctx context.Context, member string) bool
+	// DetailMember is the member whose process the composite's status detail
+	// (pid, since) shows.
+	DetailMember string
+	// Wants lists registry services that must be running before this one
+	// starts. Unlike Dependencies they are never stopped with it, and a
+	// failure to start one is logged, not fatal (systemd Wants=): mailbox
+	// wants appserver-db, yet stopping the JVM must leave the database up.
+	Wants []string
+	// Component marks a service that is only a part of a composite (mailbox
+	// and appserver-db of store, clamd of antivirus). It stays addressable
+	// through the CLI but is omitted from listings and from `control`'s
+	// start/stop/status walk, which orchestrate the composite.
+	Component bool
+	// IdleWhenDisabled makes every lifecycle verb a successful no-op while
+	// EnableCheck is false, and status report "nothing to check" (legacy
+	// zmantispamctl: the whole wrapper is guarded by the service being enabled
+	// for the host).
+	IdleWhenDisabled bool
+	// Companions are further process identities that must be running for the
+	// service to count as running in legacy mode (amavisd and amavis-mc: legacy
+	// amavisdctl status needs both). The ProcessName process stays the one
+	// whose pid is reported.
+	Companions []string
+	// RefreshSignal is the signal `refresh` delivers to the service's main
+	// process, signaled directly (as the zextras user) in every mode. Zero
+	// means the service has no refresh (only milter: SIGCONT).
+	RefreshSignal syscall.Signal
+	// Rotate is the `rotate` action for services that reopen their logs on a
+	// signal (stats: SIGHUP to every collector). Nil means no rotate.
+	Rotate func(ctx context.Context) (SignalReport, error)
+}
+
+// SignalReport is the outcome of signaling a service's processes: the pids a
+// signal was delivered to and those that were already gone.
+type SignalReport struct {
+	Signaled   []int
+	NotRunning []int
 }
 
 // ServiceAliases is the single canonical table of alternative service names
@@ -119,13 +178,22 @@ type ServiceDef struct {
 // service list. These names are accepted as input but do NOT appear in
 // Registry or AllServiceNames — they are resolution aliases only.
 var ServiceAliases = map[string]string{
-	svcClamd:             svcAntivirus,
 	svcMailboxd:          svcMailbox,
-	svcService:           svcMailbox,
+	svcMysql:             svcAppserverDB,
+	svcMariadb:           svcAppserverDB,
+	svcService:           svcStore,
 	svcZmconfigd:         svcConfigd,
 	groupDirectoryServer: svcLdap,
 	"directory":          svcLdap,
 	"config-service":     svcConfigd,
+}
+
+// ldapServiceNames maps zimbraServiceEnabled values whose registry service is
+// not the same-named one, and which are NOT CLI aliases: the "mailbox" LDAP
+// service is legacy zmstorectl (database + JVM), i.e. the store composite,
+// whereas the registry's `mailbox` is the JVM alone.
+var ldapServiceNames = map[string]string{
+	svcMailbox: svcStore,
 }
 
 // cbpolicydInitDB initializes the cbpolicyd sqlite database if it doesn't exist.
@@ -202,6 +270,7 @@ func (c *Controller) defaultRegistry() map[string]*ServiceDef {
 			ProcessName:  c.p.statsGlob,
 			CustomStart:  c.statsCustomStart,
 			CustomStop:   c.statsCustomStop,
+			Rotate:       c.statsRotate,
 		},
 		svcOpendkim: {
 			Name:         svcOpendkim,
@@ -244,20 +313,29 @@ func (c *Controller) defaultRegistry() map[string]*ServiceDef {
 			ProcessName:  milterMainClass,
 			EnableCheck:  c.milterEnabled,
 			CustomStart:  c.milterCustomStart,
+			// zmmilterctl refresh: SIGCONT makes MilterServer re-read its config.
+			RefreshSignal: syscall.SIGCONT,
 		},
 		svcAmavis: {
-			Name:          svcAmavis,
-			DisplayName:   svcAmavis,
-			SystemdUnits:  []string{unitMailthreat},
-			BinaryPath:    c.p.common + "/sbin/amavisd",
-			BinaryArgs:    []string{"-X", "no_conf_file_writable_check", "-c", c.p.conf + "/amavisd.conf"},
-			PidFile:       c.p.run + "/amavisd.pid",
-			ProcessName:   "amavisd",
+			Name:         svcAmavis,
+			DisplayName:  svcAmavis,
+			SystemdUnits: []string{unitMailthreat},
+			BinaryPath:   c.p.common + "/sbin/amavisd",
+			BinaryArgs:   []string{"-X", "no_conf_file_writable_check", "-c", c.p.conf + "/amavisd.conf"},
+			PidFile:      c.p.run + "/amavisd.pid",
+			ProcessName:  "amavisd",
+			// amavisd is only useful with its amavis-mc companion: legacy
+			// amavisdctl status needs both, start launches both.
+			Companions:    []string{amavisMCIdentity},
 			ConfigRewrite: []string{svcAmavis, svcAntispam},
+			PreStart:      []Hook{c.amavisPreStart},
+			CustomStart:   c.amavisCustomStart,
+			CustomStop:    c.amavisCustomStop,
+			Component:     true,
 		},
-		svcAntivirus: {
-			Name:          svcAntivirus,
-			DisplayName:   svcAntivirus,
+		svcClamd: {
+			Name:          svcClamd,
+			DisplayName:   svcClamd,
 			SystemdUnits:  []string{unitAntivirus},
 			BinaryPath:    c.p.common + "/sbin/clamd",
 			BinaryArgs:    []string{"--config-file=" + c.p.conf + "/clamd.conf"},
@@ -267,15 +345,44 @@ func (c *Controller) defaultRegistry() map[string]*ServiceDef {
 			UseSDNotify:   true,
 			ConfigRewrite: []string{svcAntivirus},
 			PreStart:      []Hook{c.clamdDirInit},
-			Dependencies:  []string{svcFreshclam},
+			Component:     true,
 		},
-		svcAntispam: {
-			Name:         svcAntispam,
-			DisplayName:  svcAntispam,
+		// antivirus is legacy zmantivirusctl: amavisd (+amavis-mc), clamd and
+		// freshclam, started in that order and stopped in the same order.
+		// `clamd` alone is the separate clamd-only service (zmclamdctl).
+		svcAntivirus: {
+			Name:                  svcAntivirus,
+			DisplayName:           svcAntivirus,
+			SystemdUnits:          []string{unitMailthreat, unitAntivirus, "carbonio-freshclam.service"},
+			Members:               []string{svcAmavis, svcClamd, svcFreshclam},
+			StopMembersForward:    true,
+			ForceMembersNoRewrite: true,
+			MemberApplies:         c.amavisMemberApplies,
+			DetailMember:          svcClamd,
+			ConfigRewrite:         []string{svcAntivirus},
+		},
+		svcAntispamDB: {
+			Name:         svcAntispamDB,
+			DisplayName:  svcAntispamDB,
 			SystemdUnits: []string{"carbonio-antispam.service"},
-			ProcessName:  "amavisd",
-			CustomStart:  c.antispamCustomStart,
-			CustomStop:   c.antispamCustomStop,
+			PidFile:      c.p.antispamDBPidFile,
+			ProcessName:  c.p.common + "/sbin/m*d* --defaults-file=" + c.p.conf + "/antispam-my.cnf",
+			CustomStart:  c.antispamDBCustomStart,
+			CustomStop:   c.antispamDBCustomStop,
+			Component:    true,
+		},
+		// antispam is legacy zmantispamctl: the amavisd mariadb (when local),
+		// then amavisd, all of it only on hosts running the antispam service.
+		svcAntispam: {
+			Name:               svcAntispam,
+			DisplayName:        svcAntispam,
+			SystemdUnits:       []string{"carbonio-antispam.service", unitMailthreat},
+			Members:            []string{svcAntispamDB, svcAmavis},
+			StopMembersForward: true,
+			MemberApplies:      c.antispamMemberApplies,
+			DetailMember:       svcAmavis,
+			EnableCheck:        c.antispamEnabled,
+			IdleWhenDisabled:   true,
 		},
 		serviceMTA: {
 			Name:          serviceMTA,
@@ -305,24 +412,47 @@ func (c *Controller) defaultRegistry() map[string]*ServiceDef {
 			UseSDNotify:   true,
 			ConfigRewrite: []string{svcProxy},
 		},
+		// mailbox is the mailboxd JVM alone (legacy zmmailboxdctl). The
+		// database is appserver-db and the pair together is the store
+		// composite, which stops the JVM first and the database last.
 		svcMailbox: {
-			Name:        svcMailbox,
-			DisplayName: svcMailbox,
-			// Units are listed in start order (DB first, JVM second). startService
-			// iterates forward; stopService iterates in reverse so the JVM is
-			// terminated before mariadb is shut down. Matches legacy zmstorectl's
-			// START_ORDER="mysql.server zmmailboxdctl" /
-			// STOP_ORDER="zmmailboxdctl mysql.server". carbonio-appserver.service
-			// already Wants=carbonio-appserver-db.service, so starting the JVM
-			// unit alone would pull in the DB — but Wants= is a start-time link
-			// only; without listing the DB here the stop path would leave
-			// mariadb running after `zmcontrol stop`.
-			SystemdUnits:  []string{"carbonio-appserver-db.service", unitAppserver},
+			Name:          svcMailbox,
+			DisplayName:   svcMailbox,
+			SystemdUnits:  []string{unitAppserver},
 			ProcessName:   mailboxMainClass,
-			ConfigRewrite: []string{svcMailbox},
-			CustomStart:   c.mailboxCustomStart,
-			CustomStop:    c.mailboxCustomStop,
-			PostStart:     []Hook{c.MailboxAdvancedStatusHook},
+			ConfigRewrite: mailboxConfigRewrite,
+			// carbonio-appserver.service has Wants=carbonio-appserver-db.service:
+			// starting the JVM brings the database up, stopping it leaves it up.
+			Wants:       []string{svcAppserverDB},
+			CustomStart: c.mailboxCustomStart,
+			CustomStop:  c.mailboxCustomStop,
+			PostStart:   []Hook{c.MailboxAdvancedStatusHook},
+			Component:   true,
+		},
+		svcAppserverDB: {
+			Name:         svcAppserverDB,
+			DisplayName:  svcMysql,
+			SystemdUnits: []string{unitAppserverDB},
+			PidFile:      c.p.appserverDBPidFile,
+			// mariadbd (or mysqld) of the mailbox defaults file; the antispam
+			// database runs the same binary with its own defaults file.
+			ProcessName: c.p.common + "/sbin/m*d* --defaults-file=" + c.p.conf + "/my.cnf",
+			CustomStart: c.appserverDBCustomStart,
+			CustomStop:  c.appserverDBCustomStop,
+			// The InnoDB flush must precede the stop in both orchestration modes.
+			PreStop:   []Hook{c.appserverDBFlushHook},
+			Component: true,
+		},
+		// store is legacy zmstorectl: appserver-db then mailbox; stopped in
+		// reverse so the JVM is gone before the database shuts down.
+		svcStore: {
+			Name:                  svcStore,
+			DisplayName:           svcMailbox,
+			SystemdUnits:          []string{unitAppserverDB, unitAppserver},
+			Members:               []string{svcAppserverDB, svcMailbox},
+			ForceMembersNoRewrite: true,
+			DetailMember:          svcMailbox,
+			ConfigRewrite:         mailboxConfigRewrite,
 		},
 		svcLdap: {
 			Name:         svcLdap,
@@ -347,6 +477,9 @@ func (c *Controller) defaultRegistry() map[string]*ServiceDef {
 			Detached:     true,
 			LogFile:      c.p.log + "/configd.out",
 			ProcessName:  c.p.bin + "/configd",
+			// Start returns once the daemon answers STATUS (legacy
+			// zmconfigdctl start): control start's later steps rely on it.
+			CustomStart: c.configdCustomStart,
 		},
 		svcServiceDiscover: {
 			Name:                svcServiceDiscover,
@@ -357,6 +490,56 @@ func (c *Controller) defaultRegistry() map[string]*ServiceDef {
 			UseSystemdForStatus: true,
 		},
 	}
+}
+
+// mailboxConfigRewrite is the zmtlsctl configuration set of the mailbox
+// (legacy zmstorectl/zmmailboxdctl run `zmtlsctl` unless `norewrite`): the
+// files mailboxd reads at boot.
+var mailboxConfigRewrite = []string{
+	svcSasl, "webxml", svcMailbox, svcService, "zextras", "zextrasAdmin", "zimlet",
+}
+
+// amavisMemberApplies skips amavis on hosts without amavisd installed
+// (zmantivirusctl lists it among its scripts, which are no-ops there).
+func (c *Controller) amavisMemberApplies(_ context.Context, member string) bool {
+	return member != svcAmavis || c.amavisInstalled()
+}
+
+// antispamMemberApplies runs the antispam database only when it lives on this
+// host (antispamDBEnabled), and amavis only when it is installed.
+func (c *Controller) antispamMemberApplies(ctx context.Context, member string) bool {
+	if member == svcAntispamDB {
+		return c.antispamDBEnabled(ctx)
+	}
+
+	return c.amavisMemberApplies(ctx, member)
+}
+
+// antispamEnabled reports whether the antispam service is enabled for this
+// host in LDAP (or its cache). A host whose services cannot be discovered
+// counts as not running antispam, as for legacy zmantispamctl.
+func (c *Controller) antispamEnabled(ctx context.Context) bool {
+	enabled, err := c.DiscoverEnabledServices(ctx)
+	if err != nil {
+		return false
+	}
+
+	return slices.Contains(enabled, svcAntispam)
+}
+
+// ControlServiceNames returns the services `control` orchestrates, sorted by
+// start order: every registered service except the Components of a composite
+// (their composite starts, stops and reports them).
+func (c *Controller) ControlServiceNames() []string {
+	names := make([]string, 0, len(c.registry))
+
+	for _, name := range c.AllServiceNames() {
+		if !c.registry[name].Component {
+			names = append(names, name)
+		}
+	}
+
+	return names
 }
 
 // LookupService returns the ServiceDef for a service name, or nil if not found.

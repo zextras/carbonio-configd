@@ -24,7 +24,8 @@ func TestMapLDAPServiceToRegistry(t *testing.T) {
 		expected string
 	}{
 		{"directory-server", "ldap"},
-		{"service", "mailbox"},
+		{"service", "store"},
+		{"mailbox", "store"},
 		{"zmconfigd", "configd"},
 		{"mta", "mta"},
 		{"proxy", "proxy"},

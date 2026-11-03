@@ -191,8 +191,8 @@ func TestPrintServiceStatus_NotRunning(t *testing.T) {
 	c, out := newConsole()
 
 	err := fx.r.PrintServiceStatus(context.Background(), c, "cbpolicyd")
-	if err == nil || err.Error() != "service cbpolicyd is not running" {
-		t.Fatalf("err = %v, want 'service cbpolicyd is not running'", err)
+	if !errors.Is(err, ErrNotRunning) {
+		t.Fatalf("err = %v, want ErrNotRunning", err)
 	}
 
 	if got, want := out.String(), "cbpolicyd is not running.\n"; got != want {

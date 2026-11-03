@@ -211,7 +211,9 @@ func TestServiceStatus_NotRunningIsFalseNil(t *testing.T) {
 
 	for _, name := range ctl.AllServiceNames() {
 		def := ctl.LookupService(name)
-		if def.UseSystemdForStatus {
+		// Composites report their members; an idle (disabled) service reports
+		// running by design.
+		if def.UseSystemdForStatus || def.IdleWhenDisabled {
 			continue
 		}
 

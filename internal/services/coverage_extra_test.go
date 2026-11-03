@@ -75,7 +75,7 @@ func TestServiceListStatus_LegacyMode(t *testing.T) {
 
 	ctl.pinMode(false)
 
-	infos := ctl.ServiceListStatus(context.Background())
+	infos := ctl.ServiceListStatus(context.Background(), true)
 	if len(infos) == 0 {
 		t.Error("expected non-empty list from registry")
 	}
@@ -91,7 +91,7 @@ func TestServiceListStatusStream_CtxCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	ch := ctl.ServiceListStatusStream(ctx)
+	ch := ctl.ServiceListStatusStream(ctx, true)
 	for range ch {
 	}
 }

@@ -57,8 +57,9 @@ func TestRun_ServiceNotRunning(t *testing.T) {
 		t.Errorf("rc = %d, want 1", rc)
 	}
 
-	if want := "Error: service cbpolicyd is not running\n"; stderr != want {
-		t.Errorf("stderr = %q, want %q", stderr, want)
+	// "<service> is not running." on stdout is the whole report: no Error line.
+	if stderr != "" {
+		t.Errorf("stderr = %q, want empty", stderr)
 	}
 
 	if stdout == "" {

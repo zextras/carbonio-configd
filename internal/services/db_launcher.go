@@ -6,23 +6,22 @@ package services
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"io/fs"
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
-// startAppserverDB spawns mysqld_safe for the mailbox mariadb. Invoked by
-// mailboxCustomStart before the JVM so mailboxd finds port 7306 ready.
-// Replaces legacy zmstorectl's call to `/opt/zextras/bin/mysql.server start`
-// with a direct exec so the daemon has no runtime dependency on the legacy
-// shell wrapper.
+// startAppserverDB spawns mysqld_safe for the mailbox mariadb (the
+// appserver-db service; the store composite starts it before the JVM so
+// mailboxd finds port 7306 ready). Replaces legacy zmstorectl's call to
+// `/opt/zextras/bin/mysql.server start` with a direct exec so the daemon has
+// no runtime dependency on the legacy shell wrapper.
 func (c *Controller) startAppserverDB(ctx context.Context) error {
 	lc, err := c.loadConfig()
 	if err != nil {
@@ -33,14 +32,14 @@ func (c *Controller) startAppserverDB(ctx context.Context) error {
 		lc["mysql_mycnf"], lc["mysql_errlogfile"], c.p.appserverDBPidFile)
 }
 
-// stopAppserverDB flushes InnoDB dirty pages and then terminates the mailbox
-// mariadb via its pidfile with SIGTERM→SIGKILL escalation. mysqld_safe
-// (the supervising shell wrapper) exits on its own when its child mariadbd
-// is gone, so no separate signal is needed.
-func (c *Controller) stopAppserverDB(ctx context.Context) error {
-	c.flushAppserverDBDirtyPages(ctx)
-
-	return c.stopMysqldByPidFile(ctx, "appserver-db", c.p.appserverDBPidFile)
+// stopAppserverDB shuts the mailbox mariadb down cleanly. The InnoDB
+// dirty-page flush runs first (flushAppserverDBDirtyPages, also a PreStop hook
+// so the systemd stop path gets it too), then the server gets SIGTERM and a
+// bounded wait — never SIGKILL: killing mariadbd mid-flush forces InnoDB
+// crash recovery on the next start. Legacy mysql.server stop is the same: a
+// plain `kill`, then up to zimbra_mysql_shutdown_timeout seconds of polling.
+func (c *Controller) stopAppserverDB(ctx context.Context, def *ServiceDef) error {
+	return c.stopMysqld(ctx, def, "zimbra_mysql_shutdown_timeout", c.p.appserverDBPidFile)
 }
 
 // startAntispamDB spawns mysqld_safe for the amavisd mariadb. Uses
@@ -66,9 +65,10 @@ func (c *Controller) startAntispamDB(ctx context.Context) error {
 }
 
 // stopAntispamDB terminates the amavisd mariadb. No InnoDB flush — antispam
-// DB content is transient scoring state, not user mail.
-func (c *Controller) stopAntispamDB(ctx context.Context) error {
-	return c.stopMysqldByPidFile(ctx, "antispam-db", c.p.antispamDBPidFile)
+// DB content is transient scoring state, not user mail — but the same
+// never-SIGKILL rule applies.
+func (c *Controller) stopAntispamDB(ctx context.Context, def *ServiceDef) error {
+	return c.stopMysqld(ctx, def, "zimbra_mysql_shutdown_timeout", c.p.antispamDBPidFile)
 }
 
 // antispamDBEnabled gates the antispam lifecycle hooks. Mirrors the guard at
@@ -171,78 +171,185 @@ func (c *Controller) spawnMysqldSafe(ctx context.Context, name, defaultsFile, er
 	return nil
 }
 
-// stopMysqldByPidFile reads the PID recorded by mariadbd, sends SIGTERM with
-// escalation to SIGKILL on timeout (the kill timeout), and removes the
-// pidfile. Signaling the PID directly rather than the process group is
-// intentional: mysqld_safe exits on its own once its supervised child is
-// gone, so a group kill would only add risk of cross-signal collisions when
-// appserver and antispam DBs coexist.
-func (c *Controller) stopMysqldByPidFile(ctx context.Context, name, pidfile string) error {
-	data, err := c.env.FS.ReadFile(pidfile)
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			logger.InfoContext(ctx, "DB already stopped (no pidfile)",
-				"name", name, "pidfile", pidfile)
+// Safe-stop tuning of the mariadb launchers.
+const (
+	// mysqlShutdownTimeoutDefault is the wait for mariadbd to exit after
+	// SIGTERM when zimbra_mysql_shutdown_timeout is unset (the localconfig
+	// default is 60).
+	mysqlShutdownTimeoutDefault = 60 * time.Second
+	// innodbFlushTimeout is how long the pre-stop flush waits for InnoDB to
+	// write its dirty pages (legacy storectl.sh: 600 x 1s).
+	innodbFlushTimeout = 600 * time.Second
+	mysqlPollInterval  = time.Second
+)
 
-			return nil
-		}
+// stopMysqld terminates the mariadbd of def: SIGTERM to its pid, then a
+// bounded wait for it to exit. It never escalates to SIGKILL — a mariadbd
+// killed while flushing needs InnoDB crash recovery at the next start — so a
+// server that outlives the wait is reported as an error and left running.
+// A server that is not running is a successful stop.
+func (c *Controller) stopMysqld(ctx context.Context, def *ServiceDef, timeoutKey, pidfile string) error {
+	pid := c.runningPID(ctx, def)
+	if pid == 0 {
+		logger.InfoContext(ctx, "DB already stopped", "name", def.Name)
 
-		return fmt.Errorf("%s: read pidfile %s: %w", name, pidfile, err)
-	}
-
-	pidStr, _, _ := strings.Cut(strings.TrimSpace(string(data)), "\n")
-
-	pid, err := strconv.Atoi(strings.TrimSpace(pidStr))
-	if err != nil || pid <= 0 {
 		_ = c.env.FS.Remove(pidfile)
 
-		return fmt.Errorf("%s: invalid pid in %s: %q", name, pidfile, pidStr)
+		return nil
+	}
+
+	timeout := mysqlShutdownTimeoutDefault
+
+	if lc, err := c.loadConfig(); err == nil {
+		if secs, convErr := strconv.Atoi(strings.TrimSpace(lc[timeoutKey])); convErr == nil && secs > 0 {
+			timeout = time.Duration(secs) * time.Second
+		}
 	}
 
 	c.signalPID(pid, syscall.SIGTERM)
-	c.waitAndEscalate(ctx, []int{pid}, c.killTimeout)
+
+	if !c.pollUntilExit(ctx, pid, timeout, mysqlPollInterval) {
+		return fmt.Errorf("%s (pid %d) still running %s after SIGTERM; not forcing termination "+
+			"(SIGKILL would require InnoDB crash recovery)", def.Name, pid, timeout)
+	}
 
 	_ = c.env.FS.Remove(pidfile)
 
-	logger.InfoContext(ctx, "DB stopped", "name", name, "pid", pid)
+	logger.InfoContext(ctx, "DB stopped", "name", def.Name, "pid", pid)
 
 	return nil
 }
 
-// flushAppserverDBDirtyPages tells InnoDB to flush buffered writes to disk
-// by setting innodb_max_dirty_pages_pct to 0. Best effort: skipped when the
-// password is missing or mysql is already unreachable. Matches the intent
-// of legacy zmstorectl.flushDirtyPages without shelling out to its script.
+// appserverDBFlushHook is the PreStop hook of appserver-db: it flushes InnoDB
+// before the stop in both orchestration modes.
+func (c *Controller) appserverDBFlushHook(ctx context.Context, _ *ServiceManager) error {
+	c.flushAppserverDBDirtyPages(ctx)
+
+	return nil
+}
+
+// flushAppserverDBDirtyPages makes InnoDB write its buffered pages to disk
+// before the server is stopped, like legacy storectl.sh flushDirtyPages:
+//
+//  1. only when the server runs and InnoDB is not DISABLED;
+//  2. set global innodb_max_dirty_pages_pct=0;
+//  3. poll `show engine innodb status` until every buffer pool instance reports
+//     "Modified db pages 0", for up to innodbFlushTimeout.
+//
+// Best effort: a failed step is logged and the stop proceeds.
 func (c *Controller) flushAppserverDBDirtyPages(ctx context.Context) {
+	def := c.registry[svcAppserverDB]
+	if def == nil || c.runningPID(ctx, def) == 0 {
+		return
+	}
+
 	lc, err := c.loadConfig()
 	if err != nil {
+		logger.WarnContext(ctx, "InnoDB flush skipped: localconfig load failed", "error", err)
+
 		return
 	}
 
 	password := lc["zimbra_mysql_password"]
 	if password == "" {
+		logger.WarnContext(ctx, "InnoDB flush skipped: zimbra_mysql_password is not set")
+
 		return
 	}
 
-	//nolint:gosec // password is from localconfig, mysql binary path is fixed
-	_, err = c.env.Exec.Run(ctx, &sys.Cmd{
-		Path: c.p.bin + "/mysql",
-		Args: []string{
-			"-u", "zextras", "--password=" + password,
-			"-e", "set global innodb_max_dirty_pages_pct=0;",
-		},
-	})
-	if err != nil {
-		logger.WarnContext(ctx, "Could not signal InnoDB to flush dirty pages; proceeding to stop",
-			"error", err)
+	query := func(stmt string) (string, error) {
+		//nolint:gosec // password is from localconfig, mysql binary path is fixed
+		out, qErr := sys.Output(ctx, c.env.Exec, c.p.bin+"/mysql",
+			"-u", "zextras", "--password="+password, "-e", stmt)
+
+		return string(out), qErr
 	}
+
+	if engines, qErr := query("show engines;"); qErr == nil && innodbDisabled(engines) {
+		return
+	}
+
+	if _, qErr := query("set global innodb_max_dirty_pages_pct=0;"); qErr != nil {
+		logger.WarnContext(ctx, "Could not signal InnoDB to flush dirty pages; proceeding to stop",
+			"error", qErr)
+
+		return
+	}
+
+	deadline := c.env.Clock.Now().Add(innodbFlushTimeout)
+
+	for c.env.Clock.Now().Before(deadline) {
+		status, qErr := query(`show engine innodb status\G`)
+		if qErr != nil {
+			logger.WarnContext(ctx, "Could not read InnoDB status while flushing; proceeding to stop",
+				"error", qErr)
+
+			return
+		}
+
+		if modifiedDBPages(status) == 0 {
+			return
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-c.env.Clock.After(mysqlPollInterval):
+		}
+	}
+
+	logger.WarnContext(ctx, "InnoDB still has dirty pages after the flush wait; proceeding to stop",
+		"timeout", innodbFlushTimeout)
 }
 
-// antispamCustomStart is the antispam-service hook: it starts the amavisd
-// mariadb when configured locally. amavisd itself is managed by the amavis
-// service's own launcher (they share the same ProcessName), so this hook is
-// strictly about the DB side of antispam.
-func (c *Controller) antispamCustomStart(ctx context.Context, _ *ServiceDef) error {
+// innodbDisabled reports whether `show engines` lists InnoDB as DISABLED.
+func innodbDisabled(engines string) bool {
+	for line := range strings.SplitSeq(engines, "\n") {
+		fields := strings.Split(line, "\t")
+		if len(fields) > 1 && fields[0] == "InnoDB" {
+			return strings.TrimSpace(fields[1]) == "DISABLED"
+		}
+	}
+
+	return false
+}
+
+// modifiedDBPages sums the "Modified db pages N" lines of `show engine innodb
+// status\G` (one per buffer pool instance). An output without any such line
+// counts as nothing to wait for.
+func modifiedDBPages(status string) int {
+	total := 0
+
+	for line := range strings.SplitSeq(status, "\n") {
+		if !strings.HasPrefix(line, "Modified db pages") {
+			continue
+		}
+
+		fields := strings.Fields(line)
+
+		if n, err := strconv.Atoi(fields[len(fields)-1]); err == nil {
+			total += n
+		}
+	}
+
+	return total
+}
+
+// appserverDBCustomStart launches the mailbox mariadb (legacy mysql.server
+// start).
+func (c *Controller) appserverDBCustomStart(ctx context.Context, _ *ServiceDef) error {
+	return c.startAppserverDB(ctx)
+}
+
+// appserverDBCustomStop is the stop of appserver-db in legacy mode: a clean,
+// never-killed shutdown (the InnoDB flush ran as a PreStop hook).
+func (c *Controller) appserverDBCustomStop(ctx context.Context, def *ServiceDef) error {
+	return c.stopAppserverDB(ctx, def)
+}
+
+// antispamDBCustomStart starts the amavisd mariadb when it is configured to
+// run on this host (see antispamDBEnabled); elsewhere it is a no-op.
+func (c *Controller) antispamDBCustomStart(ctx context.Context, _ *ServiceDef) error {
 	if !c.antispamDBEnabled(ctx) {
 		return nil
 	}
@@ -250,11 +357,11 @@ func (c *Controller) antispamCustomStart(ctx context.Context, _ *ServiceDef) err
 	return c.startAntispamDB(ctx)
 }
 
-// antispamCustomStop is the symmetric stop-side of antispamCustomStart.
-func (c *Controller) antispamCustomStop(ctx context.Context, _ *ServiceDef) error {
+// antispamDBCustomStop is the symmetric stop of antispamDBCustomStart.
+func (c *Controller) antispamDBCustomStop(ctx context.Context, def *ServiceDef) error {
 	if !c.antispamDBEnabled(ctx) {
 		return nil
 	}
 
-	return c.stopAntispamDB(ctx)
+	return c.stopAntispamDB(ctx, def)
 }

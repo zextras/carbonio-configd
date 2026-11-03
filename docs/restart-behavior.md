@@ -205,11 +205,16 @@ control path, not a per-instance flag — each of those functions bifurcates int
 | Service name | Unit(s) |
 |---|---|
 | `amavis` | `carbonio-mailthreat.service` |
-| `antispam` | `carbonio-antispam.service` |
-| `antivirus` | `carbonio-antivirus.service` |
+| `antispam` (composite: `antispam-db` + `amavis`) | `carbonio-antispam.service`, `carbonio-mailthreat.service` |
+| `antispam-db` | `carbonio-antispam.service` |
+| `antivirus` (composite: `amavis` + `clamd` + `freshclam`) | `carbonio-mailthreat.service`, `carbonio-antivirus.service`, `carbonio-freshclam.service` |
+| `appserver-db` | `carbonio-appserver-db.service` |
 | `cbpolicyd` | `carbonio-policyd.service` |
+| `clamd` | `carbonio-antivirus.service` |
+| `freshclam` | `carbonio-freshclam.service` |
 | `ldap` | `carbonio-openldap.service` |
-| `mailbox` | `carbonio-appserver-db.service`, `carbonio-appserver.service` |
+| `mailbox` (the JVM only) | `carbonio-appserver.service` |
+| `store` (composite: `appserver-db` + `mailbox`) | `carbonio-appserver-db.service`, `carbonio-appserver.service` |
 | `memcached` | `carbonio-memcached.service` |
 | `milter` | `carbonio-milter.service` |
 | `mta` | `carbonio-postfix.service` |
@@ -219,10 +224,61 @@ control path, not a per-instance flag — each of those functions bifurcates int
 | `stats` | `carbonio-stats.service` |
 
 Alternative names — including LDAP `zimbraServiceEnabled` values (`directory-server`,
-`service`, `zmconfigd`) and legacy CLI aliases (`clamd`, `mailboxd`, `directory`,
-`config-service`) — resolve to these canonical entries through the single
+`service`, `zmconfigd`) and legacy CLI aliases (`mailboxd`→`mailbox`,
+`mysql`/`mariadb`→`appserver-db`, `directory`→`ldap`, `config-service`/`zmconfigd`→`configd`,
+`service`→`store`) — resolve to these canonical entries through the single
 `services.ServiceAliases` table (`registry.go`), consumed by `LookupService` and, for the
-LDAP-facing names, by `services.MapLDAPServiceToRegistry` (`discovery.go`).
+LDAP-facing names, by `services.MapLDAPServiceToRegistry` (`discovery.go`). The LDAP value
+`mailbox` (the whole store host) maps to the `store` composite, not to the `mailbox` JVM.
+`clamd` is a service of its own (`zmclamdctl`), not an alias of `antivirus`.
+
+**Composites and components.** `store`, `antivirus` and `antispam` are composites
+(`ServiceDef.Members`): `start` runs the members in order, `stop` in reverse, a failed
+member stop does not prevent the others from stopping (the errors are joined), and
+`status` reports the members. Their members (`appserver-db`, `mailbox`, `amavis`, `clamd`,
+`freshclam`, `antispam-db`) are *components*: addressable with `configd service <verb>
+<name>` but not iterated by `configd control` (`ControlServiceNames` excludes them).
+`mailbox` declares `appserver-db` as `Wants`: a failing database start is logged and the JVM
+start goes on, as legacy `zmmailboxdctl` does. `antispam` is idle (every verb a successful
+no-op, silent `status`) when LDAP does not list `antispam` for this host.
+
+**Safe MariaDB stop.** `appserver-db` (and `antispam-db`) stop with SIGTERM and a bounded wait
+(`zimbra_mysql_shutdown_timeout`, default 60 s) and are never sent SIGKILL: a MariaDB killed
+mid-flush needs InnoDB crash recovery. A server that outlives the wait is an error, and is
+left running. Before the stop, `appserver-db` flushes InnoDB dirty pages
+(`innodb_max_dirty_pages_pct=0`, polling `show engine innodb status` for up to 600 s) as a
+`PreStop` hook, so both orchestration modes get it.
+
+**Mailbox start.** Legacy mode and the systemd leaf wait for `zimbraMailPort` to accept
+connections (zmprov, then TCP, up to 3 minutes). `service start mailbox` regenerates the
+zmtlsctl set of configs (`sasl webxml mailbox service zextras zextrasAdmin zimlet`) unless
+`norewrite` is given.
+
+## CLI verbs
+
+`configd service <verb> <name> [args...]` mirrors the legacy `zm*ctl` verbs; the core
+wrappers run `exec configd service "${1:-}" <name> "${@:2}"`.
+
+| Verb | Behavior |
+|---|---|
+| `start`, `restart`, `reload` | `norewrite` (or `--no-rewrite`) skips the config regeneration |
+| `stop`, `kill` | stop (kill is a legacy alias) |
+| `status` | stopped: `<name> is not running.` on stdout, exit 1, nothing on stderr |
+| `refresh` | signals the service to re-read its config: `milter` gets SIGCONT; a stopped service prints `<name> is not currently running` (exit 0) |
+| `rotate` | `stats`: SIGHUP to every collector in the stats pidfile directory; no pidfile → exit 1 |
+| anything else | usage line on stderr, exit 1 |
+
+Trailing arguments are accepted on every verb; only `norewrite` is interpreted. `ldap` on a
+replica whose `ldap_url` equals `ldap_master_url` refuses every verb but `stop`/`kill` with
+`ldap_url and ldap_master_url cannot be the same on an ldap replica`.
+
+`configd control start` regenerates the configuration once for the union of the services it
+is going to start, then starts each of them `norewrite`; it runs `zmresolverctl` before
+`proxy`, and waits for the freshly started configd to report `SUCCESS ACTIVE`.
+`configd control status` fails (exit 1) when a service listed in the localconfig key
+`zmcontrol_service_status_list` is stopped — every service but `stats` and `logger` when the key
+is empty. `configd control -H <host>` (remote control over SSH) no longer exists: `zmcontrol
+-H` is the wrapper's job.
 
 ## MTA: restart converted to reload
 
@@ -265,8 +321,9 @@ For each dependent service:
 Dependencies are processed in `StartOrder` sequence (lower number = earlier):
 
 ```
-ldap(0) → configd(10) → mailbox(50) → memcached(60) → proxy(70) →
-amavis(75) → antispam(80) → antivirus(90) → opendkim(100) →
+ldap(0) → configd(10) → appserver-db(48) → store(49) → mailbox(50) → memcached(60) →
+proxy(70) → amavis(75) → antispam-db(79) → antispam(80) → antivirus(90) → clamd(91) →
+freshclam(92) → opendkim(100) →
 cbpolicyd(120) → saslauthd(130) → milter(140) → mta(150) → stats(160)
 ```
 

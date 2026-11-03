@@ -101,11 +101,12 @@ func TestRun_Packages(t *testing.T) {
 			"dpkg-query -W -f ${Package} ${Version}\n carbonio*",
 		},
 		{
-			"rpm listed", "ID=\"rocky\"\n", "carbonio-core 1.2-3\n",
-			"Carbonio Release \n\nInstalled packages:\ncarbonio-core 1.2-3\n",
-			"rpm -qa --qf %{NAME} %{VERSION}-%{RELEASE}\n carbonio*",
+			// rpm lists in database order; the legacy `dnf list installed` was sorted.
+			"rpm listed", "ID=\"rocky\"\n", "carbonio-mta.x86_64 1:2.0-1\ncarbonio-core.x86_64 1.2-3\n",
+			"Carbonio Release \n\nInstalled packages:\ncarbonio-core.x86_64 1.2-3\ncarbonio-mta.x86_64 1:2.0-1\n",
+			`rpm -qa --qf %{NAME}.%{ARCH} %|EPOCH?{%{EPOCH}:}|%{VERSION}-%{RELEASE}\n carbonio*`,
 		},
-		{"none installed", "ID=debian\n", "", "Carbonio Release \n", "dpkg-query -W -f ${Package} ${Version}\n carbonio*"},
+		{"none installed", "ID=debian\n", "", "Carbonio Release \n\n", "dpkg-query -W -f ${Package} ${Version}\n carbonio*"},
 	}
 
 	for _, tt := range tests {

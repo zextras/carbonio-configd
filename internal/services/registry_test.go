@@ -128,18 +128,9 @@ func TestRegistryDependencies_Antivirus(t *testing.T) {
 		t.Fatal("antivirus not found")
 	}
 
-	hasFreshclam := false
-	for _, dep := range def.Dependencies {
-		if dep == "freshclam" {
-			hasFreshclam = true
-		}
-		if dep == "clamd" {
-			t.Error("antivirus must not depend on clamd; carbonio-antivirus.service IS clamd")
-		}
-	}
-
-	if !hasFreshclam {
-		t.Error("expected antivirus to depend on freshclam")
+	// zmantivirusctl is amavisd + clamd + freshclam, in that order.
+	if want := []string{"amavis", "clamd", "freshclam"}; !slices.Equal(def.Members, want) {
+		t.Errorf("antivirus members = %v, want %v", def.Members, want)
 	}
 
 	// Verify ConfigRewrite contains "antivirus"
@@ -240,9 +231,10 @@ func TestLookupService_ZmconfigdAlias(t *testing.T) {
 	}
 }
 
-// TestRegistryAntivirusLegacyFields verifies the antivirus service definition
-// has all the expected fields for clamd integration.
-func TestRegistryAntivirusLegacyFields(t *testing.T) {
+// TestRegistryClamdLegacyFields verifies the clamd service definition (the
+// process behind zmclamdctl and the clamd member of antivirus) has all the
+// expected fields.
+func TestRegistryClamdLegacyFields(t *testing.T) {
 	t.Parallel()
 
 	ctl := newRealController(t)
@@ -250,7 +242,7 @@ func TestRegistryAntivirusLegacyFields(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	def := ctl.LookupService("antivirus")
+	def := ctl.LookupService("clamd")
 	if def == nil {
 		t.Fatal("antivirus not found")
 	}
@@ -323,9 +315,9 @@ func TestRegistryOpendkimRunsAsZextras(t *testing.T) {
 	}
 }
 
-// TestLookupService_ClamdAlias verifies that the "clamd" alias
-// resolves to the antivirus service definition.
-func TestLookupService_ClamdAlias(t *testing.T) {
+// TestLookupService_ClamdIsNotAnAliasOfAntivirus verifies that "clamd"
+// resolves to its own service definition, distinct from antivirus.
+func TestLookupService_ClamdIsNotAnAliasOfAntivirus(t *testing.T) {
 	t.Parallel()
 
 	ctl := newRealController(t)
@@ -335,7 +327,7 @@ func TestLookupService_ClamdAlias(t *testing.T) {
 	}
 	clamdDef := ctl.LookupService("clamd")
 	if clamdDef == nil {
-		t.Fatal("expected clamd alias to resolve to a service definition")
+		t.Fatal("expected clamd to resolve to a service definition")
 	}
 
 	antivirusDef := ctl.LookupService("antivirus")
@@ -343,9 +335,10 @@ func TestLookupService_ClamdAlias(t *testing.T) {
 		t.Fatal("antivirus not found")
 	}
 
-	// The alias should return the same pointer as the canonical service
-	if clamdDef != antivirusDef {
-		t.Error("clamd alias does not resolve to the same antivirus definition")
+	// clamd (zmclamdctl) is a service of its own, not an alias of antivirus
+	// (zmantivirusctl, the composite of amavis + clamd + freshclam).
+	if clamdDef == antivirusDef || clamdDef.Name != "clamd" {
+		t.Errorf("clamd resolved to %q; want its own definition", clamdDef.Name)
 	}
 }
 
@@ -399,12 +392,12 @@ func TestServiceAliasesResolve(t *testing.T) {
 	}
 }
 
-// TestServiceStartClamdAlias verifies that the clamd alias
-// resolves to the antivirus definition with the correct fields.
+// TestServiceStartClamdDefinition verifies that clamd
+// resolves to its own definition with the correct fields.
 // Note: We do NOT call ServiceStart directly as that would attempt to
-// launch the actual clamd process. Instead, we verify the alias resolution
+// launch the actual clamd process. Instead, we verify the resolution
 // and that the definition has the necessary fields for start code to use.
-func TestServiceStartClamdAlias(t *testing.T) {
+func TestServiceStartClamdDefinition(t *testing.T) {
 	t.Parallel()
 
 	ctl := newRealController(t)
@@ -413,15 +406,14 @@ func TestServiceStartClamdAlias(t *testing.T) {
 		t.Skip("slow: may invoke real system commands")
 	}
 
-	// Verify the alias resolves to antivirus
+	// clamd is its own service (zmclamdctl), not an alias of antivirus.
 	def := ctl.LookupService("clamd")
 	if def == nil {
-		t.Fatal("clamd alias should resolve to a service definition")
+		t.Fatal("clamd should resolve to a service definition")
 	}
 
-	// Verify it's the antivirus definition
-	if def.Name != "antivirus" {
-		t.Errorf("clamd alias resolved to Name=%q, want 'antivirus'", def.Name)
+	if def.Name != "clamd" {
+		t.Errorf("clamd resolved to Name=%q, want 'clamd'", def.Name)
 	}
 
 	// Verify BinaryPath is set (required for start code)
@@ -429,9 +421,7 @@ func TestServiceStartClamdAlias(t *testing.T) {
 		t.Error("BinaryPath is empty; start code would fail")
 	}
 
-	// Verify it's the same as the antivirus definition
-	antivirusDef := ctl.LookupService("antivirus")
-	if def != antivirusDef {
-		t.Error("clamd alias does not resolve to the antivirus definition")
+	if def == ctl.LookupService("antivirus") {
+		t.Error("clamd must not resolve to the antivirus composite")
 	}
 }
