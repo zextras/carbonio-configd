@@ -430,6 +430,7 @@ configd ldap gcf zimbraMtaRestriction zimbraMailMode
 configd ldap gs [server]                            # zmprov gs, global values inherited; default: zimbra_server_hostname
 configd ldap mcf +zimbraMtaRestriction reject_x     # zmprov mcf: + adds, - removes, none replaces
 configd ldap mcf -zimbraMtaRestriction reject_x
+configd ldap wait --timeout 120s                     # block until ldap_url accepts connections (used by the systemd unit); exits 0 at once when no ldap_url is set
 configd ldap search --base cn=servers,cn=zimbra --scope one --filter '(cn=mail*)' --attr zimbraServiceEnabled
 ```
 

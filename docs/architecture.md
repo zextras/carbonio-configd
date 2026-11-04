@@ -147,6 +147,7 @@ RESPONSE = RESULT_STRING NEWLINE
 |---|---|---|
 | `STATUS` | `STATUS\n` | `SUCCESS ACTIVE\n` |
 | `REWRITE section [section ...]` | `REWRITE proxy mta\n` | `SUCCESS REWRITES COMPLETE\n` once the main loop has rewritten the sections; `ERROR REWRITE TIMEOUT\n` after 60 s (the request stays queued); `ERROR SHUTTING DOWN\n` if the daemon stops meanwhile |
+| `REWRITE` with names that are not sections of `zmconfigd.cf` | `REWRITE bogus\n` | Same reply as above: the legacy listener queues such names and no section matches them. configd logs a WARN and drops them, so they never reach the main loop; a request naming only unknown sections is acknowledged without a cycle. Requests are capped at 4096 bytes and 256 arguments |
 | `REWRITE` (no sections) | `REWRITE\n` | `ERROR NO SERVICES LISTED\n` (as the legacy listener) |
 | _(anything else, empty line)_ | `FOO\n` | `ERROR UNKNOWN COMMAND\n` |
 
