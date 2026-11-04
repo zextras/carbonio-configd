@@ -13,7 +13,7 @@
 #   docker build -f docker/configd/Dockerfile .
 
 # Static binary, built for the target platform from this checkout.
-FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.26-bookworm AS builder
+FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.27-bookworm AS builder
 
 ARG TARGETOS=linux
 ARG TARGETARCH
