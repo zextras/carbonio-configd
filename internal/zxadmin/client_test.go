@@ -7,9 +7,9 @@ package zxadmin
 import (
 	"context"
 	"crypto/tls"
-	"encoding/pem"
 	"errors"
 	"fmt"
+	"github.com/zextras/carbonio-configd/internal/testutil/pki"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -763,36 +763,84 @@ func tlsTestServer(t *testing.T) *httptest.Server {
 	return srv
 }
 
-// With ssl_allow_untrusted_certs=false the admin certificate is verified
-// against the Carbonio CA before the password is sent.
-func TestNew_VerifiesServerCertificate(t *testing.T) {
-	srv := tlsTestServer(t)
-	home := t.TempDir()
+// pkiAdminServer starts an admin endpoint whose certificate (valid for
+// mailbox.example.com only) is issued by a fresh CA.
+func pkiAdminServer(t *testing.T) (*httptest.Server, pki.Server) {
+	t.Helper()
 
-	cfg := map[string]string{
-		"zimbra_ldap_password":      "secret",
-		"ssl_allow_untrusted_certs": "false",
-		"zimbra_home":               home,
-		"zimbra_server_hostname":    "example.com",
-	}
+	p := pki.NewServer(t, "mailbox.example.com")
+	mux := http.NewServeMux()
+	mux.HandleFunc(soapPath, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(goodAuthResponse))
+	})
+	mux.HandleFunc(statusPath, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(objectStatusResponse))
+	})
 
-	c := NewWithBaseURL(srv.URL, cfg)
-	if _, err := c.GetAllServicesStatus(context.Background()); err == nil {
-		t.Fatal("untrusted certificate accepted")
-	}
+	srv := httptest.NewUnstartedServer(mux)
+	srv.TLS = &tls.Config{Certificates: []tls.Certificate{p.Certificate}, MinVersion: tls.VersionTLS12}
+	srv.StartTLS()
+	t.Cleanup(srv.Close)
 
-	// Trusting the server certificate through conf/ca/ca.pem makes it work.
-	pemBytes := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw})
+	return srv, p
+}
+
+func writeCA(t *testing.T, home string, caPEM []byte) {
+	t.Helper()
+
 	if err := os.MkdirAll(home+"/conf/ca", 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := os.WriteFile(home+"/conf/ca/ca.pem", pemBytes, 0o600); err != nil {
+	if err := os.WriteFile(home+"/conf/ca/ca.pem", caPEM, 0o600); err != nil {
 		t.Fatal(err)
 	}
+}
 
-	c = NewWithBaseURL(srv.URL, cfg)
-	if _, err := c.GetAllServicesStatus(context.Background()); err != nil {
-		t.Fatalf("certificate signed by the Carbonio CA rejected: %v", err)
+// The admin certificate is always verified before the password is sent, for
+// every ssl_allow_untrusted_certs value, against the Carbonio CA and the
+// zimbra_server_hostname name.
+func TestNew_VerifiesServerCertificate(t *testing.T) {
+	srv, p := pkiAdminServer(t)
+	other := pki.NewServer(t, "mailbox.example.com")
+
+	for _, allow := range []string{"", "true", "false"} {
+		t.Run("allow="+allow, func(t *testing.T) {
+			cfg := func(home, host string) map[string]string {
+				return map[string]string{
+					"zimbra_ldap_password":      "secret",
+					"ssl_allow_untrusted_certs": allow,
+					"zimbra_home":               home,
+					"zimbra_server_hostname":    host,
+				}
+			}
+			status := func(c *Client) error {
+				_, err := c.GetAllServicesStatus(context.Background())
+
+				return err
+			}
+
+			home := t.TempDir()
+			writeCA(t, home, p.CAPEM)
+
+			if err := status(NewWithBaseURL(srv.URL, cfg(home, "mailbox.example.com"))); err != nil {
+				t.Fatalf("trusted CA and matching name rejected: %v", err)
+			}
+
+			wrongCA := t.TempDir()
+			writeCA(t, wrongCA, other.CAPEM)
+
+			if err := status(NewWithBaseURL(srv.URL, cfg(wrongCA, "mailbox.example.com"))); err == nil {
+				t.Fatal("certificate from an untrusted CA accepted")
+			}
+
+			if err := status(NewWithBaseURL(srv.URL, cfg(home, "other.example.com"))); err == nil {
+				t.Fatal("certificate for another host name accepted")
+			}
+
+			if err := status(NewWithBaseURL(srv.URL, cfg(home, ""))); err == nil {
+				t.Fatal("certificate accepted without zimbra_server_hostname")
+			}
+		})
 	}
 }

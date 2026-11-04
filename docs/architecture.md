@@ -398,6 +398,13 @@ transport from localconfig with the rule of the legacy Java client
 | `ldaps://` URL | TLS from the first byte; StartTLS is never issued on it |
 | `ssl_allow_untrusted_certs` (default `true`) | `true` skips certificate verification, like the Java dummy trust manager. `false` verifies the server against the system roots plus `conf/ca/ca.pem` and `ssl/carbonio/commercial/commercial_ca.crt` under `zimbra_home` (the CAs `zmcertmgr` adds to the Java truststore) |
 
+The admin HTTPS client (`internal/zxadmin`, `https://localhost:7071`, used by `status`, `localconfig reload`
+and the Advanced hook) is the exception: it POSTs the LDAP master password, so it **always** verifies the
+mailbox certificate, whatever `ssl_allow_untrusted_certs` says, against the system roots plus the same Carbonio
+CA files (`ldap.VerifiedTLSConfig`). The certificate is issued for the server FQDN, so the TLS server name is
+`zimbra_server_hostname` while the connection still dials localhost. A missing `zimbra_server_hostname` or an
+untrusted CA makes the call fail instead of sending the password. There is no opt-out.
+
 Booleans follow Java `Boolean.valueOf`: only `true` (any case) is true; `ldap_starttls_supported` and
 `zimbra_require_interprocess_security` are compared with `"1"`. TLS 1.2 is the minimum and the TLS server
 name is the host of each URL. The `cn=config` client talks over `ldapi://` and never uses TLS.
