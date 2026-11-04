@@ -327,14 +327,32 @@ func TestChgrpPostfixLDAPFiles_NoFiles(t *testing.T) {
 	ctl.chgrpPostfixLDAPFiles(context.Background())
 }
 
-// --- runPostalias ---
+// --- the postalias Prepare step ---
+
+// runPostalias runs the aliases-rebuild step of the MTA's Prepare sequence.
+func runPostalias(t *testing.T, ctl *Controller) {
+	t.Helper()
+
+	for i := range ctl.registry[serviceMTA].Commands.Prepare {
+		step := &ctl.registry[serviceMTA].Commands.Prepare[i]
+		if step.Run != nil && step.Run.Path == ctl.p.postaliasBin {
+			if err := ctl.runStep(context.Background(), step); err != nil {
+				t.Fatalf("the postalias step is best effort, got %v", err)
+			}
+
+			return
+		}
+	}
+
+	t.Fatal("the MTA Prepare sequence has no postalias step")
+}
 
 func TestRunPostalias_MissingFile(t *testing.T) {
 	t.Parallel()
 
 	ctl, f := newFakeController(t)
 
-	ctl.runPostalias(context.Background())
+	runPostalias(t, ctl)
 
 	if got := f.Exec.Lines(); len(got) != 0 {
 		t.Errorf("postalias must not run without an aliases file, got %q", got)
@@ -347,7 +365,7 @@ func TestRunPostalias_Exists(t *testing.T) {
 	ctl, f := newFakeController(t)
 	f.FS.Put(ctl.p.aliases, []byte("root: admin\n"), 0o644)
 
-	ctl.runPostalias(context.Background())
+	runPostalias(t, ctl)
 
 	want := []string{sudoBin + " -n " + ctl.p.postaliasBin + " " + ctl.p.aliases}
 	if got := f.Exec.Lines(); !slices.Equal(got, want) {
@@ -362,7 +380,7 @@ func TestRunPostalias_FailureIsNonFatal(t *testing.T) {
 	f.FS.Put(ctl.p.aliases, []byte("root: admin\n"), 0o644)
 	f.Exec.OnPath(sudoBin, systest.Fail(1, "postalias: fatal"))
 
-	ctl.runPostalias(context.Background())
+	runPostalias(t, ctl)
 }
 
 // --- controlCommand / commandRunning / sudoRun error paths ---

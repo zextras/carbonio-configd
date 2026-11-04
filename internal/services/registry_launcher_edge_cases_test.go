@@ -14,7 +14,7 @@ import (
 )
 
 // ============================================================
-// registry.go — cbpolicydInitDB
+// registry.go — cbpolicyd Setup
 // ============================================================
 
 // TestCbpolicydInitDB_DBAlreadyExists verifies the early-return when the DB file exists.
@@ -34,9 +34,11 @@ func TestCbpolicydInitDB_DBAlreadyExists(t *testing.T) {
 
 	ctl.p.cbpolicydDB = dbFile
 
-	err := ctl.cbpolicydInitDB(context.Background(), nil)
+	ctl.registry = ctl.defaultRegistry() // the Setup steps carry the paths set above
+
+	err := ctl.runSteps(context.Background(), ctl.registry[svcCbpolicyd].Setup)
 	if err != nil {
-		t.Errorf("cbpolicydInitDB with existing DB returned error: %v", err)
+		t.Errorf("cbpolicyd Setup with existing DB returned error: %v", err)
 	}
 }
 
@@ -57,7 +59,9 @@ func TestCbpolicydInitDB_DBMissingNoBinary(t *testing.T) {
 
 	ctl.p.cbpolicydInitBin = filepath.Join(tmp, "nonexistent-bin")
 
-	err := ctl.cbpolicydInitDB(context.Background(), nil)
+	ctl.registry = ctl.defaultRegistry() // the Setup steps carry the paths set above
+
+	err := ctl.runSteps(context.Background(), ctl.registry[svcCbpolicyd].Setup)
 	if err == nil {
 		t.Error("expected error when DB missing and init binary absent")
 	}
@@ -85,7 +89,9 @@ func TestCbpolicydInitDB_DBMissingBinaryFails(t *testing.T) {
 
 	ctl.p.cbpolicydInitBin = initBin
 
-	err := ctl.cbpolicydInitDB(context.Background(), nil)
+	ctl.registry = ctl.defaultRegistry() // the Setup steps carry the paths set above
+
+	err := ctl.runSteps(context.Background(), ctl.registry[svcCbpolicyd].Setup)
 	if err == nil {
 		t.Error("expected error when init binary exits non-zero")
 	}
@@ -112,7 +118,9 @@ func TestCbpolicydInitDB_DBMissingBinarySucceeds(t *testing.T) {
 
 	ctl.p.cbpolicydInitBin = initBin
 
-	err := ctl.cbpolicydInitDB(context.Background(), nil)
+	ctl.registry = ctl.defaultRegistry() // the Setup steps carry the paths set above
+
+	err := ctl.runSteps(context.Background(), ctl.registry[svcCbpolicyd].Setup)
 	if err != nil {
 		t.Errorf("expected nil when init binary succeeds, got: %v", err)
 	}
@@ -659,10 +667,10 @@ func TestIsLDAPLocal_ConfigPresentNoMatch(t *testing.T) {
 // ============================================================
 
 // ============================================================
-// registry.go — clamdDirInit
+// registry.go — clamd Setup
 // ============================================================
 
-// TestClamdDirInit_CreatesDir verifies that clamdDirInit creates
+// TestClamdDirInit_CreatesDir verifies that clamd Setup creates
 // the clamav database directory if it doesn't exist.
 func TestClamdDirInit_CreatesDir(t *testing.T) {
 	t.Parallel()
@@ -678,9 +686,11 @@ func TestClamdDirInit_CreatesDir(t *testing.T) {
 
 	ctl.p.clamdDir = testPath
 
-	err := ctl.clamdDirInit(context.Background(), nil)
+	ctl.registry = ctl.defaultRegistry() // the Setup steps carry the path set above
+
+	err := ctl.runSteps(context.Background(), ctl.registry[svcClamd].Setup)
 	if err != nil {
-		t.Errorf("clamdDirInit returned error: %v", err)
+		t.Errorf("clamd Setup returned error: %v", err)
 	}
 
 	// Verify the directory was created
@@ -693,7 +703,7 @@ func TestClamdDirInit_CreatesDir(t *testing.T) {
 	}
 }
 
-// TestClamdDirInit_Idempotent verifies that clamdDirInit can be
+// TestClamdDirInit_Idempotent verifies that clamd Setup can be
 // called multiple times without error (idempotent).
 func TestClamdDirInit_Idempotent(t *testing.T) {
 	t.Parallel()
@@ -710,19 +720,21 @@ func TestClamdDirInit_Idempotent(t *testing.T) {
 	ctl.p.clamdDir = testPath
 
 	// First call
-	err := ctl.clamdDirInit(context.Background(), nil)
+	ctl.registry = ctl.defaultRegistry() // the Setup steps carry the path set above
+
+	err := ctl.runSteps(context.Background(), ctl.registry[svcClamd].Setup)
 	if err != nil {
-		t.Errorf("first clamdDirInit returned error: %v", err)
+		t.Errorf("first clamd Setup returned error: %v", err)
 	}
 
 	// Second call (directory already exists)
-	err = ctl.clamdDirInit(context.Background(), nil)
+	err = ctl.runSteps(context.Background(), ctl.registry[svcClamd].Setup)
 	if err != nil {
-		t.Errorf("second clamdDirInit returned error: %v", err)
+		t.Errorf("second clamd Setup returned error: %v", err)
 	}
 }
 
-// TestClamdDirInit_Error verifies that clamdDirInit returns an error
+// TestClamdDirInit_Error verifies that clamd Setup returns an error
 // when the directory cannot be created (e.g., permission denied).
 func TestClamdDirInit_Error(t *testing.T) {
 	t.Parallel()
@@ -743,7 +755,9 @@ func TestClamdDirInit_Error(t *testing.T) {
 
 	ctl.p.clamdDir = testPath
 
-	err := ctl.clamdDirInit(context.Background(), nil)
+	ctl.registry = ctl.defaultRegistry() // the Setup steps carry the path set above
+
+	err := ctl.runSteps(context.Background(), ctl.registry[svcClamd].Setup)
 	if err == nil {
 		t.Error("expected error when creating directory in non-writable location")
 	}

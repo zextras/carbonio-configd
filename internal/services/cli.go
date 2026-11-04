@@ -165,7 +165,7 @@ func (c *Controller) ServiceStart(ctx context.Context, name string) error {
 
 	sm := NewServiceManager(c)
 
-	if err := runPreStartHooks(ctx, name, sm, def); err != nil {
+	if err := c.runPreStart(ctx, name, sm, def); err != nil {
 		return err
 	}
 
@@ -271,7 +271,7 @@ func (c *Controller) ServiceStartSystemd(ctx context.Context, name string) error
 
 	sm := NewServiceManager(c)
 
-	if err := runPreStartHooks(ctx, name, sm, def); err != nil {
+	if err := c.runPreStart(ctx, name, sm, def); err != nil {
 		return err
 	}
 
@@ -300,6 +300,16 @@ func (c *Controller) startEnabledDependencies(ctx context.Context, name string, 
 	}
 
 	return nil
+}
+
+// runPreStart runs what precedes a start: the declarative Setup steps, then
+// the PreStart hooks.
+func (c *Controller) runPreStart(ctx context.Context, name string, sm *ServiceManager, def *ServiceDef) error {
+	if err := c.runSteps(ctx, def.Setup); err != nil {
+		return fmt.Errorf("pre-start hook failed for %s: %w", name, err)
+	}
+
+	return runPreStartHooks(ctx, name, sm, def)
 }
 
 func runPreStartHooks(ctx context.Context, name string, sm *ServiceManager, def *ServiceDef) error {

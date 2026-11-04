@@ -44,9 +44,11 @@ type paths struct {
 	clamdDir         string
 
 	// amavisDir is amavisd's data directory (quarantine, tmp, var,
-	// .spamassassin); amavisMC and altermime are the amavis-mc daemon and the
-	// libexec script regenerating the altermime disclaimer config.
+	// .spamassassin); amavisd and amavisMC are the amavisd and amavis-mc
+	// daemons, altermime the libexec script regenerating the altermime
+	// disclaimer config.
 	amavisDir string
+	amavisd   string
 	amavisMC  string
 	altermime string
 	// resolverctl is the wrapper that regenerates nginx's resolvers.conf.
@@ -99,6 +101,7 @@ func newPaths(base, run string) paths {
 	p.cbpolicydInitBin = p.libexec + "/zmcbpolicydinit"
 	p.clamdDir = p.data + "/clamav/db"
 	p.amavisDir = p.data + "/amavisd"
+	p.amavisd = p.common + "/sbin/amavisd"
 	p.amavisMC = p.common + "/sbin/amavis-mc"
 	p.altermime = p.libexec + "/zmaltermimeconfig"
 	p.resolverctl = p.bin + "/zmresolverctl"
