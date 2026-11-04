@@ -107,68 +107,77 @@ func (f *fline) String() string {
 	return b.String()
 }
 
+// classifier is the state of classify across lines.
+type classifier struct {
+	sc      scanner
+	depth   int
+	pending bool // the previous code line is an unfinished statement
+}
+
 // classify parses every line and assigns its indentation level.
 func classify(lines []string, opts FormatOptions) []fline {
 	var (
-		sc      scanner
-		depth   int
-		pending bool // the previous code line is an unfinished statement
-		out     = make([]fline, len(lines))
+		c   classifier
+		out = make([]fline, len(lines))
 	)
 
 	for i, line := range lines {
-		f := &out[i]
-		f.raw = strings.TrimRight(line, " \t\r")
-
-		if sc.quote != 0 {
-			ls := sc.scan(line)
-			f.verbatim = true
-			f.raw = strings.TrimSuffix(line, "\r")
-			depth = max(depth+ls.opens-ls.closes, 0)
-
-			continue
-		}
-
-		var hadWS bool
-
-		f.prefixes, f.body, hadWS = splitPrefixes(line, opts)
-		ls := sc.scan(f.body)
-
-		if sc.quote != 0 {
-			// The quote runs on: trailing whitespace belongs to the string.
-			f.body = strings.TrimLeft(f.body, " \t")
-		} else {
-			f.body = strings.TrimRight(f.body, " \t\r")
-		}
-
-		code := strings.TrimRight(ls.code, " \t\r")
-		isComment := strings.HasPrefix(f.body, "#")
-		level := max(depth-ls.leadClose, 0)
-
-		if pending && continuesStatement(code, isComment, ls) {
-			level++
-		}
-
-		f.level = level
-
-		if !isComment && code != "" {
-			pending = !finished(code)
-		}
-
-		depth = max(depth+ls.opens-ls.closes, 0)
-
-		// An indented value-less directive is commented out when rendered, an
-		// unindented one is not: keep the indentation's presence.
-		if vanishingDirective.MatchString(f.body) && (level > 0) != hadWS {
-			f.level = -1
-		}
-
-		if isDirective(code, isComment, ls) && f.level >= 0 {
-			f.setDirective(code)
-		}
+		c.classifyLine(&out[i], line, opts)
 	}
 
 	return out
+}
+
+// classifyLine parses one line into f and advances the state.
+func (c *classifier) classifyLine(f *fline, line string, opts FormatOptions) {
+	f.raw = strings.TrimRight(line, " \t\r")
+
+	if c.sc.quote != 0 {
+		ls := c.sc.scan(line)
+		f.verbatim = true
+		f.raw = strings.TrimSuffix(line, "\r")
+		c.depth = max(c.depth+ls.opens-ls.closes, 0)
+
+		return
+	}
+
+	var hadWS bool
+
+	f.prefixes, f.body, hadWS = splitPrefixes(line, opts)
+	ls := c.sc.scan(f.body)
+
+	if c.sc.quote != 0 {
+		// The quote runs on: trailing whitespace belongs to the string.
+		f.body = strings.TrimLeft(f.body, " \t")
+	} else {
+		f.body = strings.TrimRight(f.body, " \t\r")
+	}
+
+	code := strings.TrimRight(ls.code, " \t\r")
+	isComment := strings.HasPrefix(f.body, "#")
+	level := max(c.depth-ls.leadClose, 0)
+
+	if c.pending && continuesStatement(code, isComment, ls) {
+		level++
+	}
+
+	f.level = level
+
+	if !isComment && code != "" {
+		c.pending = !finished(code)
+	}
+
+	c.depth = max(c.depth+ls.opens-ls.closes, 0)
+
+	// An indented value-less directive is commented out when rendered, an
+	// unindented one is not: keep the indentation's presence.
+	if vanishingDirective.MatchString(f.body) && (level > 0) != hadWS {
+		f.level = -1
+	}
+
+	if isDirective(code, isComment, ls) && f.level >= 0 {
+		f.setDirective(code)
+	}
 }
 
 // continuesStatement reports whether a line that follows an unfinished

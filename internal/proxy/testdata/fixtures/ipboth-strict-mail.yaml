@@ -1,4 +1,5 @@
 # Dual stack, strict server name, mail proxy on, two virtual hosts, SNI.
+---
 workdir: /opt/zextras
 hostname: proxy1.example.com
 

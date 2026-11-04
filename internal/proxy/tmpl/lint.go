@@ -47,6 +47,11 @@ type linter struct {
 	scope    map[string]bool // variables defined by the explode directive
 	explType string
 	findings []Finding
+
+	sc     scanner // quote state across lines
+	depth  int     // open blocks
+	groups map[string]*group
+	order  []string // groups in order of appearance
 }
 
 func (l *linter) add(line, col int, rule, format string, args ...any) {
@@ -65,70 +70,18 @@ type group struct {
 // first line, unbalanced braces (per enabler group and per file) and trailing
 // whitespace or tabs. Findings are ordered by position.
 func Lint(file, src string, reg Registry) []Finding {
-	l := &linter{file: file, reg: reg}
+	l := &linter{file: file, reg: reg, groups: map[string]*group{}}
 	lines := SplitLines(src)
 
 	if len(lines) > 0 {
 		l.checkExplodeLine(lines[0])
 	}
 
-	var (
-		sc     scanner
-		depth  int
-		groups = map[string]*group{}
-		order  []string
-	)
-
 	for i, line := range lines {
-		n := i + 1
-
-		l.checkWhitespace(n, line)
-
-		if i == 0 && l.explType != "" {
-			continue
-		}
-
-		if i > 0 && strings.Contains(line, ExplodeMarker) {
-			l.add(n, strings.Index(line, ExplodeMarker)+1, RuleExplode,
-				"explode directive must be on the first line of the template")
-		}
-
-		ls, base := lineBraces(&sc, line)
-		toks := Tokenize(line)
-
-		l.checkTokens(n, toks)
-
-		for _, t := range toks {
-			if t.Kind != Enabler {
-				continue
-			}
-
-			g := groups[t.Text]
-			if g == nil {
-				g = &group{line: n, col: t.Offset + 1}
-				groups[t.Text] = g
-				order = append(order, t.Text)
-			}
-
-			g.net += ls.opens - ls.closes
-		}
-
-		if ls.leadClose > depth {
-			l.add(n, base+ls.firstClose+1, RuleBraces, "unexpected '}': no block is open")
-		}
-
-		depth = max(depth+ls.opens-ls.closes, 0)
+		l.checkLine(i, line)
 	}
 
-	for _, name := range order {
-		if g := groups[name]; g.net != 0 {
-			l.add(g.line, g.col, RuleBraces, "unbalanced braces in the lines enabled by ${%s}: %s", name, imbalance(g.net))
-		}
-	}
-
-	if depth != 0 {
-		l.add(max(len(lines), 1), 1, RuleBraces, "unbalanced braces in the file: %d block(s) left open", depth)
-	}
+	l.checkBalance(len(lines))
 
 	slices.SortStableFunc(l.findings, func(a, b Finding) int {
 		if a.Line != b.Line {
@@ -139,6 +92,65 @@ func Lint(file, src string, reg Registry) []Finding {
 	})
 
 	return l.findings
+}
+
+// checkLine runs the per-line rules on line i (0-based).
+func (l *linter) checkLine(i int, line string) {
+	n := i + 1
+
+	l.checkWhitespace(n, line)
+
+	if i == 0 && l.explType != "" {
+		return
+	}
+
+	if i > 0 && strings.Contains(line, ExplodeMarker) {
+		l.add(n, strings.Index(line, ExplodeMarker)+1, RuleExplode,
+			"explode directive must be on the first line of the template")
+	}
+
+	ls, base := lineBraces(&l.sc, line)
+	toks := Tokenize(line)
+
+	l.checkTokens(n, toks)
+	l.countGroups(n, toks, ls)
+
+	if ls.leadClose > l.depth {
+		l.add(n, base+ls.firstClose+1, RuleBraces, "unexpected '}': no block is open")
+	}
+
+	l.depth = max(l.depth+ls.opens-ls.closes, 0)
+}
+
+// countGroups adds the line's net braces to each enabler group it belongs to.
+func (l *linter) countGroups(n int, toks []Token, ls lineScan) {
+	for _, t := range toks {
+		if t.Kind != Enabler {
+			continue
+		}
+
+		g := l.groups[t.Text]
+		if g == nil {
+			g = &group{line: n, col: t.Offset + 1}
+			l.groups[t.Text] = g
+			l.order = append(l.order, t.Text)
+		}
+
+		g.net += ls.opens - ls.closes
+	}
+}
+
+// checkBalance reports the enabler groups and the file left unbalanced.
+func (l *linter) checkBalance(lineCount int) {
+	for _, name := range l.order {
+		if g := l.groups[name]; g.net != 0 {
+			l.add(g.line, g.col, RuleBraces, "unbalanced braces in the lines enabled by ${%s}: %s", name, imbalance(g.net))
+		}
+	}
+
+	if l.depth != 0 {
+		l.add(max(lineCount, 1), 1, RuleBraces, "unbalanced braces in the file: %d block(s) left open", l.depth)
+	}
 }
 
 // lineBraces counts the braces of the code after the enabler prefixes.

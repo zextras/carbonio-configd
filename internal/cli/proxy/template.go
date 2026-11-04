@@ -55,6 +55,13 @@ func runTemplate(ctx context.Context, env sys.System, stdout, stderr io.Writer, 
 	}
 }
 
+// fail prints err as the command's error and returns the exit status 1.
+func fail(stderr io.Writer, err error) int {
+	_, _ = fmt.Fprintf(stderr, "Error: %v\n", err)
+
+	return 1
+}
+
 // templateFiles expands paths: a file is taken as is, a directory gives its
 // *.template files, recursively, sorted.
 func templateFiles(fsys sys.FS, paths []string) ([]string, error) {
@@ -96,9 +103,7 @@ func templateFmt(fsys sys.FS, stdout, stderr io.Writer, t *TemplateOptions) int 
 
 	files, err := templateFiles(fsys, t.Paths)
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "Error: %v\n", err)
-
-		return 1
+		return fail(stderr, err)
 	}
 
 	if len(files) == 0 {
@@ -118,9 +123,7 @@ func templateFmt(fsys sys.FS, stdout, stderr io.Writer, t *TemplateOptions) int 
 	for _, f := range files {
 		didChange, err := fmtFile(fsys, stdout, f, t)
 		if err != nil {
-			_, _ = fmt.Fprintf(stderr, "Error: %v\n", err)
-
-			return 1
+			return fail(stderr, err)
 		}
 
 		if didChange {
@@ -185,9 +188,7 @@ func writeKeepingMode(fsys sys.FS, path, content string) error {
 func templateLint(fsys sys.FS, stdout, stderr io.Writer, t *TemplateOptions) int {
 	files, err := templateFiles(fsys, t.Paths)
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "Error: %v\n", err)
-
-		return 1
+		return fail(stderr, err)
 	}
 
 	if len(files) == 0 {
@@ -201,9 +202,7 @@ func templateLint(fsys sys.FS, stdout, stderr io.Writer, t *TemplateOptions) int
 	for _, f := range files {
 		src, err := fsys.ReadFile(f)
 		if err != nil {
-			_, _ = fmt.Fprintf(stderr, "Error: %v\n", err)
-
-			return 1
+			return fail(stderr, err)
 		}
 
 		found := tmpl.Lint(f, string(src), proxygen.TemplateRegistry{})
@@ -236,23 +235,17 @@ func templateRender(ctx context.Context, env sys.System, stdout, stderr io.Write
 
 	data, err := env.FS.ReadFile(t.Values)
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "Error: %v\n", err)
-
-		return 1
+		return fail(stderr, err)
 	}
 
 	fx, err := proxygen.ParseFixture(data)
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "Error: %s: %v\n", t.Values, err)
-
-		return 1
+		return fail(stderr, fmt.Errorf("%s: %w", t.Values, err))
 	}
 
 	out, err := filepath.Abs(t.Out)
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "Error: %v\n", err)
-
-		return 1
+		return fail(stderr, err)
 	}
 
 	written, err := proxygen.RenderOffline(ctx, env, fx, t.Templates, out)
@@ -263,9 +256,7 @@ func templateRender(ctx context.Context, env sys.System, stdout, stderr io.Write
 	}
 
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "Error: %v\n", err)
-
-		return 1
+		return fail(stderr, err)
 	}
 
 	return 0

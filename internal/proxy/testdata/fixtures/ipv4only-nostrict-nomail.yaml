@@ -1,4 +1,5 @@
 # IPv4 only, no strict server name, mail proxy off, one virtual host.
+---
 workdir: /opt/zextras
 hostname: proxy2.example.com
 
