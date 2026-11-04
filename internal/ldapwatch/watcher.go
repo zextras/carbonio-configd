@@ -98,6 +98,10 @@ type Options struct {
 	// BackoffMin and BackoffMax bound the wait after a failed poll; values <= 0
 	// mean 1s and 1m.
 	BackoffMin, BackoffMax time.Duration
+	// OnPollError, when set, is called from the Run goroutine after every
+	// failed poll (not for a cancelled context), for metrics. It must not
+	// block.
+	OnPollError func()
 }
 
 // Watcher polls a Source and reports changes through Options.Trigger.
@@ -105,6 +109,7 @@ type Watcher struct {
 	source     Source
 	clock      sys.Clock
 	trigger    func(ctx context.Context, changed []string)
+	onPollErr  func()
 	interval   time.Duration
 	debounce   time.Duration
 	maxWait    time.Duration
@@ -123,6 +128,7 @@ func New(o *Options) *Watcher {
 		source:     o.Source,
 		clock:      o.Clock,
 		trigger:    o.Trigger,
+		onPollErr:  o.OnPollError,
 		interval:   positiveOr(o.Interval, defaultInterval),
 		debounce:   max(o.Debounce, 0),
 		backoffMin: positiveOr(o.BackoffMin, defaultBackoffMin),
@@ -250,6 +256,10 @@ func (w *Watcher) pollFailed(ctx context.Context, st *runState, err error) time.
 	// A cancelled context is a shutdown, not a failed poll.
 	if ctx.Err() != nil {
 		return 0
+	}
+
+	if w.onPollErr != nil {
+		w.onPollErr()
 	}
 
 	wait := st.backoff

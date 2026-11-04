@@ -134,6 +134,29 @@ func TestLabelValueEscaping(t *testing.T) {
 	assert.Contains(t, string(r.Render()), `configd_load_failures_total{source="a\"b\\c\nd"} 1`)
 }
 
+func TestLDAPWatchMetrics(t *testing.T) {
+	t.Parallel()
+
+	r := New()
+	r.LDAPChangeTriggered([]string{"servers", "global"}, TriggerCycleRequested)
+	r.LDAPChangeTriggered([]string{"global"}, TriggerAlreadyPending)
+	r.LDAPChangeTriggered([]string{"global"}, TriggerCycleRequested)
+	r.LDAPWatchPollFailed()
+	r.LDAPWatchPollFailed()
+
+	assert.Equal(t, `# HELP configd_ldap_change_triggers_total Changes of watched LDAP entries reported by the change watcher, `+
+		`by component and result (cycle_requested: the main loop was woken for a cycle; `+
+		`already_pending: a wake-up was already queued).
+# TYPE configd_ldap_change_triggers_total counter
+configd_ldap_change_triggers_total{component="global",result="already_pending"} 1
+configd_ldap_change_triggers_total{component="global",result="cycle_requested"} 2
+configd_ldap_change_triggers_total{component="servers",result="cycle_requested"} 1
+# HELP configd_ldap_watch_poll_failures_total Failed polls of the LDAP change watcher.
+# TYPE configd_ldap_watch_poll_failures_total counter
+configd_ldap_watch_poll_failures_total 2
+`, string(r.Render()))
+}
+
 func TestCounterAccumulatesGaugeReplaces(t *testing.T) {
 	t.Parallel()
 
@@ -157,6 +180,8 @@ func TestNilRegistryIsNoop(t *testing.T) {
 		r.RestartRequested("s", nil)
 		r.WatchdogRestart("s", true)
 		r.LoadFailed("lc")
+		r.LDAPChangeTriggered([]string{"global"}, TriggerCycleRequested)
+		r.LDAPWatchPollFailed()
 	})
 	assert.Empty(t, r.Render())
 	assert.NoError(t, WriteTextfile(systest.New().FS, "/x.prom", r))

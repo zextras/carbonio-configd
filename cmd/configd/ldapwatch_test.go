@@ -243,6 +243,8 @@ func TestLDAPChangeRunsAFullCycle(t *testing.T) {
 	assert.Equal(t, iterContinue, consumeReloadSignal(context.Background(), deps.reloadChan, st))
 	assert.True(t, st.reloadSignaled)
 	assert.Equal(t, before, deps.trigger.EventCounter.Load(), "no requested sections: a plain cycle")
+	assert.Empty(t, deps.appState.TakeRequestedConfigs(),
+		"no section is requested, so the planner treats the cycle as non-REWRITE and releases deferred restarts")
 
 	deps.cfg.SkipIdlePolls = true
 	deps.appState.FirstRun = false
@@ -304,8 +306,34 @@ func TestLDAPWatchStopsWhenTheDaemonContextIsCancelled(t *testing.T) {
 func TestMainLoopActionTrigger_TriggerReloadDoesNotBlock(t *testing.T) {
 	tr := &MainLoopActionTrigger{ReloadChan: make(chan struct{}, 1)}
 
-	tr.TriggerReload(context.Background(), "first")
-	tr.TriggerReload(context.Background(), "second, channel full")
+	assert.True(t, tr.TriggerReload(context.Background(), "first"))
+	assert.False(t, tr.TriggerReload(context.Background(), "second, channel full"))
 
 	assert.Len(t, tr.ReloadChan, 1)
+}
+
+// The metrics tell a change that woke the loop from one a queued wake-up
+// already covered, and count failed polls.
+func TestLDAPChangeMetrics(t *testing.T) {
+	deps, clock, src := newWatchFixture(t)
+	deps.cfg.LdapChangeTrigger = true
+
+	w := syncLDAPWatch(context.Background(), deps, nil)
+	require.NotNil(t, w)
+	t.Cleanup(w.stop)
+
+	waitForWaiters(t, clock, 1)
+	src.set(ldapwatch.Fingerprint{ldapwatch.ComponentGlobal: "g1"})
+	clock.Advance(5 * time.Second)
+	waitForWaiters(t, clock, 1)
+
+	// The token is not consumed: the next change finds the loop already woken.
+	src.set(ldapwatch.Fingerprint{ldapwatch.ComponentGlobal: "g1", ldapwatch.ComponentDomains: "d1"})
+	clock.Advance(5 * time.Second)
+	waitForWaiters(t, clock, 1)
+
+	out := string(deps.configManager.Metrics().Render())
+	assert.Contains(t, out, `configd_ldap_change_triggers_total{component="global",result="cycle_requested"} 1`)
+	assert.Contains(t, out, `configd_ldap_change_triggers_total{component="domains",result="already_pending"} 1`)
+	assert.NotContains(t, out, "configd_ldap_watch_poll_failures_total")
 }

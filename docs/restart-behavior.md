@@ -83,7 +83,8 @@ change plus a `deferred` reason. The daemon (`ConfigManager.Plan`, `holdDeferred
 2. holds them in memory (merged per service across REWRITE cycles; a later REWRITE cycle never
    drops them);
 3. in the next cycle that is **not** a REWRITE (no requested or forced section, not the first
-   run) merges them into that plan's restarts through `plan.MergeRestarts` (the plan's own
+   run; the interval, SIGHUP and an LDAP-change wake-up all qualify, since none of them
+   requests a section) merges them into that plan's restarts through `plan.MergeRestarts` (the plan's own
    entry of a service wins, with the reasons of both) and logs an INFO line
    `Executing restart deferred from a REWRITE cycle` per service. From there they take the
    normal path: the hybrid systemd policy (heavy services are only flagged `pending-restart`,
