@@ -219,7 +219,7 @@ func TestServiceReload_Legacy_MTA_NativeReload(t *testing.T) {
 		t.Fatalf("expected exactly one command (sudo postfix reload), got %q", calls)
 	}
 
-	if want := sudoBin + " " + ctl.p.postfixBin + " reload"; calls[0] != want {
+	if want := sudoBin + " -n " + ctl.p.postfixBin + " reload"; calls[0] != want {
 		t.Errorf("command = %q, want %q", calls[0], want)
 	}
 }

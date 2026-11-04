@@ -225,9 +225,10 @@ func (c *Controller) startDirect(ctx context.Context, name string, def *ServiceD
 
 	binary := def.BinaryPath
 
-	// Services like postfix require root. If current user is not root, use sudo.
+	// Services like postfix require root. If current user is not root, use
+	// sudo; -n so a missing grant fails at once instead of prompting.
 	if def.NeedsRoot && c.env.Proc.UID() != 0 {
-		args = append([]string{binary}, args...)
+		args = append([]string{"-n", binary}, args...)
 		binary = sudoBin
 	}
 
@@ -466,11 +467,11 @@ func (c *Controller) sudoKill(ctx context.Context, pid int, signal string, group
 	}
 }
 
-// sudoRun runs binary with args through sudo and reports a failure with the
+// sudoRun runs binary with args through `sudo -n` (never a password prompt) and reports a failure with the
 // command line and what it printed. Binary paths are registry constants and
 // args localconfig scalars or literals.
 func (c *Controller) sudoRun(ctx context.Context, binary string, args ...string) error {
-	full := append([]string{binary}, args...)
+	full := append([]string{"-n", binary}, args...)
 	// #nosec G204 — binary path is a registry constant; args are localconfig scalars or literals
 	out, err := sys.CombinedOutput(ctx, c.env.Exec, sudoBin, full...)
 	if err != nil {

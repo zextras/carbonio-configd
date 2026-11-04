@@ -154,7 +154,7 @@ func (h *traceHost) install() {
 
 		return sys.Result{}, nil
 	})
-	f.Exec.OnCmdline(sudoBin+" "+ctl.p.amavisMC, func(*sys.Cmd) (sys.Result, error) {
+	f.Exec.OnCmdline(sudoBin+" -n "+ctl.p.amavisMC, func(*sys.Cmd) (sys.Result, error) {
 		f.Proc.Add(amavisMCEntry(ctl, amavisMCPID))
 
 		return sys.Result{}, nil
@@ -185,8 +185,6 @@ func notifyReady(cmd *sys.Cmd) {
 func (h *traceHost) postfixDown() {
 	const notRunning = "postfix/postfix-script: warning: the Postfix mail system is not running"
 
-	h.f.Exec.OnCmdline(sudoBin+" "+h.ctl.p.postfixBin+" status", systest.Fail(1, notRunning))
-	h.f.Exec.OnCmdline(sudoBin+" "+h.ctl.p.postfixBin+" stop", systest.Fail(1, notRunning))
 	h.f.Exec.OnCmdline(sudoBin+" -n "+h.ctl.p.postfixBin+" status", systest.Fail(1, notRunning))
 	h.f.Exec.OnCmdline(sudoBin+" -n "+h.ctl.p.postfixBin+" stop", systest.Fail(1, notRunning))
 }

@@ -754,7 +754,7 @@ exec.start /opt/zextras/common/sbin/nginx -c /opt/zextras/conf/nginx.conf
 exec /opt/zextras/libexec/configrewrite amavis antispam
 fs.mkdir /opt/zextras/data/amavisd/.spamassassin mode=0755
 exec /opt/zextras/libexec/zmaltermimeconfig
-exec /usr/bin/sudo /opt/zextras/common/sbin/amavis-mc
+exec /usr/bin/sudo -n /opt/zextras/common/sbin/amavis-mc
 fs.mkdir /opt/zextras/data/amavisd/quarantine mode=0755
 fs.mkdir /opt/zextras/data/amavisd/tmp mode=0755
 fs.mkdir /opt/zextras/data/amavisd/var mode=0755
@@ -784,7 +784,7 @@ proc.signal 1002 15
 exec /opt/zextras/libexec/configrewrite amavis antispam
 fs.mkdir /opt/zextras/data/amavisd/.spamassassin mode=0755
 exec /opt/zextras/libexec/zmaltermimeconfig
-exec /usr/bin/sudo /opt/zextras/common/sbin/amavis-mc
+exec /usr/bin/sudo -n /opt/zextras/common/sbin/amavis-mc
 fs.mkdir /opt/zextras/data/amavisd/quarantine mode=0755
 fs.mkdir /opt/zextras/data/amavisd/tmp mode=0755
 fs.mkdir /opt/zextras/data/amavisd/var mode=0755
@@ -794,7 +794,7 @@ exec /opt/zextras/common/sbin/amavisd -X no_conf_file_writable_check -c /opt/zex
 ## amavis | legacy reload running
 proc.signal 1001 15
 proc.signal 1002 15
-exec /usr/bin/sudo /opt/zextras/common/sbin/amavis-mc
+exec /usr/bin/sudo -n /opt/zextras/common/sbin/amavis-mc
 fs.mkdir /opt/zextras/data/amavisd/quarantine mode=0755
 fs.mkdir /opt/zextras/data/amavisd/tmp mode=0755
 fs.mkdir /opt/zextras/data/amavisd/var mode=0755
@@ -802,7 +802,7 @@ exec /opt/zextras/common/sbin/amavisd -X no_conf_file_writable_check -c /opt/zex
 => ok
 
 ## amavis | legacy reload stopped
-exec /usr/bin/sudo /opt/zextras/common/sbin/amavis-mc
+exec /usr/bin/sudo -n /opt/zextras/common/sbin/amavis-mc
 fs.mkdir /opt/zextras/data/amavisd/quarantine mode=0755
 fs.mkdir /opt/zextras/data/amavisd/tmp mode=0755
 fs.mkdir /opt/zextras/data/amavisd/var mode=0755
@@ -812,7 +812,7 @@ exec /opt/zextras/common/sbin/amavisd -X no_conf_file_writable_check -c /opt/zex
 ## amavis | legacy start-systemd cold
 fs.mkdir /opt/zextras/data/amavisd/.spamassassin mode=0755
 exec /opt/zextras/libexec/zmaltermimeconfig
-exec /usr/bin/sudo /opt/zextras/common/sbin/amavis-mc
+exec /usr/bin/sudo -n /opt/zextras/common/sbin/amavis-mc
 fs.mkdir /opt/zextras/data/amavisd/quarantine mode=0755
 fs.mkdir /opt/zextras/data/amavisd/tmp mode=0755
 fs.mkdir /opt/zextras/data/amavisd/var mode=0755
@@ -857,7 +857,7 @@ exec /usr/bin/systemctl is-active carbonio-mailthreat.service
 ## amavis | systemd start-systemd
 fs.mkdir /opt/zextras/data/amavisd/.spamassassin mode=0755
 exec /opt/zextras/libexec/zmaltermimeconfig
-exec /usr/bin/sudo /opt/zextras/common/sbin/amavis-mc
+exec /usr/bin/sudo -n /opt/zextras/common/sbin/amavis-mc
 fs.mkdir /opt/zextras/data/amavisd/quarantine mode=0755
 fs.mkdir /opt/zextras/data/amavisd/tmp mode=0755
 fs.mkdir /opt/zextras/data/amavisd/var mode=0755
@@ -965,7 +965,7 @@ exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf
 exec /opt/zextras/libexec/configrewrite amavis antispam
 fs.mkdir /opt/zextras/data/amavisd/.spamassassin mode=0755
 exec /opt/zextras/libexec/zmaltermimeconfig
-exec /usr/bin/sudo /opt/zextras/common/sbin/amavis-mc
+exec /usr/bin/sudo -n /opt/zextras/common/sbin/amavis-mc
 fs.mkdir /opt/zextras/data/amavisd/quarantine mode=0755
 fs.mkdir /opt/zextras/data/amavisd/tmp mode=0755
 fs.mkdir /opt/zextras/data/amavisd/var mode=0755
@@ -1002,7 +1002,7 @@ exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf
 exec /opt/zextras/libexec/configrewrite amavis antispam
 fs.mkdir /opt/zextras/data/amavisd/.spamassassin mode=0755
 exec /opt/zextras/libexec/zmaltermimeconfig
-exec /usr/bin/sudo /opt/zextras/common/sbin/amavis-mc
+exec /usr/bin/sudo -n /opt/zextras/common/sbin/amavis-mc
 fs.mkdir /opt/zextras/data/amavisd/quarantine mode=0755
 fs.mkdir /opt/zextras/data/amavisd/tmp mode=0755
 fs.mkdir /opt/zextras/data/amavisd/var mode=0755
@@ -1019,7 +1019,7 @@ exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf
 exec /opt/zextras/libexec/configrewrite amavis antispam
 fs.mkdir /opt/zextras/data/amavisd/.spamassassin mode=0755
 exec /opt/zextras/libexec/zmaltermimeconfig
-exec /usr/bin/sudo /opt/zextras/common/sbin/amavis-mc
+exec /usr/bin/sudo -n /opt/zextras/common/sbin/amavis-mc
 fs.mkdir /opt/zextras/data/amavisd/quarantine mode=0755
 fs.mkdir /opt/zextras/data/amavisd/tmp mode=0755
 fs.mkdir /opt/zextras/data/amavisd/var mode=0755
@@ -1033,7 +1033,7 @@ exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf
 exec /opt/zextras/libexec/configrewrite amavis antispam
 fs.mkdir /opt/zextras/data/amavisd/.spamassassin mode=0755
 exec /opt/zextras/libexec/zmaltermimeconfig
-exec /usr/bin/sudo /opt/zextras/common/sbin/amavis-mc
+exec /usr/bin/sudo -n /opt/zextras/common/sbin/amavis-mc
 fs.mkdir /opt/zextras/data/amavisd/quarantine mode=0755
 fs.mkdir /opt/zextras/data/amavisd/tmp mode=0755
 fs.mkdir /opt/zextras/data/amavisd/var mode=0755
@@ -1045,7 +1045,7 @@ fs.open /opt/zextras/log/mysqld_safe_antispam-db.out flag=0x441 perm=0640
 exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/antispam-my.cnf --external-locking --log-error=/opt/zextras/log/antispam-mysqld.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
 fs.mkdir /opt/zextras/data/amavisd/.spamassassin mode=0755
 exec /opt/zextras/libexec/zmaltermimeconfig
-exec /usr/bin/sudo /opt/zextras/common/sbin/amavis-mc
+exec /usr/bin/sudo -n /opt/zextras/common/sbin/amavis-mc
 fs.mkdir /opt/zextras/data/amavisd/quarantine mode=0755
 fs.mkdir /opt/zextras/data/amavisd/tmp mode=0755
 fs.mkdir /opt/zextras/data/amavisd/var mode=0755
@@ -1102,7 +1102,7 @@ fs.open /opt/zextras/log/mysqld_safe_antispam-db.out flag=0x441 perm=0640
 exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/antispam-my.cnf --external-locking --log-error=/opt/zextras/log/antispam-mysqld.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
 fs.mkdir /opt/zextras/data/amavisd/.spamassassin mode=0755
 exec /opt/zextras/libexec/zmaltermimeconfig
-exec /usr/bin/sudo /opt/zextras/common/sbin/amavis-mc
+exec /usr/bin/sudo -n /opt/zextras/common/sbin/amavis-mc
 fs.mkdir /opt/zextras/data/amavisd/quarantine mode=0755
 fs.mkdir /opt/zextras/data/amavisd/tmp mode=0755
 fs.mkdir /opt/zextras/data/amavisd/var mode=0755
@@ -1116,7 +1116,7 @@ fs.remove /run/carbonio/amavisd-mysql.pid
 ## antivirus | legacy start cold
 exec /opt/zextras/libexec/configrewrite antivirus
 fs.mkdir /opt/zextras/data/amavisd/.spamassassin mode=0755
-exec /usr/bin/sudo /opt/zextras/common/sbin/amavis-mc
+exec /usr/bin/sudo -n /opt/zextras/common/sbin/amavis-mc
 fs.mkdir /opt/zextras/data/amavisd/quarantine mode=0755
 fs.mkdir /opt/zextras/data/amavisd/tmp mode=0755
 fs.mkdir /opt/zextras/data/amavisd/var mode=0755
@@ -1155,7 +1155,7 @@ proc.signal 1003 15
 proc.signal 1004 15
 exec /opt/zextras/libexec/configrewrite antivirus
 fs.mkdir /opt/zextras/data/amavisd/.spamassassin mode=0755
-exec /usr/bin/sudo /opt/zextras/common/sbin/amavis-mc
+exec /usr/bin/sudo -n /opt/zextras/common/sbin/amavis-mc
 fs.mkdir /opt/zextras/data/amavisd/quarantine mode=0755
 fs.mkdir /opt/zextras/data/amavisd/tmp mode=0755
 fs.mkdir /opt/zextras/data/amavisd/var mode=0755
@@ -1174,7 +1174,7 @@ proc.signal 1003 15
 proc.signal 1004 15
 exec /opt/zextras/libexec/configrewrite antivirus
 fs.mkdir /opt/zextras/data/amavisd/.spamassassin mode=0755
-exec /usr/bin/sudo /opt/zextras/common/sbin/amavis-mc
+exec /usr/bin/sudo -n /opt/zextras/common/sbin/amavis-mc
 fs.mkdir /opt/zextras/data/amavisd/quarantine mode=0755
 fs.mkdir /opt/zextras/data/amavisd/tmp mode=0755
 fs.mkdir /opt/zextras/data/amavisd/var mode=0755
@@ -1189,7 +1189,7 @@ exec.start /opt/zextras/common/bin/freshclam --config-file=/opt/zextras/conf/fre
 ## antivirus | legacy reload stopped
 exec /opt/zextras/libexec/configrewrite antivirus
 fs.mkdir /opt/zextras/data/amavisd/.spamassassin mode=0755
-exec /usr/bin/sudo /opt/zextras/common/sbin/amavis-mc
+exec /usr/bin/sudo -n /opt/zextras/common/sbin/amavis-mc
 fs.mkdir /opt/zextras/data/amavisd/quarantine mode=0755
 fs.mkdir /opt/zextras/data/amavisd/tmp mode=0755
 fs.mkdir /opt/zextras/data/amavisd/var mode=0755
@@ -1204,7 +1204,7 @@ exec.start /opt/zextras/common/bin/freshclam --config-file=/opt/zextras/conf/fre
 ## antivirus | legacy start-systemd cold
 fs.mkdir /opt/zextras/data/amavisd/.spamassassin mode=0755
 exec /opt/zextras/libexec/zmaltermimeconfig
-exec /usr/bin/sudo /opt/zextras/common/sbin/amavis-mc
+exec /usr/bin/sudo -n /opt/zextras/common/sbin/amavis-mc
 fs.mkdir /opt/zextras/data/amavisd/quarantine mode=0755
 fs.mkdir /opt/zextras/data/amavisd/tmp mode=0755
 fs.mkdir /opt/zextras/data/amavisd/var mode=0755
@@ -1274,7 +1274,7 @@ exec /usr/bin/systemctl is-active carbonio-freshclam.service
 ## antivirus | systemd start-systemd
 fs.mkdir /opt/zextras/data/amavisd/.spamassassin mode=0755
 exec /opt/zextras/libexec/zmaltermimeconfig
-exec /usr/bin/sudo /opt/zextras/common/sbin/amavis-mc
+exec /usr/bin/sudo -n /opt/zextras/common/sbin/amavis-mc
 fs.mkdir /opt/zextras/data/amavisd/quarantine mode=0755
 fs.mkdir /opt/zextras/data/amavisd/tmp mode=0755
 fs.mkdir /opt/zextras/data/amavisd/var mode=0755
@@ -1798,9 +1798,9 @@ exec /opt/zextras/common/sbin/saslauthd -r -a zimbra
 fs.open /opt/zextras/log/milter.out flag=0x441 perm=0640
 exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -client -Xmx256m -Dhttps.protocols=TLSv1.2,TLSv1.3 -Djdk.tls.client.protocols=TLSv1.2,TLSv1.3 -Djava.net.preferIPv4Stack=true -Dzimbra.home=/opt/zextras -Djava.library.path=/opt/zextras/lib -classpath /opt/zextras/mailbox/jars/*:/opt/zextras/conf -Dlog4j.configurationFile=file:/opt/zextras/conf/milter.log4j.properties -Dzimbra.config=/opt/zextras/conf/localconfig.xml com.zimbra.cs.milter.MilterServer
 exec /opt/zextras/libexec/configrewrite antispam antivirus opendkim mta sasl
-exec /usr/bin/sudo /opt/zextras/common/sbin/postfix status
-exec /usr/bin/sudo /usr/bin/touch /opt/zextras/common/conf/main.cf
-exec /usr/bin/sudo /opt/zextras/common/sbin/postconf -e mail_owner=postfix setgid_group=postdrop
+exec /usr/bin/sudo -n /opt/zextras/common/sbin/postfix status
+exec /usr/bin/sudo -n /usr/bin/touch /opt/zextras/common/conf/main.cf
+exec /usr/bin/sudo -n /opt/zextras/common/sbin/postconf -e mail_owner=postfix setgid_group=postdrop
 fs.mkdir /opt/zextras/conf mode=0755
 fs.write-atomic /opt/zextras/conf/ldap-vmm.cf mode=0640
 fs.write-atomic /opt/zextras/conf/ldap-vmd.cf mode=0640
@@ -1818,19 +1818,20 @@ fs.chown /opt/zextras/conf/ldap-canonical.cf -1:1001
 fs.chown /opt/zextras/conf/ldap-transport.cf -1:1001
 fs.chown /opt/zextras/conf/ldap-slm.cf -1:1001
 fs.chown /opt/zextras/conf/ldap-splitdomain.cf -1:1001
-exec /usr/bin/sudo /opt/zextras/common/sbin/postalias /etc/aliases
-exec /usr/bin/sudo /opt/zextras/common/sbin/postfix start
+exec /usr/bin/sudo -n /opt/zextras/common/sbin/postalias /etc/aliases
+exec /usr/bin/sudo -n /opt/zextras/common/sbin/postfix start
 => ok
 
 ## mta | legacy start running
 => ok
 
 ## mta | legacy stop running
-exec /usr/bin/sudo /opt/zextras/common/sbin/postfix stop
+exec /usr/bin/sudo -n /opt/zextras/common/sbin/postfix stop
 => ok
 
 ## mta | legacy stop stopped
-exec /usr/bin/sudo /opt/zextras/common/sbin/postfix stop
+exec /usr/bin/sudo -n /opt/zextras/common/sbin/postfix stop
+exec /usr/bin/sudo -n /opt/zextras/common/sbin/postfix status
 => ok
 
 ## mta | legacy status running
@@ -1845,7 +1846,7 @@ exec /opt/zextras/libexec/configrewrite sasl
 exec /opt/zextras/common/sbin/saslauthd -r -a zimbra
 fs.open /opt/zextras/log/milter.out flag=0x441 perm=0640
 exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -client -Xmx256m -Dhttps.protocols=TLSv1.2,TLSv1.3 -Djdk.tls.client.protocols=TLSv1.2,TLSv1.3 -Djava.net.preferIPv4Stack=true -Dzimbra.home=/opt/zextras -Djava.library.path=/opt/zextras/lib -classpath /opt/zextras/mailbox/jars/*:/opt/zextras/conf -Dlog4j.configurationFile=file:/opt/zextras/conf/milter.log4j.properties -Dzimbra.config=/opt/zextras/conf/localconfig.xml com.zimbra.cs.milter.MilterServer
-exec /usr/bin/sudo /opt/zextras/common/sbin/postfix reload
+exec /usr/bin/sudo -n /opt/zextras/common/sbin/postfix reload
 => ok
 
 ## mta | legacy reload running
@@ -1853,7 +1854,7 @@ exec /opt/zextras/libexec/configrewrite sasl
 exec /opt/zextras/common/sbin/saslauthd -r -a zimbra
 fs.open /opt/zextras/log/milter.out flag=0x441 perm=0640
 exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -client -Xmx256m -Dhttps.protocols=TLSv1.2,TLSv1.3 -Djdk.tls.client.protocols=TLSv1.2,TLSv1.3 -Djava.net.preferIPv4Stack=true -Dzimbra.home=/opt/zextras -Djava.library.path=/opt/zextras/lib -classpath /opt/zextras/mailbox/jars/*:/opt/zextras/conf -Dlog4j.configurationFile=file:/opt/zextras/conf/milter.log4j.properties -Dzimbra.config=/opt/zextras/conf/localconfig.xml com.zimbra.cs.milter.MilterServer
-exec /usr/bin/sudo /opt/zextras/common/sbin/postfix reload
+exec /usr/bin/sudo -n /opt/zextras/common/sbin/postfix reload
 => ok
 
 ## mta | legacy reload stopped
@@ -1861,13 +1862,13 @@ exec /opt/zextras/libexec/configrewrite sasl
 exec /opt/zextras/common/sbin/saslauthd -r -a zimbra
 fs.open /opt/zextras/log/milter.out flag=0x441 perm=0640
 exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -client -Xmx256m -Dhttps.protocols=TLSv1.2,TLSv1.3 -Djdk.tls.client.protocols=TLSv1.2,TLSv1.3 -Djava.net.preferIPv4Stack=true -Dzimbra.home=/opt/zextras -Djava.library.path=/opt/zextras/lib -classpath /opt/zextras/mailbox/jars/*:/opt/zextras/conf -Dlog4j.configurationFile=file:/opt/zextras/conf/milter.log4j.properties -Dzimbra.config=/opt/zextras/conf/localconfig.xml com.zimbra.cs.milter.MilterServer
-exec /usr/bin/sudo /opt/zextras/common/sbin/postfix reload
+exec /usr/bin/sudo -n /opt/zextras/common/sbin/postfix reload
 => ok
 
 ## mta | legacy start-systemd cold
-exec /usr/bin/sudo /opt/zextras/common/sbin/postfix status
-exec /usr/bin/sudo /usr/bin/touch /opt/zextras/common/conf/main.cf
-exec /usr/bin/sudo /opt/zextras/common/sbin/postconf -e mail_owner=postfix setgid_group=postdrop
+exec /usr/bin/sudo -n /opt/zextras/common/sbin/postfix status
+exec /usr/bin/sudo -n /usr/bin/touch /opt/zextras/common/conf/main.cf
+exec /usr/bin/sudo -n /opt/zextras/common/sbin/postconf -e mail_owner=postfix setgid_group=postdrop
 fs.mkdir /opt/zextras/conf mode=0755
 fs.write-atomic /opt/zextras/conf/ldap-vmm.cf mode=0640
 fs.write-atomic /opt/zextras/conf/ldap-vmd.cf mode=0640
@@ -1885,12 +1886,12 @@ fs.chown /opt/zextras/conf/ldap-canonical.cf -1:1001
 fs.chown /opt/zextras/conf/ldap-transport.cf -1:1001
 fs.chown /opt/zextras/conf/ldap-slm.cf -1:1001
 fs.chown /opt/zextras/conf/ldap-splitdomain.cf -1:1001
-exec /usr/bin/sudo /opt/zextras/common/sbin/postalias /etc/aliases
-exec /usr/bin/sudo /opt/zextras/common/sbin/postfix start
+exec /usr/bin/sudo -n /opt/zextras/common/sbin/postalias /etc/aliases
+exec /usr/bin/sudo -n /opt/zextras/common/sbin/postfix start
 => ok
 
 ## mta | legacy stop-systemd running
-exec /usr/bin/sudo /opt/zextras/common/sbin/postfix stop
+exec /usr/bin/sudo -n /opt/zextras/common/sbin/postfix stop
 => ok
 
 ## mta | legacy refresh running
@@ -1926,11 +1927,11 @@ exec /usr/bin/systemctl is-active carbonio-postfix.service
 => running=true ok
 
 ## mta | systemd start-systemd
-exec /usr/bin/sudo /opt/zextras/common/sbin/postfix status
+exec /usr/bin/sudo -n /opt/zextras/common/sbin/postfix status
 => ok
 
 ## mta | systemd stop-systemd
-exec /usr/bin/sudo /opt/zextras/common/sbin/postfix stop
+exec /usr/bin/sudo -n /opt/zextras/common/sbin/postfix stop
 => ok
 
 ## stats | legacy start cold

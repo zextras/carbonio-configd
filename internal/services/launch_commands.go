@@ -14,14 +14,15 @@ import (
 )
 
 // controlCommand runs one verb of a CommandSpec service: its binary, through
-// sudo when the service needs root (zextras has NOPASSWD sudo rights for the
-// postfix binary). It returns the combined output next to the error so a
+// sudo -n when the service needs root (zextras has NOPASSWD sudo rights for the
+// postfix binary; -n makes a missing grant fail at once instead of waiting on a
+// password prompt no one will answer). It returns the combined output next to the error so a
 // failing verb can be reported with what the binary said.
 func (c *Controller) controlCommand(ctx context.Context, def *ServiceDef, verb []string) ([]byte, error) {
 	binary, args := def.BinaryPath, verb
 
 	if def.NeedsRoot {
-		binary, args = sudoBin, append([]string{def.BinaryPath}, verb...)
+		binary, args = sudoBin, append([]string{"-n", def.BinaryPath}, verb...)
 	}
 
 	// #nosec G204 — binary is a registry constant and the verb a registry literal
@@ -66,20 +67,23 @@ func (c *Controller) startCommands(ctx context.Context, def *ServiceDef) error {
 	return nil
 }
 
-// stopCommands runs the Stop verb. A stop that fails because the service is
-// not running is a successful stop.
+// stopCommands runs the Stop verb. A stop that fails is still a successful
+// stop when the service is not running: the Status verb exits non-zero and no
+// process of its identity is left. The verdict never depends on what the verb
+// printed, which is locale-dependent; requiring the identity scan as well keeps
+// a Status that failed for another reason (sudo refusing the call) from hiding
+// a running service.
 func (c *Controller) stopCommands(ctx context.Context, def *ServiceDef) error {
 	out, err := c.controlCommand(ctx, def, def.Commands.Stop)
-	if err != nil {
-		// "not running" means the service is already stopped.
-		if strings.Contains(string(out), "is not running") {
-			return nil
-		}
-
-		return fmt.Errorf("%s stop: %s: %w", def.BinaryPath, strings.TrimSpace(string(out)), err)
+	if err == nil {
+		return nil
 	}
 
-	return nil
+	if def.Commands.Status != nil && !c.commandRunning(ctx, def) && c.runningPID(ctx, def) == 0 {
+		return nil
+	}
+
+	return fmt.Errorf("%s stop: %s: %w", def.BinaryPath, strings.TrimSpace(string(out)), err)
 }
 
 // reloadCommands runs the Reload verb, after restarting the enabled
