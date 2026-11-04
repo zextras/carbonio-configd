@@ -91,11 +91,15 @@ type ConfigManager struct {
 	// The fields below belong to the (sequential) main loop: the plan of a
 	// cycle is a function of prev (the snapshot the last plan was computed
 	// from), tracked (the service tracking map) and carry (the actions the
-	// last execution did not complete).
-	prev    *snapshot.Snapshot
-	tracked map[string]string
-	carry   plan.Carry
-	env     sys.System // host boundary: filesystem, process execution, clock
+	// last execution did not complete). deferred holds the restarts of
+	// sections that changed during a REWRITE cycle until a cycle that is not
+	// a REWRITE releases them (see holdDeferred). Like carry it is in memory:
+	// a process restart forgets it, as it forgets the restarts of the plan.
+	prev     *snapshot.Snapshot
+	tracked  map[string]string
+	carry    plan.Carry
+	deferred []plan.Restart
+	env      sys.System // host boundary: filesystem, process execution, clock
 
 	// loadLocalConfig loads the effective localconfig: the LC.java defaults
 	// under localconfig.xml under the CONFIGD_LC_* environment overlay,

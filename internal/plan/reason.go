@@ -39,6 +39,9 @@ const (
 	ReasonRetry ReasonKind = "retry"
 	// ReasonDrift: the host differs from what the plan would produce.
 	ReasonDrift ReasonKind = "drift"
+	// ReasonDeferred: the restart was held back from a REWRITE cycle of the
+	// section (Section) and runs in a later cycle.
+	ReasonDeferred ReasonKind = "deferred"
 	// ReasonMapfileSync: mapped files are re-synced every cycle so a deleted or
 	// hand-edited file is restored without counting as a variable change.
 	ReasonMapfileSync ReasonKind = "mapfile-sync"
@@ -115,6 +118,8 @@ func (r Reason) String() string {
 		return "retry: previous attempt did not complete"
 	case ReasonDrift:
 		return "drift: " + r.Detail
+	case ReasonDeferred:
+		return "restart deferred from the REWRITE of section " + r.Section
 	case ReasonMapfileSync:
 		return "mapped file kept in sync with the configuration"
 	default:

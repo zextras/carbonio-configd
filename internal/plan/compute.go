@@ -105,6 +105,7 @@ type builder struct {
 	ldap      map[string]*Ldap
 	proxygen  *Proxygen
 	restarts  map[string]*Restart
+	deferred  map[string]*Restart
 	tracked   map[string]string
 }
 
@@ -123,6 +124,7 @@ func newBuilder(in *Input) *builder {
 		postconfd: map[string]*Postconfd{},
 		ldap:      map[string]*Ldap{},
 		restarts:  map[string]*Restart{},
+		deferred:  map[string]*Restart{},
 		tracked:   maps.Clone(in.Tracked),
 	}
 }
@@ -356,13 +358,58 @@ func (b *builder) compileSection(sn string, sec *config.MtaConfigSection, reason
 		b.compileConditional(sn, &sec.Conditionals[i], reasons)
 	}
 
-	// Restarts are not triggered on first run, nor for a section that was
-	// forced or requested: that restart would trigger the ExecStartPre REWRITE
-	// of the very service being restarted. The skip is section-scoped; a
-	// collateral section whose variables changed still restarts its services.
-	if !b.in.FirstRun && !b.forced[sn] && !b.requested[sn] {
-		b.compileSectionRestarts(sn, sec, reasons)
+	b.compileRestarts(sn, sec, reasons)
+}
+
+// compileRestarts gathers the restarts of a processed section.
+//
+// No section restarts on the first run. A section that was forced or requested
+// does not restart its services in this cycle either: that restart would
+// trigger the ExecStartPre REWRITE of the very service being restarted, which
+// would restart it again, forever. The skip is section-scoped; a collateral
+// section whose variables changed still restarts its services.
+//
+// A forced or requested section that ALSO has a variable change must not lose
+// that restart: the change is consumed by this cycle (it becomes the baseline
+// of the next one), so no later cycle would notice it and the services would
+// keep running on the old configuration. Its restarts are therefore deferred:
+// the plan reports them in DeferredRestarts and the caller releases them in a
+// later cycle that is not itself a REWRITE (see MergeRestarts). A section that
+// is only forced or requested, with no variable change, defers nothing: that
+// is the ExecStartPre REWRITE of a starting service, and deferring it would
+// restart the service it was sent for.
+func (b *builder) compileRestarts(sn string, sec *config.MtaConfigSection, reasons []Reason) {
+	if b.in.FirstRun {
+		return
 	}
+
+	if !b.forced[sn] && !b.requested[sn] {
+		b.compileSectionRestarts(b.restarts, sn, sec, reasons)
+
+		return
+	}
+
+	changes := varChanges(reasons)
+	if len(changes) == 0 {
+		return
+	}
+
+	deferredReasons := slices.Concat(changes, []Reason{{Kind: ReasonDeferred, Section: sn}})
+	b.compileSectionRestarts(b.deferred, sn, sec, deferredReasons)
+}
+
+// varChanges returns the var-changed reasons: the real changes behind a
+// section, as opposed to the reasons that only say it was asked for.
+func varChanges(reasons []Reason) []Reason {
+	var changes []Reason
+
+	for i := range reasons {
+		if reasons[i].Kind == ReasonVarChanged {
+			changes = append(changes, reasons[i])
+		}
+	}
+
+	return changes
 }
 
 // compileRewrites gathers the REWRITE actions of a section.
@@ -469,31 +516,33 @@ func (b *builder) conditionHolds(cond *config.Conditional) bool {
 }
 
 // compileSectionRestarts derives the restart/stop entries of a changed
-// section from its RESTART services.
-func (b *builder) compileSectionRestarts(sn string, sec *config.MtaConfigSection, reasons []Reason) {
+// section from its RESTART services into dst.
+func (b *builder) compileSectionRestarts(
+	dst map[string]*Restart, sn string, sec *config.MtaConfigSection, reasons []Reason,
+) {
 	for _, svc := range slices.Sorted(maps.Keys(sec.Restarts)) {
 		name := strings.ToLower(svc)
 
 		switch {
 		case b.cur.ServiceEnabled(name):
-			b.addRestart(name, ActionRestart, sn, reasons)
+			addRestart(dst, name, ActionRestart, sn, reasons)
 		case name == "archiving":
 			// archiving is never stopped here when disabled, mirroring
 			// jylibs/state.py ("archiving not enabled, skipping stop").
 		case name == "opendkim" && b.cur.ServiceEnabled("mta"):
 			// With the MTA enabled opendkim is restarted rather than stopped.
-			b.addRestart(name, ActionRestart, sn, reasons)
+			addRestart(dst, name, ActionRestart, sn, reasons)
 		default:
-			b.addRestart(name, ActionStop, sn, reasons)
+			addRestart(dst, name, ActionStop, sn, reasons)
 		}
 	}
 }
 
-func (b *builder) addRestart(service string, action Action, section string, reasons []Reason) {
-	r := b.restarts[service]
+func addRestart(dst map[string]*Restart, service string, action Action, section string, reasons []Reason) {
+	r := dst[service]
 	if r == nil {
 		r = &Restart{Service: service}
-		b.restarts[service] = r
+		dst[service] = r
 	}
 
 	r.Action = action
@@ -649,6 +698,10 @@ func (b *builder) pruneToHost() {
 
 	b.sections = slices.DeleteFunc(b.sections, func(s Section) bool { return !touched[s.Name] })
 
+	// Deferral is a consequence of consuming a change in a REWRITE cycle,
+	// which the host comparison never is.
+	b.deferred = map[string]*Restart{}
+
 	// Restarts are organic consequences of a drifted section only.
 	for svc, r := range b.restarts {
 		if !slices.ContainsFunc(r.Sections, func(s string) bool { return touched[s] }) {
@@ -742,17 +795,18 @@ func (b *builder) pruneDirectives(h *Host, touched drifted) {
 // finish sorts everything and assembles the Plan.
 func (b *builder) finish() Plan {
 	p := Plan{
-		FirstRun:  b.in.FirstRun,
-		Sections:  b.sections,
-		Heal:      []Mapfile{},
-		Mapfiles:  []Mapfile{},
-		Rewrites:  []Rewrite{},
-		Postconf:  []Postconf{},
-		Postconfd: []Postconfd{},
-		Ldap:      []Ldap{},
-		Restarts:  []Restart{},
-		Tracked:   b.tracked,
-		Enabled:   b.cur.ServiceNames(),
+		FirstRun:         b.in.FirstRun,
+		Sections:         b.sections,
+		Heal:             []Mapfile{},
+		Mapfiles:         []Mapfile{},
+		Rewrites:         []Rewrite{},
+		Postconf:         []Postconf{},
+		Postconfd:        []Postconfd{},
+		Ldap:             []Ldap{},
+		Restarts:         []Restart{},
+		DeferredRestarts: []Restart{},
+		Tracked:          b.tracked,
+		Enabled:          b.cur.ServiceNames(),
 	}
 
 	if p.Sections == nil {
@@ -786,8 +840,14 @@ func (b *builder) finish() Plan {
 		return strings.Compare(a.Service, c.Service)
 	})
 
-	for i := range p.Restarts {
-		p.Restarts[i].Action = Classify(p.Restarts[i].Action, p.Restarts[i].Service, b.in.Systemd)
+	p.DeferredRestarts = collectSorted(b.deferred, p.DeferredRestarts, func(a, c *Restart) int {
+		return strings.Compare(a.Service, c.Service)
+	})
+
+	for _, list := range [][]Restart{p.Restarts, p.DeferredRestarts} {
+		for i := range list {
+			list[i].Action = Classify(list[i].Action, list[i].Service, b.in.Systemd)
+		}
 	}
 
 	if b.proxygen != nil {
