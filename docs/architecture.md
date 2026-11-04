@@ -10,14 +10,16 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 Source: `cmd/configd/cli.go` (`DaemonCmd.Run`), `cmd/configd/configd.go`, `cmd/configd/mainloop.go`
 
-1. **User check** — `security.MustCheckUserPermissions(stderr)` enforces that the process runs as
-   `zextras`. Root is rejected.
-2. **Logging init** — structured logger configured from `CONFIGD_LOG_FORMAT` and
-   `CONFIGD_LOG_LEVEL` environment variables (defaults: text, info).
+1. **User check** — `cliutil.RequireZextras` (`security.MustCheckUserPermissions`) enforces that
+   the process runs as `zextras`. Root is rejected; the process exits with status 1.
+2. **Logging init** — `cliutil.InitLogging`: structured logger configured from the
+   `CONFIGD_LOG_FORMAT` and `CONFIGD_LOG_LEVEL` environment variables (defaults: text, info).
 3. **sd_notify init** — `sdnotify.New()` opens the socket named by `NOTIFY_SOCKET`. If the
-   variable is unset the notifier is a no-op; no code path fails because of its absence.
-4. **Profiling/tracing setup** — CPU, memory, and trace profiles started if flags are present
-   (profiling build only).
+   variable is unset the notifier is a no-op; no code path fails because of its absence (a failure
+   to open the socket is logged and the daemon carries on).
+4. **Profiling/tracing setup** — CPU, memory, and trace profiles started if their flags are present.
+   The flags exist only in binaries built with `-tags profiling` / `-tags tracing`, see
+   [performance.md](performance.md#profiling-tooling).
 5. **Runtime** — `buildRuntime` (`cmd/configd/runtime.go`) is the one builder shared by the
    daemon, `shadow`, `plan`, `proxy gen` and the forced/standalone rewrite.
    `config.NewConfigWithHostname()` only sets defaults (base dir, intervals) and the hostname
@@ -28,7 +30,9 @@ Source: `cmd/configd/cli.go` (`DaemonCmd.Run`), `cmd/configd/configd.go`, `cmd/c
    (`zmconfigd_template_dir`, `zmconfigd_sections`, `zmconfigd_service_hooks`); the remaining
    keys are applied by the first cycle's load. It also builds the (not yet connected) LDAP
    client, the service backend and the one `services.ServiceManager`, applies
-   `--disable-restarts`, and constructs `state.State` and the `ConfigManager`.
+   `--disable-restarts`, and constructs `state.State` (seeded with a snapshot that only carries
+   the default listen port and IP mode) and the `ConfigManager` (with the `internal/cache` LDAP
+   result cache, which every cycle's load invalidates).
 6. **Main loop** — `RunMainLoop` is called. It does not return until the process is asked to
    shut down.
 
@@ -45,8 +49,12 @@ Inside `RunMainLoop` before the first iteration:
   no-op; see [restart-behavior.md](restart-behavior.md). A hook backend is never in systemd mode:
   the hooks decide what a restart does and the watchdog checks the services through their
   status hooks.
-- A watchdog goroutine is started (it does nothing on systemd hosts).
-- Signal handlers are registered (SIGTERM/SIGINT → cancel context; SIGHUP → reload channel).
+- The watchdog (`bootstrapWatchdog`, interval `zmconfigd_watchdog_interval`, default 120 s) is
+  started unless the run is a forced rewrite; it does nothing on systemd hosts. A service the
+  manager restarts on purpose is removed from the watchdog first.
+- Signal handlers are registered (`cmd/configd/signals.go`): SIGTERM/SIGINT send `STOPPING=1` and
+  cancel the context; SIGHUP, SIGUSR2 and SIGALRM send `RELOADING=1`, zero the sleep timer and
+  wake the loop through the one-slot reload channel; SIGCHLD is only logged.
 - The systemd watchdog keep-alive goroutine is started when `WATCHDOG_USEC` is set, pinging
   at half the declared interval.
 
@@ -73,28 +81,33 @@ datagram socket), `os.Getenv`, and `time.Now()` used only to log durations.
 
 Source: `cmd/configd/mainloop.go` (`RunMainLoop`)
 
-Each iteration runs the following phases in order:
+Each iteration runs the following phases in order. A panic inside an iteration is recovered,
+logged, and followed by a normal-interval sleep, so a deterministic panic cannot spin the loop.
 
 | Phase | Function | Notes |
 |---|---|---|
-| Shutdown check | — | Checks context cancellation before starting work |
-| Idle check | — | Only with `zmconfigd_skip_idle_polls=TRUE` (off by default, as legacy): skips to sleep if no REWRITE events and not first run and no reload signal |
+| Shutdown / reload check | `consumeReloadSignal` | Exits when the context is cancelled; drains a pending reload signal and remembers it (`reloadSignaled`) |
+| Idle check | `isIdlePoll` | Only with `zmconfigd_skip_idle_polls=TRUE` (off by default, as legacy): skips to sleep if no REWRITE events and not first run and no reload signal |
 | Load configs | `configManager.LoadAllConfigs` | Four concurrent goroutines; see Config loading pipeline below |
-| LDAP watcher | `syncLDAPWatch` | Right after the load, every iteration: with `zmconfigd_ldap_change_trigger=TRUE` starts the LDAP change watcher (once) or stops it when the key turns `FALSE`; with the key off (default) it does nothing and no goroutine exists. See [LDAP change detection](#ldap-change-detection-opt-in) |
-| Parse MTA config | `configManager.ParseMtaConfig` | Reads `conf/zmconfigd.cf` |
+| Parse MTA config | `configManager.ParseMtaConfig` | Reads `conf/zmconfigd.cf`, right after the load (`runLoadAndParse`) |
+| Validate hooks | `checkHooks` | Once, on the first parsed `zmconfigd.cf`; only with `zmconfigd_service_hooks`. A gap ends the daemon with status 1 |
+| LDAP watcher | `syncLDAPWatch` | Every iteration: with `zmconfigd_ldap_change_trigger=TRUE` starts the LDAP change watcher (once) or stops it when the key turns `FALSE`; with the key off (default) it does nothing and no goroutine exists. See [LDAP change detection](#ldap-change-detection-opt-in) |
 | Build dependencies | `buildServiceDependencies` | Extracts DEPENDS entries from MTA sections for the shared service manager's watchdog cascade (config-driven restarts do not cascade, see restart-behavior.md) |
+| Claim REWRITE clients | `MainLoopActionTrigger.claimWaiters` | The TCP REWRITE clients registered so far now depend on this cycle: `Plan` takes their requested sections |
 | Snapshot + Observe | `configManager.Plan` (first half) | Freezes the loaded configs into an immutable `snapshot.Snapshot`, resolves every lookup `configd.cf` requires and publishes the result |
-| Plan | `plan.Compute` (via `configManager.Plan`) | Pure, deterministic: previous snapshot vs. current snapshot gives a `plan.Plan` whose every entry carries its reasons |
+| Plan | `plan.Compute` (via `configManager.Plan`) | Pure, deterministic: previous snapshot vs. current snapshot gives a `plan.Plan` whose every entry carries its reasons. If it fails, the claimed clients are requeued (`requeueWaiters`), their sections stay queued, and the loop backs off |
 | Execute | `configManager.Execute` | Mapfiles first (self-heal included), then proxygen, rewrites, postconf, postconfd and LDAP concurrently |
-| Release REWRITE clients | `MainLoopActionTrigger.completeWaiters` | Right after Execute (also when a rewrite step failed, as legacy `notifyAll` in `finally`): TCP clients whose sections this cycle planned get `SUCCESS REWRITES COMPLETE`. If Plan fails the clients stay queued for the next cycle |
-| Apply restarts | `configManager.ApplyRestarts` | `restart.Policy.Apply`: runs every cycle; honours `zmconfigd_enable_config_restarts`, debounce and `--disable-restarts`. Skipped when the rewrite phase failed (legacy skips `doRestarts`); the plan's restarts stay in the carry for the next cycle |
-| Start listener | `network.NewThreadedStreamServer` | Only after the first pass completed (legacy `configd.py` starts it after the first rewrite); skipped in `--once` mode |
-| READY=1 | `notifier.Ready()` | First time after the first completed pass (so systemd stays `activating` until the host is configured); sent again when a cycle ends after a SIGHUP reload (`RELOADING=1`), also when that cycle backed off |
-| Back-off | `backOff` | A failed load, a rejected plan or a failed rewrite sleeps 60 s (interruptible by a reload) and retries without starting the listener or sending READY=1 if the first pass has not completed |
-| Sleep | `SleepWithContext` | Default 300 s; woken early by SIGHUP, TCP REWRITE or, when enabled, an LDAP change |
+| Release REWRITE clients | `MainLoopActionTrigger.completeWaiters` | Right after Execute (also when a rewrite step failed, as legacy `notifyAll` in `finally`): the clients claimed for this cycle get `SUCCESS REWRITES COMPLETE`. A client that arrived mid-cycle waits for the next one |
+| Back-off | `backOff` | A failed load or MTA parse, a rejected plan or a failed rewrite sleeps 60 s (interruptible by a reload), exports the metrics textfile, and retries without applying restarts, starting the listener or sending the first `READY=1`; a reload being handled is still acknowledged with `READY=1` |
+| Apply restarts | `configManager.ApplyRestarts` | `restart.Policy.Apply`: runs every successful cycle; honours `zmconfigd_enable_config_restarts`, debounce and `--disable-restarts`. Skipped when the rewrite phase failed (legacy skips `doRestarts`); the plan's restarts stay in the carry for the next cycle |
+| Start listener | `network.NewThreadedStreamServer` | Only after the first pass completed (legacy `configd.py` starts it after the first rewrite and restart pass); never in `--once` mode (profiling builds) |
+| First pass bookkeeping | `finalizeIteration` | Clears the first-run flag, sends `READY=1`, updates the `STATUS=` line, logs the timings, records the cycle metrics |
+| READY=1 | `signalReady` | First time once the listener is up, i.e. after the first completed pass (so systemd stays `activating` until the host is configured); sent again when a cycle ends after a reload signal (`RELOADING=1`), also when that cycle backed off |
+| Sleep | `SleepWithContext` | Default 300 s (`zmconfigd_interval`); woken early by SIGHUP/SIGUSR2/SIGALRM, TCP REWRITE or, when enabled, an LDAP change |
 
-Forced mode (`configd rewrite`-style standalone runs) uses the same Plan and Execute and
-never applies restarts.
+Forced mode (`configd rewrite` falling back to an in-process run, see below) uses the same Plan and
+Execute, never applies restarts and never starts the listener or watchdog. It exits 0 when the
+rewrite ran and 1 when planning or a rewrite step failed.
 
 On errors in the load or MTA-parse phases, the loop sleeps 60 s and retries rather than
 exiting. On context cancellation mid-loop, the loop exits immediately after the current
@@ -102,34 +115,57 @@ phase completes.
 
 ## Network protocol
 
-Source: `internal/network/server.go`
+Source: `internal/network/server.go`, `cmd/configd/mainloop.go` (`MainLoopActionTrigger`),
+`internal/cli/rewrite`
 
-The daemon listens on `127.0.0.1:7171` (IPv4) or `[::1]:7171` (IPv6, when
-`zimbraIPMode=ipv6`). The port is overridable via `zmconfigd_listen_port` in localconfig.
+The listener is started by the main loop after the first completed config pass (see the table
+above), not at process start. It binds `127.0.0.1` (IPv4) or `[::1]` (IPv6, when the server's
+`zimbraIPMode` is `ipv6`). The port is `zmconfigd_listen_port` in localconfig (default 7171).
+A bind failure is fatal.
 
-**Wire format**: one line per request, newline-terminated. Each connection carries exactly
-one request and receives exactly one response; the connection is closed immediately after
-the response.
+**Wire format**: one request per connection, answered with exactly one line; the connection is then
+closed. The daemon does a single read of at most 4096 bytes and takes the request up to the first
+newline, or the whole chunk when the client sends no newline (the legacy client sends none and does
+not half-close). A chunk that fills the buffer without a newline, more than 256 arguments, or no
+request within 120 s drops the connection without a reply. At most 64 connections are handled at
+once; the rest wait in the accept backlog.
 
 ```
-REQUEST  = COMMAND [SPACE ARG]* NEWLINE
+REQUEST  = COMMAND [SPACE ARG]* [NEWLINE]
 RESPONSE = RESULT_STRING NEWLINE
 ```
 
-**Commands**:
+**Commands** (case-sensitive; fields are split on whitespace):
 
 | Command | Example | Response |
 |---|---|---|
 | `STATUS` | `STATUS\n` | `SUCCESS ACTIVE\n` |
-| `REWRITE [section ...]` | `REWRITE proxy mta\n` | `SUCCESS REWRITES COMPLETE\n` once the main loop processed the sections; `ERROR REWRITE TIMEOUT\n` after 60 s (the request stays queued); `ERROR SHUTTING DOWN\n` if the daemon stops meanwhile |
-| _(unknown)_ | `FOO\n` | `ERROR UNKNOWN COMMAND\n` |
+| `REWRITE section [section ...]` | `REWRITE proxy mta\n` | `SUCCESS REWRITES COMPLETE\n` once the main loop has rewritten the sections; `ERROR REWRITE TIMEOUT\n` after 60 s (the request stays queued); `ERROR SHUTTING DOWN\n` if the daemon stops meanwhile |
+| `REWRITE` (no sections) | `REWRITE\n` | `ERROR NO SERVICES LISTED\n` (as the legacy listener) |
+| _(anything else, empty line)_ | `FOO\n` | `ERROR UNKNOWN COMMAND\n` |
 
-`REWRITE` blocks the connection until the main loop has handled it (`listener.py`
-`lAction.wait`, 60 s). With arguments, the named sections are queued as `requested` and
-rewritten by the next cycle. With no arguments no section is requested: the call only wakes
-the loop for a normal cycle, which rewrites what changed. The `configd rewrite` client and
-`configd init` use the same exchange (`internal/cli/rewrite.Request`) and dial both loopback
-families.
+Because the listener only starts after the first pass, a `STATUS` that answers `SUCCESS ACTIVE`
+means the host has been configured once; the systemd `READY=1` is sent at the same point.
+
+**REWRITE is synchronous** (`listener.py` `lAction.wait`, 60 s). Callers such as
+`configrewrite X && start X` rely on it: the reply must not precede the written files. The
+handler queues the named sections as `requested`, registers the client with
+`MainLoopActionTrigger` and wakes the loop through the reload channel. The loop claims the clients
+registered so far right before planning (`claimWaiters`), and releases them after the cycle's
+Execute phase (`completeWaiters`) whether or not a rewrite step failed, as legacy `notifyAll` did.
+A cycle whose plan fails requeues the clients, a client that arrives mid-cycle waits for the next
+cycle, and a client that gives up (timeout, shutdown) leaves its sections queued for the next
+cycle. A cycle triggered by `REWRITE` is a full cycle: sections that changed are rewritten too.
+
+**Clients.** `configd rewrite`, the `configd proxy` and `tls` writers, and `configd init` (which
+sends `REWRITE <component>` and does not fall back) use the same exchange
+(`internal/cli/rewrite.Request`): they dial `zmconfigd_listen_port` on both loopback families (the
+family matching `zimbraIPMode` first, 5 s dial timeout) and wait for the reply up to
+`zimbra_configrewrite_timeout` (default 120 s, beyond the daemon's own 60 s). `configd service`
+uses the same helper for `STATUS` readiness probes. When nothing listens on either family,
+`configd rewrite` (and the proxy/tls writers) rewrite the sections in-process (forced mode, no
+restarts), like legacy `configrewrite` falling back to `zmconfigd <configs>`. A daemon that is up
+but answers `ERROR ...` is never bypassed (a second rewriter would race it): the client exits 1.
 
 **REWRITE skips restarts**: the TCP REWRITE command queues the named sections as
 `requested`. `plan.Compute` still renders them, but compiles no service restart for a
@@ -145,8 +181,12 @@ See [restart-behavior.md](restart-behavior.md) for the full rule.
 with `sys.Proc.Signal` and `sys.Exec` instead, so it is covered by `sys.ReadOnly` (shadow) and the
 `systest` fakes like everything else. `buildRuntime` creates the one `ServiceManager` and injects it
 into `configmgr.NewConfigManager`; the config-driven restarts, the watchdog and status checks share
-it. The hooks are validated against the first parsed `zmconfigd.cf` (`runtime.validateHooks`); a
-gap ends the daemon with status 1.
+it. A hooks file with an unknown service, action or hook is a startup error. The hooks are also
+validated against the first parsed `zmconfigd.cf` (`runtime.validateHooks`, called from the main loop
+as `checkHooks`): every service a `RESTART` line of an in-scope section names or cascades into
+through `DEPENDS` needs a `restart` hook, and every service the watchdog monitors a `status` hook; a
+gap ends the daemon with status 1. File format and hook kinds (`signal:`, `exec:`, `skip`,
+`process`) are in [localconfig.md](localconfig.md#service-hooks-zmconfigd_service_hooks).
 
 ## Config loading pipeline
 
@@ -165,10 +205,12 @@ Four goroutines run concurrently, one per config source:
 | `mc` | `LoadMiscConfig` | Miscellaneous service states (SERVICE_* keys) |
 | `sc` | `LoadServerConfig` | Per-server attributes via native LDAP client |
 
-**Timeout**: derived from `ldap_read_timeout` in localconfig (default `60000` ms → 60 s).
+**Timeout**: derived from `ldap_read_timeout` in localconfig (ms; default `60000` → 60 s). A value
+below `60000` still waits 60 s, a larger one scales as `ldap_read_timeout / 1000` seconds.
 The implementation uses a two-stage timeout matching the original Python behaviour: if the
-first timeout fires, the loop waits another full interval before giving up. If all four
-goroutines finish before the timeout, the loop continues immediately.
+first timeout fires, the loop waits another full interval before giving up and counts a
+`timeout` load failure. If all four goroutines finish before the timeout, the loop continues
+immediately. A cancelled context (shutdown) ends the wait at once.
 
 Each loader stages its own part (local, global, misc, server + services); when the attempt
 ends, the parts that were delivered replace the published ones in a single new
@@ -202,7 +244,7 @@ Load ─► Snapshot ─► Observe ─► Plan ─► Execute ─► ApplyResta
    `Tracked` and `Enabled`. Compute performs no I/O and mutates nothing, so
    equal inputs give equal plans. Every entry carries `Reasons` (`first-run`, `forced`,
    `requested`, `var-changed`, `service-enabled`, `service-disabled`, `retry`,
-   `mapfile-sync`, and for `configd plan` `evaluated` and `drift`). Reasons are redacted for
+   `mapfile-sync`, `dependency`, and for `configd plan` `evaluated` and `drift`). Reasons are redacted for
    secret keys and truncated, so they are safe to log and print. The same function backs
    `configd plan`, which only adds the observed host state (`plan.Input.Host`).
 5. **Execute** — `ConfigManager.Execute` runs the mapped files first (serially, because other
@@ -229,7 +271,7 @@ consumed, the previous snapshot stays the baseline and the requested sections st
 reaches the output:
 
 - an attribute whose **key** names a secret (`redact.IsSecretKey`: `password`, `passwd`,
-  `passphrase`, `secret`, `token`, `credential`, `privatekey`/`private_key`, `apikey`, and the
+  `passphrase`, `secret`, `token`, `credential`, `privatekey`/`private_key`, `apikey`/`api_key`, and the
   suffixes `_key`, `_pass`, `_pw`; e.g. `ldap_amavis_password`, `zimbraSSLPrivateKey`,
   `userPassword`, `zimbraAuthTokenKey`) has its value replaced by `[REDACTED]`;
 - a value attribute (`value`, `previous_value`, `current_value`, `old`, `new`, `have`, `want`,
@@ -282,7 +324,10 @@ plan size by kind (`mapfiles`, `rewrites`, `postconf`, `postconfd`, `ldap`, `pro
 `configd shadow` (`cmd/configd/shadow.go`, `internal/shadow`) runs Load, Snapshot and Plan on the
 poll interval next to a real configd, and never Execute or ApplyRestarts. It is meant for QA
 nodes: the plans and rendered files of this build are compared with what the legacy daemon, or
-the previous Go release, actually does. Usage is in the README.
+the previous Go release, actually does. Flags: `--shadow-dir DIR` writes the would-be files and the
+plan JSON under `DIR`; `--single-cycle` runs one cycle and exits (status 1 when it failed). Without
+it the command runs until SIGINT/SIGTERM. The side-effect global flags (`--cpuprofile`,
+`--memprofile`, `--trace`, `--enable-tracing`) are rejected. Usage is in [cli.md](cli.md).
 
 Side-effect freedom is enforced structurally, in three layers:
 
@@ -312,13 +357,11 @@ log output on stderr and the signal registration. LDAP writes happen only in `Ex
 shadow cycle never calls.
 
 There is no per-subsystem cutover flag (proxy, MTA, watchdog) falling back to the legacy
-implementation. On the releases that ship this daemon the legacy implementation is gone: the
-native-configd migration of carbonio-core (CO-3358) removes the Jython `libexec/zmconfigd`,
-`jylibs` and `zmpython`, and turns `zmproxyconfgen` into a wrapper around `configd proxy gen`.
-Only nodes still on the pre-migration packages carry them, and even there the Jython daemon
-cannot be partitioned by section (it owns the whole cycle and port 7171; a forced run per
-section starts a JVM and never restarts services). Shadow mode is the safety net instead;
-rolling back is installing the previous package.
+implementation. On the releases that ship this daemon the legacy Jython implementation is gone:
+the `zm*` wrappers installed by carbonio-core (`zmcontrol`, `zmlocalconfig`, `zmproxyconfgen`, ...)
+exec `configd` subcommands. The Jython daemon could not be partitioned by section either (it owns
+the whole cycle and port 7171; a forced run per section starts a JVM and never restarts services).
+Shadow mode is the safety net instead; rolling back is installing the previous package.
 
 ## LDAP transport security and timeouts
 
@@ -409,15 +452,40 @@ and how many changes were coalesced, the baseline and each observed change at de
 
 | Package | Role |
 |---|---|
+| `cmd/configd` | The binary: kong CLI (`cli.go`), `buildRuntime`, main loop, signals, systemd bootstrap, shadow/plan/proxy/ldap/tls/localconfig/service/control commands |
+| `internal/cache` | In-memory TTL cache of LDAP-derived configuration with MD5 change detection; invalidated at the start of every load, disabled for `configd plan` |
+| `internal/cli` | Subcommand implementations, one package each: `cliutil` (user check, logging, base dir), `control`, `initcmd`, `ldapcmd`, `localconfig`, `plancmd`, `proxy`, `release`, `rewrite` (daemon client, standalone fallback), `service`, `status`, `tls` |
+| `internal/commands` | LDAP-backed provisioning lookups (`garpu`, `garpb`, `gamau`, typed server/global attributes) the config manager reads |
+| `internal/config` | Daemon configuration (`config.Config`), defaults, the parsed `zmconfigd.cf` types, and the localconfig keys that shape the runtime |
+| `internal/configmgr` | Loaders, `Observe`, `Plan`, `Execute`, `ApplyRestarts`, `PlanHost` (host observation for `configd plan`) |
+| `internal/errors` | Typed errors shared by the components |
+| `internal/fileutil` | Atomic writes, copies and other shared file helpers |
+| `internal/intern` | Canonical (interned) strings for hot-path keys, attribute names and service names |
+| `internal/ldap` | Native LDAP client: pool, retries and error classification, TLS/StartTLS resolution, timeouts |
+| `internal/ldapwatch` | Opt-in LDAP change watcher: polls `entryCSN`/`modifyTimestamp` fingerprints, coalesces bursts, backs off on errors, requests an early cycle |
+| `internal/localconfig` | Native `localconfig.xml` reader, defaults registry, `CONFIGD_LC_<key>` overlay (`LoadEffective`), `${var}` expansion; replaces the `zmlocalconfig` subprocess |
+| `internal/logger` | `log/slog` setup, component/correlation context, redacting handler |
+| `internal/lookup` | `ConfigLookup` interface for local/global/server/misc value lookups |
+| `internal/metrics` | In-memory counters/gauges and the Prometheus textfile renderer/writer |
+| `internal/mtaops` | MTA operations: `postconf`/`postconfd`, LDAP write-back, MAPFILE handling |
+| `internal/network` | TCP 7171 listener (`STATUS`, `REWRITE`), bounded connections, synchronous REWRITE wait |
+| `internal/parser` | Parser interfaces and types for `zmconfigd.cf` |
+| `internal/plan` | Pure `Compute`, plan types, reasons, text/JSON rendering |
+| `internal/proxy` | Proxy (nginx) configuration generator behind `configd proxy gen` and the `proxy` rewrite step |
+| `internal/redact` | Secret-key and PEM detection used by the redacting log handler and plan rendering |
+| `internal/restart` | Restart policy: systemd hybrid (pending-restart / try-reload-or-restart) or legacy queue, debounce, max failed restarts |
+| `internal/sdnotify` | systemd `sd_notify` protocol: `READY=1`, `RELOADING=1`, `STOPPING=1`, `STATUS=`, watchdog pings |
+| `internal/security` | Runtime user validation (must be `zextras`, not root) |
+| `internal/services` | Service registry, `ServiceManager` (start order, retries, restart queue), host `Controller`, `HookBackend`, service launchers |
+| `internal/shadow` | `configd shadow`: side-effect-free Load/Plan cycle with a plan log and an optional report directory |
 | `internal/snapshot` | Immutable configuration snapshot (values + accessors) |
 | `internal/state` | Process state; holds the current snapshot behind an `atomic.Pointer` plus first-run, forced and requested bookkeeping |
-| `internal/plan` | Pure `Compute`, plan types, reasons, text/JSON rendering |
-| `internal/configmgr` | Loaders, `Observe`, `Plan`, `Execute`, `ApplyRestarts`, `PlanHost` (host observation for `configd plan`) |
-| `internal/restart` | Restart policy: systemd hybrid (pending-restart / try-reload-or-restart) or legacy queue, debounce, max failed restarts |
-| `internal/ldapwatch` | Opt-in LDAP change watcher: polls `entryCSN`/`modifyTimestamp` fingerprints, coalesces bursts, backs off on errors, requests an early cycle |
-| `internal/services` | Service registry and manager (start order, retries, MTA reload) |
-| `internal/cli/plancmd` | `configd plan` command |
-| `internal/sys` | Side-effect boundary (exec, fs, proc, clock); `sys.ReadOnly` is its mutation-refusing wrapper |
-| `internal/metrics` | In-memory counters/gauges and the Prometheus textfile renderer/writer |
-| `internal/redact` | Secret-key and PEM detection used by the redacting log handler and plan rendering |
-| `internal/shadow` | `configd shadow`: side-effect-free Load/Plan cycle with a plan log and an optional report directory |
+| `internal/sys` | Side-effect boundary (exec, fs, proc, clock); `sys.ReadOnly` is its mutation-refusing wrapper, `sys/systest` the recording fakes |
+| `internal/systemd` | `systemctl` detection and unit management, with the legacy init-script fallback |
+| `internal/template` | Atomic template-to-file rewrites |
+| `internal/testutil` | Shared test mocks |
+| `internal/tls` | Mail-mode (`zimbraMailMode`) management behind `configd tls` (legacy `zmtlsctl`) |
+| `internal/tracing` | Span-based execution tracing (`-tags tracing`) |
+| `internal/transformer` | Line-by-line expansion of `%%...%%` directives in templates |
+| `internal/watchdog` | Service monitoring and restart on legacy hosts (no-op on systemd hosts) |
+| `internal/zxadmin` | Minimal Carbonio admin HTTP client (replaces JVM-based `carbonio core` calls) |

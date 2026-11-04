@@ -8,17 +8,20 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 ## Template discovery
 
-Source: `internal/proxy/generator.go`, `internal/proxy/config.go`
+Source: `internal/proxy/generator.go` (`DiscoverTemplates`), `internal/proxy/config.go`
 
-The proxy generator scans two directories for templates:
+The proxy generator scans two directories for templates (`<workdir>/conf` is the conf dir,
+`/opt/zextras/conf` unless `configd proxy gen -w` or `CARBONIO_BASE_DIR` (daemon) says otherwise; see
+[the command line](#command-line-configd-proxy-gen-and-configd-proxy-conf)):
 
 | Directory | Purpose |
 |---|---|
-| `conf/nginx/templates/` | Standard templates shipped with the package |
+| `conf/nginx/templates/` (or `-t`/`--templatedir`) | Standard templates shipped with the package |
 | `conf/nginx/templates_custom/` | Site-local overrides (optional, not created by default) |
 
-Only files with a `.template` suffix are processed. The output filename is the template
-name with the `.template` suffix stripped, written to `conf/nginx/includes/`.
+Directories are walked recursively and only files with a `.template` suffix are processed;
+`-P`/`--template-prefix` further limits the set. The output filename is the template
+name with the `.template` suffix stripped, written to `conf/nginx/includes/` (`-i`/`--include-dir`; `nginx.conf` itself goes to the conf dir).
 
 **Precedence**: when a file in `templates_custom/` has the same basename as a file in
 `templates/`, the custom file is used and the standard file is ignored. This allows
@@ -35,14 +38,16 @@ Output in both cases: `conf/nginx/includes/nginx.conf`
 
 ## Variable syntax
 
-Source: `internal/proxy/template.go` (`interpolateLine`, `processEnablerLine`)
+Source: `internal/proxy/template.go`, `internal/proxy/template_interpolate.go` (`interpolateLine`,
+`processEnablerLine`)
 
 Three syntax forms are used in template files.
 
 ### 1. Simple substitution: `${VAR}`
 
-Any occurrence of `${VAR}` in a line is replaced with the resolved variable value. If the
-variable does not exist, the token is replaced with an empty string.
+Any occurrence of `${VAR}` in a line is replaced with the resolved variable value. Names match
+`[a-zA-Z0-9._:]+`. If the variable does not exist (or cannot be expanded), the token is replaced
+with an empty string.
 
 ```nginx
 # Template
@@ -59,11 +64,13 @@ proxy_pass  http://127.0.0.1:7143;
 When `${VAR}` appears at the very start of a line (optionally preceded by whitespace), the
 token acts as a conditional switch for the rest of the line:
 
-- If VAR resolves to a **truthy** value (non-empty string, `true`, non-zero int): the
+- If VAR resolves to a **truthy** value (non-empty string, boolean `true`, non-zero int): the
   `${VAR}` token is removed and the remainder of the line is kept, with any nested
   `${...}` tokens also substituted.
 - If VAR resolves to a **falsy** value (empty string, `false`, zero): the line is
-  commented out with `#` prepended after the leading whitespace.
+  commented out, with `#` placed after the leading whitespace (and the enabler token removed).
+  When the expanded value spans several lines (e.g. `server host:port;` per upstream), every
+  non-blank line is commented.
 
 The variable must be registered with `ValueTypeEnabler` in the variable registry for this
 logic to apply. A `${VAR}` at line start that references a non-enabler variable falls
@@ -89,7 +96,8 @@ See [Explode directive](#explode-directive) below.
 
 ## Enabler variables
 
-Source: `internal/proxy/template.go` (`processEnablerLine`), regex `^(\s*)\$\{([^}]+)\}(.+)$`
+Source: `internal/proxy/template_interpolate.go` (`processEnablerLine`), regex `enablerPattern` in
+`internal/proxy/template.go`: `^(\s*)\$\{([^}]+)\}(.+)$`
 
 The enabler pattern requires at least one character after the closing `}`. A `${VAR}` on
 a line by itself is not an enabler — it is a simple substitution.
@@ -99,19 +107,24 @@ After the enabler token is stripped, the rest of the line is passed back through
 of whether the line is kept or commented out.
 
 Empty-directive cleanup: after all substitution, if a line matches the pattern
-`whitespace + word + whitespace + ;` (a directive with no argument), it is automatically
-commented out regardless of the enabler logic.
+`whitespace + word + whitespace + ;` (a directive with no argument, regex
+`^\s+[a-z0-9_]+\s+;`), it is automatically commented out (rewritten as `    # <directive>;`)
+regardless of the enabler logic.
 
 ## Explode directive
 
-Source: `internal/proxy/template.go` (`processExplode`, `processExplodeDomain`,
-`processExplodeServer`)
+Source: `internal/proxy/template_explode.go` (`processExplode`, `processExplodeDomain`,
+`processExplodeServer`); directive regex `^!\{explode\s+(\w+)\(([^)]*)\)\}`. An unknown explode
+type is an error.
 
 ### `!{explode domain(vhn)}`
 
 Generates one block per LDAP domain that has a non-empty virtual hostname. Domains are
 sorted by name for deterministic output. Domains with an empty virtual hostname are
-skipped.
+skipped. No domains are produced when `zimbraReverseProxyGenConfigPerVirtualHostname` is
+`FALSE` (server value, then global; unset counts as `TRUE`), and a domain whose virtual
+hostname, IP or SSL paths could not be rendered safely is dropped with an error log
+(`internal/proxy/sanitize.go`).
 
 Per-iteration variables set in the template scope:
 
@@ -122,7 +135,7 @@ Per-iteration variables set in the template scope:
 | `${ssl.crt}` | Domain-specific SSL certificate path, or global default if unset |
 | `${ssl.key}` | Domain-specific SSL private key path, or global default if unset |
 
-Blocks are separated by a blank line. SSL variables are restored to their global defaults
+Blocks are separated by a blank line (none after the last domain). SSL variables are restored to their global defaults
 after each domain so they do not leak between iterations.
 
 ### `!{explode domain(vhn, sso)}`
@@ -134,7 +147,7 @@ empty and not `"off"`. Used for templates that require client-certificate authen
 
 Generates one block per LDAP server where `zimbraServiceEnabled` includes `serviceName`.
 Servers are sorted by hostname then by ID. Comment lines (lines starting with `#`) are
-skipped during iteration.
+skipped during iteration; no blank line is written between server blocks.
 
 Per-iteration variables:
 
@@ -157,7 +170,9 @@ Example:
 
 ## Command line: `configd proxy gen` and `configd proxy conf`
 
-Source: `cmd/configd/proxycli.go`, `cmd/configd/proxygen.go`, `internal/cli/proxy/gen.go`
+Source: `cmd/configd/proxycli.go`, `cmd/configd/proxygen.go`, `internal/cli/proxy/gen.go`,
+`internal/cli/proxy/proxy.go`, `internal/cli/proxy/nginxconf.go`. The full command reference is
+[cli.md](cli.md).
 
 ### `configd proxy gen` (legacy `zmproxyconfgen`)
 
@@ -185,7 +200,8 @@ not talk to the daemon. It takes the flags of the Java `ProxyConfGen`:
 Exit status: `0` on success, `-d`, `-D`, `-h` and when stray positional arguments only make
 it print the usage; `1` on any error (configuration not loadable, unknown `-s` server,
 template or write failure, `-f` failure, not run as `zextras` when files would be written;
-`-n`, `-d` and `-D` do not require `zextras`).
+`-n`, `-d` and `-D` do not require `zextras`). The `-h` help also lists the root flags
+`-v`/`--version` and `--disable-restarts`, which the generator does not use.
 
 `-v` is rewritten to `--verbose` before parsing, because the root command owns `-v`
 (`--version`). Differences from the Java tool: `-f` checks the domains before rendering

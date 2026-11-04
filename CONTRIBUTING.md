@@ -14,11 +14,13 @@ To get started, please visit: <https://zextras.com/carbonio-ce-contribute>
 
 ### Pre-commit Hooks
 
-This project uses pre-commit hooks to ensure code quality. The hooks run automatically before each commit and include:
+The hooks in `.pre-commit-config.yaml` run before each commit:
 
-- **gofmt**: Formats Go code
-- **golangci-lint**: Runs linters to catch common issues
-- **fast-tests**: Runs unit tests for affected packages (< 5s)
+- **pre-commit-hooks**: trailing whitespace, end-of-file newline, YAML syntax, large files
+- **go-fmt** (`-w`) and **go-mod-tidy**
+- **golangci-lint** (`--timeout=5m`)
+- **fast-tests** (`scripts/fast-tests.sh`): `go test -short` with a 5 s timeout on the packages of the staged Go files
+- **generate-thirdparties**: regenerates `THIRDPARTIES` as the Jenkins verify stage does
 
 #### Installation
 
@@ -38,6 +40,8 @@ git commit --no-verify
 
 **Note:** Use `--no-verify` sparingly and only when necessary.
 
+The project needs the Go version in `go.mod` (Go 1.26).
+
 ### Running Tests
 
 ```bash
@@ -52,4 +56,16 @@ make lint
 
 # Run tests with race detector
 make test-race
+
+# Local quality gate: lint, test-race, deadcode, dup
+make check
+
+# REUSE license compliance (same gate as the Jenkins 'REUSE Lint' stage)
+make reuse
+
+# Verify generated localconfig docs/defaults are up to date
+# (needs a local carbonio-mailbox clone, see MAILBOX_REPO in the Makefile)
+make generate-check
 ```
+
+Integration tests are described in [test/README.md](test/README.md).
