@@ -7,7 +7,7 @@ package config
 import "testing"
 
 // The LDAP change watcher is on by default: an absent key leaves it on, and only
-// FALSE is the opt-out.
+// false, no, 0 and off are the opt-out.
 func TestLdapChangeTriggerDefaultsOn(t *testing.T) {
 	cfg, err := NewConfigWithHostname("")
 	if err != nil {
@@ -42,9 +42,16 @@ func TestLdapChangeTriggerKeys(t *testing.T) {
 		{"TRUE is on", map[string]string{"zmconfigd_ldap_change_trigger": "TRUE"}, true, 5, 2},
 		{"FALSE opts out", map[string]string{"zmconfigd_ldap_change_trigger": "FALSE"}, false, 5, 2},
 		{"false is case-insensitive", map[string]string{"zmconfigd_ldap_change_trigger": "false"}, false, 5, 2},
+		{"no opts out", map[string]string{"zmconfigd_ldap_change_trigger": "no"}, false, 5, 2},
+		{"No opts out", map[string]string{"zmconfigd_ldap_change_trigger": "No"}, false, 5, 2},
+		{"0 opts out", map[string]string{"zmconfigd_ldap_change_trigger": "0"}, false, 5, 2},
+		{"off opts out", map[string]string{"zmconfigd_ldap_change_trigger": "off"}, false, 5, 2},
+		{"OFF opts out", map[string]string{"zmconfigd_ldap_change_trigger": "OFF"}, false, 5, 2},
+		{"blanks are trimmed", map[string]string{"zmconfigd_ldap_change_trigger": "  Off \t"}, false, 5, 2},
 		{"empty stays on", map[string]string{"zmconfigd_ldap_change_trigger": ""}, true, 5, 2},
-		{"no is not FALSE", map[string]string{"zmconfigd_ldap_change_trigger": "no"}, true, 5, 2},
-		{"0 is not FALSE", map[string]string{"zmconfigd_ldap_change_trigger": "0"}, true, 5, 2},
+		{"yes is on", map[string]string{"zmconfigd_ldap_change_trigger": "yes"}, true, 5, 2},
+		{"1 is on", map[string]string{"zmconfigd_ldap_change_trigger": "1"}, true, 5, 2},
+		{"junk is on", map[string]string{"zmconfigd_ldap_change_trigger": "maybe"}, true, 5, 2},
 		{
 			"timings", map[string]string{
 				"zmconfigd_ldap_change_trigger":          "TRUE",

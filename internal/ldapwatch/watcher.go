@@ -5,8 +5,8 @@
 // Package ldapwatch detects changes of the LDAP entries a configd cycle
 // reads and asks the main loop for an immediate cycle instead of waiting for
 // the next interval. It is on by default and can be turned off with localconfig
-// zmconfigd_ldap_change_trigger=FALSE; it never replaces the interval poll,
-// which stays the safety net.
+// zmconfigd_ldap_change_trigger set to false, no, 0 or off; it never replaces
+// the interval poll, which stays the safety net.
 //
 // # Mechanism
 //
@@ -78,6 +78,10 @@ const (
 	maxWaitFactor = 10
 	// backoffFactor is the growth of the wait after consecutive failures.
 	backoffFactor = 2
+
+	// repeatedLossWarn is how many streams lost in a row raise the log level of
+	// the loss from info to warn.
+	repeatedLossWarn = 2
 
 	// defaultResyncInterval is how often a live sync stream is cross-checked
 	// with a fingerprint read when Options.ResyncInterval is unset.
@@ -183,7 +187,7 @@ type Watcher struct {
 	backoffMax   time.Duration
 
 	mode     string // current mode, only touched from Run
-	fellBack bool   // the fallback warning was already logged
+	fellBack bool   // the fallback was already logged
 }
 
 // New returns a Watcher. It panics when a required option is missing: that is

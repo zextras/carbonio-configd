@@ -17,10 +17,12 @@ import (
 )
 
 // stream runs sync mode until ctx is cancelled (it returns false) or the
-// directory turns out not to support streaming (it returns true, after warning
-// once). A stream that is lost is re-opened with exponential back-off.
+// directory turns out not to support streaming (it returns true, after logging
+// the fallback once). A stream that is lost is re-opened with exponential
+// back-off.
 func (w *Watcher) stream(ctx context.Context, st *runState) (unsupported bool) {
 	backoff := w.backoffMin
+	losses := 0 // consecutive losses; a stream that stayed up starts the count over
 
 	for ctx.Err() == nil {
 		lived, err := w.streamOnce(ctx, st)
@@ -29,7 +31,7 @@ func (w *Watcher) stream(ctx context.Context, st *runState) (unsupported bool) {
 		case ctx.Err() != nil:
 			return false
 		case errors.Is(err, ErrSyncUnsupported):
-			w.warnFallback(ctx, err)
+			w.logFallback(ctx, err)
 
 			return true
 		}
@@ -42,11 +44,12 @@ func (w *Watcher) stream(ctx context.Context, st *runState) (unsupported bool) {
 		// keeps the back-off growing, so a flapping server is not hammered.
 		if lived >= w.backoffMax {
 			backoff = w.backoffMin
+			losses = 0
 		}
 
-		logger.WarnContext(ctx, "LDAP change stream lost, reconnecting",
-			"error", err,
-			"retry_in_seconds", backoff.Seconds())
+		losses++
+
+		w.logStreamLost(ctx, err, losses, backoff)
 
 		if w.clock.Sleep(ctx, backoff) != nil {
 			return false
@@ -58,9 +61,25 @@ func (w *Watcher) stream(ctx context.Context, st *runState) (unsupported bool) {
 	return false
 }
 
-// warnFallback logs the switch to polling once per Run; later probes that find
-// the same thing are only debug lines.
-func (w *Watcher) warnFallback(ctx context.Context, err error) {
+// logStreamLost reports a lost stream: a single loss is routine (a server
+// restart, an idle connection cut by a middlebox) and logs at info; losses in a
+// row mean the stream does not stay up and log at warn.
+func (w *Watcher) logStreamLost(ctx context.Context, err error, losses int, retryIn time.Duration) {
+	if losses >= repeatedLossWarn {
+		logger.WarnContext(ctx, "LDAP change stream lost, reconnecting",
+			"error", err, "consecutive_losses", losses, "retry_in_seconds", retryIn.Seconds())
+
+		return
+	}
+
+	logger.InfoContext(ctx, "LDAP change stream lost, reconnecting",
+		"error", err, "consecutive_losses", losses, "retry_in_seconds", retryIn.Seconds())
+}
+
+// logFallback logs the switch to polling once per Run, at info: a directory
+// without the syncprov overlay (a single-node Carbonio) is the normal case, not
+// a fault. Later probes that find the same thing are only debug lines.
+func (w *Watcher) logFallback(ctx context.Context, err error) {
 	if w.fellBack {
 		logger.DebugContext(ctx, "LDAP content sync still unavailable, polling", "reason", err)
 
@@ -69,7 +88,7 @@ func (w *Watcher) warnFallback(ctx context.Context, err error) {
 
 	w.fellBack = true
 
-	logger.WarnContext(ctx, "LDAP content sync is not available, falling back to polling "+
+	logger.InfoContext(ctx, "LDAP content sync is not available, falling back to polling "+
 		"(the syncprov overlay is not loaded on this directory)",
 		"reason", err,
 		"retry_in_seconds", w.probe.Seconds())

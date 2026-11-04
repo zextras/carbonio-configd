@@ -57,7 +57,7 @@ func (t *MainLoopActionTrigger) TriggerReload(ctx context.Context, reason string
 // syncLDAPWatch makes the running watcher match zmconfigd_ldap_change_trigger.
 // It is called once per loop iteration, after the configuration has been
 // loaded: the first call with the key on (the default) starts the watcher, and
-// turning the key to FALSE stops it. With the key FALSE nothing is ever
+// turning the key off stops it. With the key off nothing is ever
 // started. A change of the poll or debounce seconds takes effect on the next
 // start.
 //

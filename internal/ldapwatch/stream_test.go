@@ -7,6 +7,8 @@ package ldapwatch_test
 import (
 	"context"
 	"errors"
+	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -16,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/zextras/carbonio-configd/internal/ldapwatch"
+	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/sys"
 	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
@@ -118,6 +121,43 @@ func (c *timerCountingClock) NewTimer(d time.Duration) sys.Timer {
 	return c.Clock.NewTimer(d)
 }
 
+// logRecorder is a slog.Handler that keeps "level message" for every record.
+type logRecorder struct {
+	mu   sync.Mutex
+	logs []string
+}
+
+func (*logRecorder) Enabled(context.Context, slog.Level) bool { return true }
+
+func (l *logRecorder) Handle(_ context.Context, r slog.Record) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	l.logs = append(l.logs, r.Level.String()+" "+r.Message)
+
+	return nil
+}
+
+func (l *logRecorder) WithAttrs([]slog.Attr) slog.Handler { return l }
+
+func (l *logRecorder) WithGroup(string) slog.Handler { return l }
+
+// with returns the records whose message contains substr.
+func (l *logRecorder) with(substr string) []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	var out []string
+
+	for _, e := range l.logs {
+		if strings.Contains(e, substr) {
+			out = append(out, e)
+		}
+	}
+
+	return out
+}
+
 type streamHarness struct {
 	t      *testing.T
 	cancel context.CancelFunc
@@ -126,6 +166,8 @@ type streamHarness struct {
 	src    *scriptedSource
 	sub    *scriptedSubscriber
 	done   chan struct{}
+
+	logs *logRecorder
 
 	mu    sync.Mutex
 	fired [][]string
@@ -145,6 +187,7 @@ func startStream(t *testing.T, opts ldapwatch.Options, steps ...subStep) *stream
 		src:    &scriptedSource{fp: fp("g0", "s0", "d0")},
 		sub:    &scriptedSubscriber{steps: steps},
 		done:   make(chan struct{}),
+		logs:   &logRecorder{},
 	}
 
 	opts.Source = h.src
@@ -177,7 +220,7 @@ func startStream(t *testing.T, opts ldapwatch.Options, steps ...subStep) *stream
 
 	w := ldapwatch.New(&opts)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(logger.ContextWithLogger(context.Background(), slog.New(h.logs)))
 	h.cancel = cancel
 
 	go func() {
@@ -368,6 +411,10 @@ func TestStream_LostStreamReconnectsWithBackoffAndCatchesUp(t *testing.T) {
 	h.settled(3, 3)
 	assert.Len(t, h.triggers(), 1, "the change is reported once")
 	assert.Equal(t, []string{
+		"INFO LDAP change stream lost, reconnecting", // routine once...
+		"WARN LDAP change stream lost, reconnecting", // ...a problem when it repeats
+	}, h.logs.with("stream lost"))
+	assert.Equal(t, []string{
 		ldapwatch.ModePoll, ldapwatch.ModeSync, ldapwatch.ModePoll,
 		ldapwatch.ModeSync, ldapwatch.ModePoll, ldapwatch.ModeSync,
 	}, h.modeLog())
@@ -421,6 +468,10 @@ func TestStream_UnsupportedFallsBackToPollingAndProbesAgain(t *testing.T) {
 	require.Eventually(t, func() bool { return h.sub.subscribed() == 1 && h.src.polls() == 1 && h.clock.Waiters() == 1 },
 		5*time.Second, time.Millisecond)
 	assert.Equal(t, 0, h.streamLosses(), "unsupported is not a lost stream")
+	assert.Equal(t, []string{
+		"INFO LDAP content sync is not available, falling back to polling " +
+			"(the syncprov overlay is not loaded on this directory)",
+	}, h.logs.with("falling back"), "the normal single-node case: one info line, no warning")
 	assert.Equal(t, []string{ldapwatch.ModePoll}, h.modeLog())
 
 	h.src.set(fp("g1", "s0", "d0"))
