@@ -6,11 +6,13 @@ package systemd
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/zextras/carbonio-configd/internal/sys"
 	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
 
@@ -66,8 +68,13 @@ func TestIsEnabled(t *testing.T) {
 	f.Exec.OnCmdline("systemctl is-enabled bad.target", systest.Fail(1, "disabled"))
 	m := NewManager(f.System())
 
-	assert.True(t, m.IsEnabled(context.Background(), "good.target"))
-	assert.False(t, m.IsEnabled(context.Background(), "bad.target"))
+	enabled, err := m.IsEnabled(context.Background(), "good.target")
+	require.NoError(t, err)
+	assert.True(t, enabled)
+
+	enabled, err = m.IsEnabled(context.Background(), "bad.target")
+	require.NoError(t, err, "a non-zero exit is an answer, not an error")
+	assert.False(t, enabled)
 	assert.Equal(t, []string{
 		"systemctl is-enabled good.target",
 		"systemctl is-enabled bad.target",
@@ -117,4 +124,17 @@ func TestCarbonioTargets(t *testing.T) {
 		"carbonio-mta.target",
 		"service-discover.target",
 	}, carbonioTargets, "carbonio.target is deliberately excluded")
+}
+
+func TestIsEnabled_CannotRunSystemctlIsAnError(t *testing.T) {
+	t.Parallel()
+
+	f := systest.New()
+	f.Exec.FailStart(func(*sys.Cmd) bool { return true }, errors.New("exec: systemctl: not found"))
+	m := NewManager(f.System())
+
+	enabled, err := m.IsEnabled(context.Background(), "x.target")
+	require.Error(t, err)
+	assert.False(t, enabled)
+	assert.False(t, m.IsSystemdEnabled(context.Background()))
 }

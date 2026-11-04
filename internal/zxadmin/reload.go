@@ -10,7 +10,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
 )
@@ -28,16 +27,12 @@ const reloadLocalConfigEnvelope = `<?xml version="1.0" encoding="UTF-8"?>` +
 func (c *Client) ReloadLocalConfig(ctx context.Context) error {
 	ctx = logger.ContextWithComponentOnce(ctx, "zxadmin")
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if err := c.ensureToken(ctx); err != nil {
+	token, err := c.ensureToken(ctx)
+	if err != nil {
 		return err
 	}
 
-	token := c.token
-
-	resp, err := c.doWithRetry(ctx, func() (*http.Request, error) {
+	resp, err := c.doWithRetry(ctx, maxHTTPRetries, func() (*http.Request, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+soapPath,
 			strings.NewReader(reloadLocalConfigEnvelope))
 		if err != nil {
@@ -61,8 +56,7 @@ func (c *Client) ReloadLocalConfig(ctx context.Context) error {
 	}
 
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		c.token = ""
-		c.expiresAt = time.Time{}
+		c.dropToken(token)
 
 		return fmt.Errorf("zxadmin: reload auth rejected: HTTP %d", resp.StatusCode)
 	}

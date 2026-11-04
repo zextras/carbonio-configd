@@ -100,7 +100,7 @@ func modifyOps(add, del, replace map[string][]string) []modifyOp {
 
 // modify sends ops to dn as one modify request.
 func (c *Client) modify(dn string, ops []modifyOp) error {
-	return c.executeWithRetry(func(conn *ldap.Conn) error {
+	return c.executeWithRetry(c.lifecycle(), func(conn *ldap.Conn) error {
 		req := ldap.NewModifyRequest(dn, nil)
 
 		for _, op := range ops {

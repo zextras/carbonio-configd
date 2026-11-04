@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
 )
@@ -17,8 +18,37 @@ import (
 // format) selecting JSON.
 const OutputFormatJSON = "json"
 
+// warnedLogFormats remembers the unknown CONFIGD_LOG_FORMAT values already
+// reported in this process.
+type warnedLogFormats struct {
+	mu   sync.Mutex
+	seen map[string]struct{}
+}
+
+// add records v and reports whether it is new.
+func (w *warnedLogFormats) add(v string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if _, dup := w.seen[v]; dup {
+		return false
+	}
+
+	if w.seen == nil {
+		w.seen = make(map[string]struct{})
+	}
+
+	w.seen[v] = struct{}{}
+
+	return true
+}
+
+var warnedLogFormat warnedLogFormats
+
 // ConfigureLogFormat applies CONFIGD_LOG_FORMAT (text or json) to logConfig.
-// An unknown value falls back to text with a warning on stderr.
+// An unknown value falls back to text with a warning on stderr, printed once
+// per process for each distinct value: a command that configures logging
+// through several paths must not repeat it.
 func ConfigureLogFormat(logConfig *logger.Config, stderr io.Writer) {
 	logFormat := os.Getenv("CONFIGD_LOG_FORMAT")
 	switch logFormat {
@@ -27,7 +57,9 @@ func ConfigureLogFormat(logConfig *logger.Config, stderr io.Writer) {
 	case "text", "":
 		logConfig.Format = logger.FormatText
 	default:
-		_, _ = fmt.Fprintf(stderr, "Warning: Unknown log format '%s', defaulting to text\n", logFormat)
+		if warnedLogFormat.add(logFormat) {
+			_, _ = fmt.Fprintf(stderr, "Warning: Unknown log format '%s', defaulting to text\n", logFormat)
+		}
 
 		logConfig.Format = logger.FormatText
 	}

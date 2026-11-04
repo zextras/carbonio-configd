@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"sort"
 	"sync"
@@ -36,8 +37,14 @@ type Tracer struct {
 	spans    []*Span
 	enabled  bool
 	spanSeq  int
+	dropped  int  // Spans discarded because maxSpans was reached
 	disabled bool // Master disable flag
 }
+
+// maxSpans bounds the recorded spans so a long-running daemon traced for hours
+// cannot grow the slice without limit; once reached, further spans are counted
+// in Tracer.dropped and discarded.
+const maxSpans = 100_000
 
 var (
 	// DefaultTracer is the global tracer instance
@@ -97,12 +104,26 @@ func (t *Tracer) EndSpan(span *Span) {
 	span.EndTime = time.Now()
 	span.Duration = span.EndTime.Sub(span.StartTime)
 
+	// Record a snapshot: the caller keeps the live span and may still call
+	// AddMetadata/SetParent on it, which must not race with an export reading
+	// the recorded one.
+	rec := *span
+	rec.Metadata = maps.Clone(span.Metadata)
+
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.spans = append(t.spans, span)
+
+	if len(t.spans) >= maxSpans {
+		t.dropped++
+
+		return
+	}
+
+	t.spans = append(t.spans, &rec)
 }
 
-// AddMetadata adds metadata to a span.
+// AddMetadata adds metadata to a span. It must only be called by the goroutine
+// that owns the span; what was added after EndSpan is not part of the record.
 func (span *Span) AddMetadata(key, value string) {
 	if span != nil && span.Metadata != nil {
 		span.Metadata[key] = value
@@ -174,6 +195,14 @@ func (t *Tracer) ExportTimeline(w io.Writer) error {
 			fmt.Fprintf(w, "  %v", span.Metadata)
 		}
 		fmt.Fprintln(w)
+	}
+
+	t.mu.RLock()
+	dropped := t.dropped
+	t.mu.RUnlock()
+
+	if dropped > 0 {
+		fmt.Fprintf(w, "\n(%d spans dropped: the tracer keeps at most %d)\n", dropped, maxSpans)
 	}
 
 	fmt.Fprintln(w)

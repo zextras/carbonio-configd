@@ -25,6 +25,10 @@ import (
 // stays byte-identical. Empty values are kept as-is (an unset key is visible).
 type redactHandler struct {
 	inner slog.Handler
+	// secretKeyed is set when attributes bound with WithAttrs include a key
+	// attribute naming a secret: value attributes of every later record are
+	// then masked, as when both are in the same record.
+	secretKeyed bool
 }
 
 func newRedactHandler(inner slog.Handler) slog.Handler {
@@ -52,7 +56,7 @@ func (h *redactHandler) Handle(ctx context.Context, r slog.Record) error {
 
 		var attrsChanged bool
 
-		attrs, attrsChanged = redactAttrs(all)
+		attrs, attrsChanged = redactAttrs(all, h.secretKeyed)
 		changed = changed || attrsChanged
 	}
 
@@ -67,27 +71,36 @@ func (h *redactHandler) Handle(ctx context.Context, r slog.Record) error {
 }
 
 func (h *redactHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	redacted, _ := redactAttrs(attrs)
+	redacted, _ := redactAttrs(attrs, h.secretKeyed)
 
-	return &redactHandler{inner: h.inner.WithAttrs(redacted)}
+	return &redactHandler{
+		inner:       h.inner.WithAttrs(redacted),
+		secretKeyed: h.secretKeyed || namesSecretKey(attrs),
+	}
 }
 
 func (h *redactHandler) WithGroup(name string) slog.Handler {
-	return &redactHandler{inner: h.inner.WithGroup(name)}
+	return &redactHandler{inner: h.inner.WithGroup(name), secretKeyed: h.secretKeyed}
+}
+
+// namesSecretKey reports whether attrs hold a key attribute that names a
+// secret configuration key.
+func namesSecretKey(attrs []slog.Attr) bool {
+	for _, a := range attrs {
+		if redact.IsKeyAttr(a.Key) && a.Value.Kind() == slog.KindString && redact.IsSecretKey(a.Value.String()) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // redactAttrs returns attrs with secrets masked and whether anything changed.
-// The input slice is never modified; on no change it is returned as-is.
-func redactAttrs(attrs []slog.Attr) ([]slog.Attr, bool) {
-	secretKeyed := false
-
-	for _, a := range attrs {
-		if redact.IsKeyAttr(a.Key) && a.Value.Kind() == slog.KindString && redact.IsSecretKey(a.Value.String()) {
-			secretKeyed = true
-
-			break
-		}
-	}
+// inheritedSecretKey is true when a key attribute bound earlier (WithAttrs)
+// names a secret. The input slice is never modified; on no change it is
+// returned as-is.
+func redactAttrs(attrs []slog.Attr, inheritedSecretKey bool) ([]slog.Attr, bool) {
+	secretKeyed := inheritedSecretKey || namesSecretKey(attrs)
 
 	var out []slog.Attr
 
@@ -118,7 +131,7 @@ func redactAttr(a slog.Attr, forced bool) (slog.Attr, bool) {
 	v := a.Value.Resolve()
 
 	if v.Kind() == slog.KindGroup {
-		group, changed := redactAttrs(v.Group())
+		group, changed := redactAttrs(v.Group(), false)
 		if !changed {
 			return a, false
 		}

@@ -19,6 +19,7 @@ import (
 
 	"github.com/zextras/carbonio-configd/internal/ldap"
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/redact"
 )
 
 // Configuration key constants
@@ -186,7 +187,7 @@ func (c *Command) ExecuteWithContext(ctx context.Context, args ...string) (exitC
 }
 
 func (c *Command) String() string {
-	return fmt.Sprintf("%s(%v)", c.Name, c.Args)
+	return fmt.Sprintf("%s(%v)", c.Name, redact.Args(c.Args))
 }
 
 // --- Dummy functions for provisioning commands (to be replaced with actual LDAP/API calls) ---
