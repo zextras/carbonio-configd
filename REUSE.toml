@@ -5,3 +5,10 @@ version = 1
 path = ["THIRDPARTIES", ".ci/thirdparties/thirdparties-go-rules.json", ".ci/thirdparties/thirdparties-go-deps.tmpl"]
 SPDX-FileCopyrightText = "2026 Zextras <https://www.zextras.com>"
 SPDX-License-Identifier = "AGPL-3.0-only"
+
+# Inlined verbatim into the org.opencontainers.image.description label of the
+# image (Jenkinsfile, descriptionFile), so it cannot carry an SPDX header.
+[[annotations]]
+path = ["docker/configd/description.md"]
+SPDX-FileCopyrightText = "2026 Zextras <https://www.zextras.com>"
+SPDX-License-Identifier = "AGPL-3.0-only"
