@@ -431,9 +431,12 @@ type daemonLoopDeps struct {
 	// validate checks the service hooks against the first parsed zmconfigd.cf;
 	// a failure ends the daemon. Nil (hosts, tests) skips the check.
 	validate func(conf *config.MtaConfig, watchdogOn bool) error
-	// ldapSource replaces the LDAP client as the source the opt-in LDAP change
-	// watcher polls; production leaves it nil.
-	ldapSource ldapwatch.Source
+	// ldapSource replaces the LDAP client as the source the LDAP change
+	// watcher reads fingerprints from; production leaves it nil. ldapSubscriber
+	// replaces the content-sync stream the same way and is only used together
+	// with ldapSource (nil: the watcher polls).
+	ldapSource     ldapwatch.Source
+	ldapSubscriber ldapwatch.Subscriber
 }
 
 // loopIterState carries mutable per-iteration counters between runs.
@@ -442,7 +445,7 @@ type loopIterState struct {
 	loopCount      int
 	reloadSignaled bool
 	server         *network.ThreadedStreamServer
-	ldapWatch      *ldapWatch // nil unless zmconfigd_ldap_change_trigger started it
+	ldapWatch      *ldapWatch // nil when zmconfigd_ldap_change_trigger is off or in --once mode
 	// ready records that READY=1 was sent: the listener is up, which only
 	// happens after the first completed config pass.
 	ready        bool

@@ -49,14 +49,14 @@ descriptions of the opt-in and container keys are in
 |---|---|---|
 | `zmconfigd_interval` | `60` | seconds between cycles |
 | `zmconfigd_listen_port` | `7171` | loopback port of the `STATUS`/`REWRITE` listener, also used by `configd rewrite`, `init`, `tls` and `proxy` to find the daemon |
-| `zmconfigd_skip_idle_polls` | off | `TRUE`: skip the config-load phase of a cycle when no `REWRITE` arrived since the last one; changes made only in LDAP then wait for a `REWRITE` or `SIGHUP`, which always force a full cycle |
+| `zmconfigd_skip_idle_polls` | off | `TRUE`: skip the config-load phase of a cycle when no `REWRITE` arrived since the last one; changes made only in LDAP then wait for a `REWRITE`, a `SIGHUP` or the LDAP-change wake-up (on by default, see `zmconfigd_ldap_change_trigger`), which always force a full cycle |
 | `zmconfigd_enable_config_restarts` | on | `FALSE`: the restarts a cycle plans are not performed (they are carried over, not dropped) |
 | `zmconfigd_restart_debounce_seconds` | `0` (off) | coalesce restarts across cycles |
 | `zmconfigd_watchdog` | on | `FALSE` turns the service watchdog off |
 | `zmconfigd_watchdog_interval` | `120` | seconds between watchdog checks (compiled-in fallback `120`) |
 | `zmconfigd_watchdog_services` | `antivirus` | space-separated service names the watchdog keeps running |
-| `zmconfigd_ldap_change_trigger` | off | `TRUE`: wake the main loop as soon as a watched LDAP entry changes; `FALSE` (default) or unset disables it. Counted in `configd_ldap_change_triggers_total` |
-| `zmconfigd_ldap_change_poll_seconds` | `5` | poll interval of that watcher |
+| `zmconfigd_ldap_change_trigger` | on | wake the main loop as soon as a watched LDAP entry changes (content-sync stream when the directory has `syncprov`, polling otherwise); `false`, `no`, `0` or `off` (case-insensitive) opts out. Counted in `configd_ldap_change_triggers_total` |
+| `zmconfigd_ldap_change_poll_seconds` | `5` | poll interval of that watcher in poll mode (unused while a stream is live) |
 | `zmconfigd_ldap_change_debounce_seconds` | `2` | quiet window of that watcher |
 | `zmconfigd_cycle_summary` | off | `TRUE`: one `Cycle summary` log line per cycle |
 | `zmconfigd_metrics_textfile` | empty | path of a Prometheus textfile written every cycle |
@@ -100,7 +100,7 @@ sleep early and run a **full** cycle:
 
 - `SIGHUP`, `SIGUSR2`, `SIGALRM` (`systemctl reload carbonio-configd.service` sends `SIGHUP`);
 - a `REWRITE` request on the listener;
-- an LDAP change, when `zmconfigd_ldap_change_trigger=TRUE`.
+- an LDAP change, unless `zmconfigd_ldap_change_trigger` is `false`, `no`, `0` or `off` (the default is on: a cycle starts within seconds of a change to the global config, a server entry or a domain, not up to `zmconfigd_interval` later, see [architecture.md](architecture.md#ldap-change-detection)).
 
 What a cycle does (load, snapshot, plan, execute, apply restarts) is in
 [architecture.md](architecture.md#cycle-model-load-snapshot-plan-execute-apply-restarts).

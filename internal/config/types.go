@@ -20,7 +20,7 @@ const (
 	// programName is the name of the configd program.
 	programName = "zmconfigd"
 	// defaultLdapChangePollSeconds and defaultLdapChangeDebounceSeconds are the
-	// defaults of the opt-in LDAP change watcher (zmconfigd_ldap_change_*).
+	// defaults of the LDAP change watcher (zmconfigd_ldap_change_*).
 	defaultLdapChangePollSeconds     = 5
 	defaultLdapChangeDebounceSeconds = 2
 )
@@ -67,12 +67,14 @@ type Config struct {
 	LdapRootPassword string
 	LdapMasterURL    string
 
-	// LdapChangeTrigger is zmconfigd_ldap_change_trigger: when true a watcher
-	// polls the LDAP entries a cycle reads and wakes the main loop as soon as
-	// one changes. false (the default) starts no watcher at all.
+	// LdapChangeTrigger is zmconfigd_ldap_change_trigger: when true (the
+	// default) a watcher follows the LDAP entries a cycle reads, through an
+	// RFC 4533 sync stream when the directory supports it and by polling
+	// otherwise, and wakes the main loop as soon as one changes. Only the
+	// values false, no, 0 and off (any case) turn it off; off starts no watcher at all.
 	LdapChangeTrigger bool
 	// LdapChangePollSeconds is zmconfigd_ldap_change_poll_seconds, the watcher's
-	// poll interval.
+	// poll interval in poll mode.
 	LdapChangePollSeconds int
 	// LdapChangeDebounceSeconds is zmconfigd_ldap_change_debounce_seconds, the
 	// quiet window that coalesces a burst of changes into one cycle.
@@ -163,7 +165,9 @@ func NewConfigWithHostname(lcHostname string) (*Config, error) {
 		WdList:           []string{"antivirus"},
 		LogLevel:         3, // Info level (3 = Info, see logger.SetLogLevel)
 
-		// Only read when zmconfigd_ldap_change_trigger=TRUE (opt-in, off by default).
+		// On unless zmconfigd_ldap_change_trigger is false, no, 0 or off; the timings are read when
+		// the watcher starts.
+		LdapChangeTrigger:         true,
 		LdapChangePollSeconds:     defaultLdapChangePollSeconds,
 		LdapChangeDebounceSeconds: defaultLdapChangeDebounceSeconds,
 	}
@@ -229,6 +233,23 @@ func localBoolNotFalse(data *ConfigMap, key string, dst *bool) {
 	}
 }
 
+// localBoolUnlessOff sets *dst to false when data[key] is false, no, 0 or off
+// (case-insensitive, surrounding blanks ignored); any other value, the empty
+// string included, sets it to true. An absent key leaves *dst alone.
+func localBoolUnlessOff(data *ConfigMap, key string, dst *bool) {
+	v, ok := data.Get(key)
+	if !ok {
+		return
+	}
+
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "false", "no", "0", "off":
+		*dst = false
+	default:
+		*dst = true
+	}
+}
+
 // SetRuntimeVals applies the keys that shape how the process is wired (the
 // template root, the section scope, the service hooks). They are read when the
 // runtime is built, before the first full load, and again by every SetVals.
@@ -290,8 +311,8 @@ func (c *Config) SetVals(localConfig *LocalConfig) {
 	localStr(data, "zmconfigd_metrics_textfile", &c.MetricsTextfile)
 	localBoolTrue(data, "zmconfigd_cycle_summary", &c.CycleSummary)
 
-	// Opt-in LDAP change watcher: off unless TRUE.
-	localBoolTrue(data, "zmconfigd_ldap_change_trigger", &c.LdapChangeTrigger)
+	// LDAP change watcher: on unless false, no, 0 or off (opt-out).
+	localBoolUnlessOff(data, "zmconfigd_ldap_change_trigger", &c.LdapChangeTrigger)
 	localInt(data, "zmconfigd_ldap_change_poll_seconds", &c.LdapChangePollSeconds)
 	localInt(data, "zmconfigd_ldap_change_debounce_seconds", &c.LdapChangeDebounceSeconds)
 

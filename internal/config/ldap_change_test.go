@@ -6,21 +6,22 @@ package config
 
 import "testing"
 
-// The LDAP change watcher is opt-in: an absent or non-TRUE key leaves it off.
-func TestLdapChangeTriggerDefaultsOff(t *testing.T) {
+// The LDAP change watcher is on by default: an absent key leaves it on, and only
+// false, no, 0 and off are the opt-out.
+func TestLdapChangeTriggerDefaultsOn(t *testing.T) {
 	cfg, err := NewConfigWithHostname("")
 	if err != nil {
 		t.Fatalf("NewConfig failed: %v", err)
 	}
 
-	if cfg.LdapChangeTrigger {
-		t.Error("LdapChangeTrigger must default to false")
+	if !cfg.LdapChangeTrigger {
+		t.Error("LdapChangeTrigger must default to true")
 	}
 
 	cfg.SetVals(&LocalConfig{Data: testConfigMap(nil)})
 
-	if cfg.LdapChangeTrigger {
-		t.Error("LdapChangeTrigger must stay false when the key is absent")
+	if !cfg.LdapChangeTrigger {
+		t.Error("LdapChangeTrigger must stay true when the key is absent")
 	}
 
 	if cfg.LdapChangePollSeconds != 5 || cfg.LdapChangeDebounceSeconds != 2 {
@@ -37,11 +38,20 @@ func TestLdapChangeTriggerKeys(t *testing.T) {
 		wantPoll     int
 		wantDebounce int
 	}{
-		{"TRUE enables", map[string]string{"zmconfigd_ldap_change_trigger": "TRUE"}, true, 5, 2},
-		{"true is case-insensitive", map[string]string{"zmconfigd_ldap_change_trigger": "true"}, true, 5, 2},
-		{"FALSE stays off", map[string]string{"zmconfigd_ldap_change_trigger": "FALSE"}, false, 5, 2},
-		{"yes is not TRUE", map[string]string{"zmconfigd_ldap_change_trigger": "yes"}, false, 5, 2},
-		{"1 is not TRUE", map[string]string{"zmconfigd_ldap_change_trigger": "1"}, false, 5, 2},
+		{"absent is on", map[string]string{}, true, 5, 2},
+		{"TRUE is on", map[string]string{"zmconfigd_ldap_change_trigger": "TRUE"}, true, 5, 2},
+		{"FALSE opts out", map[string]string{"zmconfigd_ldap_change_trigger": "FALSE"}, false, 5, 2},
+		{"false is case-insensitive", map[string]string{"zmconfigd_ldap_change_trigger": "false"}, false, 5, 2},
+		{"no opts out", map[string]string{"zmconfigd_ldap_change_trigger": "no"}, false, 5, 2},
+		{"No opts out", map[string]string{"zmconfigd_ldap_change_trigger": "No"}, false, 5, 2},
+		{"0 opts out", map[string]string{"zmconfigd_ldap_change_trigger": "0"}, false, 5, 2},
+		{"off opts out", map[string]string{"zmconfigd_ldap_change_trigger": "off"}, false, 5, 2},
+		{"OFF opts out", map[string]string{"zmconfigd_ldap_change_trigger": "OFF"}, false, 5, 2},
+		{"blanks are trimmed", map[string]string{"zmconfigd_ldap_change_trigger": "  Off \t"}, false, 5, 2},
+		{"empty stays on", map[string]string{"zmconfigd_ldap_change_trigger": ""}, true, 5, 2},
+		{"yes is on", map[string]string{"zmconfigd_ldap_change_trigger": "yes"}, true, 5, 2},
+		{"1 is on", map[string]string{"zmconfigd_ldap_change_trigger": "1"}, true, 5, 2},
+		{"junk is on", map[string]string{"zmconfigd_ldap_change_trigger": "maybe"}, true, 5, 2},
 		{
 			"timings", map[string]string{
 				"zmconfigd_ldap_change_trigger":          "TRUE",
@@ -53,7 +63,7 @@ func TestLdapChangeTriggerKeys(t *testing.T) {
 			"invalid timings keep the defaults", map[string]string{
 				"zmconfigd_ldap_change_poll_seconds":     "soon",
 				"zmconfigd_ldap_change_debounce_seconds": "later",
-			}, false, 5, 2,
+			}, true, 5, 2,
 		},
 	}
 
@@ -82,24 +92,24 @@ func TestLdapChangeTriggerKeys(t *testing.T) {
 	}
 }
 
-// Setting the key to FALSE after it was TRUE turns the watcher back off at the
-// next cycle (SetVals runs every cycle). Like zmconfigd_skip_idle_polls, a key
-// that is merely removed keeps its previous value until configd restarts.
+// Setting the key to FALSE turns the watcher off at the next cycle (SetVals
+// runs every cycle), and TRUE turns it back on. Like zmconfigd_skip_idle_polls,
+// a key that is merely removed keeps its previous value until configd restarts.
 func TestLdapChangeTriggerFollowsLocalconfigEachCycle(t *testing.T) {
 	cfg, err := NewConfigWithHostname("")
 	if err != nil {
 		t.Fatalf("NewConfig failed: %v", err)
 	}
 
-	cfg.SetVals(&LocalConfig{Data: testConfigMap(map[string]string{"zmconfigd_ldap_change_trigger": "TRUE"})})
-
-	if !cfg.LdapChangeTrigger {
-		t.Fatal("LdapChangeTrigger should be on")
-	}
-
 	cfg.SetVals(&LocalConfig{Data: testConfigMap(map[string]string{"zmconfigd_ldap_change_trigger": "FALSE"})})
 
 	if cfg.LdapChangeTrigger {
-		t.Error("LdapChangeTrigger should follow the key back to off")
+		t.Fatal("LdapChangeTrigger should follow FALSE to off")
+	}
+
+	cfg.SetVals(&LocalConfig{Data: testConfigMap(map[string]string{"zmconfigd_ldap_change_trigger": "TRUE"})})
+
+	if !cfg.LdapChangeTrigger {
+		t.Error("LdapChangeTrigger should follow the key back to on")
 	}
 }

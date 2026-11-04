@@ -84,7 +84,9 @@ change plus a `deferred` reason. The daemon (`ConfigManager.Plan`, `holdDeferred
    drops them);
 3. in the next cycle that is **not** a REWRITE (no requested or forced section, not the first
    run; the interval, SIGHUP and an LDAP-change wake-up all qualify, since none of them
-   requests a section) merges them into that plan's restarts through `plan.MergeRestarts` (the plan's own
+   requests a section. The LDAP-change wake-up is on by default, so deferred restarts are
+   normally released by the next directory change within seconds, not only by the interval; see
+   [architecture.md](architecture.md#ldap-change-detection)) merges them into that plan's restarts through `plan.MergeRestarts` (the plan's own
    entry of a service wins, with the reasons of both) and logs an INFO line
    `Executing restart deferred from a REWRITE cycle` per service. From there they take the
    normal path: the hybrid systemd policy (heavy services are only flagged `pending-restart`,

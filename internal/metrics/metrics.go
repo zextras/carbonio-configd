@@ -34,6 +34,8 @@ const (
 
 	ldapChangeTriggers  = "configd_ldap_change_triggers_total"
 	ldapWatchPollErrors = "configd_ldap_watch_poll_failures_total"
+	ldapWatchMode       = "configd_ldap_watch_mode"
+	ldapWatchStreamLost = "configd_ldap_watch_stream_failures_total"
 )
 
 type metricType string
@@ -75,6 +77,13 @@ var catalog = map[string]struct {
 		counter,
 	},
 	ldapWatchPollErrors: {"Failed polls of the LDAP change watcher.", counter},
+	ldapWatchMode: {
+		"Detection mode of the LDAP change watcher: 1 for the active mode, 0 for the other " +
+			"(sync: RFC 4533 content-sync stream live; poll: fingerprint polling).", gauge,
+	},
+	ldapWatchStreamLost: {
+		"LDAP change watcher content-sync streams that failed or were lost and are re-opened with back-off.", counter,
+	},
 }
 
 // Registry is a set of metrics safe for concurrent use.
@@ -241,6 +250,34 @@ func (r *Registry) LDAPChangeTriggered(components []string, result string) {
 	for _, c := range components {
 		r.add(ldapChangeTriggers, 1, label{"component", c}, label{"result", result})
 	}
+}
+
+// LDAP change watcher detection modes, the "mode" label of
+// configd_ldap_watch_mode.
+const (
+	// WatchModeSync: a content-sync stream is live.
+	WatchModeSync = "sync"
+	// WatchModePoll: the fingerprint is polled.
+	WatchModePoll = "poll"
+)
+
+// LDAPWatchModeChanged records the detection mode the LDAP change watcher is in
+// now: the gauge of mode is 1 and the other one 0.
+func (r *Registry) LDAPWatchModeChanged(mode string) {
+	for _, m := range []string{WatchModeSync, WatchModePoll} {
+		v := 0.0
+		if m == mode {
+			v = 1
+		}
+
+		r.set(ldapWatchMode, v, label{"mode", m})
+	}
+}
+
+// LDAPWatchStreamFailed records a failed or lost content-sync stream of the
+// LDAP change watcher.
+func (r *Registry) LDAPWatchStreamFailed() {
+	r.add(ldapWatchStreamLost, 1)
 }
 
 // LDAPWatchPollFailed records a failed poll of the LDAP change watcher.

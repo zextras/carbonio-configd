@@ -78,6 +78,13 @@ RUN mkdir -p /staging/opt/zextras/share/configd/conf/zmconfigd /staging/etc \
 
 FROM scratch
 
+# OCI image metadata that never changes between builds. The build-specific
+# labels (created, source, url, revision, ref.name, version) and the title,
+# description and vendor come from the Jenkinsfile (dockerStage ocLabels), which
+# passes them with --label; the same keys there override these.
+LABEL org.opencontainers.image.licenses="AGPL-3.0-only" \
+      org.opencontainers.image.documentation="https://github.com/zextras/carbonio-configd/tree/main/docs"
+
 # passwd, group, the templates and /tmp (rewrites render into a temporary file
 # before they replace the target), with their modes.
 COPY --from=installer /staging/ /

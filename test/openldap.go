@@ -44,18 +44,23 @@ const (
 // openLDAPEntrypoint installs slapd, builds slapd-config from the fixtures,
 // loads the schema and the seed data offline, then runs slapd in the
 // foreground on port 1389 (and ldaps on 1636 when listeners names it).
-func openLDAPEntrypoint(withTLS bool) string {
+func openLDAPEntrypoint(withTLS, withExtraConfig bool) string {
 	listeners := "ldap://0.0.0.0:1389/"
 	if withTLS {
 		listeners += " ldaps://0.0.0.0:1636/"
 	}
 
+	extra := ""
+	if withExtraConfig {
+		extra = "slapadd -n 0 -F /etc/openldap/slapd.d -l " + fixturesDir + "/extra-config.ldif\n"
+	}
+
 	return `set -eu
-apk add --no-cache openldap openldap-back-mdb >/dev/null
+apk add --no-cache openldap openldap-back-mdb openldap-overlay-syncprov >/dev/null
 mkdir -p /etc/openldap/slapd.d /var/lib/openldap/openldap-data /run/openldap
 slapadd -n 0 -F /etc/openldap/slapd.d -l ` + fixturesDir + `/slapd.ldif
 slapadd -n 0 -F /etc/openldap/slapd.d -l ` + fixturesDir + `/zimbra-schema.ldif
-slapadd -n 1 -F /etc/openldap/slapd.d -l ` + fixturesDir + `/seed.ldif
+` + extra + `slapadd -n 1 -F /etc/openldap/slapd.d -l ` + fixturesDir + `/seed.ldif
 exec slapd -d stats -F /etc/openldap/slapd.d -h "` + listeners + `"
 `
 }
@@ -70,6 +75,11 @@ type OpenLDAPFixtures struct {
 	Schema string
 	// Seed is the LDIF loaded into the data database (slapadd -n 1).
 	Seed string
+	// ExtraConfig, when not empty, is an LDIF added to slapd-config (slapadd
+	// -n 0) after Slapd and Schema and before the seed is loaded, so it can load
+	// a module and put an overlay on the data database. The syncprov overlay
+	// module is installed in the container.
+	ExtraConfig string
 	// TLS, when non-nil, makes slapd serve StartTLS on ldap:// and an ldaps://
 	// listener with this certificate.
 	TLS *OpenLDAPTLS
@@ -124,7 +134,7 @@ func StartOpenLDAP(ctx context.Context, t *testing.T, fixtures OpenLDAPFixtures)
 	c, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: testcontainers.ContainerRequest{
 			Image:        OpenLDAPImage,
-			Cmd:          []string{"sh", "-c", openLDAPEntrypoint(fixtures.TLS != nil)},
+			Cmd:          []string{"sh", "-c", openLDAPEntrypoint(fixtures.TLS != nil, fixtures.ExtraConfig != "")},
 			Files:        files,
 			ExposedPorts: ports,
 			WaitingFor:   wait.ForAll(waits...),
@@ -170,13 +180,18 @@ func StartOpenLDAP(ctx context.Context, t *testing.T, fixtures OpenLDAPFixtures)
 // fixtureFiles lists the files copied into the container. With TLS the
 // slapd-config LDIF is rewritten to point cn=config at the certificate files.
 func fixtureFiles(fixtures OpenLDAPFixtures) ([]testcontainers.ContainerFile, error) {
-	files := make([]testcontainers.ContainerFile, 0, 6)
+	files := make([]testcontainers.ContainerFile, 0, 7)
 
-	for name, host := range map[string]string{
+	ldifs := map[string]string{
 		"slapd.ldif":         fixtures.Slapd,
 		"zimbra-schema.ldif": fixtures.Schema,
 		"seed.ldif":          fixtures.Seed,
-	} {
+	}
+	if fixtures.ExtraConfig != "" {
+		ldifs["extra-config.ldif"] = fixtures.ExtraConfig
+	}
+
+	for name, host := range ldifs {
 		abs, err := filepath.Abs(host)
 		if err != nil {
 			return nil, fmt.Errorf("fixture %s: %w", host, err)

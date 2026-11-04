@@ -6,6 +6,13 @@ path = ["THIRDPARTIES", ".ci/thirdparties/thirdparties-go-rules.json", ".ci/thir
 SPDX-FileCopyrightText = "2026 Zextras <https://www.zextras.com>"
 SPDX-License-Identifier = "AGPL-3.0-only"
 
+# Inlined verbatim into the org.opencontainers.image.description label of the
+# image (Jenkinsfile, descriptionFile), so it cannot carry an SPDX header.
+[[annotations]]
+path = ["docker/configd/description.md"]
+SPDX-FileCopyrightText = "2026 Zextras <https://www.zextras.com>"
+SPDX-License-Identifier = "AGPL-3.0-only"
+
 # Verbatim carbonio-mailbox sources vendored for scripts/gen-lc.py (GPL-2.0-only, as in
 # the upstream headers; the .java files carry them inline). Never compiled or shipped.
 [[annotations]]

@@ -219,12 +219,24 @@ spec:
             steps {
                 checkout scm
                 gitMetadata()
-                dockerStage([
-                    dockerfile: 'docker/configd/Dockerfile',
-                    imageName: 'carbonio-configd',
-                    ocLabels: [title: 'Carbonio configd'],
-                    platforms: ['linux/amd64', 'linux/arm64'] as Set,
-                ])
+                script {
+                    // The image carries the version of the package it ships with.
+                    String pkgver = sh(
+                        script: '''awk -F= '/^pkgver=/{gsub(/"/, "", $2); print $2}' build/configd/PKGBUILD''',
+                        returnStdout: true,
+                    ).trim()
+                    dockerStage([
+                        dockerfile: 'docker/configd/Dockerfile',
+                        imageName: 'carbonio-configd',
+                        ocLabels: [
+                            title: 'Carbonio configd',
+                            descriptionFile: 'docker/configd/description.md',
+                            vendor: 'Zextras',
+                            version: pkgver,
+                        ],
+                        platforms: ['linux/amd64', 'linux/arm64'] as Set,
+                    ])
+                }
             }
         }
 

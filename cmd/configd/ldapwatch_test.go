@@ -2,8 +2,8 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Tests for the opt-in LDAP change trigger glue: it is off by default (no
-// goroutine at all), starts and stops with zmconfigd_ldap_change_trigger, and
+// Tests for the LDAP change trigger glue: with zmconfigd_ldap_change_trigger=FALSE
+// no goroutine exists at all, the watcher starts and stops with the key, and it
 // wakes the main loop through the same reload channel SIGHUP uses.
 package main
 
@@ -53,8 +53,8 @@ func (s *watchSource) polls() int {
 }
 
 // newWatchFixture is the loop fixture on a manual clock with an injected
-// source and the watcher key as configuration says (off unless the test sets
-// it), with 5s polls and no debounce.
+// source and the watcher key off (a test turns it on), with 5s polls and no
+// debounce. The key is on by default in production, see internal/config.
 func newWatchFixture(t *testing.T) (*daemonLoopDeps, *systest.Clock, *watchSource) {
 	t.Helper()
 
@@ -64,6 +64,7 @@ func newWatchFixture(t *testing.T) (*daemonLoopDeps, *systest.Clock, *watchSourc
 
 	deps.env = fakes.System()
 	deps.ldapSource = src
+	deps.cfg.LdapChangeTrigger = false
 	deps.cfg.LdapChangePollSeconds = 5
 	deps.cfg.LdapChangeDebounceSeconds = 0
 
@@ -97,13 +98,13 @@ func waitForWaiters(t *testing.T, clock *systest.Clock, n int) {
 	require.Eventually(t, func() bool { return clock.Waiters() == n }, 5*time.Second, time.Millisecond)
 }
 
-// The default: with zmconfigd_ldap_change_trigger unset or FALSE nothing is
-// started, whatever the iteration count.
+// The opt-out: with zmconfigd_ldap_change_trigger=FALSE nothing is started,
+// whatever the iteration count.
 func TestSyncLDAPWatch_OffStartsNoWatcherAtAll(t *testing.T) {
 	deps, clock, src := newWatchFixture(t)
 	ctx := context.Background()
 
-	require.False(t, deps.cfg.LdapChangeTrigger, "the key is off unless localconfig turns it on")
+	require.False(t, deps.cfg.LdapChangeTrigger)
 	requireNoWatcherGoroutines(t) // let goroutines of earlier tests finish exiting
 
 	var w *ldapWatch
@@ -336,4 +337,97 @@ func TestLDAPChangeMetrics(t *testing.T) {
 	assert.Contains(t, out, `configd_ldap_change_triggers_total{component="global",result="cycle_requested"} 1`)
 	assert.Contains(t, out, `configd_ldap_change_triggers_total{component="domains",result="already_pending"} 1`)
 	assert.NotContains(t, out, "configd_ldap_watch_poll_failures_total")
+}
+
+// fakeSubscriber is a content-sync stream the test drives: Subscribe reports the
+// stream live at once and then blocks until its context is done; notify plays a
+// change.
+type fakeSubscriber struct {
+	mu      sync.Mutex
+	changed func()
+	started chan struct{}
+}
+
+func newFakeSubscriber() *fakeSubscriber { return &fakeSubscriber{started: make(chan struct{}, 8)} }
+
+func (f *fakeSubscriber) Subscribe(ctx context.Context, live, changed func()) error {
+	f.mu.Lock()
+	f.changed = changed
+	f.mu.Unlock()
+
+	live()
+
+	f.started <- struct{}{}
+
+	<-ctx.Done()
+
+	return ctx.Err() //nolint:wrapcheck // the watcher wants the bare context error
+}
+
+func (f *fakeSubscriber) notify() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	f.changed()
+}
+
+// With a stream the glue wakes the main loop from a notification, not from the
+// poll interval: the clock only moves by the debounce window, which is shorter
+// than a poll.
+func TestLDAPWatchSyncStreamWakesTheMainLoop(t *testing.T) {
+	deps, clock, src := newWatchFixture(t)
+	sub := newFakeSubscriber()
+	deps.ldapSubscriber = sub
+	deps.cfg.LdapChangeTrigger = true
+	deps.cfg.LdapChangeDebounceSeconds = 2
+
+	w := syncLDAPWatch(context.Background(), deps, nil)
+	require.NotNil(t, w)
+	t.Cleanup(w.stop)
+
+	<-sub.started
+	waitForWaiters(t, clock, 1) // the resync timer: no poll is armed in sync mode
+	require.Equal(t, 1, src.polls(), "the catch-up read is the baseline")
+	assert.Contains(t, string(deps.configManager.Metrics().Render()), `configd_ldap_watch_mode{mode="sync"} 1`)
+
+	src.set(ldapwatch.Fingerprint{ldapwatch.ComponentGlobal: "g1"})
+	sub.notify()
+	waitForWaiters(t, clock, 2) // resync timer and the quiet window
+
+	assert.Empty(t, deps.reloadChan)
+
+	clock.Advance(2 * time.Second)
+	require.Eventually(t, func() bool { return len(deps.reloadChan) == 1 }, 5*time.Second, time.Millisecond,
+		"one cycle for the change")
+	assert.Equal(t, 2, src.polls(), "one fingerprint read for the notification")
+	assert.Contains(t, string(deps.configManager.Metrics().Render()),
+		`configd_ldap_change_triggers_total{component="global",result="cycle_requested"} 1`)
+}
+
+// A subscriber that reports the directory cannot stream leaves the watcher
+// polling, and the glue says so in the mode gauge.
+func TestLDAPWatchUnsupportedSyncPolls(t *testing.T) {
+	deps, clock, src := newWatchFixture(t)
+	deps.ldapSubscriber = unsupportedSubscriber{}
+	deps.cfg.LdapChangeTrigger = true
+
+	w := syncLDAPWatch(context.Background(), deps, nil)
+	require.NotNil(t, w)
+	t.Cleanup(w.stop)
+
+	waitForWaiters(t, clock, 1) // the poll wait
+	assert.Equal(t, 1, src.polls())
+
+	src.set(ldapwatch.Fingerprint{ldapwatch.ComponentGlobal: "g1"})
+	clock.Advance(5 * time.Second)
+	waitForWaiters(t, clock, 1)
+
+	assert.Len(t, deps.reloadChan, 1)
+	assert.Contains(t, string(deps.configManager.Metrics().Render()), `configd_ldap_watch_mode{mode="poll"} 1`)
+}
+
+type unsupportedSubscriber struct{}
+
+func (unsupportedSubscriber) Subscribe(context.Context, func(), func()) error {
+	return ldapwatch.ErrSyncUnsupported
 }

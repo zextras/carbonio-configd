@@ -157,6 +157,21 @@ configd_ldap_watch_poll_failures_total 2
 `, string(r.Render()))
 }
 
+func TestLDAPWatchModeAndStreamMetrics(t *testing.T) {
+	t.Parallel()
+
+	r := New()
+	r.LDAPWatchModeChanged(WatchModePoll)
+	r.LDAPWatchModeChanged(WatchModeSync)
+	r.LDAPWatchStreamFailed()
+	r.LDAPWatchStreamFailed()
+
+	out := string(r.Render())
+	assert.Contains(t, out, `configd_ldap_watch_mode{mode="sync"} 1`)
+	assert.Contains(t, out, `configd_ldap_watch_mode{mode="poll"} 0`)
+	assert.Contains(t, out, "configd_ldap_watch_stream_failures_total 2")
+}
+
 func TestCounterAccumulatesGaugeReplaces(t *testing.T) {
 	t.Parallel()
 

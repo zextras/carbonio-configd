@@ -111,6 +111,16 @@ publishes it for `linux/amd64` and `linux/arm64`.
 docker build -f docker/configd/Dockerfile -t carbonio-configd .
 ```
 
+**OCI metadata.** The Dockerfile sets the labels that never change
+(`org.opencontainers.image.licenses=AGPL-3.0-only`, `.documentation`). The Jenkinsfile
+(`dockerStage` `ocLabels`) passes `title`, `vendor` (Zextras), `version` (the `pkgver` of
+`build/configd/PKGBUILD`) and `description` (the text of `docker/configd/description.md`),
+and the shared pipeline library adds `created`, `source`, `url`, `revision` and `ref.name`
+from the git checkout. Inspect them with
+`docker inspect --format '{{json .Config.Labels}}' carbonio-configd`. Keep
+`description.md` free of double quotes, backticks and `$`: it is inlined into a shell
+argument.
+
 Use it as a container, or as a layer in an image that needs a co-located
 binary:
 

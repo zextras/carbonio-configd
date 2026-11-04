@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: 2026 Zextras <https://www.zextras.com>
+#
+# SPDX-License-Identifier: AGPL-3.0-only
+#
+# slapd-config addition that loads the syncprov module without putting the
+# overlay on the data database: slapd then lists the content-sync control in
+# its root DSE but does not serve it for the data suffix.
+dn: cn=module{1},cn=config
+objectClass: olcModuleList
+cn: module{1}
+olcModulePath: /usr/lib/openldap
+olcModuleLoad: syncprov.so

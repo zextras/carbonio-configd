@@ -4,30 +4,35 @@
 
 // Package ldapwatch detects changes of the LDAP entries a configd cycle
 // reads and asks the main loop for an immediate cycle instead of waiting for
-// the next interval. It is opt-in (localconfig zmconfigd_ldap_change_trigger,
-// off by default) and never replaces the interval poll, which stays the
-// safety net.
+// the next interval. It is on by default and can be turned off with localconfig
+// zmconfigd_ldap_change_trigger set to false, no, 0 or off; it never replaces
+// the interval poll, which stays the safety net.
 //
 // # Mechanism
 //
-// The watcher polls a small fingerprint of the watched entries (entryCSN and
-// modifyTimestamp, see LDAPSource) at a short interval and compares it with
-// the previous one. Polling is used because it is the only mechanism that
-// works on every directory topology configd runs against:
+// Two detection modes feed one state machine; in both, the entries' fingerprint
+// (entryCSN and modifyTimestamp, see LDAPSource) decides what changed:
 //
-//   - OpenLDAP has no persistent search control.
-//   - RFC 4533 syncrepl (refreshAndPersist, supported by go-ldap v3) needs the
-//     syncprov overlay on the provider's data database. A single-node
-//     Carbonio directory does not load it (there is no contextCSN on the
-//     root DSE) and slapd then ignores the control: the search ends with a
-//     plain success and never streams a change.
-//   - contextCSN, when present, moves on every write of the database
-//     (mailbox accounts included), so it cannot tell a relevant change from
-//     noise; the entryCSN of the few entries a cycle reads can.
+//   - Sync mode, when Options.Subscriber is set and the directory supports it.
+//     A Subscriber (see SyncSubscriber) holds an RFC 4533 refreshAndPersist
+//     search open and wakes the watcher for each change. A directory that
+//     advertises the content-sync control in its root DSE has the syncprov
+//     overlay, which multi-master and replica Carbonio setups load. A wake-up
+//     is only a hint: after the debounce window the watcher reads the
+//     fingerprint once and reports the components that really changed, so one
+//     burst of writes costs one fingerprint read, not one per write.
+//   - Poll mode, the fallback. A single-node Carbonio directory does not load
+//     syncprov (there is no contextCSN on the root DSE) and OpenLDAP has no
+//     persistent search control, so the watcher polls the fingerprint at a
+//     short interval and compares it with the previous one.
+//
+// contextCSN, when present, moves on every write of the database (mailbox
+// accounts included), so it cannot tell a relevant change from noise; the
+// entryCSN of the few entries a cycle reads can.
 //
 // # Behaviour
 //
-//   - The first successful poll only establishes the baseline; it never
+//   - The first successful fingerprint only establishes the baseline; it never
 //     triggers.
 //   - A change is reported once it has been quiet for the debounce window, or
 //     when the burst has lasted MaxWait, so a burst of writes produces one
@@ -37,6 +42,13 @@
 //     watcher failure is not a failed cycle. After a reconnect the first
 //     fingerprint is compared with the last good one, so changes made while
 //     the directory was unreachable still trigger.
+//   - A lost sync stream is re-opened with the same back-off, which only
+//     resets once a stream has lasted BackoffMax, so a flapping server is not
+//     hammered. While the stream is live a fingerprint is also read every
+//     Options.ResyncInterval as a safety net against a missed notification.
+//   - When the directory cannot stream, the watcher warns once, polls, and
+//     tries the stream again every Options.ProbeInterval, so a directory that
+//     gains syncprov is picked up without a restart.
 //   - Run returns promptly when its context is cancelled.
 //
 // All waiting and time reads go through the injected sys.Clock.
@@ -44,6 +56,7 @@ package ldapwatch
 
 import (
 	"context"
+	"errors"
 	"maps"
 	"slices"
 	"time"
@@ -65,7 +78,30 @@ const (
 	maxWaitFactor = 10
 	// backoffFactor is the growth of the wait after consecutive failures.
 	backoffFactor = 2
+
+	// repeatedLossWarn is how many streams lost in a row raise the log level of
+	// the loss from info to warn.
+	repeatedLossWarn = 2
+
+	// defaultResyncInterval is how often a live sync stream is cross-checked
+	// with a fingerprint read when Options.ResyncInterval is unset.
+	defaultResyncInterval = 5 * time.Minute
+	// defaultProbeInterval is how long the watcher polls after the directory
+	// turned out not to support sync before it tries again.
+	defaultProbeInterval = 10 * time.Minute
 )
+
+// Detection modes, as reported to Options.OnMode.
+const (
+	// ModeSync: a content-sync stream is live and drives the watcher.
+	ModeSync = "sync"
+	// ModePoll: the fingerprint is polled (sync unavailable, not configured, or
+	// the stream is down and being re-opened).
+	ModePoll = "poll"
+)
+
+// errStreamClosed is the end of a stream the server closed without an error.
+var errStreamClosed = errors.New("change stream closed")
 
 // Fingerprint maps a watched component (for example "global") to a digest of
 // the state of its entries. Equal digests mean nothing changed.
@@ -77,18 +113,39 @@ type Source interface {
 	Fingerprint(ctx context.Context) (Fingerprint, error)
 }
 
+// Subscriber pushes change notifications from the directory.
+type Subscriber interface {
+	// Subscribe opens a change stream and blocks while it is open. It calls
+	// live once the stream is established and its initial content has been
+	// delivered, and changed for each change after that. changed may be called
+	// often and must be cheap. Subscribe returns when ctx is cancelled (with
+	// ctx.Err()), when the stream fails or is closed, or immediately with an
+	// error wrapping ErrSyncUnsupported when the directory cannot stream.
+	Subscribe(ctx context.Context, live, changed func()) error
+}
+
 // Options configure a Watcher.
 type Options struct {
-	// Source is polled for the fingerprint. Required.
+	// Source is read for the fingerprint, in poll mode every Interval and in
+	// sync mode after a stream notification. Required.
 	Source Source
+	// Subscriber, when set, makes the watcher event-driven whenever the
+	// directory supports it; nil means poll mode only.
+	Subscriber Subscriber
 	// Clock drives every wait and time read. Required.
 	Clock sys.Clock
 	// Trigger is called, from the Run goroutine, with the sorted names of the
 	// components that changed since the previous trigger. It must not block.
 	// Required.
 	Trigger func(ctx context.Context, changed []string)
-	// Interval is the poll interval; values <= 0 mean 5s.
+	// Interval is the poll interval of poll mode; values <= 0 mean 5s.
 	Interval time.Duration
+	// ResyncInterval is how often a live stream is cross-checked with a
+	// fingerprint read; values <= 0 mean 5m.
+	ResyncInterval time.Duration
+	// ProbeInterval is how long the watcher polls after sync turned out to be
+	// unsupported before trying the stream again; values <= 0 mean 10m.
+	ProbeInterval time.Duration
 	// Debounce is the quiet window a change must survive before it is
 	// reported; 0 reports a change in the poll that sees it.
 	Debounce time.Duration
@@ -102,19 +159,35 @@ type Options struct {
 	// failed poll (not for a cancelled context), for metrics. It must not
 	// block.
 	OnPollError func()
+	// OnMode, when set, is called from the Run goroutine with ModePoll when Run
+	// starts and with the new mode each time the detection mode changes, for
+	// metrics. It must not block.
+	OnMode func(mode string)
+	// OnStreamLost, when set, is called from the Run goroutine each time an
+	// established or attempted sync stream ends with a failure (not for
+	// unsupported sync or a cancelled context), for metrics. It must not block.
+	OnStreamLost func()
 }
 
 // Watcher polls a Source and reports changes through Options.Trigger.
 type Watcher struct {
-	source     Source
-	clock      sys.Clock
-	trigger    func(ctx context.Context, changed []string)
-	onPollErr  func()
-	interval   time.Duration
-	debounce   time.Duration
-	maxWait    time.Duration
-	backoffMin time.Duration
-	backoffMax time.Duration
+	source       Source
+	sub          Subscriber
+	clock        sys.Clock
+	trigger      func(ctx context.Context, changed []string)
+	onPollErr    func()
+	onMode       func(mode string)
+	onStreamLost func()
+	interval     time.Duration
+	resync       time.Duration
+	probe        time.Duration
+	debounce     time.Duration
+	maxWait      time.Duration
+	backoffMin   time.Duration
+	backoffMax   time.Duration
+
+	mode     string // current mode, only touched from Run
+	fellBack bool   // the fallback was already logged
 }
 
 // New returns a Watcher. It panics when a required option is missing: that is
@@ -125,14 +198,19 @@ func New(o *Options) *Watcher {
 	}
 
 	w := &Watcher{
-		source:     o.Source,
-		clock:      o.Clock,
-		trigger:    o.Trigger,
-		onPollErr:  o.OnPollError,
-		interval:   positiveOr(o.Interval, defaultInterval),
-		debounce:   max(o.Debounce, 0),
-		backoffMin: positiveOr(o.BackoffMin, defaultBackoffMin),
-		backoffMax: positiveOr(o.BackoffMax, defaultBackoffMax),
+		source:       o.Source,
+		sub:          o.Subscriber,
+		clock:        o.Clock,
+		trigger:      o.Trigger,
+		onPollErr:    o.OnPollError,
+		onMode:       o.OnMode,
+		onStreamLost: o.OnStreamLost,
+		interval:     positiveOr(o.Interval, defaultInterval),
+		resync:       positiveOr(o.ResyncInterval, defaultResyncInterval),
+		probe:        positiveOr(o.ProbeInterval, defaultProbeInterval),
+		debounce:     max(o.Debounce, 0),
+		backoffMin:   positiveOr(o.BackoffMin, defaultBackoffMin),
+		backoffMax:   positiveOr(o.BackoffMax, defaultBackoffMax),
 	}
 
 	w.maxWait = positiveOr(o.MaxWait, maxWaitFactor*w.debounce)
@@ -162,12 +240,46 @@ type runState struct {
 
 func (s *runState) pending() bool { return len(s.changed) > 0 }
 
-// Run polls until ctx is cancelled and then returns.
+// Run watches until ctx is cancelled and then returns.
 func (w *Watcher) Run(ctx context.Context) {
 	ctx = logger.ContextWithComponent(ctx, "ldapwatch")
 	st := &runState{backoff: w.backoffMin, changed: make(map[string]struct{})}
 
+	w.setMode(ModePoll)
+
 	for ctx.Err() == nil {
+		if w.sub == nil {
+			w.poll(ctx, st, time.Time{})
+
+			continue
+		}
+
+		if !w.stream(ctx, st) {
+			return
+		}
+
+		// The directory cannot stream: poll for a while, then look again.
+		w.poll(ctx, st, w.clock.Now().Add(w.probe))
+	}
+}
+
+// setMode reports a change of the detection mode.
+func (w *Watcher) setMode(mode string) {
+	if mode == w.mode {
+		return
+	}
+
+	w.mode = mode
+
+	if w.onMode != nil {
+		w.onMode(mode)
+	}
+}
+
+// poll polls the fingerprint until ctx is cancelled or, when until is not the
+// zero time, until that instant has passed.
+func (w *Watcher) poll(ctx context.Context, st *runState, until time.Time) {
+	for ctx.Err() == nil && (until.IsZero() || w.clock.Now().Before(until)) {
 		if err := w.clock.Sleep(ctx, w.step(ctx, st)); err != nil {
 			return
 		}
