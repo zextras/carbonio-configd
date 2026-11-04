@@ -6,7 +6,6 @@ package services
 
 import (
 	"context"
-	"fmt"
 )
 
 // The launch specs below are the data half of the declarative service
@@ -111,68 +110,4 @@ type CollectorSpec struct {
 type OptionalCollector struct {
 	Cmd   string
 	LCKey string
-}
-
-// launchStrategies lists the launch strategies def declares; a registry entry
-// declares at most one (see validate).
-func (def *ServiceDef) launchStrategies() []string {
-	var set []string
-
-	if def.CustomStart != nil {
-		set = append(set, "CustomStart")
-	}
-
-	if def.Java != nil {
-		set = append(set, "Java")
-	}
-
-	if def.Mysqld != nil {
-		set = append(set, "Mysqld")
-	}
-
-	if def.Commands != nil {
-		set = append(set, "Commands")
-	}
-
-	if def.Collectors != nil {
-		set = append(set, "Collectors")
-	}
-
-	return set
-}
-
-// validate reports a registry entry that contradicts itself: more than one
-// launch strategy, or a spec missing what its executor needs. The default
-// registry is checked by a test, so a bad declaration fails the build rather
-// than a start on a production host.
-func (def *ServiceDef) validate() error {
-	if set := def.launchStrategies(); len(set) > 1 {
-		return fmt.Errorf("%s declares several launch strategies: %v", def.Name, set)
-	}
-
-	if err := def.validateSpecs(); err != nil {
-		return err
-	}
-
-	if def.Ready != ReadyNone && len(def.launchStrategies()) == 0 && def.BinaryPath == "" {
-		return fmt.Errorf("%s: Ready %q needs a launch strategy", def.Name, def.Ready)
-	}
-
-	return nil
-}
-
-// validateSpecs checks each declared spec for what its executor needs.
-func (def *ServiceDef) validateSpecs() error {
-	switch {
-	case def.Java != nil && (def.Java.Args == nil || def.Java.LogFile == ""):
-		return fmt.Errorf("%s: Java launch needs Args and LogFile", def.Name)
-	case def.Mysqld != nil && (def.PidFile == "" || def.ProcessName == "" || def.Mysqld.DefaultsKey == ""):
-		return fmt.Errorf("%s: Mysqld launch needs PidFile, ProcessName and DefaultsKey", def.Name)
-	case def.Commands != nil && (def.BinaryPath == "" || def.Commands.Start == nil):
-		return fmt.Errorf("%s: Commands launch needs BinaryPath and a Start verb", def.Name)
-	case def.Collectors != nil && (len(def.Collectors.Always) == 0 || def.ProcessName == ""):
-		return fmt.Errorf("%s: Collectors launch needs Always and ProcessName", def.Name)
-	}
-
-	return nil
 }

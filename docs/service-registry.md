@@ -28,7 +28,7 @@ declaration, not a new launcher.
 ## Launch strategies (legacy, non-systemd mode)
 
 `startWithoutSystemd` picks the first strategy the entry declares; an entry
-declares at most one (`ServiceDef.validate`, checked for the whole registry by
+declares at most one (checked for the whole registry by
 `TestDefaultRegistry_EntriesAreValid`).
 
 | Strategy | Used by | Start | Stop |

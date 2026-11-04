@@ -125,7 +125,7 @@ func NewController(env sys.System, opts ...Option) *Controller {
 	c.p = newPaths(c.baseDir, c.runDir)
 
 	if c.ldapProbe == nil {
-		c.ldapProbe = c.probeLDAP
+		WithLDAPProbe(c.probeLDAP)(c)
 	}
 
 	if c.mailboxReady == nil {
