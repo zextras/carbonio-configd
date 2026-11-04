@@ -373,6 +373,17 @@ exec `configd` subcommands. The Jython daemon could not be partitioned by sectio
 the whole cycle and port 7171; a forced run per section starts a JVM and never restarts services).
 Shadow mode is the safety net instead; rolling back is installing the previous package.
 
+Shadow mode is not run in Jenkins, and there is no legacy comparison there. `configd shadow` needs
+a configured Carbonio node (the install tree under `/opt/zextras`, `localconfig.xml`, the LDAP
+server with the real global config, servers and domains, and the service templates), and the
+repository contains neither such a fixture nor the legacy Jython implementation to produce the
+reference output. The CI pod has none of them, so a comparison there would diff against nothing.
+What CI covers instead: the shadow command's side-effect freedom (`cmd/configd/shadow_test.go`),
+the plan/render logic on fakes, and the OpenLDAP container suite (`make test-integration-ldap`,
+the Jenkins 'LDAP integration' stage, nightly or with `RUN_LDAP_INTEGRATION`). The legacy
+comparison is a manual QA-node step: run `configd shadow --single-cycle --shadow-dir DIR` on a
+node and diff `DIR` against the files legacy rendered.
+
 ## LDAP transport security and timeouts
 
 Source: `internal/ldap/tls.go` (`ResolveTLS`), `internal/ldap/client.go`
