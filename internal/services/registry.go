@@ -6,15 +6,12 @@ package services
 
 import (
 	"context"
-	"fmt"
 	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
 	"syscall"
 	"time"
-
-	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // Hook is a function that runs before/after service actions.
@@ -75,7 +72,11 @@ type ServiceDef struct {
 	Dependencies []string
 	// EnableCheck is called to determine if this service should be started (for conditional deps)
 	EnableCheck EnableCheckFunc
-	// PreStart hooks run before starting the service
+	// Setup are the declarative steps run before starting the service, in
+	// every start path and ahead of the PreStart hooks: directories to
+	// create, one-time initializations, helper commands.
+	Setup []Step
+	// PreStart hooks run before starting the service, after Setup
 	PreStart []Hook
 	// PostStart hooks run after starting the service
 	PostStart []Hook
@@ -89,8 +90,8 @@ type ServiceDef struct {
 	// event-driven readiness detection instead of polling.
 	UseSDNotify bool
 	// CustomStart, when set, takes over the non-systemd start path entirely.
-	// The escape hatch for a launch no spec below expresses (amavis starts a
-	// companion daemon and clears stale temporary directories). Prefer a spec.
+	// The escape hatch for a launch no spec below expresses; no registry
+	// entry needs it today. Prefer a spec.
 	CustomStart func(ctx context.Context, def *ServiceDef) error
 	// CustomStop mirrors CustomStart for the stop side.
 	CustomStop func(ctx context.Context, def *ServiceDef) error
@@ -146,11 +147,11 @@ type ServiceDef struct {
 	// zmantispamctl: the whole wrapper is guarded by the service being enabled
 	// for the host).
 	IdleWhenDisabled bool
-	// Companions are further process identities that must be running for the
-	// service to count as running in legacy mode (amavisd and amavis-mc: legacy
+	// Companions are further processes that must be running for the service
+	// to count as running in legacy mode (amavisd and amavis-mc: legacy
 	// amavisdctl status needs both). The ProcessName process stays the one
 	// whose pid is reported.
-	Companions []string
+	Companions []Companion
 	// RefreshSignal is the signal `refresh` delivers to the service's main
 	// process, signaled directly (as the zextras user) in every mode. Zero
 	// means the service has no refresh (only milter: SIGCONT).
@@ -163,11 +164,13 @@ type ServiceDef struct {
 	Ready ReadyKind
 	// Java, Mysqld, Commands and Collectors are the launch strategies of
 	// services that BinaryPath alone cannot describe (see spec.go). A service
-	// declares at most one, and none together with CustomStart.
+	// declares at most one, and none together with CustomStart. Direct
+	// refines the BinaryPath launch and is no strategy of its own.
 	Java       *JavaSpec
 	Mysqld     *MysqldSpec
 	Commands   *CommandSpec
 	Collectors *CollectorSpec
+	Direct     *DirectSpec
 	// Heavy marks a service whose restart is costly (the mailbox JVM, its
 	// database, the directory server): on a systemd host a configuration
 	// change flags it restart-pending instead of restarting it. internal/plan
@@ -210,39 +213,6 @@ var ldapServiceNames = map[string]string{
 	svcMailbox: svcStore,
 }
 
-// cbpolicydInitDB initializes the cbpolicyd sqlite database if it doesn't exist.
-// Mirrors legacy cbpolicydctl.sh pre-start logic.
-func (c *Controller) cbpolicydInitDB(_ context.Context, _ *ServiceManager) error {
-	if _, err := c.env.FS.Stat(c.p.cbpolicydDB); err == nil {
-		return nil
-	}
-
-	if err := c.env.FS.MkdirAll(filepath.Dir(c.p.cbpolicydDB), 0o755); err != nil {
-		return fmt.Errorf("failed to create cbpolicyd DB directory: %w", err)
-	}
-
-	if _, err := c.env.FS.Stat(c.p.cbpolicydInitBin); err != nil {
-		return fmt.Errorf("cbpolicyd DB missing and init binary not found: %w", err)
-	}
-
-	if output, err := sys.CombinedOutput(context.Background(), c.env.Exec, c.p.cbpolicydInitBin); err != nil {
-		return fmt.Errorf("cbpolicyd DB init failed: %s: %w", strings.TrimSpace(string(output)), err)
-	}
-
-	return nil
-}
-
-// clamdDirInit creates the clamav database directory if missing. Mirrors the
-// `mkdir -p /opt/zextras/data/clamav/db` from legacy clamdctl.sh; clamd refuses
-// to start if the directory does not exist.
-func (c *Controller) clamdDirInit(_ context.Context, _ *ServiceManager) error {
-	if err := c.env.FS.MkdirAll(c.p.clamdDir, 0o755); err != nil {
-		return fmt.Errorf("failed to create clamav DB directory: %w", err)
-	}
-
-	return nil
-}
-
 // milterEnabled checks if the milter service is enabled via mta_milter_options file.
 func (c *Controller) milterEnabled(_ context.Context) bool {
 	data, err := c.env.FS.ReadFile(c.p.milterOptions)
@@ -275,7 +245,11 @@ func (c *Controller) defaultRegistry() map[string]*ServiceDef {
 			PidFile:       c.p.run + "/cbpolicyd.pid",
 			ProcessName:   c.p.common + "/bin/cbpolicyd",
 			ConfigRewrite: []string{svcCbpolicyd},
-			PreStart:      []Hook{c.cbpolicydInitDB},
+			// Legacy cbpolicyd start: create the sqlite database once.
+			Setup: []Step{
+				{UnlessExists: c.p.cbpolicydDB, Mkdir: []string{filepath.Dir(c.p.cbpolicydDB)}},
+				{UnlessExists: c.p.cbpolicydDB, Run: &RunStep{Path: c.p.cbpolicydInitBin}},
+			},
 		},
 		svcStats: {
 			Name:         svcStats,
@@ -336,18 +310,35 @@ func (c *Controller) defaultRegistry() map[string]*ServiceDef {
 			Name:         svcAmavis,
 			DisplayName:  svcAmavis,
 			SystemdUnits: []string{unitMailthreat},
-			BinaryPath:   c.p.common + "/sbin/amavisd",
+			BinaryPath:   c.p.amavisd,
 			BinaryArgs:   []string{"-X", "no_conf_file_writable_check", "-c", c.p.conf + "/amavisd.conf"},
 			PidFile:      c.p.run + "/amavisd.pid",
 			ProcessName:  "amavisd",
 			// amavisd is only useful with its amavis-mc companion: legacy
 			// amavisdctl status needs both, start launches both.
-			Companions:    []string{amavisMCIdentity},
+			Companions:    []Companion{{Identity: amavisMCIdentity, Binary: c.p.amavisMC}},
 			ConfigRewrite: []string{svcAmavis, svcAntispam},
-			PreStart:      []Hook{c.amavisPreStart},
-			CustomStart:   c.amavisCustomStart,
-			CustomStop:    c.amavisCustomStop,
-			Component:     true,
+			// The pieces of legacy amavisdctl around its `configrewrite amavis
+			// antispam`: the data directory and, unless the start is
+			// `norewrite`, the altermime configuration (a failing
+			// zmaltermimeconfig is ignored, as the wrapper discards its output).
+			Setup: []Step{
+				{Mkdir: []string{c.p.amavisDir + "/.spamassassin"}},
+				{Run: &RunStep{Path: c.p.altermime, IfExists: c.p.altermime, SkipOnNoRewrite: true, BestEffort: true}},
+			},
+			// Legacy amavisdctl start: amavis-mc, then (unless amavisd runs)
+			// quarantine/tmp/var with the stale tmp/amavis-* cleared, then
+			// amavisd, each given 10 x 1s to appear.
+			Direct: &DirectSpec{
+				OptionalBinary: true,
+				SkipIfRunning:  true,
+				Prepare: []Step{
+					{RemoveStale: &StaleDirs{Dir: c.p.amavisDir + "/tmp", Prefix: "amavis-"}},
+					{Mkdir: []string{c.p.amavisDir + "/quarantine", c.p.amavisDir + "/tmp", c.p.amavisDir + "/var"}},
+				},
+				Wait: ProcessWait{Attempts: amavisReadyAttempts, Interval: amavisReadyInterval},
+			},
+			Component: true,
 		},
 		svcClamd: {
 			Name:          svcClamd,
@@ -360,7 +351,7 @@ func (c *Controller) defaultRegistry() map[string]*ServiceDef {
 			ProcessName:   c.p.common + "/sbin/clamd",
 			UseSDNotify:   true,
 			ConfigRewrite: []string{svcAntivirus},
-			PreStart:      []Hook{c.clamdDirInit},
+			Setup:         []Step{{Mkdir: []string{c.p.clamdDir}}},
 			Component:     true,
 		},
 		// antivirus is legacy zmantivirusctl: amavisd (+amavis-mc), clamd and
@@ -413,11 +404,18 @@ func (c *Controller) defaultRegistry() map[string]*ServiceDef {
 			PidFile:      c.p.data + "/postfix/spool/pid/master.pid",
 			ProcessName:  c.p.common + "/libexec/master",
 			Commands: &CommandSpec{
-				Start:                      []string{actionStart},
-				Stop:                       []string{"stop"},
-				Status:                     []string{"status"},
-				Reload:                     []string{actionReload},
-				Prepare:                    []func(context.Context) error{c.prepareMainCf, c.prepareLDAPTables, c.rebuildAliases},
+				Start:  []string{actionStart},
+				Stop:   []string{"stop"},
+				Status: []string{"status"},
+				Reload: []string{actionReload},
+				Prepare: []Step{
+					{Hook: c.prepareMainCf},
+					{Hook: c.prepareLDAPTables},
+					{Run: &RunStep{
+						Path: c.p.postaliasBin, Args: []string{c.p.aliases}, Sudo: true,
+						IfExists: c.p.aliases, BestEffort: true,
+					}},
+				},
 				RestartAsReload:            true,
 				ReloadRestartsDependencies: true,
 			},
@@ -547,7 +545,7 @@ var mailboxConfigRewrite = []string{
 // amavisMemberApplies skips amavis on hosts without amavisd installed
 // (zmantivirusctl lists it among its scripts, which are no-ops there).
 func (c *Controller) amavisMemberApplies(_ context.Context, member string) bool {
-	return member != svcAmavis || c.amavisInstalled()
+	return member != svcAmavis || c.binaryInstalled(c.p.amavisd)
 }
 
 // antispamMemberApplies runs the antispam database only when it lives on this

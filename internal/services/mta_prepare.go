@@ -20,8 +20,8 @@ import (
 const startTLSYes = "yes"
 
 // The MTA is the CommandSpec registry entry: `postfix start|stop|status|
-// reload` through sudo, with the three preparation hooks below run before a
-// start of a stopped postfix. The legacy /opt/zextras/bin/postfix start
+// reload` through sudo, with the three Prepare steps below run before a start
+// of a stopped postfix. The legacy /opt/zextras/bin/postfix start
 // wrapper composed the same steps; each is reimplemented natively so
 // carbonio-configd carries no runtime dependency on the shell-script MTA
 // control path:
@@ -31,19 +31,20 @@ const startTLSYes = "yes"
 //     startup emits "postfix/postlog: fatal: the Postfix mail system is
 //     already running" and the caller sees a failed start for a healthy
 //     daemon.
-//  2. prepareMainCf: postfix refuses to start without main.cf. When absent,
+//  2. Hook prepareMainCf: postfix refuses to start without main.cf. When absent,
 //     create an empty file and seed mail_owner / setgid_group from
 //     localconfig via postconf -e.
-//  3. prepareLDAPTables: write the 8 ldap-*.cf files under /opt/zextras/conf
+//  3. Hook prepareLDAPTables: write the 8 ldap-*.cf files under /opt/zextras/conf
 //     that postfix's main.cf references (ldap:/opt/zextras/conf/ldap-vmm.cf
 //     etc.). This replaces legacy mtainit.sh.
-//  4. rebuildAliases: rebuild the aliases database when /etc/aliases exists.
+//  4. Run step: `sudo postalias /etc/aliases` rebuilds the aliases database
+//     when /etc/aliases exists (best effort: a failure is logged).
 //  5. Spawn the daemon (the generic launcher): sudo postfix start. Postfix
 //     self-daemonizes, so the command returns once the master has forked.
 //
 // ConfigRewrite on the registry entry still triggers
 // /opt/zextras/libexec/configrewrite before the start — that regenerates
-// main.cf itself and is intentionally kept outside of these hooks so it runs
+// main.cf itself and is intentionally kept outside of these steps so it runs
 // for every start path (including systemd).
 
 // prepareMainCf is the main.cf bootstrap step of the MTA start.
@@ -70,13 +71,6 @@ func (c *Controller) prepareLDAPTables(ctx context.Context) error {
 	if err := c.writePostfixLDAPConfig(ctx, lc); err != nil {
 		return fmt.Errorf("render ldap-*.cf: %w", err)
 	}
-
-	return nil
-}
-
-// rebuildAliases is the postalias step of the MTA start; it never fails.
-func (c *Controller) rebuildAliases(ctx context.Context) error {
-	c.runPostalias(ctx)
 
 	return nil
 }
@@ -227,20 +221,6 @@ func (c *Controller) chgrpPostfixLDAPFiles(ctx context.Context) {
 			logger.WarnContext(ctx, "chgrp postfix failed",
 				"path", path, "error", err)
 		}
-	}
-}
-
-// runPostalias rebuilds /etc/aliases.db from /etc/aliases when the source
-// file exists. Best-effort — a missing aliases file or a postalias failure
-// is logged and non-fatal, matching legacy postfix wrapper behavior.
-func (c *Controller) runPostalias(ctx context.Context) {
-	if _, err := c.env.FS.Stat(c.p.aliases); err != nil {
-		return
-	}
-
-	if err := c.sudoRun(ctx, c.p.postaliasBin, c.p.aliases); err != nil {
-		logger.WarnContext(ctx, "postalias failed; continuing",
-			"aliases", c.p.aliases, "error", err)
 	}
 }
 

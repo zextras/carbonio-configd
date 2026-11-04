@@ -53,10 +53,8 @@ func (c *Controller) startCommands(ctx context.Context, def *ServiceDef) error {
 		return nil
 	}
 
-	for _, prepare := range spec.Prepare {
-		if err := prepare(ctx); err != nil {
-			return err
-		}
+	if err := c.runSteps(ctx, spec.Prepare); err != nil {
+		return err
 	}
 
 	out, err := c.controlCommand(ctx, def, spec.Start)

@@ -21,7 +21,8 @@ declaration, not a new launcher.
 | Order | `Dependencies`, `Wants`, `Members` (composites: `store`, `antivirus`, `antispam`), `StopMembersForward`, `MemberApplies`, `EnableCheck` |
 | Privilege | `NeedsRoot` (runs through `sudo`) |
 | Restart policy | `Heavy` (a configuration change flags it restart-pending on systemd hosts instead of restarting it; `internal/plan.HeavyService` lists the same names and a test keeps both in step) |
-| Configuration | `ConfigRewrite`, `PreStart` / `PostStart` / `PreStop` hooks |
+| Configuration | `ConfigRewrite`, `Setup` steps, `PreStart` / `PostStart` / `PreStop` hooks |
+| Helper daemons | `Companions` (process identity and, to launch it, the binary), `Direct` |
 | Legacy-mode launch | exactly one of the strategies below |
 | Readiness | `Ready`, or `UseSDNotify` |
 
@@ -38,15 +39,45 @@ declares at most one (checked for the whole registry by
 | `Mysqld` (`MysqldSpec`) | appserver-db, antispam-db | `mysqld_safe` with the defaults file of localconfig | SIGTERM and a bounded wait, **never SIGKILL** (InnoDB crash recovery) |
 | `Commands` (`CommandSpec`) | mta (`postfix`) | `Status` probe, `Prepare` steps, `Start` verb | `Stop` verb |
 | `Collectors` (`CollectorSpec`) | stats (`zmstat-*`) | one process per collector | pidfiles (process group, sudo when root-owned), then identity |
-| `CustomStart` / `CustomStop` | amavis | named hook | named hook |
+| `BinaryPath` + `Direct` (`DirectSpec`) + `Companions` | amavis | `Companions` through sudo, skip when running, `Prepare` steps, spawn, bounded wait for the process | `ProcessName`, then each companion |
+| `CustomStart` / `CustomStop` | none today | named hook | named hook |
 
 `Ready` names the probe a launch waits for: `ReadyLDAP` (anonymous rootDSE
 search, fails fast when the daemon exits), `ReadyConfigd` (`STATUS`),
 `ReadyMailboxPort`. `UseSDNotify` waits for `READY=1` instead.
 
-`CustomStart` / `CustomStop` are the escape hatch for logic no spec expresses:
-amavis starts a companion daemon and clears stale temporary directories. Keep a
-hook small and give it one job; reach for a spec field first.
+## Steps
+
+The work around a launch is an ordered list of `Step`s (`spec.go`, run by
+`steps.go`). A step does exactly one thing; a failing step stops the sequence
+(a best-effort `Run` is only logged):
+
+| Step | Does | Used by |
+|---|---|---|
+| `Mkdir` | create directories (0755) | clamd, amavis, cbpolicyd |
+| `RemoveStale` | remove the sub-directories of `Dir` named `Prefix*` | amavis (`tmp/amavis-*`) |
+| `Run` | run a command, with `Sudo`, `IfExists` (skip quietly when the path is absent), `SkipOnNoRewrite` (`norewrite` starts), `BestEffort` | amavis (`zmaltermimeconfig`), mta (`postalias`), cbpolicyd (database init) |
+| `Hook` | a named function, see below | mta |
+
+`UnlessExists` makes any step a one-time initialization (the cbpolicyd database).
+The lists live in `ServiceDef.Setup` (every start path, before the `PreStart`
+hooks), `CommandSpec.Prepare` (before the `Start` verb of a stopped service) and
+`DirectSpec.Prepare` (between the companions and the spawn).
+
+## Procedural exceptions
+
+What cannot be data stays a small named function with one job. The list is
+closed: `TestDefaultRegistry_ProceduralExceptions` fails when a hook appears or
+disappears, so growing it is a decision taken here.
+
+| Where | Function | Why it is not data |
+|---|---|---|
+| mta `Prepare` | `prepareMainCf` | Seeds `main.cf` from localconfig: the owner and group are validated (`postfixAccountNameRe`) before anything runs, and the `postconf -e` arguments are computed from them. |
+| mta `Prepare` | `prepareLDAPTables` | Renders the eight `ldap-*.cf` tables from localconfig (URL, port, bind password, STARTTLS rule), writes them atomically at 0640 and chgrps them to the postfix group when it resolves. |
+| mailbox `PostStart` | `MailboxAdvancedStatusHook` | Polls the Carbonio Advanced modules through the admin API until they are ready (legacy `advanced_status 2`), best effort. |
+| appserver-db `PreStop` | `appserverDBFlushHook` | Flushes InnoDB before the stop, in both orchestration modes, by polling the database for its dirty pages. |
+| `ServiceDef.CustomStart` / `CustomStop` | none | Escape hatch for a launch no spec expresses. No entry uses it; prefer a spec. |
+| `Java.Args`, `ArgsFromConfig`, `MemberApplies`, `EnableCheck`, `MysqldSpec.Active` | the builders and predicates | Computed from localconfig, LDAP or the host. |
 
 ## Adding a service
 

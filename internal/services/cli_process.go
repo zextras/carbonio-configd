@@ -53,7 +53,7 @@ func (c *Controller) startService(ctx context.Context, name string, def *Service
 // The launch strategy the ServiceDef declares decides how: a CustomStart hook
 // (fully custom launch), a Java, Mysqld, Commands or Collectors spec (the
 // generic launchers of launch*.go and collectors.go), else a BinaryPath
-// direct spawn.
+// direct spawn (with its Companions and DirectSpec, when declared).
 func (c *Controller) startWithoutSystemd(ctx context.Context, name string, def *ServiceDef) error {
 	logger.InfoContext(ctx, "Starting service in legacy mode", "service", name)
 
@@ -68,6 +68,8 @@ func (c *Controller) startWithoutSystemd(ctx context.Context, name string, def *
 		return c.startCommands(ctx, def)
 	case def.Collectors != nil:
 		return c.startCollectors(ctx, def)
+	case def.Direct != nil:
+		return c.startDaemon(ctx, name, def)
 	case def.BinaryPath != "":
 		return c.startDirect(ctx, name, def)
 	case def.ProcessName != "":
@@ -170,7 +172,7 @@ func (c *Controller) stopWithoutSystemd(ctx context.Context, name string, def *S
 	logger.InfoContext(ctx, "Stopping service via pkill (legacy mode)",
 		"service", name, "process", def.ProcessName)
 
-	return c.killProcess(ctx, def.ProcessName)
+	return c.killAll(ctx, def)
 }
 
 // reloadWithoutSystemd is the fast-path reload for non-systemd hosts.

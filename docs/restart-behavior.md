@@ -235,13 +235,14 @@ control path, not a per-instance flag — each of those functions bifurcates int
 1. **strict systemd** (`IsSystemdMode() == true`, i.e. a Carbonio systemd target is
    enabled) — every start/stop/status goes through `systemctl` against the units listed in
    `ServiceDef.SystemdUnits`. No direct binary spawn, no fallback script.
-2. **pure legacy** (`IsSystemdMode() == false`) — direct binary execution
-   (`ServiceDef.CustomStart`/`CustomStop`, then `BinaryPath`/`ProcessName`). `systemctl` is
-   never invoked. There is no `zm*ctl` fallback: services whose legacy launch is too dynamic
-   for a static `BinaryPath` (mailbox, stats, mta, ldap, milter, antispam, ...) get a native
-   `CustomStart`/`CustomStop` implementation in the corresponding `*_launcher.go` file instead
-   of shelling out to the old `/opt/zextras/bin/zm*ctl` scripts. Stops that are only a
-   bounded SIGTERM wait (slapd/LMDB) are data too: `ServiceDef.GracefulStop`.
+2. **pure legacy** (`IsSystemdMode() == false`) — direct binary execution through the launch
+   strategy the `ServiceDef` declares (`Java`, `Mysqld`, `Commands`, `Collectors`, else
+   `BinaryPath`/`ProcessName`, see `service-registry.md`). `systemctl` is never invoked. There
+   is no `zm*ctl` fallback: services whose legacy launch is too dynamic for a static
+   `BinaryPath` (mailbox, stats, mta, ldap, milter, antispam, amavis, ...) declare what the old
+   `/opt/zextras/bin/zm*ctl` scripts did as data — spec fields, ordered `Setup`/`Prepare`
+   steps, `Companions` — instead of shelling out to them. Stops that are only a bounded
+   SIGTERM wait (slapd/LMDB) are data too: `ServiceDef.GracefulStop`.
 
    **Process identity.** Legacy status and stop recognise a service's processes by what the
    kernel records, never by a cmdline substring (`internal/services/procident.go`). The
