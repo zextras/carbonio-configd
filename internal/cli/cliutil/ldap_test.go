@@ -6,6 +6,7 @@ package cliutil
 
 import (
 	"crypto/tls"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -64,9 +65,7 @@ func TestOpenWriteLDAPClient_StartTLSFollowsLocalconfig(t *testing.T) {
 		"ldap_starttls_supported":              "1",
 		"zimbra_require_interprocess_security": "1",
 	}
-	for k, v := range base {
-		secure[k] = v
-	}
+	maps.Copy(secure, base)
 
 	if err := searchOnce(t, secure); err != nil {
 		t.Fatalf("StartTLS search: %v", err)

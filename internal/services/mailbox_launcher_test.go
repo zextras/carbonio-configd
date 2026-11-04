@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -187,12 +188,7 @@ func TestMailboxJavaArgs_CustomHeapAndOptions(t *testing.T) {
 	args := ctl.mailboxJavaArgs(lc)
 
 	has := func(s string) bool {
-		for _, a := range args {
-			if a == s {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(args, s)
 	}
 	if !has("-Xms2048m") {
 		t.Error("expected -Xms2048m")

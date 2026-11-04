@@ -40,7 +40,7 @@ git commit --no-verify
 
 **Note:** Use `--no-verify` sparingly and only when necessary.
 
-The project needs the Go version in `go.mod` (Go 1.26).
+The project needs the Go version in `go.mod` (Go 1.27).
 
 ### Running Tests
 

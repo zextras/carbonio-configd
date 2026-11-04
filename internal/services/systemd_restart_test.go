@@ -180,18 +180,14 @@ func TestServiceManager_ConcurrentUse(t *testing.T) {
 	var wg sync.WaitGroup
 
 	for range 4 {
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			for range 20 {
 				_ = sm.AddRestart(context.Background(), "svc")
 				_ = sm.ProcessRestarts(context.Background(), lookup)
 				sm.SetDependencies(context.Background(), map[string][]string{"other": {"another"}})
 				_ = sm.GetPendingRestarts()
 			}
-		}()
+		})
 	}
 
 	wg.Wait()

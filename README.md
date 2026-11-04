@@ -91,7 +91,7 @@ See the [documentation index](docs/README.md):
 
 ## Development
 
-Requires Go 1.26 (see `go.mod`) and `make`.
+Requires Go 1.27 (see `go.mod`) and `make`.
 
 ```bash
 make build              # static binary in ./bin/configd

@@ -196,7 +196,7 @@ func (f *cycleFixture) restartsRequested() bool {
 }
 
 func containsRestartMetric(rendered string) bool {
-	for _, line := range strings.Split(rendered, "\n") {
+	for line := range strings.SplitSeq(rendered, "\n") {
 		if line != "" && line[0] != '#' && strings.Contains(line, "restart") && strings.Contains(line, `service="`+restartSvc+`"`) {
 			return true
 		}

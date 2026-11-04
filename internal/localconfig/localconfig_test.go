@@ -300,7 +300,7 @@ func BenchmarkLoadLocalConfigFromFile(b *testing.B) {
 	var xmlBuilder strings.Builder
 	xmlBuilder.WriteString(`<?xml version="1.0" encoding="UTF-8"?><localconfig>`)
 
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		xmlBuilder.WriteString(`<key name="test_key_`)
 		xmlBuilder.WriteString(strings.Repeat("a", i%10)) // Variable length keys
 		xmlBuilder.WriteString(`"><value>test_value_`)
@@ -408,7 +408,7 @@ func TestLoadEffectiveFrom_Basic(t *testing.T) {
 // BenchmarkFormatAsKeyValue benchmarks key=value formatting
 func BenchmarkFormatAsKeyValue(b *testing.B) {
 	config := make(map[string]string, 100)
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		config[strings.Repeat("key", i%10)] = strings.Repeat("value", i%20)
 	}
 

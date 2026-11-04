@@ -121,8 +121,7 @@ func TestConfigLookup_ContextPropagation(t *testing.T) {
 		data: map[string]string{"misc:key": "val"},
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	got, err := cl.LookUpConfig(ctx, "misc", "key")
 	if err != nil {

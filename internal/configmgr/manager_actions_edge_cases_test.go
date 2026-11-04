@@ -263,7 +263,7 @@ func TestDoRewrites_MultipleFiles(t *testing.T) {
 
 	// Create 6 source files (more than the semaphore size of 4)
 	var entries []plan.Rewrite
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		src := baseDir + "/" + string(rune('a'+i)) + ".in"
 		if err := os.WriteFile(src, []byte("content\n"), 0o644); err != nil {
 			t.Fatalf("create src: %v", err)
@@ -278,7 +278,7 @@ func TestDoRewrites_MultipleFiles(t *testing.T) {
 	}
 
 	// All destination files should exist
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		dest := baseDir + "/" + string(rune('a'+i)) + ".out"
 		if _, err := os.Stat(dest); err != nil {
 			t.Errorf("expected dest file %s: %v", dest, err)
@@ -297,7 +297,7 @@ func TestDoRewrites_CancelledContext(t *testing.T) {
 
 	// Set up many rewrites so the loop actually checks ctx.Done()
 	var entries []plan.Rewrite
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		src := baseDir + "/" + string(rune('a'+i)) + ".in"
 		_ = os.WriteFile(src, []byte("content\n"), 0o644)
 		entries = append(entries, plan.Rewrite{
@@ -466,7 +466,7 @@ func TestDoPostconf_CancelledContext(t *testing.T) {
 	}
 	cm, exec := newTestCMWithExecutor(t)
 	var entries []plan.Postconf
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		entries = append(entries, plan.Postconf{Key: string(rune('a' + i)), Value: "val"})
 	}
 
@@ -560,7 +560,7 @@ func TestDoPostconfd_CancelledContext(t *testing.T) {
 	}
 	cm, exec := newTestCMWithExecutor(t)
 	var entries []plan.Postconfd
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		entries = append(entries, plan.Postconfd{Key: string(rune('a' + i)), Value: "val"})
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -667,7 +667,7 @@ func TestDoLdap_CancelledContext(t *testing.T) {
 	}
 	cm, exec := newTestCMWithExecutor(t)
 	var entries []plan.Ldap
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		entries = append(entries, plan.Ldap{Key: string(rune('a' + i)), Value: "val"})
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -782,7 +782,7 @@ func TestDoMapfile_CancelledContext(t *testing.T) {
 	cm, exec := newTestCMWithExecutor(t)
 
 	var entries []plan.Mapfile
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		entries = append(entries, plan.Mapfile{Key: string(rune('a' + i))})
 	}
 

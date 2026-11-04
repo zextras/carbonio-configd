@@ -5,6 +5,7 @@
 package configmgr
 
 import (
+	"maps"
 	"strings"
 	"testing"
 )
@@ -453,9 +454,7 @@ func TestProcessMilterConfig(t *testing.T) {
 			cm := newTestConfigManager(t)
 
 			data := make(map[string]string, len(tt.input))
-			for k, v := range tt.input {
-				data[k] = v
-			}
+			maps.Copy(data, tt.input)
 			processMilterConfigForData(data)
 			setServer(cm, data, nil)
 

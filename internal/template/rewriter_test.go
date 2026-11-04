@@ -465,7 +465,7 @@ func TestRewriteReader_FlushError(t *testing.T) {
 	// Provide enough content that bufio must flush to the underlying writer.
 	// Each transformed line is ~30 bytes; 200 lines exceed the default 4096-byte buffer.
 	var bigInput strings.Builder
-	for i := 0; i < 200; i++ {
+	for range 200 {
 		bigInput.WriteString("myhostname = %%VAR:zimbraServerHostname%%\n")
 	}
 	input := strings.NewReader(bigInput.String())
@@ -735,7 +735,7 @@ func TestRewriteConfig_FlushAndCloseCoverage(t *testing.T) {
 
 	// Build a large source with 300 lines to force at least one internal Flush.
 	var sb strings.Builder
-	for i := 0; i < 300; i++ {
+	for range 300 {
 		sb.WriteString("myhostname = %%VAR:zimbraServerHostname%%\n")
 	}
 	sourcePath := filepath.Join(tmpDir, "large.in")

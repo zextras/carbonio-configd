@@ -280,8 +280,7 @@ func TestAwaitSDNotifyStopping_ReturnsOnStoppingDatagram(t *testing.T) {
 	socketPath := expectedSocketPath(ctl, "test-stopping")
 	_ = os.Remove(socketPath)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	done := make(chan struct{})
 

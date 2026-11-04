@@ -122,7 +122,7 @@ func FuzzWrapDoc(f *testing.F) {
 			t.Fatalf("output of %q does not end with a newline: %q", text, got)
 		}
 
-		for _, line := range strings.Split(strings.TrimSuffix(got, "\n"), "\n") {
+		for line := range strings.SplitSeq(strings.TrimSuffix(got, "\n"), "\n") {
 			if utf16Len(line) > docWrapWidth && strings.Contains(line, " ") {
 				t.Fatalf("line %q of %q exceeds %d columns", line, text, docWrapWidth)
 			}

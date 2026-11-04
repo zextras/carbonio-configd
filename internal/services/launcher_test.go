@@ -8,6 +8,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -651,10 +652,8 @@ func TestKillStatsPidFile_InvalidPid(t *testing.T) {
 
 func assertContains(t *testing.T, args []string, needle string) {
 	t.Helper()
-	for _, a := range args {
-		if a == needle {
-			return
-		}
+	if slices.Contains(args, needle) {
+		return
 	}
 	t.Errorf("expected args to contain %q, got %v", needle, args)
 }

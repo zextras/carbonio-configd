@@ -166,8 +166,7 @@ func TestWrapConfig(t *testing.T) {
 			}
 
 			// Verify it's a ConfigError
-			var configErr *ConfigError
-			if !errors.As(wrapped, &configErr) {
+			if _, ok := errors.AsType[*ConfigError](wrapped); !ok {
 				t.Error("WrapConfig should return a *ConfigError")
 			}
 		})
@@ -219,8 +218,7 @@ func TestWrapCache(t *testing.T) {
 				t.Errorf("Error() = %v, want %v", wrapped.Error(), tt.expectError)
 			}
 
-			var cacheErr *CacheError
-			if !errors.As(wrapped, &cacheErr) {
+			if _, ok := errors.AsType[*CacheError](wrapped); !ok {
 				t.Error("WrapCache should return a *CacheError")
 			}
 		})

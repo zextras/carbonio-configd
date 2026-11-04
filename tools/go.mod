@@ -6,7 +6,7 @@
 // go tool -modfile=tools/go.mod <deadcode|dupl>.
 module github.com/zextras/carbonio-configd/tools
 
-go 1.26.0
+go 1.27.0
 
 tool (
 	github.com/mibk/dupl

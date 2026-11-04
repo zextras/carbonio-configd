@@ -571,7 +571,7 @@ func TestProcessEnablerLineFalseEnablerMultiLine(t *testing.T) {
 		t.Fatalf("interpolateLine: %v", err)
 	}
 
-	for _, l := range strings.Split(result, "\n") {
+	for l := range strings.SplitSeq(result, "\n") {
 		trimmed := strings.TrimSpace(l)
 		if trimmed == "" {
 			continue

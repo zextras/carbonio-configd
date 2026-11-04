@@ -245,9 +245,9 @@ func (f *FS) CreateTemp(dir, pattern string) (sys.File, error) {
 	seq := f.tmpSeq
 	f.mu.Unlock()
 
-	prefix, suffix := pattern, ""
-	if i := strings.LastIndex(pattern, "*"); i >= 0 {
-		prefix, suffix = pattern[:i], pattern[i+1:]
+	prefix, suffix, found := strings.CutLast(pattern, "*")
+	if !found {
+		prefix, suffix = pattern, ""
 	}
 
 	name := filepath.Join(dir, fmt.Sprintf("%s%06d%s", prefix, seq, suffix))

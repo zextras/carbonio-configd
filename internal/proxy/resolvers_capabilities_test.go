@@ -7,6 +7,7 @@ package proxy
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/zextras/carbonio-configd/internal/config"
@@ -138,13 +139,7 @@ func TestResolveIMAPCapabilities(t *testing.T) {
 				return
 			}
 			if tt.expectContains != "" {
-				found := false
-				for _, c := range caps {
-					if c == tt.expectContains {
-						found = true
-						break
-					}
-				}
+				found := slices.Contains(caps, tt.expectContains)
 				if !found {
 					t.Errorf("expected capabilities to contain %q, got %v", tt.expectContains, caps)
 				}
