@@ -49,7 +49,7 @@ Runtime dependencies are `libsystemd0` and `polkitd` (apt), `systemd-libs` and
 `zextras`):
 
 - part of `carbonio-appserver`, `carbonio-directory-server`, `carbonio-mta` and `carbonio-proxy` targets (`PartOf=`/`WantedBy=`); `After=network-online.target carbonio-openldap.service`;
-- `ExecStartPre=` runs `/opt/zextras/bin/systemd-envscript`, then waits up to 120 s for the LDAP port (`$ldap_domain`:`$ldap_port` from `/opt/zextras/data/systemd.env`) to accept connections;
+- `ExecStartPre=` runs `/opt/zextras/bin/systemd-envscript`, then runs `configd ldap wait --timeout 120s`: it waits up to 120 s for one of the `ldap_url` URLs (resolved from localconfig and with the same TLS rules as the daemon, space-separated lists fail over) to accept a connection, and fails the start after that. When no `ldap_url` is configured it prints a warning and succeeds at once, because the daemon itself starts without LDAP (its LDAP queries fail until it is configured);
 - `ExecStart=/opt/zextras/bin/configd`, `ExecReload=/bin/kill -HUP $MAINPID`;
 - `WatchdogSec=120`: configd pings systemd every 60 s once READY has been sent (the watchdog only counts after `READY=1`, so a slow first pass is not penalised);
 - `TimeoutStartSec=300`, `TimeoutStopSec=10`, `KillMode=mixed`, `KillSignal=SIGTERM`;
