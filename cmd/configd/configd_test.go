@@ -77,7 +77,7 @@ func TestPerlArchname(t *testing.T) {
 			fakes := systest.New()
 			fakes.Exec.OnPath("/usr/bin/perl", systest.Reply(tt.output))
 
-			if got := perlArchname(fakes.System()); got != tt.expected {
+			if got := perlArchname(t.Context(), fakes.System()); got != tt.expected {
 				t.Errorf("perlArchname() = %q, want %q", got, tt.expected)
 			}
 
@@ -94,7 +94,7 @@ func TestPerlArchname_PerlFails(t *testing.T) {
 	fakes := systest.New()
 	fakes.Exec.OnPath("/usr/bin/perl", systest.Fail(2, "boom"))
 
-	if got := perlArchname(fakes.System()); got != "" {
+	if got := perlArchname(t.Context(), fakes.System()); got != "" {
 		t.Errorf("perlArchname() = %q, want empty when perl fails", got)
 	}
 }
@@ -104,7 +104,7 @@ func TestEnsureZextrasPerlEnv_PerlAlreadySet(t *testing.T) {
 	t.Setenv("PERLLIB", "")
 
 	fakes := systest.New()
-	ensureZextrasPerlEnv(fakes.System())
+	ensureZextrasPerlEnv(t.Context(), fakes.System())
 
 	if got := os.Getenv("PERLLIB"); got != "" {
 		t.Errorf("PERLLIB = %q, want it untouched when PERL5LIB is already set", got)
@@ -122,7 +122,7 @@ func TestEnsureZextrasPerlEnv_PerlNotAvailable(t *testing.T) {
 	fakes := systest.New()
 	fakes.Exec.FailStart(func(c *sys.Cmd) bool { return c.Path == "/usr/bin/perl" }, os.ErrNotExist)
 
-	ensureZextrasPerlEnv(fakes.System())
+	ensureZextrasPerlEnv(t.Context(), fakes.System())
 
 	if got := os.Getenv("PERL5LIB"); got != "" {
 		t.Errorf("PERL5LIB = %q, want it unset when perl is missing", got)
@@ -140,7 +140,7 @@ func TestEnsureZextrasPerlEnv_PerlSetsVars(t *testing.T) {
 	fakes := systest.New()
 	fakes.Exec.OnPath("/usr/bin/perl", systest.Reply("archname='x86_64-linux-thread-multi';\n"))
 
-	ensureZextrasPerlEnv(fakes.System())
+	ensureZextrasPerlEnv(t.Context(), fakes.System())
 
 	want := cliutil.BasePath("common", "lib", "perl5", "x86_64-linux-thread-multi") + ":" +
 		cliutil.BasePath("common", "lib", "perl5")

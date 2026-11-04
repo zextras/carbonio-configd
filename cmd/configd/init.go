@@ -6,7 +6,6 @@ package main
 
 import (
 	"context"
-	"os"
 
 	"github.com/zextras/carbonio-configd/internal/cli/initcmd"
 	"github.com/zextras/carbonio-configd/internal/sys"
@@ -19,8 +18,8 @@ type InitCmd struct {
 }
 
 // Run executes the init subcommand.
-func (c *InitCmd) Run(env sys.System) error {
-	return exitWith(initcmd.Run(context.Background(), env, os.Stdout, os.Stderr, &initcmd.Options{
+func (c *InitCmd) Run(env sys.System, std *stdio) error {
+	return exitWith(initcmd.Run(context.Background(), env, std.Out, std.Err, &initcmd.Options{
 		Component: c.Component,
 		Force:     c.Force,
 	}))

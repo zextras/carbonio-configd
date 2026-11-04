@@ -35,6 +35,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/plan"
 	"github.com/zextras/carbonio-configd/internal/services"
 	"github.com/zextras/carbonio-configd/internal/sys"
+	"github.com/zextras/carbonio-configd/internal/systemd"
 )
 
 // maxAttempts is how many cycles a failing restart (the manager refusing it,
@@ -48,8 +49,7 @@ const maxAttempts = 3
 // through units, and how a plan entry is carried out on them. It is satisfied
 // by *services.ServiceManager.
 type Systemd interface {
-	// IsSystemdMode reports whether services are managed through systemd units.
-	IsSystemdMode() bool
+	systemd.Mode
 	// ApplySystemd carries out a restart (try-reload-or-restart), start or
 	// stop of service.
 	ApplySystemd(ctx context.Context, service string, action plan.Action) error
@@ -113,9 +113,11 @@ func (p *Policy) WithSystemd(sd Systemd) *Policy {
 	return p
 }
 
-// systemdMode reports whether this cycle follows the systemd rules.
-func (p *Policy) systemdMode() bool {
-	return p.systemd != nil && p.systemd.IsSystemdMode()
+// SystemdMode reports whether this cycle follows the systemd rules: the policy
+// holds the one systemd-mode answer of the config manager. A nil policy or one
+// without a systemd host is never in systemd mode.
+func (p *Policy) SystemdMode() bool {
+	return p != nil && systemd.Managed(p.systemd)
 }
 
 // Apply runs the restart policy for one cycle and returns the plan restarts
@@ -169,7 +171,7 @@ func (p *Policy) queue(ctx context.Context, restarts []plan.Restart) []plan.Rest
 func (p *Policy) dispatch(
 	ctx context.Context, service string, action plan.Action, reasons, kinds []string,
 ) (retry bool) {
-	if !p.systemdMode() {
+	if !p.SystemdMode() {
 		return p.queueLegacy(ctx, service, reasons, kinds)
 	}
 

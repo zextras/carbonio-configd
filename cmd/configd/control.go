@@ -6,7 +6,6 @@ package main
 
 import (
 	"context"
-	"os"
 
 	"github.com/zextras/carbonio-configd/internal/cli/control"
 	"github.com/zextras/carbonio-configd/internal/sys"
@@ -22,32 +21,32 @@ type ControlCmd struct {
 }
 
 // runControl executes one "configd control" action.
-func runControl(env sys.System, action control.Action) error {
+func runControl(env sys.System, std *stdio, action control.Action) error {
 	opts := &control.Options{Action: action}
 
-	return exitWith(control.Run(context.Background(), env, os.Stdout, os.Stderr, opts))
+	return exitWith(control.Run(context.Background(), env, std.Out, std.Err, opts))
 }
 
 type ControlStartCmd struct{}
 
-func (c *ControlStartCmd) Run(_ *ControlCmd, env sys.System) error {
-	return runControl(env, control.ActionStart)
+func (c *ControlStartCmd) Run(_ *ControlCmd, env sys.System, std *stdio) error {
+	return runControl(env, std, control.ActionStart)
 }
 
 type ControlStopCmd struct{}
 
-func (c *ControlStopCmd) Run(_ *ControlCmd, env sys.System) error {
-	return runControl(env, control.ActionStop)
+func (c *ControlStopCmd) Run(_ *ControlCmd, env sys.System, std *stdio) error {
+	return runControl(env, std, control.ActionStop)
 }
 
 type ControlRestartCmd struct{}
 
-func (c *ControlRestartCmd) Run(_ *ControlCmd, env sys.System) error {
-	return runControl(env, control.ActionRestart)
+func (c *ControlRestartCmd) Run(_ *ControlCmd, env sys.System, std *stdio) error {
+	return runControl(env, std, control.ActionRestart)
 }
 
 type ControlStatusCmd struct{}
 
-func (c *ControlStatusCmd) Run(_ *ControlCmd, env sys.System) error {
-	return runControl(env, control.ActionStatus)
+func (c *ControlStatusCmd) Run(_ *ControlCmd, env sys.System, std *stdio) error {
+	return runControl(env, std, control.ActionStatus)
 }

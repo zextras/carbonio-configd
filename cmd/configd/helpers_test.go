@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"io"
 	"testing"
 )
 
@@ -61,4 +62,10 @@ func TestSetupProfilingAndTracing_NoFlags(t *testing.T) {
 	if tc != nil {
 		t.Error("expected nil TracingConfig when no tracing flags set")
 	}
+}
+
+// discardStdio is the standard streams of a command whose output a test does
+// not look at.
+func discardStdio() *stdio {
+	return &stdio{Out: io.Discard, Err: io.Discard}
 }

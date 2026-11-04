@@ -6,7 +6,6 @@ package main
 
 import (
 	"context"
-	"os"
 
 	"github.com/zextras/carbonio-configd/internal/cli/status"
 	"github.com/zextras/carbonio-configd/internal/sys"
@@ -18,6 +17,6 @@ type StatusCmd struct {
 }
 
 // Run executes the status subcommand.
-func (c *StatusCmd) Run(env sys.System) error {
-	return exitWith(status.Run(context.Background(), env, os.Stdout, os.Stderr, &status.Options{Name: c.Name}))
+func (c *StatusCmd) Run(env sys.System, std *stdio) error {
+	return exitWith(status.Run(context.Background(), env, std.Out, std.Err, &status.Options{Name: c.Name}))
 }

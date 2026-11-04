@@ -6,8 +6,6 @@ package main
 
 import (
 	"context"
-	"io"
-	"os"
 
 	"github.com/zextras/carbonio-configd/internal/cli/ldapcmd"
 	"github.com/zextras/carbonio-configd/internal/sys"
@@ -29,18 +27,17 @@ type LDAPCmd struct {
 	Mcf    LDAPMcfCmd    `cmd:"" passthrough:"" help:"Modify the global config: [+|-]attr value ... (zmprov mcf)"`
 	Search LDAPSearchCmd `cmd:"" help:"Search LDAP"`
 
-	// dial and stdout are the seams of the tests: the connection opener and
-	// where the verbs print. Unset, the verbs use a pooled client and os.Stdout.
-	dial   ldapcmd.Dial
-	stdout io.Writer
+	// dial is the seam of the tests: the connection opener. Unset, the verbs
+	// use a pooled client.
+	dial ldapcmd.Dial
 }
 
 // LDAPGacfCmd is "configd ldap gacf".
 type LDAPGacfCmd struct{}
 
 // Run executes "configd ldap gacf".
-func (c *LDAPGacfCmd) Run(parent *LDAPCmd, env sys.System) error {
-	return parent.run(env, parent.options(ldapcmd.VerbGacf, nil))
+func (c *LDAPGacfCmd) Run(parent *LDAPCmd, env sys.System, std *stdio) error {
+	return parent.run(env, std, parent.options(ldapcmd.VerbGacf, nil))
 }
 
 // LDAPGcfCmd is "configd ldap gcf".
@@ -49,8 +46,8 @@ type LDAPGcfCmd struct {
 }
 
 // Run executes "configd ldap gcf".
-func (c *LDAPGcfCmd) Run(parent *LDAPCmd, env sys.System) error {
-	return parent.run(env, parent.options(ldapcmd.VerbGcf, c.Attrs))
+func (c *LDAPGcfCmd) Run(parent *LDAPCmd, env sys.System, std *stdio) error {
+	return parent.run(env, std, parent.options(ldapcmd.VerbGcf, c.Attrs))
 }
 
 // LDAPGsCmd is "configd ldap gs".
@@ -59,13 +56,13 @@ type LDAPGsCmd struct {
 }
 
 // Run executes "configd ldap gs".
-func (c *LDAPGsCmd) Run(parent *LDAPCmd, env sys.System) error {
+func (c *LDAPGsCmd) Run(parent *LDAPCmd, env sys.System, std *stdio) error {
 	var args []string
 	if c.Server != "" {
 		args = []string{c.Server}
 	}
 
-	return parent.run(env, parent.options(ldapcmd.VerbGs, args))
+	return parent.run(env, std, parent.options(ldapcmd.VerbGs, args))
 }
 
 // LDAPMcfCmd is "configd ldap mcf". Its arguments are taken verbatim, so a
@@ -75,14 +72,14 @@ type LDAPMcfCmd struct {
 }
 
 // Run executes "configd ldap mcf".
-func (c *LDAPMcfCmd) Run(parent *LDAPCmd, env sys.System) error {
+func (c *LDAPMcfCmd) Run(parent *LDAPCmd, env sys.System, std *stdio) error {
 	// The command is passthrough, so a habitual "--" arrives as an argument.
 	changes := c.Changes
 	if len(changes) > 0 && changes[0] == "--" {
 		changes = changes[1:]
 	}
 
-	return parent.run(env, parent.options(ldapcmd.VerbMcf, changes))
+	return parent.run(env, std, parent.options(ldapcmd.VerbMcf, changes))
 }
 
 // LDAPSearchCmd is "configd ldap search".
@@ -94,11 +91,11 @@ type LDAPSearchCmd struct {
 }
 
 // Run executes "configd ldap search".
-func (c *LDAPSearchCmd) Run(parent *LDAPCmd, env sys.System) error {
+func (c *LDAPSearchCmd) Run(parent *LDAPCmd, env sys.System, std *stdio) error {
 	opts := parent.options(ldapcmd.VerbSearch, nil)
 	opts.Base, opts.Filter, opts.Scope, opts.Attrs = c.Base, c.Filter, c.Scope, c.Attr
 
-	return parent.run(env, opts)
+	return parent.run(env, std, opts)
 }
 
 func (c *LDAPCmd) options(verb ldapcmd.Verb, args []string) *ldapcmd.Options {
@@ -115,13 +112,8 @@ func (c *LDAPCmd) options(verb ldapcmd.Verb, args []string) *ldapcmd.Options {
 
 // run executes one verb on env's filesystem and turns its status into main's
 // exit error.
-func (c *LDAPCmd) run(env sys.System, opts *ldapcmd.Options) error {
+func (c *LDAPCmd) run(env sys.System, std *stdio, opts *ldapcmd.Options) error {
 	opts.FS = env.FS
 
-	stdout := c.stdout
-	if stdout == nil {
-		stdout = os.Stdout
-	}
-
-	return exitWith(ldapcmd.Run(context.Background(), stdout, os.Stderr, opts))
+	return exitWith(ldapcmd.Run(context.Background(), std.Out, std.Err, opts))
 }

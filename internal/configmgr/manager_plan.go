@@ -32,6 +32,10 @@ import (
 // value as undefined). A MAPFILE is observed as the path it must have: the
 // path when a value is configured and "" when it is not, independently of what
 // is currently on disk, because restoring the file is an action of the plan.
+//
+// FILE lookups are cached in State.FileCache for the rest of the daemon cycle
+// (the next load clears it) unless ctx carries a private cache (withFileScratch,
+// as PlanHost's does): then Observe leaves the state untouched.
 func (cm *ConfigManager) Observe(
 	ctx context.Context, base *snapshot.Snapshot, conf *config.MtaConfig,
 ) *snapshot.Snapshot {
@@ -394,12 +398,11 @@ func (cm *ConfigManager) ApplyRestarts(ctx context.Context, pl *plan.Plan) {
 	})
 }
 
-// systemdMode reports whether the services are managed through systemd units;
-// a manager without that notion (a test double) is never in systemd mode.
+// systemdMode reports whether the services are managed through systemd units.
+// The restart policy holds the answer (the one the service manager gives); a
+// manager without that notion (a test double) is never in systemd mode.
 func (cm *ConfigManager) systemdMode() bool {
-	m, ok := cm.ServiceMgr.(interface{ IsSystemdMode() bool })
-
-	return ok && m.IsSystemdMode()
+	return cm.policy.SystemdMode()
 }
 
 // debounceOf returns the restart debounce period configured in localconfig.

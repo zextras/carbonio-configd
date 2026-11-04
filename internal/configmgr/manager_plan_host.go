@@ -34,9 +34,11 @@ var ErrUnknownSection = errors.New("unknown section")
 //
 // It performs read-only host access only (file reads and stats, "postconf -h"
 // and "postconf -n"): no file is written, no postfix parameter is set, no LDAP
-// attribute is modified and no service is restarted.
+// attribute is modified and no service is restarted. The manager's state is
+// untouched too: the FILE lookups the observation and the rendering make are
+// cached for the duration of the call only, never in State.FileCache.
 func (cm *ConfigManager) PlanHost(ctx context.Context, scope []string) (*plan.Plan, error) {
-	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
+	ctx = withFileScratch(logger.ContextWithComponentOnce(ctx, "configmgr"))
 
 	conf := cm.State.GetMtaConfig()
 

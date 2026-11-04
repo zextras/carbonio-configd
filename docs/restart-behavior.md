@@ -216,6 +216,10 @@ Source: `internal/watchdog/watchdog.go`
   - after the watchdog's own restart attempt, successful or not, the service is tracked again: a
     service still down after a failed restart is retried by the next tick (previously it was left
     untracked and never retried).
+- The services watched are exactly the ones named by `zmconfigd_watchdog_services`; the watchdog
+  carries no list of its own.
+- `Stop` followed by `Start` never overlaps two loops: the new loop waits for the old one to exit
+  before arming its ticker, and a stop wins over a simultaneous tick.
 
 ## Service control priority
 

@@ -7,7 +7,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/alecthomas/kong"
 	"github.com/willabides/kongplete"
@@ -47,12 +46,12 @@ type CLI struct {
 type DaemonCmd struct{}
 
 // Run executes the daemon command.
-func (c *DaemonCmd) Run(cli *CLI, env sys.System) error {
-	if !cliutil.RequireZextras(os.Stderr) {
+func (c *DaemonCmd) Run(cli *CLI, env sys.System, std *stdio) error {
+	if !cliutil.RequireZextras(std.Err) {
 		return exitStatus(1)
 	}
 
-	ctx := cliutil.InitLogging(os.Stderr)
+	ctx := cliutil.InitLogging(std.Err)
 	ctx = logger.ContextWithComponent(ctx, "main")
 
 	notifier, err := sdnotify.New()
@@ -94,8 +93,8 @@ type RewriteCmd struct {
 }
 
 // Run executes the rewrite command.
-func (c *RewriteCmd) Run(_ *CLI, env sys.System) error {
-	return exitWith(rewrite.Run(context.Background(), os.Stdout, os.Stderr, &rewrite.Options{
+func (c *RewriteCmd) Run(_ *CLI, env sys.System, std *stdio) error {
+	return exitWith(rewrite.Run(context.Background(), std.Out, std.Err, &rewrite.Options{
 		Configs:    c.ConfigNames,
 		Standalone: standaloneRewrite(env, false),
 	}))
@@ -109,8 +108,8 @@ type PlanCmd struct {
 
 // Run executes the plan command. The exit status is 0 when nothing would
 // change, 1 when a rewrite would change something and 2 on error.
-func (c *PlanCmd) Run(_ *CLI, env sys.System) error {
-	return exitWith(plancmd.Run(context.Background(), os.Stdout, os.Stderr, &plancmd.Options{
+func (c *PlanCmd) Run(_ *CLI, env sys.System, std *stdio) error {
+	return exitWith(plancmd.Run(context.Background(), std.Out, std.Err, &plancmd.Options{
 		Sections: c.Sections,
 		JSON:     c.JSON,
 		Planner:  planOnHost(env),

@@ -6,7 +6,6 @@ package main
 
 import (
 	"context"
-	"os"
 	"slices"
 
 	"github.com/zextras/carbonio-configd/internal/cli/service"
@@ -37,8 +36,8 @@ type ServiceCmd struct {
 }
 
 // runService executes one "configd service" action.
-func runService(env sys.System, opts *service.Options) error {
-	return exitWith(service.Run(context.Background(), env, os.Stdout, os.Stderr, opts))
+func runService(env sys.System, std *stdio, opts *service.Options) error {
+	return exitWith(service.Run(context.Background(), env, std.Out, std.Err, opts))
 }
 
 // serviceArgs are the positional arguments every service verb takes: the
@@ -63,8 +62,8 @@ func (a *serviceArgs) options(action service.Action) *service.Options {
 type ServiceListCmd struct{}
 
 // Run executes the service list command.
-func (c *ServiceListCmd) Run(env sys.System) error {
-	return runService(env, &service.Options{Action: service.ActionList})
+func (c *ServiceListCmd) Run(env sys.System, std *stdio) error {
+	return runService(env, std, &service.Options{Action: service.ActionList})
 }
 
 // ServiceStartCmd starts a service.
@@ -75,11 +74,11 @@ type ServiceStartCmd struct {
 
 // Run executes the service start command. Both the --no-rewrite flag and the
 // legacy "norewrite" positional argument are honored.
-func (c *ServiceStartCmd) Run(env sys.System) error {
+func (c *ServiceStartCmd) Run(env sys.System, std *stdio) error {
 	opts := c.options(service.ActionStart)
 	opts.NoRewrite = opts.NoRewrite || c.NoRewrite
 
-	return runService(env, opts)
+	return runService(env, std, opts)
 }
 
 // ServiceStartSystemdCmd is the systemd ExecStart leaf: it launches the service
@@ -90,8 +89,8 @@ type ServiceStartSystemdCmd struct {
 }
 
 // Run executes the systemd-leaf start command.
-func (c *ServiceStartSystemdCmd) Run(env sys.System) error {
-	return runService(env, c.options(service.ActionStartSystemd))
+func (c *ServiceStartSystemdCmd) Run(env sys.System, std *stdio) error {
+	return runService(env, std, c.options(service.ActionStartSystemd))
 }
 
 // ServiceStopSystemdCmd is the systemd ExecStop leaf: it stops the service
@@ -101,8 +100,8 @@ type ServiceStopSystemdCmd struct {
 }
 
 // Run executes the systemd-leaf stop command.
-func (c *ServiceStopSystemdCmd) Run(env sys.System) error {
-	return runService(env, c.options(service.ActionStopSystemd))
+func (c *ServiceStopSystemdCmd) Run(env sys.System, std *stdio) error {
+	return runService(env, std, c.options(service.ActionStopSystemd))
 }
 
 // ServiceRestartSystemdCmd stops then starts the service in-process, never
@@ -112,8 +111,8 @@ type ServiceRestartSystemdCmd struct {
 }
 
 // Run executes the systemd-leaf restart command.
-func (c *ServiceRestartSystemdCmd) Run(env sys.System) error {
-	return runService(env, c.options(service.ActionRestartSystemd))
+func (c *ServiceRestartSystemdCmd) Run(env sys.System, std *stdio) error {
+	return runService(env, std, c.options(service.ActionRestartSystemd))
 }
 
 // ServiceStopCmd stops a service.
@@ -122,8 +121,8 @@ type ServiceStopCmd struct {
 }
 
 // Run executes the service stop command.
-func (c *ServiceStopCmd) Run(env sys.System) error {
-	return runService(env, c.options(service.ActionStop))
+func (c *ServiceStopCmd) Run(env sys.System, std *stdio) error {
+	return runService(env, std, c.options(service.ActionStop))
 }
 
 // ServiceKillCmd stops a service; legacy zm*ctl scripts treat kill and stop
@@ -133,8 +132,8 @@ type ServiceKillCmd struct {
 }
 
 // Run executes the service kill command.
-func (c *ServiceKillCmd) Run(env sys.System) error {
-	return runService(env, c.options(service.ActionKill))
+func (c *ServiceKillCmd) Run(env sys.System, std *stdio) error {
+	return runService(env, std, c.options(service.ActionKill))
 }
 
 // ServiceRestartCmd restarts a service.
@@ -144,11 +143,11 @@ type ServiceRestartCmd struct {
 }
 
 // Run executes the service restart command.
-func (c *ServiceRestartCmd) Run(env sys.System) error {
+func (c *ServiceRestartCmd) Run(env sys.System, std *stdio) error {
 	opts := c.options(service.ActionRestart)
 	opts.NoRewrite = opts.NoRewrite || c.NoRewrite
 
-	return runService(env, opts)
+	return runService(env, std, opts)
 }
 
 // ServiceReloadCmd reloads a service.
@@ -157,8 +156,8 @@ type ServiceReloadCmd struct {
 }
 
 // Run executes the service reload command.
-func (c *ServiceReloadCmd) Run(env sys.System) error {
-	return runService(env, c.options(service.ActionReload))
+func (c *ServiceReloadCmd) Run(env sys.System, std *stdio) error {
+	return runService(env, std, c.options(service.ActionReload))
 }
 
 // ServiceStatusCmd shows detailed status for a service.
@@ -167,8 +166,8 @@ type ServiceStatusCmd struct {
 }
 
 // Run executes the service status command.
-func (c *ServiceStatusCmd) Run(env sys.System) error {
-	return runService(env, c.options(service.ActionStatus))
+func (c *ServiceStatusCmd) Run(env sys.System, std *stdio) error {
+	return runService(env, std, c.options(service.ActionStatus))
 }
 
 // ServiceRefreshCmd signals a service to re-read its configuration.
@@ -177,8 +176,8 @@ type ServiceRefreshCmd struct {
 }
 
 // Run executes the service refresh command.
-func (c *ServiceRefreshCmd) Run(env sys.System) error {
-	return runService(env, c.options(service.ActionRefresh))
+func (c *ServiceRefreshCmd) Run(env sys.System, std *stdio) error {
+	return runService(env, std, c.options(service.ActionRefresh))
 }
 
 // ServiceRotateCmd signals a service to reopen its logs.
@@ -187,8 +186,8 @@ type ServiceRotateCmd struct {
 }
 
 // Run executes the service rotate command.
-func (c *ServiceRotateCmd) Run(env sys.System) error {
-	return runService(env, c.options(service.ActionRotate))
+func (c *ServiceRotateCmd) Run(env sys.System, std *stdio) error {
+	return runService(env, std, c.options(service.ActionRotate))
 }
 
 // ServiceUsageCmd catches an empty or unknown verb (the wrappers forward
@@ -198,6 +197,6 @@ type ServiceUsageCmd struct {
 }
 
 // Run prints the usage and exits 1.
-func (c *ServiceUsageCmd) Run(env sys.System) error {
-	return runService(env, &service.Options{Action: service.ActionUsage, Extra: c.Args})
+func (c *ServiceUsageCmd) Run(env sys.System, std *stdio) error {
+	return runService(env, std, &service.Options{Action: service.ActionUsage, Extra: c.Args})
 }
