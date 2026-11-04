@@ -64,8 +64,31 @@ make check
 make reuse
 
 # Verify generated localconfig docs/defaults are up to date
-# (needs a local carbonio-mailbox clone, see MAILBOX_REPO in the Makefile)
+# (uses the clone at MAILBOX_REPO, else shallow-clones the pinned tag from GitHub)
 make generate-check
+
+# vet / race-test every build-tag combination (default, integration, tracing, profiling)
+make vet-tags test-tags
+
+# 10 s per fuzz target, and the dependency vulnerability scan
+make fuzz-smoke security
 ```
+
+### What Jenkins runs
+
+`make lint` fails when `golangci-lint` is not installed (it never skips silently). The pipeline runs, in order: REUSE
+lint, THIRDPARTIES, **Static checks** (`make vet-tags deadcode dup generate-check`), **Tests** (`gotestsum` with the
+race detector for the default, `tracing`, `profiling` and `tracing profiling` tags), **Fuzz smoke**
+(`make fuzz-smoke`), **Vulnerability scan** (`make security`), **Lint and SonarQube analysis** (one `golangci-lint`
+run: its checkstyle report goes to Sonar and its exit status fails the build), the packages and the docker image.
+`make check` reproduces the network-free part locally.
+
+`gotestsum`, `govulncheck`, `deadcode` and `dupl` are pinned in `tools/go.mod` and run through
+`go tool -modfile=tools/go.mod`; bump them there (`go get -modfile=tools/go.mod -tool <pkg>@<version>`), never with
+`@latest` in the Jenkinsfile.
+
+The `LDAP integration` stage (`make test-integration-ldap`) needs a container runtime that the default `golang-v1` pod
+does not have. It runs on a `docker-build-v1` pod on the nightly build of `main`, or when a build is started with
+`RUN_LDAP_INTEGRATION=true`; see [test/README.md](test/README.md#in-jenkins).
 
 Integration tests are described in [test/README.md](test/README.md).

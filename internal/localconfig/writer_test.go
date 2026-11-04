@@ -259,7 +259,10 @@ func TestSaveLocalConfig_AtomicWrite(t *testing.T) {
 }
 
 func TestSetKey_FileNotFound(t *testing.T) {
-	err := setOne("/nonexistent/path/localconfig.xml", "key", "value")
+	// A parent directory unique to this test: a shared absolute path such as
+	// /nonexistent/path can be created by other packages' tests when the
+	// suite runs as root (CI), which made this test flaky.
+	err := setOne(filepath.Join(t.TempDir(), "missing", "localconfig.xml"), "key", "value")
 	if err == nil {
 		t.Error("expected error for nonexistent file")
 	}

@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-only
 
-# Dead-code check (local only, not wired into CI): reports functions that no
+# Dead-code check (make deadcode; the Jenkins 'Static checks' stage runs it): reports functions that no
 # main package reaches, using golang.org/x/tools/cmd/deadcode pinned in
 # tools/go.mod. There is no allowlist; the expected result is zero findings.
 #

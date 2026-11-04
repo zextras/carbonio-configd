@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-only
 
-# Go duplication ratchet (local only, not wired into CI). Runs dupl (pinned in
+# Go duplication ratchet (make dup; the Jenkins 'Static checks' stage runs it). Runs dupl (pinned in
 # tools/go.mod) with -t 100 tokens over non-test, non-generated Go and compares
 # the clone group count and the number of duplicated lines (union of the
 # reported ranges) with go_groups and go_lines in scripts/dup-baseline.json.
@@ -33,13 +33,21 @@ lines=$({ grep -E '^  .+:[0-9]+,[0-9]+$' <<<"$report" || true; } |
 echo "dupl -t ${threshold}: ${groups} clone groups, ${lines} duplicated lines"
 
 if [[ ${1:-} == --update ]]; then
-	jq -n --argjson g "$groups" --argjson l "$lines" '{go_groups: $g, go_lines: $l}' >"$baseline"
+	printf '{\n  "go_groups": %d,\n  "go_lines": %d\n}\n' "$groups" "$lines" >"$baseline"
 	echo "baseline updated: $baseline"
 	exit 0
 fi
 
-base_groups=$(jq .go_groups "$baseline")
-base_lines=$(jq .go_lines "$baseline")
+# The golang CI container has no jq: the baseline is two integer fields.
+json_int() {
+	sed -n "s/^[[:space:]]*\"$1\":[[:space:]]*\([0-9][0-9]*\).*/\1/p" "$baseline"
+}
+base_groups=$(json_int go_groups)
+base_lines=$(json_int go_lines)
+if [[ -z $base_groups || -z $base_lines ]]; then
+	echo "FAIL: cannot read go_groups/go_lines from $baseline" >&2
+	exit 1
+fi
 echo "baseline:    ${base_groups} clone groups, ${base_lines} duplicated lines"
 
 if ((groups > base_groups || lines > base_lines)); then
