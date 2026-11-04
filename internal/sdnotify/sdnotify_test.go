@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -319,6 +320,31 @@ func TestWatchdogEnabled(t *testing.T) {
 
 			if dur != tt.wantDur {
 				t.Errorf("WatchdogEnabled() duration = %v, want %v", dur, tt.wantDur)
+			}
+		})
+	}
+}
+
+// TestWatchdogEnabled_WatchdogPID verifies the watchdog is only ours when
+// WATCHDOG_PID is unset or names this process.
+func TestWatchdogEnabled_WatchdogPID(t *testing.T) {
+	t.Setenv("WATCHDOG_USEC", "30000000")
+
+	for _, tt := range []struct {
+		name   string
+		pid    string
+		wantOK bool
+	}{
+		{"unset", "", true},
+		{"this process", strconv.Itoa(os.Getpid()), true},
+		{"another process", strconv.Itoa(os.Getpid() + 1), false},
+		{"not a number", "abc", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("WATCHDOG_PID", tt.pid)
+
+			if _, ok := WatchdogEnabled(); ok != tt.wantOK {
+				t.Errorf("WatchdogEnabled() ok = %v, want %v", ok, tt.wantOK)
 			}
 		})
 	}

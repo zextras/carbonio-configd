@@ -725,3 +725,56 @@ func TestTracer_GetSpans_Sorting(t *testing.T) {
 			spans[0].Name, spans[1].Name, spans[2].Name)
 	}
 }
+
+// Metadata added after EndSpan must not race with an export and is not part of
+// the recorded span.
+func TestAddMetadataAfterEndSpanDoesNotRaceWithExport(t *testing.T) {
+	tracer := &Tracer{enabled: true}
+	span := tracer.StartSpan("op")
+	span.AddMetadata("k", "v")
+	tracer.EndSpan(span)
+
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+
+		for range 200 {
+			span.AddMetadata("late", "x")
+		}
+	}()
+
+	for range 200 {
+		var buf bytes.Buffer
+		if err := tracer.ExportJSON(&buf); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	<-done
+
+	got := tracer.GetSpans()
+	if len(got) != 1 || got[0].Metadata["k"] != "v" {
+		t.Fatalf("recorded spans = %+v", got)
+	}
+
+	if _, late := got[0].Metadata["late"]; late {
+		t.Error("metadata added after EndSpan leaked into the record")
+	}
+}
+
+func TestSpanSliceIsBounded(t *testing.T) {
+	tracer := &Tracer{enabled: true}
+
+	for range maxSpans + 10 {
+		tracer.EndSpan(tracer.StartSpan("op"))
+	}
+
+	if n := len(tracer.GetSpans()); n != maxSpans {
+		t.Errorf("recorded %d spans, want the cap %d", n, maxSpans)
+	}
+
+	if tracer.dropped != 10 {
+		t.Errorf("dropped = %d, want 10", tracer.dropped)
+	}
+}

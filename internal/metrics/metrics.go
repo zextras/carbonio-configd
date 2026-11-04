@@ -31,6 +31,9 @@ const (
 	restartRequests  = "configd_restart_requests_total"
 	watchdogRestarts = "configd_watchdog_restarts_total"
 	loadFailures     = "configd_load_failures_total"
+
+	ldapChangeTriggers  = "configd_ldap_change_triggers_total"
+	ldapWatchPollErrors = "configd_ldap_watch_poll_failures_total"
 )
 
 type metricType string
@@ -66,6 +69,12 @@ var catalog = map[string]struct {
 	loadFailures: {
 		"Failed configuration loads, by source (lc, gc, mc, sc loaders, timeout, mta_config).", counter,
 	},
+	ldapChangeTriggers: {
+		"Changes of watched LDAP entries reported by the change watcher, by component and result " +
+			"(cycle_requested: the main loop was woken for a cycle; already_pending: a wake-up was already queued).",
+		counter,
+	},
+	ldapWatchPollErrors: {"Failed polls of the LDAP change watcher.", counter},
 }
 
 // Registry is a set of metrics safe for concurrent use.
@@ -213,6 +222,30 @@ func (r *Registry) WatchdogRestart(service string, ok bool) {
 // LoadFailed records a failed configuration load from source.
 func (r *Registry) LoadFailed(source string) {
 	r.add(loadFailures, 1, label{"source", source})
+}
+
+// Results of a reported LDAP change, the "result" label of
+// configd_ldap_change_triggers_total.
+const (
+	// TriggerCycleRequested: the main loop was woken, a cycle follows.
+	TriggerCycleRequested = "cycle_requested"
+	// TriggerAlreadyPending: a wake-up was already queued, so the change is
+	// absorbed by the cycle that wake-up starts.
+	TriggerAlreadyPending = "already_pending"
+)
+
+// LDAPChangeTriggered records a change of the watched LDAP components reported
+// by the change watcher, once per component, with result one of the Trigger*
+// constants.
+func (r *Registry) LDAPChangeTriggered(components []string, result string) {
+	for _, c := range components {
+		r.add(ldapChangeTriggers, 1, label{"component", c}, label{"result", result})
+	}
+}
+
+// LDAPWatchPollFailed records a failed poll of the LDAP change watcher.
+func (r *Registry) LDAPWatchPollFailed() {
+	r.add(ldapWatchPollErrors, 1)
 }
 
 // Render returns the registry in the Prometheus text exposition format: one

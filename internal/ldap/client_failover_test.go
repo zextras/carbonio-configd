@@ -5,10 +5,13 @@
 package ldap
 
 import (
+	"context"
 	"errors"
 	"net"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/go-ldap/ldap/v3"
 )
@@ -38,7 +41,7 @@ func TestClient_Connect_AggregatesPerURLFailure(t *testing.T) {
 		password: "secret",
 	}
 
-	conn, err := c.connect()
+	conn, err := c.connect(t.Context())
 	if err == nil {
 		t.Fatal("expected aggregate error")
 	}
@@ -109,7 +112,7 @@ func TestClient_Connect_FailsOverBindFailureToNextURL(t *testing.T) {
 		password: "secret",
 	}
 
-	conn, err := c.connect()
+	conn, err := c.connect(t.Context())
 	if err != nil {
 		t.Fatalf("connect() did not fail over to the next URL: %v", err)
 	}
@@ -119,4 +122,70 @@ func TestClient_Connect_FailsOverBindFailureToNextURL(t *testing.T) {
 	}
 
 	_ = conn.Close()
+}
+
+// A cancelled context must abort a dial that never returns instead of waiting
+// for the dial timeout.
+func TestClient_Connect_ContextCancelAbortsDial(t *testing.T) {
+	t.Parallel()
+
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+
+	c := &Client{
+		dial: func(string, ...ldap.DialOpt) (*ldap.Conn, error) {
+			<-release
+
+			return nil, errors.New("late")
+		},
+		urls: []string{"ldap://a:389"},
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() {
+		_, err := c.connect(ctx)
+		done <- err
+	}()
+
+	cancel()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("connect = %v, want context.Canceled in the chain", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("connect did not return after the context was cancelled")
+	}
+}
+
+// executeWithRetry is the only retry layer: with a permanently failing dial it
+// makes exactly 1+maxRetries connection attempts.
+func TestClient_ExecuteWithRetry_AttemptBudget(t *testing.T) {
+	t.Parallel()
+
+	var dials atomic.Int32
+
+	c := &Client{
+		dial: func(string, ...ldap.DialOpt) (*ldap.Conn, error) {
+			dials.Add(1)
+
+			return nil, errors.New("refused")
+		},
+		urls:          []string{"ldap://a:389"},
+		maxRetries:    3,
+		retryDelay:    time.Millisecond,
+		maxRetryDelay: time.Millisecond,
+	}
+
+	err := c.executeWithRetry(t.Context(), func(*ldap.Conn) error { return nil })
+	if err == nil {
+		t.Fatal("expected failure")
+	}
+
+	if got := dials.Load(); got != 4 {
+		t.Errorf("dials = %d, want 4 (1 + maxRetries)", got)
+	}
 }

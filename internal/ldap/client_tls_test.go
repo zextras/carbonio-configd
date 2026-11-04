@@ -227,7 +227,7 @@ func TestClient_HungServer_BoundedByBindTimeout(t *testing.T) {
 			c.bindTimeout = 200 * time.Millisecond
 
 			start := time.Now()
-			_, err := c.connect()
+			_, err := c.connect(t.Context())
 			elapsed := time.Since(start)
 
 			if err == nil {
@@ -255,7 +255,7 @@ func TestClient_Close_AbortsInFlightConnect(t *testing.T) {
 	done := make(chan error, 1)
 
 	go func() {
-		_, err := c.connect()
+		_, err := c.connect(t.Context())
 		done <- err
 	}()
 
@@ -300,7 +300,7 @@ func TestClient_ReturnConnectionAfterClose_ClosesIt(t *testing.T) {
 	srv := ldapfake.New(t, ldapfake.Options{})
 	c := tlsTestClient(t, srv.URL("ldap", "127.0.0.1"), false, nil)
 
-	conn, err := c.getConnection()
+	conn, err := c.getConnection(t.Context())
 	if err != nil {
 		t.Fatalf("getConnection: %v", err)
 	}
@@ -314,49 +314,6 @@ func TestClient_ReturnConnectionAfterClose_ClosesIt(t *testing.T) {
 
 	if !conn.IsClosing() {
 		t.Error("connection returned to a closed client was not closed")
-	}
-}
-
-func TestSleepCtx(t *testing.T) {
-	t.Parallel()
-
-	if err := sleepCtx(context.Background(), time.Millisecond); err != nil {
-		t.Errorf("sleepCtx = %v", err)
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	start := time.Now()
-	if err := sleepCtx(ctx, time.Minute); !errors.Is(err, context.Canceled) {
-		t.Errorf("sleepCtx cancelled = %v, want context.Canceled", err)
-	}
-
-	if time.Since(start) > time.Second {
-		t.Error("sleepCtx ignored cancellation")
-	}
-}
-
-func TestLdapWithRetry_ContextCancelAbortsBackoff(t *testing.T) {
-	t.Parallel()
-
-	l := NewLdap(context.Background(), nil)
-	l.MaxRetries = 3
-	l.RetryDelay = time.Minute
-	l.MaxRetryDelay = time.Minute
-
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-
-	start := time.Now()
-	err := l.withRetry(ctx, "op", func() error { return errors.New("connection refused") })
-
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("withRetry = %v, want context.DeadlineExceeded", err)
-	}
-
-	if time.Since(start) > 2*time.Second {
-		t.Error("withRetry slept through the cancelled context")
 	}
 }
 

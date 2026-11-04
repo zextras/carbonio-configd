@@ -117,7 +117,7 @@ func (c *Client) SetDomainSSLCertKey(domainName, certificate, privateKey string)
 
 	dn := result.Entries[0].DN
 
-	return c.executeWithRetry(func(conn *ldap.Conn) error {
+	return c.executeWithRetry(c.lifecycle(), func(conn *ldap.Conn) error {
 		req := ldap.NewModifyRequest(dn, nil)
 		req.Replace("zimbraSSLCertificate", []string{certificate})
 		req.Replace("zimbraSSLPrivateKey", []string{privateKey})

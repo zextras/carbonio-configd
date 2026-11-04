@@ -7,11 +7,8 @@ package ldap
 import (
 	"context"
 	"errors"
-	"fmt"
+	"strings"
 	"testing"
-	"time"
-
-	"github.com/go-ldap/ldap/v3"
 
 	"github.com/zextras/carbonio-configd/internal/config"
 	errs "github.com/zextras/carbonio-configd/internal/errors"
@@ -398,231 +395,6 @@ func TestLdap_ModifyAttributeBatch_NonMaster_DNAdjustment(t *testing.T) {
 	// write stage (nil NativeClient guard in executeBatchModifyInternal)
 }
 
-func TestLdap_RetryConfiguration(t *testing.T) {
-	cfg := &config.Config{
-		LdapIsMaster: true,
-	}
-	l := NewLdap(context.Background(), cfg)
-
-	// Test default retry configuration
-	if l.MaxRetries != 3 {
-		t.Errorf("Expected MaxRetries=3, got %d", l.MaxRetries)
-	}
-	if l.RetryDelay != 100*time.Millisecond {
-		t.Errorf("Expected RetryDelay=100ms, got %v", l.RetryDelay)
-	}
-	if l.MaxRetryDelay != 5*time.Second {
-		t.Errorf("Expected MaxRetryDelay=5s, got %v", l.MaxRetryDelay)
-	}
-}
-
-func TestLdap_IsRetryableError(t *testing.T) {
-	tests := []struct {
-		name          string
-		err           error
-		wantRetryable bool
-	}{
-		{
-			name:          "nil_error",
-			err:           nil,
-			wantRetryable: false,
-		},
-		{
-			name:          "config_error_not_retryable",
-			err:           errs.NewConfigError("test", "key"),
-			wantRetryable: false,
-		},
-		{
-			name:          "wrapped_config_error_not_retryable",
-			err:           errs.WrapConfig("test", "key", fmt.Errorf("inner")),
-			wantRetryable: false,
-		},
-		{
-			name:          "generic_error_retryable",
-			err:           fmt.Errorf("connection timeout"),
-			wantRetryable: true,
-		},
-		{
-			name:          "network_error_retryable",
-			err:           fmt.Errorf("connection refused"),
-			wantRetryable: true,
-		},
-		{
-			name:          "permanent_ldap_result_code_not_retryable",
-			err:           ldap.NewError(ldap.LDAPResultNoSuchObject, errors.New("not found")),
-			wantRetryable: false,
-		},
-		{
-			name: "wrapped_permanent_ldap_error_not_retryable",
-			err: fmt.Errorf("modify %s on %s: %w", "olcLogLevel", "cn=config",
-				ldap.NewError(ldap.LDAPResultInvalidCredentials, errors.New("bad creds"))),
-			wantRetryable: false,
-		},
-		{
-			name:          "transient_ldap_result_code_retryable",
-			err:           ldap.NewError(ldap.LDAPResultUnavailable, errors.New("unavailable")),
-			wantRetryable: true,
-		},
-		{
-			name: "wrapped_transient_ldap_error_retryable",
-			err: fmt.Errorf("operation failed after %d retries: %w", 3,
-				ldap.NewError(ldap.LDAPResultServerDown, errors.New("server down"))),
-			wantRetryable: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := isRetryableError(tt.err)
-			if got != tt.wantRetryable {
-				t.Errorf("isRetryableError() = %v, want %v", got, tt.wantRetryable)
-			}
-		})
-	}
-}
-
-func TestLdap_WithRetry(t *testing.T) {
-	tests := []struct {
-		name           string
-		maxRetries     int
-		retryDelay     time.Duration
-		maxRetryDelay  time.Duration
-		operation      string
-		fnErrors       []error // errors to return on each attempt
-		wantErr        bool
-		wantAttempts   int
-		wantFinalError string
-	}{
-		{
-			name:          "success_first_attempt",
-			maxRetries:    3,
-			retryDelay:    10 * time.Millisecond,
-			maxRetryDelay: 100 * time.Millisecond,
-			operation:     "test operation",
-			fnErrors:      []error{nil},
-			wantErr:       false,
-			wantAttempts:  1,
-		},
-		{
-			name:          "success_after_retries",
-			maxRetries:    3,
-			retryDelay:    10 * time.Millisecond,
-			maxRetryDelay: 100 * time.Millisecond,
-			operation:     "test operation",
-			fnErrors: []error{
-				fmt.Errorf("transient error 1"),
-				fmt.Errorf("transient error 2"),
-				nil, // Success on third attempt
-			},
-			wantErr:      false,
-			wantAttempts: 3,
-		},
-		{
-			name:          "max_retries_exceeded",
-			maxRetries:    2,
-			retryDelay:    10 * time.Millisecond,
-			maxRetryDelay: 100 * time.Millisecond,
-			operation:     "test operation",
-			fnErrors: []error{
-				fmt.Errorf("transient error 1"),
-				fmt.Errorf("transient error 2"),
-				fmt.Errorf("transient error 3"),
-			},
-			wantErr:        true,
-			wantAttempts:   3, // Initial + 2 retries
-			wantFinalError: "operation test operation failed after 2 retries",
-		},
-		{
-			name:          "non_retryable_error_immediate_failure",
-			maxRetries:    3,
-			retryDelay:    10 * time.Millisecond,
-			maxRetryDelay: 100 * time.Millisecond,
-			operation:     "test operation",
-			fnErrors: []error{
-				errs.NewConfigError("test", "key"),
-			},
-			wantErr:      true,
-			wantAttempts: 1, // Should stop immediately
-		},
-		{
-			name:          "retryable_then_non_retryable",
-			maxRetries:    3,
-			retryDelay:    10 * time.Millisecond,
-			maxRetryDelay: 100 * time.Millisecond,
-			operation:     "test operation",
-			fnErrors: []error{
-				fmt.Errorf("transient error"),
-				errs.NewConfigError("test", "key"), // Non-retryable on second attempt
-			},
-			wantErr:      true,
-			wantAttempts: 2, // Should stop after non-retryable error
-		},
-		{
-			name:          "exponential_backoff",
-			maxRetries:    3,
-			retryDelay:    10 * time.Millisecond,
-			maxRetryDelay: 50 * time.Millisecond,
-			operation:     "test operation",
-			fnErrors: []error{
-				fmt.Errorf("error 1"),
-				fmt.Errorf("error 2"),
-				fmt.Errorf("error 3"),
-				fmt.Errorf("error 4"),
-			},
-			wantErr:      true,
-			wantAttempts: 4, // Initial + 3 retries
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cfg := &config.Config{
-				LdapIsMaster: true,
-			}
-			l := NewLdap(context.Background(), cfg)
-			l.MaxRetries = tt.maxRetries
-			l.RetryDelay = tt.retryDelay
-			l.MaxRetryDelay = tt.maxRetryDelay
-
-			attempts := 0
-			err := l.withRetry(context.Background(), tt.operation, func() error {
-				defer func() { attempts++ }()
-				if attempts < len(tt.fnErrors) {
-					return tt.fnErrors[attempts]
-				}
-				return nil
-			})
-
-			if (err != nil) != tt.wantErr {
-				t.Errorf("withRetry() error = %v, wantErr %v", err, tt.wantErr)
-			}
-
-			if attempts != tt.wantAttempts {
-				t.Errorf("withRetry() attempts = %d, want %d", attempts, tt.wantAttempts)
-			}
-
-			if tt.wantFinalError != "" && (err == nil || !contains(err.Error(), tt.wantFinalError)) {
-				t.Errorf("withRetry() error = %v, want error containing %q", err, tt.wantFinalError)
-			}
-		})
-	}
-}
-
-// Helper function for string contains check
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 || indexString(s, substr) >= 0)
-}
-
-func indexString(s, substr string) int {
-	for i := 0; i+len(substr) <= len(s); i++ {
-		if s[i:i+len(substr)] == substr {
-			return i
-		}
-	}
-	return -1
-}
-
-// TestLdap_SetNativeClient tests SetNativeClient method
 func TestLdap_SetNativeClient(t *testing.T) {
 	cfg := &config.Config{}
 	l := NewLdap(context.Background(), cfg)
@@ -665,7 +437,6 @@ func TestLdap_ModifyAttribute_RoutesToConfigClient(t *testing.T) {
 	cfg := &config.Config{LdapIsMaster: true}
 	l := NewLdap(context.Background(), cfg)
 	l.IsMaster = true
-	l.MaxRetries = 0
 	l.NativeClient = &Client{} // data client present — must NOT be used for writes
 
 	err := l.ModifyAttribute(context.Background(), keyLDAPCommonLoglevel, "256")
@@ -685,7 +456,6 @@ func TestLdap_ModifyAttribute_WithNativeClient(t *testing.T) {
 	cfg := &config.Config{LdapIsMaster: true}
 	l := NewLdap(context.Background(), cfg)
 	l.IsMaster = true
-	l.MaxRetries = 0 // avoid retry sleeps
 	l.ConfigClient = &Client{}
 
 	// Valid key resolves; config modify fails fast (no URLs to dial).
@@ -707,7 +477,7 @@ func TestLdap_ModifyAttribute_LookupErrorBeforeClient(t *testing.T) {
 	if err == nil {
 		t.Fatal("ModifyAttribute() expected lookup error for unknown key, got nil")
 	}
-	if !errs.IsConfigError(err) {
+	if cfgErr := (*errs.ConfigError)(nil); !errors.As(err, &cfgErr) {
 		t.Errorf("ModifyAttribute() error = %v, want a config (lookup) error", err)
 	}
 }
@@ -748,7 +518,6 @@ func TestLdap_ModifyAttributeBatch_LookupError(t *testing.T) {
 	cfg := &config.Config{LdapIsMaster: true}
 	l := NewLdap(context.Background(), cfg)
 	l.IsMaster = true
-	l.MaxRetries = 0
 	l.ConfigClient = &Client{}
 
 	err := l.ModifyAttributeBatch(context.Background(), map[string]string{
@@ -757,7 +526,7 @@ func TestLdap_ModifyAttributeBatch_LookupError(t *testing.T) {
 	if err == nil {
 		t.Fatal("ModifyAttributeBatch() expected lookup error for unknown key, got nil")
 	}
-	if !errs.IsConfigError(err) {
+	if cfgErr := (*errs.ConfigError)(nil); !errors.As(err, &cfgErr) {
 		t.Errorf("ModifyAttributeBatch() error = %v, want a config (lookup) error", err)
 	}
 }
@@ -769,7 +538,6 @@ func TestLdap_ModifyAttributeBatch_WithNativeClient(t *testing.T) {
 	cfg := &config.Config{LdapIsMaster: true}
 	l := NewLdap(context.Background(), cfg)
 	l.IsMaster = true
-	l.MaxRetries = 0
 	l.ConfigClient = &Client{}
 
 	// Two DNs (cn=config and olcDatabase={3}mdb,cn=config) exercise grouping.
@@ -835,3 +603,5 @@ func TestLdap_ExecuteBatchModifyInternal_NilConfigClient(t *testing.T) {
 		t.Fatalf("expected error to contain %q, got %q", "config client not initialized", err.Error())
 	}
 }
+
+func contains(s, substr string) bool { return strings.Contains(s, substr) }

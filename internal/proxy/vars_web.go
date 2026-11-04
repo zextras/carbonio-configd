@@ -109,7 +109,6 @@ func (g *Generator) registerWebUpstreamNameVariables() {
 	g.registerStringVar("web.ssl.login.upstream.name", "zimbra_login_ssl", "Upstream name for SSL login")
 	g.registerStringVar("web.admin.upstream.name", "zimbra_admin", "Upstream name for admin console")
 	g.registerStringVar("web.admin.upstream.adminclient.name", "zimbra_adminclient", "Upstream name for admin client")
-	g.registerStringVar("web.upstream.target", "http://zimbra", "Upstream target name for web proxy")
 
 	// web.server_name.default - Server name for default vhost
 	g.registerVar("web.server_name.default", "",
@@ -279,6 +278,8 @@ func (g *Generator) registerWebAuthVariables() {
 		&upstreamSpec{services: adminClientSvcs, portAttrKey: attrAdminPortAttribute, portAttrDefault: defaultAdminPortAttr})
 
 	// upstream target URLs (scheme determined by zimbraReverseProxySSLToUpstreamEnabled)
+	g.registerUpstreamTargetVar("web.upstream.target", "http://zimbra", "zimbra_ssl", "zimbra",
+		"Target URL for the web proxy_pass (scheme based on SSL setting)")
 	g.registerUpstreamTargetVar("web.upstream.zx", "http://zx", "zx_ssl", "zx",
 		"Target URL for zx upstream paths (scheme based on SSL setting)")
 	g.registerUpstreamTargetVar("web.upstream.ews.target", "http://zimbra_ews", "zimbra_ews_ssl", "zimbra_ews",

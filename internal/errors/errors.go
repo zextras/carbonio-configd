@@ -96,11 +96,3 @@ var (
 func NewConfigError(op, key string) error {
 	return &ConfigError{Op: op, Key: key, Err: ErrConfigInvalid}
 }
-
-// Type checking helpers
-
-// IsConfigError checks if an error is or contains a ConfigError
-func IsConfigError(err error) bool {
-	var configErr *ConfigError
-	return errors.As(err, &configErr)
-}

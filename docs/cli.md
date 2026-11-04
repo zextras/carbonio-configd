@@ -304,7 +304,9 @@ First-time initialisation of a component: refuses when its configuration
 already exists (`conf/nginx/nginx.conf`, `common/conf/postfix/main.cf`) unless
 `--force`; asks the **running** daemon to `REWRITE` the component (an
 unreachable daemon is an error: `systemctl start carbonio-configd.service`);
-then starts the service (a failed start is a warning, exit code stays `0`).
+then starts the service. A failed start exits `1` (the configs were still
+generated: start the service manually). Every failure message on stderr starts
+with `Error:`.
 
 ## localconfig
 

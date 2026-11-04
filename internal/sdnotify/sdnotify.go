@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -127,13 +128,22 @@ func (n *Notifier) Enabled() bool {
 	return n != nil
 }
 
-// WatchdogEnabled returns the watchdog interval if WATCHDOG_USEC is set.
-// Returns (0, false) if watchdog is not enabled.
+// WatchdogEnabled returns the watchdog interval if WATCHDOG_USEC is set and,
+// when WATCHDOG_PID is set, names this process (sd_watchdog_enabled(3): the
+// variable is inherited by children, which must not ping on the service's
+// behalf). Returns (0, false) if watchdog is not enabled for this process.
 // The recommended ping interval is half the returned duration.
 func WatchdogEnabled() (time.Duration, bool) {
 	usecStr := os.Getenv("WATCHDOG_USEC")
 	if usecStr == "" {
 		return 0, false
+	}
+
+	if pidStr := os.Getenv("WATCHDOG_PID"); pidStr != "" {
+		pid, err := strconv.Atoi(pidStr)
+		if err != nil || pid != os.Getpid() {
+			return 0, false
+		}
 	}
 
 	var usec int64

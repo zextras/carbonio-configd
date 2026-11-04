@@ -736,3 +736,32 @@ func TestCheckConditional_SecretValueNotLogged(t *testing.T) {
 	assert.Contains(t, out, "mailboxd_keystore_password")
 	assert.Contains(t, out, "value=ldap://x", "non-secret values stay visible")
 }
+
+// A lookup that fails for a reason other than "undefined" must keep the
+// previous observation instead of turning into a changed (empty) value.
+func TestObserve_LookupErrorKeepsPreviousValue(t *testing.T) {
+	conf := &config.MtaConfig{Sections: map[string]*config.MtaConfigSection{"s": {
+		RequiredVars: map[string]string{"flaky": configTypeFILE},
+	}}}
+	cm, _ := newPlanCM(t, conf)
+
+	confDir := filepath.Join(cm.mainConfig.BaseDir, "conf")
+	require.NoError(t, os.MkdirAll(confDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(confDir, "flaky"), []byte("a\n"), 0o600))
+
+	first := cm.Observe(context.Background(), cm.State.Snapshot(), conf)
+	v, _ := first.Observed(configTypeFILE, "flaky")
+	require.Equal(t, "a", v)
+
+	// Replace the file with a directory: reading it fails with EISDIR, which
+	// is a read error, not an undefined value.
+	cm.State.Publish(first)
+	cm.State.ClearFileCache(context.Background())
+	require.NoError(t, os.Remove(filepath.Join(confDir, "flaky")))
+	require.NoError(t, os.Mkdir(filepath.Join(confDir, "flaky"), 0o755))
+
+	second := cm.Observe(context.Background(), cm.State.Snapshot(), conf)
+	v, ok := second.Observed(configTypeFILE, "flaky")
+	assert.True(t, ok)
+	assert.Equal(t, "a", v, "a failed read must not look like a value change")
+}

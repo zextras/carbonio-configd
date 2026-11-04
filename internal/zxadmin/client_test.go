@@ -7,12 +7,15 @@ package zxadmin
 import (
 	"context"
 	"crypto/tls"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -334,7 +337,7 @@ func TestGetAllServicesStatus_TransportErrorAfterAuth(t *testing.T) {
 	c := newTestClient(t, srv)
 
 	// Ensure token is cached by calling ensureToken.
-	if err := c.ensureToken(context.Background()); err != nil {
+	if _, err := c.ensureToken(context.Background()); err != nil {
 		t.Fatalf("ensureToken failed: %v", err)
 	}
 
@@ -677,5 +680,119 @@ func TestReloadLocalConfig_ServerRefusedConnection(t *testing.T) {
 	err := c.ReloadLocalConfig(context.Background())
 	if !errors.Is(err, syscall.ECONNREFUSED) {
 		t.Fatalf("error must unwrap to ECONNREFUSED, got %v", err)
+	}
+}
+
+// The master password must not be re-sent by a retry loop: a failing auth
+// endpoint sees exactly one POST per authentication attempt.
+func TestAuthenticate_PasswordPostedOnce(t *testing.T) {
+	var calls atomic.Int32
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(soapPath, func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	})
+
+	srv := httptest.NewTLSServer(mux)
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+
+	if _, err := c.GetAllServicesStatus(context.Background()); err == nil {
+		t.Fatal("expected an error")
+	}
+
+	if got := calls.Load(); got != 1 {
+		t.Errorf("auth POSTs = %d, want 1", got)
+	}
+}
+
+// A slow request must not serialize the other callers behind it.
+func TestGetAllServicesStatus_MutexNotHeldDuringRequest(t *testing.T) {
+	inFlight := make(chan struct{}, 2)
+	release := make(chan struct{})
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(soapPath, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(goodAuthResponse))
+	})
+	mux.HandleFunc(statusPath, func(w http.ResponseWriter, _ *http.Request) {
+		inFlight <- struct{}{}
+
+		<-release
+
+		_, _ = w.Write([]byte(objectStatusResponse))
+	})
+
+	srv := httptest.NewTLSServer(mux)
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+
+	for range 2 {
+		go func() { _, _ = c.GetAllServicesStatus(context.Background()) }()
+	}
+
+	for range 2 {
+		select {
+		case <-inFlight:
+		case <-time.After(3 * time.Second):
+			close(release)
+			t.Fatal("second request was blocked behind the first one")
+		}
+	}
+
+	close(release)
+}
+
+func tlsTestServer(t *testing.T) *httptest.Server {
+	t.Helper()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(soapPath, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(goodAuthResponse))
+	})
+	mux.HandleFunc(statusPath, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(objectStatusResponse))
+	})
+
+	srv := httptest.NewTLSServer(mux)
+	t.Cleanup(srv.Close)
+
+	return srv
+}
+
+// With ssl_allow_untrusted_certs=false the admin certificate is verified
+// against the Carbonio CA before the password is sent.
+func TestNew_VerifiesServerCertificate(t *testing.T) {
+	srv := tlsTestServer(t)
+	home := t.TempDir()
+
+	cfg := map[string]string{
+		"zimbra_ldap_password":      "secret",
+		"ssl_allow_untrusted_certs": "false",
+		"zimbra_home":               home,
+		"zimbra_server_hostname":    "example.com",
+	}
+
+	c := NewWithBaseURL(srv.URL, cfg)
+	if _, err := c.GetAllServicesStatus(context.Background()); err == nil {
+		t.Fatal("untrusted certificate accepted")
+	}
+
+	// Trusting the server certificate through conf/ca/ca.pem makes it work.
+	pemBytes := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw})
+	if err := os.MkdirAll(home+"/conf/ca", 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(home+"/conf/ca/ca.pem", pemBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	c = NewWithBaseURL(srv.URL, cfg)
+	if _, err := c.GetAllServicesStatus(context.Background()); err != nil {
+		t.Fatalf("certificate signed by the Carbonio CA rejected: %v", err)
 	}
 }

@@ -42,6 +42,14 @@ type Client struct {
 	closed    chan struct{}
 	closeOnce sync.Once
 
+	// ctx is the client's lifecycle context (ClientConfig.Context, cancelled
+	// by Close). Dials, the StartTLS/bind watchdog and retry waits observe it,
+	// so cancelling it (daemon shutdown) aborts an in-flight connect instead
+	// of waiting for dialTimeout/bindTimeout. A nil ctx (zero-value Client)
+	// behaves as context.Background.
+	ctx    context.Context //nolint:containedctx // lifecycle context of a long-lived pool, see above
+	cancel context.CancelFunc
+
 	// Retry configuration
 	maxRetries    int
 	retryDelay    time.Duration
@@ -114,6 +122,11 @@ type ClientConfig struct {
 	StartTLS      bool          // Upgrade ldap:// connections with StartTLS (see ResolveTLS for the legacy rule)
 	FS            sys.FS        // Filesystem the attrs schema is read from (default: sys.RealFS)
 	AttrsDir      string        // Directory of the attrs schema files (default: <base>/conf/attrs)
+
+	// Context is the lifecycle context of the client (default:
+	// context.Background). Cancelling it aborts in-flight dials, StartTLS/bind
+	// and retry waits of every operation, like Close does.
+	Context context.Context //nolint:containedctx // lifecycle context of a long-lived pool
 }
 
 // defaultDialTimeout bounds a single LDAP dial attempt when
@@ -180,7 +193,16 @@ func NewClient(config *ClientConfig) (*Client, error) {
 		return nil, fmt.Errorf("ldap client: no URL configured (URL=%q, URLs=%v)", config.URL, config.URLs)
 	}
 
+	parent := config.Context
+	if parent == nil {
+		parent = context.Background()
+	}
+
+	lifeCtx, cancel := context.WithCancel(parent)
+
 	client := &Client{
+		ctx:           lifeCtx,
+		cancel:        cancel,
 		urls:          urls,
 		bindDN:        config.BindDN,
 		password:      config.Password,
@@ -209,12 +231,21 @@ func (c *Client) BaseDN() string { return c.baseDN }
 // getConnection gets a connection from the pool or creates a new one. The
 // pool lock is held only to pop an idle connection: dialing, StartTLS and bind
 // run unlocked so a slow or hung server cannot stall every other caller.
-func (c *Client) getConnection() (*ldap.Conn, error) {
+func (c *Client) getConnection(ctx context.Context) (*ldap.Conn, error) {
 	if conn := c.popIdle(); conn != nil {
 		return conn, nil
 	}
 
-	return c.connect()
+	return c.connect(ctx)
+}
+
+// lifecycle returns the client's lifecycle context.
+func (c *Client) lifecycle() context.Context {
+	if c.ctx == nil {
+		return context.Background()
+	}
+
+	return c.ctx
 }
 
 // popIdle returns a healthy pooled connection, or nil when none is available.
@@ -270,13 +301,17 @@ func (c *Client) isClosed() bool {
 // emitted at WARN so an operator can pinpoint a misconfigured entry even
 // when the overall connection succeeds (CO-3565). Dialing shares the
 // dialFn seam also used by DialFirstReachable.
-func (c *Client) connect() (*ldap.Conn, error) {
-	ctx := logger.ContextWithComponentOnce(context.Background(), "ldap")
+func (c *Client) connect(ctx context.Context) (*ldap.Conn, error) {
+	ctx = logger.ContextWithComponentOnce(ctx, "ldap")
 
 	agg := &AggregateDialError{Errors: make([]error, 0, len(c.urls))}
 
 	for _, url := range c.urls {
-		conn, err := c.dialAndBind(url)
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("ldap connect aborted: %w", err)
+		}
+
+		conn, err := c.dialAndBind(ctx, url)
 		if err == nil {
 			return conn, nil
 		}
@@ -298,7 +333,7 @@ func (c *Client) connect() (*ldap.Conn, error) {
 // and bind are bounded by bindTimeout through a watchdog that closes the
 // connection, because go-ldap's StartTLS waits for the server reply without a
 // deadline; Close on the client aborts them too.
-func (c *Client) dialAndBind(rawURL string) (*ldap.Conn, error) {
+func (c *Client) dialAndBind(ctx context.Context, rawURL string) (*ldap.Conn, error) {
 	dialer := ldap.DialWithDialer(&net.Dialer{Timeout: c.dialTimeout})
 	tlsConfig := c.tlsConfigFor(rawURL)
 
@@ -307,7 +342,7 @@ func (c *Client) dialAndBind(rawURL string) (*ldap.Conn, error) {
 		dial = ldap.DialURL
 	}
 
-	conn, err := dial(rawURL, dialer, ldap.DialWithTLSConfig(tlsConfig))
+	conn, err := dialCtx(ctx, dial, rawURL, dialer, ldap.DialWithTLSConfig(tlsConfig))
 	if err != nil {
 		return nil, fmt.Errorf("dial: %w", err)
 	}
@@ -321,7 +356,7 @@ func (c *Client) dialAndBind(rawURL string) (*ldap.Conn, error) {
 	// timeout with the same budget would race it: whichever fires first decides
 	// whether the failure is reported as errConnectAborted. executeWithRetry sets
 	// the per-operation timeout before every request on the bound connection.
-	release := c.watchdog(conn, budget)
+	release := c.watchdog(ctx, conn, budget)
 
 	err = c.upgradeAndBind(conn, rawURL, tlsConfig)
 
@@ -364,7 +399,7 @@ func (c *Client) upgradeAndBind(conn *ldap.Conn, rawURL string, tlsConfig *tls.C
 // watchdog closes conn when budget elapses or the client is closed. The
 // returned release stops the watchdog and reports whether it already fired
 // (in which case conn is closed and the attempt must be treated as failed).
-func (c *Client) watchdog(conn *ldap.Conn, budget time.Duration) (release func() (fired bool)) {
+func (c *Client) watchdog(ctx context.Context, conn *ldap.Conn, budget time.Duration) (release func() (fired bool)) {
 	timer := time.NewTimer(budget)
 	done := make(chan struct{})
 	firedCh := make(chan bool, 1)
@@ -375,6 +410,7 @@ func (c *Client) watchdog(conn *ldap.Conn, budget time.Duration) (release func()
 		select {
 		case <-timer.C:
 		case <-c.closed:
+		case <-ctx.Done():
 		case <-done:
 			firedCh <- false
 
@@ -399,6 +435,10 @@ func (c *Client) Close() error {
 		c.closeOnce.Do(func() { close(c.closed) })
 	}
 
+	if c.cancel != nil {
+		c.cancel()
+	}
+
 	c.poolMu.Lock()
 	defer c.poolMu.Unlock()
 
@@ -414,23 +454,30 @@ func (c *Client) Close() error {
 }
 
 // executeWithRetry executes an LDAP operation with retry logic.
-func (c *Client) executeWithRetry(operation func(*ldap.Conn) error) error {
+//
+// ctx bounds the whole operation: cancelling it aborts a dial in flight and
+// the backoff waits. This is the only retry layer of the LDAP stack (callers
+// such as Ldap must not wrap it in another loop): one operation makes at most
+// 1+maxRetries attempts per URL walk.
+func (c *Client) executeWithRetry(ctx context.Context, operation func(*ldap.Conn) error) error {
 	var lastErr error
 
 	delay := c.retryDelay
 
 	for attempt := 0; attempt <= c.maxRetries; attempt++ {
 		if attempt > 0 {
-			if !c.waitRetry(delay) {
-				return fmt.Errorf("operation aborted after %d retries: client closed: %w", attempt-1, lastErr)
+			if !c.waitRetry(ctx, delay) {
+				return fmt.Errorf("operation aborted after %d retries: client closed or context done: %w",
+					attempt-1, lastErr)
 			}
 
 			delay = c.nextRetryDelay(delay)
 		}
 
-		conn, err := c.getConnection()
+		conn, err := c.getConnection(ctx)
 		if err != nil {
 			lastErr = err
+
 			continue
 		}
 
@@ -457,12 +504,14 @@ func (c *Client) executeWithRetry(operation func(*ldap.Conn) error) error {
 
 // waitRetry blocks for delay before the next attempt. It reports false when
 // the client is closed first, in which case the caller must stop retrying.
-func (c *Client) waitRetry(delay time.Duration) bool {
+func (c *Client) waitRetry(ctx context.Context, delay time.Duration) bool {
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
 
 	select {
 	case <-c.closed:
+		return false
+	case <-ctx.Done():
 		return false
 	case <-timer.C:
 		return true
@@ -590,7 +639,7 @@ func isLDAPErrorRetryable(err error) bool {
 func (c *Client) Search(baseDN, filter string, attributes []string, scope int) (*ldap.SearchResult, error) {
 	var result *ldap.SearchResult
 
-	err := c.executeWithRetry(func(conn *ldap.Conn) error {
+	err := c.executeWithRetry(c.lifecycle(), func(conn *ldap.Conn) error {
 		searchRequest := ldap.NewSearchRequest(
 			baseDN,
 			scope,
@@ -866,7 +915,7 @@ func (c *Client) GetEnabledServices(hostname string) ([]string, error) {
 
 // ModifyAttribute replaces an attribute value on an LDAP entry.
 func (c *Client) ModifyAttribute(dn, attribute, value string) error {
-	return c.executeWithRetry(func(conn *ldap.Conn) error {
+	return c.executeWithRetry(c.lifecycle(), func(conn *ldap.Conn) error {
 		modifyRequest := ldap.NewModifyRequest(dn, nil)
 		modifyRequest.Replace(attribute, []string{value})
 
@@ -893,4 +942,34 @@ func entryToMap(entry *ldap.Entry) map[string]string {
 	}
 
 	return result
+}
+
+// dialCtx runs dial and abandons it when ctx is done: go-ldap's dial has no
+// context, so the dial continues in the background (bounded by the dialer's
+// timeout) and a connection that arrives late is closed.
+func dialCtx(ctx context.Context, dial dialFn, rawURL string, opts ...ldap.DialOpt) (*ldap.Conn, error) {
+	type result struct {
+		conn *ldap.Conn
+		err  error
+	}
+
+	ch := make(chan result, 1)
+
+	go func() {
+		conn, err := dial(rawURL, opts...)
+		ch <- result{conn, err}
+	}()
+
+	select {
+	case r := <-ch:
+		return r.conn, r.err
+	case <-ctx.Done():
+		go func() {
+			if r := <-ch; r.conn != nil {
+				_ = r.conn.Close()
+			}
+		}()
+
+		return nil, fmt.Errorf("dial aborted: %w", ctx.Err())
+	}
 }
