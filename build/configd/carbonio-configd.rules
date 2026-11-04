@@ -3,16 +3,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Allow the zextras user to start/stop/restart/reload the exact set of
-// Carbonio systemd units managed by configd, and to start/stop/reset-failed
-// the instances of the carbonio-run-exec@ and carbonio-run-forking@ template
-// units configd launches non-systemd-mode service processes in.
+// Carbonio systemd units managed by configd.
 //
 // Security hardening:
-// - The run units are templates shipped by the package, with a fixed User=
-//   (zextras) and a fixed ExecStart that only runs what a zextras-owned spec
-//   file names. They are NOT transient units: polkit sees only a unit name
-//   and a verb, never the properties, so a rule for transient units would let
-//   any process of zextras start a unit with User=root and any command.
 // - Explicit unit allowlist (no prefix match) prevents privilege escalation
 //   via attacker-created carbonio-*.service units
 // - unit/verb are null-guarded (action.lookup can return null)
@@ -39,12 +32,6 @@ polkit.addRule(function(action, subject) {
         "service-discover.service"
     ];
 
-    // Instances of the two carbonio-run templates: nothing else matches, so
-    // no other unit name (carbonio-run-foo.service, a drop-in, ...) is
-    // covered.
-    var runUnit = /^carbonio-run-(exec|forking)@[a-z0-9][a-z0-9_.-]*\.service$/;
-    var runVerbs = ["start", "stop", "reset-failed"];
-
     var operationalVerbs = [
         "start", "stop", "restart", "reload",
         "try-restart", "try-reload-or-restart"
@@ -59,15 +46,6 @@ polkit.addRule(function(action, subject) {
     }
 
     var unit = action.lookup("unit") || "";
-    if (runUnit.test(unit)) {
-        var runVerb = action.lookup("verb") || "";
-        if (runVerbs.indexOf(runVerb) === -1) {
-            return polkit.Result.NO;
-        }
-
-        return polkit.Result.YES;
-    }
-
     if (allowedUnits.indexOf(unit) === -1) {
         return polkit.Result.NOT_HANDLED;
     }

@@ -86,7 +86,7 @@ func buildRuntime(ctx context.Context, env sys.System, opts *runtimeOpts) (*runt
 		"zimbraIPMode":          rewrite.IPModeIPv4,
 	}}))
 
-	ctl := services.NewController(env, services.WithUnits())
+	ctl := services.NewController(env)
 	sm := services.NewServiceManager(ctl)
 
 	var hooks *services.HookBackend

@@ -90,7 +90,7 @@ func noRewrite(opts *Options) bool {
 }
 
 func newRunner(env sys.System, opts *Options) *runner {
-	ctl := services.NewController(env, services.WithUnits(), services.WithNoRewrite(noRewrite(opts)))
+	ctl := services.NewController(env, services.WithNoRewrite(noRewrite(opts)))
 
 	return &runner{
 		ctl:      ctl,

@@ -8,7 +8,6 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
@@ -90,8 +89,8 @@ func (c *Controller) startCompanion(ctx context.Context, companion Companion, wa
 		return nil
 	}
 
-	if out, err := c.runLaunch(ctx, companion.Identity, sudoBin, "-n", companion.Binary); err != nil {
-		return fmt.Errorf("start %s: %s: %w", companion.Identity, strings.TrimSpace(string(out)), err)
+	if err := c.sudoRun(ctx, companion.Binary); err != nil {
+		return fmt.Errorf("start %s: %w", companion.Identity, err)
 	}
 
 	if wait.Attempts > 0 && !c.waitForIdentity(ctx, companion.Identity, wait) {

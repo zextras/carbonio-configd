@@ -12,7 +12,6 @@ import (
 
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/localconfig"
-	"github.com/zextras/carbonio-configd/internal/rununit"
 	"github.com/zextras/carbonio-configd/internal/sys"
 	"github.com/zextras/carbonio-configd/internal/systemd"
 )
@@ -57,11 +56,6 @@ type Controller struct {
 	noRewrite   bool
 	killTimeout time.Duration
 
-	// units launches the long-running processes of the services as systemd
-	// units of their own, or as children of this process when it cannot. Nil
-	// (the default) launches them as children.
-	units *rununit.Runner
-
 	systemd     *systemd.Manager
 	modeOnce    sync.Once
 	systemdMode bool
@@ -79,14 +73,6 @@ func WithBaseDir(dir string) Option {
 // the sd_notify sockets) from /run/carbonio to dir.
 func WithRunDir(dir string) Option {
 	return func(c *Controller) { c.runDir = dir }
-}
-
-// WithUnits makes the Controller start the processes of services as systemd
-// units of their own (package rununit) instead of as its own children, when
-// the host allows it. The production wiring sets it; without it every process
-// is a child, which is what the tests of the launch sequences observe.
-func WithUnits() Option {
-	return func(c *Controller) { c.units = rununit.New(c.env) }
 }
 
 // WithConfigLoader replaces the effective-localconfig loader.

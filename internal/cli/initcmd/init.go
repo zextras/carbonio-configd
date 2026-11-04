@@ -46,9 +46,7 @@ func Run(ctx context.Context, env sys.System, stdout, stderr io.Writer, opts *Op
 		return 1
 	}
 
-	ctl := services.NewController(env, services.WithUnits())
-
-	return run(ctx, env, ctl, stdout, stderr, opts, localconfig.LoadEffective)
+	return run(ctx, env, services.NewController(env), stdout, stderr, opts, localconfig.LoadEffective)
 }
 
 func run(

@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
@@ -42,6 +43,41 @@ func startSdWatchdogKeepAlive(
 	}()
 }
 
+// legacyModeDoc is where the legacy-mode drop-in is explained.
+const legacyModeDoc = "docs/systemd.md#legacy-mode-on-a-systemd-host"
+
+// warnHardenedLegacyMode logs one WARN when the daemon, which orchestrates
+// services itself (legacy mode: no carbonio target enabled), runs under the
+// hardened carbonio-configd.service. There no-new-privileges is set, so the
+// `sudo` and file-capability binaries (nginx on port 443) it starts fail with
+// "operation not permitted" or "no new privileges". The shipped unit is meant
+// for hosts where systemd orchestrates the services; for the unsupported
+// mixed case the package ships an opt-in drop-in (legacy-mode.conf).
+func warnHardenedLegacyMode(ctx context.Context, fs sys.FS) {
+	status, err := fs.ReadFile("/proc/self/status")
+	if err != nil || !noNewPrivsSet(status) {
+		return
+	}
+
+	logger.WarnContext(ctx, "configd runs with no-new-privileges (hardened carbonio-configd.service) but no Carbonio "+
+		"systemd target is enabled, so it starts the services itself: sudo and file-capability binaries such as "+
+		"nginx will fail. Either enable the carbonio targets or install the legacy-mode drop-in "+
+		"/usr/share/carbonio-configd/systemd/legacy-mode.conf into "+
+		"/etc/systemd/system/carbonio-configd.service.d/",
+		"doc", legacyModeDoc)
+}
+
+// noNewPrivsSet reports whether a /proc/<pid>/status has NoNewPrivs: 1.
+func noNewPrivsSet(status []byte) bool {
+	for line := range strings.SplitSeq(string(status), "\n") {
+		if name, value, ok := strings.Cut(line, ":"); ok && name == "NoNewPrivs" {
+			return strings.TrimSpace(value) == "1"
+		}
+	}
+
+	return false
+}
+
 // bootstrapWatchdog builds the watchdog on the runtime's one service manager.
 func bootstrapWatchdog(ctx context.Context, rt *runtime) *watchdog.Watchdog {
 	if rt.hooks == nil {
@@ -55,6 +91,7 @@ func bootstrapWatchdog(ctx context.Context, rt *runtime) *watchdog.Watchdog {
 			logger.InfoContext(ctx, "Detected traditional environment",
 				"use_systemctl", false,
 				"scripts_only", "zm*ctl")
+			warnHardenedLegacyMode(ctx, rt.env.FS)
 		}
 	} else {
 		logger.InfoContext(ctx, "Service control through hooks", "hooks_file", rt.cfg.ServiceHooks)

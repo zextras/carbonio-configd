@@ -5,12 +5,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/sdnotify"
 	"github.com/zextras/carbonio-configd/internal/services"
 	"github.com/zextras/carbonio-configd/internal/state"
@@ -72,4 +75,46 @@ func TestBootstrapWatchdog_OneServiceManagerForConfigAndWatchdog(t *testing.T) {
 	rt.sm.BeforeRestart("antivirus")
 
 	require.False(t, wd.IsServiceTracked("antivirus"), "a service restarted on purpose is no longer watched")
+}
+
+func TestWarnHardenedLegacyMode(t *testing.T) {
+	for name, tc := range map[string]struct {
+		status   string
+		wantWarn bool
+	}{
+		"no-new-privileges set":   {"Name:\tconfigd\nNoNewPrivs:\t1\nSeccomp:\t2\n", true},
+		"no-new-privileges clear": {"Name:\tconfigd\nNoNewPrivs:\t0\nSeccomp:\t0\n", false},
+		"field missing":           {"Name:\tconfigd\n", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var buf bytes.Buffer
+
+			logger.InitStructuredLogging(&logger.Config{Output: &buf, Level: logger.LogLevelInfo})
+
+			f := systest.New()
+			f.FS.Put("/proc/self/status", []byte(tc.status), 0o444)
+
+			warnHardenedLegacyMode(context.Background(), f.System().FS)
+
+			if !tc.wantWarn {
+				require.NotContains(t, buf.String(), "level=WARN")
+
+				return
+			}
+
+			require.Equal(t, 1, strings.Count(buf.String(), "level=WARN"))
+			require.Contains(t, buf.String(), "legacy-mode.conf")
+			require.Contains(t, buf.String(), "docs/systemd.md#legacy-mode-on-a-systemd-host")
+		})
+	}
+}
+
+func TestWarnHardenedLegacyMode_UnreadableStatusIsSilent(t *testing.T) {
+	var buf bytes.Buffer
+
+	logger.InitStructuredLogging(&logger.Config{Output: &buf, Level: logger.LogLevelInfo})
+
+	warnHardenedLegacyMode(context.Background(), systest.New().System().FS)
+
+	require.NotContains(t, buf.String(), "level=WARN")
 }

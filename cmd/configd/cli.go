@@ -39,7 +39,6 @@ type CLI struct {
 	Shadow      ShadowCmd                    `cmd:"" help:"Run the cycle next to a real configd, without side effects"`
 	Release     ReleaseCmd                   `cmd:"" help:"Show Carbonio release and package versions"`
 	Completion  kongplete.InstallCompletions `cmd:"" help:"Install shell completions"`
-	RunUnit     RunUnitCmd                   `cmd:"" name:"run-unit" hidden:"" help:"ExecStart of the carbonio-run units"`
 	Daemon      DaemonCmd                    `cmd:"" default:"1" hidden:""`
 }
 
