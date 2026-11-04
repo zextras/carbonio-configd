@@ -20,6 +20,8 @@ GOGET=$(GOCMD) get
 GOMOD=$(GOCMD) mod
 GOFMT=gofmt
 GOLINT=golangci-lint
+# gotestsum, govulncheck, deadcode and dupl are pinned in tools/go.mod.
+GOTOOL=$(GOCMD) tool -modfile=tools/go.mod
 
 # Build flags
 LDFLAGS=-ldflags="-s -w"
@@ -28,7 +30,7 @@ BUILD_FLAGS_PROFILING=-trimpath -tags profiling $(LDFLAGS)
 BUILD_FLAGS_TRACING=-trimpath -tags tracing $(LDFLAGS)
 BUILD_FLAGS_FULL=-trimpath -tags "profiling tracing" $(LDFLAGS)
 
-.PHONY: all build clean test test-integration test-integration-ldap deps fmt lint help install deadcode dup dup-baseline fuzz check reuse thirdparties generate generate-check
+.PHONY: all build clean test test-race test-tags test-integration test-integration-ldap deps fmt lint help install deadcode dup dup-baseline fuzz fuzz-smoke check vet-tags reuse thirdparties generate generate-check security
 
 # REUSE compliance (same gate as the Jenkins 'REUSE Lint' stage)
 reuse:
@@ -46,7 +48,9 @@ MAILBOX_REPO ?= $(HOME)/zextras/carbonio-mailbox
 generate:
 	python3 scripts/gen-lc.py --mailbox-repo $(MAILBOX_REPO)
 
-# Regenerate into a temp dir and diff against the committed files.
+# Regenerate into a temp dir and diff against the committed files. Without a
+# local clone at MAILBOX_REPO the pinned tag is cloned from GitHub (needs
+# network and python3; this is how Jenkins runs it).
 generate-check:
 	scripts/gen-lc-check.sh $(MAILBOX_REPO)
 
@@ -98,6 +102,22 @@ test-race:
 	@echo "Running tests with race detector..."
 	$(GOTEST) -race -v ./...
 
+# vet every build-tag combination: profiling and tracing select alternative
+# implementations; integration is vetted (compiled, including its tests) but
+# never run here.
+vet-tags:
+	@for tags in "" integration tracing profiling "tracing profiling"; do \
+		echo "go vet -tags '$$tags' ./..."; \
+		$(GOCMD) vet -tags "$$tags" ./... || exit 1; \
+	done
+
+# Race-test the tracing/profiling variants (the default tags are test-race)
+test-tags:
+	@for tags in tracing profiling "tracing profiling"; do \
+		echo "go test -race -tags '$$tags' ./..."; \
+		$(GOTEST) -race -tags "$$tags" ./... || exit 1; \
+	done
+
 # Run integration tests (requires live LDAP environment)
 test-integration:
 	@echo "Running integration tests..."
@@ -144,14 +164,11 @@ fmt:
 	@echo "Formatting code..."
 	$(GOFMT) -s -w .
 
-# Lint code
+# Lint code (fails when golangci-lint is not installed: a skipped lint is a false green)
 lint:
 	@echo "Linting code..."
-	@if command -v $(GOLINT) > /dev/null; then \
-		$(GOLINT) run ./...; \
-	else \
-		echo "golangci-lint not installed, skipping lint"; \
-	fi
+	@command -v $(GOLINT) > /dev/null || { echo "golangci-lint not installed; install it (see .golangci.yml, version pinned in the Jenkins golang-v1 pod)" >&2; exit 1; }
+	$(GOLINT) run ./...
 
 # Run the application
 run:
@@ -181,30 +198,20 @@ build-linux-arm64:
 # Build for all supported architectures
 build-all: build-linux-amd64 build-linux-arm64
 
-# Generate mocks (if using mockery)
-mocks:
-	@echo "Generating mocks..."
-	@if command -v mockery > /dev/null; then \
-		mockery --all --dir ./internal --output ./internal/mocks; \
-	else \
-		echo "mockery not installed, skipping mock generation"; \
-	fi
-
-# Security scan
+# Vulnerability scan of the module's dependencies (govulncheck, pinned in
+# tools/go.mod; needs network for the vuln DB). Fails on any finding in code
+# that is reachable. gosec runs as part of golangci-lint (see .golangci.yml).
 security:
-	@echo "Running security scan..."
-	@if command -v gosec > /dev/null; then \
-		gosec ./... -quiet || echo "Security scan completed with warnings (expected for config management tool)"; \
-	else \
-		echo "gosec not installed, skipping security scan"; \
-	fi
+	@echo "Running vulnerability scan..."
+	$(GOTOOL) govulncheck ./...
 
 # Benchmark tests
 benchmark:
 	@echo "Running benchmarks..."
 	$(GOTEST) -bench=. -benchmem ./...
 
-# Local quality checks (not run by CI). Tools are pinned in tools/go.mod.
+# Quality checks, all run by Jenkins ('Static checks' and 'Fuzz smoke' stages).
+# Tools are pinned in tools/go.mod.
 # Unreachable code across all profiling/tracing tag combinations
 deadcode:
 	scripts/deadcode-check.sh
@@ -220,8 +227,13 @@ dup-baseline:
 fuzz:
 	scripts/fuzz.sh
 
-# All local checks: lint, tests with race detector, deadcode, duplication
-check: lint test-race deadcode dup
+# Short smoke run of every fuzz target (10s each), as in Jenkins
+fuzz-smoke:
+	FUZZTIME=10s scripts/fuzz.sh
+
+# The Jenkins checks that need no container runtime (fuzz-smoke, security and
+# generate-check are separate targets): lint, vet and race tests for every tag combination, deadcode, duplication
+check: lint vet-tags test-race test-tags deadcode dup
 
 # Initialize Go module (only run once)
 init-module:
@@ -282,14 +294,17 @@ help:
 	@echo "  run            - Build and run the application"
 	@echo "  install        - Install to system (/opt/zextras/libexec/)"
 	@echo "  build-all      - Build for all supported architectures"
-	@echo "  mocks          - Generate mocks"
-	@echo "  security       - Run security scan"
+	@echo "  security       - Vulnerability scan (govulncheck, pinned in tools/go.mod)"
 	@echo "  benchmark      - Run benchmark tests"
 	@echo "  deadcode       - Fail on code no main package reaches (all tag combinations)"
 	@echo "  dup            - Fail when duplication (dupl -t 100) grows past scripts/dup-baseline.json"
 	@echo "  dup-baseline   - Rewrite scripts/dup-baseline.json"
 	@echo "  fuzz           - Run every fuzz target for FUZZTIME (default 30s) each"
-	@echo "  check          - lint, test-race, deadcode, dup (local only, not in CI)"
+	@echo "  fuzz-smoke     - Run every fuzz target for 10s each (as in Jenkins)"
+	@echo "  vet-tags       - go vet for the default, integration, tracing, profiling and tracing+profiling tags"
+	@echo "  test-tags      - Race tests for the tracing, profiling and tracing+profiling tags"
+	@echo "  generate-check - Fail when lcdocs.go/lcdefaults.go differ from the pinned carbonio-mailbox tag"
+	@echo "  check          - lint, vet-tags, test-race, test-tags, deadcode, dup"
 	@echo "  update-deps    - Update dependencies"
 	@echo "  verify         - Verify dependencies"
 	@echo "  release        - Create release packages"

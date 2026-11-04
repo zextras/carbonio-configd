@@ -95,6 +95,21 @@ Nightly job: run `make test-integration-ldap` on an agent with docker or podman 
 the Alpine mirrors (the container installs slapd with `apk` at start-up). A failure to start the container fails the
 test; only a missing runtime skips it. The target uses `-count=1`, so results are never cached.
 
+### In Jenkins
+
+The Jenkins pod templates `golang-v1` (the pipeline's default agent) and `base` have no container runtime: only the
+`docker-build-v1`, `zextras-v1` and `infra-v1` templates carry a privileged `dind` sidecar. The `LDAP integration`
+stage therefore runs on its own `docker-build-v1` pod, and only
+
+- on the nightly build of the primary branch (`H 3 * * *`; the nightly build skips packaging, the docker image and
+  uploads), or
+- when a build is started with the `RUN_LDAP_INTEGRATION` parameter set.
+
+`scripts/ci-ldap-integration.sh` starts a `golang` container from the `dind` container, mounting in the daemon's
+socket and its `docker` binary (the suite skips itself without a reachable docker) and sharing the pod network. It
+fails when `TestOpenLDAP_ConfigdCycle` or `TestOpenLDAP_StartTLS` does not report PASS, so a skipped suite is never a
+green build. Run it by hand from a docker host with `scripts/ci-ldap-integration.sh`.
+
 ## Dependencies
 
 Integration tests depend on the following packages (only required when building with `-tags=integration`):

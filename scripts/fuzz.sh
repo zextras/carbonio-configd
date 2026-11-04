@@ -3,8 +3,8 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-only
 
-# Runs every native Go fuzz target (func FuzzXxx) for FUZZTIME each (local only,
-# not wired into CI). `go test -fuzz` accepts one target per package per run,
+# Runs every native Go fuzz target (func FuzzXxx) for FUZZTIME each (make fuzz;
+# the Jenkins 'Fuzz smoke' stage runs it with FUZZTIME=10s). `go test -fuzz` accepts one target per package per run,
 # so targets are discovered with `go test -list` and run one at a time.
 # `go test ./...` already runs each target's seed corpus and the crashers kept
 # under testdata/fuzz/, so a found bug stays a regular failing test.
