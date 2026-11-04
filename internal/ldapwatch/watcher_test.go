@@ -275,6 +275,44 @@ func TestFailedPollsBackOffExponentiallyUpToTheCap(t *testing.T) {
 	assert.Empty(t, h.fired(), "failures never trigger")
 }
 
+func TestOnPollErrorIsCalledOncePerFailedPoll(t *testing.T) {
+	var (
+		mu     sync.Mutex
+		failed int
+	)
+
+	h := start(t, ldapwatch.Options{
+		Interval: interval, BackoffMin: time.Second,
+		OnPollError: func() {
+			mu.Lock()
+			defer mu.Unlock()
+
+			failed++
+		},
+	})
+
+	count := func() int {
+		mu.Lock()
+		defer mu.Unlock()
+
+		return failed
+	}
+
+	assert.Zero(t, count(), "the baseline poll succeeded")
+
+	h.src.fail(errors.New("ldap down"))
+	h.advance(interval)
+	assert.Equal(t, 1, count())
+
+	h.advance(time.Second)
+	assert.Equal(t, 2, count(), "every failed poll is counted")
+
+	h.src.set(fp("g0", "s0", "d0"))
+	h.advance(2 * time.Second)
+	h.advance(interval)
+	assert.Equal(t, 2, count(), "successful polls are not")
+}
+
 func TestRecoveryResetsBackoffAndDoesNotTriggerWhenNothingChanged(t *testing.T) {
 	h := start(t, ldapwatch.Options{Interval: interval, BackoffMin: time.Second, BackoffMax: time.Minute})
 

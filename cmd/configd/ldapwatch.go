@@ -12,6 +12,7 @@ import (
 
 	"github.com/zextras/carbonio-configd/internal/ldapwatch"
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/metrics"
 )
 
 // ldapWatch owns the goroutine of a running LDAP change watcher. The zero
@@ -34,16 +35,22 @@ func (w *ldapWatch) stop() {
 // TriggerReload wakes the main loop for an immediate cycle. It is the reload
 // path SIGHUP and the TCP REWRITE command use: a token on ReloadChan, dropped
 // when one is already pending. No section is requested, so the woken cycle is
-// a normal one, exactly as if the interval had elapsed.
-func (t *MainLoopActionTrigger) TriggerReload(ctx context.Context, reason string) {
+// a normal (non-REWRITE) one, exactly as if the interval had elapsed: it
+// releases the restarts a REWRITE cycle deferred. It reports whether a token
+// was queued; false means one was already pending and absorbs this request.
+func (t *MainLoopActionTrigger) TriggerReload(ctx context.Context, reason string) bool {
 	ctx = logger.ContextWithComponent(ctx, "mainloop")
 
 	select {
 	case t.ReloadChan <- struct{}{}:
 		logger.DebugContext(ctx, "Reload signal sent to main loop", "reason", reason)
+
+		return true
 	default:
 		logger.DebugContext(ctx, "Reload channel blocked, main loop already processing or not ready",
 			"reason", reason)
+
+		return false
 	}
 }
 
@@ -105,14 +112,22 @@ func startLDAPWatch(ctx context.Context, deps *daemonLoopDeps) *ldapWatch {
 	interval := time.Duration(deps.cfg.LdapChangePollSeconds) * time.Second
 	debounce := time.Duration(deps.cfg.LdapChangeDebounceSeconds) * time.Second
 
+	reg := deps.configManager.Metrics()
+
 	w := ldapwatch.New(&ldapwatch.Options{
 		Source:   src,
 		Clock:    deps.env.Clock,
 		Interval: interval,
 		Debounce: debounce,
 		Trigger: func(ctx context.Context, changed []string) {
-			deps.trigger.TriggerReload(ctx, "ldap-change:"+strings.Join(changed, ","))
+			result := metrics.TriggerAlreadyPending
+			if deps.trigger.TriggerReload(ctx, "ldap-change:"+strings.Join(changed, ",")) {
+				result = metrics.TriggerCycleRequested
+			}
+
+			reg.LDAPChangeTriggered(changed, result)
 		},
+		OnPollError: reg.LDAPWatchPollFailed,
 	})
 
 	wctx, cancel := context.WithCancel(ctx)

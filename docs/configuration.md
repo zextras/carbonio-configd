@@ -55,7 +55,7 @@ descriptions of the opt-in and container keys are in
 | `zmconfigd_watchdog` | on | `FALSE` turns the service watchdog off |
 | `zmconfigd_watchdog_interval` | `120` | seconds between watchdog checks (compiled-in fallback `120`) |
 | `zmconfigd_watchdog_services` | `antivirus` | space-separated service names the watchdog keeps running |
-| `zmconfigd_ldap_change_trigger` | off | `TRUE`: wake the main loop as soon as a watched LDAP entry changes |
+| `zmconfigd_ldap_change_trigger` | off | `TRUE`: wake the main loop as soon as a watched LDAP entry changes; `FALSE` (default) or unset disables it. Counted in `configd_ldap_change_triggers_total` |
 | `zmconfigd_ldap_change_poll_seconds` | `5` | poll interval of that watcher |
 | `zmconfigd_ldap_change_debounce_seconds` | `2` | quiet window of that watcher |
 | `zmconfigd_cycle_summary` | off | `TRUE`: one `Cycle summary` log line per cycle |
