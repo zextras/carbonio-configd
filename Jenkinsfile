@@ -40,6 +40,8 @@ spec:
 
     environment {
         GOPRIVATE = 'gitlab.com/zextras,bitbucket.org/zextras,github.com/zextras'
+        // gotestsum and govulncheck are pinned in tools/go.mod (as are deadcode and dupl).
+        GOTESTSUM = 'go tool -modfile=tools/go.mod gotestsum'
     }
 
     options {
@@ -48,10 +50,20 @@ spec:
         timeout(time: 2, unit: 'HOURS')
     }
 
+    // The nightly build of the primary branch runs the checks and the LDAP
+    // integration suite only: it never builds, publishes or uploads (see the
+    // triggeredBy 'TimerTrigger' guards below).
+    triggers {
+        cron(env.BRANCH_IS_PRIMARY == 'true' ? 'H 3 * * *' : '')
+    }
+
     parameters {
         booleanParam defaultValue: false,
             description: 'Set to true to skip the test stage',
             name: 'SKIP_TEST'
+        booleanParam defaultValue: false,
+            description: 'Run the OpenLDAP container integration suite (make test-integration-ldap) on a docker-in-docker pod. Always runs on the nightly build.',
+            name: 'RUN_LDAP_INTEGRATION'
     }
 
     stages {
@@ -82,12 +94,43 @@ spec:
             }
         }
 
+        // vet for every build-tag combination (integration is compiled, never run),
+        // unreachable code, duplication ratchet, and drift of the tables generated
+        // from carbonio-mailbox LC.java (shallow-clones the pinned tag from GitHub).
+        // Mirrors `make check`'s static part; reproduce locally with
+        // `make vet-tags deadcode dup generate-check`.
+        stage('Static checks') {
+            steps {
+                container('golang') {
+                    // The workspace is owned by the jnlp user; git (dup-check) refuses it as root otherwise.
+                    sh 'git config --global --add safe.directory "$PWD"'
+                    sh 'make vet-tags deadcode dup generate-check'
+                }
+            }
+        }
+
+        // The default tags run with the race detector and feed Sonar's coverage; the
+        // profiling/tracing variants compile different files, so they are tested
+        // (and their coverage reported) separately.
         stage('Tests') {
             when { expression { params.SKIP_TEST != true } }
             steps {
                 container('golang') {
-                    sh 'go run gotest.tools/gotestsum@latest --format testname --junitfile tests.xml -- -race -coverprofile=coverage.out ./...'
-                    junit allowEmptyResults: false, checksName: 'Tests', testResults: 'tests.xml'
+                    sh '$GOTESTSUM --format testname --junitfile tests.xml -- -race -coverprofile=coverage.out ./...'
+                    sh '$GOTESTSUM --format testname --junitfile tests-tracing.xml -- -race -tags tracing -coverprofile=coverage.tracing.out ./...'
+                    sh '$GOTESTSUM --format testname --junitfile tests-profiling.xml -- -race -tags profiling -coverprofile=coverage.profiling.out ./...'
+                    sh '$GOTESTSUM --format testname --junitfile tests-full.xml -- -race -tags "tracing profiling" -coverprofile=coverage.full.out ./...'
+                    junit allowEmptyResults: false, checksName: 'Tests', testResults: 'tests*.xml'
+                }
+            }
+        }
+
+        // 10 s per native fuzz target (scripts/fuzz.sh); a crasher fails the build.
+        stage('Fuzz smoke') {
+            when { expression { params.SKIP_TEST != true } }
+            steps {
+                container('golang') {
+                    sh 'make fuzz-smoke'
                 }
             }
         }
@@ -96,30 +139,62 @@ spec:
             when { expression { params.SKIP_TEST != true } }
             steps {
                 container('golang') {
-                    sh 'go run golang.org/x/vuln/cmd/govulncheck@latest ./...'
+                    sh 'make security'
                 }
             }
         }
 
-        stage('SonarQube analysis') {
+        // One golangci-lint run writes both the checkstyle report Sonar reads and the
+        // console output, and its exit status fails the build after Sonar has the report.
+        stage('Lint and SonarQube analysis') {
             steps {
-                container('golangci-lint') {
-                    script {
-                        scannerHome = tool 'SonarScanner'
+                script {
+                    String scannerHome = tool 'SonarScanner'
+                    int lintStatus = 0
+                    container('golangci-lint') {
+                        lintStatus = sh(returnStatus: true,
+                            script: 'golangci-lint run ./... --output.checkstyle.path linter.out --output.text.path stdout')
                     }
-                    sh 'golangci-lint run ./... --issues-exit-code 0 --output.checkstyle.path linter.out'
+                    withSonarQubeEnv(credentialsId: 'sonarqube-user-token',
+                        installationName: 'SonarQube instance') {
+                        sh "${scannerHome}/bin/sonar-scanner"
+                    }
+                    if (lintStatus != 0) {
+                        error "golangci-lint failed (exit status ${lintStatus})"
+                    }
                 }
-                withSonarQubeEnv(credentialsId: 'sonarqube-user-token',
-                    installationName: 'SonarQube instance') {
-                    sh "${scannerHome}/bin/sonar-scanner"
+            }
+        }
+
+        // The pod templates golang-v1 and base have no container runtime, so this runs
+        // `make test-integration-ldap` in a golang container started by the dockerd
+        // sidecar of the docker-build-v1 pod (the docker CLI binary and socket of the
+        // sidecar are mounted into it: the suite skips itself without a reachable
+        // docker). Nightly on the primary branch, or on demand with RUN_LDAP_INTEGRATION.
+        stage('LDAP integration') {
+            when {
+                beforeAgent true
+                anyOf {
+                    triggeredBy 'TimerTrigger'
+                    expression { params.RUN_LDAP_INTEGRATION == true }
                 }
-                container('golangci-lint') {
-                    sh 'golangci-lint run ./...'
+            }
+            agent {
+                kubernetes {
+                    inheritFrom 'docker-build-v1'
+                    yamlMergeStrategy merge()
+                }
+            }
+            steps {
+                checkout scm
+                container('dind') {
+                    sh 'sh scripts/ci-ldap-integration.sh'
                 }
             }
         }
 
         stage('Build Packages') {
+            when { not { triggeredBy 'TimerTrigger' } }
             steps {
                 echo 'Building deb/rpm packages'
                 buildStage([
@@ -142,6 +217,10 @@ spec:
         // templates (docker/configd/Dockerfile). It needs a docker-capable node, which
         // the golang pod is not.
         stage('Publish docker image') {
+            when {
+                beforeAgent true
+                not { triggeredBy 'TimerTrigger' }
+            }
             agent {
                 node {
                     label 'base'
@@ -161,7 +240,10 @@ spec:
 
         stage('Upload artifacts') {
             when {
-                expression { return uploadStage.shouldUpload() }
+                allOf {
+                    not { triggeredBy 'TimerTrigger' }
+                    expression { return uploadStage.shouldUpload() }
+                }
             }
             tools {
                 jfrog 'jfrog-cli'
