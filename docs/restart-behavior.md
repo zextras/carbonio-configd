@@ -82,7 +82,7 @@ The `reasons` attribute holds the human-readable reasons, for example
 `dependency of antivirus`. A service queued several times in one cycle is logged once with
 the merged reasons.
 
-`configd plan` prints the same reasons without changing anything; see the README.
+`configd plan` prints the same reasons without changing anything; see [cli.md](cli.md) and the [README](../README.md).
 
 ## Systemd hosts: hybrid restart policy
 
@@ -139,8 +139,8 @@ run (the `DEPENDS` map is set on the shared service manager for the watchdog), s
 change restarts the services named by `RESTART` and nothing else.
 
 **One service manager.** The restart policy and the watchdog share a single
-`services.ServiceManager` (built by `configmgr.NewConfigManager`, reused by
-`bootstrapDependencies`). Its exported methods are safe for concurrent use and
+`services.ServiceManager` (built in `cmd/configd/runtime.go` and passed to `configmgr.NewConfigManager`
+and the watchdog). Its exported methods are safe for concurrent use and
 `ProcessRestarts` serializes whole passes, so the two never restart the same service
 concurrently and the main loop's `SetDependencies` does not race the watchdog's reads. When the
 manager restarts a service it calls `BeforeRestart`, which makes the watchdog stop watching it
@@ -155,7 +155,7 @@ Source: `internal/watchdog/watchdog.go`
 
 - **systemd host:** the watchdog is a no-op (`Start`/`Stop` do nothing, one INFO line says so):
   the units' `Restart=` recovers crashed services.
-- **legacy host:** every `zmconfigd_watchdog_interval` seconds it probes the services of
+- **legacy host:** unless `zmconfigd_watchdog=false`, every `zmconfigd_watchdog_interval` seconds (default 120) it probes the services of
   `zmconfigd_watchdog_services` (default `antivirus`) enabled on the node and restarts a tracked
   one that is down (`AddRestart` + `ProcessRestarts`, which cascades through `DEPENDS`).
   Tracking rules (legacy `state.py`/`configd.py`):
@@ -168,7 +168,7 @@ Source: `internal/watchdog/watchdog.go`
 
 ## Service control priority
 
-Source: `internal/services/cli.go` (`ServiceStart`, `ServiceStop`, `ServiceReload`, `ServiceStatus`),
+Source: `internal/services/cli.go` (`Controller.ServiceStart`, `ServiceStop`, `ServiceReload`, `ServiceStatus`),
 `internal/services/registry.go` (`ServiceDef`, `Registry`)
 
 `services.ServiceManager.ControlProcess` (`internal/services/manager.go`) is a thin
@@ -256,6 +256,8 @@ zmtlsctl set of configs (`sasl webxml mailbox service zextras zextrasAdmin zimle
 
 ## CLI verbs
 
+Full command reference: [cli.md](cli.md).
+
 `configd service <verb> <name> [args...]` mirrors the legacy `zm*ctl` verbs; the core
 wrappers run `exec configd service "${1:-}" <name> "${@:2}"`.
 
@@ -282,7 +284,7 @@ is empty. `configd control -H <host>` (remote control over SSH) no longer exists
 
 ## MTA: restart converted to reload
 
-Source: `internal/services/cli.go` (`ServiceRestart`)
+Source: `internal/services/cli.go` (`Controller.ServiceRestart`)
 
 Any restart request for the `mta` service is converted to a reload:
 

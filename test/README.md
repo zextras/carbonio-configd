@@ -6,11 +6,11 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 # Integration Tests
 
-This package contains reusable test helpers for spinning up Carbonio service containers (LDAP) via Docker, Podman, or Kubernetes.
+This package (`github.com/zextras/carbonio-configd/test`) contains reusable test helpers for spinning up Carbonio service containers (LDAP) via Docker, Podman, or Kubernetes. The shell suite `tests/integration/configd-test-suite.sh` is separate: it runs the installed `/opt/zextras/bin/configd` inside a Carbonio container.
 
 ## Running Integration Tests
 
-Integration tests require a container runtime (Docker, Podman, or Kubernetes) and are excluded from default builds to keep the main module's dependency surface minimal.
+Integration tests require a container runtime (Docker, Podman, or Kubernetes) and are excluded from default builds by the `integration` build tag. `make test-integration` runs every tagged test (`go test -v -tags integration ./...`); some of them (e.g. `internal/ldap/ldap_integration_test.go`) need a live Carbonio environment and skip themselves when it is absent.
 
 ### Prerequisites
 
@@ -51,11 +51,16 @@ The following files are gated with `//go:build integration` and only compile whe
 - `test/openldap.go` - self-contained OpenLDAP container (`StartOpenLDAP`) built from LDIF fixtures
 - `internal/configmgr/openldap_integration_test.go` - configd loaders, plan and Execute against that container
 - `internal/configmgr/openldap_starttls_integration_test.go` - the same container with a TLS certificate and `olcSecurity: tls=1`: StartTLS/ldaps client paths
+- `internal/cli/ldapcmd/ldapcmd_container_test.go` - `configd ldap` against the OpenLDAP container
 - `internal/ldap/client_container_test.go` - LDAP client integration tests
 - `internal/ldap/ldap_container_test.go` - LDAP manager integration tests
 - `internal/tls/mode_container_test.go` - TLS mode integration tests
 
+Other `integration`-tagged test files need a live Carbonio environment instead of a container (`internal/ldap/ldap_integration_test.go`, `internal/configmgr/{loader,manager,e2e_configd_cycle}_*test.go`, `internal/proxy/proxy_integration_test.go`, `internal/transformer/transformer_integration_test.go`).
+
 ## OpenLDAP Suite (`make test-integration-ldap`)
+
+The target runs `go test -v -count=1 -tags integration -run '^Test(OpenLDAP|Container)_' ./internal/configmgr ./internal/cli/ldapcmd`.
 
 `TestOpenLDAP_ConfigdCycle` (in `internal/configmgr`) needs no private image or live environment. It starts
 slapd in a container from the public `docker.io/library/alpine:3.24` image (`apk add openldap` at start-up, about 5 s
@@ -96,20 +101,20 @@ Integration tests depend on the following packages (only required when building 
 
 - `k8s.io/api`, `k8s.io/apimachinery`, `k8s.io/client-go` - Kubernetes client libraries
 - `github.com/testcontainers/testcontainers-go` - Container orchestration
-- `github.com/moby/moby` - Docker/Moby API
-- `github.com/shirou/gopsutil` - System utilities (indirect dependency)
+- `github.com/moby/moby/api` - Docker/Moby API types
+- `github.com/shirou/gopsutil/v4` - System utilities (indirect dependency)
 
-These dependencies are NOT included in the default module build and do not affect `go mod tidy` or `govulncheck` for standard builds.
+They are listed in the main `go.mod`, but only compiled into builds that use `-tags integration`; the shipped `configd` binary does not link them.
 
 ## Container Runtime Detection
 
 The test helpers automatically detect and use the available container runtime:
 
-1. **Docker**: Preferred if available
-2. **Podman**: Used if Docker is unavailable; automatically configures `DOCKER_HOST` and `TESTCONTAINERS_RYUK_DISABLED`
-3. **Kubernetes**: Used when running inside a Kubernetes pod (detected via `KUBERNETES_SERVICE_HOST`)
+1. **Docker**: Preferred if available (`docker` on `PATH` and `docker info` succeeds)
+2. **Podman**: Used if Docker is unavailable (socket taken from `podman info`); sets `DOCKER_HOST` and `TESTCONTAINERS_RYUK_DISABLED=true`
+3. **Kubernetes**: Used by `SpinUpCarbonioLdap` when running inside a Kubernetes pod (detected via `KUBERNETES_SERVICE_HOST`); `K8S_IMAGE_PULL_SECRET` names an optional image pull secret
 
-Tests will skip gracefully if no container runtime is available.
+`test.SkipIfNoDocker` skips the test if no Docker or Podman is reachable; `test.ContainerRuntimeAvailable` is the `TestMain` variant (it also accepts Kubernetes).
 
 ## Example Usage
 
@@ -125,7 +130,7 @@ func TestWithContainer(t *testing.T) {
 	// Skip if no container runtime is available
 	test.SkipIfNoDocker(t)
 
-	// Start LDAP container
+	// Start the Carbonio OpenLDAP container (PublicImageAddress is a private Zextras registry)
 	container, ctx := test.SpinUpCarbonioLdap(t, test.PublicImageAddress, test.LatestRelease)
 	defer container.Stop()
 
