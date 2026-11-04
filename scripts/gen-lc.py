@@ -9,20 +9,25 @@ Outputs (internal/localconfig/):
   lcdocs.go      the "zmlocalconfig -i" key docs
   lcdefaults.go  every KnownKey default plus the .protect() (force-to-edit) set
 
-Inputs, both read with `git show <tag>:<path>` from a carbonio-mailbox clone:
-  common/src/main/java/com/zimbra/common/localconfig/LC.java   KnownKey declarations
-                                                               with @Supported/@Reloadable,
-                                                               default values, .protect()
-  store/conf/msgs/ZsMsg.properties                             default-locale key docs
+Inputs, vendored verbatim from carbonio-mailbox in scripts/lc-source/ (so generation
+and `make generate-check` need neither network nor a clone):
+  LC.java           common/src/main/java/com/zimbra/common/localconfig/LC.java: KnownKey
+                    declarations with @Supported/@Reloadable, default values, .protect()
+  Constants.java    common/src/main/java/com/zimbra/common/util/Constants.java: constants
+                    referenced by the defaults
+  ZsMsg.properties  store/conf/msgs/ZsMsg.properties: default-locale key docs
+  TAG               the carbonio-mailbox tag the files were taken from; must equal
+                    scripts/lc-mailbox-tag
 
 lcdocs.go only contains keys declared in LC.java that also have a
 ZsMsg.properties entry, exactly the set LocalConfig.printDoc can print.
 
-The pinned tag lives in scripts/lc-mailbox-tag (the Makefile reads it too).
+The pinned tag lives in scripts/lc-mailbox-tag. To bump it, edit that file and run
+`make lc-sync` (copies the inputs at the new tag from a local clone), then `make generate`.
 
-  scripts/gen-lc.py                          ~/zextras/carbonio-mailbox @ pinned tag
-  scripts/gen-lc.py --mailbox-repo DIR --tag TAG [--outdir DIR]
-  go generate ./internal/localconfig/        (or: make generate)
+  scripts/gen-lc.py [--outdir DIR]
+  scripts/gen-lc.py --sync-from MAILBOX_REPO   refresh scripts/lc-source at the pinned tag
+  go generate ./internal/localconfig/          (or: make generate)
 """
 
 import argparse
@@ -34,9 +39,16 @@ import sys
 
 LC_PATH = "common/src/main/java/com/zimbra/common/localconfig/LC.java"
 MSGS_PATH = "store/conf/msgs/ZsMsg.properties"
+CONSTANTS_PATH = "common/src/main/java/com/zimbra/common/util/Constants.java"
 WRAP = 84
 HERE = os.path.dirname(os.path.abspath(__file__))
-CONSTANTS_PATH = "common/src/main/java/com/zimbra/common/util/Constants.java"
+SOURCE_DIR = os.path.join(HERE, "lc-source")
+# vendored file name -> path inside carbonio-mailbox
+SOURCES = {
+    "LC.java": LC_PATH,
+    "Constants.java": CONSTANTS_PATH,
+    "ZsMsg.properties": MSGS_PATH,
+}
 
 
 def git_show(repo, tag, path):
@@ -44,6 +56,21 @@ def git_show(repo, tag, path):
         ["git", "-C", repo, "show", f"{tag}:{path}"],
         check=True, capture_output=True,
     ).stdout
+
+
+def read_source(name):
+    with open(os.path.join(SOURCE_DIR, name), "rb") as f:
+        return f.read()
+
+
+def sync_sources(repo, tag):
+    """Copy the generator inputs at `tag` from a carbonio-mailbox clone into SOURCE_DIR."""
+    os.makedirs(SOURCE_DIR, exist_ok=True)
+    for name, path in SOURCES.items():
+        with open(os.path.join(SOURCE_DIR, name), "wb") as f:
+            f.write(git_show(repo, tag, path))
+    with open(os.path.join(SOURCE_DIR, "TAG"), "w", encoding="utf-8") as f:
+        f.write(tag + "\n")
 
 
 def logical_lines(text):
@@ -378,29 +405,38 @@ def write_go(path, text):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--mailbox-repo", default=os.path.expanduser("~/zextras/carbonio-mailbox"))
-    with open(os.path.join(HERE, "lc-mailbox-tag"), encoding="utf-8") as f:
-        pinned = f.read().strip()
-    ap.add_argument("--tag", default=pinned)
+    ap.add_argument("--sync-from", metavar="MAILBOX_REPO",
+                    help="refresh scripts/lc-source from this clone at the pinned tag, then exit")
     ap.add_argument("--outdir", default=os.path.join(HERE, "..", "internal", "localconfig"))
     args = ap.parse_args()
+    with open(os.path.join(HERE, "lc-mailbox-tag"), encoding="utf-8") as f:
+        tag = f.read().strip()
 
-    java = git_show(args.mailbox_repo, args.tag, LC_PATH).decode("utf-8")
+    if args.sync_from:
+        sync_sources(args.sync_from, tag)
+        print(f"{SOURCE_DIR}: synced at {tag}", file=sys.stderr)
+        return
+
+    vendored = read_source("TAG").decode("utf-8").strip()
+    if vendored != tag:
+        sys.exit(f"gen-lc: scripts/lc-source is at {vendored} but scripts/lc-mailbox-tag pins {tag}: run 'make lc-sync'")
+
+    java = read_source("LC.java").decode("utf-8")
     consts = parse_constants(
-        java_strip_comments(git_show(args.mailbox_repo, args.tag, CONSTANTS_PATH).decode("utf-8")),
+        java_strip_comments(read_source("Constants.java").decode("utf-8")),
         r"static final long (\w+)\s*=\s*([^;]+);")
     flags = parse_flags(java)
-    props = parse_properties(git_show(args.mailbox_repo, args.tag, MSGS_PATH))
+    props = parse_properties(read_source("ZsMsg.properties"))
     entries = [(k, props[k], *flags[k]) for k in sorted(flags) if k in props]
     defaults, protected = parse_defaults(java, consts)
     if set(defaults) != set(flags):
         raise ValueError("KnownKey sets differ between flag and default parsers")
 
     docs = os.path.join(args.outdir, "lcdocs.go")
-    write_go(docs, render(entries, args.tag))
+    write_go(docs, render(entries, tag))
     print(f"{docs}: {len(entries)} keys", file=sys.stderr)
     defs = os.path.join(args.outdir, "lcdefaults.go")
-    write_go(defs, render_defaults(defaults, protected, args.tag))
+    write_go(defs, render_defaults(defaults, protected, tag))
     print(f"{defs}: {len(defaults)} keys ({sum(v is None for v in defaults.values())} null), {len(protected)} protected", file=sys.stderr)
 
 
