@@ -221,7 +221,9 @@ func BenchmarkServiceProbesAgainstProc(b *testing.B) {
 // (or its parent): that made the lookups flaky. Tests that put os.Getpid() in
 // the table on purpose must not call it.
 func pinSelfPids(ctl *Controller) {
-	ctl.env.Proc = fixedPidProc{Proc: ctl.env.Proc, pid: 1, ppid: 2}
+	// Above the kernel's pid_max limit (2^22): no real or fake PID can match.
+	// 1 and 2 collided with the real PIDs of `go test` in a container (CI).
+	ctl.env.Proc = fixedPidProc{Proc: ctl.env.Proc, pid: 1 << 30, ppid: 1<<30 + 1}
 }
 
 // fixedPidProc reports fixed own and parent PIDs, outside the range the fake
