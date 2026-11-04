@@ -265,21 +265,21 @@ func TestFormatListenDirectives(t *testing.T) {
 			addressSet: map[string]bool{"192.168.1.1": true},
 			prefix:     "",
 			httpsPort:  "443",
-			contains:   []string{"listen 192.168.1.1:443 default_server;"},
+			contains:   []string{"listen                  192.168.1.1:443 default_server;"},
 		},
 		{
 			name:       "with prefix (comment out) prepends prefix",
 			addressSet: map[string]bool{"10.0.0.1": true},
 			prefix:     "#",
 			httpsPort:  "443",
-			contains:   []string{"#    listen 10.0.0.1:443 default_server;"},
+			contains:   []string{"#    listen                  10.0.0.1:443 default_server;"},
 		},
 		{
 			name:       "multiple addresses sorted",
 			addressSet: map[string]bool{"10.0.0.2": true, "10.0.0.1": true},
 			prefix:     "",
 			httpsPort:  "443",
-			contains:   []string{"listen 10.0.0.1:443", "listen 10.0.0.2:443"},
+			contains:   []string{"listen                  10.0.0.1:443", "listen                  10.0.0.2:443"},
 		},
 	}
 
