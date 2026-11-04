@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/redact"
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
@@ -224,7 +225,7 @@ func (c *Controller) startDirect(ctx context.Context, name string, def *ServiceD
 	}
 
 	logger.InfoContext(ctx, "Starting service directly",
-		"service", name, "binary", binary, "args", args, "detached", def.Detached)
+		"service", name, "binary", binary, "args", redact.Args(args), "detached", def.Detached)
 
 	if def.Detached {
 		return c.startDetached(ctx, name, def)

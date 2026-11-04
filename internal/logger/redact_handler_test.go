@@ -163,3 +163,31 @@ func TestInitStructuredLogging_RedactsByDefault(t *testing.T) {
 	assert.Contains(t, out, `"value":"7071"`)
 	assert.Contains(t, out, "redact_handler_test.go", "source attribution must still point at the caller")
 }
+
+// A secret key bound with With() must mask the value logged later, as it does
+// when both attributes are in the same record.
+func TestRedactHandler_WithAttrsSecretKeyMasksLaterValue(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+
+	l := slog.New(newRedactHandler(slog.NewTextHandler(&buf, nil))).With("key", "ldap_root_password")
+	l.Info("lookup", "value", "hunter2")
+	l.WithGroup("g").Info("lookup", "value", "hunter3")
+
+	out := buf.String()
+	assert.NotContains(t, out, "hunter2")
+	assert.NotContains(t, out, "hunter3")
+	assert.Contains(t, out, "key=ldap_root_password")
+}
+
+func TestRedactHandler_WithAttrsPlainKeyKeepsValue(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+
+	l := slog.New(newRedactHandler(slog.NewTextHandler(&buf, nil))).With("key", "zimbraImapBindPort")
+	l.Info("lookup", "value", "7143")
+
+	assert.Contains(t, buf.String(), "value=7143")
+}

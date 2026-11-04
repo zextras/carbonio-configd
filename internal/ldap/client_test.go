@@ -368,7 +368,7 @@ func TestWaitRetry_AbortedByClose(t *testing.T) {
 
 	result := make(chan bool, 1)
 
-	go func() { result <- c.waitRetry(time.Hour) }()
+	go func() { result <- c.waitRetry(context.Background(), time.Hour) }()
 
 	require.NoError(t, c.Close())
 
@@ -382,7 +382,7 @@ func TestWaitRetry_AbortedByClose(t *testing.T) {
 
 func TestWaitRetry_Elapses(t *testing.T) {
 	c := &Client{closed: make(chan struct{})}
-	require.True(t, c.waitRetry(time.Millisecond))
+	require.True(t, c.waitRetry(context.Background(), time.Millisecond))
 }
 
 // TestClient_HandleOperationError_ConnectionError_NilConn verifies that a connection

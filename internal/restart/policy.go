@@ -37,10 +37,12 @@ import (
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
-// maxSystemdAttempts is how many cycles a failing systemd action is tried
-// before it is dropped (the units' own Restart= handles crashes); it mirrors
-// the service manager's MaxFailedRestarts.
-const maxSystemdAttempts = 3
+// maxAttempts is how many cycles a failing restart (the manager refusing it,
+// or a failing systemd action) is tried before it is dropped. For systemd it
+// mirrors the service manager's MaxFailedRestarts (the units' own Restart=
+// handles crashes); the legacy path uses the same cap so a permanently refused
+// request does not retry forever.
+const maxAttempts = 3
 
 // Systemd is the host side of the systemd mode: whether services are managed
 // through units, and how a plan entry is carried out on them. It is satisfied
@@ -186,13 +188,24 @@ func (p *Policy) dispatch(
 // manager refused it.
 func (p *Policy) queueLegacy(ctx context.Context, service string, reasons, kinds []string) (retry bool) {
 	if err := p.mgr.AddRestartWithReasons(ctx, service, slices.Clone(reasons)); err != nil {
-		logger.WarnContext(ctx, "Failed to queue restart",
+		p.failures[service]++
+
+		if p.failures[service] >= maxAttempts {
+			delete(p.failures, service)
+			logger.ErrorContext(ctx, "Giving up on restart after repeated failures",
+				"service", service, "attempts", maxAttempts, "error", err)
+
+			return false
+		}
+
+		logger.WarnContext(ctx, "Failed to queue restart, will retry next cycle",
 			"service", service,
 			"error", err)
 
 		return true
 	}
 
+	delete(p.failures, service)
 	p.metrics.RestartRequested(service, kinds)
 
 	return false
@@ -218,10 +231,10 @@ func (p *Policy) applySystemd(
 
 	p.failures[service]++
 
-	if p.failures[service] >= maxSystemdAttempts {
+	if p.failures[service] >= maxAttempts {
 		delete(p.failures, service)
 		logger.ErrorContext(ctx, "Giving up on service action after repeated failures",
-			"service", service, "action", string(action), "attempts", maxSystemdAttempts, "error", err)
+			"service", service, "action", string(action), "attempts", maxAttempts, "error", err)
 
 		return false
 	}

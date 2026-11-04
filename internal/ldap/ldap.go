@@ -12,9 +12,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
-
-	"github.com/go-ldap/ldap/v3"
 
 	"github.com/zextras/carbonio-configd/internal/config"
 	errs "github.com/zextras/carbonio-configd/internal/errors"
@@ -41,10 +38,10 @@ type Ldap struct {
 	// For now, we'll simulate the behavior.
 	IsMaster bool
 
-	// Retry configuration
-	MaxRetries    int           // Maximum number of retry attempts (default: 3)
-	RetryDelay    time.Duration // Initial retry delay (default: 100ms)
-	MaxRetryDelay time.Duration // Maximum retry delay (default: 5s)
+	// There is deliberately no retry configuration here: transient failures
+	// are retried by exactly one layer, Client.executeWithRetry (which also
+	// reconnects). Wrapping it in a second loop multiplied the attempts
+	// (up to (1+3)*(1+3) per operation) and the worst-case wait.
 
 	// Native LDAP client for direct LDAP queries against the cn=zimbra data
 	// suffix (bound as uid=zimbra over TCP). Used for reads only.
@@ -107,17 +104,11 @@ func NewLdap(ctx context.Context, cfg *config.Config) *Ldap {
 	l := &Ldap{
 		config:         cfg,
 		pendingChanges: make(map[string]string),
-		MaxRetries:     3,
-		RetryDelay:     100 * time.Millisecond,
-		MaxRetryDelay:  5 * time.Second,
 	}
 	// In a real scenario, this would establish an LDAP connection.
 	// For now, we'll assume it's successful.
 
-	logger.DebugContext(ctx, "LDAP client initialized with retry config",
-		"max_retries", l.MaxRetries,
-		"retry_delay", l.RetryDelay,
-		"max_retry_delay", l.MaxRetryDelay)
+	logger.DebugContext(ctx, "LDAP client initialized")
 
 	return l
 }
@@ -199,10 +190,8 @@ func (l *Ldap) ModifyAttribute(ctx context.Context, key, value string) error {
 		return errs.WrapConfig("modify", key, errConfigClientNotInitialized)
 	}
 
-	// Execute LDAP modification with retry logic.
-	return l.withRetry(ctx, fmt.Sprintf("modify %s=%s", key, value), func() error {
-		return l.applyConfigModify(ctx, entry.DN, entry.Attr, val)
-	})
+	// Transient failures are retried by the ConfigClient.
+	return l.applyConfigModify(ctx, entry.DN, entry.Attr, val)
 }
 
 // refreshMasterStatus mirrors jylibs/ldap.py modify_attribute: when the local
@@ -357,12 +346,9 @@ func (l *Ldap) ModifyAttributeBatch(ctx context.Context, changes map[string]stri
 		dnGroups[entry.DN][entry.Attr] = val
 	}
 
-	// Execute batch modifications for each DN with retry logic
+	// Execute batch modifications for each DN
 	for dn, attrs := range dnGroups {
-		err := l.withRetry(ctx, fmt.Sprintf("batch modify DN %s", dn), func() error {
-			return l.executeBatchModifyInternal(ctx, dn, attrs)
-		})
-		if err != nil {
+		if err := l.executeBatchModifyInternal(ctx, dn, attrs); err != nil {
 			logger.ErrorContext(ctx, "Failed to batch modify DN",
 				"dn", dn,
 				"error", err)
@@ -374,8 +360,10 @@ func (l *Ldap) ModifyAttributeBatch(ctx context.Context, changes map[string]stri
 	return nil
 }
 
-// executeBatchModifyInternal performs the actual LDAP batch modification without retry logic.
-// This is called by ModifyAttributeBatch through the withRetry wrapper. Each attribute on
+// executeBatchModifyInternal performs the LDAP batch modification of one DN.
+// Transient failures are retried per attribute by the ConfigClient (the single
+// retry layer); each attribute is read first and skipped when already equal,
+// so nothing is re-applied twice. Each attribute on
 // the DN is applied via the native client; the go-ldap library does not expose a
 // transactional multi-attribute modify here, so attributes are replaced sequentially and
 // the first failure aborts the remaining attributes for that DN.
@@ -395,122 +383,6 @@ func (l *Ldap) executeBatchModifyInternal(ctx context.Context, dn string, attrs 
 	}
 
 	return nil
-}
-
-// sleepCtx waits for d or until ctx is done, returning ctx's error in the
-// latter case.
-func sleepCtx(ctx context.Context, d time.Duration) error {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-
-	select {
-	case <-ctx.Done():
-		return fmt.Errorf("wait interrupted: %w", ctx.Err())
-	case <-timer.C:
-		return nil
-	}
-}
-
-// withRetry executes an LDAP operation with exponential backoff retry logic.
-// This handles transient failures such as connection timeouts, temporary unavailability,
-// or network issues. Non-retryable errors (validation, permission) are returned immediately.
-func (l *Ldap) withRetry(ctx context.Context, operation string, fn func() error) error {
-	var lastErr error
-
-	delay := l.RetryDelay
-
-	for attempt := 0; attempt <= l.MaxRetries; attempt++ {
-		if attempt > 0 {
-			var err error
-
-			delay, err = l.backoffBeforeRetry(ctx, operation, attempt, delay, lastErr)
-			if err != nil {
-				return err
-			}
-		}
-
-		err := fn()
-		if err == nil {
-			if attempt > 0 {
-				logger.InfoContext(ctx, "LDAP operation succeeded after retries",
-					"operation", operation,
-					"attempts", attempt)
-			}
-
-			return nil
-		}
-
-		lastErr = err
-
-		// Check if error is retryable
-		if !isRetryableError(err) {
-			logger.DebugContext(ctx, "Non-retryable error",
-				"operation", operation,
-				"error", err)
-
-			return err
-		}
-
-		logger.WarnContext(ctx, "Transient error",
-			"operation", operation,
-			"error", err)
-	}
-
-	logger.ErrorContext(ctx, "LDAP operation failed after all retries",
-		"operation", operation,
-		"max_retries", l.MaxRetries,
-		"error", lastErr)
-
-	return fmt.Errorf("operation %s failed after %d retries: %w", operation, l.MaxRetries, lastErr)
-}
-
-// backoffBeforeRetry sleeps for delay before retry attempt and returns the next
-// (doubled, capped) delay. It fails if ctx is done during the wait.
-func (l *Ldap) backoffBeforeRetry(
-	ctx context.Context, operation string, attempt int, delay time.Duration, lastErr error,
-) (time.Duration, error) {
-	logger.DebugContext(ctx, "Retrying LDAP operation",
-		"operation", operation,
-		"attempt", attempt,
-		"max_retries", l.MaxRetries,
-		"delay", delay)
-
-	if err := sleepCtx(ctx, delay); err != nil {
-		return delay, fmt.Errorf("operation %s aborted before retry %d: %w (last error: %w)",
-			operation, attempt, err, lastErr)
-	}
-
-	// Exponential backoff with cap
-	return min(delay*2, l.MaxRetryDelay), nil
-}
-
-// isRetryableError determines if an error is transient and should be retried.
-// Non-retryable errors include validation errors, permission errors, and invalid keys.
-func isRetryableError(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	// Config errors (validation, permission, unknown keys) are not retryable
-	if errs.IsConfigError(err) {
-		return false
-	}
-
-	// Most error paths in this file return a plain fmt.Errorf wrapping
-	// whatever the native client (client.go) produced, so the underlying
-	// *ldap.Error result code — already classified once by
-	// Client.executeWithRetry/isLDAPErrorRetryable — is still reachable via
-	// errors.AsType through the %w chain. Reuse that classification instead of
-	// defaulting to retryable, or permanent LDAP failures (no such object,
-	// bad DN, bad credentials, ...) get retried a second time here after
-	// the native client already gave up on them.
-	if _, ok := errors.AsType[*ldap.Error](err); ok {
-		return isLDAPErrorRetryable(err)
-	}
-
-	// No structured LDAP result code (e.g. plain network/context errors):
-	// assume transient and retryable.
-	return true
 }
 
 // Domain represents a Carbonio domain with virtual hostname configuration

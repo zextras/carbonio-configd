@@ -11,6 +11,7 @@ import (
 	"net"
 	"os/user"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/zextras/carbonio-configd/internal/security"
@@ -85,13 +86,13 @@ func TestRun_Contracts(t *testing.T) {
 	}{
 		{
 			name: "unknown component", opts: Options{Component: "x"},
-			wantStderr: "Unknown component: x\n",
+			wantStderr: "Error: unknown component: x\n",
 		},
 		{
 			name: "load error", opts: Options{Component: "mta"},
 			load:       loadFrom(nil, errors.New("bad xml")),
 			wantStdout: "Initializing MTA (postfix, saslauthd, LDAP transport maps)...\n",
-			wantStderr: "Error loading localconfig: bad xml\n",
+			wantStderr: "Error: loading localconfig: bad xml\n",
 		},
 		{
 			name: "daemon not running", opts: Options{Component: "proxy"},
@@ -127,8 +128,55 @@ func TestRun_ConfigsExistGuard(t *testing.T) {
 	code := run(context.Background(), f.System(), services.NewController(f.System()), &stdout, &stderr,
 		&Options{Component: "proxy"}, nil)
 
-	want := "Configs for proxy already exist. Use --force to reinitialize.\n"
+	want := "Error: configs for proxy already exist. Use --force to reinitialize.\n"
 	if code != 1 || stderr.String() != want || stdout.Len() != 0 {
 		t.Errorf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
+// A service that does not start after a successful rewrite is a failure: the
+// exit code must be non-zero so provisioning scripts notice, while the message
+// tells the operator the configs were generated.
+func TestRun_ServiceStartFailureExitsNonZero(t *testing.T) {
+	t.Setenv("CARBONIO_BASE_DIR", testBase)
+
+	l, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { _ = l.Close() })
+
+	go func() {
+		for {
+			conn, err := l.Accept()
+			if err != nil {
+				return
+			}
+
+			buf := make([]byte, 128)
+			_, _ = conn.Read(buf)
+			_, _ = conn.Write([]byte("SUCCESS\n"))
+			_ = conn.Close()
+		}
+	}()
+
+	port := strconv.Itoa(l.Addr().(*net.TCPAddr).Port)
+
+	var stdout, stderr bytes.Buffer
+
+	env := systest.New().System()
+	load := loadFrom(map[string]string{"zmconfigd_listen_port": port}, nil)
+	code := run(context.Background(), env, services.NewController(env), &stdout, &stderr,
+		&Options{Component: "proxy"}, load)
+
+	if code != 1 {
+		t.Errorf("code=%d, want 1; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+
+	for _, want := range []string{"Error: service start failed:", "Configs were generated."} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Errorf("stderr %q misses %q", stderr.String(), want)
+		}
 	}
 }

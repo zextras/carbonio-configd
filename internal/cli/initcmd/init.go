@@ -57,14 +57,14 @@ func run(
 
 	desc, ok := initComponents[component]
 	if !ok {
-		_, _ = fmt.Fprintf(stderr, "Unknown component: %s\n", component)
+		_, _ = fmt.Fprintf(stderr, "Error: unknown component: %s\n", component)
 
 		return 1
 	}
 
 	// Check if configs already exist (basic guard)
 	if !opts.Force && configsExist(env, component) {
-		_, _ = fmt.Fprintf(stderr, "Configs for %s already exist. Use --force to reinitialize.\n", component)
+		_, _ = fmt.Fprintf(stderr, "Error: configs for %s already exist. Use --force to reinitialize.\n", component)
 
 		return 1
 	}
@@ -74,7 +74,7 @@ func run(
 	// Send REWRITE to running daemon
 	lc, err := loadConfig()
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "Error loading localconfig: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "Error: loading localconfig: %v\n", err)
 
 		return 1
 	}
@@ -97,11 +97,13 @@ func run(
 
 	if err := ctl.ServiceStart(ctx, component); err != nil {
 		logger.WarnContext(ctx, "Service start failed", "component", component, "error", err)
-		_, _ = fmt.Fprintf(stderr, "Warning: service start failed: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "Error: service start failed: %v\n", err)
 		_, _ = fmt.Fprintln(stderr, "Configs were generated. Start the service manually.")
-	} else {
-		_, _ = fmt.Fprintf(stdout, "Done. %s is running.\n", component)
+
+		return 1
 	}
+
+	_, _ = fmt.Fprintf(stdout, "Done. %s is running.\n", component)
 
 	return 0
 }

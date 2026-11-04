@@ -50,6 +50,23 @@ func TestConfigureLogFormat(t *testing.T) {
 	}
 }
 
+func TestConfigureLogFormat_WarnsOncePerValue(t *testing.T) {
+	t.Setenv("CONFIGD_LOG_FORMAT", "yaml-once")
+
+	var first, second bytes.Buffer
+
+	ConfigureLogFormat(logger.DefaultConfig(), &first)
+	ConfigureLogFormat(logger.DefaultConfig(), &second)
+
+	if first.Len() == 0 {
+		t.Error("the first use of an unknown format must warn")
+	}
+
+	if second.Len() != 0 {
+		t.Errorf("repeated warning %q", second.String())
+	}
+}
+
 func TestConfigureLogLevel(t *testing.T) {
 	tests := []struct {
 		name     string
