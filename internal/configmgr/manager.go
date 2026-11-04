@@ -256,7 +256,7 @@ func (cm *ConfigManager) initConfigLdapClient(ctx context.Context, localCfg map[
 
 // lookupFileKey returns the value for key from the file cache or disk.
 func (cm *ConfigManager) lookupFileKey(ctx context.Context, key string) (string, error) {
-	if val, ok := cm.State.LookupFile(key); ok {
+	if val, ok := cm.lookupCachedFile(ctx, key); ok {
 		logger.DebugContext(ctx, "Loaded from cache", "key", key, "value", redact.ForLog(key, val))
 
 		return val, nil
@@ -288,7 +288,7 @@ func (cm *ConfigManager) lookupFileKey(ctx context.Context, key string) (string,
 	}
 
 	value := strings.Join(filteredLines, ", ")
-	cm.State.StoreFile(key, value)
+	cm.storeCachedFile(ctx, key, value)
 
 	logger.DebugContext(ctx, "Loaded file content", "key", key, "value", redact.ForLog(key, value))
 

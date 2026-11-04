@@ -101,7 +101,7 @@ func TestSystemdMode_WatchdogIsANoOp(t *testing.T) {
 		ServiceManager: mockSM,
 		State:          state.NewState(),
 		CheckInterval:  50 * time.Millisecond,
-		SystemdMode:    true,
+		Systemd:        systemdHost{},
 	})
 	h.wd.AddService(context.Background(), "antivirus")
 	h.wd.SetServiceEnabled(context.Background(), "antivirus", true)
@@ -124,3 +124,8 @@ func TestSystemdMode_WatchdogIsANoOp(t *testing.T) {
 		t.Errorf("systemd-mode watchdog must not probe or restart, got %d calls", n)
 	}
 }
+
+// systemdHost is a systemd.Mode of a host managed through systemd units.
+type systemdHost struct{}
+
+func (systemdHost) IsSystemdMode() bool { return true }

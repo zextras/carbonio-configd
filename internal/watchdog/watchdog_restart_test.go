@@ -137,7 +137,7 @@ func TestWatchdog_StopHonorsContextWhileRunBusy(t *testing.T) {
 	wd.SetServiceEnabled(context.Background(), "amavis", true)
 
 	h.start()
-	h.clock.Advance(h.wd.CheckInterval)
+	h.clock.Advance(h.wd.checkInterval)
 
 	select {
 	case <-entered:

@@ -11,7 +11,6 @@ import (
 	"context"
 	"maps"
 	"slices"
-	"sort"
 	"sync"
 	"time"
 
@@ -20,6 +19,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/services"
 	"github.com/zextras/carbonio-configd/internal/state"
 	"github.com/zextras/carbonio-configd/internal/sys"
+	"github.com/zextras/carbonio-configd/internal/systemd"
 )
 
 // SnapshotProvider scopes one process-table snapshot to a context so every
@@ -40,8 +40,9 @@ type Watchdog struct {
 	// ServiceManager for controlling services
 	serviceManager services.Manager
 
-	// CheckInterval is the interval between health checks
-	CheckInterval time.Duration
+	// checkInterval is the interval between health checks; fixed at
+	// construction (Config.CheckInterval), so it needs no lock.
+	checkInterval time.Duration
 
 	// enabled controls whether watchdog is active
 	enabled bool
@@ -54,8 +55,9 @@ type Watchdog struct {
 	// by every Start together with stopChan.
 	runningChan chan struct{}
 
-	// ServiceEnabled maps service names to their enabled status
-	ServiceEnabled map[string]bool
+	// serviceEnabled is the set of services the watchdog monitors
+	// (zmconfigd_watchdog_services); guarded by mu.
+	serviceEnabled map[string]bool
 
 	// prevServices records each monitored service's last observed run state
 	// ("running"/"stopped") so status flips can be logged per cycle, mirroring
@@ -74,51 +76,10 @@ type Watchdog struct {
 	// metrics counts watchdog restarts; nil records nothing.
 	metrics *metrics.Registry
 
-	// systemdMode makes the watchdog a no-op: on a systemd host the units'
-	// Restart= policy recovers crashed services.
-	systemdMode bool
+	// systemd makes the watchdog a no-op when it reports a systemd host: the
+	// units' Restart= policy recovers crashed services. Nil: never.
+	systemd systemd.Mode
 }
-
-const (
-	// serviceLDAP is the LDAP service name.
-	serviceLDAP = "ldap"
-
-	// serviceMailbox is the mailbox service name.
-	serviceMailbox = "mailbox"
-
-	// serviceMailboxd is the mailboxd service name.
-	serviceMailboxd = "mailboxd"
-
-	// serviceMemcached is the memcached service name.
-	serviceMemcached = "memcached"
-
-	// serviceProxy is the proxy service name.
-	serviceProxy = "proxy"
-
-	// serviceAntispam is the antispam service name.
-	serviceAntispam = "antispam"
-
-	// serviceAntivirus is the antivirus service name.
-	serviceAntivirus = "antivirus"
-
-	// serviceCbpolicyd is the cbpolicyd service name.
-	serviceCbpolicyd = "cbpolicyd"
-
-	// serviceAmavis is the amavis service name.
-	serviceAmavis = "amavis"
-
-	// serviceOpendkim is the opendkim service name.
-	serviceOpendkim = "opendkim"
-
-	// serviceMTA is the MTA service name.
-	serviceMTA = "mta"
-
-	// serviceSasl is the sasl service name.
-	serviceSasl = "sasl"
-
-	// serviceStats is the stats service name.
-	serviceStats = "stats"
-)
 
 // Config holds configuration for the Watchdog.
 type Config struct {
@@ -143,10 +104,11 @@ type Config struct {
 	// the live process table.
 	Snapshots SnapshotProvider
 
-	// SystemdMode marks a host whose services are managed through systemd
-	// units. The watchdog then does nothing (Start and Stop are no-ops): the
-	// units' Restart= handles crashes, as legacy zmconfigd relied on it.
-	SystemdMode bool
+	// Systemd tells whether the host's services are managed through systemd
+	// units (the daemon's service manager answers). The watchdog then does
+	// nothing (Start and Stop are no-ops): the units' Restart= handles
+	// crashes, as legacy zmconfigd relied on it. Nil is a legacy host.
+	Systemd systemd.Mode
 }
 
 // NewWatchdog creates a new Watchdog instance.
@@ -158,14 +120,14 @@ func NewWatchdog(cfg Config) *Watchdog { //nolint:gocritic // hugeParam: constru
 	return &Watchdog{
 		state:          cfg.State,
 		serviceManager: cfg.ServiceManager,
-		CheckInterval:  cfg.CheckInterval,
+		checkInterval:  cfg.CheckInterval,
 		enabled:        false,
-		ServiceEnabled: make(map[string]bool),
+		serviceEnabled: make(map[string]bool),
 		prevServices:   make(map[string]string),
 		configLookup:   cfg.ConfigLookup,
 		clock:          cfg.Clock,
 		snapshots:      cfg.Snapshots,
-		systemdMode:    cfg.SystemdMode,
+		systemd:        cfg.Systemd,
 	}
 }
 
@@ -180,7 +142,7 @@ func (w *Watchdog) SetMetrics(reg *metrics.Registry) {
 func (w *Watchdog) Start(ctx context.Context) {
 	ctx = logger.ContextWithComponentOnce(ctx, "watchdog")
 
-	if w.systemdMode {
+	if systemd.Managed(w.systemd) {
 		logger.InfoContext(ctx, "Watchdog disabled in systemd mode: unit Restart= policies recover crashed services")
 
 		return
@@ -195,6 +157,10 @@ func (w *Watchdog) Start(ctx context.Context) {
 		return
 	}
 
+	// A previous loop whose Stop gave up waiting (ctx done) may still be in
+	// its last cycle: the new loop waits for it so two never check at once.
+	previous := w.runningChan
+
 	w.enabled = true
 	w.stopChan = make(chan struct{})
 	w.runningChan = make(chan struct{})
@@ -202,9 +168,9 @@ func (w *Watchdog) Start(ctx context.Context) {
 	w.mu.Unlock()
 
 	logger.DebugContext(ctx, "Starting watchdog",
-		"check_interval", w.CheckInterval)
+		"check_interval", w.checkInterval)
 
-	go w.run(ctx, stopChan, runningChan)
+	go w.run(ctx, stopChan, runningChan, previous)
 }
 
 // Stop halts the watchdog monitoring loop and waits for it to finish, or
@@ -213,7 +179,7 @@ func (w *Watchdog) Start(ctx context.Context) {
 func (w *Watchdog) Stop(ctx context.Context) {
 	ctx = logger.ContextWithComponentOnce(ctx, "watchdog")
 
-	if w.systemdMode {
+	if systemd.Managed(w.systemd) {
 		return
 	}
 
@@ -246,7 +212,7 @@ func (w *Watchdog) IsServiceEnabled(service string) bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	return w.ServiceEnabled[service]
+	return w.serviceEnabled[service]
 }
 
 // AddService adds a service to watchdog tracking.
@@ -275,11 +241,25 @@ func (w *Watchdog) IsServiceTracked(service string) bool {
 	return status != nil && *status
 }
 
-// run is the main watchdog monitoring loop.
-func (w *Watchdog) run(ctx context.Context, stopChan <-chan struct{}, runningChan chan<- struct{}) {
+// run is the main watchdog monitoring loop. previous is the running channel
+// of the loop this one replaces (nil for the first): run does not begin before
+// that loop has exited.
+func (w *Watchdog) run(
+	ctx context.Context, stopChan <-chan struct{}, runningChan chan<- struct{}, previous <-chan struct{},
+) {
 	defer close(runningChan)
 
-	ticker := w.clock.NewTicker(w.CheckInterval)
+	if previous != nil {
+		select {
+		case <-previous:
+		case <-stopChan:
+			return
+		case <-ctx.Done():
+			return
+		}
+	}
+
+	ticker := w.clock.NewTicker(w.checkInterval)
 	defer ticker.Stop()
 
 	for {
@@ -289,6 +269,16 @@ func (w *Watchdog) run(ctx context.Context, stopChan <-chan struct{}, runningCha
 
 			return
 		case <-ticker.C():
+			// A stop wins over a tick that fired at the same time: a loop
+			// being stopped must not start another cycle.
+			select {
+			case <-stopChan:
+				logger.DebugContext(ctx, "Watchdog stopped")
+
+				return
+			default:
+			}
+
 			w.checkServices(ctx)
 		}
 	}
@@ -352,13 +342,8 @@ func (w *Watchdog) rearmRunningServices(ctx context.Context, observed map[string
 func (w *Watchdog) logServiceStatusChanges(ctx context.Context) map[string]bool {
 	w.mu.Lock()
 
-	monitored := make([]string, 0, len(w.ServiceEnabled))
-	for svc := range w.ServiceEnabled {
-		monitored = append(monitored, svc)
-	}
+	monitored := slices.Sorted(maps.Keys(w.serviceEnabled))
 	w.mu.Unlock()
-
-	sort.Strings(monitored)
 
 	hostname := ""
 	if w.configLookup != nil {
@@ -497,26 +482,17 @@ func (w *Watchdog) restartDownService(ctx context.Context, service string) {
 	w.AddService(ctx, service)
 }
 
-// getTrackedServices returns a list of all services currently tracked by watchdog.
+// getTrackedServices returns the monitored services that are currently tracked
+// by the watchdog, in name order. The monitored list is the one configured in
+// zmconfigd_watchdog_services (UpdateServiceList), as in legacy configd's
+// watchdog(), which walks wd_list.
 func (w *Watchdog) getTrackedServices() []string {
-	// Collect all services that are tracked
-	// Note: State methods handle their own locking
-	commonServices := []string{
-		serviceLDAP, serviceMailbox, serviceMailboxd, serviceMemcached, serviceProxy,
-		serviceAntispam, serviceAntivirus, serviceCbpolicyd, serviceAmavis, serviceOpendkim,
-		serviceMTA, serviceSasl, serviceStats,
-	}
+	w.mu.Lock()
+	monitored := slices.Sorted(maps.Keys(w.serviceEnabled))
+	w.mu.Unlock()
 
-	serviceList := make([]string, 0, len(commonServices))
-
-	for _, service := range commonServices {
-		status := w.state.GetWatchdog(service)
-		if status != nil && *status {
-			serviceList = append(serviceList, service)
-		}
-	}
-
-	return serviceList
+	// State methods handle their own locking.
+	return slices.DeleteFunc(monitored, func(service string) bool { return !w.IsServiceTracked(service) })
 }
 
 // UpdateServiceList updates the list of services that should be monitored.
@@ -531,10 +507,10 @@ func (w *Watchdog) UpdateServiceList(ctx context.Context, enabledServices []stri
 		"service_count", len(enabledServices))
 
 	// Reset enabled map
-	w.ServiceEnabled = make(map[string]bool)
+	w.serviceEnabled = make(map[string]bool, len(enabledServices))
 
 	// Enable all provided services
 	for _, service := range enabledServices {
-		w.ServiceEnabled[service] = true
+		w.serviceEnabled[service] = true
 	}
 }

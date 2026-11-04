@@ -13,7 +13,6 @@ import (
 	"github.com/zextras/carbonio-configd/internal/sdnotify"
 	"github.com/zextras/carbonio-configd/internal/state"
 	"github.com/zextras/carbonio-configd/internal/sys"
-	"github.com/zextras/carbonio-configd/internal/systemd"
 	"github.com/zextras/carbonio-configd/internal/watchdog"
 )
 
@@ -46,8 +45,9 @@ func startSdWatchdogKeepAlive(
 // bootstrapWatchdog builds the watchdog on the runtime's one service manager.
 func bootstrapWatchdog(ctx context.Context, rt *runtime) *watchdog.Watchdog {
 	if rt.hooks == nil {
-		systemdManager := systemd.NewManager(rt.env)
-		if systemdManager.IsSystemdEnabled(ctx) {
+		// The service manager's answer is the daemon's one systemd-mode
+		// detection: the restart policy and the watchdog use it too.
+		if rt.sm.IsSystemdMode() {
 			logger.InfoContext(ctx, "Detected systemd-enabled environment",
 				"use_systemctl", true,
 				"fallback", "zm*ctl")
@@ -71,7 +71,7 @@ func bootstrapWatchdog(ctx context.Context, rt *runtime) *watchdog.Watchdog {
 		State:          rt.state,
 		Clock:          rt.env.Clock,
 		Snapshots:      rt.sm,
-		SystemdMode:    rt.sm.IsSystemdMode(),
+		Systemd:        rt.sm,
 		ConfigLookup: func(key string) string {
 			val, _ := rt.state.Snapshot().Local(key)
 
