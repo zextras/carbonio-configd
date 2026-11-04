@@ -1,0 +1,2142 @@
+## ldap | legacy start cold
+fs.open /opt/zextras/log/slapd.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/libexec/slapd -d 0 -l LOCAL0 -h ldap://ldap.example.com:389 ldapi:/// -F /opt/zextras/data/ldap/config
+=> ok
+
+## ldap | legacy start running
+=> ok
+
+## ldap | legacy stop running
+proc.signal 1001 15
+fs.remove /run/carbonio/slapd.pid
+=> ok
+
+## ldap | legacy stop stopped
+=> ok
+
+## ldap | legacy status running
+=> running=true ok
+
+## ldap | legacy status stopped
+=> running=false ok
+
+## ldap | legacy restart running
+proc.signal 1001 15
+fs.remove /run/carbonio/slapd.pid
+fs.open /opt/zextras/log/slapd.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/libexec/slapd -d 0 -l LOCAL0 -h ldap://ldap.example.com:389 ldapi:/// -F /opt/zextras/data/ldap/config
+=> ok
+
+## ldap | legacy reload running
+proc.signal 1001 15
+fs.remove /run/carbonio/slapd.pid
+fs.open /opt/zextras/log/slapd.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/libexec/slapd -d 0 -l LOCAL0 -h ldap://ldap.example.com:389 ldapi:/// -F /opt/zextras/data/ldap/config
+=> ok
+
+## ldap | legacy reload stopped
+fs.open /opt/zextras/log/slapd.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/libexec/slapd -d 0 -l LOCAL0 -h ldap://ldap.example.com:389 ldapi:/// -F /opt/zextras/data/ldap/config
+=> ok
+
+## ldap | legacy start-systemd cold
+fs.open /opt/zextras/log/slapd.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/libexec/slapd -d 0 -l LOCAL0 -h ldap://ldap.example.com:389 ldapi:/// -F /opt/zextras/data/ldap/config
+=> ok
+
+## ldap | legacy stop-systemd running
+proc.signal 1001 15
+fs.remove /run/carbonio/slapd.pid
+=> ok
+
+## ldap | legacy refresh running
+=> signaled=[] gone=[] err: verb not supported by this service: ldap has no refresh
+
+## ldap | legacy refresh stopped
+=> signaled=[] gone=[] err: verb not supported by this service: ldap has no refresh
+
+## ldap | legacy rotate running
+=> signaled=[] gone=[] err: verb not supported by this service: ldap has no rotate
+
+## ldap | systemd start
+exec /usr/bin/systemctl is-active carbonio-openldap.service
+=> ok
+
+## ldap | systemd stop
+exec /usr/bin/systemctl stop carbonio-openldap.service
+=> ok
+
+## ldap | systemd restart
+exec /usr/bin/systemctl stop carbonio-openldap.service
+exec /usr/bin/systemctl is-active carbonio-openldap.service
+=> ok
+
+## ldap | systemd reload
+exec /usr/bin/systemctl reload carbonio-openldap.service
+=> ok
+
+## ldap | systemd status active
+exec /usr/bin/systemctl is-active carbonio-openldap.service
+=> running=true ok
+
+## ldap | systemd start-systemd
+fs.open /opt/zextras/log/slapd.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/libexec/slapd -d 0 -l LOCAL0 -h ldap://ldap.example.com:389 ldapi:/// -F /opt/zextras/data/ldap/config
+=> ok
+
+## ldap | systemd stop-systemd
+=> ok
+
+## configd | legacy start cold
+fs.open /opt/zextras/log/configd.out flag=0x441 perm=0640
+exec.start /opt/zextras/bin/configd
+=> ok
+
+## configd | legacy start running
+=> ok
+
+## configd | legacy stop running
+proc.signal 1001 15
+=> ok
+
+## configd | legacy stop stopped
+=> ok
+
+## configd | legacy status running
+=> running=true ok
+
+## configd | legacy status stopped
+=> running=false ok
+
+## configd | legacy restart running
+proc.signal 1001 15
+fs.open /opt/zextras/log/configd.out flag=0x441 perm=0640
+exec.start /opt/zextras/bin/configd
+=> ok
+
+## configd | legacy reload running
+proc.signal 1001 15
+fs.open /opt/zextras/log/configd.out flag=0x441 perm=0640
+exec.start /opt/zextras/bin/configd
+=> ok
+
+## configd | legacy reload stopped
+fs.open /opt/zextras/log/configd.out flag=0x441 perm=0640
+exec.start /opt/zextras/bin/configd
+=> ok
+
+## configd | legacy start-systemd cold
+fs.open /opt/zextras/log/configd.out flag=0x441 perm=0640
+exec.start /opt/zextras/bin/configd
+=> ok
+
+## configd | legacy stop-systemd running
+proc.signal 1001 15
+=> ok
+
+## configd | legacy refresh running
+=> signaled=[] gone=[] err: verb not supported by this service: configd has no refresh
+
+## configd | legacy refresh stopped
+=> signaled=[] gone=[] err: verb not supported by this service: configd has no refresh
+
+## configd | legacy rotate running
+=> signaled=[] gone=[] err: verb not supported by this service: configd has no rotate
+
+## configd | systemd start
+exec /usr/bin/systemctl is-active carbonio-configd.service
+=> ok
+
+## configd | systemd stop
+exec /usr/bin/systemctl stop carbonio-configd.service
+=> ok
+
+## configd | systemd restart
+exec /usr/bin/systemctl stop carbonio-configd.service
+exec /usr/bin/systemctl is-active carbonio-configd.service
+=> ok
+
+## configd | systemd reload
+exec /usr/bin/systemctl reload carbonio-configd.service
+=> ok
+
+## configd | systemd status active
+exec /usr/bin/systemctl is-active carbonio-configd.service
+=> running=true ok
+
+## configd | systemd start-systemd
+fs.open /opt/zextras/log/configd.out flag=0x441 perm=0640
+exec.start /opt/zextras/bin/configd
+=> ok
+
+## configd | systemd stop-systemd
+=> ok
+
+## service-discover | legacy start cold
+=> ok
+
+## service-discover | legacy start running
+=> ok
+
+## service-discover | legacy stop running
+=> ok
+
+## service-discover | legacy stop stopped
+=> ok
+
+## service-discover | legacy status running
+=> running=false ok
+
+## service-discover | legacy status stopped
+=> running=false ok
+
+## service-discover | legacy restart running
+=> ok
+
+## service-discover | legacy reload running
+=> ok
+
+## service-discover | legacy reload stopped
+=> ok
+
+## service-discover | legacy start-systemd cold
+=> ok
+
+## service-discover | legacy stop-systemd running
+proc.signal 1001 15
+=> ok
+
+## service-discover | legacy refresh running
+=> signaled=[] gone=[] err: verb not supported by this service: service-discover has no refresh
+
+## service-discover | legacy refresh stopped
+=> signaled=[] gone=[] err: verb not supported by this service: service-discover has no refresh
+
+## service-discover | legacy rotate running
+=> signaled=[] gone=[] err: verb not supported by this service: service-discover has no rotate
+
+## service-discover | systemd start
+exec /usr/bin/systemctl is-active service-discover.service
+=> ok
+
+## service-discover | systemd stop
+=> ok
+
+## service-discover | systemd restart
+exec /usr/bin/systemctl is-active service-discover.service
+=> ok
+
+## service-discover | systemd reload
+=> ok
+
+## service-discover | systemd status active
+exec /usr/bin/systemctl is-active service-discover.service
+=> running=true ok
+
+## service-discover | systemd start-systemd
+=> ok
+
+## service-discover | systemd stop-systemd
+=> ok
+
+## appserver-db | legacy start cold
+fs.open /opt/zextras/log/mysqld_safe_appserver-db.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/my.cnf --external-locking --log-error=/opt/zextras/log/mysql_error.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
+=> ok
+
+## appserver-db | legacy start running
+=> ok
+
+## appserver-db | legacy stop running
+proc.signal 1001 15
+fs.remove /run/carbonio/mysql.pid
+=> ok
+
+## appserver-db | legacy stop stopped
+fs.remove /run/carbonio/mysql.pid
+=> ok
+
+## appserver-db | legacy status running
+=> running=true ok
+
+## appserver-db | legacy status stopped
+=> running=false ok
+
+## appserver-db | legacy restart running
+proc.signal 1001 15
+fs.remove /run/carbonio/mysql.pid
+fs.open /opt/zextras/log/mysqld_safe_appserver-db.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/my.cnf --external-locking --log-error=/opt/zextras/log/mysql_error.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
+=> ok
+
+## appserver-db | legacy reload running
+proc.signal 1001 15
+fs.remove /run/carbonio/mysql.pid
+fs.open /opt/zextras/log/mysqld_safe_appserver-db.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/my.cnf --external-locking --log-error=/opt/zextras/log/mysql_error.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
+=> ok
+
+## appserver-db | legacy reload stopped
+fs.remove /run/carbonio/mysql.pid
+fs.open /opt/zextras/log/mysqld_safe_appserver-db.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/my.cnf --external-locking --log-error=/opt/zextras/log/mysql_error.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
+=> ok
+
+## appserver-db | legacy start-systemd cold
+fs.open /opt/zextras/log/mysqld_safe_appserver-db.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/my.cnf --external-locking --log-error=/opt/zextras/log/mysql_error.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
+=> ok
+
+## appserver-db | legacy stop-systemd running
+proc.signal 1001 15
+fs.remove /run/carbonio/mysql.pid
+=> ok
+
+## appserver-db | legacy refresh running
+=> signaled=[] gone=[] err: verb not supported by this service: appserver-db has no refresh
+
+## appserver-db | legacy refresh stopped
+=> signaled=[] gone=[] err: verb not supported by this service: appserver-db has no refresh
+
+## appserver-db | legacy rotate running
+=> signaled=[] gone=[] err: verb not supported by this service: appserver-db has no rotate
+
+## appserver-db | systemd start
+exec /usr/bin/systemctl is-active carbonio-appserver-db.service
+=> ok
+
+## appserver-db | systemd stop
+exec /usr/bin/systemctl stop carbonio-appserver-db.service
+=> ok
+
+## appserver-db | systemd restart
+exec /usr/bin/systemctl stop carbonio-appserver-db.service
+exec /usr/bin/systemctl is-active carbonio-appserver-db.service
+=> ok
+
+## appserver-db | systemd reload
+exec /usr/bin/systemctl reload carbonio-appserver-db.service
+=> ok
+
+## appserver-db | systemd status active
+exec /usr/bin/systemctl is-active carbonio-appserver-db.service
+=> running=true ok
+
+## appserver-db | systemd start-systemd
+fs.open /opt/zextras/log/mysqld_safe_appserver-db.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/my.cnf --external-locking --log-error=/opt/zextras/log/mysql_error.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
+=> ok
+
+## appserver-db | systemd stop-systemd
+fs.remove /run/carbonio/mysql.pid
+=> ok
+
+## store | legacy start cold
+exec /opt/zextras/libexec/configrewrite sasl webxml mailbox service zextras zextrasAdmin zimlet
+fs.open /opt/zextras/log/mysqld_safe_appserver-db.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/my.cnf --external-locking --log-error=/opt/zextras/log/mysql_error.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
+fs.open /opt/zextras/log/mysqld_safe_appserver-db.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/my.cnf --external-locking --log-error=/opt/zextras/log/mysql_error.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
+fs.mkdir /opt/zextras/mailboxd/work/service/jsp mode=0755
+fs.mkdir /opt/zextras/mailboxd/work mode=0755
+fs.open /opt/zextras/log/gc.log flag=0x41 perm=0640
+fs.open /opt/zextras/log/zmmailboxd.out flag=0x441 perm=0640
+exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -Dfile.encoding=UTF-8 -Xss256k -Dsun.net.inetaddr.ttl=60 -Xms1024m -Xmx1024m -Djava.io.tmpdir=/opt/zextras/mailboxd/work -Djava.library.path=/opt/zextras/lib -Dzimbra.config=/opt/zextras/conf/localconfig.xml -cp /opt/zextras/mailbox/jars/mailbox.jar:/opt/zextras/mailbox/jars/* com.zextras.mailbox.Mailbox
+=> ok
+
+## store | legacy start running
+exec /opt/zextras/libexec/configrewrite sasl webxml mailbox service zextras zextrasAdmin zimlet
+=> ok
+
+## store | legacy stop running
+proc.signal 1002 15
+proc.signal 1001 15
+fs.remove /run/carbonio/mysql.pid
+=> ok
+
+## store | legacy stop stopped
+fs.remove /run/carbonio/mysql.pid
+=> ok
+
+## store | legacy status running
+=> running=true ok
+
+## store | legacy status stopped
+=> running=false ok
+
+## store | legacy restart running
+proc.signal 1002 15
+proc.signal 1001 15
+fs.remove /run/carbonio/mysql.pid
+exec /opt/zextras/libexec/configrewrite sasl webxml mailbox service zextras zextrasAdmin zimlet
+fs.open /opt/zextras/log/mysqld_safe_appserver-db.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/my.cnf --external-locking --log-error=/opt/zextras/log/mysql_error.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
+fs.open /opt/zextras/log/mysqld_safe_appserver-db.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/my.cnf --external-locking --log-error=/opt/zextras/log/mysql_error.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
+fs.mkdir /opt/zextras/mailboxd/work/service/jsp mode=0755
+fs.mkdir /opt/zextras/mailboxd/work mode=0755
+fs.open /opt/zextras/log/gc.log flag=0x41 perm=0640
+fs.open /opt/zextras/log/zmmailboxd.out flag=0x441 perm=0640
+exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -Dfile.encoding=UTF-8 -Xss256k -Dsun.net.inetaddr.ttl=60 -Xms1024m -Xmx1024m -Djava.io.tmpdir=/opt/zextras/mailboxd/work -Djava.library.path=/opt/zextras/lib -Dzimbra.config=/opt/zextras/conf/localconfig.xml -cp /opt/zextras/mailbox/jars/mailbox.jar:/opt/zextras/mailbox/jars/* com.zextras.mailbox.Mailbox
+=> ok
+
+## store | legacy reload running
+proc.signal 1002 15
+proc.signal 1001 15
+fs.remove /run/carbonio/mysql.pid
+exec /opt/zextras/libexec/configrewrite sasl webxml mailbox service zextras zextrasAdmin zimlet
+fs.open /opt/zextras/log/mysqld_safe_appserver-db.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/my.cnf --external-locking --log-error=/opt/zextras/log/mysql_error.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
+fs.open /opt/zextras/log/mysqld_safe_appserver-db.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/my.cnf --external-locking --log-error=/opt/zextras/log/mysql_error.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
+fs.mkdir /opt/zextras/mailboxd/work/service/jsp mode=0755
+fs.mkdir /opt/zextras/mailboxd/work mode=0755
+fs.open /opt/zextras/log/gc.log flag=0x41 perm=0640
+fs.open /opt/zextras/log/zmmailboxd.out flag=0x441 perm=0640
+exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -Dfile.encoding=UTF-8 -Xss256k -Dsun.net.inetaddr.ttl=60 -Xms1024m -Xmx1024m -Djava.io.tmpdir=/opt/zextras/mailboxd/work -Djava.library.path=/opt/zextras/lib -Dzimbra.config=/opt/zextras/conf/localconfig.xml -cp /opt/zextras/mailbox/jars/mailbox.jar:/opt/zextras/mailbox/jars/* com.zextras.mailbox.Mailbox
+=> ok
+
+## store | legacy reload stopped
+fs.remove /run/carbonio/mysql.pid
+exec /opt/zextras/libexec/configrewrite sasl webxml mailbox service zextras zextrasAdmin zimlet
+fs.open /opt/zextras/log/mysqld_safe_appserver-db.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/my.cnf --external-locking --log-error=/opt/zextras/log/mysql_error.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
+fs.open /opt/zextras/log/mysqld_safe_appserver-db.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/my.cnf --external-locking --log-error=/opt/zextras/log/mysql_error.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
+fs.mkdir /opt/zextras/mailboxd/work/service/jsp mode=0755
+fs.mkdir /opt/zextras/mailboxd/work mode=0755
+fs.open /opt/zextras/log/gc.log flag=0x41 perm=0640
+fs.open /opt/zextras/log/zmmailboxd.out flag=0x441 perm=0640
+exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -Dfile.encoding=UTF-8 -Xss256k -Dsun.net.inetaddr.ttl=60 -Xms1024m -Xmx1024m -Djava.io.tmpdir=/opt/zextras/mailboxd/work -Djava.library.path=/opt/zextras/lib -Dzimbra.config=/opt/zextras/conf/localconfig.xml -cp /opt/zextras/mailbox/jars/mailbox.jar:/opt/zextras/mailbox/jars/* com.zextras.mailbox.Mailbox
+=> ok
+
+## store | legacy start-systemd cold
+fs.open /opt/zextras/log/mysqld_safe_appserver-db.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/my.cnf --external-locking --log-error=/opt/zextras/log/mysql_error.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
+fs.mkdir /opt/zextras/mailboxd/work/service/jsp mode=0755
+fs.mkdir /opt/zextras/mailboxd/work mode=0755
+fs.open /opt/zextras/log/gc.log flag=0x41 perm=0640
+fs.open /opt/zextras/log/zmmailboxd.out flag=0x441 perm=0640
+exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -Dfile.encoding=UTF-8 -Xss256k -Dsun.net.inetaddr.ttl=60 -Xms1024m -Xmx1024m -Djava.io.tmpdir=/opt/zextras/mailboxd/work -Djava.library.path=/opt/zextras/lib -Dzimbra.config=/opt/zextras/conf/localconfig.xml -cp /opt/zextras/mailbox/jars/mailbox.jar:/opt/zextras/mailbox/jars/* com.zextras.mailbox.Mailbox
+=> ok
+
+## store | legacy stop-systemd running
+proc.signal 1002 15
+proc.signal 1001 15
+fs.remove /run/carbonio/mysql.pid
+=> ok
+
+## store | legacy refresh running
+=> signaled=[] gone=[] err: verb not supported by this service: store has no refresh
+
+## store | legacy refresh stopped
+=> signaled=[] gone=[] err: verb not supported by this service: store has no refresh
+
+## store | legacy rotate running
+=> signaled=[] gone=[] err: verb not supported by this service: store has no rotate
+
+## store | systemd start
+exec /opt/zextras/libexec/configrewrite sasl webxml mailbox service zextras zextrasAdmin zimlet
+exec /usr/bin/systemctl is-active carbonio-appserver-db.service
+exec /usr/bin/systemctl is-active carbonio-appserver.service
+=> ok
+
+## store | systemd stop
+exec /usr/bin/systemctl stop carbonio-appserver.service
+exec /usr/bin/systemctl stop carbonio-appserver-db.service
+=> ok
+
+## store | systemd restart
+exec /usr/bin/systemctl stop carbonio-appserver.service
+exec /usr/bin/systemctl stop carbonio-appserver-db.service
+exec /opt/zextras/libexec/configrewrite sasl webxml mailbox service zextras zextrasAdmin zimlet
+exec /usr/bin/systemctl is-active carbonio-appserver-db.service
+exec /usr/bin/systemctl is-active carbonio-appserver.service
+=> ok
+
+## store | systemd reload
+exec /usr/bin/systemctl stop carbonio-appserver.service
+exec /usr/bin/systemctl stop carbonio-appserver-db.service
+exec /opt/zextras/libexec/configrewrite sasl webxml mailbox service zextras zextrasAdmin zimlet
+exec /usr/bin/systemctl is-active carbonio-appserver-db.service
+exec /usr/bin/systemctl is-active carbonio-appserver.service
+=> ok
+
+## store | systemd status active
+exec /usr/bin/systemctl is-active carbonio-appserver-db.service
+exec /usr/bin/systemctl is-active carbonio-appserver.service
+=> running=true ok
+
+## store | systemd start-systemd
+fs.open /opt/zextras/log/mysqld_safe_appserver-db.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/my.cnf --external-locking --log-error=/opt/zextras/log/mysql_error.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
+fs.mkdir /opt/zextras/mailboxd/work/service/jsp mode=0755
+fs.mkdir /opt/zextras/mailboxd/work mode=0755
+fs.open /opt/zextras/log/gc.log flag=0x41 perm=0640
+fs.open /opt/zextras/log/zmmailboxd.out flag=0x441 perm=0640
+exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -Dfile.encoding=UTF-8 -Xss256k -Dsun.net.inetaddr.ttl=60 -Xms1024m -Xmx1024m -Djava.io.tmpdir=/opt/zextras/mailboxd/work -Djava.library.path=/opt/zextras/lib -Dzimbra.config=/opt/zextras/conf/localconfig.xml -cp /opt/zextras/mailbox/jars/mailbox.jar:/opt/zextras/mailbox/jars/* com.zextras.mailbox.Mailbox
+=> ok
+
+## store | systemd stop-systemd
+fs.remove /run/carbonio/mysql.pid
+=> ok
+
+## mailbox | legacy start cold
+fs.open /opt/zextras/log/mysqld_safe_appserver-db.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/my.cnf --external-locking --log-error=/opt/zextras/log/mysql_error.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
+exec /opt/zextras/libexec/configrewrite sasl webxml mailbox service zextras zextrasAdmin zimlet
+fs.mkdir /opt/zextras/mailboxd/work/service/jsp mode=0755
+fs.mkdir /opt/zextras/mailboxd/work mode=0755
+fs.open /opt/zextras/log/gc.log flag=0x41 perm=0640
+fs.open /opt/zextras/log/zmmailboxd.out flag=0x441 perm=0640
+exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -Dfile.encoding=UTF-8 -Xss256k -Dsun.net.inetaddr.ttl=60 -Xms1024m -Xmx1024m -Djava.io.tmpdir=/opt/zextras/mailboxd/work -Djava.library.path=/opt/zextras/lib -Dzimbra.config=/opt/zextras/conf/localconfig.xml -cp /opt/zextras/mailbox/jars/mailbox.jar:/opt/zextras/mailbox/jars/* com.zextras.mailbox.Mailbox
+=> ok
+
+## mailbox | legacy start running
+=> ok
+
+## mailbox | legacy stop running
+proc.signal 1001 15
+=> ok
+
+## mailbox | legacy stop stopped
+=> ok
+
+## mailbox | legacy status running
+=> running=true ok
+
+## mailbox | legacy status stopped
+=> running=false ok
+
+## mailbox | legacy restart running
+proc.signal 1001 15
+fs.open /opt/zextras/log/mysqld_safe_appserver-db.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/my.cnf --external-locking --log-error=/opt/zextras/log/mysql_error.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
+exec /opt/zextras/libexec/configrewrite sasl webxml mailbox service zextras zextrasAdmin zimlet
+fs.mkdir /opt/zextras/mailboxd/work/service/jsp mode=0755
+fs.mkdir /opt/zextras/mailboxd/work mode=0755
+fs.open /opt/zextras/log/gc.log flag=0x41 perm=0640
+fs.open /opt/zextras/log/zmmailboxd.out flag=0x441 perm=0640
+exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -Dfile.encoding=UTF-8 -Xss256k -Dsun.net.inetaddr.ttl=60 -Xms1024m -Xmx1024m -Djava.io.tmpdir=/opt/zextras/mailboxd/work -Djava.library.path=/opt/zextras/lib -Dzimbra.config=/opt/zextras/conf/localconfig.xml -cp /opt/zextras/mailbox/jars/mailbox.jar:/opt/zextras/mailbox/jars/* com.zextras.mailbox.Mailbox
+=> ok
+
+## mailbox | legacy reload running
+proc.signal 1001 15
+fs.mkdir /opt/zextras/mailboxd/work/service/jsp mode=0755
+fs.mkdir /opt/zextras/mailboxd/work mode=0755
+fs.open /opt/zextras/log/gc.log flag=0x41 perm=0640
+fs.open /opt/zextras/log/zmmailboxd.out flag=0x441 perm=0640
+exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -Dfile.encoding=UTF-8 -Xss256k -Dsun.net.inetaddr.ttl=60 -Xms1024m -Xmx1024m -Djava.io.tmpdir=/opt/zextras/mailboxd/work -Djava.library.path=/opt/zextras/lib -Dzimbra.config=/opt/zextras/conf/localconfig.xml -cp /opt/zextras/mailbox/jars/mailbox.jar:/opt/zextras/mailbox/jars/* com.zextras.mailbox.Mailbox
+=> ok
+
+## mailbox | legacy reload stopped
+fs.mkdir /opt/zextras/mailboxd/work/service/jsp mode=0755
+fs.mkdir /opt/zextras/mailboxd/work mode=0755
+fs.open /opt/zextras/log/gc.log flag=0x41 perm=0640
+fs.open /opt/zextras/log/zmmailboxd.out flag=0x441 perm=0640
+exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -Dfile.encoding=UTF-8 -Xss256k -Dsun.net.inetaddr.ttl=60 -Xms1024m -Xmx1024m -Djava.io.tmpdir=/opt/zextras/mailboxd/work -Djava.library.path=/opt/zextras/lib -Dzimbra.config=/opt/zextras/conf/localconfig.xml -cp /opt/zextras/mailbox/jars/mailbox.jar:/opt/zextras/mailbox/jars/* com.zextras.mailbox.Mailbox
+=> ok
+
+## mailbox | legacy start-systemd cold
+fs.mkdir /opt/zextras/mailboxd/work/service/jsp mode=0755
+fs.mkdir /opt/zextras/mailboxd/work mode=0755
+fs.open /opt/zextras/log/gc.log flag=0x41 perm=0640
+fs.open /opt/zextras/log/zmmailboxd.out flag=0x441 perm=0640
+exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -Dfile.encoding=UTF-8 -Xss256k -Dsun.net.inetaddr.ttl=60 -Xms1024m -Xmx1024m -Djava.io.tmpdir=/opt/zextras/mailboxd/work -Djava.library.path=/opt/zextras/lib -Dzimbra.config=/opt/zextras/conf/localconfig.xml -cp /opt/zextras/mailbox/jars/mailbox.jar:/opt/zextras/mailbox/jars/* com.zextras.mailbox.Mailbox
+=> ok
+
+## mailbox | legacy stop-systemd running
+proc.signal 1001 15
+=> ok
+
+## mailbox | legacy refresh running
+=> signaled=[] gone=[] err: verb not supported by this service: mailbox has no refresh
+
+## mailbox | legacy refresh stopped
+=> signaled=[] gone=[] err: verb not supported by this service: mailbox has no refresh
+
+## mailbox | legacy rotate running
+=> signaled=[] gone=[] err: verb not supported by this service: mailbox has no rotate
+
+## mailbox | systemd start
+exec /usr/bin/systemctl is-active carbonio-appserver.service
+=> ok
+
+## mailbox | systemd stop
+exec /usr/bin/systemctl stop carbonio-appserver.service
+=> ok
+
+## mailbox | systemd restart
+exec /usr/bin/systemctl stop carbonio-appserver.service
+exec /usr/bin/systemctl is-active carbonio-appserver.service
+=> ok
+
+## mailbox | systemd reload
+exec /usr/bin/systemctl reload carbonio-appserver.service
+=> ok
+
+## mailbox | systemd status active
+exec /usr/bin/systemctl is-active carbonio-appserver.service
+=> running=true ok
+
+## mailbox | systemd start-systemd
+fs.mkdir /opt/zextras/mailboxd/work/service/jsp mode=0755
+fs.mkdir /opt/zextras/mailboxd/work mode=0755
+fs.open /opt/zextras/log/gc.log flag=0x41 perm=0640
+fs.open /opt/zextras/log/zmmailboxd.out flag=0x441 perm=0640
+exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -Dfile.encoding=UTF-8 -Xss256k -Dsun.net.inetaddr.ttl=60 -Xms1024m -Xmx1024m -Djava.io.tmpdir=/opt/zextras/mailboxd/work -Djava.library.path=/opt/zextras/lib -Dzimbra.config=/opt/zextras/conf/localconfig.xml -cp /opt/zextras/mailbox/jars/mailbox.jar:/opt/zextras/mailbox/jars/* com.zextras.mailbox.Mailbox
+=> ok
+
+## mailbox | systemd stop-systemd
+=> ok
+
+## memcached | legacy start cold
+exec /opt/zextras/common/bin/memcached -d -U 0 -l 127.0.1.1,127.0.0.1 -p 11211
+=> ok
+
+## memcached | legacy start running
+=> ok
+
+## memcached | legacy stop running
+proc.signal 1001 15
+=> ok
+
+## memcached | legacy stop stopped
+=> ok
+
+## memcached | legacy status running
+=> running=true ok
+
+## memcached | legacy status stopped
+=> running=false ok
+
+## memcached | legacy restart running
+proc.signal 1001 15
+exec /opt/zextras/common/bin/memcached -d -U 0 -l 127.0.1.1,127.0.0.1 -p 11211
+=> ok
+
+## memcached | legacy reload running
+proc.signal 1001 15
+exec /opt/zextras/common/bin/memcached -d -U 0 -l 127.0.1.1,127.0.0.1 -p 11211
+=> ok
+
+## memcached | legacy reload stopped
+exec /opt/zextras/common/bin/memcached -d -U 0 -l 127.0.1.1,127.0.0.1 -p 11211
+=> ok
+
+## memcached | legacy start-systemd cold
+exec /opt/zextras/common/bin/memcached -d -U 0 -l 127.0.1.1,127.0.0.1 -p 11211
+=> ok
+
+## memcached | legacy stop-systemd running
+proc.signal 1001 15
+=> ok
+
+## memcached | legacy refresh running
+=> signaled=[] gone=[] err: verb not supported by this service: memcached has no refresh
+
+## memcached | legacy refresh stopped
+=> signaled=[] gone=[] err: verb not supported by this service: memcached has no refresh
+
+## memcached | legacy rotate running
+=> signaled=[] gone=[] err: verb not supported by this service: memcached has no rotate
+
+## memcached | systemd start
+exec /usr/bin/systemctl is-active carbonio-memcached.service
+=> ok
+
+## memcached | systemd stop
+exec /usr/bin/systemctl stop carbonio-memcached.service
+=> ok
+
+## memcached | systemd restart
+exec /usr/bin/systemctl stop carbonio-memcached.service
+exec /usr/bin/systemctl is-active carbonio-memcached.service
+=> ok
+
+## memcached | systemd reload
+exec /usr/bin/systemctl reload carbonio-memcached.service
+=> ok
+
+## memcached | systemd status active
+exec /usr/bin/systemctl is-active carbonio-memcached.service
+=> running=true ok
+
+## memcached | systemd start-systemd
+exec /opt/zextras/common/bin/memcached -d -U 0 -l 127.0.1.1,127.0.0.1 -p 11211
+=> ok
+
+## memcached | systemd stop-systemd
+=> ok
+
+## proxy | legacy start cold
+exec /opt/zextras/libexec/configrewrite proxy
+exec.start /opt/zextras/common/sbin/nginx -c /opt/zextras/conf/nginx.conf
+=> ok
+
+## proxy | legacy start running
+=> ok
+
+## proxy | legacy stop running
+proc.signal 1001 15
+=> ok
+
+## proxy | legacy stop stopped
+=> ok
+
+## proxy | legacy status running
+=> running=true ok
+
+## proxy | legacy status stopped
+=> running=false ok
+
+## proxy | legacy restart running
+proc.signal 1001 15
+exec /opt/zextras/libexec/configrewrite proxy
+exec.start /opt/zextras/common/sbin/nginx -c /opt/zextras/conf/nginx.conf
+=> ok
+
+## proxy | legacy reload running
+proc.signal 1001 15
+exec.start /opt/zextras/common/sbin/nginx -c /opt/zextras/conf/nginx.conf
+=> ok
+
+## proxy | legacy reload stopped
+exec.start /opt/zextras/common/sbin/nginx -c /opt/zextras/conf/nginx.conf
+=> ok
+
+## proxy | legacy start-systemd cold
+exec.start /opt/zextras/common/sbin/nginx -c /opt/zextras/conf/nginx.conf
+=> ok
+
+## proxy | legacy stop-systemd running
+proc.signal 1001 15
+=> ok
+
+## proxy | legacy refresh running
+=> signaled=[] gone=[] err: verb not supported by this service: proxy has no refresh
+
+## proxy | legacy refresh stopped
+=> signaled=[] gone=[] err: verb not supported by this service: proxy has no refresh
+
+## proxy | legacy rotate running
+=> signaled=[] gone=[] err: verb not supported by this service: proxy has no rotate
+
+## proxy | systemd start
+exec /usr/bin/systemctl is-active carbonio-nginx.service
+=> ok
+
+## proxy | systemd stop
+exec /usr/bin/systemctl stop carbonio-nginx.service
+=> ok
+
+## proxy | systemd restart
+exec /usr/bin/systemctl stop carbonio-nginx.service
+exec /usr/bin/systemctl is-active carbonio-nginx.service
+=> ok
+
+## proxy | systemd reload
+exec /usr/bin/systemctl reload carbonio-nginx.service
+=> ok
+
+## proxy | systemd status active
+exec /usr/bin/systemctl is-active carbonio-nginx.service
+=> running=true ok
+
+## proxy | systemd start-systemd
+exec.start /opt/zextras/common/sbin/nginx -c /opt/zextras/conf/nginx.conf
+=> ok
+
+## proxy | systemd stop-systemd
+=> ok
+
+## amavis | legacy start cold
+exec /opt/zextras/libexec/configrewrite amavis antispam
+fs.mkdir /opt/zextras/data/amavisd/.spamassassin mode=0755
+exec /opt/zextras/libexec/zmaltermimeconfig
+exec /usr/bin/sudo /opt/zextras/common/sbin/amavis-mc
+fs.mkdir /opt/zextras/data/amavisd/quarantine mode=0755
+fs.mkdir /opt/zextras/data/amavisd/tmp mode=0755
+fs.mkdir /opt/zextras/data/amavisd/var mode=0755
+exec /opt/zextras/common/sbin/amavisd -X no_conf_file_writable_check -c /opt/zextras/conf/amavisd.conf
+=> ok
+
+## amavis | legacy start running
+=> ok
+
+## amavis | legacy stop running
+proc.signal 1001 15
+proc.signal 1002 15
+=> ok
+
+## amavis | legacy stop stopped
+=> ok
+
+## amavis | legacy status running
+=> running=true ok
+
+## amavis | legacy status stopped
+=> running=false ok
+
+## amavis | legacy restart running
+proc.signal 1001 15
+proc.signal 1002 15
+exec /opt/zextras/libexec/configrewrite amavis antispam
+fs.mkdir /opt/zextras/data/amavisd/.spamassassin mode=0755
+exec /opt/zextras/libexec/zmaltermimeconfig
+exec /usr/bin/sudo /opt/zextras/common/sbin/amavis-mc
+fs.mkdir /opt/zextras/data/amavisd/quarantine mode=0755
+fs.mkdir /opt/zextras/data/amavisd/tmp mode=0755
+fs.mkdir /opt/zextras/data/amavisd/var mode=0755
+exec /opt/zextras/common/sbin/amavisd -X no_conf_file_writable_check -c /opt/zextras/conf/amavisd.conf
+=> ok
+
+## amavis | legacy reload running
+proc.signal 1001 15
+proc.signal 1002 15
+exec /usr/bin/sudo /opt/zextras/common/sbin/amavis-mc
+fs.mkdir /opt/zextras/data/amavisd/quarantine mode=0755
+fs.mkdir /opt/zextras/data/amavisd/tmp mode=0755
+fs.mkdir /opt/zextras/data/amavisd/var mode=0755
+exec /opt/zextras/common/sbin/amavisd -X no_conf_file_writable_check -c /opt/zextras/conf/amavisd.conf
+=> ok
+
+## amavis | legacy reload stopped
+exec /usr/bin/sudo /opt/zextras/common/sbin/amavis-mc
+fs.mkdir /opt/zextras/data/amavisd/quarantine mode=0755
+fs.mkdir /opt/zextras/data/amavisd/tmp mode=0755
+fs.mkdir /opt/zextras/data/amavisd/var mode=0755
+exec /opt/zextras/common/sbin/amavisd -X no_conf_file_writable_check -c /opt/zextras/conf/amavisd.conf
+=> ok
+
+## amavis | legacy start-systemd cold
+fs.mkdir /opt/zextras/data/amavisd/.spamassassin mode=0755
+exec /opt/zextras/libexec/zmaltermimeconfig
+exec /usr/bin/sudo /opt/zextras/common/sbin/amavis-mc
+fs.mkdir /opt/zextras/data/amavisd/quarantine mode=0755
+fs.mkdir /opt/zextras/data/amavisd/tmp mode=0755
+fs.mkdir /opt/zextras/data/amavisd/var mode=0755
+exec /opt/zextras/common/sbin/amavisd -X no_conf_file_writable_check -c /opt/zextras/conf/amavisd.conf
+=> ok
+
+## amavis | legacy stop-systemd running
+proc.signal 1001 15
+proc.signal 1002 15
+=> ok
+
+## amavis | legacy refresh running
+=> signaled=[] gone=[] err: verb not supported by this service: amavis has no refresh
+
+## amavis | legacy refresh stopped
+=> signaled=[] gone=[] err: verb not supported by this service: amavis has no refresh
+
+## amavis | legacy rotate running
+=> signaled=[] gone=[] err: verb not supported by this service: amavis has no rotate
+
+## amavis | systemd start
+exec /usr/bin/systemctl is-active carbonio-mailthreat.service
+=> ok
+
+## amavis | systemd stop
+exec /usr/bin/systemctl stop carbonio-mailthreat.service
+=> ok
+
+## amavis | systemd restart
+exec /usr/bin/systemctl stop carbonio-mailthreat.service
+exec /usr/bin/systemctl is-active carbonio-mailthreat.service
+=> ok
+
+## amavis | systemd reload
+exec /usr/bin/systemctl reload carbonio-mailthreat.service
+=> ok
+
+## amavis | systemd status active
+exec /usr/bin/systemctl is-active carbonio-mailthreat.service
+=> running=true ok
+
+## amavis | systemd start-systemd
+fs.mkdir /opt/zextras/data/amavisd/.spamassassin mode=0755
+exec /opt/zextras/libexec/zmaltermimeconfig
+exec /usr/bin/sudo /opt/zextras/common/sbin/amavis-mc
+fs.mkdir /opt/zextras/data/amavisd/quarantine mode=0755
+fs.mkdir /opt/zextras/data/amavisd/tmp mode=0755
+fs.mkdir /opt/zextras/data/amavisd/var mode=0755
+exec /opt/zextras/common/sbin/amavisd -X no_conf_file_writable_check -c /opt/zextras/conf/amavisd.conf
+=> ok
+
+## amavis | systemd stop-systemd
+=> ok
+
+## antispam-db | legacy start cold
+fs.open /opt/zextras/log/mysqld_safe_antispam-db.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/antispam-my.cnf --external-locking --log-error=/opt/zextras/log/antispam-mysqld.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
+=> ok
+
+## antispam-db | legacy start running
+=> ok
+
+## antispam-db | legacy stop running
+proc.signal 1001 15
+fs.remove /run/carbonio/amavisd-mysql.pid
+=> ok
+
+## antispam-db | legacy stop stopped
+fs.remove /run/carbonio/amavisd-mysql.pid
+=> ok
+
+## antispam-db | legacy status running
+=> running=true ok
+
+## antispam-db | legacy status stopped
+=> running=false ok
+
+## antispam-db | legacy restart running
+proc.signal 1001 15
+fs.remove /run/carbonio/amavisd-mysql.pid
+fs.open /opt/zextras/log/mysqld_safe_antispam-db.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/antispam-my.cnf --external-locking --log-error=/opt/zextras/log/antispam-mysqld.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
+=> ok
+
+## antispam-db | legacy reload running
+proc.signal 1001 15
+fs.remove /run/carbonio/amavisd-mysql.pid
+fs.open /opt/zextras/log/mysqld_safe_antispam-db.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/antispam-my.cnf --external-locking --log-error=/opt/zextras/log/antispam-mysqld.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
+=> ok
+
+## antispam-db | legacy reload stopped
+fs.remove /run/carbonio/amavisd-mysql.pid
+fs.open /opt/zextras/log/mysqld_safe_antispam-db.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/antispam-my.cnf --external-locking --log-error=/opt/zextras/log/antispam-mysqld.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
+=> ok
+
+## antispam-db | legacy start-systemd cold
+fs.open /opt/zextras/log/mysqld_safe_antispam-db.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/antispam-my.cnf --external-locking --log-error=/opt/zextras/log/antispam-mysqld.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
+=> ok
+
+## antispam-db | legacy stop-systemd running
+proc.signal 1001 15
+fs.remove /run/carbonio/amavisd-mysql.pid
+=> ok
+
+## antispam-db | legacy refresh running
+=> signaled=[] gone=[] err: verb not supported by this service: antispam-db has no refresh
+
+## antispam-db | legacy refresh stopped
+=> signaled=[] gone=[] err: verb not supported by this service: antispam-db has no refresh
+
+## antispam-db | legacy rotate running
+=> signaled=[] gone=[] err: verb not supported by this service: antispam-db has no rotate
+
+## antispam-db | systemd start
+exec /usr/bin/systemctl is-active carbonio-antispam.service
+=> ok
+
+## antispam-db | systemd stop
+exec /usr/bin/systemctl stop carbonio-antispam.service
+=> ok
+
+## antispam-db | systemd restart
+exec /usr/bin/systemctl stop carbonio-antispam.service
+exec /usr/bin/systemctl is-active carbonio-antispam.service
+=> ok
+
+## antispam-db | systemd reload
+exec /usr/bin/systemctl reload carbonio-antispam.service
+=> ok
+
+## antispam-db | systemd status active
+exec /usr/bin/systemctl is-active carbonio-antispam.service
+=> running=true ok
+
+## antispam-db | systemd start-systemd
+fs.open /opt/zextras/log/mysqld_safe_antispam-db.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/antispam-my.cnf --external-locking --log-error=/opt/zextras/log/antispam-mysqld.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
+=> ok
+
+## antispam-db | systemd stop-systemd
+fs.remove /run/carbonio/amavisd-mysql.pid
+=> ok
+
+## antispam | legacy start cold
+fs.open /opt/zextras/log/mysqld_safe_antispam-db.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/antispam-my.cnf --external-locking --log-error=/opt/zextras/log/antispam-mysqld.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
+exec /opt/zextras/libexec/configrewrite amavis antispam
+fs.mkdir /opt/zextras/data/amavisd/.spamassassin mode=0755
+exec /opt/zextras/libexec/zmaltermimeconfig
+exec /usr/bin/sudo /opt/zextras/common/sbin/amavis-mc
+fs.mkdir /opt/zextras/data/amavisd/quarantine mode=0755
+fs.mkdir /opt/zextras/data/amavisd/tmp mode=0755
+fs.mkdir /opt/zextras/data/amavisd/var mode=0755
+exec /opt/zextras/common/sbin/amavisd -X no_conf_file_writable_check -c /opt/zextras/conf/amavisd.conf
+=> ok
+
+## antispam | legacy start running
+=> ok
+
+## antispam | legacy stop running
+proc.signal 1001 15
+fs.remove /run/carbonio/amavisd-mysql.pid
+proc.signal 1002 15
+proc.signal 1003 15
+=> ok
+
+## antispam | legacy stop stopped
+fs.remove /run/carbonio/amavisd-mysql.pid
+=> ok
+
+## antispam | legacy status running
+=> running=true ok
+
+## antispam | legacy status stopped
+=> running=false ok
+
+## antispam | legacy restart running
+proc.signal 1001 15
+fs.remove /run/carbonio/amavisd-mysql.pid
+proc.signal 1002 15
+proc.signal 1003 15
+fs.open /opt/zextras/log/mysqld_safe_antispam-db.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/antispam-my.cnf --external-locking --log-error=/opt/zextras/log/antispam-mysqld.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
+exec /opt/zextras/libexec/configrewrite amavis antispam
+fs.mkdir /opt/zextras/data/amavisd/.spamassassin mode=0755
+exec /opt/zextras/libexec/zmaltermimeconfig
+exec /usr/bin/sudo /opt/zextras/common/sbin/amavis-mc
+fs.mkdir /opt/zextras/data/amavisd/quarantine mode=0755
+fs.mkdir /opt/zextras/data/amavisd/tmp mode=0755
+fs.mkdir /opt/zextras/data/amavisd/var mode=0755
+exec /opt/zextras/common/sbin/amavisd -X no_conf_file_writable_check -c /opt/zextras/conf/amavisd.conf
+=> ok
+
+## antispam | legacy reload running
+proc.signal 1001 15
+fs.remove /run/carbonio/amavisd-mysql.pid
+proc.signal 1002 15
+proc.signal 1003 15
+fs.open /opt/zextras/log/mysqld_safe_antispam-db.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/antispam-my.cnf --external-locking --log-error=/opt/zextras/log/antispam-mysqld.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
+exec /opt/zextras/libexec/configrewrite amavis antispam
+fs.mkdir /opt/zextras/data/amavisd/.spamassassin mode=0755
+exec /opt/zextras/libexec/zmaltermimeconfig
+exec /usr/bin/sudo /opt/zextras/common/sbin/amavis-mc
+fs.mkdir /opt/zextras/data/amavisd/quarantine mode=0755
+fs.mkdir /opt/zextras/data/amavisd/tmp mode=0755
+fs.mkdir /opt/zextras/data/amavisd/var mode=0755
+exec /opt/zextras/common/sbin/amavisd -X no_conf_file_writable_check -c /opt/zextras/conf/amavisd.conf
+=> ok
+
+## antispam | legacy reload stopped
+fs.remove /run/carbonio/amavisd-mysql.pid
+fs.open /opt/zextras/log/mysqld_safe_antispam-db.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/antispam-my.cnf --external-locking --log-error=/opt/zextras/log/antispam-mysqld.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
+exec /opt/zextras/libexec/configrewrite amavis antispam
+fs.mkdir /opt/zextras/data/amavisd/.spamassassin mode=0755
+exec /opt/zextras/libexec/zmaltermimeconfig
+exec /usr/bin/sudo /opt/zextras/common/sbin/amavis-mc
+fs.mkdir /opt/zextras/data/amavisd/quarantine mode=0755
+fs.mkdir /opt/zextras/data/amavisd/tmp mode=0755
+fs.mkdir /opt/zextras/data/amavisd/var mode=0755
+exec /opt/zextras/common/sbin/amavisd -X no_conf_file_writable_check -c /opt/zextras/conf/amavisd.conf
+=> ok
+
+## antispam | legacy start-systemd cold
+fs.open /opt/zextras/log/mysqld_safe_antispam-db.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/antispam-my.cnf --external-locking --log-error=/opt/zextras/log/antispam-mysqld.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
+fs.mkdir /opt/zextras/data/amavisd/.spamassassin mode=0755
+exec /opt/zextras/libexec/zmaltermimeconfig
+exec /usr/bin/sudo /opt/zextras/common/sbin/amavis-mc
+fs.mkdir /opt/zextras/data/amavisd/quarantine mode=0755
+fs.mkdir /opt/zextras/data/amavisd/tmp mode=0755
+fs.mkdir /opt/zextras/data/amavisd/var mode=0755
+exec /opt/zextras/common/sbin/amavisd -X no_conf_file_writable_check -c /opt/zextras/conf/amavisd.conf
+=> ok
+
+## antispam | legacy stop-systemd running
+proc.signal 1001 15
+fs.remove /run/carbonio/amavisd-mysql.pid
+proc.signal 1002 15
+proc.signal 1003 15
+=> ok
+
+## antispam | legacy refresh running
+=> signaled=[] gone=[] err: verb not supported by this service: antispam has no refresh
+
+## antispam | legacy refresh stopped
+=> signaled=[] gone=[] err: verb not supported by this service: antispam has no refresh
+
+## antispam | legacy rotate running
+=> signaled=[] gone=[] err: verb not supported by this service: antispam has no rotate
+
+## antispam | systemd start
+exec /usr/bin/systemctl is-active carbonio-antispam.service
+exec /usr/bin/systemctl is-active carbonio-mailthreat.service
+=> ok
+
+## antispam | systemd stop
+exec /usr/bin/systemctl stop carbonio-antispam.service
+exec /usr/bin/systemctl stop carbonio-mailthreat.service
+=> ok
+
+## antispam | systemd restart
+exec /usr/bin/systemctl stop carbonio-antispam.service
+exec /usr/bin/systemctl stop carbonio-mailthreat.service
+exec /usr/bin/systemctl is-active carbonio-antispam.service
+exec /usr/bin/systemctl is-active carbonio-mailthreat.service
+=> ok
+
+## antispam | systemd reload
+exec /usr/bin/systemctl stop carbonio-antispam.service
+exec /usr/bin/systemctl stop carbonio-mailthreat.service
+exec /usr/bin/systemctl is-active carbonio-antispam.service
+exec /usr/bin/systemctl is-active carbonio-mailthreat.service
+=> ok
+
+## antispam | systemd status active
+exec /usr/bin/systemctl is-active carbonio-antispam.service
+exec /usr/bin/systemctl is-active carbonio-mailthreat.service
+=> running=true ok
+
+## antispam | systemd start-systemd
+fs.open /opt/zextras/log/mysqld_safe_antispam-db.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/antispam-my.cnf --external-locking --log-error=/opt/zextras/log/antispam-mysqld.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
+fs.mkdir /opt/zextras/data/amavisd/.spamassassin mode=0755
+exec /opt/zextras/libexec/zmaltermimeconfig
+exec /usr/bin/sudo /opt/zextras/common/sbin/amavis-mc
+fs.mkdir /opt/zextras/data/amavisd/quarantine mode=0755
+fs.mkdir /opt/zextras/data/amavisd/tmp mode=0755
+fs.mkdir /opt/zextras/data/amavisd/var mode=0755
+exec /opt/zextras/common/sbin/amavisd -X no_conf_file_writable_check -c /opt/zextras/conf/amavisd.conf
+=> ok
+
+## antispam | systemd stop-systemd
+fs.remove /run/carbonio/amavisd-mysql.pid
+=> ok
+
+## antivirus | legacy start cold
+exec /opt/zextras/libexec/configrewrite antivirus
+fs.mkdir /opt/zextras/data/amavisd/.spamassassin mode=0755
+exec /usr/bin/sudo /opt/zextras/common/sbin/amavis-mc
+fs.mkdir /opt/zextras/data/amavisd/quarantine mode=0755
+fs.mkdir /opt/zextras/data/amavisd/tmp mode=0755
+fs.mkdir /opt/zextras/data/amavisd/var mode=0755
+exec /opt/zextras/common/sbin/amavisd -X no_conf_file_writable_check -c /opt/zextras/conf/amavisd.conf
+fs.mkdir /opt/zextras/data/clamav/db mode=0755
+fs.open /opt/zextras/log/clamd.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/sbin/clamd --config-file=/opt/zextras/conf/clamd.conf
+fs.open /opt/zextras/log/freshclam.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/freshclam --config-file=/opt/zextras/conf/freshclam.conf --quiet -d --checks=12 --foreground=true
+=> ok
+
+## antivirus | legacy start running
+exec /opt/zextras/libexec/configrewrite antivirus
+=> ok
+
+## antivirus | legacy stop running
+proc.signal 1001 15
+proc.signal 1002 15
+proc.signal 1003 15
+proc.signal 1004 15
+=> ok
+
+## antivirus | legacy stop stopped
+=> ok
+
+## antivirus | legacy status running
+=> running=true ok
+
+## antivirus | legacy status stopped
+=> running=false ok
+
+## antivirus | legacy restart running
+proc.signal 1001 15
+proc.signal 1002 15
+proc.signal 1003 15
+proc.signal 1004 15
+exec /opt/zextras/libexec/configrewrite antivirus
+fs.mkdir /opt/zextras/data/amavisd/.spamassassin mode=0755
+exec /usr/bin/sudo /opt/zextras/common/sbin/amavis-mc
+fs.mkdir /opt/zextras/data/amavisd/quarantine mode=0755
+fs.mkdir /opt/zextras/data/amavisd/tmp mode=0755
+fs.mkdir /opt/zextras/data/amavisd/var mode=0755
+exec /opt/zextras/common/sbin/amavisd -X no_conf_file_writable_check -c /opt/zextras/conf/amavisd.conf
+fs.mkdir /opt/zextras/data/clamav/db mode=0755
+fs.open /opt/zextras/log/clamd.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/sbin/clamd --config-file=/opt/zextras/conf/clamd.conf
+fs.open /opt/zextras/log/freshclam.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/freshclam --config-file=/opt/zextras/conf/freshclam.conf --quiet -d --checks=12 --foreground=true
+=> ok
+
+## antivirus | legacy reload running
+proc.signal 1001 15
+proc.signal 1002 15
+proc.signal 1003 15
+proc.signal 1004 15
+exec /opt/zextras/libexec/configrewrite antivirus
+fs.mkdir /opt/zextras/data/amavisd/.spamassassin mode=0755
+exec /usr/bin/sudo /opt/zextras/common/sbin/amavis-mc
+fs.mkdir /opt/zextras/data/amavisd/quarantine mode=0755
+fs.mkdir /opt/zextras/data/amavisd/tmp mode=0755
+fs.mkdir /opt/zextras/data/amavisd/var mode=0755
+exec /opt/zextras/common/sbin/amavisd -X no_conf_file_writable_check -c /opt/zextras/conf/amavisd.conf
+fs.mkdir /opt/zextras/data/clamav/db mode=0755
+fs.open /opt/zextras/log/clamd.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/sbin/clamd --config-file=/opt/zextras/conf/clamd.conf
+fs.open /opt/zextras/log/freshclam.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/freshclam --config-file=/opt/zextras/conf/freshclam.conf --quiet -d --checks=12 --foreground=true
+=> ok
+
+## antivirus | legacy reload stopped
+exec /opt/zextras/libexec/configrewrite antivirus
+fs.mkdir /opt/zextras/data/amavisd/.spamassassin mode=0755
+exec /usr/bin/sudo /opt/zextras/common/sbin/amavis-mc
+fs.mkdir /opt/zextras/data/amavisd/quarantine mode=0755
+fs.mkdir /opt/zextras/data/amavisd/tmp mode=0755
+fs.mkdir /opt/zextras/data/amavisd/var mode=0755
+exec /opt/zextras/common/sbin/amavisd -X no_conf_file_writable_check -c /opt/zextras/conf/amavisd.conf
+fs.mkdir /opt/zextras/data/clamav/db mode=0755
+fs.open /opt/zextras/log/clamd.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/sbin/clamd --config-file=/opt/zextras/conf/clamd.conf
+fs.open /opt/zextras/log/freshclam.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/freshclam --config-file=/opt/zextras/conf/freshclam.conf --quiet -d --checks=12 --foreground=true
+=> ok
+
+## antivirus | legacy start-systemd cold
+fs.mkdir /opt/zextras/data/amavisd/.spamassassin mode=0755
+exec /opt/zextras/libexec/zmaltermimeconfig
+exec /usr/bin/sudo /opt/zextras/common/sbin/amavis-mc
+fs.mkdir /opt/zextras/data/amavisd/quarantine mode=0755
+fs.mkdir /opt/zextras/data/amavisd/tmp mode=0755
+fs.mkdir /opt/zextras/data/amavisd/var mode=0755
+exec /opt/zextras/common/sbin/amavisd -X no_conf_file_writable_check -c /opt/zextras/conf/amavisd.conf
+fs.mkdir /opt/zextras/data/clamav/db mode=0755
+fs.open /opt/zextras/log/clamd.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/sbin/clamd --config-file=/opt/zextras/conf/clamd.conf
+fs.open /opt/zextras/log/freshclam.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/freshclam --config-file=/opt/zextras/conf/freshclam.conf --quiet -d --checks=12 --foreground=true
+=> ok
+
+## antivirus | legacy stop-systemd running
+proc.signal 1001 15
+proc.signal 1002 15
+proc.signal 1003 15
+proc.signal 1004 15
+=> ok
+
+## antivirus | legacy refresh running
+=> signaled=[] gone=[] err: verb not supported by this service: antivirus has no refresh
+
+## antivirus | legacy refresh stopped
+=> signaled=[] gone=[] err: verb not supported by this service: antivirus has no refresh
+
+## antivirus | legacy rotate running
+=> signaled=[] gone=[] err: verb not supported by this service: antivirus has no rotate
+
+## antivirus | systemd start
+exec /opt/zextras/libexec/configrewrite antivirus
+exec /usr/bin/systemctl is-active carbonio-mailthreat.service
+exec /usr/bin/systemctl is-active carbonio-antivirus.service
+exec /usr/bin/systemctl is-active carbonio-freshclam.service
+=> ok
+
+## antivirus | systemd stop
+exec /usr/bin/systemctl stop carbonio-mailthreat.service
+exec /usr/bin/systemctl stop carbonio-antivirus.service
+exec /usr/bin/systemctl stop carbonio-freshclam.service
+=> ok
+
+## antivirus | systemd restart
+exec /usr/bin/systemctl stop carbonio-mailthreat.service
+exec /usr/bin/systemctl stop carbonio-antivirus.service
+exec /usr/bin/systemctl stop carbonio-freshclam.service
+exec /opt/zextras/libexec/configrewrite antivirus
+exec /usr/bin/systemctl is-active carbonio-mailthreat.service
+exec /usr/bin/systemctl is-active carbonio-antivirus.service
+exec /usr/bin/systemctl is-active carbonio-freshclam.service
+=> ok
+
+## antivirus | systemd reload
+exec /usr/bin/systemctl stop carbonio-mailthreat.service
+exec /usr/bin/systemctl stop carbonio-antivirus.service
+exec /usr/bin/systemctl stop carbonio-freshclam.service
+exec /opt/zextras/libexec/configrewrite antivirus
+exec /usr/bin/systemctl is-active carbonio-mailthreat.service
+exec /usr/bin/systemctl is-active carbonio-antivirus.service
+exec /usr/bin/systemctl is-active carbonio-freshclam.service
+=> ok
+
+## antivirus | systemd status active
+exec /usr/bin/systemctl is-active carbonio-mailthreat.service
+exec /usr/bin/systemctl is-active carbonio-antivirus.service
+exec /usr/bin/systemctl is-active carbonio-freshclam.service
+=> running=true ok
+
+## antivirus | systemd start-systemd
+fs.mkdir /opt/zextras/data/amavisd/.spamassassin mode=0755
+exec /opt/zextras/libexec/zmaltermimeconfig
+exec /usr/bin/sudo /opt/zextras/common/sbin/amavis-mc
+fs.mkdir /opt/zextras/data/amavisd/quarantine mode=0755
+fs.mkdir /opt/zextras/data/amavisd/tmp mode=0755
+fs.mkdir /opt/zextras/data/amavisd/var mode=0755
+exec /opt/zextras/common/sbin/amavisd -X no_conf_file_writable_check -c /opt/zextras/conf/amavisd.conf
+fs.mkdir /opt/zextras/data/clamav/db mode=0755
+fs.open /opt/zextras/log/clamd.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/sbin/clamd --config-file=/opt/zextras/conf/clamd.conf
+fs.open /opt/zextras/log/freshclam.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/freshclam --config-file=/opt/zextras/conf/freshclam.conf --quiet -d --checks=12 --foreground=true
+=> ok
+
+## antivirus | systemd stop-systemd
+=> ok
+
+## clamd | legacy start cold
+exec /opt/zextras/libexec/configrewrite antivirus
+fs.mkdir /opt/zextras/data/clamav/db mode=0755
+fs.open /opt/zextras/log/clamd.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/sbin/clamd --config-file=/opt/zextras/conf/clamd.conf
+=> ok
+
+## clamd | legacy start running
+=> ok
+
+## clamd | legacy stop running
+proc.signal 1001 15
+=> ok
+
+## clamd | legacy stop stopped
+=> ok
+
+## clamd | legacy status running
+=> running=true ok
+
+## clamd | legacy status stopped
+=> running=false ok
+
+## clamd | legacy restart running
+proc.signal 1001 15
+exec /opt/zextras/libexec/configrewrite antivirus
+fs.mkdir /opt/zextras/data/clamav/db mode=0755
+fs.open /opt/zextras/log/clamd.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/sbin/clamd --config-file=/opt/zextras/conf/clamd.conf
+=> ok
+
+## clamd | legacy reload running
+proc.signal 1001 15
+fs.open /opt/zextras/log/clamd.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/sbin/clamd --config-file=/opt/zextras/conf/clamd.conf
+=> ok
+
+## clamd | legacy reload stopped
+fs.open /opt/zextras/log/clamd.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/sbin/clamd --config-file=/opt/zextras/conf/clamd.conf
+=> ok
+
+## clamd | legacy start-systemd cold
+fs.mkdir /opt/zextras/data/clamav/db mode=0755
+fs.open /opt/zextras/log/clamd.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/sbin/clamd --config-file=/opt/zextras/conf/clamd.conf
+=> ok
+
+## clamd | legacy stop-systemd running
+proc.signal 1001 15
+=> ok
+
+## clamd | legacy refresh running
+=> signaled=[] gone=[] err: verb not supported by this service: clamd has no refresh
+
+## clamd | legacy refresh stopped
+=> signaled=[] gone=[] err: verb not supported by this service: clamd has no refresh
+
+## clamd | legacy rotate running
+=> signaled=[] gone=[] err: verb not supported by this service: clamd has no rotate
+
+## clamd | systemd start
+exec /usr/bin/systemctl is-active carbonio-antivirus.service
+=> ok
+
+## clamd | systemd stop
+exec /usr/bin/systemctl stop carbonio-antivirus.service
+=> ok
+
+## clamd | systemd restart
+exec /usr/bin/systemctl stop carbonio-antivirus.service
+exec /usr/bin/systemctl is-active carbonio-antivirus.service
+=> ok
+
+## clamd | systemd reload
+exec /usr/bin/systemctl reload carbonio-antivirus.service
+=> ok
+
+## clamd | systemd status active
+exec /usr/bin/systemctl is-active carbonio-antivirus.service
+=> running=true ok
+
+## clamd | systemd start-systemd
+fs.mkdir /opt/zextras/data/clamav/db mode=0755
+fs.open /opt/zextras/log/clamd.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/sbin/clamd --config-file=/opt/zextras/conf/clamd.conf
+=> ok
+
+## clamd | systemd stop-systemd
+=> ok
+
+## freshclam | legacy start cold
+fs.open /opt/zextras/log/freshclam.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/freshclam --config-file=/opt/zextras/conf/freshclam.conf --quiet -d --checks=12 --foreground=true
+=> ok
+
+## freshclam | legacy start running
+=> ok
+
+## freshclam | legacy stop running
+proc.signal 1001 15
+=> ok
+
+## freshclam | legacy stop stopped
+=> ok
+
+## freshclam | legacy status running
+=> running=true ok
+
+## freshclam | legacy status stopped
+=> running=false ok
+
+## freshclam | legacy restart running
+proc.signal 1001 15
+fs.open /opt/zextras/log/freshclam.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/freshclam --config-file=/opt/zextras/conf/freshclam.conf --quiet -d --checks=12 --foreground=true
+=> ok
+
+## freshclam | legacy reload running
+proc.signal 1001 15
+fs.open /opt/zextras/log/freshclam.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/freshclam --config-file=/opt/zextras/conf/freshclam.conf --quiet -d --checks=12 --foreground=true
+=> ok
+
+## freshclam | legacy reload stopped
+fs.open /opt/zextras/log/freshclam.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/freshclam --config-file=/opt/zextras/conf/freshclam.conf --quiet -d --checks=12 --foreground=true
+=> ok
+
+## freshclam | legacy start-systemd cold
+fs.open /opt/zextras/log/freshclam.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/freshclam --config-file=/opt/zextras/conf/freshclam.conf --quiet -d --checks=12 --foreground=true
+=> ok
+
+## freshclam | legacy stop-systemd running
+proc.signal 1001 15
+=> ok
+
+## freshclam | legacy refresh running
+=> signaled=[] gone=[] err: verb not supported by this service: freshclam has no refresh
+
+## freshclam | legacy refresh stopped
+=> signaled=[] gone=[] err: verb not supported by this service: freshclam has no refresh
+
+## freshclam | legacy rotate running
+=> signaled=[] gone=[] err: verb not supported by this service: freshclam has no rotate
+
+## freshclam | systemd start
+exec /usr/bin/systemctl is-active carbonio-freshclam.service
+=> ok
+
+## freshclam | systemd stop
+exec /usr/bin/systemctl stop carbonio-freshclam.service
+=> ok
+
+## freshclam | systemd restart
+exec /usr/bin/systemctl stop carbonio-freshclam.service
+exec /usr/bin/systemctl is-active carbonio-freshclam.service
+=> ok
+
+## freshclam | systemd reload
+exec /usr/bin/systemctl reload carbonio-freshclam.service
+=> ok
+
+## freshclam | systemd status active
+exec /usr/bin/systemctl is-active carbonio-freshclam.service
+=> running=true ok
+
+## freshclam | systemd start-systemd
+fs.open /opt/zextras/log/freshclam.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/freshclam --config-file=/opt/zextras/conf/freshclam.conf --quiet -d --checks=12 --foreground=true
+=> ok
+
+## freshclam | systemd stop-systemd
+=> ok
+
+## opendkim | legacy start cold
+exec.start /opt/zextras/common/sbin/opendkim -f -x /opt/zextras/conf/opendkim.conf -u zextras
+=> ok
+
+## opendkim | legacy start running
+=> ok
+
+## opendkim | legacy stop running
+proc.signal 1001 15
+=> ok
+
+## opendkim | legacy stop stopped
+=> ok
+
+## opendkim | legacy status running
+=> running=true ok
+
+## opendkim | legacy status stopped
+=> running=false ok
+
+## opendkim | legacy restart running
+proc.signal 1001 15
+exec.start /opt/zextras/common/sbin/opendkim -f -x /opt/zextras/conf/opendkim.conf -u zextras
+=> ok
+
+## opendkim | legacy reload running
+proc.signal 1001 15
+exec.start /opt/zextras/common/sbin/opendkim -f -x /opt/zextras/conf/opendkim.conf -u zextras
+=> ok
+
+## opendkim | legacy reload stopped
+exec.start /opt/zextras/common/sbin/opendkim -f -x /opt/zextras/conf/opendkim.conf -u zextras
+=> ok
+
+## opendkim | legacy start-systemd cold
+exec.start /opt/zextras/common/sbin/opendkim -f -x /opt/zextras/conf/opendkim.conf -u zextras
+=> ok
+
+## opendkim | legacy stop-systemd running
+proc.signal 1001 15
+=> ok
+
+## opendkim | legacy refresh running
+=> signaled=[] gone=[] err: verb not supported by this service: opendkim has no refresh
+
+## opendkim | legacy refresh stopped
+=> signaled=[] gone=[] err: verb not supported by this service: opendkim has no refresh
+
+## opendkim | legacy rotate running
+=> signaled=[] gone=[] err: verb not supported by this service: opendkim has no rotate
+
+## opendkim | systemd start
+exec /usr/bin/systemctl is-active carbonio-opendkim.service
+=> ok
+
+## opendkim | systemd stop
+exec /usr/bin/systemctl stop carbonio-opendkim.service
+=> ok
+
+## opendkim | systemd restart
+exec /usr/bin/systemctl stop carbonio-opendkim.service
+exec /usr/bin/systemctl is-active carbonio-opendkim.service
+=> ok
+
+## opendkim | systemd reload
+exec /usr/bin/systemctl reload carbonio-opendkim.service
+=> ok
+
+## opendkim | systemd status active
+exec /usr/bin/systemctl is-active carbonio-opendkim.service
+=> running=true ok
+
+## opendkim | systemd start-systemd
+exec.start /opt/zextras/common/sbin/opendkim -f -x /opt/zextras/conf/opendkim.conf -u zextras
+=> ok
+
+## opendkim | systemd stop-systemd
+=> ok
+
+## cbpolicyd | legacy start cold
+exec /opt/zextras/libexec/configrewrite cbpolicyd
+exec /opt/zextras/common/bin/cbpolicyd --config /opt/zextras/conf/cbpolicyd.conf
+=> ok
+
+## cbpolicyd | legacy start running
+=> ok
+
+## cbpolicyd | legacy stop running
+proc.signal 1001 15
+=> ok
+
+## cbpolicyd | legacy stop stopped
+=> ok
+
+## cbpolicyd | legacy status running
+=> running=true ok
+
+## cbpolicyd | legacy status stopped
+=> running=false ok
+
+## cbpolicyd | legacy restart running
+proc.signal 1001 15
+exec /opt/zextras/libexec/configrewrite cbpolicyd
+exec /opt/zextras/common/bin/cbpolicyd --config /opt/zextras/conf/cbpolicyd.conf
+=> ok
+
+## cbpolicyd | legacy reload running
+proc.signal 1001 15
+exec /opt/zextras/common/bin/cbpolicyd --config /opt/zextras/conf/cbpolicyd.conf
+=> ok
+
+## cbpolicyd | legacy reload stopped
+exec /opt/zextras/common/bin/cbpolicyd --config /opt/zextras/conf/cbpolicyd.conf
+=> ok
+
+## cbpolicyd | legacy start-systemd cold
+exec /opt/zextras/common/bin/cbpolicyd --config /opt/zextras/conf/cbpolicyd.conf
+=> ok
+
+## cbpolicyd | legacy stop-systemd running
+proc.signal 1001 15
+=> ok
+
+## cbpolicyd | legacy refresh running
+=> signaled=[] gone=[] err: verb not supported by this service: cbpolicyd has no refresh
+
+## cbpolicyd | legacy refresh stopped
+=> signaled=[] gone=[] err: verb not supported by this service: cbpolicyd has no refresh
+
+## cbpolicyd | legacy rotate running
+=> signaled=[] gone=[] err: verb not supported by this service: cbpolicyd has no rotate
+
+## cbpolicyd | systemd start
+exec /usr/bin/systemctl is-active carbonio-policyd.service
+=> ok
+
+## cbpolicyd | systemd stop
+exec /usr/bin/systemctl stop carbonio-policyd.service
+=> ok
+
+## cbpolicyd | systemd restart
+exec /usr/bin/systemctl stop carbonio-policyd.service
+exec /usr/bin/systemctl is-active carbonio-policyd.service
+=> ok
+
+## cbpolicyd | systemd reload
+exec /usr/bin/systemctl reload carbonio-policyd.service
+=> ok
+
+## cbpolicyd | systemd status active
+exec /usr/bin/systemctl is-active carbonio-policyd.service
+=> running=true ok
+
+## cbpolicyd | systemd start-systemd
+exec /opt/zextras/common/bin/cbpolicyd --config /opt/zextras/conf/cbpolicyd.conf
+=> ok
+
+## cbpolicyd | systemd stop-systemd
+=> ok
+
+## saslauthd | legacy start cold
+exec /opt/zextras/libexec/configrewrite sasl
+exec /opt/zextras/common/sbin/saslauthd -r -a zimbra
+=> ok
+
+## saslauthd | legacy start running
+=> ok
+
+## saslauthd | legacy stop running
+proc.signal 1001 15
+=> ok
+
+## saslauthd | legacy stop stopped
+=> ok
+
+## saslauthd | legacy status running
+=> running=true ok
+
+## saslauthd | legacy status stopped
+=> running=false ok
+
+## saslauthd | legacy restart running
+proc.signal 1001 15
+exec /opt/zextras/libexec/configrewrite sasl
+exec /opt/zextras/common/sbin/saslauthd -r -a zimbra
+=> ok
+
+## saslauthd | legacy reload running
+proc.signal 1001 15
+exec /opt/zextras/common/sbin/saslauthd -r -a zimbra
+=> ok
+
+## saslauthd | legacy reload stopped
+exec /opt/zextras/common/sbin/saslauthd -r -a zimbra
+=> ok
+
+## saslauthd | legacy start-systemd cold
+exec /opt/zextras/common/sbin/saslauthd -r -a zimbra
+=> ok
+
+## saslauthd | legacy stop-systemd running
+proc.signal 1001 15
+=> ok
+
+## saslauthd | legacy refresh running
+=> signaled=[] gone=[] err: verb not supported by this service: saslauthd has no refresh
+
+## saslauthd | legacy refresh stopped
+=> signaled=[] gone=[] err: verb not supported by this service: saslauthd has no refresh
+
+## saslauthd | legacy rotate running
+=> signaled=[] gone=[] err: verb not supported by this service: saslauthd has no rotate
+
+## saslauthd | systemd start
+exec /usr/bin/systemctl is-active carbonio-saslauthd.service
+=> ok
+
+## saslauthd | systemd stop
+exec /usr/bin/systemctl stop carbonio-saslauthd.service
+=> ok
+
+## saslauthd | systemd restart
+exec /usr/bin/systemctl stop carbonio-saslauthd.service
+exec /usr/bin/systemctl is-active carbonio-saslauthd.service
+=> ok
+
+## saslauthd | systemd reload
+exec /usr/bin/systemctl reload carbonio-saslauthd.service
+=> ok
+
+## saslauthd | systemd status active
+exec /usr/bin/systemctl is-active carbonio-saslauthd.service
+=> running=true ok
+
+## saslauthd | systemd start-systemd
+exec /opt/zextras/common/sbin/saslauthd -r -a zimbra
+=> ok
+
+## saslauthd | systemd stop-systemd
+=> ok
+
+## milter | legacy start cold
+fs.open /opt/zextras/log/milter.out flag=0x441 perm=0640
+exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -client -Xmx256m -Dhttps.protocols=TLSv1.2,TLSv1.3 -Djdk.tls.client.protocols=TLSv1.2,TLSv1.3 -Djava.net.preferIPv4Stack=true -Dzimbra.home=/opt/zextras -Djava.library.path=/opt/zextras/lib -classpath /opt/zextras/mailbox/jars/*:/opt/zextras/conf -Dlog4j.configurationFile=file:/opt/zextras/conf/milter.log4j.properties -Dzimbra.config=/opt/zextras/conf/localconfig.xml com.zimbra.cs.milter.MilterServer
+=> ok
+
+## milter | legacy start running
+=> ok
+
+## milter | legacy stop running
+proc.signal 1001 15
+=> ok
+
+## milter | legacy stop stopped
+=> ok
+
+## milter | legacy status running
+=> running=true ok
+
+## milter | legacy status stopped
+=> running=false ok
+
+## milter | legacy restart running
+proc.signal 1001 15
+fs.open /opt/zextras/log/milter.out flag=0x441 perm=0640
+exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -client -Xmx256m -Dhttps.protocols=TLSv1.2,TLSv1.3 -Djdk.tls.client.protocols=TLSv1.2,TLSv1.3 -Djava.net.preferIPv4Stack=true -Dzimbra.home=/opt/zextras -Djava.library.path=/opt/zextras/lib -classpath /opt/zextras/mailbox/jars/*:/opt/zextras/conf -Dlog4j.configurationFile=file:/opt/zextras/conf/milter.log4j.properties -Dzimbra.config=/opt/zextras/conf/localconfig.xml com.zimbra.cs.milter.MilterServer
+=> ok
+
+## milter | legacy reload running
+proc.signal 1001 15
+fs.open /opt/zextras/log/milter.out flag=0x441 perm=0640
+exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -client -Xmx256m -Dhttps.protocols=TLSv1.2,TLSv1.3 -Djdk.tls.client.protocols=TLSv1.2,TLSv1.3 -Djava.net.preferIPv4Stack=true -Dzimbra.home=/opt/zextras -Djava.library.path=/opt/zextras/lib -classpath /opt/zextras/mailbox/jars/*:/opt/zextras/conf -Dlog4j.configurationFile=file:/opt/zextras/conf/milter.log4j.properties -Dzimbra.config=/opt/zextras/conf/localconfig.xml com.zimbra.cs.milter.MilterServer
+=> ok
+
+## milter | legacy reload stopped
+fs.open /opt/zextras/log/milter.out flag=0x441 perm=0640
+exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -client -Xmx256m -Dhttps.protocols=TLSv1.2,TLSv1.3 -Djdk.tls.client.protocols=TLSv1.2,TLSv1.3 -Djava.net.preferIPv4Stack=true -Dzimbra.home=/opt/zextras -Djava.library.path=/opt/zextras/lib -classpath /opt/zextras/mailbox/jars/*:/opt/zextras/conf -Dlog4j.configurationFile=file:/opt/zextras/conf/milter.log4j.properties -Dzimbra.config=/opt/zextras/conf/localconfig.xml com.zimbra.cs.milter.MilterServer
+=> ok
+
+## milter | legacy start-systemd cold
+fs.open /opt/zextras/log/milter.out flag=0x441 perm=0640
+exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -client -Xmx256m -Dhttps.protocols=TLSv1.2,TLSv1.3 -Djdk.tls.client.protocols=TLSv1.2,TLSv1.3 -Djava.net.preferIPv4Stack=true -Dzimbra.home=/opt/zextras -Djava.library.path=/opt/zextras/lib -classpath /opt/zextras/mailbox/jars/*:/opt/zextras/conf -Dlog4j.configurationFile=file:/opt/zextras/conf/milter.log4j.properties -Dzimbra.config=/opt/zextras/conf/localconfig.xml com.zimbra.cs.milter.MilterServer
+=> ok
+
+## milter | legacy stop-systemd running
+proc.signal 1001 15
+=> ok
+
+## milter | legacy refresh running
+proc.signal 1001 18
+=> signaled=[1001] gone=[] ok
+
+## milter | legacy refresh stopped
+=> signaled=[] gone=[] ok
+
+## milter | legacy rotate running
+=> signaled=[] gone=[] err: verb not supported by this service: milter has no rotate
+
+## milter | systemd start
+exec /usr/bin/systemctl is-active carbonio-milter.service
+=> ok
+
+## milter | systemd stop
+exec /usr/bin/systemctl stop carbonio-milter.service
+=> ok
+
+## milter | systemd restart
+exec /usr/bin/systemctl stop carbonio-milter.service
+exec /usr/bin/systemctl is-active carbonio-milter.service
+=> ok
+
+## milter | systemd reload
+exec /usr/bin/systemctl reload carbonio-milter.service
+=> ok
+
+## milter | systemd status active
+exec /usr/bin/systemctl is-active carbonio-milter.service
+=> running=true ok
+
+## milter | systemd start-systemd
+fs.open /opt/zextras/log/milter.out flag=0x441 perm=0640
+exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -client -Xmx256m -Dhttps.protocols=TLSv1.2,TLSv1.3 -Djdk.tls.client.protocols=TLSv1.2,TLSv1.3 -Djava.net.preferIPv4Stack=true -Dzimbra.home=/opt/zextras -Djava.library.path=/opt/zextras/lib -classpath /opt/zextras/mailbox/jars/*:/opt/zextras/conf -Dlog4j.configurationFile=file:/opt/zextras/conf/milter.log4j.properties -Dzimbra.config=/opt/zextras/conf/localconfig.xml com.zimbra.cs.milter.MilterServer
+=> ok
+
+## milter | systemd stop-systemd
+=> ok
+
+## mta | legacy start cold
+exec /opt/zextras/libexec/configrewrite sasl
+exec /opt/zextras/common/sbin/saslauthd -r -a zimbra
+fs.open /opt/zextras/log/milter.out flag=0x441 perm=0640
+exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -client -Xmx256m -Dhttps.protocols=TLSv1.2,TLSv1.3 -Djdk.tls.client.protocols=TLSv1.2,TLSv1.3 -Djava.net.preferIPv4Stack=true -Dzimbra.home=/opt/zextras -Djava.library.path=/opt/zextras/lib -classpath /opt/zextras/mailbox/jars/*:/opt/zextras/conf -Dlog4j.configurationFile=file:/opt/zextras/conf/milter.log4j.properties -Dzimbra.config=/opt/zextras/conf/localconfig.xml com.zimbra.cs.milter.MilterServer
+exec /opt/zextras/libexec/configrewrite antispam antivirus opendkim mta sasl
+exec /usr/bin/sudo /opt/zextras/common/sbin/postfix status
+exec /usr/bin/sudo /usr/bin/touch /opt/zextras/common/conf/main.cf
+exec /usr/bin/sudo /opt/zextras/common/sbin/postconf -e mail_owner=postfix setgid_group=postdrop
+fs.mkdir /opt/zextras/conf mode=0755
+fs.write-atomic /opt/zextras/conf/ldap-vmm.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-vmd.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-vam.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-vad.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-canonical.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-transport.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-slm.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-splitdomain.cf mode=0640
+fs.chown /opt/zextras/conf/ldap-vmm.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-vmd.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-vam.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-vad.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-canonical.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-transport.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-slm.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-splitdomain.cf -1:1001
+exec /usr/bin/sudo /opt/zextras/common/sbin/postalias /etc/aliases
+exec /usr/bin/sudo /opt/zextras/common/sbin/postfix start
+=> ok
+
+## mta | legacy start running
+=> ok
+
+## mta | legacy stop running
+exec /usr/bin/sudo /opt/zextras/common/sbin/postfix stop
+=> ok
+
+## mta | legacy stop stopped
+exec /usr/bin/sudo /opt/zextras/common/sbin/postfix stop
+=> ok
+
+## mta | legacy status running
+=> running=true ok
+
+## mta | legacy status stopped
+=> running=false ok
+
+## mta | legacy restart running
+exec /opt/zextras/libexec/configrewrite antispam antivirus opendkim mta sasl
+exec /opt/zextras/libexec/configrewrite sasl
+exec /opt/zextras/common/sbin/saslauthd -r -a zimbra
+fs.open /opt/zextras/log/milter.out flag=0x441 perm=0640
+exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -client -Xmx256m -Dhttps.protocols=TLSv1.2,TLSv1.3 -Djdk.tls.client.protocols=TLSv1.2,TLSv1.3 -Djava.net.preferIPv4Stack=true -Dzimbra.home=/opt/zextras -Djava.library.path=/opt/zextras/lib -classpath /opt/zextras/mailbox/jars/*:/opt/zextras/conf -Dlog4j.configurationFile=file:/opt/zextras/conf/milter.log4j.properties -Dzimbra.config=/opt/zextras/conf/localconfig.xml com.zimbra.cs.milter.MilterServer
+exec /usr/bin/sudo /opt/zextras/common/sbin/postfix reload
+=> ok
+
+## mta | legacy reload running
+exec /opt/zextras/libexec/configrewrite sasl
+exec /opt/zextras/common/sbin/saslauthd -r -a zimbra
+fs.open /opt/zextras/log/milter.out flag=0x441 perm=0640
+exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -client -Xmx256m -Dhttps.protocols=TLSv1.2,TLSv1.3 -Djdk.tls.client.protocols=TLSv1.2,TLSv1.3 -Djava.net.preferIPv4Stack=true -Dzimbra.home=/opt/zextras -Djava.library.path=/opt/zextras/lib -classpath /opt/zextras/mailbox/jars/*:/opt/zextras/conf -Dlog4j.configurationFile=file:/opt/zextras/conf/milter.log4j.properties -Dzimbra.config=/opt/zextras/conf/localconfig.xml com.zimbra.cs.milter.MilterServer
+exec /usr/bin/sudo /opt/zextras/common/sbin/postfix reload
+=> ok
+
+## mta | legacy reload stopped
+exec /opt/zextras/libexec/configrewrite sasl
+exec /opt/zextras/common/sbin/saslauthd -r -a zimbra
+fs.open /opt/zextras/log/milter.out flag=0x441 perm=0640
+exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -client -Xmx256m -Dhttps.protocols=TLSv1.2,TLSv1.3 -Djdk.tls.client.protocols=TLSv1.2,TLSv1.3 -Djava.net.preferIPv4Stack=true -Dzimbra.home=/opt/zextras -Djava.library.path=/opt/zextras/lib -classpath /opt/zextras/mailbox/jars/*:/opt/zextras/conf -Dlog4j.configurationFile=file:/opt/zextras/conf/milter.log4j.properties -Dzimbra.config=/opt/zextras/conf/localconfig.xml com.zimbra.cs.milter.MilterServer
+exec /usr/bin/sudo /opt/zextras/common/sbin/postfix reload
+=> ok
+
+## mta | legacy start-systemd cold
+exec /usr/bin/sudo /opt/zextras/common/sbin/postfix status
+exec /usr/bin/sudo /usr/bin/touch /opt/zextras/common/conf/main.cf
+exec /usr/bin/sudo /opt/zextras/common/sbin/postconf -e mail_owner=postfix setgid_group=postdrop
+fs.mkdir /opt/zextras/conf mode=0755
+fs.write-atomic /opt/zextras/conf/ldap-vmm.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-vmd.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-vam.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-vad.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-canonical.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-transport.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-slm.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-splitdomain.cf mode=0640
+fs.chown /opt/zextras/conf/ldap-vmm.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-vmd.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-vam.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-vad.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-canonical.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-transport.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-slm.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-splitdomain.cf -1:1001
+exec /usr/bin/sudo /opt/zextras/common/sbin/postalias /etc/aliases
+exec /usr/bin/sudo /opt/zextras/common/sbin/postfix start
+=> ok
+
+## mta | legacy stop-systemd running
+exec /usr/bin/sudo /opt/zextras/common/sbin/postfix stop
+=> ok
+
+## mta | legacy refresh running
+=> signaled=[] gone=[] err: verb not supported by this service: mta has no refresh
+
+## mta | legacy refresh stopped
+=> signaled=[] gone=[] err: verb not supported by this service: mta has no refresh
+
+## mta | legacy rotate running
+=> signaled=[] gone=[] err: verb not supported by this service: mta has no rotate
+
+## mta | systemd start
+exec /usr/bin/systemctl is-active carbonio-postfix.service
+=> ok
+
+## mta | systemd stop
+exec /usr/bin/systemctl stop carbonio-postfix.service
+exec /usr/bin/systemctl stop carbonio-milter.service
+exec /usr/bin/systemctl stop carbonio-saslauthd.service
+=> ok
+
+## mta | systemd restart
+exec /opt/zextras/libexec/configrewrite antispam antivirus opendkim mta sasl
+exec /usr/bin/systemctl reload carbonio-postfix.service
+=> ok
+
+## mta | systemd reload
+exec /usr/bin/systemctl reload carbonio-postfix.service
+=> ok
+
+## mta | systemd status active
+exec /usr/bin/systemctl is-active carbonio-postfix.service
+=> running=true ok
+
+## mta | systemd start-systemd
+exec /usr/bin/sudo /opt/zextras/common/sbin/postfix status
+=> ok
+
+## mta | systemd stop-systemd
+exec /usr/bin/sudo /opt/zextras/common/sbin/postfix stop
+=> ok
+
+## stats | legacy start cold
+fs.open /opt/zextras/log/zmstat-proc.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-proc
+fs.open /opt/zextras/log/zmstat-cpu.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-cpu
+fs.open /opt/zextras/log/zmstat-vm.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-vm
+fs.open /opt/zextras/log/zmstat-io.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-io -x
+fs.open /opt/zextras/log/zmstat-df.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-df
+fs.open /opt/zextras/log/zmstat-io.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-io
+fs.open /opt/zextras/log/zmstat-fd.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-fd
+fs.open /opt/zextras/log/zmstat-allprocs.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-allprocs
+fs.open /opt/zextras/log/zmstat-mysql.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-mysql
+fs.open /opt/zextras/log/zmstat-nginx.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-nginx
+=> ok
+
+## stats | legacy start running
+=> ok
+
+## stats | legacy stop running
+proc.signal-group 1001 15
+fs.remove /run/carbonio/stats/zmstat-cpu.pid
+proc.signal-group 1002 15
+fs.remove /run/carbonio/stats/zmstat-vm.pid
+=> ok
+
+## stats | legacy stop stopped
+=> ok
+
+## stats | legacy status running
+=> running=true ok
+
+## stats | legacy status stopped
+=> running=false ok
+
+## stats | legacy restart running
+proc.signal-group 1001 15
+fs.remove /run/carbonio/stats/zmstat-cpu.pid
+proc.signal-group 1002 15
+fs.remove /run/carbonio/stats/zmstat-vm.pid
+fs.open /opt/zextras/log/zmstat-proc.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-proc
+fs.open /opt/zextras/log/zmstat-cpu.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-cpu
+fs.open /opt/zextras/log/zmstat-vm.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-vm
+fs.open /opt/zextras/log/zmstat-io.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-io -x
+fs.open /opt/zextras/log/zmstat-df.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-df
+fs.open /opt/zextras/log/zmstat-io.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-io
+fs.open /opt/zextras/log/zmstat-fd.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-fd
+fs.open /opt/zextras/log/zmstat-allprocs.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-allprocs
+fs.open /opt/zextras/log/zmstat-mysql.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-mysql
+fs.open /opt/zextras/log/zmstat-nginx.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-nginx
+=> ok
+
+## stats | legacy reload running
+proc.signal-group 1001 15
+fs.remove /run/carbonio/stats/zmstat-cpu.pid
+proc.signal-group 1002 15
+fs.remove /run/carbonio/stats/zmstat-vm.pid
+fs.open /opt/zextras/log/zmstat-proc.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-proc
+fs.open /opt/zextras/log/zmstat-cpu.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-cpu
+fs.open /opt/zextras/log/zmstat-vm.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-vm
+fs.open /opt/zextras/log/zmstat-io.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-io -x
+fs.open /opt/zextras/log/zmstat-df.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-df
+fs.open /opt/zextras/log/zmstat-io.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-io
+fs.open /opt/zextras/log/zmstat-fd.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-fd
+fs.open /opt/zextras/log/zmstat-allprocs.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-allprocs
+fs.open /opt/zextras/log/zmstat-mysql.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-mysql
+fs.open /opt/zextras/log/zmstat-nginx.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-nginx
+=> ok
+
+## stats | legacy reload stopped
+fs.open /opt/zextras/log/zmstat-proc.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-proc
+fs.open /opt/zextras/log/zmstat-cpu.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-cpu
+fs.open /opt/zextras/log/zmstat-vm.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-vm
+fs.open /opt/zextras/log/zmstat-io.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-io -x
+fs.open /opt/zextras/log/zmstat-df.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-df
+fs.open /opt/zextras/log/zmstat-io.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-io
+fs.open /opt/zextras/log/zmstat-fd.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-fd
+fs.open /opt/zextras/log/zmstat-allprocs.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-allprocs
+fs.open /opt/zextras/log/zmstat-mysql.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-mysql
+fs.open /opt/zextras/log/zmstat-nginx.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-nginx
+=> ok
+
+## stats | legacy start-systemd cold
+fs.open /opt/zextras/log/zmstat-proc.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-proc
+fs.open /opt/zextras/log/zmstat-cpu.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-cpu
+fs.open /opt/zextras/log/zmstat-vm.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-vm
+fs.open /opt/zextras/log/zmstat-io.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-io -x
+fs.open /opt/zextras/log/zmstat-df.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-df
+fs.open /opt/zextras/log/zmstat-io.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-io
+fs.open /opt/zextras/log/zmstat-fd.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-fd
+fs.open /opt/zextras/log/zmstat-allprocs.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-allprocs
+fs.open /opt/zextras/log/zmstat-mysql.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-mysql
+fs.open /opt/zextras/log/zmstat-nginx.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-nginx
+=> ok
+
+## stats | legacy stop-systemd running
+proc.signal-group 1001 15
+fs.remove /run/carbonio/stats/zmstat-cpu.pid
+proc.signal-group 1002 15
+fs.remove /run/carbonio/stats/zmstat-vm.pid
+=> ok
+
+## stats | legacy refresh running
+=> signaled=[] gone=[] err: verb not supported by this service: stats has no refresh
+
+## stats | legacy refresh stopped
+=> signaled=[] gone=[] err: verb not supported by this service: stats has no refresh
+
+## stats | legacy rotate running
+proc.signal 1001 1
+proc.signal 1002 1
+=> signaled=[1001 1002] gone=[] ok
+
+## stats | systemd start
+exec /usr/bin/systemctl is-active carbonio-stats.service
+=> ok
+
+## stats | systemd stop
+exec /usr/bin/systemctl stop carbonio-stats.service
+=> ok
+
+## stats | systemd restart
+exec /usr/bin/systemctl stop carbonio-stats.service
+exec /usr/bin/systemctl is-active carbonio-stats.service
+=> ok
+
+## stats | systemd reload
+exec /usr/bin/systemctl reload carbonio-stats.service
+=> ok
+
+## stats | systemd status active
+exec /usr/bin/systemctl is-active carbonio-stats.service
+=> running=true ok
+
+## stats | systemd start-systemd
+fs.open /opt/zextras/log/zmstat-proc.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-proc
+fs.open /opt/zextras/log/zmstat-cpu.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-cpu
+fs.open /opt/zextras/log/zmstat-vm.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-vm
+fs.open /opt/zextras/log/zmstat-io.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-io -x
+fs.open /opt/zextras/log/zmstat-df.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-df
+fs.open /opt/zextras/log/zmstat-io.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-io
+fs.open /opt/zextras/log/zmstat-fd.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-fd
+fs.open /opt/zextras/log/zmstat-allprocs.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-allprocs
+fs.open /opt/zextras/log/zmstat-mysql.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-mysql
+fs.open /opt/zextras/log/zmstat-nginx.out flag=0x441 perm=0640
+exec.start /opt/zextras/libexec/zmstat-nginx
+=> ok
+
+## stats | systemd stop-systemd
+=> ok
+
