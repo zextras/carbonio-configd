@@ -9,13 +9,14 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/proxy/tmpl"
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
@@ -26,8 +27,8 @@ var bufPool = sync.Pool{
 
 // SSL variable key constants used in template processing.
 const (
-	varKeySSLCrt     = "ssl.crt"
-	varKeySSLKey     = "ssl.key"
+	varKeySSLCrt     = tmpl.VarSSLCrt
+	varKeySSLKey     = tmpl.VarSSLKey
 	varKeyOrigSSLCrt = "_orig_ssl.crt"
 	varKeyOrigSSLKey = "_orig_ssl.key"
 	mailImapEnabled  = "mail.imap.enabled"
@@ -44,38 +45,25 @@ type Template struct {
 
 // TemplateProcessor processes nginx configuration templates
 type TemplateProcessor struct {
-	generator             *Generator
-	fs                    sys.FS // reads template files
-	templateDir           string
-	outputDir             string
-	varPattern            *regexp.Regexp
-	explodePattern        *regexp.Regexp
-	enablerPattern        *regexp.Regexp
-	emptyDirectivePattern *regexp.Regexp
-	// debugVars is the set of variable names that trigger extra debug logging in interpolateLine.
-	debugVars map[string]struct{}
-	// Mock functions for testing
+	generator   *Generator
+	fs          sys.FS // reads template files
+	templateDir string
+	outputDir   string
+	// Domain and server sources replacing the LDAP queries (tests, offline rendering).
 	domainProvider func() []DomainInfo
 	serverProvider func(serviceName string) []ServerInfo
+	// hostResolver replaces the DNS lookup of a virtual hostname (offline rendering);
+	// nil resolves through the DNS.
+	hostResolver func(ctx context.Context, host string) net.IP
 }
 
 // NewTemplateProcessor creates a new template processor
 func NewTemplateProcessor(gen *Generator, fsys sys.FS, templateDir, outputDir string) *TemplateProcessor {
 	return &TemplateProcessor{
-		generator:             gen,
-		fs:                    fsys,
-		templateDir:           templateDir,
-		outputDir:             outputDir,
-		varPattern:            regexp.MustCompile(`\$\{([a-zA-Z0-9._:]+)\}`),
-		explodePattern:        regexp.MustCompile(`^!\{explode\s+(\w+)\(([^)]*)\)\}`),
-		enablerPattern:        regexp.MustCompile(`^(\s*)\$\{([^}]+)\}(.+)$`),
-		emptyDirectivePattern: regexp.MustCompile(`^\s+[a-z0-9_]+\s+;`),
-		debugVars: map[string]struct{}{
-			mailImapEnabled:      {},
-			"mail.pop3.enabled":  {},
-			mailImapsEnabled:     {},
-			"mail.pop3s.enabled": {},
-		},
+		generator:   gen,
+		fs:          fsys,
+		templateDir: templateDir,
+		outputDir:   outputDir,
 	}
 }
 
@@ -99,7 +87,7 @@ func (tp *TemplateProcessor) LoadTemplate(ctx context.Context, name string) (*Te
 	// Convert to string once — strings.Split and the Content field would
 	// otherwise each copy the full buffer, doubling peak allocations.
 	contentStr := string(content)
-	lines := splitTemplateLines(contentStr)
+	lines := tmpl.SplitLines(contentStr)
 
 	logger.DebugContext(ctx, "Loaded template",
 		"name", name,
@@ -114,20 +102,8 @@ func (tp *TemplateProcessor) LoadTemplate(ctx context.Context, name string) (*Te
 	}, nil
 }
 
-// splitTemplateLines splits template content into lines the way Java's
-// BufferedReader.readLine does: a trailing newline terminates the last line
-// instead of starting an empty one, so the output (each line plus "\n") is not
-// padded with an extra blank line.
-func splitTemplateLines(content string) []string {
-	if content == "" {
-		return nil
-	}
-
-	return strings.Split(strings.TrimSuffix(content, "\n"), "\n")
-}
-
 // ProcessTemplate processes a template with variable substitution
-func (tp *TemplateProcessor) ProcessTemplate(ctx context.Context, tmpl *Template) (string, error) {
+func (tp *TemplateProcessor) ProcessTemplate(ctx context.Context, tpl *Template) (string, error) {
 	ctx = logger.ContextWithComponentOnce(ctx, "proxy")
 
 	output := bufPool.Get().(*bytes.Buffer)
@@ -138,7 +114,7 @@ func (tp *TemplateProcessor) ProcessTemplate(ctx context.Context, tmpl *Template
 	writer := bufio.NewWriter(output)
 
 	// Check if first line contains explode directive
-	if explodeType, explodeArgs, remaining, ok := tp.parseExplodeDirective(tmpl.Lines); ok {
+	if explodeType, explodeArgs, remaining, ok := tp.parseExplodeDirective(tpl.Lines); ok {
 		if err := tp.processExplode(ctx, explodeType, explodeArgs, remaining, writer); err != nil {
 			return "", fmt.Errorf("error processing explode directive: %w", err)
 		}
@@ -151,15 +127,9 @@ func (tp *TemplateProcessor) ProcessTemplate(ctx context.Context, tmpl *Template
 	}
 
 	// No explode directive - process template normally
-	for lineNum, line := range tmpl.Lines {
-		// Process variable substitutions
-		processed, err := tp.interpolateLine(ctx, line)
-		if err != nil {
-			return "", fmt.Errorf("error processing line %d: %w", lineNum+1, err)
-		}
-
-		// Write processed line
-		if _, err := writer.WriteString(processed + "\n"); err != nil {
+	for _, line := range tpl.Lines {
+		// Process variable substitutions and write the processed line
+		if _, err := writer.WriteString(tp.interpolateLine(ctx, line) + "\n"); err != nil {
 			return "", fmt.Errorf("error writing output: %w", err)
 		}
 	}
@@ -177,16 +147,11 @@ func (tp *TemplateProcessor) processTemplateLines(
 	ctx context.Context, lines []string, writer *bufio.Writer, skipComments bool,
 ) error {
 	for _, line := range lines {
-		if skipComments && strings.HasPrefix(strings.TrimSpace(line), "#") {
+		if skipComments && tmpl.IsCommentLine(line) {
 			continue
 		}
 
-		processed, err := tp.interpolateLine(ctx, line)
-		if err != nil {
-			return fmt.Errorf("error processing exploded template line: %w", err)
-		}
-
-		if _, err := writer.WriteString(processed + "\n"); err != nil {
+		if _, err := writer.WriteString(tp.interpolateLine(ctx, line) + "\n"); err != nil {
 			return fmt.Errorf("error writing exploded output: %w", err)
 		}
 	}

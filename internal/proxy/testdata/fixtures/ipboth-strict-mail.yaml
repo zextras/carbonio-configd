@@ -1,0 +1,39 @@
+# Dual stack, strict server name, mail proxy on, two virtual hosts, SNI.
+---
+workdir: /opt/zextras
+hostname: proxy1.example.com
+
+global:
+  zimbraIPMode: both
+  zimbraReverseProxyStrictServerNameEnabled: "TRUE"
+  zimbraReverseProxyMailEnabled: "TRUE"
+  zimbraReverseProxyHttpEnabled: "TRUE"
+  zimbraReverseProxyMailMode: both
+  zimbraReverseProxyMailImapEnabled: "TRUE"
+  zimbraReverseProxyMailImapsEnabled: "TRUE"
+  zimbraReverseProxyMailPop3Enabled: "TRUE"
+  zimbraReverseProxyMailPop3sEnabled: "TRUE"
+  zimbraReverseProxySNIEnabled: "TRUE"
+
+variables:
+  web.upstream.:servers: "    server 10.0.0.11:8080;"
+  web.upstream.webclient.:servers: "    server 10.0.0.12:8080;"
+
+domains:
+  - name: example.com
+    vhn: mail.example.com
+    vip: 192.0.2.10
+  - name: sso.example.org
+    vhn: sso.example.org
+    vip: 2001:db8::10
+    clientcertmode: optional
+    clientcertca: "present"
+    sslcertificate: "present"
+    sslprivatekey: "present"
+
+servers:
+  mailbox:
+    - id: 6a1d1b1c-0000-4000-8000-000000000001
+      hostname: mbox1.example.com
+    - id: 6a1d1b1c-0000-4000-8000-000000000002
+      hostname: mbox2.example.com

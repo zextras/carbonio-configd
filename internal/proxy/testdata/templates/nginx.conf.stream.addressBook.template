@@ -1,0 +1,5 @@
+!{explode server(mailbox)}
+# Synthetic per-server template.
+    upstream ${server_id} {
+  server ${server_hostname}:7070;
+}

@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/proxy/tmpl"
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
@@ -108,19 +109,16 @@ func FuzzInterpolateLine(f *testing.F) {
 			t.Skip("lines never contain newlines")
 		}
 
-		got, err := tp.interpolateLine(ctx, line)
-		if err != nil {
-			t.Fatalf("interpolateLine(%q) returned error: %v", line, err)
-		}
+		got := tp.interpolateLine(ctx, line)
 
-		again, _ := tp.interpolateLine(ctx, line)
+		again := tp.interpolateLine(ctx, line)
 		if again != got {
 			t.Fatalf("non-deterministic interpolateLine(%q): %q vs %q", line, got, again)
 		}
 
 		if !strings.Contains(line, "${") {
 			want := line
-			if tp.emptyDirectivePattern.MatchString(line) {
+			if tmpl.EmptyDirectivePattern.MatchString(line) {
 				want = "    # " + strings.TrimSpace(line)
 			}
 

@@ -1,0 +1,18 @@
+#
+# Synthetic main template: enabler chains, includes, a quoted brace.
+#
+user  zextras zextras;
+worker_processes  ${main.workers};
+
+events
+{
+        worker_connections  ${main.connections};
+}
+
+http
+{
+  log_format main "$remote_addr { $request }";   
+    ${web.http.enabled}include ${core.includes}/${core.cprefix}.web.http;
+  ${web.https.enabled} include ${core.includes}/${core.cprefix}.web.https;
+    ${mail.enabled}${web.https.enabled}include ${core.includes}/${core.cprefix}.mail;
+}

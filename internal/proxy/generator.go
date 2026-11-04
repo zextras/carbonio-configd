@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/proxy/tmpl"
 	"github.com/zextras/carbonio-configd/internal/sys"
 	"github.com/zextras/carbonio-configd/internal/tracing"
 )
@@ -391,7 +392,7 @@ func (g *Generator) ProcessTemplateWithProcessor(
 		"output", outputName)
 
 	// Load template
-	tmpl, err := processor.LoadTemplate(ctx, templatePath)
+	tpl, err := processor.LoadTemplate(ctx, templatePath)
 	if err != nil {
 		logger.ErrorContext(ctx, "Failed to load template",
 			"template", templatePath,
@@ -402,10 +403,10 @@ func (g *Generator) ProcessTemplateWithProcessor(
 
 	logger.DebugContext(ctx, "Template loaded",
 		"template", templatePath,
-		"line_count", len(tmpl.Lines))
+		"line_count", len(tpl.Lines))
 
 	// Process template
-	result, err := processor.ProcessTemplate(ctx, tmpl)
+	result, err := processor.ProcessTemplate(ctx, tpl)
 	if err != nil {
 		logger.ErrorContext(ctx, "Failed to process template",
 			"template", templatePath,
@@ -421,10 +422,7 @@ func (g *Generator) ProcessTemplateWithProcessor(
 	// Write output file. The main entry-point config (nginx.conf, rendered from
 	// nginx.conf.template) must live in ConfDir — that's where nginx -c points.
 	// All other rendered templates go into the IncludesDir.
-	outputPath := filepath.Join(g.IncludesDir, outputName)
-	if outputName == g.confPrefix() {
-		outputPath = filepath.Join(g.ConfDir, outputName)
-	}
+	outputPath := g.outputPath(outputName)
 
 	logger.DebugContext(ctx, "Writing output file",
 		"path", outputPath,
@@ -438,6 +436,16 @@ func (g *Generator) ProcessTemplateWithProcessor(
 		"path", outputPath)
 
 	return nil
+}
+
+// outputPath is where the generated file outputName goes: the main entry-point
+// config (nginx.conf) lives in ConfDir, every other file in IncludesDir.
+func (g *Generator) outputPath(outputName string) string {
+	if outputName == g.confPrefix() {
+		return filepath.Join(g.ConfDir, outputName)
+	}
+
+	return filepath.Join(g.IncludesDir, outputName)
 }
 
 // ensureIncludesDir creates the includes directory if it doesn't exist
@@ -482,16 +490,7 @@ func (g *Generator) writeFile(ctx context.Context, path string, content []byte) 
 // dropped. With a non-default template prefix only the templates of that
 // prefix are generated, as ProxyConfGen names them explicitly.
 func (g *Generator) outputName(templateName string) (string, bool) {
-	name := strings.TrimSuffix(templateName, ".template")
-	if g.templatePrefix() == nginxConfPrefix && g.confPrefix() == nginxConfPrefix {
-		return name, true
-	}
-
-	if name != g.templatePrefix() && !strings.HasPrefix(name, g.templatePrefix()+".") {
-		return "", false
-	}
-
-	return g.confPrefix() + strings.TrimPrefix(name, g.templatePrefix()), true
+	return tmpl.OutputName(templateName, g.templatePrefix(), g.confPrefix())
 }
 
 // checkVirtualHostnames fails when a domain's virtual hostname (or virtual IP

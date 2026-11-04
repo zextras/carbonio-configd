@@ -7,6 +7,7 @@ package proxy
 import (
 	"context"
 	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/proxy/tmpl"
 	"github.com/zextras/carbonio-configd/internal/sys"
 	"os"
 	"path/filepath"
@@ -218,11 +219,9 @@ func BenchmarkVariableExpansion(b *testing.B) {
 		"proxy_connect_timeout ${main.ctimeout}s;",
 	}
 
-	processor := NewTemplateProcessor(gen, gen.env.FS, "", "")
-
 	for b.Loop() {
 		for _, str := range testStrings {
-			_ = processor.varPattern.ReplaceAllStringFunc(str, func(match string) string {
+			_ = tmpl.VarPattern.ReplaceAllStringFunc(str, func(match string) string {
 				varName := match[2 : len(match)-1]
 				value, _ := gen.ExpandVariable(context.Background(), varName)
 				return value

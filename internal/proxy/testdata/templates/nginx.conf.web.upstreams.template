@@ -1,0 +1,8 @@
+# Synthetic upstreams.
+upstream  main
+{
+    ${web.upstream.:servers}
+    keepalive 32;
+}
+
+upstream ews { ${web.upstream.ewsserver.:servers} }
