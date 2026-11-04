@@ -37,7 +37,15 @@ func (g *Generator) resolveListenAddresses(ctx context.Context) (any, error) {
 		return strictServerNamePrefix, nil
 	}
 
-	// Get the expanded value of web.https.port
+	// Get the expanded value of web.https.port. The variables are resolved in
+	// map order, so web.https.port may still hold its default here: resolve it
+	// first, or the listen port would depend on the iteration order.
+	if v, ok := g.Variables["web.https.port"]; ok {
+		if val, lerr := g.LookupValue(ctx, v); lerr == nil {
+			v.Value = val
+		}
+	}
+
 	httpsPort, err := g.ExpandVariable(ctx, "web.https.port")
 	if err != nil {
 		httpsPort = "443"
@@ -141,7 +149,7 @@ func (g *Generator) formatListenDirectives(addressSet map[string]bool, prefix, h
 			sb.WriteString("\n")
 		}
 
-		fmt.Fprintf(&sb, "%s    listen %s:%s default_server;", prefix, addr, httpsPort)
+		fmt.Fprintf(&sb, "%s    listen                  %s:%s default_server;", prefix, addr, httpsPort)
 	}
 
 	return sb.String()

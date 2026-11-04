@@ -90,14 +90,13 @@ server {
 	if !strings.Contains(outputStr, "mail.example.com") {
 		t.Errorf("Output missing first domain hostname")
 	}
-	if !strings.Contains(outputStr, "192.168.1.10:443") {
-		t.Errorf("Output missing first domain IP")
+	// SNI is enabled by default: nginx listens on every address, so the
+	// virtual IP is not part of the listen directive (ProxyConfGen vip = "").
+	if strings.Contains(outputStr, "192.168.1.10") || !strings.Contains(outputStr, "listen :443;") {
+		t.Errorf("Output must not pin the listen address with SNI enabled:\n%s", outputStr)
 	}
 	if !strings.Contains(outputStr, "mail.test.com") {
 		t.Errorf("Output missing second domain hostname")
-	}
-	if !strings.Contains(outputStr, "192.168.1.11:443") {
-		t.Errorf("Output missing second domain IP")
 	}
 
 	// Verify blank line between domains
