@@ -16,6 +16,7 @@ tour. The pages below are the reference.
 | [systemd.md](systemd.md) | understand packaging per distribution, the systemd unit, readiness (`READY=1`), synchronous `REWRITE`, the polkit rule and the container image |
 | [architecture.md](architecture.md) | follow the startup sequence, main loop, network protocol, cycle model (load, snapshot, plan, execute), observability, shadow mode and the package map |
 | [restart-behavior.md](restart-behavior.md) | learn when a configuration change restarts a service, the hybrid policy on systemd hosts, the watchdog and dependency cascading |
+| [service-registry.md](service-registry.md) | declare or change a service: the registry fields, the launch strategies and readiness probes, the lifecycle traces that guard them |
 | [localconfig.md](localconfig.md) | see how the effective localconfig is built, the `zmlocalconfig` parity rules and the service hooks format |
 | [proxy-templates.md](proxy-templates.md) | write or debug nginx proxy templates and use `configd proxy gen` / `proxy conf` |
 | [performance.md](performance.md) | tune LDAP retries and parallel rewrites, and profile configd |
