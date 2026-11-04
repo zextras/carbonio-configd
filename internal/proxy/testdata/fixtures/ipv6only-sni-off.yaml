@@ -1,0 +1,19 @@
+# IPv6 only, strict server name, mail proxy on, SNI off: the listen address is
+# the virtual IP of each domain (deprecated IP-based virtual hosting).
+workdir: /opt/zextras
+hostname: proxy3.example.com
+
+global:
+  zimbraIPMode: ipv6
+  zimbraReverseProxyStrictServerNameEnabled: "TRUE"
+  zimbraReverseProxyMailEnabled: "TRUE"
+  zimbraReverseProxyMailMode: both
+  zimbraReverseProxySNIEnabled: "FALSE"
+
+domains:
+  - name: example.com
+    vhn: mail.example.com
+    vip: 2001:db8::20
+  - name: example.org
+    vhn: mail.example.org
+    vip: 198.51.100.20

@@ -19,3 +19,10 @@ SPDX-License-Identifier = "AGPL-3.0-only"
 path = ["scripts/lc-source/ZsMsg.properties", "scripts/lc-source/TAG"]
 SPDX-FileCopyrightText = ["2022 Synacor, Inc.", "2022 Zextras <https://www.zextras.com>"]
 SPDX-License-Identifier = "GPL-2.0-only"
+
+# Synthetic templates and fixtures of the proxy template tools' tests: plain
+# nginx/YAML data, rendered and compared by the tests.
+[[annotations]]
+path = ["internal/proxy/testdata/templates/**", "internal/proxy/testdata/fixtures/**"]
+SPDX-FileCopyrightText = "2026 Zextras <https://www.zextras.com>"
+SPDX-License-Identifier = "AGPL-3.0-only"

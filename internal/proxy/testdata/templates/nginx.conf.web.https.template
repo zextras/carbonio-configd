@@ -1,0 +1,19 @@
+!{explode domain(vhn)}
+# Synthetic per-domain server block, Allman style, mixed indentation.
+server
+{
+    server_name  ${vhn};
+${core.ipboth.enabled}    listen   [::]:${web.https.port} ssl;
+    ${core.ipv4only.enabled}listen ${web.https.port} ssl;
+	${core.ipv6only.enabled}listen   [::]:${web.https.port} ssl;
+    ${web.strict.servername}    ssl_protocols       ${web.ssl.protocols};
+    ssl_certificate ${ssl.crt.default};
+    ssl_certificate_key     ${ssl.key.default};
+
+  location /status
+      {
+        add_header X-Note "a } brace # in quotes";   # trailing } comment
+        return 200 "ok";
+        ${web.ews.upstream.disable}proxy_pass http://ews;
+  }
+}

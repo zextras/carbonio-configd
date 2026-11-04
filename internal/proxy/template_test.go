@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/proxy/tmpl"
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
@@ -101,10 +102,7 @@ func TestTemplateProcessorVariableSubstitution(t *testing.T) {
 			tt.setupVars(gen)
 
 			processor := NewTemplateProcessor(gen, gen.env.FS, "", "")
-			result, err := processor.interpolateLine(context.Background(), tt.template)
-			if err != nil {
-				t.Fatalf("interpolateLine() error = %v", err)
-			}
+			result := processor.interpolateLine(context.Background(), tt.template)
 
 			if result != tt.expected {
 				t.Errorf("interpolateLine() = %q, want %q", result, tt.expected)
@@ -273,10 +271,7 @@ func TestTemplateProcessorCustomFormatter(t *testing.T) {
 	}
 
 	processor := NewTemplateProcessor(gen, gen.env.FS, "", "")
-	result, err := processor.interpolateLine(context.Background(), "ssl_protocols ${web.ssl.protocols};")
-	if err != nil {
-		t.Fatalf("interpolateLine() error = %v", err)
-	}
+	result := processor.interpolateLine(context.Background(), "ssl_protocols ${web.ssl.protocols};")
 
 	expected := "ssl_protocols TLSv1.2 TLSv1.3;"
 	if result != expected {
@@ -502,10 +497,7 @@ func TestProcessEnablerLineTrueEnabler(t *testing.T) {
 
 	// The enabler pattern: whitespace + ${var} + rest
 	line := "    ${mail.imap.enabled}listen 143;"
-	result, err := processor.interpolateLine(context.Background(), line)
-	if err != nil {
-		t.Fatalf("interpolateLine: %v", err)
-	}
+	result := processor.interpolateLine(context.Background(), line)
 	// When enabled=true, the enabler is stripped and rest is kept
 	if strings.Contains(result, "#") {
 		t.Errorf("Expected enabled line (no comment), got: %q", result)
@@ -532,10 +524,7 @@ func TestProcessEnablerLineFalseEnabler(t *testing.T) {
 	processor := NewTemplateProcessor(gen, gen.env.FS, "", "")
 
 	line := "    ${mail.imap.enabled}listen 143;"
-	result, err := processor.interpolateLine(context.Background(), line)
-	if err != nil {
-		t.Fatalf("interpolateLine: %v", err)
-	}
+	result := processor.interpolateLine(context.Background(), line)
 	// When enabled=false, line is commented out
 	if !strings.Contains(result, "#") {
 		t.Errorf("Expected commented-out line, got: %q", result)
@@ -566,10 +555,7 @@ func TestProcessEnablerLineFalseEnablerMultiLine(t *testing.T) {
 	processor := NewTemplateProcessor(gen, gen.env.FS, "", "")
 
 	line := "    ${web.ews.upstream.disable}    ${web.upstream.ewsserver.:servers}"
-	result, err := processor.interpolateLine(context.Background(), line)
-	if err != nil {
-		t.Fatalf("interpolateLine: %v", err)
-	}
+	result := processor.interpolateLine(context.Background(), line)
 
 	for l := range strings.SplitSeq(result, "\n") {
 		trimmed := strings.TrimSpace(l)
@@ -598,10 +584,7 @@ func TestProcessEnablerLineStringEnabler(t *testing.T) {
 	processor := NewTemplateProcessor(gen, gen.env.FS, "", "")
 
 	line := "    ${mail.pop3.enabled}listen 110;"
-	result, err := processor.interpolateLine(context.Background(), line)
-	if err != nil {
-		t.Fatalf("interpolateLine: %v", err)
-	}
+	result := processor.interpolateLine(context.Background(), line)
 	if strings.Contains(result, "#") {
 		t.Errorf("Expected enabled line (no comment) for string enabler, got: %q", result)
 	}
@@ -625,10 +608,7 @@ func TestProcessEnablerLineIntEnabler(t *testing.T) {
 	processor := NewTemplateProcessor(gen, gen.env.FS, "", "")
 
 	line := "    ${mail.imaps.enabled}listen 993 ssl;"
-	result, err := processor.interpolateLine(context.Background(), line)
-	if err != nil {
-		t.Fatalf("interpolateLine: %v", err)
-	}
+	result := processor.interpolateLine(context.Background(), line)
 	if !strings.Contains(result, "#") {
 		t.Errorf("Expected commented-out line for int(0) enabler, got: %q", result)
 	}
@@ -655,10 +635,7 @@ func TestProcessEnablerLineUnexpectedType(t *testing.T) {
 	// The default branch treats the enabler as disabled, so the line should be
 	// commented out (same as a disabled bool/string/int(0) enabler).
 	line := "    ${mail.imaps.enabled}listen 993 ssl;"
-	result, err := processor.interpolateLine(context.Background(), line)
-	if err != nil {
-		t.Fatalf("interpolateLine: %v", err)
-	}
+	result := processor.interpolateLine(context.Background(), line)
 	// Unexpected type: isEnabled remains false (zero-value), so line is commented out.
 	if !strings.HasPrefix(result, "#") && !strings.HasPrefix(result, "    #") {
 		t.Errorf("Expected commented-out line for unexpected enabler type, got: %q", result)
@@ -684,10 +661,7 @@ func TestProcessEnablerLineNotEnabler(t *testing.T) {
 
 	// This looks like the enabler pattern syntactically but the variable is not ValueTypeEnabler
 	line := "    ${web.server_name} extra stuff"
-	result, err := processor.interpolateLine(context.Background(), line)
-	if err != nil {
-		t.Fatalf("interpolateLine: %v", err)
-	}
+	result := processor.interpolateLine(context.Background(), line)
 	// Should fall through to normal substitution
 	if !strings.Contains(result, "mail.example.com") {
 		t.Errorf("Expected normal substitution for non-enabler, got: %q", result)
@@ -1087,16 +1061,16 @@ func TestSplitTemplateLines(t *testing.T) {
 	}
 
 	for in, want := range cases {
-		got := splitTemplateLines(in)
+		got := tmpl.SplitLines(in)
 		if len(got) != len(want) {
-			t.Errorf("splitTemplateLines(%q) = %q, want %q", in, got, want)
+			t.Errorf("tmpl.SplitLines(%q) = %q, want %q", in, got, want)
 
 			continue
 		}
 
 		for i := range got {
 			if got[i] != want[i] {
-				t.Errorf("splitTemplateLines(%q) = %q, want %q", in, got, want)
+				t.Errorf("tmpl.SplitLines(%q) = %q, want %q", in, got, want)
 			}
 		}
 	}
@@ -1110,10 +1084,7 @@ func TestInterpolateLine_DisabledEnablerKeepsFollowingWhitespace(t *testing.T) {
 
 	tp := newFuzzProcessor()
 
-	got, err := tp.interpolateLine(context.Background(), "${mail.pop3.enabled}    location = /certauth {")
-	if err != nil {
-		t.Fatalf("interpolateLine: %v", err)
-	}
+	got := tp.interpolateLine(context.Background(), "${mail.pop3.enabled}    location = /certauth {")
 
 	if want := "#    location = /certauth {"; got != want {
 		t.Errorf("got %q, want %q", got, want)

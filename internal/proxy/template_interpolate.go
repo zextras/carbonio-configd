@@ -10,171 +10,53 @@ import (
 	"strings"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/proxy/tmpl"
 )
 
-// interpolateLine replaces all ${VAR} references in a line
-func (tp *TemplateProcessor) interpolateLine(ctx context.Context, line string) (string, error) {
-	// Check for enabler variables at the start of the line
-	// Pattern: optional whitespace + ${var} + rest of line
-	// Examples: "    ${mail.imap.enabled} include ..."
-	//           "    ${core.ipboth.enabled}listen ..."
-	// Note: No space required after } - enabler can be directly followed by directive
-	enablerPattern := tp.enablerPattern
-
-	if matches := enablerPattern.FindStringSubmatch(line); matches != nil {
-		if _, ok := tp.debugVars[matches[2]]; ok {
-			logger.DebugContext(ctx, "Checking potential enabler line",
-				"line", line)
-			logger.DebugContext(ctx, "Pattern matches",
-				"matches", true)
-		}
-
-		result, handled, err := tp.processEnablerLine(ctx, matches)
-		if err != nil {
-			return "", err
-		}
-
-		if handled {
-			return result, nil
-		}
-	}
-
-	// Normal variable substitution for non-enabler variables
-	result := tp.varPattern.ReplaceAllStringFunc(line, func(match string) string {
-		// Extract variable name from ${VAR}. The match already satisfied
-		// varPattern, so the submatch is guaranteed; compute it once.
-		sub := tp.varPattern.FindStringSubmatch(match)
-		if len(sub) < 2 {
-			return match
-		}
-
-		varName := sub[1]
-
-		// Look up variable value
-		value, err := tp.generator.ExpandVariable(ctx, varName)
-		if err != nil {
-			// For missing variables, return empty string (fail silently for now)
-			// In production, might want to log this
-			return ""
-		}
-
-		return value
-	})
-
-	// Check if the line ends up with a directive that has no arguments
-	// Pattern: whitespace + word (letters/digits/underscores) + whitespace + semicolon
-	// Example: "    imap_id         ;" or "    proxy_issue_pop3_xoip   ;"
-	// Must have at least one space between directive and semicolon
-	if tp.emptyDirectivePattern.MatchString(result) {
-		// Comment out the line by prepending "# "
-		trimmed := strings.TrimSpace(result)
-		logger.DebugContext(ctx, "Commenting out empty directive",
-			"directive", trimmed)
-		result = "    # " + trimmed
-	}
-
-	return result, nil
+// interpolateLine renders one template line: enabler prefixes, ${VAR}
+// substitution and the commenting-out of empty directives (see tmpl.RenderLine).
+func (tp *TemplateProcessor) interpolateLine(ctx context.Context, line string) string {
+	return tmpl.RenderLine(line, &varResolver{ctx: ctx, g: tp.generator})
 }
 
-// processEnablerLine handles enabler variable logic for a line that matched the
-// enabler pattern. It returns the processed line, whether the enabler was handled
-// (i.e. the variable was an actual enabler type), and any error.
-func (tp *TemplateProcessor) processEnablerLine(
-	ctx context.Context, matches []string,
-) (result string, handled bool, err error) {
-	indent := matches[1]
-	varName := matches[2]
-	restOfLine := matches[3]
+// varResolver adapts a Generator's variables to tmpl.Resolver.
+type varResolver struct {
+	ctx context.Context
+	g   *Generator
+}
 
-	if logger.IsDebug(ctx) {
-		logger.DebugContext(ctx, "Matched enabler pattern",
-			"variable", varName,
-			"rest_of_line", restOfLine)
-	}
-
-	// Check if this is an enabler variable
-	v, exists := tp.generator.Variables[varName]
+// Enabler implements tmpl.Resolver: a variable of type enabler is on when its
+// value is true, a non-empty string (keyword-style enablers such as "server")
+// or non-zero.
+func (r *varResolver) Enabler(name string) (on, ok bool) {
+	v, exists := r.g.Variables[name]
 	if !exists || v.ValueType != ValueTypeEnabler {
-		return "", false, nil
+		return false, false
 	}
 
-	// Get the boolean value
-	val := v.Value
-	isEnabled := false
-
-	logger.DebugContext(ctx, "Found enabler variable",
-		"variable", varName,
-		"value", val,
-		"value_type", fmt.Sprintf("%T", val))
-
-	// Handle different value types
-	switch v := val.(type) {
+	switch val := v.Value.(type) {
 	case bool:
-		isEnabled = v
-		logger.DebugContext(ctx, "Enabler is bool",
-			"variable", varName,
-			"enabled", isEnabled)
+		on = val
 	case string:
-		// For string enablers, any non-empty value means enabled
-		// This handles both "TRUE" and keyword-style enablers (e.g., "server")
-		isEnabled = v != ""
-		logger.DebugContext(ctx, "Enabler is string",
-			"variable", varName,
-			"value", v,
-			"enabled", isEnabled)
+		on = val != ""
 	case int, int64:
-		isEnabled = v != 0
-		logger.DebugContext(ctx, "Enabler is int",
-			"variable", varName,
-			"value", v,
-			"enabled", isEnabled)
+		on = val != 0
 	default:
-		logger.ErrorContext(ctx, "Enabler has unexpected type",
-			"variable", varName,
-			"type", fmt.Sprintf("%T", val),
-			"value", val)
+		logger.ErrorContext(r.ctx, "Enabler has unexpected type",
+			"variable", name,
+			"type", fmt.Sprintf("%T", v.Value),
+			"value", v.Value)
 	}
 
-	processedLine := indent + restOfLine
+	return on, true
+}
 
-	// Recursively process the rest of the line (it may have other ${} variables)
-	processedRest, err := tp.interpolateLine(ctx, processedLine)
-	if err != nil {
-		return "", false, err
-	}
+// Value implements tmpl.Resolver. A variable that cannot be expanded renders
+// as the empty string.
+func (r *varResolver) Value(name string) (string, bool) {
+	text, err := r.g.ExpandVariable(r.ctx, name)
 
-	if isEnabled {
-		// Variable is true - remove the enabler variable, keep the rest of the line
-		logger.DebugContext(ctx, "Enabler is TRUE, processing rest of line",
-			"variable", varName,
-			"processed_line", processedLine)
-
-		return processedRest, true, nil
-	}
-
-	// Variable is false - comment out the line (without the enabler variable)
-	logger.DebugContext(ctx, "Enabler is FALSE, commenting out line",
-		"variable", varName)
-
-	// Comment out every line of the expanded value (multi-line :servers expansions
-	// produce one "server host:port;" line per upstream; each must be commented).
-	lines := strings.Split(processedRest, "\n")
-	for i, l := range lines {
-		trimmed := strings.TrimLeft(l, " \t")
-
-		switch {
-		case trimmed == "":
-			lines[i] = l // preserve blank lines as-is
-		case i == 0:
-			// Legacy StringUtil.fillTemplate substitutes the enabler with "#" in
-			// place, so whitespace following the enabler is preserved verbatim.
-			lines[i] = indent + "#" + strings.TrimPrefix(l, indent)
-		default:
-			lines[i] = indent + "#" + trimmed
-		}
-	}
-
-	return strings.Join(lines, "\n"), true, nil
+	return text, err == nil
 }
 
 // ExpandVariable expands a single variable by name

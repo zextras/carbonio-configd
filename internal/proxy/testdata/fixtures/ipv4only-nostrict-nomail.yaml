@@ -1,0 +1,22 @@
+# IPv4 only, no strict server name, mail proxy off, one virtual host.
+workdir: /opt/zextras
+hostname: proxy2.example.com
+
+global:
+  zimbraIPMode: ipv4
+  zimbraReverseProxyStrictServerNameEnabled: "FALSE"
+  zimbraReverseProxyMailEnabled: "FALSE"
+  zimbraReverseProxyHttpEnabled: "TRUE"
+  zimbraReverseProxyMailMode: https
+
+variables:
+  web.upstream.:servers: "    server 10.0.0.21:8080;"
+
+domains:
+  - name: example.net
+    vhn: mail.example.net
+
+servers:
+  mailbox:
+    - id: 6a1d1b1c-0000-4000-8000-000000000003
+      hostname: mbox3.example.net

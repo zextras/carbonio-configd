@@ -66,13 +66,11 @@ func NewGenerator(ctx context.Context, env sys.System, cfg *config.Config, src S
 		LdapClient:    src.Ldap,
 		Cache:         src.Cache,
 		upstreamCache: &upstreamQueryCache{},
-		WorkingDir:    cfg.BaseDir,
-		TemplateDir:   filepath.Join(cfg.BaseDir, "conf", "nginx", "templates"),
-		ConfDir:       filepath.Join(cfg.BaseDir, "conf"),
-		IncludesDir:   filepath.Join(cfg.BaseDir, "conf", "nginx", "includes"),
 		Hostname:      cfg.Hostname,
 		DryRun:        false,
 	}
+
+	g.setLayout(cfg.BaseDir)
 
 	g.applySettings(src.Settings)
 
@@ -227,4 +225,13 @@ func (g *Generator) templatePrefix() string {
 	}
 
 	return g.TemplatePrefix
+}
+
+// setLayout sets the working, template, conf and includes directories of a
+// working directory (ProxyConfGen defaults).
+func (g *Generator) setLayout(workDir string) {
+	g.WorkingDir = workDir
+	g.TemplateDir = filepath.Join(workDir, "conf", "nginx", "templates")
+	g.ConfDir = filepath.Join(workDir, "conf")
+	g.IncludesDir = filepath.Join(workDir, "conf", "nginx", "includes")
 }

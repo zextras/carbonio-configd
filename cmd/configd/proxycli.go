@@ -19,7 +19,9 @@ type ProxyCmd struct {
 	Enable  ProxyEnableCmd  `cmd:"" help:"Enable a proxy protocol"`
 	Disable ProxyDisableCmd `cmd:"" help:"Disable a proxy protocol"`
 	Status  ProxyStatusCmd  `cmd:"" help:"Show all protocol statuses"`
-	Rewrite ProxyRewriteCmd `cmd:"" default:"withargs" hidden:""`
+	// Template holds the offline tools for the nginx templates (no LDAP, no zextras user).
+	Template ProxyTemplateCmd `cmd:"" help:"Format, lint and render the nginx proxy templates"`
+	Rewrite  ProxyRewriteCmd  `cmd:"" default:"withargs" hidden:""`
 }
 
 // runProxy executes a proxy action with the process's stdio.
@@ -98,6 +100,61 @@ func (c *ProxyGenCmd) Run(env sys.System, std *stdio) error {
 	}
 
 	return runProxy(env, std, opts)
+}
+
+// ProxyTemplateCmd groups the template tools: they work on files only, so they
+// run anywhere, as any user.
+type ProxyTemplateCmd struct {
+	Fmt    ProxyTemplateFmtCmd    `cmd:"" help:"Re-indent and align nginx templates"`
+	Lint   ProxyTemplateLintCmd   `cmd:"" help:"Report unknown variables, bad enablers and braces, stray whitespace"`
+	Render ProxyTemplateRenderCmd `cmd:"" help:"Render nginx templates from a fixture, without LDAP"`
+}
+
+// ProxyTemplateFmtCmd is "configd proxy template fmt".
+//
+//nolint:lll // kong help texts stay on the tag line
+type ProxyTemplateFmtCmd struct {
+	Check bool     `help:"List the files that would change and print the diff; exit 1 if there are any" xor:"mode"`
+	Write bool     `short:"w" help:"Rewrite the files in place" xor:"mode"`
+	Paths []string `arg:"" name:"path" help:"Template files, or directories searched for *.template files"`
+}
+
+// Run formats the templates.
+func (c *ProxyTemplateFmtCmd) Run(env sys.System, std *stdio) error {
+	return runProxy(env, std, &proxy.Options{
+		Action:   proxy.ActionTemplateFmt,
+		Template: &proxy.TemplateOptions{Paths: c.Paths, Check: c.Check, Write: c.Write},
+	})
+}
+
+// ProxyTemplateLintCmd is "configd proxy template lint".
+type ProxyTemplateLintCmd struct {
+	Paths []string `arg:"" name:"path" help:"Template files, or directories searched for *.template files"`
+}
+
+// Run lints the templates.
+func (c *ProxyTemplateLintCmd) Run(env sys.System, std *stdio) error {
+	return runProxy(env, std, &proxy.Options{
+		Action:   proxy.ActionTemplateLint,
+		Template: &proxy.TemplateOptions{Paths: c.Paths},
+	})
+}
+
+// ProxyTemplateRenderCmd is "configd proxy template render".
+//
+//nolint:lll // kong help texts stay on the tag line
+type ProxyTemplateRenderCmd struct {
+	Values    string `required:"" type:"path" help:"Fixture (YAML): the configuration to render with"`
+	Templates string `required:"" type:"path" help:"Template directory"`
+	Out       string `required:"" type:"path" help:"Directory the files are written to, standing for the conf directory (nginx.conf, nginx/includes/...)"`
+}
+
+// Run renders the templates.
+func (c *ProxyTemplateRenderCmd) Run(env sys.System, std *stdio) error {
+	return runProxy(env, std, &proxy.Options{
+		Action:   proxy.ActionTemplateRender,
+		Template: &proxy.TemplateOptions{Values: c.Values, Templates: c.Templates, Out: c.Out},
+	})
 }
 
 // ProxyEnableCmd enables a proxy protocol.

@@ -1,0 +1,9 @@
+# Synthetic mail template: an empty directive disappears when its value is empty.
+mail
+{
+    ${mail.enabled}server_name ${web.server_name.default};
+    ${mail.enabled}auth_http ${lookup.target};
+    imap_id   ${mail.imapid};
+        imap_capabilities ${mail.imapcapa};
+    timeout   ${mail.imap.timeout};
+}

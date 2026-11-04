@@ -38,8 +38,8 @@ Output in both cases: `conf/nginx/includes/nginx.conf`
 
 ## Variable syntax
 
-Source: `internal/proxy/template.go`, `internal/proxy/template_interpolate.go` (`interpolateLine`,
-`processEnablerLine`)
+Source: `internal/proxy/tmpl` (`RenderLine`, the variable and enabler regexes), driven by
+`internal/proxy/template_interpolate.go` (`interpolateLine`)
 
 Three syntax forms are used in template files.
 
@@ -96,8 +96,8 @@ See [Explode directive](#explode-directive) below.
 
 ## Enabler variables
 
-Source: `internal/proxy/template_interpolate.go` (`processEnablerLine`), regex `enablerPattern` in
-`internal/proxy/template.go`: `^(\s*)\$\{([^}]+)\}(.+)$`
+Source: `internal/proxy/tmpl` (`RenderLine`), regex `tmpl.EnablerPattern`:
+`^(\s*)\$\{([^}]+)\}(.+)$`
 
 The enabler pattern requires at least one character after the closing `}`. A `${VAR}` on
 a line by itself is not an enabler — it is a simple substitution.
@@ -167,6 +167,84 @@ Example:
     server mailbox1.example.com:7071;
     server mailbox2.example.com:7071;
 ```
+
+## Template tools: `configd proxy template`
+
+Source: `internal/proxy/tmpl` (the pure template language: lexer, `RenderLine`, `Format`, `Lint`,
+`Diff`; it knows no generator and no LDAP), `internal/proxy/registry.go` (the variable registry
+the tools use), `internal/proxy/offline.go` (offline rendering), `internal/cli/proxy/template.go`.
+
+The generator and the tools share one implementation of the language, so they cannot disagree
+about what a line means. The tools need no LDAP, no localconfig and not the `zextras` user.
+
+### `fmt [--check | --write] <file|dir>...`
+
+Re-indents each template by brace depth (4 spaces; braces in quotes, in comments and in
+`${...}` do not count) and aligns the values of consecutive directives. Enabler prefixes are
+re-attached to their directive, after the indent: `${core.ipboth.enabled}listen ...`. The
+`!{explode ...}` line is never touched. It never adds or removes a line, and it is idempotent.
+A directory is searched for `*.template` files.
+
+- no flag: write the result of a single file to stdout;
+- `--check`: write nothing, print a unified diff per file that would change, list those files
+  on stderr, exit 1 if there are any (for CI);
+- `--write`: rewrite the files that change and list them.
+
+Rules that keep the rendered output the same (up to whitespace):
+
+- only prefixes that are enabler variables are separated from their text; any other
+  `${var}` at the start of a line is text, and left alone;
+- a directive whose values are all variables (`imap_id ${mail.imapid};`) is commented out
+  by the generator when it renders empty, but only if it is indented, so its indent is kept
+  as it is;
+- a quote that spans lines, and the lines it covers, are left verbatim;
+- already-aligned directives keep their column; otherwise the most common column wins.
+
+### `lint <file|dir>...`
+
+Prints `file:line:col: message [rule]` and exits 1 when there is any finding.
+
+| Rule | Finds |
+|---|---|
+| `unknown-variable` | a `${var}` that is neither registered nor defined by the explode directive of the file (`vhn`, `vip`, `ssl.crt`... under `domain`, `server_id`, `server_hostname` under `server`) |
+| `enabler-as-value` | an enabler variable used in the middle of a line: it renders `""` or `#` |
+| `value-as-enabler` | a number, duration or on/off variable at the start of a line, where only a `""`/`#` variable can work. String variables are not reported: `web.strict.servername` and the `*.disable` variables are such switches |
+| `explode` | an explode directive that is not on the first line, or is malformed |
+| `braces` | unbalanced `{`/`}`, per file and per enabler group (`${x}foo {` ... `${x}}`) |
+| `whitespace` | trailing whitespace, tabs |
+
+### `render --values <fixture.yaml> --templates <dir> --out <dir>`
+
+Renders every template with the same code as `proxy gen`, with the configuration taken from a
+fixture, and writes the files the generator writes: `<out>/nginx.conf` and
+`<out>/nginx/includes/<name>`, that is `<out>` stands for the conf directory. Paths inside
+the files (includes, certificates) are the fixture's `workdir` (default `/opt/zextras`).
+Domains and servers for `explode` come from the fixture. Upstream server lists come from LDAP
+in production, so a fixture sets them with `variables`.
+
+```yaml
+workdir: /opt/zextras
+hostname: proxy1.example.com
+global:                            # LDAP global config attributes (server: overrides them)
+  zimbraIPMode: both               # ipv4, ipv6 or both
+  zimbraReverseProxyStrictServerNameEnabled: "TRUE"
+  zimbraReverseProxyMailEnabled: "TRUE"
+variables:                         # template variables, by name, after resolution
+  web.upstream.:servers: "    server 10.0.0.11:8080;"
+domains:                           # for !{explode domain(...)}; vip must be an IP address
+  - {name: example.com, vhn: mail.example.com, vip: 192.0.2.10}
+servers:                           # for !{explode server(service)}
+  mailbox:
+    - {id: 6a1d1b1c-0000-4000-8000-000000000001, hostname: mbox1.example.com}
+```
+
+Unknown fields and unknown variable names are errors. Virtual IPs are never resolved through
+the DNS. Examples: `internal/proxy/testdata/fixtures/`.
+
+The safety property of `fmt` is a test: for every fixture, the files rendered from the
+formatted templates equal those of the originals up to whitespace
+(`TestFormatPreservesRender`). Set `CONFIGD_PROXY_TEMPLATES` to a template directory (for
+example `carbonio-proxy/proxy/conf/nginx/templates`) to run it on real templates too.
 
 ## Command line: `configd proxy gen` and `configd proxy conf`
 

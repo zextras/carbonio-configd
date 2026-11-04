@@ -50,6 +50,11 @@ const (
 	ActionDisable Action = "disable"
 	ActionStatus  Action = "status"
 	ActionRewrite Action = "rewrite"
+
+	// The "configd proxy template" tools.
+	ActionTemplateFmt    Action = "template-fmt"
+	ActionTemplateLint   Action = "template-lint"
+	ActionTemplateRender Action = "template-render"
 )
 
 // Options are the parsed command-line flags of "configd proxy <action>".
@@ -73,6 +78,9 @@ type Options struct {
 	Gen      *GenOptions
 	Generate GenFunc
 
+	// template: the flags of "template fmt|lint|render".
+	Template *TemplateOptions
+
 	// Standalone is the in-process rewrite used when no daemon answers.
 	Standalone rewrite.Standalone
 }
@@ -95,6 +103,8 @@ func Run(ctx context.Context, env sys.System, stdout, stderr io.Writer, opts *Op
 		return withLDAP(stdout, stderr, showProxyStatus)
 	case ActionGen:
 		return runGen(ctx, stdout, stderr, opts)
+	case ActionTemplateFmt, ActionTemplateLint, ActionTemplateRender:
+		return runTemplate(ctx, env, stdout, stderr, opts)
 	case ActionRewrite:
 		if !cliutil.RequireZextras(stderr) {
 			return 1

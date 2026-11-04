@@ -52,6 +52,13 @@ Builds with extra tags add root flags (not in the packaged binary):
 
 See [performance.md](performance.md#profiling-tooling) for how to use them.
 
+`proxy template` works on files only, offline: `fmt` re-indents and aligns nginx templates
+(`--check` exits `1` and prints a diff when a file would change, `--write` rewrites in
+place), `lint` reports unknown variables, misplaced enablers and explode directives,
+unbalanced braces and stray whitespace (exit `1` on findings), and `render` renders the
+templates from a YAML fixture without LDAP. Details in
+[proxy-templates.md](proxy-templates.md#template-tools-configd-proxy-template).
+
 A command-line parse error exits `1` (not Kong's default `80`), like the legacy tools.
 
 ## Who may run what
@@ -62,7 +69,7 @@ user.` and exit `1` otherwise.
 
 | Requires `zextras` | No user check |
 |---|---|
-| daemon, `rewrite`, `plan`, `shadow`, `control` (all actions), `init`, `tls`, `service start/stop/kill/restart/reload/refresh/rotate` (and the hidden `*-systemd` leaves), `proxy enable`, `proxy disable`, `proxy` (rewrite), `proxy gen` unless `-n`, `-d` or `-D` | `status`, `service list`, `service status`, `proxy conf`, `proxy status`, `proxy gen -n/-d/-D`, `localconfig`, `ldap`, `release`, `completion`, `--help`, `--version` |
+| daemon, `rewrite`, `plan`, `shadow`, `control` (all actions), `init`, `tls`, `service start/stop/kill/restart/reload/refresh/rotate` (and the hidden `*-systemd` leaves), `proxy enable`, `proxy disable`, `proxy` (rewrite), `proxy gen` unless `-n`, `-d` or `-D` | `status`, `service list`, `service status`, `proxy conf`, `proxy status`, `proxy template fmt/lint/render`, `proxy gen -n/-d/-D`, `localconfig`, `ldap`, `release`, `completion`, `--help`, `--version` |
 
 ## Exit codes
 
@@ -367,6 +374,9 @@ configd proxy gen [flags]               # zmproxyconfgen
 configd proxy conf [flags] [nginx.conf] # zmproxyconf
 configd proxy enable|disable <protocol> # http, https, mail, imap, imaps, pop3, pop3s
 configd proxy status
+configd proxy template fmt [--check|--write] <file|dir>...
+configd proxy template lint <file|dir>...
+configd proxy template render --values <fixture.yaml> --templates <dir> --out <dir>
 configd proxy [<config>...]             # no subcommand: forced rewrite of the proxy section
 ```
 

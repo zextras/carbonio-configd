@@ -16,6 +16,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/ldap"
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/proxy/tmpl"
 )
 
 // parseExplodeDirective checks whether the first line of lines is an explode directive.
@@ -27,12 +28,12 @@ func (tp *TemplateProcessor) parseExplodeDirective(
 		return "", "", nil, false
 	}
 
-	matches := tp.explodePattern.FindStringSubmatch(lines[0])
-	if matches == nil {
+	explodeType, explodeArgs, ok = tmpl.ParseExplode(lines[0])
+	if !ok {
 		return "", "", nil, false
 	}
 
-	return matches[1], matches[2], lines[1:], true
+	return explodeType, explodeArgs, lines[1:], true
 }
 
 // processExplode handles !{explode domain(...)} and !{explode server(...)} directives.
@@ -54,9 +55,9 @@ func (tp *TemplateProcessor) parseExplodeDirective(
 func (tp *TemplateProcessor) processExplode(ctx context.Context, explodeType,
 	args string, templateLines []string, writer *bufio.Writer) error {
 	switch explodeType {
-	case "domain":
+	case tmpl.ExplodeDomain:
 		return tp.processExplodeDomain(ctx, args, templateLines, writer)
-	case "server":
+	case tmpl.ExplodeServer:
 		return tp.processExplodeServer(ctx, args, templateLines, writer)
 	default:
 		return fmt.Errorf("unknown explode type: %s", explodeType)
@@ -110,17 +111,9 @@ func (tp *TemplateProcessor) processExplodeDomain(
 	ctx context.Context, argsStr string, templateLines []string, writer *bufio.Writer,
 ) error {
 	// Parse arguments (e.g., "vhn" or "vhn, sso")
-	argsStr = strings.TrimSpace(argsStr)
-	if argsStr == "" {
-		return fmt.Errorf("explode domain directive requires at least one argument")
-	}
-
-	args := strings.Split(argsStr, ",")
-	for i := range args {
-		args[i] = strings.TrimSpace(args[i])
-		if args[i] == "" {
-			return fmt.Errorf("explode domain directive has empty argument")
-		}
+	args, err := tmpl.DomainArgs(argsStr)
+	if err != nil {
+		return err
 	}
 
 	// Get domains from generator (for now, use a mock implementation)
@@ -142,7 +135,7 @@ func (tp *TemplateProcessor) processExplodeDomain(
 
 		// Set domain-specific variables
 		tp.setDomainVariables(&domain)
-		tp.generator.Variables["vip"].Value = tp.virtualIPPrefix(ctx, &domain)
+		tp.generator.Variables[tmpl.VarVIP].Value = tp.virtualIPPrefix(ctx, &domain)
 
 		// Process template lines with domain variables
 		if err := tp.processTemplateLines(ctx, templateLines, writer, false); err != nil {
@@ -193,9 +186,9 @@ func (tp *TemplateProcessor) processExplodeDomain(
 // LDAP Query: Finds all servers where zimbraServiceEnabled contains the specified service name.
 func (tp *TemplateProcessor) processExplodeServer(ctx context.Context, serviceName string,
 	templateLines []string, writer *bufio.Writer) error {
-	serviceName = strings.TrimSpace(serviceName)
-	if serviceName == "" {
-		return fmt.Errorf("service name required for server explode directive")
+	serviceName, err := tmpl.ServerService(serviceName)
+	if err != nil {
+		return err
 	}
 
 	// Get servers from generator (for now, use a mock implementation)
@@ -510,7 +503,12 @@ func (tp *TemplateProcessor) virtualIPPrefix(ctx context.Context, domain *Domain
 		host = domain.VirtualHostname
 	}
 
-	ip := resolveVirtualHost(ctx, host)
+	resolve := tp.hostResolver
+	if resolve == nil {
+		resolve = resolveVirtualHost
+	}
+
+	ip := resolve(ctx, host)
 
 	switch {
 	case ip == nil:
@@ -556,13 +554,13 @@ func resolveVirtualHost(ctx context.Context, host string) net.IP {
 // without domains "leaking" their SSL configuration to subsequent domains.
 func (tp *TemplateProcessor) setDomainVariables(domain *DomainInfo) {
 	// Set variables that templates expect
-	tp.generator.Variables["vhn"] = &Variable{
-		Keyword:   "vhn",
+	tp.generator.Variables[tmpl.VarVHN] = &Variable{
+		Keyword:   tmpl.VarVHN,
 		ValueType: ValueTypeString,
 		Value:     domain.VirtualHostname,
 	}
-	tp.generator.Variables["vip"] = &Variable{
-		Keyword:   "vip",
+	tp.generator.Variables[tmpl.VarVIP] = &Variable{
+		Keyword:   tmpl.VarVIP,
 		ValueType: ValueTypeString,
 		Value:     domain.VirtualIPAddress,
 	}
@@ -589,7 +587,7 @@ func (tp *TemplateProcessor) setDomainVariables(domain *DomainInfo) {
 // Per-domain client certificate variables (legacy ProxyConfGen.java:808-830).
 const (
 	varKeySSLClientCertMode = "ssl.clientcertmode"
-	varKeySSLClientCertCA   = "ssl.clientcertca"
+	varKeySSLClientCertCA   = tmpl.VarSSLClientCA
 	varKeySSOCertAuth       = "web.sso.certauth.enabled"
 	origVarPrefix           = "_orig_"
 )
@@ -655,8 +653,8 @@ func defaultVarString(v *Variable) string {
 // This ensures clean separation between domains during explode processing and prevents
 // one domain's SSL configuration from affecting subsequent domains.
 func (tp *TemplateProcessor) clearDomainVariables() {
-	delete(tp.generator.Variables, "vhn")
-	delete(tp.generator.Variables, "vip")
+	delete(tp.generator.Variables, tmpl.VarVHN)
+	delete(tp.generator.Variables, tmpl.VarVIP)
 
 	// Restore original SSL values (may be global defaults or nil)
 	if origCrt, ok := tp.generator.Variables[varKeyOrigSSLCrt]; ok {
@@ -697,13 +695,13 @@ func (tp *TemplateProcessor) clearDomainVariables() {
 
 // setServerVariables sets server-specific variables for template processing
 func (tp *TemplateProcessor) setServerVariables(server ServerInfo) {
-	tp.generator.Variables["server_id"] = &Variable{
-		Keyword:   "server_id",
+	tp.generator.Variables[tmpl.VarServerID] = &Variable{
+		Keyword:   tmpl.VarServerID,
 		ValueType: ValueTypeString,
 		Value:     server.ID,
 	}
-	tp.generator.Variables["server_hostname"] = &Variable{
-		Keyword:   "server_hostname",
+	tp.generator.Variables[tmpl.VarServerHostname] = &Variable{
+		Keyword:   tmpl.VarServerHostname,
 		ValueType: ValueTypeString,
 		Value:     server.Hostname,
 	}
@@ -711,6 +709,6 @@ func (tp *TemplateProcessor) setServerVariables(server ServerInfo) {
 
 // clearServerVariables removes server-specific variables after processing
 func (tp *TemplateProcessor) clearServerVariables() {
-	delete(tp.generator.Variables, "server_id")
-	delete(tp.generator.Variables, "server_hostname")
+	delete(tp.generator.Variables, tmpl.VarServerID)
+	delete(tp.generator.Variables, tmpl.VarServerHostname)
 }
