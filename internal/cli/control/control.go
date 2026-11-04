@@ -47,7 +47,7 @@ type orchestrator struct {
 }
 
 func newOrchestrator(env sys.System) *orchestrator {
-	ctl := services.NewController(env)
+	ctl := services.NewController(env, services.WithUnits())
 
 	return &orchestrator{ctl: ctl, reporter: status.NewReporter(env, ctl), svcStatus: ctl.ServiceStatus}
 }

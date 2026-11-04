@@ -1,0 +1,53 @@
+# SPDX-FileCopyrightText: 2026 Zextras <https://www.zextras.com>
+#
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# Runs one Carbonio service process that configd or zmcontrol start in
+# non-systemd mode: a foreground daemon, which stays the unit's main process.
+# The instance is the service name (carbonio-run-exec@nginx.service); what to run comes from a
+# spec file the caller leaves in /run/carbonio/units (see internal/rununit),
+# so nothing but zextras' own, validated command line ever runs here.
+#
+# Started and stopped by zextras through the polkit rule shipped with
+# carbonio-configd (50-carbonio-configd.rules), which grants start, stop and
+# reset-failed on these instances and nothing else. The unit is a template with
+# a fixed User= and not a transient unit on purpose: polkit cannot restrict the
+# properties of a transient unit, so whoever may create one could run any
+# command as root.
+#
+# Not sandboxed, as the legacy zm*ctl scripts never were: sudo (the sudoers of
+# zextras: postfix, amavis-mc, ...) and capability-bearing binaries (nginx has
+# cap_net_bind_service) must keep working, and NoNewPrivileges would break both.
+
+[Unit]
+Description=Carbonio service %i
+Documentation=https://docs.zextras.com
+
+[Service]
+Type=exec
+User=zextras
+Group=zextras
+Slice=carbonio.slice
+EnvironmentFile=-/opt/zextras/data/systemd.env
+Environment=TMPDIR=/opt/zextras/data/tmp
+WorkingDirectory=/opt/zextras
+UMask=0027
+ExecStart=/opt/zextras/bin/configd run-unit exec %i
+# The process is the unit: when it exits the unit is done, and what it left
+# behind is stopped. Services that fork away use carbonio-run-forking@ instead.
+
+# configd's watchdog is the restarter, as in legacy: no Restart= here.
+Restart=no
+RemainAfterExit=no
+# A JVM (mailbox, milter) that is stopped with SIGTERM exits 143: that is a stop,
+# not a failure, and must not leave a failed unit behind.
+SuccessExitStatus=143
+KillMode=control-group
+KillSignal=SIGTERM
+# Long enough for a JVM or a database to flush on a stop.
+TimeoutStopSec=120
+TimeoutStartSec=300
+StandardInput=null
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=carbonio-%i

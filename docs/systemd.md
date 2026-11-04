@@ -54,35 +54,125 @@ Runtime dependencies are `libsystemd0` and `polkitd` (apt), `systemd-libs` and
 - `WatchdogSec=120`: configd pings systemd every 60 s once READY has been sent (the watchdog only counts after `READY=1`, so a slow first pass is not penalised);
 - `TimeoutStartSec=300`, `TimeoutStopSec=10`, `KillSignal=SIGTERM`;
 - `Restart=on-failure`, `RestartSec=3`, 5 starts per 300 s;
-- `KillMode=process`: stopping or restarting configd signals only the daemon. In legacy (non-systemd) mode the services it started are in the unit's cgroup and are left running, as when the legacy `zmconfigd` stopped;
-- no memory, CPU or task limits (they were `MemoryMax=512M`, `MemoryHigh=384M`, `CPUQuota=80%`, `TasksMax=256`), because a cgroup limit applies to the services a legacy-mode daemon starts too: clamd was throttled by `MemoryHigh` until its start timed out. `OOMScoreAdjust=-500` and `GOMAXPROCS=4` stay;
-- hardening, limited to what keeps legacy-mode children working: `ProtectSystem=strict` with write access to `/opt/zextras` and `/run/carbonio`, `ProtectHome`, `PrivateTmp`, `ProtectControlGroups`, `ProcSubset=pid`, `RemoveIPC`, `UMask=0027`, and `CapabilityBoundingSet=` as a deny list (`CAP_SYS_BOOT`, `CAP_SYS_MODULE`, `CAP_SYS_TIME`, `CAP_SYSLOG`, `CAP_SYS_RAWIO`, `CAP_MKNOD`, `CAP_BPF`, `CAP_PERFMON`, `CAP_MAC_*`, `CAP_AUDIT_CONTROL`/`READ`, ...). configd has no capabilities and is granted no ambient ones.
+- `KillMode=process`: stopping or restarting configd signals only the daemon. The services it starts in legacy (non-systemd) mode live in their own units (see [Service run units](#service-run-units)), so they are not in this cgroup. `KillMode=process` still matters for the ones a configd older than this unit started, which are in this cgroup, and for a host where the run units cannot be used: `mixed`/`control-group` would `SIGKILL` them on `systemctl restart carbonio-configd` (a package upgrade does that), which the legacy `zmconfigd` never did;
+- resource limits `MemoryHigh=384M`, `MemoryMax=512M`, `CPUQuota=80%`, `TasksMax=256`. They bound configd and the short-lived helpers it runs (`zmprov`, `zmlocalconfig`, `sudo`, `systemctl`), not the services, which are in the run units. On a host where the run units cannot be used the services are in this cgroup again (a one-time `WARN` says so: `Cannot start services as systemd units`) and these limits must be lifted with a drop-in (`MemoryHigh=infinity`, `MemoryMax=infinity`, `CPUQuota=`, `TasksMax=infinity`): clamd alone holds ~1.5 GB of signatures. `OOMScoreAdjust=-500` and `GOMAXPROCS=4` stay;
+- hardening, limited to what keeps configd's own helpers working: `ProtectSystem=strict` with write access to `/opt/zextras` and `/run/carbonio`, `ProtectHome`, `PrivateTmp`, `ProtectControlGroups`, `ProcSubset=pid`, `RemoveIPC`, `UMask=0027`, and `CapabilityBoundingSet=` as a deny list (`CAP_SYS_BOOT`, `CAP_SYS_MODULE`, `CAP_SYS_TIME`, `CAP_SYSLOG`, `CAP_SYS_RAWIO`, `CAP_MKNOD`, `CAP_BPF`, `CAP_PERFMON`, `CAP_MAC_*`, `CAP_AUDIT_CONTROL`/`READ`, ...). configd has no capabilities and is granted no ambient ones.
 
 ### What the unit does not restrict, and why
 
-Everything in the unit is inherited by every process configd execs. In legacy mode that is nginx,
-postfix (through `sudo`), mailboxd, mysqld, clamd, the `zm*ctl` scripts: the legacy `zmconfigd`
-ran them with no sandbox, as `zextras`. These are therefore **not** set:
+Everything in the unit is inherited by every process configd execs. Since the service
+processes moved to their own units, what is left to inherit is `sudo` (setuid root; postfix
+status/stop/reload, `postalias`/`postmap` and the other prepare steps, the `kill` fallback for
+root-owned processes: see the `zextras` sudoers rules), the java tools (`zmprov`, `zmlocalconfig`)
+and `systemctl`. These are therefore **not** set, because `sudo` stops working with them:
 
-- `NoNewPrivileges`: the kernel then ignores setuid bits and file capabilities on exec. `sudo` (setuid root; used for `postfix`, `postconf`, `postalias`, `postsuper`, `postcat`, `qshape.pl`, `amavis-mc`, `zmmailboxdmgr`, `zmqstat`, `zmstat-fd`, see the `zextras` sudoers rules) fails with `The "no new privileges" flag is set`, and `nginx` (file capability `cap_net_bind_service=ep`, for ports 80/443) cannot bind them.
-- An empty `CapabilityBoundingSet=`: a binary whose file capabilities are not all in the bounding set fails to exec with `EPERM`: `fork/exec /opt/zextras/common/sbin/nginx: operation not permitted`, the restart of proxy that failed. `sudo` also needs `CAP_SETUID`, `CAP_SETGID` and `CAP_AUDIT_WRITE`.
+- `NoNewPrivileges`: the kernel then ignores setuid bits and file capabilities on exec. `sudo` fails with `The "no new privileges" flag is set`. (Before the run units, nginx, with its file capability `cap_net_bind_service=ep`, could not bind ports 80/443 either.)
+- An empty `CapabilityBoundingSet=`: `sudo` needs `CAP_SETUID`, `CAP_SETGID` and `CAP_AUDIT_WRITE`, and a binary whose file capabilities are not all in the bounding set fails to exec with `EPERM` (`fork/exec /opt/zextras/common/sbin/nginx: operation not permitted` was the restart of proxy that failed).
 - Every directive that systemd implements with a seccomp filter: with `User=zextras`, systemd sets NoNewPrivileges on the process for any of them, whatever `NoNewPrivileges=` says (measured per directive on systemd 252 with `systemd-run -p User=zextras`): `PrivateDevices`, `ProtectKernelModules`, `ProtectKernelTunables`, `ProtectKernelLogs`, `ProtectClock`, `ProtectHostname`, `RestrictRealtime`, `RestrictSUIDSGID`, `LockPersonality`, `RestrictNamespaces`, `RestrictAddressFamilies`, `SystemCallArchitectures`, `SystemCallFilter` (and `MemoryDenyWriteExecute`, which also breaks Java). `NoNewPrivileges=no` is written out in the unit so that this stays explicit.
 - `ProtectProc=invisible`: `/proc` hides the processes of other users, so root-owned services (postfix master, `zmstat-fd` started through sudo) would look stopped to the daemon and `zmcontrol status` and be restarted over and over.
+
+Moving the `sudo` calls out of configd (to units of their own) would make `NoNewPrivileges` and
+the seccomp directives possible; it was not done because those calls are short, frequent and
+synchronous (status polling) and a unit per call is slower and accumulates state, and because
+configd would then have no `sudo` fallback when systemd or polkit refuse. It is the next step if
+the sandbox is to be tightened.
 
 In systemd mode configd controls the other units with `systemctl` and the polkit rule below and
 does not use `sudo`; the unit is the same in both modes, because the mode is chosen at run time
 (a `carbonio-*` target is enabled or not).
 
+## Service run units
+
+In legacy (non-systemd) mode configd, and `zmcontrol start`/`configd service start`, start the
+services themselves. If they were children of `carbonio-configd.service` they would live in its
+cgroup and inherit its sandbox and limits, and a restart of the unit would stop them. Each is
+therefore started as the instance of a template unit, under `carbonio.slice`:
+
+| unit | `Type=` | runs | used for |
+| --- | --- | --- | --- |
+| `carbonio-run-exec@<service>.service` | `exec` | a foreground daemon, which stays the main process | everything started with a plain start: nginx, opendkim, clamd, freshclam, slapd, mailboxd, milter, `mysqld_safe`, the stats collectors |
+| `carbonio-run-forking@<service>.service` | `forking` | a launcher that runs to completion and leaves daemons behind in the cgroup | `memcached -d`, saslauthd, amavisd, `postfix start` and the amavis-mc companion (both through `sudo`), cbpolicyd, the `zm*ctl` start scripts |
+
+Both have `User=zextras`, `UMask=0027`, `Restart=no` (configd's watchdog is the restarter, as in
+legacy), `KillMode=control-group`, `TimeoutStopSec=120` and the environment of the old daemon
+(`EnvironmentFile=-/opt/zextras/data/systemd.env`, `TMPDIR`). They carry **no sandbox**:
+the processes they run are the ones the legacy `zmconfigd` ran with no sandbox, and need `sudo`
+and file capabilities (nginx). `systemd-cgls` shows each service under
+`carbonio.slice/carbonio-run-*@<service>.service`, `systemctl status carbonio-run-exec@nginx` its
+state and `journalctl -u carbonio-run-exec@nginx` what it prints to stdout/stderr when no log file
+is configured. `systemctl set-property carbonio.slice MemoryMax=...` bounds all of them together;
+no limit is shipped because the services have never had one.
+
+How a start works (`internal/rununit`):
+
+1. configd writes the command line to `/run/carbonio/units/<kind>-<service>.json` (a directory
+   owned by `zextras`, mode 0700).
+2. It runs `systemctl start carbonio-run-<kind>@<service>.service`. The unit's `ExecStart` is the
+   hidden command `configd run-unit <kind> <service>`. It checks the owner and mode of the
+   directory and of the spec, that the program path is absolute and clean, and that the environment
+   holds nothing but `NOTIFY_SOCKET` (no `LD_*`, no `PATH`), then, for `exec`, execs the program in
+   place (it becomes the main process, and its `stdout`/`stderr` are the log file of the spec), and,
+   for `forking`, runs it to completion, writes its exit status and output next to the spec and exits 0
+   (configd reads them back, so the `zm*ctl` exit status and output reach the caller as before).
+3. The Process configd keeps is the unit's main process: its pid comes from `MainPID`, and waiting
+   for it uses a `pidfd`; the unit's `Result`/`ExecMainStatus` give the exit status.
+
+A start finds what an earlier one left under the same unit name: a *failed* unit is reset and a
+*stopping* one waited for, so the name can be reused; an *active* (or still activating) unit is
+**joined**, not restarted: the start waits for it (`systemctl start` on an active unit is a no-op)
+and takes its main pid. This is what the daemon's watchdog and `zmcontrol start` (or a service
+and the service that `Wants` it) find when they start the same service at the same time; the
+legacy second start would just fail to bind, and replacing the unit would kill the service that
+the first one is starting.
+
+nginx forks into the background by default, which would end its unit with the parent, so in a unit it
+runs with `-g "daemon off;"` (`ServiceDef.UnitArgs`); `ps` shows that in its command line. As a
+plain child (the fallback) it keeps its usual arguments.
+
+Services that `sudo` starts as root (postfix `master`, `amavis-mc`) are not under `carbonio.slice`
+even though their launcher ran in a run unit: `sudo`'s PAM session (`pam_systemd`) moves the process
+it starts into a `session-N.scope` of `user-0.slice`, as it always did. They are not children of
+configd either.
+
+The run units are used only when `/run/systemd/system` exists (systemd is init) and the caller is
+not root. Anything that does not fit (stdin, a relative program, an environment other than
+`NOTIFY_SOCKET`, an output that is not a file) is started as a plain child, as before. If
+`systemctl` cannot start a unit (polkit denial, a template that is not installed because the package
+is older, no bus), configd logs one `WARN` and starts every service as a child from then on, until
+it restarts: a host never ends with a service it could not start. The configd daemon itself is not
+started this way. Tests and `--once` runs that do not opt in with `services.WithUnits()` start plain
+children.
+
+### Upgrade path
+
+The package ships the templates and the slice with the new unit and rule. `postinst` runs
+`daemon-reload` and restarts configd (`KillMode=process` leaves the running services alone).
+Services started by the old configd are in `carbonio-configd.service`'s cgroup (or in the session
+that ran `zmcontrol start`); the new configd adopts them by pidfile or identity as it always did, and
+they move to a run unit at their next restart, whether the daemon restarts them for a config change
+or `zmcontrol restart` does. Nothing is restarted by the upgrade. Until then those processes keep
+the old cgroup, which now carries the resource limits above: a heavy one (clamd) may be throttled
+until it is restarted, so restart the antivirus after the upgrade.
+
 ## Readiness, reload and shutdown
 
 - **`READY=1` is sent after the first config pass** (load, plan, rewrites, restarts) has completed. The TCP listener (`zmconfigd_listen_port`, default 7171, loopback) starts at the same point, so a `REWRITE` is never accepted before the daemon has configured the host. Use a `TimeoutStartSec` that covers a slow first pass (the shipped value is 300 s).
-- **`REWRITE` is synchronous.** `configd rewrite` (and `init`, `tls`, `proxy`) wait until the main loop has written the sections: reply `SUCCESS REWRITES COMPLETE`, or `ERROR REWRITE TIMEOUT` after 60 s (the request stays queued). Callers can safely chain `configrewrite X && start X`. See [cli.md](cli.md#rewrite).
+- **`REWRITE` is synchronous.** `configd rewrite` (and `init`, `tls`, `proxy`) wait until the main loop has written the sections: reply `SUCCESS REWRITES COMPLETE`, or `ERROR REWRITE TIMEOUT` after 60 s (the request stays queued). Callers can safely chain `configrewrite X && start X`. See [cli.md](cli.md#rewrite). One exception: while a cycle applies its restarts, a `REWRITE` for sections that same cycle has just rewritten is answered at once (and not queued). In systemd mode the daemon restarts a service with `systemctl try-reload-or-restart`, and the unit's `ExecStartPre` (`echo REWRITE proxy | netcat ... 7171`) asks for the rewrite of its own section; the daemon's loop is blocked on that very `systemctl`, so waiting for the next cycle would stall every such restart for the 60 s timeout.
 - **Reload**: `systemctl reload` sends `SIGHUP` (`SIGUSR2` and `SIGALRM` do the same). configd sends `RELOADING=1`, runs a full cycle and sends `READY=1` again when it ends, whether or not the cycle succeeded.
 - **Shutdown**: `SIGTERM`/`SIGINT` send `STOPPING=1` and cancel the main loop.
 
 ## Polkit rule
 
-`50-carbonio-configd.rules` lets the `zextras` user run `start`, `stop`,
+`50-carbonio-configd.rules` also lets `zextras` run `start`, `stop` and `reset-failed` on the
+instances of `carbonio-run-exec@` and `carbonio-run-forking@` (`^carbonio-run-(exec|forking)@[a-z0-9][a-z0-9_.-]*\.service$`)
+and denies every other verb on them. The units are static templates with a fixed `User=zextras`
+rather than transient units (`systemd-run`) because polkit can only match the unit name and the
+verb, not the properties: a `zextras` right to start transient units would let any process of that
+user (the mailbox JVM, nginx workers) start one as root. With the templates the worst a compromised
+`zextras` can do is run a command as `zextras` in a cgroup, which it can do anyway; the
+spec directory is `zextras`-only, and nothing in a template runs as root.
+
+The rule also lets the `zextras` user run `start`, `stop`,
 `restart`, `reload`, `try-restart` and `try-reload-or-restart` on an explicit
 allowlist of units (`carbonio-antispam`, `-antivirus`, `-appserver-db`,
 `-appserver`, `-configd`, `-freshclam`, `-mailthreat`, `-memcached`, `-milter`,

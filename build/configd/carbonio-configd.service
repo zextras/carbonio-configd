@@ -31,12 +31,15 @@ WatchdogSec=120
 # configd sends READY=1 after the first successful loop iteration.
 TimeoutStartSec=300
 TimeoutStopSec=10
-# KillMode=process: stopping or restarting configd signals only the daemon. In
-# legacy (non-systemd) mode the services it started (nginx, mailboxd, clamd,
-# ...) are in this unit's cgroup, and mixed/control-group would SIGKILL them
-# all on `systemctl restart carbonio-configd` (a package upgrade does that),
-# while the legacy zmconfigd never took the services down with it. systemd
-# logs "remains running after unit stopped" for them, which is expected.
+# KillMode=process: stopping or restarting configd signals only the daemon.
+# The services it starts live in carbonio-run-*@ units of carbonio.slice, not
+# in this cgroup, and keep running across a restart of configd. KillMode=process
+# is still needed for the ones a configd older than this unit started: those are
+# in this cgroup (and so are the services of a host where the run units cannot
+# be used, see docs/systemd.md), and mixed/control-group would SIGKILL them on
+# `systemctl restart carbonio-configd` (a package upgrade does that), which the
+# legacy zmconfigd never did. systemd logs "remains running after unit
+# stopped" for them, which is expected.
 KillMode=process
 KillSignal=SIGTERM
 
@@ -46,29 +49,35 @@ RestartSec=3
 StartLimitInterval=300
 StartLimitBurst=5
 
-# Resource limits: none on memory, CPU or tasks (MemoryMax/MemoryHigh/CPUQuota/
-# TasksMax were 512M/384M/80%/256). A cgroup limit applies to everything in
-# the unit's cgroup, and in legacy (non-systemd) mode that includes the
-# services the daemon starts: clamd (~1.5 GB of signatures) was throttled by
-# MemoryHigh until its start timed out, and mailboxd/mysqld would be OOM-killed
-# or hit TasksMax. In systemd mode the services are units of their own and
-# configd itself is a small Go process.
+# Resource limits. They bound configd and its short-lived helpers (zmprov,
+# zmlocalconfig, sudo, systemctl), not the services: those run in
+# carbonio-run-*@ units outside this cgroup. A host where the run units cannot
+# be used gets the services in this cgroup again and must lift these limits
+# (docs/systemd.md): clamd alone holds ~1.5 GB of signatures.
+MemoryHigh=384M
+MemoryMax=512M
+CPUQuota=80%
+TasksMax=256
 
 # OOM protection (negative = less likely to be killed, range: -1000 to 1000)
 OOMScoreAdjust=-500
 
 # ── Security: scope of the sandbox ────────────────────────────────────
-# What follows is inherited by every process configd spawns. In legacy
-# (non-systemd) mode the daemon itself starts, stops and restarts the Carbonio
-# services (nginx, postfix, mailboxd, mysqld, ...) through the zm*ctl scripts,
-# nginx and sudo, as the unsandboxed legacy zmconfigd did, so a directive is
-# kept only if those processes still work under it. Every directive that was
-# removed for that reason is listed in the two sections below.
+# What follows is inherited by every process configd spawns. The long-running
+# service processes are not among them: they run in carbonio-run-*@ units with
+# their own (unsandboxed) environment, so nginx's file capabilities need no
+# room here. What configd still runs itself is `sudo` (postfix status, stop and
+# reload, postalias/postmap and the other Prepare steps of the services, the
+# kill fallback for root-owned processes) and java tools (zmprov,
+# zmlocalconfig). A directive is kept only if those still work under it. Every
+# directive that was removed for that reason is listed in the two sections
+# below.
 
 # ── Security: Filesystem ──────────────────────────────────────────────
-# /opt/zextras is writable as a whole, not only conf/log/data: the services
-# the daemon starts keep their state there (db, store, index, redolog, zmstat,
-# jetty, mta/antivirus data). /usr, /etc, /var and /boot are read-only.
+# /opt/zextras is writable as a whole, not only conf/log/data: configd and the
+# tools it runs write configuration, logs and pidfiles all over it (conf, data,
+# log, common/conf, the mta and antivirus data). /usr, /etc, /var and /boot are
+# read-only.
 ProtectSystem=strict
 ReadWritePaths=-/opt/zextras -/run/carbonio
 ProtectHome=yes
@@ -81,19 +90,17 @@ UMask=0027
 
 # ── Security: Privileges ──────────────────────────────────────────────
 # configd runs as zextras with no capabilities and never gets ambient ones.
-# The processes it execs must still be able to gain privileges the way they
-# do from a login shell: /opt/zextras/common/sbin/nginx carries file
-# capabilities (cap_net_bind_service=ep, to bind 80/443) and sudo is setuid
-# root (the sudoers rules of zextras: postfix, postconf, postalias, postsuper,
-# postcat, qshape.pl, amavis-mc, zmmailboxdmgr, zmqstat, zmstat-fd, ...).
-# These directives break both and are therefore NOT set:
-#  - NoNewPrivileges=yes: the kernel ignores setuid bits and file
-#    capabilities on exec. sudo fails with 'The "no new privileges" flag is
-#    set', and nginx cannot bind 443.
-#  - an empty CapabilityBoundingSet= (it was): exec of a binary whose file
-#    capabilities are not all in the bounding set fails with EPERM
-#    ("fork/exec /opt/zextras/common/sbin/nginx: operation not permitted"), and
-#    sudo has no CAP_SETUID/CAP_SETGID/CAP_AUDIT_WRITE.
+# The only privilege it takes is through `sudo`, which is setuid root (the
+# sudoers rules of zextras: postfix, postconf, postalias, postsuper, postcat,
+# qshape.pl, amavis-mc, zmmailboxdmgr, zmqstat, zmstat-fd, ...). The service
+# processes, nginx with its file capabilities (cap_net_bind_service=ep) among
+# them, run in carbonio-run-*@ units, so only sudo is left that these
+# directives would break, and they are therefore NOT set:
+#  - NoNewPrivileges=yes: the kernel ignores setuid bits on exec. sudo fails
+#    with 'The "no new privileges" flag is set'.
+#  - an empty CapabilityBoundingSet= (it was): sudo has no CAP_SETUID,
+#    CAP_SETGID and CAP_AUDIT_WRITE, and a binary whose file capabilities are
+#    not all in the bounding set fails to exec with EPERM.
 #  - every directive that systemd implements with a seccomp filter or that
 #    the system manager only honours together with NoNewPrivileges when the
 #    unit has a User=: with User=zextras systemd sets NoNewPrivileges on the

@@ -87,7 +87,7 @@ func (c *Controller) startCollectors(ctx context.Context, def *ServiceDef) error
 			continue
 		}
 
-		proc, startErr := c.env.Exec.Start(ctx, &sys.Cmd{
+		proc, startErr := c.startIn(ctx, "stats-"+binary, &sys.Cmd{
 			Path:   binaryPath,
 			Args:   args,
 			Stdout: logFd,

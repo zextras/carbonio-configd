@@ -107,7 +107,13 @@ sent to this daemon while its main loop was busy running the restart, which coul
 it after the 60 s REWRITE timeout (`Rewrite request timed out`, `Config rewrite failed`) before
 the service started. A REWRITE client is also answered before the restarts of its cycle run
 (`SUCCESS REWRITES COMPLETE` when the rewrite phase is over), so a restart that fails or is slow
-never holds it. A baseline artefact explains restarts right after a bootstrap: variables read from
+never holds it. In systemd mode the restart is a `systemctl try-reload-or-restart` whose
+`ExecStartPre` (`echo REWRITE proxy | netcat ... 7171`) sends a REWRITE to this daemon while its
+loop waits for that very command: a REWRITE that arrives while the cycle applies its restarts and
+names only sections that same cycle has just rewritten is therefore answered at once
+(`SUCCESS REWRITES COMPLETE`) and not queued, instead of waiting for the next cycle and the 60 s
+timeout (`MainLoopActionTrigger.beginRestarts`). Any other REWRITE in that window (a section the
+cycle did not rewrite) is queued and answered by the next cycle as before. A baseline artefact explains restarts right after a bootstrap: variables read from
 a file (`MAPLOCAL`, e.g. `zimbraSSLDHParam`) are observed before the cycle writes that file, so the
 first cycle sees them unset and the next one sees a change, deferred or not, and restarts the
 services that use them once.

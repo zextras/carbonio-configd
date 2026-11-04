@@ -62,7 +62,7 @@ func (c *Controller) startJava(ctx context.Context, def *ServiceDef) error {
 		}
 	}
 
-	if err := c.startJavaDetached(ctx, spec.Label, javaBin, spec.LogFile, args); err != nil {
+	if err := c.startJavaDetached(ctx, def.Name, spec.Label, javaBin, spec.LogFile, args); err != nil {
 		return err
 	}
 
@@ -76,7 +76,7 @@ func (c *Controller) startJava(ctx context.Context, def *ServiceDef) error {
 // cmd.Wait() on the child, so nothing needs the handle once it's launched;
 // the process is reaped by init once configd's own process exits.
 func (c *Controller) startJavaDetached(
-	ctx context.Context, label, javaBin, logFile string, args []string,
+	ctx context.Context, service, label, javaBin, logFile string, args []string,
 ) error {
 	logFd, err := c.openLogFile(logFile)
 	if err != nil {
@@ -87,7 +87,7 @@ func (c *Controller) startJavaDetached(
 
 	logger.InfoContext(ctx, "Starting "+label+" via Java launcher", "java", javaBin, "log", logFile)
 
-	proc, err := c.env.Exec.Start(ctx, &sys.Cmd{
+	proc, err := c.startIn(ctx, service, &sys.Cmd{
 		Path:   javaBin,
 		Args:   args,
 		Stdout: logFd,

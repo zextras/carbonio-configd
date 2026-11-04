@@ -35,12 +35,18 @@ source=(
   "${pkgname}-wrappers-completion.bash"
   "${pkgname}.rules"
   "${pkgname}.service"
+  "carbonio.slice"
+  "carbonio-run-exec@.service"
+  "carbonio-run-forking@.service"
 )
 sha256sums=(
   'a16bbcc3f76bacb1d1d630c2163055b444f8154c3e2b98100c395758cf9cc6bb'
   '351daad1cd3da7bfc5b34c429aee072224d13efd128b5c2e9c710279f7985440'
-  '2852da97671727f9ddd10d07289f25976d4032364bae8912687186bc4ae3d4ad'
-  'dffce7055758a48e88fffca20f9413c3415ddb17ca867f811fdddcc9aef80c21'
+  '3e50d3050f74830c4e38ff976956a8f3c9076417b53c25bbc595b3c960205da0'
+  '24bb8d13b4a7b11382701b9ca50d58d08ccde4691ccea6ae7a3540d974598b55'
+  '09e664bf92f6c084c2c0852d7182d813c41d88e8d67e962bdab42d1812780b2e'
+  'e2774a5abfe11308c944fad74ddb196ceeaaa13b6d08b82176bdd2339c80875a'
+  'e59fa84eb8dd869aa093c0399cfc8ac34502f1e0f88ae6090487c005fd5e3a9a'
 )
 
 _kill_legacy_zmconfigd() {
@@ -80,6 +86,15 @@ _package_common() {
 _package_systemd() {
   install -Dm644 "${srcdir}/${pkgname}.service" \
     "${pkgdir}/usr/lib/systemd/system/carbonio-configd.service"
+
+  # Where configd starts the service processes in non-systemd mode: the slice
+  # and the two template units (see docs/systemd.md)
+  install -Dm644 "${srcdir}/carbonio.slice" \
+    "${pkgdir}/usr/lib/systemd/system/carbonio.slice"
+  install -Dm644 "${srcdir}/carbonio-run-exec@.service" \
+    "${pkgdir}/usr/lib/systemd/system/carbonio-run-exec@.service"
+  install -Dm644 "${srcdir}/carbonio-run-forking@.service" \
+    "${pkgdir}/usr/lib/systemd/system/carbonio-run-forking@.service"
 }
 
 build() {

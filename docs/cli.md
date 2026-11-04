@@ -285,6 +285,10 @@ After the start loop `control start` probes each service it started once more (t
 `control status` fails on, so not `stats` or `logger` by default): one that is not running
 prints `<name> is not running after start` and exits `1`, so a service that the config daemon
 restarted or that died right after its start is not reported as `Done`.
+In non-systemd mode `control start` and `service start` start the service processes in
+`carbonio-run-*@<service>.service` units under `carbonio.slice` (not as children of the
+caller or of the daemon: [systemd.md](systemd.md#service-run-units)); `configd run-unit` is the hidden
+helper those units run and is not meant to be called by hand.
 Remote hosts (`zmcontrol -H`) are not supported here, the wrapper rejects `-H`;
 use `/opt/zextras/libexec/zmrc`.
 

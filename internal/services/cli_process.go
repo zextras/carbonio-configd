@@ -243,12 +243,12 @@ func (c *Controller) startDirect(ctx context.Context, name string, def *ServiceD
 	}
 
 	if def.UseSDNotify {
-		_, err := c.startWithSDNotify(ctx, &sys.Cmd{Path: binary, Args: args}, name)
+		_, err := c.startWithSDNotify(ctx, &sys.Cmd{Path: binary, Args: args}, name, def.UnitArgs)
 
 		return err
 	}
 
-	output, err := sys.CombinedOutput(ctx, c.env.Exec, binary, args...)
+	output, err := c.runLaunch(ctx, name, binary, args...)
 	if err != nil {
 		return fmt.Errorf("failed to start %s directly: %s: %w", name, strings.TrimSpace(string(output)), err)
 	}
@@ -302,7 +302,7 @@ func (c *Controller) startDetached(ctx context.Context, name string, def *Servic
 	// For sd_notify-capable detached daemons, wait for READY=1 before returning.
 	// startWithSDNotify starts the process internally.
 	if def.UseSDNotify {
-		proc, err := c.startWithSDNotify(context.Background(), cmd, name)
+		proc, err := c.startWithSDNotify(context.Background(), cmd, name, def.UnitArgs)
 		if err != nil {
 			return fmt.Errorf("failed to start %s: %w", name, err)
 		}
@@ -314,7 +314,7 @@ func (c *Controller) startDetached(ctx context.Context, name string, def *Servic
 		return nil
 	}
 
-	proc, err := c.env.Exec.Start(context.Background(), cmd)
+	proc, err := c.startProcess(context.Background(), name, def, cmd)
 	if err != nil {
 		return fmt.Errorf("failed to spawn %s: %w", name, err)
 	}
@@ -334,6 +334,50 @@ func (c *Controller) startDetached(ctx context.Context, name string, def *Servic
 	c.releaseChild(name, proc)
 
 	return c.awaitReady(ctx, def, nil)
+}
+
+// runLaunch runs the command that starts service name (a launcher that returns
+// once the daemon has forked) in a systemd unit of its own, and returns what it
+// printed.
+func (c *Controller) runLaunch(ctx context.Context, name, binary string, args ...string) ([]byte, error) {
+	cmd := &sys.Cmd{Path: binary, Args: args, Combined: true}
+
+	if c.units == nil {
+		res, err := c.env.Exec.Run(ctx, cmd)
+
+		return res.Stdout, err
+	}
+
+	res, err := c.units.Run(ctx, name, cmd)
+
+	return res.Stdout, err
+}
+
+// startIn starts the daemon of service name through the unit runner, or as a
+// child of this process without one. unitArgs are appended to its arguments
+// only in a unit (ServiceDef.UnitArgs).
+func (c *Controller) startIn(ctx context.Context, name string, cmd *sys.Cmd, unitArgs ...string) (sys.Process, error) {
+	if c.units == nil {
+		return c.env.Exec.Start(ctx, cmd)
+	}
+
+	return c.units.Start(ctx, name, cmd, unitArgs...)
+}
+
+// startProcess starts the foreground daemon of service name in a systemd unit
+// of its own. The configd daemon itself is the exception: it is not a service
+// of itself, and the CLI that starts it has no unit to put it in.
+func (c *Controller) startProcess(
+	ctx context.Context,
+	name string,
+	def *ServiceDef,
+	cmd *sys.Cmd,
+) (sys.Process, error) {
+	if def.Ready == ReadyConfigd {
+		return c.env.Exec.Start(ctx, cmd)
+	}
+
+	return c.startIn(ctx, name, cmd, def.UnitArgs...)
 }
 
 // releaseChild frees the handle of a detached child the CLI never waits for.

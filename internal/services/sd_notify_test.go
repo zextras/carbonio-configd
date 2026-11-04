@@ -85,7 +85,7 @@ func startAsync(ctx context.Context, ctl *Controller, cmd *sys.Cmd, service stri
 	done := make(chan sdResult, 1)
 
 	go func() {
-		proc, err := ctl.startWithSDNotify(ctx, cmd, service)
+		proc, err := ctl.startWithSDNotify(ctx, cmd, service, nil)
 		done <- sdResult{proc, err}
 	}()
 
@@ -170,7 +170,7 @@ func TestStartWithSDNotify_ChildExitFailsFast(t *testing.T) {
 	ctl := NewController(withMode(env, false), WithBaseDir(t.TempDir()), WithRunDir(t.TempDir()),
 		WithConfigLoader(emptyConfig))
 
-	_, err := ctl.startWithSDNotify(context.Background(), &sys.Cmd{Path: "slapd"}, "test-exit")
+	_, err := ctl.startWithSDNotify(context.Background(), &sys.Cmd{Path: "slapd"}, "test-exit", nil)
 	if err == nil || !strings.Contains(err.Error(), "exited during startup before signaling READY=1") {
 		t.Fatalf("error = %v, want early-exit failure", err)
 	}
@@ -369,7 +369,7 @@ func TestStartWithSDNotify_CmdStartFails(t *testing.T) {
 	ctl, f := newSDController(t)
 	f.Exec.FailStart(func(*sys.Cmd) bool { return true }, errors.New("fork/exec: no such file or directory"))
 
-	proc, err := ctl.startWithSDNotify(context.Background(), &sys.Cmd{Path: "slapd"}, "test-start-fail")
+	proc, err := ctl.startWithSDNotify(context.Background(), &sys.Cmd{Path: "slapd"}, "test-start-fail", nil)
 	if err == nil {
 		t.Fatal("expected error when the process cannot be started")
 	}

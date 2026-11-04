@@ -182,7 +182,7 @@ func TestRunRestartsPhase(t *testing.T) {
 		t.Run(fmt.Sprintf("always applies restarts (config restarts=%v)", enabled), func(t *testing.T) {
 			deps.cfg.RestartConfig = enabled
 			// Empty plan: ApplyRestarts always runs and returns promptly.
-			dur := runRestartsPhase(ctx, deps.configManager, &plan.Plan{})
+			dur := runRestartsPhase(ctx, deps.configManager, deps.trigger, &plan.Plan{})
 			assert.GreaterOrEqual(t, dur, time.Duration(0))
 		})
 	}

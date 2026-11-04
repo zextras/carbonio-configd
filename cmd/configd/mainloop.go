@@ -40,7 +40,8 @@ const componentAntivirus = "antivirus"
 // the inflight clients are released (completeWaiters), and when the cycle did
 // not get to rewrite they go back to waiting (requeueWaiters), their sections
 // still queued, for the next cycle. A client that arrives mid-cycle stays in
-// waiting for the next one.
+// waiting for the next one, except while the cycle applies its restarts and
+// the client asks for a section the cycle has just rewritten (beginRestarts).
 type MainLoopActionTrigger struct {
 	ReloadChan   chan struct{}
 	State        *state.State
@@ -49,6 +50,9 @@ type MainLoopActionTrigger struct {
 	mu       sync.Mutex
 	waiting  []*rewriteWaiter
 	inflight []*rewriteWaiter
+	// restarting holds the sections the cycle that is applying its restarts
+	// has just rewritten; nil outside the restart phase.
+	restarting map[string]struct{}
 }
 
 // rewriteWaiter is one REWRITE client waiting for the main loop.
@@ -64,6 +68,21 @@ func (t *MainLoopActionTrigger) TriggerRewrite(ctx context.Context, configs []st
 
 	for _, cfg := range configs {
 		logger.DebugContext(ctx, "Processing rewrite request", "config", cfg)
+	}
+
+	if t.rewrittenByRestartingCycle(configs) {
+		// A unit the cycle is restarting right now asks, from its ExecStartPre,
+		// for the rewrite of its own section ("echo REWRITE proxy | netcat").
+		// The cycle wrote that section before it started restarting and the
+		// loop is blocked until the unit is up, so queuing the request and
+		// waiting for the next cycle would stall the restart until the
+		// REWRITE timeout. The files are already written: answer at once.
+		logger.DebugContext(ctx, "Rewrite already done by the restarting cycle", "configs", configs)
+
+		done := make(chan struct{})
+		close(done)
+
+		return &network.RewriteWait{Done: done}
 	}
 
 	// The sections are queued before the client registers: a loop that claims
@@ -117,6 +136,48 @@ func (t *MainLoopActionTrigger) completeWaiters() {
 	}
 
 	t.inflight = nil
+}
+
+// beginRestarts opens the restart phase of a cycle that rewrote the given
+// sections: until endRestarts, a REWRITE naming only those sections is already
+// satisfied. A restart issued through systemd can run an ExecStartPre that
+// sends exactly such a REWRITE to this daemon while its loop waits for the
+// restart.
+func (t *MainLoopActionTrigger) beginRestarts(sections []plan.Section) {
+	set := make(map[string]struct{}, len(sections))
+	for _, sec := range sections {
+		set[sec.Name] = struct{}{}
+	}
+
+	t.mu.Lock()
+	t.restarting = set
+	t.mu.Unlock()
+}
+
+// endRestarts closes the window opened by beginRestarts.
+func (t *MainLoopActionTrigger) endRestarts() {
+	t.mu.Lock()
+	t.restarting = nil
+	t.mu.Unlock()
+}
+
+// rewrittenByRestartingCycle reports whether every section was rewritten by the
+// cycle that is applying its restarts.
+func (t *MainLoopActionTrigger) rewrittenByRestartingCycle(configs []string) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if len(t.restarting) == 0 || len(configs) == 0 {
+		return false
+	}
+
+	for _, cfg := range configs {
+		if _, ok := t.restarting[cfg]; !ok {
+			return false
+		}
+	}
+
+	return true
 }
 
 // requeueWaiters hands the claimed clients back to the next cycle, for a cycle
@@ -566,7 +627,7 @@ func runCycle(ctx context.Context, deps *daemonLoopDeps, st *loopIterState, dur 
 		return iterExit
 	}
 
-	restartsDur := runRestartsPhase(ctx, deps.configManager, pl)
+	restartsDur := runRestartsPhase(ctx, deps.configManager, deps.trigger, pl)
 
 	// As in configd.py, the listener starts only after the first rewrite and
 	// restart pass, so a start script waiting on the service (READY=1, STATUS)
@@ -647,8 +708,18 @@ func handleIdleSleep(ctx context.Context, deps *daemonLoopDeps, st *loopIterStat
 // runRestartsPhase hands the plan's restarts to the restart policy and returns
 // the elapsed time. The policy runs every cycle: with restarts disabled it only
 // publishes the dependency graph and keeps the restarts pending.
-func runRestartsPhase(ctx context.Context, cm *configmgr.ConfigManager, pl *plan.Plan) time.Duration {
+func runRestartsPhase(
+	ctx context.Context,
+	cm *configmgr.ConfigManager,
+	trigger *MainLoopActionTrigger,
+	pl *plan.Plan,
+) time.Duration {
 	phaseStart := time.Now()
+
+	if trigger != nil {
+		trigger.beginRestarts(pl.Sections)
+		defer trigger.endRestarts()
+	}
 
 	cm.ApplyRestarts(ctx, pl)
 

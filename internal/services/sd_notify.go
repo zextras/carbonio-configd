@@ -30,7 +30,12 @@ import (
 //
 // This mirrors systemd's Type=notify readiness detection for the legacy
 // (non-systemd) control path.
-func (c *Controller) startWithSDNotify(ctx context.Context, cmd *sys.Cmd, service string) (sys.Process, error) {
+func (c *Controller) startWithSDNotify(
+	ctx context.Context,
+	cmd *sys.Cmd,
+	service string,
+	unitArgs []string,
+) (sys.Process, error) {
 	socketPath := c.p.sdNotifySocket(service)
 
 	// A stale socket from a previous configd invocation would make
@@ -52,7 +57,7 @@ func (c *Controller) startWithSDNotify(ctx context.Context, cmd *sys.Cmd, servic
 	// inherited NOTIFY_SOCKET.
 	cmd.Env = append(cmd.Env, "NOTIFY_SOCKET="+socketPath)
 
-	proc, err := c.env.Exec.Start(ctx, cmd)
+	proc, err := c.startIn(ctx, service, cmd, unitArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("start %s: %w", service, err)
 	}

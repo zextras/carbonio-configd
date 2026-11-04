@@ -19,14 +19,29 @@ import (
 // password prompt no one will answer). It returns the combined output next to the error so a
 // failing verb can be reported with what the binary said.
 func (c *Controller) controlCommand(ctx context.Context, def *ServiceDef, verb []string) ([]byte, error) {
-	binary, args := def.BinaryPath, verb
-
-	if def.NeedsRoot {
-		binary, args = sudoBin, append([]string{"-n", def.BinaryPath}, verb...)
-	}
+	binary, args := commandLine(def, verb)
 
 	// #nosec G204 — binary is a registry constant and the verb a registry literal
 	return sys.CombinedOutput(ctx, c.env.Exec, binary, args...)
+}
+
+// launchCommand is controlCommand for the Start verb: the command that makes
+// the service fork its daemons runs in a systemd unit of its own, so that
+// they do not end up in the cgroup of the process that started them.
+func (c *Controller) launchCommand(ctx context.Context, def *ServiceDef, verb []string) ([]byte, error) {
+	binary, args := commandLine(def, verb)
+
+	// #nosec G204 — binary is a registry constant and the verb a registry literal
+	return c.runLaunch(ctx, def.Name, binary, args...)
+}
+
+// commandLine is the program and arguments that run verb of def.
+func commandLine(def *ServiceDef, verb []string) (binary string, args []string) {
+	if def.NeedsRoot {
+		return sudoBin, append([]string{"-n", def.BinaryPath}, verb...)
+	}
+
+	return def.BinaryPath, verb
 }
 
 // commandRunning reports whether the CommandSpec's Status verb exits 0. A spec
@@ -57,7 +72,7 @@ func (c *Controller) startCommands(ctx context.Context, def *ServiceDef) error {
 		return err
 	}
 
-	out, err := c.controlCommand(ctx, def, spec.Start)
+	out, err := c.launchCommand(ctx, def, spec.Start)
 	if err != nil {
 		return fmt.Errorf("%s start: %s: %w", def.BinaryPath, strings.TrimSpace(string(out)), err)
 	}

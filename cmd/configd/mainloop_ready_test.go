@@ -28,6 +28,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/configmgr"
 	"github.com/zextras/carbonio-configd/internal/network"
+	"github.com/zextras/carbonio-configd/internal/plan"
 	"github.com/zextras/carbonio-configd/internal/sdnotify"
 	"github.com/zextras/carbonio-configd/internal/services"
 	"github.com/zextras/carbonio-configd/internal/snapshot"
@@ -453,6 +454,31 @@ func TestRewriteWaiters(t *testing.T) {
 		tr.claimWaiters()
 		tr.completeWaiters()
 		assert.True(t, released(w))
+	})
+
+	t.Run("a restarting cycle answers at once for the sections it just rewrote", func(t *testing.T) {
+		tr := newTrigger()
+		tr.beginRestarts([]plan.Section{{Name: "proxy"}, {Name: "mta"}})
+
+		w := tr.TriggerRewrite(context.Background(), []string{"proxy"})
+
+		assert.True(t, released(w), "the unit's ExecStartPre must not wait for a loop blocked on that very unit")
+		assert.Empty(t, tr.State.TakeRequestedConfigs(), "nothing is left to rewrite")
+
+		tr.endRestarts()
+
+		w = tr.TriggerRewrite(context.Background(), []string{"proxy"})
+		assert.False(t, released(w), "outside the restart phase a REWRITE waits for the loop")
+	})
+
+	t.Run("a restarting cycle still holds a REWRITE of another section", func(t *testing.T) {
+		tr := newTrigger()
+		tr.beginRestarts([]plan.Section{{Name: "proxy"}})
+
+		w := tr.TriggerRewrite(context.Background(), []string{"proxy", "mta"})
+
+		assert.False(t, released(w), "mta was not rewritten by this cycle")
+		assert.ElementsMatch(t, []string{"proxy", "mta"}, tr.State.TakeRequestedConfigs())
 	})
 
 	t.Run("cancel forgets the client and keeps the request queued", func(t *testing.T) {

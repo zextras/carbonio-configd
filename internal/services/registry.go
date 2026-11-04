@@ -89,6 +89,11 @@ type ServiceDef struct {
 	// a temporary NOTIFY_SOCKET and waits for READY=1 before returning, giving
 	// event-driven readiness detection instead of polling.
 	UseSDNotify bool
+	// UnitArgs are extra arguments for the daemon when it runs as the main
+	// process of a systemd unit (see rununit) and not as a child of the
+	// starting process: those that otherwise fork into the background, which
+	// would end the unit with the parent, are told to stay in the foreground.
+	UnitArgs []string
 	// CustomStart, when set, takes over the non-systemd start path entirely.
 	// The escape hatch for a launch no spec below expresses; no registry
 	// entry needs it today. Prefer a spec.
@@ -341,15 +346,17 @@ func (c *Controller) defaultRegistry() map[string]*ServiceDef {
 			Component: true,
 		},
 		svcClamd: {
-			Name:          svcClamd,
-			DisplayName:   svcClamd,
-			SystemdUnits:  []string{unitAntivirus},
-			BinaryPath:    c.p.common + "/sbin/clamd",
-			BinaryArgs:    []string{"--config-file=" + c.p.conf + "/clamd.conf"},
-			Detached:      true,
-			PidFile:       c.p.run + "/clamd.pid",
-			ProcessName:   c.p.common + "/sbin/clamd",
-			UseSDNotify:   true,
+			Name:         svcClamd,
+			DisplayName:  svcClamd,
+			SystemdUnits: []string{unitAntivirus},
+			BinaryPath:   c.p.common + "/sbin/clamd",
+			BinaryArgs:   []string{"--config-file=" + c.p.conf + "/clamd.conf"},
+			Detached:     true,
+			PidFile:      c.p.run + "/clamd.pid",
+			ProcessName:  c.p.common + "/sbin/clamd",
+			UseSDNotify:  true,
+			// clamd forks into the background unless told not to.
+			UnitArgs:      []string{"--foreground"},
 			ConfigRewrite: []string{svcAntivirus},
 			Setup:         []Step{{Mkdir: []string{c.p.clamdDir}}},
 			Component:     true,
@@ -432,8 +439,10 @@ func (c *Controller) defaultRegistry() map[string]*ServiceDef {
 			// Full binary path: nginx retitles itself "nginx: master process
 			// <path> -c ...", and /usr/bin/carbonio-prometheus-nginx-exporter
 			// must not be mistaken for it.
-			ProcessName:   c.p.common + "/sbin/nginx",
-			UseSDNotify:   true,
+			ProcessName: c.p.common + "/sbin/nginx",
+			UseSDNotify: true,
+			// nginx daemonizes by default; as a unit's main process it must not.
+			UnitArgs:      []string{"-g", "daemon off;"},
 			ConfigRewrite: []string{svcProxy},
 		},
 		// mailbox is the mailboxd JVM alone (legacy zmmailboxdctl). The

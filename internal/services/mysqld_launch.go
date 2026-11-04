@@ -133,7 +133,7 @@ func (c *Controller) spawnMysqldSafe(ctx context.Context, name, defaultsFile, er
 	// startDetached (cli_process.go). Starting it with ctx would tie the
 	// daemon's lifetime to this function's ctx, which is the exact opposite
 	// of what we want.
-	proc, startErr := c.env.Exec.Start(context.Background(), &sys.Cmd{
+	proc, startErr := c.startIn(context.Background(), name, &sys.Cmd{
 		Path:   c.p.mysqldSafeBin,
 		Args:   args,
 		Stdout: logFd,
