@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"github.com/stretchr/testify/require"
 	"github.com/zextras/carbonio-configd/internal/sdnotify"
 	"github.com/zextras/carbonio-configd/internal/state"
 	"os"
@@ -21,9 +22,6 @@ func TestSetupSignalHandler_SIGTERM(t *testing.T) {
 
 	// Setup signal handler
 	SetupSignalHandler(ctx, appState, cancel, reloadChan, nil)
-
-	// Give handler time to start
-	time.Sleep(50 * time.Millisecond)
 
 	// Send SIGTERM to ourselves
 	p, err := os.FindProcess(os.Getpid())
@@ -55,8 +53,6 @@ func TestSetupSignalHandler_SIGHUP(t *testing.T) {
 	reloadChan := make(chan struct{}, 1)
 
 	SetupSignalHandler(ctx, appState, cancel, reloadChan, nil)
-
-	time.Sleep(50 * time.Millisecond)
 
 	// Send SIGCHLD
 	p, err := os.FindProcess(os.Getpid())
@@ -94,8 +90,6 @@ func TestSetupSignalHandler_SIGUSR2(t *testing.T) {
 
 	SetupSignalHandler(ctx, appState, cancel, reloadChan, nil)
 
-	time.Sleep(50 * time.Millisecond)
-
 	p, err := os.FindProcess(os.Getpid())
 	if err != nil {
 		t.Fatalf("Failed to find process: %v", err)
@@ -129,8 +123,6 @@ func TestSetupSignalHandler_SIGALRM(t *testing.T) {
 
 	SetupSignalHandler(ctx, appState, cancel, reloadChan, nil)
 
-	time.Sleep(50 * time.Millisecond)
-
 	p, err := os.FindProcess(os.Getpid())
 	if err != nil {
 		t.Fatalf("Failed to find process: %v", err)
@@ -153,44 +145,34 @@ func TestSetupSignalHandler_SIGALRM(t *testing.T) {
 	}
 }
 
-func TestSetupSignalHandler_SIGCHLD(t *testing.T) {
-	appState := &state.State{}
+// SIGCHLD is informational: it must neither reload nor cancel nor touch the
+// sleep timer. dispatchSignal is synchronous, so this needs no waiting; the OS
+// delivery path is covered by the other SetupSignalHandler tests.
+func TestDispatchSignal_SIGCHLD(t *testing.T) {
+	appState := &state.State{SleepTimer: 100}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	reloadChan := make(chan struct{}, 1)
 
-	SetupSignalHandler(ctx, appState, cancel, reloadChan, nil)
+	stop := dispatchSignal(ctx, syscall.SIGCHLD, appState, cancel, reloadChan, nil)
 
-	time.Sleep(50 * time.Millisecond)
-
-	p, err := os.FindProcess(os.Getpid())
-	if err != nil {
-		t.Fatalf("Failed to find process: %v", err)
+	if stop {
+		t.Error("SIGCHLD must not stop the handler")
 	}
 
-	err = p.Signal(syscall.SIGCHLD)
-	if err != nil {
-		t.Fatalf("Failed to send SIGCHLD: %v", err)
-	}
-
-	// Give handler time to process
-	time.Sleep(100 * time.Millisecond)
-
-	// SIGCHLD should NOT trigger reload
 	select {
 	case <-reloadChan:
 		t.Error("SIGCHLD should not trigger reload")
 	default:
-		// Success - no reload signal
 	}
 
-	// Context should still be active
-	select {
-	case <-ctx.Done():
+	if ctx.Err() != nil {
 		t.Error("Context should not be canceled after SIGCHLD")
-	default:
-		// Success
+	}
+
+	if got := appState.GetSleepTimer(); got != 100 {
+		t.Errorf("SIGCHLD changed SleepTimer to %f, want 100", got)
 	}
 }
 
@@ -207,8 +189,6 @@ func TestSetupSignalHandler_ReloadChannelBlocked(t *testing.T) {
 
 	SetupSignalHandler(ctx, appState, cancel, reloadChan, nil)
 
-	time.Sleep(50 * time.Millisecond)
-
 	// Send SIGHUP when channel is blocked
 	p, err := os.FindProcess(os.Getpid())
 	if err != nil {
@@ -220,19 +200,22 @@ func TestSetupSignalHandler_ReloadChannelBlocked(t *testing.T) {
 		t.Fatalf("Failed to send SIGHUP: %v", err)
 	}
 
-	// Handler should not block - it uses non-blocking send
-	time.Sleep(100 * time.Millisecond)
+	// The handler uses a non-blocking send, so it must still reset the sleep
+	// timer with the channel full.
+	require.Eventually(t, func() bool { return appState.GetSleepTimer() == 0 },
+		5*time.Second, time.Millisecond, "SleepTimer not reset with a blocked reload channel")
 
-	// Sleep timer should still be reset
-	if appState.GetSleepTimer() != 0 {
-		t.Errorf("Expected SleepTimer to be 0 even with blocked channel, got %f", appState.GetSleepTimer())
-	}
-
-	// Drain the channel
+	// Free the slot; the handler must have survived the blocked send and
+	// deliver a fresh SIGHUP.
 	<-reloadChan
 
-	// Original signal should still be in channel (was already there)
-	// The new signal was dropped due to non-blocking send
+	require.NoError(t, p.Signal(syscall.SIGHUP))
+
+	select {
+	case <-reloadChan:
+	case <-time.After(5 * time.Second):
+		t.Error("handler stopped reacting after a blocked reload")
+	}
 }
 
 // TestDispatchSignalSafe_ShutdownPanicStillCancels: when handling SIGTERM panics

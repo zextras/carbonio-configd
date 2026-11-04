@@ -16,7 +16,9 @@ Type=notify
 User=zextras
 EnvironmentFile=-/opt/zextras/data/systemd.env
 ExecStartPre=/opt/zextras/bin/systemd-envscript
-ExecStartPre=/usr/bin/timeout 120 /bin/bash -c 'until (exec 3<>"/dev/tcp/$1/$2") 2>/dev/null; do sleep 2; done' _ $ldap_domain $ldap_port
+# Bounded wait for ldap_url (same resolution and TLS rules as the daemon); returns at
+# once when no LDAP URL is configured, fails after 120 s.
+ExecStartPre=/opt/zextras/bin/configd ldap wait --timeout 120s
 ExecStart=/opt/zextras/bin/configd
 ExecReload=/bin/kill -HUP $MAINPID
 NotifyAccess=main

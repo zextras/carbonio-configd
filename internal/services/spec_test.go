@@ -72,6 +72,48 @@ func (def *ServiceDef) validateSpecs() error {
 		return fmt.Errorf("%s: Commands launch needs BinaryPath and a Start verb", def.Name)
 	case def.Collectors != nil && (len(def.Collectors.Always) == 0 || def.ProcessName == ""):
 		return fmt.Errorf("%s: Collectors launch needs Always and ProcessName", def.Name)
+	case def.Direct != nil && (def.BinaryPath == "" || def.ProcessName == "" || len(def.launchStrategies()) > 0):
+		return fmt.Errorf("%s: Direct refines a BinaryPath launch and needs BinaryPath and ProcessName", def.Name)
+	}
+
+	for _, companion := range def.Companions {
+		if companion.Identity == "" || (companion.Binary != "" && def.Direct == nil) {
+			return fmt.Errorf("%s: a Companion needs an Identity, and a Binary needs Direct", def.Name)
+		}
+	}
+
+	return validateSteps(def.Name, def.Setup, def.Commands, def.Direct)
+}
+
+// validateSteps checks that every Step declares exactly one action.
+func validateSteps(name string, setup []Step, commands *CommandSpec, direct *DirectSpec) error {
+	all := append([]Step(nil), setup...)
+
+	if commands != nil {
+		all = append(all, commands.Prepare...)
+	}
+
+	if direct != nil {
+		all = append(all, direct.Prepare...)
+	}
+
+	for i := range all {
+		step := &all[i]
+		actions := 0
+
+		for _, set := range []bool{len(step.Mkdir) > 0, step.RemoveStale != nil, step.Run != nil, step.Hook != nil} {
+			if set {
+				actions++
+			}
+		}
+
+		if actions != 1 {
+			return fmt.Errorf("%s: step %d declares %d actions, want exactly one", name, i, actions)
+		}
+
+		if step.Run != nil && step.Run.Path == "" {
+			return fmt.Errorf("%s: step %d runs a command without a Path", name, i)
+		}
 	}
 
 	return nil
@@ -106,7 +148,6 @@ func TestDefaultRegistry_DeclaresTheLaunchStrategies(t *testing.T) {
 		svcAntispamDB:  "Mysqld",
 		serviceMTA:     "Commands",
 		svcStats:       "Collectors",
-		svcAmavis:      "CustomStart",
 	}
 
 	for name, def := range ctl.registry {
@@ -153,13 +194,44 @@ func TestServiceDefValidate_RejectsContradictions(t *testing.T) {
 		},
 		{
 			name: "commands without a start verb",
-			def:  ServiceDef{Name: "x", BinaryPath: "/b", Commands: &CommandSpec{Prepare: []func(context.Context) error{noop}}},
+			def:  ServiceDef{Name: "x", BinaryPath: "/b", Commands: &CommandSpec{Prepare: []Step{{Hook: noop}}}},
 			want: "Commands launch needs",
 		},
 		{
 			name: "collectors without identity",
 			def:  ServiceDef{Name: "x", Collectors: &CollectorSpec{Always: []string{"c"}}},
 			want: "Collectors launch needs",
+		},
+		{
+			name: "direct without a binary",
+			def:  ServiceDef{Name: "x", ProcessName: "p", Direct: &DirectSpec{}},
+			want: "Direct refines",
+		},
+		{
+			name: "direct next to another strategy",
+			def: ServiceDef{
+				Name: "x", BinaryPath: "/b", ProcessName: "p", Direct: &DirectSpec{},
+				Java: &JavaSpec{Args: javaArgs, LogFile: "/l"},
+			},
+			want: "Direct refines",
+		},
+		{
+			name: "companion binary without direct",
+			def: ServiceDef{
+				Name: "x", BinaryPath: "/b",
+				Companions: []Companion{{Identity: "helper", Binary: "/helper"}},
+			},
+			want: "a Binary needs Direct",
+		},
+		{
+			name: "step without an action",
+			def:  ServiceDef{Name: "x", Setup: []Step{{UnlessExists: "/f"}}},
+			want: "declares 0 actions",
+		},
+		{
+			name: "step with two actions",
+			def:  ServiceDef{Name: "x", Setup: []Step{{Mkdir: []string{"/d"}, Hook: noop}}},
+			want: "declares 2 actions",
 		},
 		{
 			name: "readiness without a launcher",
@@ -176,5 +248,59 @@ func TestServiceDefValidate_RejectsContradictions(t *testing.T) {
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.want)
 		})
+	}
+}
+
+// TestDefaultRegistry_ProceduralExceptions pins every piece of procedural code
+// the registry still wires in: the Hook steps, the PreStart/PostStart/PreStop
+// hooks and the CustomStart/CustomStop launchers. Each is an exception
+// documented, with its reason, in docs/service-registry.md; growing this list
+// is a decision to take there, not a side effect of a new service.
+func TestDefaultRegistry_ProceduralExceptions(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	got := map[string]int{}
+
+	for name, def := range ctl.registry {
+		steps := append([]Step(nil), def.Setup...)
+		if def.Commands != nil {
+			steps = append(steps, def.Commands.Prepare...)
+		}
+
+		if def.Direct != nil {
+			steps = append(steps, def.Direct.Prepare...)
+		}
+
+		for i := range steps {
+			if steps[i].Hook != nil {
+				got[name+" Hook step"]++
+			}
+		}
+
+		got[name+" PreStart"] = len(def.PreStart)
+		got[name+" PostStart"] = len(def.PostStart)
+		got[name+" PreStop"] = len(def.PreStop)
+
+		if def.CustomStart != nil || def.CustomStop != nil {
+			got[name+" CustomStart/CustomStop"] = 1
+		}
+	}
+
+	want := map[string]int{
+		serviceMTA + " Hook step":   2, // main.cf bootstrap, ldap-*.cf rendering
+		svcMailbox + " PostStart":   1, // advanced status
+		svcAppserverDB + " PreStop": 1, // InnoDB flush
+	}
+
+	for key, n := range got {
+		if n != 0 {
+			assert.Equal(t, want[key], n, key)
+		}
+	}
+
+	for key, n := range want {
+		assert.Equal(t, n, got[key], key)
 	}
 }

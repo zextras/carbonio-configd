@@ -278,9 +278,9 @@ func TestRegistryClamdLegacyFields(t *testing.T) {
 		t.Error("ConfigRewrite does not contain 'antivirus'")
 	}
 
-	// PreStart should have exactly one hook (clamdDirInit)
-	if len(def.PreStart) != 1 {
-		t.Errorf("len(PreStart) = %d, want 1", len(def.PreStart))
+	// Setup creates the clamav database directory
+	if len(def.Setup) != 1 || len(def.Setup[0].Mkdir) != 1 || def.Setup[0].Mkdir[0] != ctl.p.clamdDir {
+		t.Errorf("Setup = %+v, want one step creating %s", def.Setup, ctl.p.clamdDir)
 	}
 }
 

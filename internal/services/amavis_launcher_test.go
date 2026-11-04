@@ -32,19 +32,19 @@ func amavisMCEntry(ctl *Controller, pid int) sys.ProcEntry {
 
 func execLines(f *systest.Fakes) string { return strings.Join(f.Exec.Lines(), "\n") }
 
-func TestAmavisPreStart_CreatesSpamassassinAndRunsAltermime(t *testing.T) {
+func TestAmavisSetup_CreatesSpamassassinAndRunsAltermime(t *testing.T) {
 	t.Parallel()
 
 	ctl, f := newFakeController(t)
 	f.FS.Put(ctl.p.altermime, []byte("#!/bin/sh"), 0o755)
 
-	require.NoError(t, ctl.amavisPreStart(context.Background(), nil))
+	require.NoError(t, ctl.runSteps(context.Background(), ctl.registry[svcAmavis].Setup))
 
 	assert.True(t, f.FS.Exists(ctl.p.amavisDir+"/.spamassassin"))
 	assert.Contains(t, f.Exec.Lines(), ctl.p.altermime)
 }
 
-func TestAmavisPreStart_AltermimeSkippedWhenRewriteSkipped(t *testing.T) {
+func TestAmavisSetup_AltermimeSkippedWhenRewriteSkipped(t *testing.T) {
 	t.Parallel()
 
 	t.Run("context", func(t *testing.T) {
@@ -53,7 +53,7 @@ func TestAmavisPreStart_AltermimeSkippedWhenRewriteSkipped(t *testing.T) {
 		ctl, f := newFakeController(t)
 		f.FS.Put(ctl.p.altermime, []byte("#!/bin/sh"), 0o755)
 
-		require.NoError(t, ctl.amavisPreStart(WithNoRewriteContext(context.Background()), nil))
+		require.NoError(t, ctl.runSteps(WithNoRewriteContext(context.Background()), ctl.registry[svcAmavis].Setup))
 
 		assert.True(t, f.FS.Exists(ctl.p.amavisDir+"/.spamassassin"), "directory still prepared")
 		assert.NotContains(t, execLines(f), ctl.p.altermime)
@@ -65,25 +65,25 @@ func TestAmavisPreStart_AltermimeSkippedWhenRewriteSkipped(t *testing.T) {
 		ctl, f := newFakeController(t, WithNoRewrite(true))
 		f.FS.Put(ctl.p.altermime, []byte("#!/bin/sh"), 0o755)
 
-		require.NoError(t, ctl.amavisPreStart(context.Background(), nil))
+		require.NoError(t, ctl.runSteps(context.Background(), ctl.registry[svcAmavis].Setup))
 
 		assert.True(t, f.FS.Exists(ctl.p.amavisDir+"/.spamassassin"))
 		assert.NotContains(t, execLines(f), ctl.p.altermime)
 	})
 }
 
-func TestAmavisPreStart_AltermimeMissingOrFailingIsIgnored(t *testing.T) {
+func TestAmavisSetup_AltermimeMissingOrFailingIsIgnored(t *testing.T) {
 	t.Parallel()
 
 	ctl, f := newFakeController(t)
 
-	require.NoError(t, ctl.amavisPreStart(context.Background(), nil), "script not installed")
+	require.NoError(t, ctl.runSteps(context.Background(), ctl.registry[svcAmavis].Setup), "script not installed")
 	assert.NotContains(t, execLines(f), ctl.p.altermime)
 
 	f.FS.Put(ctl.p.altermime, []byte("#!/bin/sh"), 0o755)
 	f.Exec.OnPath(ctl.p.altermime, systest.Fail(1, "boom"))
 
-	require.NoError(t, ctl.amavisPreStart(context.Background(), nil), "failure is ignored")
+	require.NoError(t, ctl.runSteps(context.Background(), ctl.registry[svcAmavis].Setup), "failure is ignored")
 }
 
 // installAmavis makes the daemons "appear" when launched: sudo amavis-mc
@@ -103,7 +103,7 @@ func installAmavis(ctl *Controller, f *systest.Fakes) {
 	})
 }
 
-func TestAmavisCustomStart_StartsMCViaSudoThenAmavisdAndPreparesDirs(t *testing.T) {
+func TestAmavisStart_StartsMCViaSudoThenAmavisdAndPreparesDirs(t *testing.T) {
 	t.Parallel()
 
 	ctl, f := newFakeController(t)
@@ -117,7 +117,7 @@ func TestAmavisCustomStart_StartsMCViaSudoThenAmavisdAndPreparesDirs(t *testing.
 
 	pumpClock(t, f.Clock, amavisReadyInterval)
 
-	require.NoError(t, ctl.amavisCustomStart(context.Background(), ctl.registry[svcAmavis]))
+	require.NoError(t, ctl.startWithoutSystemd(context.Background(), svcAmavis, ctl.registry[svcAmavis]))
 
 	lines := f.Exec.Lines()
 	mcIdx, dIdx := -1, -1
@@ -144,7 +144,7 @@ func TestAmavisCustomStart_StartsMCViaSudoThenAmavisdAndPreparesDirs(t *testing.
 	assert.True(t, f.FS.Exists(ctl.p.amavisDir+"/tmp/keep-me"), "other tmp content kept")
 }
 
-func TestAmavisCustomStart_SkipsWhenAmavisdRunning(t *testing.T) {
+func TestAmavisStart_SkipsWhenAmavisdRunning(t *testing.T) {
 	t.Parallel()
 
 	ctl, f := newFakeController(t)
@@ -154,7 +154,7 @@ func TestAmavisCustomStart_SkipsWhenAmavisdRunning(t *testing.T) {
 	f.FS.PutDir(ctl.p.amavisDir+"/tmp", 0o755)
 	f.FS.PutDir(ctl.p.amavisDir+"/tmp/amavis-live", 0o755)
 
-	require.NoError(t, ctl.amavisCustomStart(context.Background(), ctl.registry[svcAmavis]))
+	require.NoError(t, ctl.startWithoutSystemd(context.Background(), svcAmavis, ctl.registry[svcAmavis]))
 
 	lines := execLines(f)
 	assert.NotContains(t, lines, sudoBin, "amavis-mc already running: no sudo")
@@ -162,7 +162,7 @@ func TestAmavisCustomStart_SkipsWhenAmavisdRunning(t *testing.T) {
 	assert.True(t, f.FS.Exists(ctl.p.amavisDir+"/tmp/amavis-live"), "running instance's tmp untouched")
 }
 
-func TestAmavisCustomStart_StartsMCEvenIfAmavisdRunning(t *testing.T) {
+func TestAmavisStart_StartsMCEvenIfAmavisdRunning(t *testing.T) {
 	t.Parallel()
 
 	ctl, f := newFakeController(t)
@@ -171,23 +171,23 @@ func TestAmavisCustomStart_StartsMCEvenIfAmavisdRunning(t *testing.T) {
 
 	pumpClock(t, f.Clock, amavisReadyInterval)
 
-	require.NoError(t, ctl.amavisCustomStart(context.Background(), ctl.registry[svcAmavis]))
+	require.NoError(t, ctl.startWithoutSystemd(context.Background(), svcAmavis, ctl.registry[svcAmavis]))
 
 	assert.Contains(t, execLines(f), sudoBin+" -n "+ctl.p.amavisMC)
 	assert.True(t, f.Proc.Alive(amavisMCPID))
 }
 
-func TestAmavisCustomStart_NotInstalledIsNoOp(t *testing.T) {
+func TestAmavisStart_NotInstalledIsNoOp(t *testing.T) {
 	t.Parallel()
 
 	ctl, f := newFakeController(t)
 
-	require.NoError(t, ctl.amavisCustomStart(context.Background(), ctl.registry[svcAmavis]))
+	require.NoError(t, ctl.startWithoutSystemd(context.Background(), svcAmavis, ctl.registry[svcAmavis]))
 
 	assert.Empty(t, f.Exec.Lines())
 }
 
-func TestAmavisCustomStart_MCNeverAppears(t *testing.T) {
+func TestAmavisStart_MCNeverAppears(t *testing.T) {
 	t.Parallel()
 
 	ctl, f := newFakeController(t)
@@ -195,13 +195,13 @@ func TestAmavisCustomStart_MCNeverAppears(t *testing.T) {
 
 	pumpClock(t, f.Clock, amavisReadyInterval)
 
-	err := ctl.amavisCustomStart(context.Background(), ctl.registry[svcAmavis])
+	err := ctl.startWithoutSystemd(context.Background(), svcAmavis, ctl.registry[svcAmavis])
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "amavis-mc did not start")
 }
 
-func TestAmavisCustomStart_AmavisdNeverAppears(t *testing.T) {
+func TestAmavisStart_AmavisdNeverAppears(t *testing.T) {
 	t.Parallel()
 
 	ctl, f := newFakeController(t)
@@ -210,20 +210,20 @@ func TestAmavisCustomStart_AmavisdNeverAppears(t *testing.T) {
 
 	pumpClock(t, f.Clock, amavisReadyInterval)
 
-	err := ctl.amavisCustomStart(context.Background(), ctl.registry[svcAmavis])
+	err := ctl.startWithoutSystemd(context.Background(), svcAmavis, ctl.registry[svcAmavis])
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "amavisd did not start")
 }
 
-func TestAmavisCustomStop_KillsAmavisdThenMC(t *testing.T) {
+func TestAmavisStop_KillsAmavisdThenMC(t *testing.T) {
 	t.Parallel()
 
 	ctl, f := newFakeController(t)
 	f.Proc.Add(amavisdEntry(amavisdPID))
 	f.Proc.Add(amavisMCEntry(ctl, amavisMCPID))
 
-	require.NoError(t, ctl.amavisCustomStop(context.Background(), ctl.registry[svcAmavis]))
+	require.NoError(t, ctl.stopWithoutSystemd(context.Background(), svcAmavis, ctl.registry[svcAmavis]))
 
 	sigs := f.Proc.Signals()
 	require.Len(t, sigs, 2)
@@ -235,12 +235,12 @@ func TestAmavisCustomStop_KillsAmavisdThenMC(t *testing.T) {
 	assert.False(t, f.Proc.Alive(amavisMCPID))
 }
 
-func TestAmavisCustomStop_NothingRunningIsNil(t *testing.T) {
+func TestAmavisStop_NothingRunningIsNil(t *testing.T) {
 	t.Parallel()
 
 	ctl, f := newFakeController(t)
 
-	require.NoError(t, ctl.amavisCustomStop(context.Background(), ctl.registry[svcAmavis]))
+	require.NoError(t, ctl.stopWithoutSystemd(context.Background(), svcAmavis, ctl.registry[svcAmavis]))
 	assert.Empty(t, f.Proc.Signals())
 }
 

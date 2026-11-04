@@ -419,6 +419,11 @@ type ConfigdRequestHandler struct {
 	// RewriteTimeout bounds how long REWRITE waits for the main loop; zero
 	// means DefaultRewriteTimeout.
 	RewriteTimeout time.Duration
+
+	// KnownSections lists the sections of the parsed zmconfigd.cf. REWRITE
+	// names outside it are dropped, as nothing would match them; nil disables
+	// the check.
+	KnownSections func() []string
 }
 
 // HandleRequest processes incoming commands.
@@ -455,6 +460,13 @@ func (h *ConfigdRequestHandler) rewrite(ctx context.Context, sections []string) 
 		return "ERROR INTERNAL ERROR"
 	}
 
+	sections = h.filterKnown(ctx, sections)
+	if len(sections) == 0 {
+		// Legacy queues unknown names, no section matches them and the client
+		// gets the usual reply: nothing is rewritten.
+		return respRewritesComplete
+	}
+
 	wait := h.ActionTrigger.TriggerRewrite(ctx, sections)
 	logger.DebugContext(ctx, "Triggered REWRITE command",
 		"args", sections)
@@ -483,4 +495,33 @@ func (h *ConfigdRequestHandler) rewrite(ctx context.Context, sections []string) 
 	case <-ctx.Done():
 		return errShuttingDown
 	}
+}
+
+// filterKnown drops, with a warning, the names that are not sections of
+// zmconfigd.cf. The legacy listener accepts them silently and never matches
+// them, so the reply is unchanged.
+func (h *ConfigdRequestHandler) filterKnown(ctx context.Context, sections []string) []string {
+	if h.KnownSections == nil {
+		return sections
+	}
+
+	known := make(map[string]struct{})
+	for _, name := range h.KnownSections() {
+		known[name] = struct{}{}
+	}
+
+	kept := make([]string, 0, len(sections))
+
+	for _, name := range sections {
+		if _, ok := known[name]; !ok {
+			logger.WarnContext(ctx, "Ignoring REWRITE of unknown section",
+				"section", name)
+
+			continue
+		}
+
+		kept = append(kept, name)
+	}
+
+	return kept
 }

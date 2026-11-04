@@ -96,7 +96,7 @@ spec:
 
         // vet for every build-tag combination (integration is compiled, never run),
         // unreachable code, duplication ratchet, and drift of the tables generated
-        // from carbonio-mailbox LC.java (shallow-clones the pinned tag from GitHub).
+        // from carbonio-mailbox LC.java (hermetic: the inputs are vendored in scripts/lc-source).
         // Mirrors `make check`'s static part; reproduce locally with
         // `make vet-tags deadcode dup generate-check`.
         stage('Static checks') {

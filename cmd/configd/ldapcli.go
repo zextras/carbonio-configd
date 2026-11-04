@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"time"
 
 	"github.com/zextras/carbonio-configd/internal/cli/ldapcmd"
 	"github.com/zextras/carbonio-configd/internal/sys"
@@ -26,10 +27,27 @@ type LDAPCmd struct {
 	Gs     LDAPGsCmd     `cmd:"" help:"Print a server entry with global inheritance (zmprov gs)"`
 	Mcf    LDAPMcfCmd    `cmd:"" passthrough:"" help:"Modify the global config: [+|-]attr value ... (zmprov mcf)"`
 	Search LDAPSearchCmd `cmd:"" help:"Search LDAP"`
+	Wait   LDAPWaitCmd   `cmd:"" help:"Wait until LDAP (ldap_url) accepts connections"`
 
 	// dial is the seam of the tests: the connection opener. Unset, the verbs
 	// use a pooled client.
 	dial ldapcmd.Dial
+}
+
+// LDAPWaitCmd is "configd ldap wait", the bounded LDAP wait of the systemd
+// unit. It succeeds at once when no LDAP URL is configured, as the daemon
+// starts without one.
+type LDAPWaitCmd struct {
+	Timeout time.Duration `name:"timeout" default:"120s" help:"Give up after this long"`
+}
+
+// Run executes "configd ldap wait".
+func (c *LDAPWaitCmd) Run(parent *LDAPCmd, env sys.System, std *stdio) error {
+	return exitWith(ldapcmd.Wait(context.Background(), std.Err, &ldapcmd.WaitOptions{
+		URLs:    parent.URL,
+		FS:      env.FS,
+		Timeout: c.Timeout,
+	}))
 }
 
 // LDAPGacfCmd is "configd ldap gacf".

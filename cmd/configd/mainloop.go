@@ -271,7 +271,10 @@ func maybeStartListener(
 		ipv6 = true
 	}
 
-	handler := &network.ConfigdRequestHandler{ActionTrigger: mainLoopTrigger}
+	handler := &network.ConfigdRequestHandler{
+		ActionTrigger: mainLoopTrigger,
+		KnownSections: func() []string { return slices.Collect(maps.Keys(appState.GetMtaConfig().Sections)) },
+	}
 	srv := network.NewThreadedStreamServer(listenerAddr, listenerPort, ipv6, handler)
 
 	if err := srv.ServeForever(ctx); err != nil {

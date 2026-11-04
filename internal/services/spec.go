@@ -6,15 +6,16 @@ package services
 
 import (
 	"context"
+	"time"
 )
 
 // The launch specs below are the data half of the declarative service
 // registry: a ServiceDef says WHAT a service is (units, identity, how it is
 // started, stopped and proven ready); the generic executors in launch*.go and
 // collectors.go do the work. Genuinely service-specific code stays behind
-// named hooks (ServiceDef.PreStart/PostStart/PreStop, CommandSpec.Prepare,
+// named hooks (ServiceDef.PreStart/PostStart/PreStop, a Step's Hook,
 // ServiceDef.CustomStart/CustomStop, the Args builders), each a small function
-// with one job.
+// with one job; docs/service-registry.md lists every one that remains.
 
 // ReadyKind names the probe that proves a freshly launched service is serving,
 // run by the generic launcher before the start returns (ServiceDef.Ready).
@@ -79,9 +80,10 @@ type CommandSpec struct {
 	// Start, Stop, Status and Reload are the arguments of each verb; nil means
 	// the service has no such verb. Status exits 0 when the service is running.
 	Start, Stop, Status, Reload []string
-	// Prepare are the named steps run, in order, before Start when Status says
-	// the service is not running already (main.cf bootstrap, table rendering).
-	Prepare []func(ctx context.Context) error
+	// Prepare are the steps run, in order, before Start when Status says the
+	// service is not running already (main.cf bootstrap, table rendering,
+	// aliases rebuild).
+	Prepare []Step
 	// RestartAsReload turns `restart` into a configuration rewrite followed by
 	// a reload: the service is never stopped for a restart (postfix).
 	RestartAsReload bool
@@ -110,4 +112,81 @@ type CollectorSpec struct {
 type OptionalCollector struct {
 	Cmd   string
 	LCKey string
+}
+
+// Step is one action of an ordered launch sequence (ServiceDef.Setup,
+// CommandSpec.Prepare, DirectSpec.Prepare). Exactly one of Mkdir, RemoveStale,
+// Run and Hook is set. A failing step stops the sequence, except a best-effort
+// Run, which is only logged.
+type Step struct {
+	// Mkdir creates the directories (and their parents, 0755).
+	Mkdir []string
+	// RemoveStale clears leftovers of a previous run.
+	RemoveStale *StaleDirs
+	// Run runs one command.
+	Run *RunStep
+	// Hook is the escape hatch for a step no field expresses; each one is
+	// listed, with its reason, in docs/service-registry.md.
+	Hook func(ctx context.Context) error
+	// UnlessExists skips the step when the path exists: a one-time
+	// initialization (the cbpolicyd database).
+	UnlessExists string
+}
+
+// StaleDirs names the directories directly under Dir whose name starts with
+// Prefix; they are removed with their content, a failure being logged only.
+type StaleDirs struct {
+	Dir    string
+	Prefix string
+}
+
+// RunStep is a command run by a Step: Path with Args, through `sudo -n` when
+// Sudo.
+type RunStep struct {
+	Path string
+	Args []string
+	Sudo bool
+	// IfExists skips the command, quietly, when this path is absent: an
+	// optional helper script, or the input file of a rebuild.
+	IfExists string
+	// SkipOnNoRewrite skips the command for a start that must not regenerate
+	// configuration (`norewrite`).
+	SkipOnNoRewrite bool
+	// BestEffort logs a failure, with what the command printed, instead of
+	// failing the sequence.
+	BestEffort bool
+}
+
+// Companion is a helper daemon a service cannot do without: legacy
+// amavisdctl status needs amavis-mc next to amavisd and its start launches
+// both. Identity is its process identity (see ServiceDef.ProcessName); Binary,
+// when set, is started through `sudo -n` before the main process unless a
+// process of that identity runs already (DirectSpec.Wait then bounds the wait
+// for it to appear). A stop terminates the main process, then each companion.
+type Companion struct {
+	Identity string
+	Binary   string
+}
+
+// ProcessWait bounds how long a launch waits for a process to show up in the
+// process table: Attempts probes, Interval apart. The zero value does not wait.
+type ProcessWait struct {
+	Attempts int
+	Interval time.Duration
+}
+
+// DirectSpec refines a BinaryPath launch (ServiceDef.Direct) with what a
+// daemon needs around its spawn; the sequence is the one of legacy amavisdctl.
+type DirectSpec struct {
+	// OptionalBinary makes an absent BinaryPath a quiet no-op: the legacy
+	// wrapper exits 0 on hosts without the daemon installed.
+	OptionalBinary bool
+	// SkipIfRunning leaves the service alone when a process of ProcessName
+	// runs already. Companions are still brought up first.
+	SkipIfRunning bool
+	// Prepare are the steps run after the companions and before the spawn.
+	Prepare []Step
+	// Wait bounds the wait for the companions and, after the spawn, for
+	// ProcessName to appear.
+	Wait ProcessWait
 }
