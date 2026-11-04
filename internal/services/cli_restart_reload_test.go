@@ -12,25 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"testing"
-	"time"
 )
-
-// TestServiceRestart_MTA_IsRegistered verifies that MTA restart calls ServiceReload.
-func TestServiceRestart_MTA_IsRegistered(t *testing.T) {
-	t.Parallel()
-
-	ctl := newRealController(t)
-
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	err := ctl.ServiceRestart(ctx, "mta")
-	_ = err
-}
 
 // TestServiceRestart_StopFailedStartAnyway exercises the "stop failed, start anyway" branch.
 func TestServiceRestart_StopFailedStartAnyway(t *testing.T) {

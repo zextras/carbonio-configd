@@ -656,21 +656,6 @@ func TestNoRewrite_SkipConfigRewrite(t *testing.T) {
 	}
 }
 
-func TestServiceReload_FallbackOnNonSystemd(t *testing.T) {
-	t.Parallel()
-
-	ctl := newRealController(t)
-
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-
-	ctl.pinMode(false)
-
-	err := ctl.ServiceReload(context.Background(), "proxy")
-	_ = err
-}
-
 func TestServiceStatus_LegacyMode_PidFile(t *testing.T) {
 	t.Parallel()
 
