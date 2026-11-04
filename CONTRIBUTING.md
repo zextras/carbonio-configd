@@ -64,7 +64,7 @@ make check
 make reuse
 
 # Verify generated localconfig docs/defaults are up to date
-# (uses the clone at MAILBOX_REPO, else shallow-clones the pinned tag from GitHub)
+# (hermetic: regenerates from the carbonio-mailbox sources vendored in scripts/lc-source)
 make generate-check
 
 # vet / race-test every build-tag combination (default, integration, tracing, profiling)

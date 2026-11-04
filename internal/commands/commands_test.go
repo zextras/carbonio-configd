@@ -179,7 +179,6 @@ func TestCommand_Execute_UnknownOutput(t *testing.T) {
 
 func TestCommand_Execute_Timing(t *testing.T) {
 	cmd := NewCommand("test", "test", func(ctx context.Context, args ...string) (string, error) {
-		time.Sleep(10 * time.Millisecond) // Small delay
 		return "result", nil
 	})
 
