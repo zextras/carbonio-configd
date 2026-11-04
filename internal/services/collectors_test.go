@@ -13,7 +13,7 @@ import (
 	"testing"
 )
 
-// --- statsCustomStart (conditional collectors) ---
+// --- startCollectors (conditional collectors) ---
 
 func TestStatsCustomStart_MysqlCollectorEnabled(t *testing.T) {
 	t.Parallel()
@@ -31,11 +31,11 @@ func TestStatsCustomStart_MysqlCollectorEnabled(t *testing.T) {
 	// even when localconfig is unavailable.
 	err := ctl.startCollectors(context.Background(), ctl.registry[svcStats])
 	if err == nil {
-		t.Log("statsCustomStart succeeded unexpectedly (localconfig available)")
+		t.Log("startCollectors succeeded unexpectedly (localconfig available)")
 	}
 }
 
-// --- statsCustomStart (ctl.loadConfig override) ---
+// --- startCollectors (ctl.loadConfig override) ---
 
 func TestStatsCustomStart_LoadConfigFails(t *testing.T) {
 	t.Parallel()
@@ -117,7 +117,7 @@ func TestStatsCustomStart_SomeCollectorsPresent(t *testing.T) {
 
 	err := ctl.startCollectors(context.Background(), ctl.registry[svcStats])
 	if err != nil {
-		t.Errorf("statsCustomStart returned error: %v", err)
+		t.Errorf("startCollectors returned error: %v", err)
 	}
 }
 
@@ -158,6 +158,6 @@ func TestStatsCustomStart_ConditionalMysqlCollectorEnabled(t *testing.T) {
 
 	err := ctl.startCollectors(context.Background(), ctl.registry[svcStats])
 	if err != nil {
-		t.Errorf("statsCustomStart returned error: %v", err)
+		t.Errorf("startCollectors returned error: %v", err)
 	}
 }

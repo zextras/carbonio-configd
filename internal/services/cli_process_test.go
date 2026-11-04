@@ -1154,6 +1154,6 @@ func TestMtaIsRunning_NotRunning(t *testing.T) {
 	f.Exec.OnPath(sudoBin, systest.Fail(1, ""))
 
 	if ctl.commandRunning(context.Background(), ctl.registry[serviceMTA]) {
-		t.Error("expected mtaIsRunning=false with failing sudo")
+		t.Error("expected commandRunning=false with failing sudo")
 	}
 }

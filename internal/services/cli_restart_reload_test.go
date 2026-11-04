@@ -200,7 +200,7 @@ func TestServiceReload_Legacy_MTA_RestartsEnabledDeps(t *testing.T) {
 // that meant a full postfix restart (dropping in-flight SMTP) whenever the
 // host wasn't orchestrated by Carbonio's systemd targets. In legacy mode,
 // MTA reload must run "postfix reload" directly and never touch systemctl
-// or fall back to mtaCustomStop/mtaCustomStart.
+// or fall back to stopCommands/startCommands.
 func TestServiceReload_Legacy_MTA_NativeReload(t *testing.T) {
 	t.Parallel()
 

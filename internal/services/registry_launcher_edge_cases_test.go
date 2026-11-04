@@ -139,10 +139,10 @@ func TestMilterEnabled_FileNotFound(t *testing.T) {
 }
 
 // ============================================================
-// stats_launcher.go — statsCustomStop
+// collectors.go — stopCollectors
 // ============================================================
 
-// TestStatsCustomStop_NonExistentDir verifies statsCustomStop succeeds when the
+// TestStatsCustomStop_NonExistentDir verifies stopCollectors succeeds when the
 // stats PID directory does not exist.
 func TestStatsCustomStop_NonExistentDir(t *testing.T) {
 	t.Parallel()
@@ -156,11 +156,11 @@ func TestStatsCustomStop_NonExistentDir(t *testing.T) {
 
 	err := ctl.stopCollectors(context.Background(), ctl.registry[svcStats])
 	if err != nil {
-		t.Errorf("statsCustomStop with non-existent dir returned error: %v", err)
+		t.Errorf("stopCollectors with non-existent dir returned error: %v", err)
 	}
 }
 
-// TestStatsCustomStop_EmptyDir verifies statsCustomStop with an existing but empty dir.
+// TestStatsCustomStop_EmptyDir verifies stopCollectors with an existing but empty dir.
 func TestStatsCustomStop_EmptyDir(t *testing.T) {
 	t.Parallel()
 
@@ -175,7 +175,7 @@ func TestStatsCustomStop_EmptyDir(t *testing.T) {
 
 	err := ctl.stopCollectors(context.Background(), ctl.registry[svcStats])
 	if err != nil {
-		t.Errorf("statsCustomStop with empty dir returned error: %v", err)
+		t.Errorf("stopCollectors with empty dir returned error: %v", err)
 	}
 }
 
@@ -201,11 +201,11 @@ func TestStatsCustomStop_SkipsNonPidFiles(t *testing.T) {
 
 	err := ctl.stopCollectors(context.Background(), ctl.registry[svcStats])
 	if err != nil {
-		t.Errorf("statsCustomStop returned unexpected error: %v", err)
+		t.Errorf("stopCollectors returned unexpected error: %v", err)
 	}
 }
 
-// TestStatsCustomStop_ReadDirError verifies statsCustomStop returns error when
+// TestStatsCustomStop_ReadDirError verifies stopCollectors returns error when
 // ctl.p.statsPidDir exists but is not a directory.
 func TestStatsCustomStop_ReadDirError(t *testing.T) {
 	t.Parallel()
@@ -230,7 +230,7 @@ func TestStatsCustomStop_ReadDirError(t *testing.T) {
 }
 
 // ============================================================
-// stats_launcher.go — killStatsPidFile
+// collectors.go — killStatsPidFile
 // ============================================================
 
 // TestKillStatsPidFile_ValidPidSelfNoError verifies killStatsPidFile handles a valid but
@@ -253,10 +253,10 @@ func TestKillStatsPidFile_ValidPidSelfNoError(t *testing.T) {
 }
 
 // ============================================================
-// stats_launcher.go — statsCustomStart
+// collectors.go — startCollectors
 // ============================================================
 
-// TestStatsCustomStart_NoCollectors verifies statsCustomStart returns an error
+// TestStatsCustomStart_NoCollectors verifies startCollectors returns an error
 // when no collector binaries exist.
 func TestStatsCustomStart_NoCollectors(t *testing.T) {
 	t.Parallel()
@@ -278,7 +278,7 @@ func TestStatsCustomStart_NoCollectors(t *testing.T) {
 	}
 }
 
-// TestStatsCustomStart_WithFakeCollector verifies statsCustomStart starts at least
+// TestStatsCustomStart_WithFakeCollector verifies startCollectors starts at least
 // one collector when a matching binary is present in ctl.p.libexec.
 func TestStatsCustomStart_WithFakeCollector(t *testing.T) {
 	t.Parallel()

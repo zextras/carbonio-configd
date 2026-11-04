@@ -445,7 +445,7 @@ func TestSudoRun_WithArgs(t *testing.T) {
 	}
 }
 
-// --- mtaCustomStart error path ---
+// --- startCommands error path ---
 
 func TestMtaCustomStart_LoadConfigFails(t *testing.T) {
 	t.Parallel()
@@ -471,7 +471,7 @@ func TestMtaCustomStart_RunningSkip(t *testing.T) {
 
 	// `postfix status` succeeds (fake default): the start is skipped.
 	if err := ctl.startCommands(context.Background(), ctl.registry[serviceMTA]); err != nil {
-		t.Fatalf("mtaCustomStart (running skip): %v", err)
+		t.Fatalf("startCommands (running skip): %v", err)
 	}
 
 	want := []string{sudoBin + " -n " + ctl.p.postfixBin + " status"}
@@ -492,7 +492,7 @@ func TestMtaCustomStart_StartsWhenNotRunning(t *testing.T) {
 	f.FS.PutDir(ctl.p.conf, 0o755)
 
 	if err := ctl.startCommands(context.Background(), ctl.registry[serviceMTA]); err != nil {
-		t.Fatalf("mtaCustomStart: %v", err)
+		t.Fatalf("startCommands: %v", err)
 	}
 
 	want := []string{

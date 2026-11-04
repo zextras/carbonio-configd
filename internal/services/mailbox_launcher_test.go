@@ -14,7 +14,7 @@ import (
 	"testing"
 )
 
-// --- mailboxCustomStart (ctl.loadConfig override) ---
+// --- startJava (ctl.loadConfig override) ---
 
 func TestMailboxCustomStart_LoadConfigFails(t *testing.T) {
 	t.Parallel()
@@ -111,7 +111,7 @@ func TestMailboxCustomStart_JavaBinaryPresent(t *testing.T) {
 
 	err := ctl.startJava(context.Background(), ctl.registry[svcMailbox])
 	if err != nil {
-		t.Errorf("mailboxCustomStart returned error: %v", err)
+		t.Errorf("startJava returned error: %v", err)
 	}
 }
 
@@ -276,7 +276,7 @@ func TestMailboxCustomStart_DirCreation(t *testing.T) {
 
 	err := ctl.startJava(context.Background(), ctl.registry[svcMailbox])
 	if err != nil {
-		t.Logf("mailboxCustomStart: %v (may fail if args issue)", err)
+		t.Logf("startJava: %v (may fail if args issue)", err)
 	}
 
 	workDir := filepath.Join(tmp, "mailboxd", "work", "service", "jsp")
@@ -341,7 +341,7 @@ func TestMailboxCustomStart_GCLogCreation(t *testing.T) {
 
 	err := ctl.startJava(context.Background(), ctl.registry[svcMailbox])
 	if err != nil {
-		t.Logf("mailboxCustomStart: %v", err)
+		t.Logf("startJava: %v", err)
 	}
 
 	gcLog := filepath.Join(logDir, "gc.log")
@@ -350,7 +350,7 @@ func TestMailboxCustomStart_GCLogCreation(t *testing.T) {
 	}
 }
 
-// --- mailboxCustomStop ---
+// --- stopWithoutSystemd ---
 
 func TestMailboxCustomStop_NoProcessName(t *testing.T) {
 	t.Parallel()
@@ -382,7 +382,7 @@ func TestMailboxCustomStop_WithProcessName(t *testing.T) {
 	}
 	err := ctl.stopWithoutSystemd(context.Background(), def.Name, def)
 	if err != nil {
-		t.Logf("stop with ProcessName: %v (stopAppserverDB error is expected)", err)
+		t.Logf("stop with ProcessName: %v (stopMysqld error is expected)", err)
 	}
 }
 

@@ -13,7 +13,7 @@ import (
 	"testing"
 )
 
-// --- milterCustomStart (ctl.loadConfig override) ---
+// --- startJava (ctl.loadConfig override) ---
 
 func TestMilterCustomStart_LoadConfigFails(t *testing.T) {
 	t.Parallel()
@@ -108,6 +108,6 @@ func TestMilterCustomStart_JavaBinaryPresent(t *testing.T) {
 
 	err := ctl.startJava(context.Background(), ctl.registry[svcMilter])
 	if err != nil {
-		t.Errorf("milterCustomStart returned error: %v", err)
+		t.Errorf("startJava returned error: %v", err)
 	}
 }

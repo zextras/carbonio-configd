@@ -71,7 +71,7 @@ func TestBuildLDAPBindURL_TableDriven(t *testing.T) {
 	}
 }
 
-// --- ldapCustomStart (ctl.loadConfig override) ---
+// --- startDirect (ctl.loadConfig override) ---
 
 func TestLdapCustomStart_LoadConfigFails(t *testing.T) {
 	t.Parallel()
@@ -140,7 +140,7 @@ func TestLdapCustomStart_WithFakeSlapd(t *testing.T) {
 	ctl.p.log = logDir
 
 	// slapd has no sd_notify; readiness is determined by the LDAP probe.
-	// Stub the probe to succeed so ldapCustomStart returns once the fake
+	// Stub the probe to succeed so startDirect returns once the fake
 	// slapd is launched.
 	withLdapProbe(t, ctl, func(_ context.Context, _ []string) error { return nil })
 
@@ -154,10 +154,10 @@ func TestLdapCustomStart_WithFakeSlapd(t *testing.T) {
 	select {
 	case err := <-done:
 		if err != nil {
-			t.Errorf("ldapCustomStart returned error: %v", err)
+			t.Errorf("startDirect returned error: %v", err)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for ldapCustomStart")
+		t.Fatal("timed out waiting for startDirect")
 	}
 }
 

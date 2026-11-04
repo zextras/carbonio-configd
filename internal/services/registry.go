@@ -89,12 +89,10 @@ type ServiceDef struct {
 	// event-driven readiness detection instead of polling.
 	UseSDNotify bool
 	// CustomStart, when set, takes over the non-systemd start path entirely.
-	// Used for services whose launch is too dynamic for a static BinaryPath —
-	// e.g., mailbox (Java command built from localconfig + heap sizing) and
-	// stats (orchestrator for ~11 zmstat-* collectors with a pidfile bundle).
+	// The escape hatch for a launch no spec below expresses (amavis starts a
+	// companion daemon and clears stale temporary directories). Prefer a spec.
 	CustomStart func(ctx context.Context, def *ServiceDef) error
-	// CustomStop mirrors CustomStart for the stop side. Used by stats to
-	// kill every collector recorded in its aggregate pidfile.
+	// CustomStop mirrors CustomStart for the stop side.
 	CustomStop func(ctx context.Context, def *ServiceDef) error
 	// UseSystemdForStatus, when true, forces status detection via systemctl
 	// is-active even in non-systemd (legacy) mode. Use for services like

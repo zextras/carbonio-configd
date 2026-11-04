@@ -415,7 +415,7 @@ func TestMilterEnabled(t *testing.T) {
 }
 
 // ============================================================
-// cli_process.go — killProcess (OtherPidSignaled) + killStatsPidFile + statsCustomStop
+// cli_process.go — killProcess (OtherPidSignaled) + killStatsPidFile + stopCollectors
 // ============================================================
 
 // TestKillProcess_OtherPidSignaled verifies killProcess signals a non-self, non-parent PID.
@@ -475,7 +475,7 @@ func TestKillStatsPidFile_ValidPidKilled(t *testing.T) {
 	}
 }
 
-// TestStatsCustomStop_WithValidPidFile verifies statsCustomStop kills via .pid files.
+// TestStatsCustomStop_WithValidPidFile verifies stopCollectors kills via .pid files.
 func TestStatsCustomStop_WithValidPidFile(t *testing.T) {
 	t.Parallel()
 
@@ -505,7 +505,7 @@ func TestStatsCustomStop_WithValidPidFile(t *testing.T) {
 
 	err := ctl.stopCollectors(context.Background(), ctl.registry[svcStats])
 	if err != nil {
-		t.Errorf("statsCustomStop returned error: %v", err)
+		t.Errorf("stopCollectors returned error: %v", err)
 	}
 }
 

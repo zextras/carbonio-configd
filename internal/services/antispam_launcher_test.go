@@ -265,7 +265,7 @@ func TestAntispamCustomStart_EnabledButLocal(t *testing.T) {
 	t.Logf("antispamCustomStart returned: %v", err)
 }
 
-// --- startAntispamDB ---
+// --- startMysqld ---
 
 func TestStartAntispamDB_EmptyMycnf(t *testing.T) {
 	t.Parallel()
@@ -319,5 +319,5 @@ func TestStartAntispamDB_WithConfig(t *testing.T) {
 	}
 
 	err := ctl.startMysqld(context.Background(), ctl.registry[svcAntispamDB])
-	t.Logf("startAntispamDB: %v", err)
+	t.Logf("startMysqld: %v", err)
 }

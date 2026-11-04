@@ -210,7 +210,7 @@ func TestSpawnMysqldSafe_NoErrLog(t *testing.T) {
 	}
 }
 
-// --- startAppserverDB / stopAppserverDB ---
+// --- startMysqld / stopMysqld ---
 
 func TestStopAppserverDB_MissingPidfile(t *testing.T) {
 	t.Parallel()
@@ -268,7 +268,7 @@ func TestStartAppserverDB_LoadConfigOk(t *testing.T) {
 
 	err := ctl.startMysqld(context.Background(), ctl.registry[svcAppserverDB])
 	if err != nil {
-		t.Logf("startAppserverDB: %v (may fail if mysqld_safe not available)", err)
+		t.Logf("startMysqld: %v (may fail if mysqld_safe not available)", err)
 	}
 }
 
@@ -309,10 +309,10 @@ func TestStartAppserverDB_WithConfig(t *testing.T) {
 	}
 
 	err := ctl.startMysqld(context.Background(), ctl.registry[svcAppserverDB])
-	t.Logf("startAppserverDB: %v", err)
+	t.Logf("startMysqld: %v", err)
 }
 
-// --- stopAntispamDB ---
+// --- stopMysqldService ---
 
 func TestStopAntispamDB_MissingPidfile(t *testing.T) {
 	t.Parallel()

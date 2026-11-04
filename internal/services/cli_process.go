@@ -85,7 +85,7 @@ func (c *Controller) startWithoutSystemd(ctx context.Context, name string, def *
 // stopService stops a service. Mirrors startService's bifurcation on
 // c.IsSystemdMode(). Legacy mode calls CustomStop or pkill by ProcessName
 // and never invokes systemctl — critical for services like stats whose
-// workers run outside any systemd cgroup (e.g. spawned by statsCustomStart
+// workers run outside any systemd cgroup (e.g. spawned by startCollectors
 // directly into /init.scope in container installs).
 func (c *Controller) stopService(ctx context.Context, name string, def *ServiceDef) error {
 	if def.ExternallyManaged {
