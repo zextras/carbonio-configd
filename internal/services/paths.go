@@ -29,7 +29,7 @@ type paths struct {
 	// statsPidDir holds the per-collector pidfiles of the stats service.
 	statsPidDir string
 	// statsGlob is the identity of every zmstat-* collector: the script path
-	// under libexec statsCustomStart launches (perl scripts, so it is an argv
+	// under libexec startCollectors launches (perl scripts, so it is an argv
 	// token of `perl -w <script>`). A glob over the whole path, so
 	// `tail -f .../log/zmstat-proc.out` is not mistaken for a collector.
 	statsGlob string

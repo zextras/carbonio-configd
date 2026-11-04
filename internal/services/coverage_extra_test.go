@@ -291,7 +291,7 @@ func TestStatsCustomStart_LoadConfigFails_Covg(t *testing.T) {
 		return nil, fmt.Errorf("no lc")
 	}
 
-	if err := ctl.statsCustomStart(context.Background(), &ServiceDef{Name: "stats"}); err == nil {
+	if err := ctl.startCollectors(context.Background(), ctl.registry[svcStats]); err == nil {
 		t.Error("expected error when ctl.loadConfig fails")
 	}
 }
@@ -311,7 +311,7 @@ func TestStatsCustomStart_NoBinaries(t *testing.T) {
 		return map[string]string{}, nil
 	}
 
-	err := ctl.statsCustomStart(context.Background(), &ServiceDef{Name: "stats"})
+	err := ctl.startCollectors(context.Background(), ctl.registry[svcStats])
 	if err == nil || !strings.Contains(err.Error(), "no stats collectors started") {
 		t.Errorf("expected 'no stats collectors started', got %v", err)
 	}
@@ -324,7 +324,7 @@ func TestStatsCustomStop_MissingDir(t *testing.T) {
 
 	ctl.p.statsPidDir = filepath.Join(t.TempDir(), "does-not-exist")
 
-	if err := ctl.statsCustomStop(context.Background(), &ServiceDef{Name: "stats"}); err != nil {
+	if err := ctl.stopCollectors(context.Background(), ctl.registry[svcStats]); err != nil {
 		t.Errorf("expected nil for missing dir, got %v", err)
 	}
 }
@@ -337,7 +337,7 @@ func TestStatsCustomStop_EmptyDir_Covg(t *testing.T) {
 	tmp := t.TempDir()
 	ctl.p.statsPidDir = tmp
 
-	if err := ctl.statsCustomStop(context.Background(), &ServiceDef{Name: "stats"}); err != nil {
+	if err := ctl.stopCollectors(context.Background(), ctl.registry[svcStats]); err != nil {
 		t.Errorf("expected nil for empty dir, got %v", err)
 	}
 }
@@ -355,7 +355,7 @@ func TestStatsCustomStop_WithSafePidFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := ctl.statsCustomStop(context.Background(), &ServiceDef{Name: "stats"}); err != nil {
+	if err := ctl.stopCollectors(context.Background(), ctl.registry[svcStats]); err != nil {
 		t.Errorf("expected nil, got %v", err)
 	}
 }
@@ -369,7 +369,9 @@ func TestMailboxCustomStart_LoadConfigFails_Covg(t *testing.T) {
 		return nil, fmt.Errorf("lc boom")
 	}
 
-	err := ctl.mailboxCustomStart(context.Background(), &ServiceDef{Name: "mailbox"})
+	ctl.registry = ctl.defaultRegistry()
+
+	err := ctl.startJava(context.Background(), ctl.registry[svcMailbox])
 	if err == nil || !strings.Contains(err.Error(), "failed to load localconfig") {
 		t.Errorf("expected load error, got %v", err)
 	}
@@ -388,7 +390,9 @@ func TestMailboxCustomStart_JavaMissing(t *testing.T) {
 		}, nil
 	}
 
-	err := ctl.mailboxCustomStart(context.Background(), &ServiceDef{Name: "mailbox"})
+	ctl.registry = ctl.defaultRegistry()
+
+	err := ctl.startJava(context.Background(), ctl.registry[svcMailbox])
 	if err == nil || !strings.Contains(err.Error(), "java binary not found") {
 		t.Errorf("expected java-not-found error, got %v", err)
 	}

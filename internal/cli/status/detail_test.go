@@ -199,6 +199,35 @@ func TestPrintServiceStatus_NotRunning(t *testing.T) {
 	}
 }
 
+// TestPrintServiceStatus_CompositeNamesTheMemberThatIsDown: the store is the
+// database plus the mailbox JVM; with only the database down the status names
+// the database, not "mailbox is not running" (legacy storectl prints the
+// failing member's script).
+func TestPrintServiceStatus_CompositeNamesTheMemberThatIsDown(t *testing.T) {
+	t.Parallel()
+
+	const jvm, db = "/opt/zextras/jvm", "/opt/zextras/mariadbd"
+
+	fx := newFixture(false, map[string]*services.ServiceDef{
+		"store":        {Name: "store", DisplayName: "mailbox", Members: []string{"appserver-db", "mailbox"}},
+		"appserver-db": {Name: "appserver-db", DisplayName: "mysql", ProcessName: db},
+		"mailbox":      {Name: "mailbox", DisplayName: "mailbox", ProcessName: jvm},
+	})
+	fx.f.Proc.Add(sys.ProcEntry{PID: 4001, Argv: []string{jvm}, Exe: jvm}) // the JVM runs, the database does not
+	fx.f.FS.PutDir("/proc/4001", 0o555)
+
+	c, out := newConsole()
+
+	err := fx.r.PrintServiceStatus(context.Background(), c, "store")
+	if !errors.Is(err, ErrNotRunning) {
+		t.Fatalf("err = %v, want ErrNotRunning", err)
+	}
+
+	if got, want := out.String(), "mysql is not running.\n"; got != want {
+		t.Errorf("output = %q, want %q", got, want)
+	}
+}
+
 func TestPrintServiceStatus_ProbeError(t *testing.T) {
 	t.Parallel()
 

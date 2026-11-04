@@ -180,6 +180,7 @@ func TestServiceStatus_StalePidfileRecycledPid(t *testing.T) {
 	ctl.pinMode(false)
 
 	_, add := fakeProcFS(t, ctl)
+	pinSelfPids(ctl)
 	add(4242, "/usr/bin/vim\x00/opt/zextras/log/clamd.log\x00", "vim", false)
 	add(4243, "tail\x00-f\x00/opt/zextras/log/clamd.log\x00", "tail", false)
 
@@ -237,6 +238,7 @@ func TestServiceStatus_StalePidfileFallsThroughToScan(t *testing.T) {
 	ctl.pinMode(false)
 
 	_, add := fakeProcFS(t, ctl)
+	pinSelfPids(ctl)
 	add(4242, "/usr/bin/vim\x00", "vim", false)
 	add(4300, "/opt/zextras/common/sbin/clamd\x00-c\x00/x\x00", "clamd", false)
 
@@ -300,6 +302,7 @@ func TestServiceStatus_JavaMailboxd(t *testing.T) {
 	ctl.pinMode(false)
 
 	_, add := fakeProcFS(t, ctl)
+	pinSelfPids(ctl)
 	add(4600, "tail\x00-f\x00/opt/zextras/log/mailbox.log\x00", "tail", false)
 
 	running, err := ctl.ServiceStatus(context.Background(), svcMailbox)
@@ -354,6 +357,7 @@ func TestServiceStatus_SystemdModeUnaffectedByProcessIdentity(t *testing.T) {
 	f.Exec.OnPath(systemctlBin, systest.Fail(1, "")) // every `systemctl is-active` exits 1: inactive
 
 	_, add := fakeProcFS(t, ctl)
+	pinSelfPids(ctl)
 	add(4800, "/opt/zextras/common/sbin/clamd\x00", "clamd", false)
 
 	running, err := ctl.ServiceStatus(context.Background(), svcAntivirus)
@@ -450,6 +454,7 @@ func TestRunningPID_RealContainerArgvForms(t *testing.T) {
 	ctl := newRealController(t)
 
 	_, add := fakeProcFS(t, ctl)
+	pinSelfPids(ctl)
 
 	argv := func(args ...string) string { return strings.Join(args, "\x00") + "\x00" }
 
@@ -531,6 +536,7 @@ func TestRunningPID_ServiceDiscoverIgnoresConsulSidecars(t *testing.T) {
 	ctl := newRealController(t)
 
 	_, add := fakeProcFS(t, ctl)
+	pinSelfPids(ctl)
 	add(14319, "", "consul", false)
 	add(14320, "/usr/bin/consul\x00connect\x00envoy\x00-sidecar-for\x00carbonio-mta\x00"+
 		"-config-dir\x00/etc/zextras/service-discover/\x00", "consul", false)
@@ -542,4 +548,26 @@ func TestRunningPID_ServiceDiscoverIgnoresConsulSidecars(t *testing.T) {
 
 	add(13799, "/usr/bin/consul\x00agent\x00-config-dir=/etc/zextras/service-discover\x00-server\x00", "consul", false)
 	assert.Equal(t, 13799, ctl.RunningPID(context.Background(), def), "-flag=value form, no trailing slash")
+}
+
+// A made-up PID in the fake /proc table that equals the real PID of the test
+// process (or its parent) must still be found: the self/parent exclusion
+// applies to the fake process identity, not to the host's. This used to make
+// TestRunningPID_RealContainerArgvForms flaky whenever `go test` ran with a
+// PID that coincided with one of the captured ones.
+func TestRunningPID_FakeProcTableIgnoresRealSelfPid(t *testing.T) {
+	t.Parallel()
+
+	for _, pid := range []int{os.Getpid(), os.Getppid()} {
+		ctl := newRealController(t)
+
+		_, add := fakeProcFS(t, ctl)
+		pinSelfPids(ctl)
+		add(pid, "/opt/zextras/common/sbin/saslauthd\x00-r\x00-a\x00zimbra\x00", "saslauthd", false)
+
+		def := *ctl.LookupService(svcSaslauthd)
+		def.PidFile = ""
+
+		assert.Equal(t, pid, ctl.RunningPID(context.Background(), &def))
+	}
 }

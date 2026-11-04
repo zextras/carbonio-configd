@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -219,21 +220,32 @@ func TestConfigdStatus_SendsSTATUSAndReturnsReply(t *testing.T) {
 	assert.Equal(t, "STATUS", <-reqs)
 }
 
+// refusedPort returns a loopback TCP port that refuses connections and cannot
+// be taken by a concurrent test: a socket bound but never listening answers
+// SYNs with RST while holding the port. (Closing a listener instead released
+// the port, which a parallel test's listener could then be handed before the
+// dial happened: the flake of this test.)
+func refusedPort(t *testing.T) int {
+	t.Helper()
+
+	fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM, 0)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = syscall.Close(fd) })
+
+	require.NoError(t, syscall.Bind(fd, &syscall.SockaddrInet4{Addr: [4]byte{127, 0, 0, 1}}))
+
+	sa, err := syscall.Getsockname(fd)
+	require.NoError(t, err)
+
+	return sa.(*syscall.SockaddrInet4).Port
+}
+
 func TestConfigdStatus_Unreachable(t *testing.T) {
 	t.Parallel()
 
-	port, _ := configdServer(t, "x")
-	l, err := net.Listen("tcp4", "127.0.0.1:0")
-	require.NoError(t, err)
+	ctl, _ := configdController(t, refusedPort(t))
 
-	closedPort := l.Addr().(*net.TCPAddr).Port
-	require.NoError(t, l.Close())
-
-	_ = port
-
-	ctl, _ := configdController(t, closedPort)
-
-	_, err = ctl.configdStatus(context.Background())
+	_, err := ctl.configdStatus(context.Background())
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not reachable")
@@ -330,7 +342,7 @@ func TestConfigdCustomStart_StartsDaemonThenWaitsReady(t *testing.T) {
 		return nil
 	}
 
-	require.NoError(t, ctl.configdCustomStart(context.Background(), def))
+	require.NoError(t, ctl.startDirect(context.Background(), def.Name, def))
 	assert.Equal(t, 1, ready)
 }
 
@@ -344,7 +356,7 @@ func TestConfigdCustomStart_ReadyFailureIsReturned(t *testing.T) {
 
 	ctl.configdReady = func(context.Context) error { return assert.AnError }
 
-	require.ErrorIs(t, ctl.configdCustomStart(context.Background(), def), assert.AnError)
+	require.ErrorIs(t, ctl.startDirect(context.Background(), def.Name, def), assert.AnError)
 }
 
 func TestConfigdCustomStart_StartFailureSkipsReadiness(t *testing.T) {
@@ -359,5 +371,5 @@ func TestConfigdCustomStart_StartFailureSkipsReadiness(t *testing.T) {
 		return nil
 	}
 
-	require.Error(t, ctl.configdCustomStart(context.Background(), def))
+	require.Error(t, ctl.startDirect(context.Background(), def.Name, def))
 }

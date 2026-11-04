@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/redact"
 )
 
 const (
@@ -425,7 +426,7 @@ func (h *ConfigdRequestHandler) HandleRequest(ctx context.Context, command strin
 	ctx = logger.ContextWithComponentOnce(ctx, "network")
 	logger.DebugContext(ctx, "ConfigdRequestHandler received command",
 		"command", command,
-		"args", args)
+		"args", redact.Args(args))
 
 	switch command {
 	case "STATUS":

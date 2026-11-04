@@ -101,6 +101,11 @@ func (c *Controller) awaitSDNotifyStopping(ctx context.Context, service string) 
 		_ = c.env.FS.Remove(socketPath)
 	}()
 
+	// Cancellation interrupts a blocked read at once, so the caller can wait
+	// for the observer (and its removal of the socket path) without a delay.
+	stopRead := context.AfterFunc(ctx, func() { _ = conn.SetReadDeadline(time.Now()) })
+	defer stopRead()
+
 	buf := make([]byte, 512)
 
 	for {
@@ -111,6 +116,12 @@ func (c *Controller) awaitSDNotifyStopping(ctx context.Context, service string) 
 		}
 
 		_ = conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+
+		// A cancellation that slipped in before the deadline was re-armed
+		// must not leave the read waiting.
+		if ctx.Err() != nil {
+			return
+		}
 
 		n, _, err := conn.ReadFrom(buf)
 		if err != nil {

@@ -214,3 +214,23 @@ func BenchmarkServiceProbesAgainstProc(b *testing.B) {
 		}
 	})
 }
+
+// pinSelfPids makes ctl believe it runs as PID 1 under parent 2. The scans skip
+// the controller's own PID and its parent's, so a fake /proc table with
+// made-up PIDs must not let one of them collide with the real PID of `go test`
+// (or its parent): that made the lookups flaky. Tests that put os.Getpid() in
+// the table on purpose must not call it.
+func pinSelfPids(ctl *Controller) {
+	ctl.env.Proc = fixedPidProc{Proc: ctl.env.Proc, pid: 1, ppid: 2}
+}
+
+// fixedPidProc reports fixed own and parent PIDs, outside the range the fake
+// /proc tables use, and delegates everything else.
+type fixedPidProc struct {
+	sys.Proc
+
+	pid, ppid int
+}
+
+func (p fixedPidProc) Pid() int  { return p.pid }
+func (p fixedPidProc) Ppid() int { return p.ppid }

@@ -77,7 +77,7 @@ func TestStopService_NonSystemdCustomStop(t *testing.T) {
 
 // TestStopService_LegacyMode_BypassesSystemctl asserts that in legacy mode
 // stopService goes straight to stopWithoutSystemd (CustomStop / pkill) without
-// invoking systemctl. This guards the container fix: statsCustomStop must
+// invoking systemctl. This guards the container fix: stopCollectors must
 // actually run to terminate workers that live outside any systemd cgroup.
 func TestStopService_LegacyMode_BypassesSystemctl(t *testing.T) {
 	t.Parallel()

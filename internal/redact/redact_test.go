@@ -29,6 +29,14 @@ func TestIsSecretKey(t *testing.T) {
 		{"ssl_private_key", true},
 		{"ssl_key", true},
 		{"ldap_root_pw", true},
+		{"ldap_bind_pwd", true},
+		{"ldap_bindpw", true},
+		{"zimbraSomeCreds", true},
+		{"pin", true},
+		{"smartcard_pin", true},
+		{"zimbraMailPinning", false},
+		{"pwd", false},
+		{"mapping", false},
 		{"zimbraImapBindPort", false},
 		{"ldap_master_url", false},
 		{"zimbraMailKeyPort", false},
@@ -103,4 +111,39 @@ func TestAttrNames(t *testing.T) {
 	}
 
 	assert.False(t, IsKeyAttr("value"))
+}
+
+func TestText_URLUserinfo(t *testing.T) {
+	t.Parallel()
+
+	in := "connecting to ldap://zimbra:s3cret@ldap.example.com:389/base and https://host/path"
+	got, changed := Text(in)
+
+	assert.True(t, changed)
+	assert.NotContains(t, got, "s3cret")
+	assert.Contains(t, got, "ldap://zimbra:"+Placeholder+"@ldap.example.com:389/base")
+	assert.Contains(t, got, "https://host/path")
+
+	plain, changed := Text("mail to a@b.c via http://host:8080/x")
+	assert.False(t, changed)
+	assert.Equal(t, "mail to a@b.c via http://host:8080/x", plain)
+}
+
+func TestArgs(t *testing.T) {
+	t.Parallel()
+
+	in := []string{
+		"--user", "zimbra", "--password", "hunter2", "--ldap_root_password=hunter3",
+		"ldap_amavis_password=hunter4", "-u", "ldaps://u:hunter5@h:636", "--port", "389", "plain",
+	}
+	snapshot := append([]string(nil), in...)
+
+	got := Args(in)
+
+	assert.Equal(t, []string{
+		"--user", "zimbra", "--password", Placeholder, "--ldap_root_password=" + Placeholder,
+		"ldap_amavis_password=" + Placeholder, "-u", "ldaps://u:" + Placeholder + "@h:636", "--port", "389", "plain",
+	}, got)
+	assert.Equal(t, snapshot, in, "Args must not modify its input")
+	assert.Empty(t, Args(nil))
 }

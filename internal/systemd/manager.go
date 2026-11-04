@@ -10,6 +10,8 @@ package systemd
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
@@ -55,12 +57,24 @@ func (m *Manager) IsBooted() bool {
 	return m.booted
 }
 
-// IsEnabled checks if a systemd unit is enabled.
-func (m *Manager) IsEnabled(ctx context.Context, unit string) bool {
+// IsEnabled checks if a systemd unit is enabled. "systemctl is-enabled"
+// exiting non-zero means the unit is not enabled (disabled, masked or
+// unknown): that is an answer, (false, nil). Any other failure (systemctl
+// missing, cancelled or timed-out context) means the question could not be
+// answered and is returned as an error instead of a silent "not enabled".
+func (m *Manager) IsEnabled(ctx context.Context, unit string) (bool, error) {
 	ctx = logger.ContextWithComponent(ctx, "systemd")
-	_, err := m.env.Exec.Run(ctx, &sys.Cmd{Path: "systemctl", Args: []string{"is-enabled", unit}})
 
-	return err == nil
+	_, err := m.env.Exec.Run(ctx, &sys.Cmd{Path: "systemctl", Args: []string{"is-enabled", unit}})
+	if err == nil {
+		return true, nil
+	}
+
+	if _, notEnabled := errors.AsType[*sys.ExitError](err); notEnabled {
+		return false, nil
+	}
+
+	return false, fmt.Errorf("systemctl is-enabled %s: %w", unit, err)
 }
 
 // IsSystemdEnabled checks if Carbonio is running with systemd.
@@ -72,7 +86,15 @@ func (m *Manager) IsEnabled(ctx context.Context, unit string) bool {
 func (m *Manager) IsSystemdEnabled(ctx context.Context) bool {
 	ctx = logger.ContextWithComponent(ctx, "systemd")
 	for _, target := range carbonioTargets {
-		if m.IsEnabled(ctx, target) {
+		enabled, err := m.IsEnabled(ctx, target)
+		if err != nil {
+			logger.WarnContext(ctx, "Cannot tell whether a Carbonio systemd target is enabled",
+				"target", target, "error", err)
+
+			continue
+		}
+
+		if enabled {
 			logger.DebugContext(ctx, "Detected enabled systemd target",
 				"target", target)
 

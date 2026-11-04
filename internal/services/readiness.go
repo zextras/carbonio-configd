@@ -162,12 +162,27 @@ func (c *Controller) waitForConfigd(ctx context.Context) error {
 		time.Duration(configdReadyAttempts)*configdReadyInterval, last)
 }
 
-// configdCustomStart spawns the detached configd daemon and waits until it
-// answers STATUS.
-func (c *Controller) configdCustomStart(ctx context.Context, def *ServiceDef) error {
-	if err := c.startDirect(ctx, def.Name, def); err != nil {
-		return err
-	}
+// awaitReady runs the readiness probe def.Ready names, after the service has
+// been launched. exited delivers the launched child's exit for probes that
+// must fail fast when it dies (ReadyLDAP); other probes ignore it.
+func (c *Controller) awaitReady(ctx context.Context, def *ServiceDef, exited <-chan error) error {
+	switch def.Ready {
+	case ReadyNone:
+		return nil
+	case ReadyConfigd:
+		return c.configdReady(ctx)
+	case ReadyLDAP, ReadyMailboxPort:
+		lc, err := c.loadConfig()
+		if err != nil {
+			return fmt.Errorf("failed to load localconfig: %w", err)
+		}
 
-	return c.configdReady(ctx)
+		if def.Ready == ReadyLDAP {
+			return c.awaitLDAPReady(ctx, lc, exited)
+		}
+
+		return c.mailboxReady(ctx, lc)
+	default:
+		return fmt.Errorf("%s: unknown readiness probe %q", def.Name, def.Ready)
+	}
 }

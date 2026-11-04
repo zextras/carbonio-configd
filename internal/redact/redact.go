@@ -27,17 +27,23 @@ var secretKeyTokens = []string{
 	"private_key",
 	"apikey",
 	"api_key",
+	"_pwd",
+	"bindpw",
+	"creds",
 }
 
 // secretKeySuffixes are case-insensitive key suffixes that mark a secret
 // (e.g. ssl_key, ldap_root_pw). A bare "key" substring is deliberately not a
 // token: it would match harmless names such as "zimbraMailKeyPort".
-var secretKeySuffixes = []string{"_key", "_pass", "_pw"}
+var secretKeySuffixes = []string{"_key", "_pass", "_pw", "_pin"}
 
 // IsSecretKey reports whether the configuration key name denotes a secret whose
 // value must never be written to the logs.
 func IsSecretKey(key string) bool {
 	k := strings.ToLower(key)
+	if k == "pin" {
+		return true
+	}
 
 	for _, token := range secretKeyTokens {
 		if strings.Contains(k, token) {
@@ -75,17 +81,61 @@ const pemMarker = "PRIVATE KEY-----"
 var pemPrivateKey = regexp.MustCompile(
 	`-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----(?s:.*?)(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|\z)`)
 
-// Text returns s with every PEM private key block replaced by Placeholder and
-// reports whether anything was replaced. Text without a private key is
-// returned unchanged without allocating.
+// urlUserinfo matches the password part of the userinfo of a URL (the text
+// between the colon after the user name and the at sign before the host).
+var urlUserinfo = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://[^/\s:@]*:)[^/\s@]+(@)`)
+
+// Text returns s with every PEM private key block and every URL userinfo
+// password replaced by Placeholder and reports whether anything was replaced.
+// Text without either is returned unchanged without allocating.
 func Text(s string) (string, bool) {
-	if !strings.Contains(s, pemMarker) {
-		return s, false
+	out := s
+
+	if strings.Contains(out, pemMarker) {
+		out = pemPrivateKey.ReplaceAllLiteralString(out, Placeholder)
 	}
 
-	out := pemPrivateKey.ReplaceAllLiteralString(s, Placeholder)
+	if strings.Contains(out, "://") && strings.Contains(out, "@") {
+		out = urlUserinfo.ReplaceAllString(out, "${1}"+Placeholder+"${2}")
+	}
 
 	return out, out != s
+}
+
+// Args returns a copy of argv that is safe to log: the value of a secret flag
+// ("--password secret", "--password=secret", "key=secret" where the name is a
+// secret key, see IsSecretKey) and any URL userinfo password are replaced by
+// Placeholder. argv is never modified.
+func Args(argv []string) []string {
+	out := make([]string, len(argv))
+	maskNext := false
+
+	for i, arg := range argv {
+		if maskNext {
+			out[i] = Placeholder
+			maskNext = false
+
+			continue
+		}
+
+		out[i] = arg
+
+		if name, _, isAssign := strings.Cut(arg, "="); isAssign {
+			if IsSecretKey(strings.TrimLeft(name, "-")) {
+				out[i] = name + "=" + Placeholder
+
+				continue
+			}
+		} else if strings.HasPrefix(arg, "-") && IsSecretKey(strings.TrimLeft(arg, "-")) {
+			maskNext = true
+
+			continue
+		}
+
+		out[i], _ = Text(arg)
+	}
+
+	return out
 }
 
 // valueAttrNames are the log attribute names that carry the value of the

@@ -16,7 +16,7 @@ complete -F _zmcontrol_completions zmcontrol
 # zmlocalconfig — delegates to configd localconfig
 _zmlocalconfig_completions() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
-  local flags="-m -c -q -p -s -d -n -e -u -r -f -k -x --force"
+  local flags="-m -c -q -p -s -d -n -e -u -r -f -k -x -i -l --force --info --reload"
   local modes="plain shell export nokey xml"
   if [[ "$cur" == -* ]]; then
     COMPREPLY=($(compgen -W "$flags" -- "$cur"))

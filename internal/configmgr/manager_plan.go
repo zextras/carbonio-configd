@@ -6,7 +6,9 @@ package configmgr
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"maps"
 	"slices"
 	"strings"
@@ -45,12 +47,12 @@ func (cm *ConfigManager) Observe(
 		section := conf.Sections[name]
 
 		for key, lookupType := range section.RequiredVars {
-			cm.observeOne(ctx, obs, lookupType, strings.TrimPrefix(key, "!"))
+			cm.observeOne(ctx, base, obs, lookupType, strings.TrimPrefix(key, "!"))
 		}
 
 		for i := range section.Conditionals {
 			cond := &section.Conditionals[i]
-			cm.observeOne(ctx, obs, cond.Type, strings.TrimPrefix(cond.Key, "!"))
+			cm.observeOne(ctx, base, obs, cond.Type, strings.TrimPrefix(cond.Key, "!"))
 		}
 	}
 
@@ -58,7 +60,9 @@ func (cm *ConfigManager) Observe(
 }
 
 // observeOne records the value of one lookup unless it is already known.
-func (cm *ConfigManager) observeOne(ctx context.Context, obs map[snapshot.Lookup]string, lookupType, key string) {
+func (cm *ConfigManager) observeOne(
+	ctx context.Context, base *snapshot.Snapshot, obs map[snapshot.Lookup]string, lookupType, key string,
+) {
 	id := snapshot.Lookup{Type: lookupType, Key: key}
 	if _, seen := obs[id]; seen {
 		return
@@ -71,11 +75,30 @@ func (cm *ConfigManager) observeOne(ctx context.Context, obs map[snapshot.Lookup
 	}
 
 	value, err := cm.LookUpConfig(ctx, lookupType, key)
+	if err != nil && !lookupIsMissing(err) {
+		// A lookup that could not be performed is not a value change: keep
+		// the previous observation so a transient read error cannot trigger
+		// rewrites or restarts.
+		prev, _ := base.Observed(lookupType, key)
+		logger.WarnContext(ctx, "Lookup failed; keeping previous observed value",
+			"lookup_type", lookupType, "key", key, "error", err)
+
+		obs[id] = prev
+
+		return
+	}
+
 	if err != nil {
 		value = ""
 	}
 
 	obs[id] = value
+}
+
+// lookupIsMissing reports whether err only says the looked-up value is
+// undefined (legacy treats that as an empty value).
+func lookupIsMissing(err error) bool {
+	return errors.Is(err, errLookupNotFound) || errors.Is(err, fs.ErrNotExist)
 }
 
 // mapfilePath returns the path a MAPFILE key must have: the mapped file when a

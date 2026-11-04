@@ -389,3 +389,41 @@ func TestApply_ShutdownDuringRestartsIsNotAnError(t *testing.T) {
 
 	assert.NotContains(t, logs.String(), "level=ERROR")
 }
+
+func TestApply_LegacyRefusedRestartGivesUp(t *testing.T) {
+	t.Parallel()
+
+	for name, settings := range map[string]restart.Settings{
+		"immediate": {Enabled: true},
+		"debounced": {Enabled: true, Debounce: debounce},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			h := newHarness()
+			h.addErr["mta"] = errors.New("boom")
+
+			pl := &plan.Plan{Restarts: []plan.Restart{req("mta", enabledReason("mta"))}}
+
+			var carry []plan.Restart
+
+			for range 4 { // debounced: 1 to record, then 3 refused flushes
+				carry = h.policy.Apply(t.Context(), pl, settings)
+				pl = &plan.Plan{Restarts: carry}
+
+				h.clock.Advance(debounce)
+			}
+
+			// The manager recovers, but the request was dropped after 3 attempts.
+			delete(h.addErr, "mta")
+			h.clock.Advance(debounce)
+
+			carry = h.policy.Apply(t.Context(), pl, settings)
+			h.clock.Advance(debounce)
+			h.policy.Apply(t.Context(), &plan.Plan{}, settings)
+
+			assert.Empty(t, carry)
+			assert.Empty(t, h.queued, "a restart refused 3 times must be dropped, not retried forever")
+		})
+	}
+}

@@ -17,58 +17,46 @@ import (
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
-// startAppserverDB spawns mysqld_safe for the mailbox mariadb (the
-// appserver-db service; the store composite starts it before the JVM so
-// mailboxd finds port 7306 ready). Replaces legacy zmstorectl's call to
-// `/opt/zextras/bin/mysql.server start` with a direct exec so the daemon has
-// no runtime dependency on the legacy shell wrapper.
-func (c *Controller) startAppserverDB(ctx context.Context) error {
+// mysqlShutdownTimeoutKey is the localconfig key (seconds) bounding the wait
+// for a mariadbd to exit after SIGTERM, shared by every MysqldSpec service.
+const mysqlShutdownTimeoutKey = "zimbra_mysql_shutdown_timeout"
+
+// startMysqld spawns mysqld_safe for a MysqldSpec service (legacy
+// mysql.server start through a direct exec, so the daemon has no runtime
+// dependency on the legacy shell wrapper). The store composite starts
+// appserver-db before the JVM so mailboxd finds port 7306 ready. A spec with
+// Active set starts only on hosts where it reports true; one with
+// OptionalDefaults skips quietly when its defaults file is not configured.
+func (c *Controller) startMysqld(ctx context.Context, def *ServiceDef) error {
+	spec := def.Mysqld
+
+	if spec.Active != nil && !spec.Active(ctx) {
+		return nil
+	}
+
 	lc, err := c.loadConfig()
 	if err != nil {
 		return fmt.Errorf("load localconfig: %w", err)
 	}
 
-	return c.spawnMysqldSafe(ctx, "appserver-db",
-		lc["mysql_mycnf"], lc["mysql_errlogfile"], c.p.appserverDBPidFile)
-}
-
-// stopAppserverDB shuts the mailbox mariadb down cleanly. The InnoDB
-// dirty-page flush runs first (flushAppserverDBDirtyPages, also a PreStop hook
-// so the systemd stop path gets it too), then the server gets SIGTERM and a
-// bounded wait — never SIGKILL: killing mariadbd mid-flush forces InnoDB
-// crash recovery on the next start. Legacy mysql.server stop is the same: a
-// plain `kill`, then up to zimbra_mysql_shutdown_timeout seconds of polling.
-func (c *Controller) stopAppserverDB(ctx context.Context, def *ServiceDef) error {
-	return c.stopMysqld(ctx, def, "zimbra_mysql_shutdown_timeout", c.p.appserverDBPidFile)
-}
-
-// startAntispamDB spawns mysqld_safe for the amavisd mariadb. Uses
-// antispam_mysql_mycnf so multi-server installs can point at a different
-// defaults file. Guarded by antispamDBEnabled at the caller; this function
-// does the minimal correctness check (non-empty mycnf) and returns a no-op
-// result when the install is not configured for a local antispam DB.
-func (c *Controller) startAntispamDB(ctx context.Context) error {
-	lc, err := c.loadConfig()
-	if err != nil {
-		return fmt.Errorf("load localconfig: %w", err)
-	}
-
-	mycnf := lc["antispam_mysql_mycnf"]
-	if mycnf == "" {
-		logger.InfoContext(ctx, "antispam_mysql_mycnf not set; skipping antispam DB start")
+	defaults := lc[spec.DefaultsKey]
+	if defaults == "" && spec.OptionalDefaults {
+		logger.InfoContext(ctx, spec.DefaultsKey+" not set; skipping "+def.Name+" start")
 
 		return nil
 	}
 
-	return c.spawnMysqldSafe(ctx, "antispam-db",
-		mycnf, lc["antispam_mysql_errlogfile"], c.p.antispamDBPidFile)
+	return c.spawnMysqldSafe(ctx, def.Name, defaults, lc[spec.ErrlogKey], def.PidFile)
 }
 
-// stopAntispamDB terminates the amavisd mariadb. No InnoDB flush — antispam
-// DB content is transient scoring state, not user mail — but the same
-// never-SIGKILL rule applies.
-func (c *Controller) stopAntispamDB(ctx context.Context, def *ServiceDef) error {
-	return c.stopMysqld(ctx, def, "zimbra_mysql_shutdown_timeout", c.p.antispamDBPidFile)
+// stopMysqldService is the legacy-mode stop of a MysqldSpec service: a clean,
+// never-killed shutdown (appserver-db's InnoDB flush ran as a PreStop hook).
+func (c *Controller) stopMysqldService(ctx context.Context, def *ServiceDef) error {
+	if def.Mysqld.Active != nil && !def.Mysqld.Active(ctx) {
+		return nil
+	}
+
+	return c.stopMysqld(ctx, def)
 }
 
 // antispamDBEnabled gates the antispam lifecycle hooks. Mirrors the guard at
@@ -188,12 +176,12 @@ const (
 // killed while flushing needs InnoDB crash recovery at the next start — so a
 // server that outlives the wait is reported as an error and left running.
 // A server that is not running is a successful stop.
-func (c *Controller) stopMysqld(ctx context.Context, def *ServiceDef, timeoutKey, pidfile string) error {
+func (c *Controller) stopMysqld(ctx context.Context, def *ServiceDef) error {
 	pid := c.runningPID(ctx, def)
 	if pid == 0 {
 		logger.InfoContext(ctx, "DB already stopped", "name", def.Name)
 
-		_ = c.env.FS.Remove(pidfile)
+		_ = c.env.FS.Remove(def.PidFile)
 
 		return nil
 	}
@@ -201,7 +189,7 @@ func (c *Controller) stopMysqld(ctx context.Context, def *ServiceDef, timeoutKey
 	timeout := mysqlShutdownTimeoutDefault
 
 	if lc, err := c.loadConfig(); err == nil {
-		if secs, convErr := strconv.Atoi(strings.TrimSpace(lc[timeoutKey])); convErr == nil && secs > 0 {
+		if secs, convErr := strconv.Atoi(strings.TrimSpace(lc[mysqlShutdownTimeoutKey])); convErr == nil && secs > 0 {
 			timeout = time.Duration(secs) * time.Second
 		}
 	}
@@ -213,7 +201,7 @@ func (c *Controller) stopMysqld(ctx context.Context, def *ServiceDef, timeoutKey
 			"(SIGKILL would require InnoDB crash recovery)", def.Name, pid, timeout)
 	}
 
-	_ = c.env.FS.Remove(pidfile)
+	_ = c.env.FS.Remove(def.PidFile)
 
 	logger.InfoContext(ctx, "DB stopped", "name", def.Name, "pid", pid)
 
@@ -333,35 +321,4 @@ func modifiedDBPages(status string) int {
 	}
 
 	return total
-}
-
-// appserverDBCustomStart launches the mailbox mariadb (legacy mysql.server
-// start).
-func (c *Controller) appserverDBCustomStart(ctx context.Context, _ *ServiceDef) error {
-	return c.startAppserverDB(ctx)
-}
-
-// appserverDBCustomStop is the stop of appserver-db in legacy mode: a clean,
-// never-killed shutdown (the InnoDB flush ran as a PreStop hook).
-func (c *Controller) appserverDBCustomStop(ctx context.Context, def *ServiceDef) error {
-	return c.stopAppserverDB(ctx, def)
-}
-
-// antispamDBCustomStart starts the amavisd mariadb when it is configured to
-// run on this host (see antispamDBEnabled); elsewhere it is a no-op.
-func (c *Controller) antispamDBCustomStart(ctx context.Context, _ *ServiceDef) error {
-	if !c.antispamDBEnabled(ctx) {
-		return nil
-	}
-
-	return c.startAntispamDB(ctx)
-}
-
-// antispamDBCustomStop is the symmetric stop of antispamDBCustomStart.
-func (c *Controller) antispamDBCustomStop(ctx context.Context, def *ServiceDef) error {
-	if !c.antispamDBEnabled(ctx) {
-		return nil
-	}
-
-	return c.stopAntispamDB(ctx, def)
 }

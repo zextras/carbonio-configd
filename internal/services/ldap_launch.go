@@ -17,61 +17,22 @@ import (
 
 	carboldap "github.com/zextras/carbonio-configd/internal/ldap"
 	"github.com/zextras/carbonio-configd/internal/logger"
-	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
-// ldapCustomStart builds and executes the slapd command with bind_url from localconfig.
-func (c *Controller) ldapCustomStart(ctx context.Context, def *ServiceDef) error {
-	lc, err := c.loadConfig()
-	if err != nil {
-		return fmt.Errorf("failed to load localconfig: %w", err)
-	}
-
-	// Build bind_url from localconfig (matches systemd-envscript logic)
-	bindURL := buildLDAPBindURL(lc)
-
-	args := []string{
+// slapdArgs is the slapd command line (ServiceDef.ArgsFromConfig): no
+// daemonizing (the launcher detaches it), syslog facility LOCAL0, the bind URL
+// of localconfig plus the ldapi socket, and the cn=config directory. The bind
+// URL matches the systemd envscript logic.
+func (c *Controller) slapdArgs(lc map[string]string) []string {
+	return []string{
 		"-d", "0",
 		"-l", "LOCAL0",
-		"-h", bindURL + " ldapi:///",
+		"-h", buildLDAPBindURL(lc) + " ldapi:///",
 		"-F", c.p.data + "/ldap/config",
 	}
-
-	logFile := c.p.log + "/slapd.out"
-
-	logFd, err := c.openLogFile(logFile)
-	if err != nil {
-		return err
-	}
-
-	defer func() { _ = logFd.Close() }()
-
-	// slapd is a long-lived detached daemon: its lifetime must NOT be bound to
-	// the start request's context. Starting it with ctx, a later cancellation
-	// of ctx (e.g. a future cancellable ServiceStart caller) would SIGKILL
-	// slapd out from under the running system. startThenProbe starts it with
-	// a background context so only an explicit stop terminates it.
-	cmd := &sys.Cmd{
-		Path:   c.p.common + "/libexec/slapd",
-		Args:   args,
-		Stdout: logFd,
-		Stderr: logFd,
-		Setsid: true,
-	}
-
-	logger.InfoContext(ctx, "Starting LDAP server", "bind_url", bindURL, "log", logFile)
-
-	// The bundled slapd is built WITHOUT libsystemd, so it never emits
-	// sd_notify READY=1. Waiting on a notify datagram therefore always burns
-	// the full timeout (the daemon is up but silent), which made the first
-	// `zmcontrol start` report the directory server as Failed while a second
-	// start — seeing slapd already listening — succeeded. Instead we start
-	// slapd and actively probe the LDAP endpoint until it answers, so readiness
-	// reflects "actually serving" and returns in ~1s.
-	return c.startThenProbe(ctx, cmd, bindURL)
 }
 
-// ldapReadyTimeout bounds how long startThenProbe waits for slapd to begin
+// ldapReadyTimeout bounds how long awaitLDAPReady waits for slapd to begin
 // answering LDAP queries before declaring the start failed.
 const ldapReadyTimeout = 30 * time.Second
 
@@ -118,26 +79,21 @@ func buildLDAPBindURL(lc map[string]string) string {
 	return fmt.Sprintf("ldap://%s:%s", host, port)
 }
 
-// startThenProbe starts cmd and waits until the LDAP server actually answers a
-// query (or the child exits, ctx is cancelled, or ldapReadyTimeout elapses).
-// This replaces sd_notify readiness for slapd, which is built without
-// libsystemd and never sends READY=1.
-func (c *Controller) startThenProbe(ctx context.Context, cmd *sys.Cmd, bindURL string) error {
+// awaitLDAPReady waits until the LDAP server actually answers a query (or the
+// child exits, ctx is cancelled, or ldapReadyTimeout elapses). It replaces
+// sd_notify readiness for slapd, which is built without libsystemd and never
+// sends READY=1: waiting on a notify datagram would always burn the full
+// timeout (the daemon is up but silent), which made the first `zmcontrol
+// start` report the directory server as Failed while a second start — seeing
+// slapd already listening — succeeded. Probing the endpoint makes readiness
+// mean "actually serving" and returns in ~1s. exited delivers the child's
+// exit, so a slapd that dies during startup (cannot bind its listener) fails
+// the start at once.
+func (c *Controller) awaitLDAPReady(ctx context.Context, lc map[string]string, exited <-chan error) error {
 	const service = "ldap"
 
-	proc, err := c.env.Exec.Start(context.Background(), cmd)
-	if err != nil {
-		return fmt.Errorf("start %s: %w", service, err)
-	}
-
-	// Detect early child exit so we fail fast instead of polling for the full
-	// timeout when slapd dies during startup (e.g. cannot bind its listener).
-	exited := make(chan error, 1)
-
-	go func() { exited <- proc.Wait() }()
-
-	// bindURL may contain multiple space-separated URLs (HA); probe all.
-	urls := carboldap.ParseURLs(bindURL)
+	// The bind URL may contain multiple space-separated URLs (HA); probe all.
+	urls := carboldap.ParseURLs(buildLDAPBindURL(lc))
 
 	deadline := c.env.Clock.Now().Add(ldapReadyTimeout)
 	ticker := c.env.Clock.NewTicker(ldapProbeInterval)
@@ -164,22 +120,36 @@ func (c *Controller) startThenProbe(ctx context.Context, cmd *sys.Cmd, bindURL s
 	}
 }
 
+// probeLDAP is the default Controller.ldapProbe: probeLDAPReady with the TLS
+// settings the LDAP client itself runs with (carboldap.ResolveTLS): the
+// legacy ssl_allow_untrusted_certs semantics, so with ssl_allow_untrusted_certs
+// =false an ldaps:// bind URL is verified against the system roots and the
+// Carbonio CA files.
+func (c *Controller) probeLDAP(ctx context.Context, urls []string) error {
+	lc, err := c.loadConfig()
+	if err != nil {
+		// No localconfig, no basis for stricter settings than the default.
+		lc = nil
+	}
+
+	return probeLDAPReady(ctx, urls, carboldap.ResolveTLS(ctx, lc, c.env.FS).Config)
+}
+
 // probeLDAPReady dials the first reachable LDAP URL and performs an anonymous
 // rootDSE base search. Success means slapd is accepting connections AND serving
 // queries — a half-open listener that hasn't finished initializing fails the
 // search, so this does not false-positive. No credentials are required.
 //
-// The probe carries no credentials and only asks whether slapd serves queries,
-// so ldaps:// URLs skip certificate verification (the local self-signed
-// chain must not make a healthy slapd look dead). Dial and request are bounded
-// so a wedged listener cannot stall the start sequence.
-func probeLDAPReady(ctx context.Context, urls []string) error {
+// ldaps:// URLs are verified as tlsConfig says. Its default (ResolveTLS with
+// ssl_allow_untrusted_certs unset) skips verification, like every legacy
+// client of this directory server: the local certificate is often a
+// self-signed chain, and a probe that only asks "does slapd serve queries?"
+// must not make a healthy slapd look dead. Dial and request are bounded so a
+// wedged listener cannot stall the start sequence.
+func probeLDAPReady(ctx context.Context, urls []string, tlsConfig *tls.Config) error {
 	conn, _, err := carboldap.DialFirstReachable(ctx, urls,
 		ldap.DialWithDialer(&net.Dialer{Timeout: ldapProbeDialTimeout}),
-		ldap.DialWithTLSConfig(&tls.Config{
-			MinVersion:         tls.VersionTLS12,
-			InsecureSkipVerify: true, //nolint:gosec // G402: anonymous readiness probe, no secrets exchanged
-		}),
+		ldap.DialWithTLSConfig(tlsConfig),
 	)
 	if err != nil {
 		return err

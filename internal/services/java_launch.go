@@ -23,76 +23,60 @@ import (
 // `pgrep -f com.zextras.mailbox.Mailbox`, as an exact argv token.
 const mailboxMainClass = "com.zextras.mailbox.Mailbox"
 
-// mailboxCustomStart starts the mailboxd JVM and waits until it serves its
-// mail port (legacy zmmailboxdctl start). It starts the JVM only: the database
-// is the appserver-db service (the store composite starts both, and mailbox
-// Wants appserver-db), and the zmtlsctl configuration set runs as the
-// service's ConfigRewrite, skipped by `norewrite`.
-func (c *Controller) mailboxCustomStart(ctx context.Context, def *ServiceDef) error {
+// startJava launches a JVM service from its JavaSpec: the java binary of
+// localconfig, the spec's argument list, a detached session logging to the
+// spec's log file, then the service's readiness probe. The mailbox JVM is the
+// JVM only: the database is the appserver-db service (the store composite
+// starts both, and mailbox Wants appserver-db), and the zmtlsctl
+// configuration set runs as the service's ConfigRewrite, skipped by
+// `norewrite`.
+func (c *Controller) startJava(ctx context.Context, def *ServiceDef) error {
+	spec := def.Java
+
 	lc, err := c.loadConfig()
 	if err != nil {
 		return fmt.Errorf("failed to load localconfig: %w", err)
 	}
 
-	javaBin, err := c.mailboxJavaBinary(ctx, lc)
+	javaBin, err := c.javaBinary(ctx, lc)
 	if err != nil {
 		return err
 	}
 
-	args := c.mailboxJavaArgs(lc)
+	args := spec.Args(lc)
 
-	if err := c.env.FS.MkdirAll(c.p.mailboxd+"/work/service/jsp", 0o755); err != nil {
-		logger.WarnContext(ctx, "Failed to create mailbox work directory",
-			"path", c.p.mailboxd+"/work/service/jsp", "error", err)
-	}
-
-	if err := c.env.FS.MkdirAll(c.p.mailboxd+"/work", 0o755); err != nil {
-		logger.WarnContext(ctx, "Failed to create mailbox work directory",
-			"path", c.p.mailboxd+"/work", "error", err)
-	}
-
-	// Pre-create gc.log with correct permissions (Java needs write access)
-	gcLog := c.p.log + "/gc.log"
-	if _, statErr := c.env.FS.Stat(gcLog); errors.Is(statErr, fs.ErrNotExist) {
-		if gcFd, createErr := c.env.FS.OpenFile(gcLog, os.O_CREATE|os.O_WRONLY, 0o640); createErr == nil {
-			_ = gcFd.Close()
+	for _, dir := range spec.Mkdirs {
+		if err := c.env.FS.MkdirAll(dir, 0o755); err != nil {
+			logger.WarnContext(ctx, "Failed to create "+spec.Label+" work directory",
+				"path", dir, "error", err)
 		}
 	}
 
-	if err := c.startJavaDetached(ctx, "mailbox", javaBin, c.p.log+"/zmmailboxd.out", args,
-		"heap", lc["mailboxd_java_heap_size"]+"m"); err != nil {
+	// Pre-create the files the JVM only needs write access to, with the
+	// right permissions.
+	for _, file := range spec.Touch {
+		if _, statErr := c.env.FS.Stat(file); errors.Is(statErr, fs.ErrNotExist) {
+			if fd, createErr := c.env.FS.OpenFile(file, os.O_CREATE|os.O_WRONLY, 0o640); createErr == nil {
+				_ = fd.Close()
+			}
+		}
+	}
+
+	if err := c.startJavaDetached(ctx, spec.Label, javaBin, spec.LogFile, args); err != nil {
 		return err
 	}
 
-	return c.mailboxReady(ctx, lc)
-}
-
-// mailboxCustomStop terminates the mailboxd JVM (SIGTERM, bounded wait, then
-// SIGKILL). The database is left running: stopping it is the store
-// composite's job, after the JVM is gone (legacy zmmailboxdctl stop only ever
-// touches the JVM).
-func (c *Controller) mailboxCustomStop(ctx context.Context, def *ServiceDef) error {
-	if def.ProcessName == "" {
-		return nil
-	}
-
-	if err := c.killProcess(ctx, def.ProcessName); err != nil {
-		return fmt.Errorf("stop mailbox JVM: %w", err)
-	}
-
-	return nil
+	return c.awaitReady(ctx, def, nil)
 }
 
 // startJavaDetached builds and starts javaBin with args as a fully detached,
 // fire-and-forget child: stdout/stderr go to logFile, it gets its own
 // session (Setsid), and the process handle is released right
-// after Start. Shared by mailboxCustomStart and milterCustomStart, whose
-// Java-launch skeletons had drifted (milter released the handle, mailbox
-// did not) — Release is correct for both: neither caller ever calls
+// after Start. Release is right for every JVM service: nothing ever calls
 // cmd.Wait() on the child, so nothing needs the handle once it's launched;
 // the process is reaped by init once configd's own process exits.
 func (c *Controller) startJavaDetached(
-	ctx context.Context, label, javaBin, logFile string, args []string, logFields ...any,
+	ctx context.Context, label, javaBin, logFile string, args []string,
 ) error {
 	logFd, err := c.openLogFile(logFile)
 	if err != nil {
@@ -101,8 +85,7 @@ func (c *Controller) startJavaDetached(
 
 	defer func() { _ = logFd.Close() }()
 
-	fields := append([]any{"java", javaBin, "log", logFile}, logFields...)
-	logger.InfoContext(ctx, "Starting "+label+" via Java launcher", fields...)
+	logger.InfoContext(ctx, "Starting "+label+" via Java launcher", "java", javaBin, "log", logFile)
 
 	proc, err := c.env.Exec.Start(ctx, &sys.Cmd{
 		Path:   javaBin,
@@ -122,7 +105,7 @@ func (c *Controller) startJavaDetached(
 	return nil
 }
 
-func (c *Controller) mailboxJavaBinary(ctx context.Context, lc map[string]string) (string, error) {
+func (c *Controller) javaBinary(ctx context.Context, lc map[string]string) (string, error) {
 	javaHome := lc["mailboxd_java_home"]
 	if javaHome == "" {
 		javaHome = lc["zimbra_java_home"]
@@ -209,5 +192,43 @@ func (c *Controller) mailboxJavaArgs(lc map[string]string) []string {
 		"-Dzimbra.config="+c.p.conf+"/localconfig.xml",
 		"-cp", c.p.mailbox+"/jars/mailbox.jar:"+c.p.mailbox+"/jars/*",
 		mailboxMainClass,
+	)
+}
+
+// milterMainClass is the JVM main class of the milter: the last argument
+// milterJavaArgs hands to java, and the identity (ServiceDef.ProcessName)
+// under which the running JVM is recognised — legacy zmmilterctl's
+// `pgrep -f '/opt/zextras/.*/java.*milter.MilterServer'`, as an exact argv
+// token.
+const milterMainClass = "com.zimbra.cs.milter.MilterServer"
+
+// milterJavaArgs builds JVM arguments for MilterServer.
+// Mirrors the legacy milterctl.sh / carbonio-milter.service command.
+func (c *Controller) milterJavaArgs(lc map[string]string) []string {
+	javaOpts := lc["zimbra_zmjava_options"]
+	if javaOpts == "" {
+		javaOpts = "-Xmx256m" +
+			" -Dhttps.protocols=TLSv1.2,TLSv1.3" +
+			" -Djdk.tls.client.protocols=TLSv1.2,TLSv1.3" +
+			" -Djava.net.preferIPv4Stack=true"
+	}
+
+	javaLibPath := lc["zimbra_zmjava_java_library_path"]
+	if javaLibPath == "" {
+		javaLibPath = c.p.base + "/lib"
+	}
+
+	log4jFile := c.p.conf + "/milter.log4j.properties"
+
+	args := append(javaPreviewArgs(), "-client")
+	args = append(args, withoutPreviewArgs(strings.Fields(javaOpts))...)
+
+	return append(args,
+		"-Dzimbra.home="+c.p.base,
+		"-Djava.library.path="+javaLibPath,
+		"-classpath", c.p.mailbox+"/jars/*:"+c.p.conf,
+		"-Dlog4j.configurationFile=file:"+log4jFile,
+		"-Dzimbra.config="+c.p.conf+"/localconfig.xml",
+		milterMainClass,
 	)
 }

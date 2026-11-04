@@ -30,7 +30,7 @@ func TestStartDirect_DetachedMissingBinary(t *testing.T) {
 		LogFile:    logFile,
 	}
 
-	err := ctl.startDetached(context.Background(), "testdetached", def)
+	err := ctl.startDetached(context.Background(), "testdetached", def, def.BinaryArgs)
 	if err == nil {
 		t.Error("expected error when detached binary is missing")
 	}
@@ -51,7 +51,7 @@ func TestStartDetached_LogFileOpenError(t *testing.T) {
 		LogFile:    "/nonexistent-dir-xyz/test.log",
 	}
 
-	err := ctl.startDetached(context.Background(), "testservice", def)
+	err := ctl.startDetached(context.Background(), "testservice", def, def.BinaryArgs)
 	if err == nil {
 		t.Error("expected error when log file cannot be opened")
 	}
@@ -73,7 +73,7 @@ func TestStartDetached_LogOpenFails(t *testing.T) {
 		LogFile:    "/nonexistent/dir/test.out",
 	}
 
-	err := ctl.startDetached(context.Background(), "testdetached", def)
+	err := ctl.startDetached(context.Background(), "testdetached", def, def.BinaryArgs)
 	if err == nil {
 		t.Error("expected error when log file cannot be opened")
 	}
@@ -98,7 +98,7 @@ func TestStartDetached_SuccessNoSDNotify(t *testing.T) {
 		Detached:    false,
 	}
 
-	err := ctl.startDetached(context.Background(), "testservice", def)
+	err := ctl.startDetached(context.Background(), "testservice", def, def.BinaryArgs)
 	if err != nil {
 		t.Errorf("startDetached returned unexpected error: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestStartDetached_Success(t *testing.T) {
 		LogFile:     logFile,
 	}
 
-	err := ctl.startDetached(context.Background(), "testdetached", def)
+	err := ctl.startDetached(context.Background(), "testdetached", def, def.BinaryArgs)
 	if err != nil {
 		t.Errorf("startDetached returned unexpected error: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestStartDetached_DefaultLogPath(t *testing.T) {
 		LogFile:    "",
 	}
 
-	err := ctl.startDetached(context.Background(), "testdetached", def)
+	err := ctl.startDetached(context.Background(), "testdetached", def, def.BinaryArgs)
 	if err == nil {
 		t.Error("expected error when default log path directory doesn't exist")
 	}
@@ -180,7 +180,7 @@ func TestStartDetached_UseSDNotify(t *testing.T) {
 		Detached:    false,
 	}
 
-	ctl.startDetached(context.Background(), "testservice", def)
+	ctl.startDetached(context.Background(), "testservice", def, def.BinaryArgs)
 }
 
 // TestStartDetached_SDNotify_BinaryMissing verifies startDetached returns error
@@ -204,7 +204,7 @@ func TestStartDetached_SDNotify_BinaryMissing(t *testing.T) {
 		LogFile:     logFile,
 	}
 
-	err := ctl.startDetached(context.Background(), "testdetached", def)
+	err := ctl.startDetached(context.Background(), "testdetached", def, def.BinaryArgs)
 	if err == nil {
 		t.Error("expected error when UseSDNotify=true and binary is missing")
 	}
