@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/zextras/carbonio-configd/internal/sys"
 	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
@@ -341,7 +343,17 @@ func TestAwaitSDNotifyStopping_ReturnsOnContextCancel(t *testing.T) {
 		close(done)
 	}()
 
-	time.Sleep(100 * time.Millisecond)
+	// Cancel only once the observer is up (its socket exists), so the test
+	// exercises cancellation of a running observer rather than a race with its
+	// start-up.
+	socketPath := expectedSocketPath(ctl, "test-cancel-stopping")
+
+	require.Eventually(t, func() bool {
+		_, err := os.Stat(socketPath)
+
+		return err == nil
+	}, 2*time.Second, time.Millisecond, "observer socket never appeared")
+
 	cancel()
 
 	select {

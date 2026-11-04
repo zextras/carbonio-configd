@@ -596,9 +596,7 @@ func TestE2E_NetworkListener(t *testing.T) {
 	}
 	defer server.Shutdown(context.Background())
 
-	// Give server time to start
-	time.Sleep(100 * time.Millisecond)
-
+	// ServeForever returned: the listener is bound and accepts connections.
 	t.Run("STATUS_Command_Via_TCP", func(t *testing.T) {
 		// Connect to server
 		conn, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", port))
