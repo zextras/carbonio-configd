@@ -14,83 +14,71 @@ import (
 
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/logger"
-	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // startTLSYes is the Postfix boolean literal for "yes", used in LDAP table rendering.
 const startTLSYes = "yes"
 
-// mtaCustomStart replaces legacy /opt/zextras/bin/postfix start. The legacy
-// wrapper composed five steps; each is reimplemented natively here so
+// The MTA is the CommandSpec registry entry: `postfix start|stop|status|
+// reload` through sudo, with the three preparation hooks below run before a
+// start of a stopped postfix. The legacy /opt/zextras/bin/postfix start
+// wrapper composed the same steps; each is reimplemented natively so
 // carbonio-configd carries no runtime dependency on the shell-script MTA
 // control path:
 //
-//  1. Idempotence probe: `postfix status` exits 0 when already running; if
-//     it does, skip — otherwise postfix's own startup emits
-//     "postfix/postlog: fatal: the Postfix mail system is already running"
-//     and the caller sees a failed start for a healthy daemon.
-//  2. Bootstrap main.cf: postfix refuses to start without it. When absent,
+//  1. Idempotence probe (the generic launcher): `postfix status` exits 0 when
+//     already running; then the start is skipped — otherwise postfix's own
+//     startup emits "postfix/postlog: fatal: the Postfix mail system is
+//     already running" and the caller sees a failed start for a healthy
+//     daemon.
+//  2. prepareMainCf: postfix refuses to start without main.cf. When absent,
 //     create an empty file and seed mail_owner / setgid_group from
 //     localconfig via postconf -e.
-//  3. Render LDAP tables: write the 8 ldap-*.cf files under /opt/zextras/
-//     conf that postfix's main.cf references (ldap:/opt/zextras/conf/
-//     ldap-vmm.cf etc.). This replaces legacy mtainit.sh.
-//  4. Rebuild aliases database when /etc/aliases exists.
-//  5. Spawn the daemon: sudo postfix start. Postfix self-daemonizes, so
-//     CombinedOutput returns once the master has forked.
+//  3. prepareLDAPTables: write the 8 ldap-*.cf files under /opt/zextras/conf
+//     that postfix's main.cf references (ldap:/opt/zextras/conf/ldap-vmm.cf
+//     etc.). This replaces legacy mtainit.sh.
+//  4. rebuildAliases: rebuild the aliases database when /etc/aliases exists.
+//  5. Spawn the daemon (the generic launcher): sudo postfix start. Postfix
+//     self-daemonizes, so the command returns once the master has forked.
 //
 // ConfigRewrite on the registry entry still triggers
-// /opt/zextras/libexec/configrewrite before this hook runs — that regenerates
-// main.cf itself and is intentionally kept outside of this function so it
-// runs for every start path (including systemd).
-func (c *Controller) mtaCustomStart(ctx context.Context, _ *ServiceDef) error {
+// /opt/zextras/libexec/configrewrite before the start — that regenerates
+// main.cf itself and is intentionally kept outside of these hooks so it runs
+// for every start path (including systemd).
+
+// prepareMainCf is the main.cf bootstrap step of the MTA start.
+func (c *Controller) prepareMainCf(ctx context.Context) error {
 	lc, err := c.loadConfig()
 	if err != nil {
 		return fmt.Errorf("load localconfig: %w", err)
-	}
-
-	if c.mtaIsRunning(ctx) {
-		logger.InfoContext(ctx, "postfix already running; skipping start")
-
-		return nil
 	}
 
 	if err := c.bootstrapPostfixMainCf(ctx, lc); err != nil {
 		return fmt.Errorf("bootstrap main.cf: %w", err)
 	}
 
-	if err := c.writePostfixLDAPConfig(ctx, lc); err != nil {
-		return fmt.Errorf("render ldap-*.cf: %w", err)
-	}
-
-	c.runPostalias(ctx)
-
-	return c.startPostfixDaemon(ctx)
+	return nil
 }
 
-// mtaCustomStop runs "sudo postfix stop" to gracefully shut down postfix.
-// zextras has NOPASSWD sudo rights for postfix binary.
-func (c *Controller) mtaCustomStop(ctx context.Context, _ *ServiceDef) error {
-	// #nosec G204 — fixed binary path from internal registry
-	out, err := sys.CombinedOutput(ctx, c.env.Exec, sudoBin, c.p.postfixBin, "stop")
+// prepareLDAPTables is the ldap-*.cf rendering step of the MTA start.
+func (c *Controller) prepareLDAPTables(ctx context.Context) error {
+	lc, err := c.loadConfig()
 	if err != nil {
-		// "not running" means postfix is already stopped — treat as success.
-		if strings.Contains(string(out), "is not running") {
-			return nil
-		}
+		return fmt.Errorf("load localconfig: %w", err)
+	}
 
-		return fmt.Errorf("postfix stop: %s: %w", strings.TrimSpace(string(out)), err)
+	if err := c.writePostfixLDAPConfig(ctx, lc); err != nil {
+		return fmt.Errorf("render ldap-*.cf: %w", err)
 	}
 
 	return nil
 }
 
-// mtaIsRunning is the idempotence gate before start. Replaces zmmtastatus.
-func (c *Controller) mtaIsRunning(ctx context.Context) bool {
-	// #nosec G204 — fixed binary path from internal registry
-	_, err := c.env.Exec.Run(ctx, &sys.Cmd{Path: sudoBin, Args: []string{c.p.postfixBin, "status"}})
+// rebuildAliases is the postalias step of the MTA start; it never fails.
+func (c *Controller) rebuildAliases(ctx context.Context) error {
+	c.runPostalias(ctx)
 
-	return err == nil
+	return nil
 }
 
 // postfixAccountNameRe is the shape of a POSIX user/group name accepted for
@@ -254,30 +242,6 @@ func (c *Controller) runPostalias(ctx context.Context) {
 		logger.WarnContext(ctx, "postalias failed; continuing",
 			"aliases", c.p.aliases, "error", err)
 	}
-}
-
-func (c *Controller) startPostfixDaemon(ctx context.Context) error {
-	// #nosec G204 — fixed binary path from internal registry
-	out, err := sys.CombinedOutput(ctx, c.env.Exec, sudoBin, c.p.postfixBin, "start")
-	if err != nil {
-		return fmt.Errorf("postfix start: %s: %w",
-			strings.TrimSpace(string(out)), err)
-	}
-
-	return nil
-}
-
-func (c *Controller) sudoRun(ctx context.Context, binary string, args ...string) error {
-	full := append([]string{binary}, args...)
-	// #nosec G204 — binary path is a registry constant; args are localconfig scalars or literals
-	out, err := sys.CombinedOutput(ctx, c.env.Exec, sudoBin, full...)
-	if err != nil {
-		return fmt.Errorf("%s %s: %s: %w",
-			binary, strings.Join(args, " "),
-			strings.TrimSpace(string(out)), err)
-	}
-
-	return nil
 }
 
 // LDAP query bodies. Formatted so each table's query_filter and

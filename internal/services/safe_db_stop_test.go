@@ -115,7 +115,7 @@ func TestStopMysqld_SIGTERMOnlyAndPidfileRemoved(t *testing.T) {
 	addDB(ctl, f, dbPID)
 	f.FS.Put(ctl.p.appserverDBPidFile, []byte("500\n"), 0o644)
 
-	require.NoError(t, ctl.stopAppserverDB(context.Background(), ctl.registry[svcAppserverDB]))
+	require.NoError(t, ctl.stopMysqldService(context.Background(), ctl.registry[svcAppserverDB]))
 
 	assert.Equal(t, []syscall.Signal{syscall.SIGTERM}, sigsOf(f))
 	assert.False(t, f.Proc.Alive(dbPID))
@@ -128,7 +128,7 @@ func TestStopMysqld_NotRunningIsNil(t *testing.T) {
 	ctl, f := newFakeController(t)
 	f.FS.Put(ctl.p.appserverDBPidFile, []byte("500\n"), 0o644) // stale
 
-	require.NoError(t, ctl.stopAppserverDB(context.Background(), ctl.registry[svcAppserverDB]))
+	require.NoError(t, ctl.stopMysqldService(context.Background(), ctl.registry[svcAppserverDB]))
 
 	assert.Empty(t, f.Proc.Signals())
 }
@@ -144,7 +144,7 @@ func TestStopMysqld_TimeoutLeavesProcessAliveWithoutKill(t *testing.T) {
 	pumpClock(t, f.Clock, time.Second)
 
 	start := f.Clock.Now()
-	err := ctl.stopAppserverDB(context.Background(), ctl.registry[svcAppserverDB])
+	err := ctl.stopMysqldService(context.Background(), ctl.registry[svcAppserverDB])
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not forcing termination")
@@ -166,7 +166,7 @@ func TestStopMysqld_HonorsLocalconfigTimeout(t *testing.T) {
 	pumpClock(t, f.Clock, time.Second)
 
 	start := f.Clock.Now()
-	err := ctl.stopAppserverDB(context.Background(), ctl.registry[svcAppserverDB])
+	err := ctl.stopMysqldService(context.Background(), ctl.registry[svcAppserverDB])
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "7s")
@@ -195,7 +195,7 @@ func TestStopMysqld_ExitsWithinTimeout(t *testing.T) {
 		f.Proc.Remove(dbPID)
 	}()
 
-	require.NoError(t, ctl.stopAppserverDB(context.Background(), ctl.registry[svcAppserverDB]))
+	require.NoError(t, ctl.stopMysqldService(context.Background(), ctl.registry[svcAppserverDB]))
 	assert.Equal(t, []syscall.Signal{syscall.SIGTERM}, sigsOf(f))
 	assert.False(t, f.FS.Exists(ctl.p.appserverDBPidFile))
 }
@@ -349,7 +349,7 @@ func TestMailboxCustomStop_OnlyKillsJVM(t *testing.T) {
 	m := &mysqlRecorder{engines: enginesEnabled, status: func(int) string { return "" }}
 	m.install(ctl, f)
 
-	require.NoError(t, ctl.mailboxCustomStop(context.Background(), ctl.registry[svcMailbox]))
+	require.NoError(t, ctl.stopWithoutSystemd(context.Background(), svcMailbox, ctl.registry[svcMailbox]))
 
 	assert.False(t, f.Proc.Alive(mailboxPID))
 	assert.True(t, f.Proc.Alive(dbPID), "database untouched")
@@ -387,7 +387,7 @@ func TestMailboxCustomStart_JVMOnlyThenReady(t *testing.T) {
 		return nil
 	}
 
-	require.NoError(t, ctl.mailboxCustomStart(context.Background(), ctl.registry[svcMailbox]))
+	require.NoError(t, ctl.startJava(context.Background(), ctl.registry[svcMailbox]))
 
 	assert.Equal(t, 1, readyCalls)
 
@@ -404,7 +404,7 @@ func TestMailboxCustomStart_ReadyFailureIsReturned(t *testing.T) {
 	boom := errors.New("port never opened")
 	ctl.mailboxReady = func(context.Context, map[string]string) error { return boom }
 
-	err := ctl.mailboxCustomStart(context.Background(), ctl.registry[svcMailbox])
+	err := ctl.startJava(context.Background(), ctl.registry[svcMailbox])
 
 	require.ErrorIs(t, err, boom)
 }

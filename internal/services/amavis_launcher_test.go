@@ -91,7 +91,7 @@ func TestAmavisPreStart_AltermimeMissingOrFailingIsIgnored(t *testing.T) {
 func installAmavis(ctl *Controller, f *systest.Fakes) {
 	f.FS.Put(ctl.p.common+"/sbin/amavisd", []byte("x"), 0o755)
 
-	f.Exec.OnCmdline(sudoBin+" "+ctl.p.amavisMC, func(*sys.Cmd) (sys.Result, error) {
+	f.Exec.OnCmdline(sudoBin+" -n "+ctl.p.amavisMC, func(*sys.Cmd) (sys.Result, error) {
 		f.Proc.Add(amavisMCEntry(ctl, amavisMCPID))
 
 		return sys.Result{}, nil
@@ -123,7 +123,7 @@ func TestAmavisCustomStart_StartsMCViaSudoThenAmavisdAndPreparesDirs(t *testing.
 	mcIdx, dIdx := -1, -1
 
 	for i, l := range lines {
-		if strings.HasPrefix(l, sudoBin+" "+ctl.p.amavisMC) && mcIdx < 0 {
+		if strings.HasPrefix(l, sudoBin+" -n "+ctl.p.amavisMC) && mcIdx < 0 {
 			mcIdx = i
 		}
 
@@ -173,7 +173,7 @@ func TestAmavisCustomStart_StartsMCEvenIfAmavisdRunning(t *testing.T) {
 
 	require.NoError(t, ctl.amavisCustomStart(context.Background(), ctl.registry[svcAmavis]))
 
-	assert.Contains(t, execLines(f), sudoBin+" "+ctl.p.amavisMC)
+	assert.Contains(t, execLines(f), sudoBin+" -n "+ctl.p.amavisMC)
 	assert.True(t, f.Proc.Alive(amavisMCPID))
 }
 

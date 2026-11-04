@@ -210,7 +210,7 @@ func TestSpawnMysqldSafe_NoErrLog(t *testing.T) {
 	}
 }
 
-// --- startAppserverDB / stopAppserverDB ---
+// --- startMysqld / stopMysqld ---
 
 func TestStopAppserverDB_MissingPidfile(t *testing.T) {
 	t.Parallel()
@@ -224,7 +224,7 @@ func TestStopAppserverDB_MissingPidfile(t *testing.T) {
 		return map[string]string{}, nil
 	}
 
-	err := ctl.stopAppserverDB(context.Background(), ctl.registry[svcAppserverDB])
+	err := ctl.stopMysqldService(context.Background(), ctl.registry[svcAppserverDB])
 	if err != nil {
 		t.Fatalf("expected nil for missing pidfile, got %v", err)
 	}
@@ -239,7 +239,7 @@ func TestStartAppserverDB_LoadConfigFails(t *testing.T) {
 		return nil, fmt.Errorf("test error")
 	}
 
-	err := ctl.startAppserverDB(context.Background())
+	err := ctl.startMysqld(context.Background(), ctl.registry[svcAppserverDB])
 	if err == nil {
 		t.Fatal("expected error when ctl.loadConfig fails")
 	}
@@ -266,9 +266,9 @@ func TestStartAppserverDB_LoadConfigOk(t *testing.T) {
 		return map[string]string{"mysql_mycnf": "/tmp/test.cnf"}, nil
 	}
 
-	err := ctl.startAppserverDB(context.Background())
+	err := ctl.startMysqld(context.Background(), ctl.registry[svcAppserverDB])
 	if err != nil {
-		t.Logf("startAppserverDB: %v (may fail if mysqld_safe not available)", err)
+		t.Logf("startMysqld: %v (may fail if mysqld_safe not available)", err)
 	}
 }
 
@@ -308,11 +308,11 @@ func TestStartAppserverDB_WithConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := ctl.startAppserverDB(context.Background())
-	t.Logf("startAppserverDB: %v", err)
+	err := ctl.startMysqld(context.Background(), ctl.registry[svcAppserverDB])
+	t.Logf("startMysqld: %v", err)
 }
 
-// --- stopAntispamDB ---
+// --- stopMysqldService ---
 
 func TestStopAntispamDB_MissingPidfile(t *testing.T) {
 	t.Parallel()
@@ -322,7 +322,7 @@ func TestStopAntispamDB_MissingPidfile(t *testing.T) {
 	tmp := t.TempDir()
 	ctl.p.antispamDBPidFile = filepath.Join(tmp, "missing.pid")
 
-	err := ctl.stopAntispamDB(context.Background(), ctl.registry[svcAntispamDB])
+	err := ctl.stopMysqldService(context.Background(), ctl.registry[svcAntispamDB])
 	if err != nil {
 		t.Fatalf("expected nil for missing pidfile, got %v", err)
 	}

@@ -487,7 +487,7 @@ domain is reported once, within seconds, and a change to an entry no cycle reads
 | `internal/restart` | Restart policy: systemd hybrid (pending-restart / try-reload-or-restart) or legacy queue, debounce, max failed restarts |
 | `internal/sdnotify` | systemd `sd_notify` protocol: `READY=1`, `RELOADING=1`, `STOPPING=1`, `STATUS=`, watchdog pings |
 | `internal/security` | Runtime user validation (must be `zextras`, not root) |
-| `internal/services` | Service registry, `ServiceManager` (start order, retries, restart queue), host `Controller`, `HookBackend`, service launchers |
+| `internal/services` | Service registry, `ServiceManager` (start order, retries, restart queue), host `Controller`, `HookBackend`; each service is a declarative entry run by generic launch executors, see [service-registry.md](service-registry.md) |
 | `internal/shadow` | `configd shadow`: side-effect-free Load/Plan cycle with a plan log and an optional report directory |
 | `internal/snapshot` | Immutable configuration snapshot (values + accessors) |
 | `internal/state` | Process state; holds the current snapshot behind an `atomic.Pointer` plus first-run, forced and requested bookkeeping |

@@ -97,7 +97,7 @@ func WithKillTimeout(d time.Duration) Option {
 	return func(c *Controller) { c.killTimeout = d }
 }
 
-// WithLDAPProbe replaces the slapd readiness probe.
+// WithLDAPProbe replaces the slapd readiness probe (probeLDAP by default).
 func WithLDAPProbe(probe func(ctx context.Context, urls []string) error) Option {
 	return func(c *Controller) { c.ldapProbe = probe }
 }
@@ -115,7 +115,6 @@ func NewController(env sys.System, opts ...Option) *Controller {
 		WithBaseDir(config.BaseDir()),
 		WithRunDir(defaultRunDir),
 		WithConfigLoader(localconfig.LoadEffective),
-		WithLDAPProbe(probeLDAPReady),
 		WithKillTimeout(defaultKillProcessTimeout),
 	}
 
@@ -124,6 +123,10 @@ func NewController(env sys.System, opts ...Option) *Controller {
 	}
 
 	c.p = newPaths(c.baseDir, c.runDir)
+
+	if c.ldapProbe == nil {
+		WithLDAPProbe(c.probeLDAP)(c)
+	}
 
 	if c.mailboxReady == nil {
 		c.mailboxReady = c.waitForMailboxPort

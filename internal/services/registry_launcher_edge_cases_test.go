@@ -139,10 +139,10 @@ func TestMilterEnabled_FileNotFound(t *testing.T) {
 }
 
 // ============================================================
-// stats_launcher.go — statsCustomStop
+// collectors.go — stopCollectors
 // ============================================================
 
-// TestStatsCustomStop_NonExistentDir verifies statsCustomStop succeeds when the
+// TestStatsCustomStop_NonExistentDir verifies stopCollectors succeeds when the
 // stats PID directory does not exist.
 func TestStatsCustomStop_NonExistentDir(t *testing.T) {
 	t.Parallel()
@@ -154,13 +154,13 @@ func TestStatsCustomStop_NonExistentDir(t *testing.T) {
 	}
 	ctl.p.statsPidDir = "/nonexistent-stats-pid-dir-xyz-123"
 
-	err := ctl.statsCustomStop(context.Background(), nil)
+	err := ctl.stopCollectors(context.Background(), ctl.registry[svcStats])
 	if err != nil {
-		t.Errorf("statsCustomStop with non-existent dir returned error: %v", err)
+		t.Errorf("stopCollectors with non-existent dir returned error: %v", err)
 	}
 }
 
-// TestStatsCustomStop_EmptyDir verifies statsCustomStop with an existing but empty dir.
+// TestStatsCustomStop_EmptyDir verifies stopCollectors with an existing but empty dir.
 func TestStatsCustomStop_EmptyDir(t *testing.T) {
 	t.Parallel()
 
@@ -173,9 +173,9 @@ func TestStatsCustomStop_EmptyDir(t *testing.T) {
 
 	ctl.p.statsPidDir = tmp
 
-	err := ctl.statsCustomStop(context.Background(), nil)
+	err := ctl.stopCollectors(context.Background(), ctl.registry[svcStats])
 	if err != nil {
-		t.Errorf("statsCustomStop with empty dir returned error: %v", err)
+		t.Errorf("stopCollectors with empty dir returned error: %v", err)
 	}
 }
 
@@ -199,13 +199,13 @@ func TestStatsCustomStop_SkipsNonPidFiles(t *testing.T) {
 
 	ctl.p.statsPidDir = tmp
 
-	err := ctl.statsCustomStop(context.Background(), nil)
+	err := ctl.stopCollectors(context.Background(), ctl.registry[svcStats])
 	if err != nil {
-		t.Errorf("statsCustomStop returned unexpected error: %v", err)
+		t.Errorf("stopCollectors returned unexpected error: %v", err)
 	}
 }
 
-// TestStatsCustomStop_ReadDirError verifies statsCustomStop returns error when
+// TestStatsCustomStop_ReadDirError verifies stopCollectors returns error when
 // ctl.p.statsPidDir exists but is not a directory.
 func TestStatsCustomStop_ReadDirError(t *testing.T) {
 	t.Parallel()
@@ -223,14 +223,14 @@ func TestStatsCustomStop_ReadDirError(t *testing.T) {
 
 	ctl.p.statsPidDir = fakePidDir
 
-	err := ctl.statsCustomStop(context.Background(), nil)
+	err := ctl.stopCollectors(context.Background(), ctl.registry[svcStats])
 	if err == nil {
 		t.Error("expected error when ctl.p.statsPidDir is a file (ReadDir fails)")
 	}
 }
 
 // ============================================================
-// stats_launcher.go — killStatsPidFile
+// collectors.go — killStatsPidFile
 // ============================================================
 
 // TestKillStatsPidFile_ValidPidSelfNoError verifies killStatsPidFile handles a valid but
@@ -253,10 +253,10 @@ func TestKillStatsPidFile_ValidPidSelfNoError(t *testing.T) {
 }
 
 // ============================================================
-// stats_launcher.go — statsCustomStart
+// collectors.go — startCollectors
 // ============================================================
 
-// TestStatsCustomStart_NoCollectors verifies statsCustomStart returns an error
+// TestStatsCustomStart_NoCollectors verifies startCollectors returns an error
 // when no collector binaries exist.
 func TestStatsCustomStart_NoCollectors(t *testing.T) {
 	t.Parallel()
@@ -272,13 +272,13 @@ func TestStatsCustomStart_NoCollectors(t *testing.T) {
 
 	ctl.p.log = tmp
 
-	err := ctl.statsCustomStart(context.Background(), &ServiceDef{Name: "stats"})
+	err := ctl.startCollectors(context.Background(), ctl.registry[svcStats])
 	if err == nil {
 		t.Error("expected error when no collector binaries exist")
 	}
 }
 
-// TestStatsCustomStart_WithFakeCollector verifies statsCustomStart starts at least
+// TestStatsCustomStart_WithFakeCollector verifies startCollectors starts at least
 // one collector when a matching binary is present in ctl.p.libexec.
 func TestStatsCustomStart_WithFakeCollector(t *testing.T) {
 	t.Parallel()
@@ -304,7 +304,7 @@ func TestStatsCustomStart_WithFakeCollector(t *testing.T) {
 
 	ctl.p.log = logDir
 
-	err := ctl.statsCustomStart(context.Background(), &ServiceDef{Name: "stats"})
+	err := ctl.startCollectors(context.Background(), ctl.registry[svcStats])
 	_ = err
 }
 
@@ -329,7 +329,7 @@ func TestStatsCustomStart_LogOpenFails(t *testing.T) {
 
 	ctl.p.log = filepath.Join(tmp, "nonexistent-log-dir")
 
-	err := ctl.statsCustomStart(context.Background(), &ServiceDef{Name: "stats"})
+	err := ctl.startCollectors(context.Background(), ctl.registry[svcStats])
 	if err == nil {
 		t.Error("expected error when no collectors can be started (log dir missing)")
 	}
@@ -349,7 +349,7 @@ func TestStatsCustomStart_LocalconfigFailError(t *testing.T) {
 
 	ctl.p.libexec = tmp
 
-	err := ctl.statsCustomStart(context.Background(), &ServiceDef{Name: "stats"})
+	err := ctl.startCollectors(context.Background(), ctl.registry[svcStats])
 	if err == nil {
 		t.Error("expected error in test environment (no localconfig)")
 	}
@@ -386,12 +386,12 @@ func TestStatsCustomStart_ConditionalCollectors(t *testing.T) {
 
 	ctl.p.log = logDir
 
-	err := ctl.statsCustomStart(context.Background(), &ServiceDef{Name: "stats"})
+	err := ctl.startCollectors(context.Background(), ctl.registry[svcStats])
 	_ = err
 }
 
 // ============================================================
-// registry.go — mailboxJavaBinary
+// registry.go — javaBinary
 // ============================================================
 
 // TestMailboxJavaBinary_ExplicitJavaHome verifies mailboxd_java_home is used.
@@ -416,9 +416,9 @@ func TestMailboxJavaBinary_ExplicitJavaHome(t *testing.T) {
 	lc := map[string]string{
 		"mailboxd_java_home": tmp,
 	}
-	got, err := ctl.mailboxJavaBinary(context.Background(), lc)
+	got, err := ctl.javaBinary(context.Background(), lc)
 	if err != nil {
-		t.Fatalf("mailboxJavaBinary returned error: %v", err)
+		t.Fatalf("javaBinary returned error: %v", err)
 	}
 	if got != javaBin {
 		t.Errorf("got %q, want %q", got, javaBin)
@@ -447,9 +447,9 @@ func TestMailboxJavaBinary_FallbackToZimbraJavaHome(t *testing.T) {
 	lc := map[string]string{
 		"zimbra_java_home": tmp,
 	}
-	got, err := ctl.mailboxJavaBinary(context.Background(), lc)
+	got, err := ctl.javaBinary(context.Background(), lc)
 	if err != nil {
-		t.Fatalf("mailboxJavaBinary returned error: %v", err)
+		t.Fatalf("javaBinary returned error: %v", err)
 	}
 	if got != javaBin {
 		t.Errorf("got %q, want %q", got, javaBin)
@@ -469,7 +469,7 @@ func TestMailboxJavaBinary_FixedFallbackMissing(t *testing.T) {
 	ctl.p.common = tmp
 
 	lc := map[string]string{}
-	_, err := ctl.mailboxJavaBinary(context.Background(), lc)
+	_, err := ctl.javaBinary(context.Background(), lc)
 	if err == nil {
 		t.Error("expected error when java binary is absent in fixed fallback path")
 	}
@@ -488,7 +488,7 @@ func TestMailboxJavaBinary_BinaryNotFound(t *testing.T) {
 	lc := map[string]string{
 		"mailboxd_java_home": tmp,
 	}
-	_, err := ctl.mailboxJavaBinary(context.Background(), lc)
+	_, err := ctl.javaBinary(context.Background(), lc)
 	if err == nil {
 		t.Error("expected error when java binary not found")
 	}
@@ -497,79 +497,6 @@ func TestMailboxJavaBinary_BinaryNotFound(t *testing.T) {
 // ============================================================
 // registry.go — various custom start/stop
 // ============================================================
-
-// TestMtaCustomStop_NotRunningOutput verifies that "is not running" in sudo output is treated as success.
-func TestMtaCustomStop_NotRunningOutput(t *testing.T) {
-	t.Parallel()
-
-	ctl := newRealController(t)
-
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	tmp := t.TempDir()
-
-	fakeBin := filepath.Join(tmp, "postfix")
-	script := "#!/bin/sh\necho 'postfix/postfix-script: the Postfix mail system is not running'\nexit 1\n"
-	if err := os.WriteFile(fakeBin, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	ctl.p.postfixBin = fakeBin
-
-	err := ctl.mtaCustomStop(context.Background(), nil)
-	_ = err
-}
-
-// TestMtaCustomStop_ErrorNotRunning verifies the error return when the command fails
-// with output that does NOT contain "is not running".
-func TestMtaCustomStop_ErrorNotRunning(t *testing.T) {
-	t.Parallel()
-
-	ctl := newRealController(t)
-
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	tmp := t.TempDir()
-
-	fakePostfix := filepath.Join(tmp, "postfix")
-	script := "#!/bin/sh\necho 'fatal: some other error'\nexit 1\n"
-
-	if err := os.WriteFile(fakePostfix, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	ctl.p.postfixBin = fakePostfix
-
-	err := ctl.mtaCustomStop(context.Background(), nil)
-	_ = err
-}
-
-// TestMtaCustomStop_SuccessPath verifies the success return when the command exits 0.
-func TestMtaCustomStop_SuccessPath(t *testing.T) {
-	t.Parallel()
-
-	ctl := newRealController(t)
-
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-	tmp := t.TempDir()
-
-	fakePostfix := filepath.Join(tmp, "postfix")
-	if err := os.WriteFile(fakePostfix, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	ctl.p.postfixBin = fakePostfix
-
-	err := ctl.mtaCustomStop(context.Background(), nil)
-	if err != nil {
-		t.Logf("sudo not available or rejected fake binary (expected in CI): %v", err)
-		t.Skip("skipping success-path assertion: sudo unavailable in this environment")
-	}
-}
 
 // TestServiceDiscoverIsExternallyManaged asserts configd only observes
 // service-discover: it owns service-discover.service (running
@@ -623,7 +550,9 @@ func TestMilterCustomStart_LocalconfigError(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	err := ctl.milterCustomStart(context.Background(), nil)
+	ctl.registry = ctl.defaultRegistry()
+
+	err := ctl.startJava(context.Background(), ctl.registry[svcMilter])
 	_ = err
 }
 
@@ -636,7 +565,9 @@ func TestMailboxCustomStart_LocalconfigError(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	err := ctl.mailboxCustomStart(context.Background(), &ServiceDef{Name: "mailbox"})
+	ctl.registry = ctl.defaultRegistry()
+
+	err := ctl.startJava(context.Background(), ctl.registry[svcMailbox])
 	_ = err
 }
 
@@ -649,7 +580,9 @@ func TestLdapCustomStart_LocalconfigError(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	err := ctl.ldapCustomStart(context.Background(), &ServiceDef{Name: "ldap"})
+	ctl.registry = ctl.defaultRegistry()
+
+	err := ctl.startDirect(context.Background(), svcLdap, ctl.registry[svcLdap])
 	_ = err
 }
 

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -374,5 +375,57 @@ func TestSdNotifySocketPath_Format(t *testing.T) {
 	path := ctl.p.sdNotifySocket("myservice")
 	if !strings.Contains(path, "notify-myservice.sock") {
 		t.Errorf("expected socket path to contain 'notify-myservice.sock', got %s", path)
+	}
+}
+
+// TestStopWithSDNotify_RestartKeepsNotifySocket is the regression test of the
+// stop-side observer unlinking the notify socket of the start that follows: a
+// restart of an sd_notify service in legacy mode stops it (observer started),
+// then starts it again, and the daemon's READY=1 must still reach the start.
+// Before the stop waited for its observer, the observer's deferred unlink ran
+// after the start had bound its own socket at the same path.
+func TestStopWithSDNotify_RestartKeepsNotifySocket(t *testing.T) {
+	t.Parallel()
+
+	ctl, f := newSDController(t)
+	def := ctl.registry[svcOpendkim]
+
+	if err := os.MkdirAll(filepath.Dir(def.BinaryPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(def.BinaryPath, []byte("x"), 0o755); err != nil { //nolint:gosec // test stand-in binary
+		t.Fatal(err)
+	}
+
+	// The daemon reports READY=1 a moment after the launch, after the window
+	// in which the stop-side observer (500 ms read deadline) used to unlink the
+	// socket path.
+	f.Exec.OnPath(def.BinaryPath, func(c *sys.Cmd) (sys.Result, error) {
+		for _, e := range c.Env {
+			if socket, ok := strings.CutPrefix(e, "NOTIFY_SOCKET="); ok {
+				go func() {
+					time.Sleep(900 * time.Millisecond)
+
+					if conn, err := net.Dial("unixgram", socket); err == nil {
+						_, _ = conn.Write([]byte("READY=1\n"))
+						_ = conn.Close()
+					}
+				}()
+			}
+		}
+
+		return sys.Result{}, nil
+	})
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	if err := ctl.stopWithoutSystemd(ctx, def.Name, def); err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+
+	if err := ctl.startWithoutSystemd(ctx, def.Name, def); err != nil {
+		t.Fatalf("start right after stop must see READY=1: %v", err)
 	}
 }

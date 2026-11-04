@@ -411,8 +411,9 @@ func (c *Controller) ServiceRestart(ctx context.Context, name string) error {
 		return fmt.Errorf(errUnknownService, name)
 	}
 
-	// MTA restart is converted to reload for graceful handling
-	if name == serviceMTA {
+	// A service that reloads instead of restarting (the MTA) is never stopped
+	// for a restart.
+	if def.Commands != nil && def.Commands.RestartAsReload {
 		if !c.rewriteSkipped(ctx) && len(def.ConfigRewrite) > 0 {
 			c.rewriteConfigs(ctx, def)
 		}
@@ -488,10 +489,10 @@ func (c *Controller) ServiceReload(ctx context.Context, name string) error {
 //
 // The legacy path covers the container case that motivated this design
 // (podman without carbonio targets enabled): services like stats are spawned
-// directly by statsCustomStart into /init.scope, so their systemd unit is
+// directly by the collectors launcher into /init.scope, so their systemd unit is
 // inactive even while the workers are live. In legacy mode we never ask
 // systemctl, so ServiceStatus reports the true state and controlStop can
-// invoke statsCustomStop to actually terminate the workers.
+// invoke stopCollectors to actually terminate the workers.
 func (c *Controller) ServiceStatus(ctx context.Context, name string) (bool, error) {
 	def := c.LookupService(name)
 	if def == nil {
@@ -519,6 +520,27 @@ func (c *Controller) compositeStatus(ctx context.Context, def *ServiceDef) (bool
 	}
 
 	return true, nil
+}
+
+// NotRunningMembers returns the display names of the applicable members of a
+// composite that are not running, in start order: what a composite's status
+// names when it is down (legacy storectl/antispamctl/antivirusctl print the
+// script of each failing member). It is empty for a service without members
+// and for a composite whose members all run.
+func (c *Controller) NotRunningMembers(ctx context.Context, def *ServiceDef) []string {
+	var down []string
+
+	for _, member := range c.applicableMembers(ctx, def) {
+		if running, err := c.ServiceStatus(ctx, member); err != nil || running {
+			continue
+		}
+
+		if m := c.LookupService(member); m != nil {
+			down = append(down, m.DisplayName)
+		}
+	}
+
+	return down
 }
 
 // systemdUnitsActive reports whether every unit is active. A non-zero
