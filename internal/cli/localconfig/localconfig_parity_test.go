@@ -298,7 +298,7 @@ func TestInfo_NoArgumentsListsAllSupportedKeysSorted(t *testing.T) {
 
 	var headers []string
 
-	for _, line := range strings.Split(stdout, "\n") {
+	for line := range strings.SplitSeq(stdout, "\n") {
 		if strings.HasSuffix(line, ":") && !strings.Contains(line, " ") {
 			headers = append(headers, strings.TrimSuffix(line, ":"))
 		}

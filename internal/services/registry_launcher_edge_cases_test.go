@@ -695,7 +695,7 @@ func TestGetDiskThreshold_RepeatedCalls(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: may invoke real system commands")
 	}
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		v := ctl.GetDiskThreshold()
 		if v <= 0 {
 			t.Errorf("call %d: ctl.GetDiskThreshold() = %d, want > 0", i, v)

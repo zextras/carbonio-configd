@@ -134,13 +134,7 @@ func TestRegistryDependencies_Antivirus(t *testing.T) {
 	}
 
 	// Verify ConfigRewrite contains "antivirus"
-	hasAntivirusConfig := false
-	for _, cfg := range def.ConfigRewrite {
-		if cfg == "antivirus" {
-			hasAntivirusConfig = true
-			break
-		}
-	}
+	hasAntivirusConfig := slices.Contains(def.ConfigRewrite, "antivirus")
 	if !hasAntivirusConfig {
 		t.Error("expected antivirus ConfigRewrite to contain 'antivirus'")
 	}
@@ -279,13 +273,7 @@ func TestRegistryClamdLegacyFields(t *testing.T) {
 	}
 
 	// ConfigRewrite should contain "antivirus"
-	hasAntivirusConfig := false
-	for _, cfg := range def.ConfigRewrite {
-		if cfg == "antivirus" {
-			hasAntivirusConfig = true
-			break
-		}
-	}
+	hasAntivirusConfig := slices.Contains(def.ConfigRewrite, "antivirus")
 	if !hasAntivirusConfig {
 		t.Error("ConfigRewrite does not contain 'antivirus'")
 	}

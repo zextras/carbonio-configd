@@ -688,7 +688,7 @@ func TestRunCleanup_EvictsOldestWhenOverLimit(t *testing.T) {
 	// Insert 5 entries with distinct timestamps (oldest first).
 	base := time.Now().Add(-10 * time.Minute)
 	cache.mutex.Lock()
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		key := fmt.Sprintf("key%d", i)
 		cache.memoryCache[key] = &MemoryCacheEntry{
 			Data:      key,

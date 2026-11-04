@@ -446,13 +446,7 @@ func TestScanProcesses_SelfMatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("scanProcesses returned error: %v", err)
 	}
-	found := false
-	for _, pid := range pids {
-		if pid == self {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(pids, self)
 	if !found {
 		// Not fatal — matches can be excluded by other scan heuristics
 		t.Logf("own pid %d not found among matches for %q (may be filtered)", self, needle)

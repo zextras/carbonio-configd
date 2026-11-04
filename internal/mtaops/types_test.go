@@ -88,7 +88,7 @@ func TestMapfileOperation(t *testing.T) {
 		name     string
 		op       MapfileOperation
 		checkKey string
-		checkVal interface{}
+		checkVal any
 	}{
 		{
 			name: "MAPFILE operation with base64",

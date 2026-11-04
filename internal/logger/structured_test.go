@@ -115,7 +115,7 @@ func TestJSONFormat(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(output), "\n")
 	lastLine := lines[len(lines)-1]
 
-	var logEntry map[string]interface{}
+	var logEntry map[string]any
 	if err := json.Unmarshal([]byte(lastLine), &logEntry); err != nil {
 		t.Fatalf("Failed to parse JSON output: %v", err)
 	}

@@ -289,10 +289,10 @@ func TestConfigMapConcurrent(t *testing.T) {
 	wg.Add(numGoroutines)
 
 	// Launch goroutines doing concurrent Set/Get/Delete/Snapshot
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		go func(id int) {
 			defer wg.Done()
-			for j := 0; j < opsPerGoroutine; j++ {
+			for j := range opsPerGoroutine {
 				key := "key" + string(rune(j%10))
 				value := "value" + string(rune(id))
 

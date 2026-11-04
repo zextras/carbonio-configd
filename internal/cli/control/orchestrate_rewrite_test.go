@@ -6,6 +6,7 @@ package control
 
 import (
 	"context"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -62,9 +63,7 @@ func newRewriteFlow(t *testing.T, lc map[string]string, enabled ...string) *rewr
 	add("mta", []string{"mta", "zimbra"})
 
 	base := map[string]string{"zimbra_server_hostname": "h.example.com", "ldap_url": "ldap://h.example.com:389"}
-	for k, v := range lc {
-		base[k] = v
-	}
+	maps.Copy(base, lc)
 
 	rf.o, rf.fakes = testOrchestrator(registry, base)
 	rf.o.svcStatus = func(_ context.Context, name string) (bool, error) {

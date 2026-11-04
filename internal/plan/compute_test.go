@@ -6,6 +6,7 @@ package plan
 
 import (
 	"bytes"
+	"maps"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -76,9 +77,7 @@ func baseVars() map[string]string {
 
 func changed(vars map[string]string, k, v string) map[string]string {
 	out := map[string]string{}
-	for key, val := range vars {
-		out[key] = val
-	}
+	maps.Copy(out, vars)
 
 	out[k] = v
 

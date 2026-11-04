@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"maps"
 	"syscall"
 	"testing"
 
@@ -33,9 +34,7 @@ func podRuntime(t *testing.T, hooks string, extra map[string]string) (*runtime, 
 	f.FS.Put(hooksPath, []byte(hooks), 0o644)
 
 	keys := map[string]string{"zmconfigd_service_hooks": hooksPath}
-	for k, v := range extra {
-		keys[k] = v
-	}
+	maps.Copy(keys, extra)
 
 	rt, err := buildRuntime(context.Background(), f.System(), &runtimeOpts{loadLocal: localKeys(keys)})
 	require.NoError(t, err)
