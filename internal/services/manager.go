@@ -128,8 +128,15 @@ var ErrRestartsFailed = errors.New("service restarts failed")
 // Registry-backed lifecycle functions in cli.go — the single control path
 // also used by the CLI. The MTA restart→reload conversion and the
 // systemd/legacy bifurcation both live there (ServiceRestart, IsSystemdMode).
+//
+// The action never regenerates configuration (legacy state.py controlProcess
+// always passed "norewrite" to the zm*ctl): the daemon calls this from its main
+// loop, after the cycle that decided the action has written the files, and a
+// rewrite here would be a REWRITE request to this very daemon. The loop is busy
+// running the action and cannot serve it, so the request would block until the
+// 60 s REWRITE timeout before the service could start.
 func (sm *ServiceManager) ControlProcess(ctx context.Context, service string, action ServiceAction) error {
-	ctx = logger.ContextWithComponentOnce(ctx, "services")
+	ctx = WithNoRewriteContext(logger.ContextWithComponentOnce(ctx, "services"))
 	service = strings.ToLower(service)
 
 	switch action {

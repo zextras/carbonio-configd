@@ -105,3 +105,60 @@ func TestGetSortedServices_EqualPriorityIsStable(t *testing.T) {
 		}
 	}
 }
+
+// TestControlProcess_NeverRewritesConfig is the regression for the self-REWRITE
+// stall: the daemon's main loop restarts a service through ControlProcess, and
+// a start that rewrote its configuration would send a REWRITE to this daemon,
+// which is busy running the restart and answers after the 60 s timeout. Legacy
+// controlProcess always passed norewrite. The restart still starts the service
+// (a failing start is reported) and the configuration is never touched.
+func TestControlProcess_NeverRewritesConfig(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name     string
+		action   ServiceAction
+		startErr error
+	}{
+		{name: "restart", action: ActionRestart},
+		{name: "start", action: ActionStart},
+		{name: "failed restart", action: ActionRestart, startErr: errors.New("nginx: operation not permitted")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			started := false
+			reg := map[string]*ServiceDef{
+				"proxy": {
+					Name:          "proxy",
+					ConfigRewrite: []string{"proxy"},
+					CustomStart: func(_ context.Context, _ *ServiceDef) error {
+						started = true
+
+						return tc.startErr
+					},
+					CustomStop: func(_ context.Context, _ *ServiceDef) error { return nil },
+				},
+			}
+
+			ctl, f := newFakeController(t, WithRegistry(reg))
+			f.FS.Put(ctl.p.configrewrite, []byte("#!/bin/sh\n"), 0o755)
+
+			err := NewServiceManager(ctl).ControlProcess(context.Background(), "proxy", tc.action)
+
+			if !errors.Is(err, tc.startErr) {
+				t.Errorf("ControlProcess error = %v, want %v", err, tc.startErr)
+			}
+
+			if !started {
+				t.Error("the service was not started")
+			}
+
+			for _, line := range f.Exec.Lines() {
+				if strings.HasPrefix(line, ctl.p.configrewrite) {
+					t.Errorf("config rewritten by a daemon-initiated %s: %q", tc.name, line)
+				}
+			}
+		})
+	}
+}
