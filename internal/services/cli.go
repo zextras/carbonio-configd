@@ -522,6 +522,27 @@ func (c *Controller) compositeStatus(ctx context.Context, def *ServiceDef) (bool
 	return true, nil
 }
 
+// NotRunningMembers returns the display names of the applicable members of a
+// composite that are not running, in start order: what a composite's status
+// names when it is down (legacy storectl/antispamctl/antivirusctl print the
+// script of each failing member). It is empty for a service without members
+// and for a composite whose members all run.
+func (c *Controller) NotRunningMembers(ctx context.Context, def *ServiceDef) []string {
+	var down []string
+
+	for _, member := range c.applicableMembers(ctx, def) {
+		if running, err := c.ServiceStatus(ctx, member); err != nil || running {
+			continue
+		}
+
+		if m := c.LookupService(member); m != nil {
+			down = append(down, m.DisplayName)
+		}
+	}
+
+	return down
+}
+
 // systemdUnitsActive reports whether every unit is active. A non-zero
 // systemctl exit (unit inactive/failed/unknown) or an unbooted systemd is a
 // "not running" answer; only a failure to run systemctl is an error.
