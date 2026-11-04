@@ -479,6 +479,11 @@ func TestRewriteOverTCP_ReleasedByCycle(t *testing.T) {
 
 	t.Cleanup(func() { st.server.Shutdown(context.Background()) })
 
+	// REWRITE only accepts sections of the parsed zmconfigd.cf.
+	f.deps.appState.SetMtaConfig(&config.MtaConfig{Sections: map[string]*config.MtaConfigSection{
+		restartSvc: {Name: restartSvc},
+	}})
+
 	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
 
 	reply := make(chan string, 1)
