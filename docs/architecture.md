@@ -97,7 +97,7 @@ logged, and followed by a normal-interval sleep, so a deterministic panic cannot
 | Load configs | `configManager.LoadAllConfigs` | Four concurrent goroutines; see Config loading pipeline below |
 | Parse MTA config | `configManager.ParseMtaConfig` | Reads `conf/zmconfigd.cf`, right after the load (`runLoadAndParse`) |
 | Validate hooks | `checkHooks` | Once, on the first parsed `zmconfigd.cf`; only with `zmconfigd_service_hooks`. A gap ends the daemon with status 1 |
-| LDAP watcher | `syncLDAPWatch` | Every iteration: with `zmconfigd_ldap_change_trigger=TRUE` starts the LDAP change watcher (once) or stops it when the key turns `FALSE`; with the key off (default) it does nothing and no goroutine exists. See [LDAP change detection](#ldap-change-detection-opt-in) |
+| LDAP watcher | `syncLDAPWatch` | Every iteration: starts the LDAP change watcher (once) unless `zmconfigd_ldap_change_trigger=FALSE`, and stops it when the key turns `FALSE`; with `FALSE` it does nothing and no goroutine exists. See [LDAP change detection](#ldap-change-detection) |
 | Build dependencies | `buildServiceDependencies` | Extracts DEPENDS entries from MTA sections for the shared service manager's watchdog cascade (config-driven restarts do not cascade, see restart-behavior.md) |
 | Claim REWRITE clients | `MainLoopActionTrigger.claimWaiters` | The TCP REWRITE clients registered so far now depend on this cycle: `Plan` takes their requested sections |
 | Snapshot + Observe | `configManager.Plan` (first half) | Freezes the loaded configs into an immutable `snapshot.Snapshot`, resolves every lookup `configd.cf` requires and publishes the result |
@@ -316,7 +316,7 @@ node_exporter textfile collector directory (`--collector.textfile.directory`).
 | `configd_restart_requests_total` | counter | `service`, `reason` (plan reason kind) | Restarts the restart policy queued; a restart with several reasons counts once under each |
 | `configd_watchdog_restarts_total` | counter | `service`, `result` (`success`, `failure`) | Restarts attempted by the watchdog |
 | `configd_load_failures_total` | counter | `source` (`lc`, `gc`, `mc`, `sc`, `timeout`, `mta_config`) | Failed configuration loads |
-| `configd_ldap_change_triggers_total` | counter | `component` (`global`, `servers`, `domains`), `result` (`cycle_requested`, `already_pending`) | Changes the [LDAP change watcher](#ldap-change-detection-opt-in) reported, once per changed component. `cycle_requested`: the main loop was woken and a cycle follows; `already_pending`: a wake-up (SIGHUP, REWRITE or an earlier change) was already queued and the change rides on that cycle. Only exists with `zmconfigd_ldap_change_trigger=TRUE` |
+| `configd_ldap_change_triggers_total` | counter | `component` (`global`, `servers`, `domains`), `result` (`cycle_requested`, `already_pending`) | Changes the [LDAP change watcher](#ldap-change-detection) reported, once per changed component. `cycle_requested`: the main loop was woken and a cycle follows; `already_pending`: a wake-up (SIGHUP, REWRITE or an earlier change) was already queued and the change rides on that cycle. Exists unless `zmconfigd_ldap_change_trigger=FALSE` |
 | `configd_ldap_watch_poll_failures_total` | counter | | Failed polls of the watcher (each is also a `WARN`) |
 
 Output is sorted (metrics, then label sets) with one `# HELP` and `# TYPE` line per metric, so
@@ -397,17 +397,18 @@ request (`OpTimeout`, 30 s). The pool lock is held only to pop or push an idle c
 network I/O, and `Client.Close` aborts connection attempts in flight. `Ldap.withRetry` backoff sleeps stop
 when the caller's context is cancelled.
 
-## LDAP change detection (opt-in)
+## LDAP change detection
 
 Source: `internal/ldapwatch`, `cmd/configd/ldapwatch.go`
 
-By default configd notices an LDAP change at the next cycle, up to `zmconfigd_interval`
-(300 s) later. With `zmconfigd_ldap_change_trigger=TRUE` (off by default, see
-[localconfig.md](localconfig.md#configd-only-keys-not-in-the-defaults-registry)) a watcher
-wakes the main loop as soon as an entry the cycle reads changes. Everything else is
+Without a watcher configd would notice an LDAP change at the next cycle, up to
+`zmconfigd_interval` (300 s) later. The watcher is **on by default**; set
+`zmconfigd_ldap_change_trigger=FALSE` (see
+[localconfig.md](localconfig.md#configd-only-keys-not-in-the-defaults-registry)) to opt out.
+It wakes the main loop as soon as an entry the cycle reads changes. Everything else is
 unchanged: the woken iteration is the normal cycle (Load, Snapshot, Plan, Execute, Apply
 restarts), rendered files, restart decisions and log lines are the same, and the regular
-interval poll keeps running as the safety net. A failing or stopped watcher therefore only
+interval cycle keeps running as the safety net. A failing or stopped watcher therefore only
 costs latency.
 
 **What is watched.** The entries the cycle reads from LDAP: the global config
@@ -416,54 +417,95 @@ costs latency.
 generator does). The server entries cover this server's own attributes and services, the
 upstream servers the proxy generates and the servers that `gamau`, `garpu` and `garpb`
 enumerate; those three lookups read the *servers* list, not the domains. Domains are read by
-the proxy generator only. Each search asks for `entryCSN` and `modifyTimestamp` only; the
-watcher hashes DN plus those values per component, so additions and deletions change the
-digest as well as modifications. The LDAP writes of a cycle go to slapd's own configuration
-database (the `LDAP` section, over ldapi), which is not watched, so a cycle cannot trigger
-itself.
+the proxy generator only. The watcher hashes DN plus `entryCSN` and `modifyTimestamp` per
+component, so additions and deletions change the digest as well as modifications. The LDAP
+writes of a cycle go to slapd's own configuration database (the `LDAP` section, over ldapi),
+which is not watched, so a cycle cannot trigger itself.
 
-**Why polling a fingerprint.** Measured on the QA container (carbonio-core 4.6.7):
+**Two detection modes, one state machine.** Both end in the same step: read the fingerprint
+(three small searches that return only `entryCSN` and `modifyTimestamp`), compare it with the
+last good one, report the components that differ.
 
-- OpenLDAP has no persistent search control.
-- RFC 4533 syncrepl `refreshAndPersist` (available in go-ldap v3) needs the `syncprov` overlay
-  on the data database. The QA directory loads only `dynlist`, `unique` and `noopsrch`
-  there: the root DSE has no `contextCSN`, and a search with the sync control is accepted
-  and then ends in a plain success without a Sync Done control and without ever streaming a
-  change. A watcher built on it would silently never fire.
-- `contextCSN`, where it exists, moves on every write (every mailbox account change), so it
-  cannot distinguish a relevant change from noise; the `entryCSN` of the few entries a cycle
-  reads can. `entryCSN` and `modifyTimestamp` are readable by the `zimbra` admin on all three
-  queries.
+| Mode | When | What wakes the watcher | LDAP load |
+|---|---|---|---|
+| `sync` | The root DSE lists the content-sync control `1.3.6.1.4.1.4203.1.9.1.1` in `supportedControl`, i.e. slapd loads the `syncprov` overlay, which multi-master and replica Carbonio setups do | A persistent RFC 4533 `refreshAndPersist` search (go-ldap `Syncrepl`) over the watched object classes (`zimbraGlobalConfig`, `zimbraServer`, `zimbraDomain`), DNs only. The server pushes a message for each committed change to one of those entries | One idle connection, one fingerprint read per debounced burst of changes, and one every `ResyncInterval` (5 min) as a cross-check |
+| `poll` | Fallback: no `syncprov` (a single-node Carbonio directory does not load it), or the server refuses the sync search | A timer: `zmconfigd_ldap_change_poll_seconds` (default 5 s) | A fingerprint read every poll interval. The domains search is the one that scales with the directory, which is why the interval is a key |
 
-Polling works on every topology (single node, replicas, failover) and needs nothing from the
-server. The cost is the poll: three small searches per `zmconfigd_ldap_change_poll_seconds`
-(default 5 s). The domains search is the one that scales with the directory, which is why the
-interval is a key.
+In `sync` mode a notification is only a hint: after the debounce window the watcher reads the
+fingerprint and reports what really changed. A notification that does not change a watched
+fingerprint (an event for an entry changed back, say) costs one read and triggers nothing.
+`contextCSN` is not used: it moves on every write of the database (every mailbox account
+change), so it cannot distinguish a relevant change from noise; the `entryCSN` of the few
+entries a cycle reads can.
 
-**Behaviour** (`ldapwatch.Watcher.Run`, a single goroutine, all waits and time reads through
-the injected `sys.Clock`):
+**Choosing a mode** (`ldapwatch.SyncSubscriber`). The root DSE is read first. A server that
+does not list the control is `poll`. A server that lists it is still asked: the module can be
+loaded without the overlay on the data database, in which case slapd answers the critical
+control with `unavailableCriticalExtension` (result code 12, observed in the integration test),
+and a server that ignores the control just completes the search without a refresh phase. Both
+are treated as "not available". The watcher then logs one `WARN` (`LDAP content sync is not
+available, falling back to polling`), polls, and tries the stream again every 10 minutes
+(`ProbeInterval`; a root DSE read and one connection), so a directory that gains `syncprov`
+is picked up without a restart. Later probes that find the same thing log at debug only.
+Other failures (connection errors, busy, a rejection after the stream worked) are not a
+verdict on the directory: they are a lost stream, see below.
+
+**Behaviour** (`ldapwatch.Watcher.Run`, one goroutine plus the stream goroutine, all waits
+and time reads through the injected `sys.Clock`):
 
 | Aspect | Behaviour |
 |---|---|
-| Baseline | The first successful poll only records the fingerprint and never triggers. A change between the first cycle's load and that poll is picked up by the interval poll |
-| Coalescing | A change is reported once it has been quiet for `zmconfigd_ldap_change_debounce_seconds` (default 2 s), or after ten windows of continuous changes at the latest, so one burst of writes yields one cycle and a steady stream cannot postpone it forever. `0` reports it in the poll that sees it. Further tokens while a cycle is pending collapse in the one-slot reload channel |
-| Trigger | `MainLoopActionTrigger.TriggerReload`: a non-blocking send on the reload channel SIGHUP and REWRITE use. Unlike SIGHUP it does not send `RELOADING=1` and does not zero the sleep timer, and unlike REWRITE it requests no section; the cycle is a full one (`reloadSignaled`, so `zmconfigd_skip_idle_polls` does not skip it). With no requested section it is a non-REWRITE cycle, so it also releases the restarts a REWRITE cycle deferred (see [restart-behavior.md](restart-behavior.md#a-change-consumed-by-a-rewrite-cycle-deferred-restarts)). It runs on the main loop goroutine like every other cycle, so it can never overlap a REWRITE cycle: a REWRITE that arrives while it runs waits for the next iteration |
-| Errors | A failed poll is logged as a warning (never an error) and retried after 1 s, 2 s, 4 s, ... capped at 60 s; the first good poll resets the wait. The fingerprint is compared with the last good one, so a change made while LDAP was unreachable triggers after the reconnect |
-| Client | The watcher reuses the config manager's native LDAP client (pool, retries, timeouts). Its searches take no context, so `LDAPSource` runs them in a helper goroutine and abandons the wait on cancel; the helper ends with the in-flight search, bounded by the client's operation timeout |
-| Lifecycle | Started from the main loop goroutine after the first successful load (the LDAP client and the parameters come from the loaded localconfig), stopped and joined when the key turns `FALSE` and when the daemon loop exits; cancelling the daemon context stops it too. Poll and debounce seconds are copied at start. Never started in `--once` mode |
-| Default off | With the key off `syncLDAPWatch` returns without starting anything: no goroutine, no timer, no LDAP query. It stays opt-in on purpose: legacy zmconfigd only polls, so cycles and the restarts they apply would otherwise start at arbitrary moments instead of at most `zmconfigd_interval` after a change, and three searches every 5 s are new LDAP load on every node. Failure already degrades cleanly (warning, exponential back-off, the interval poll keeps running), so turning it on is safe; making it the default is a behaviour change for the cutover to decide |
-| Directory read | The watcher polls the replica configd itself reads from: it reuses the config manager's LDAP client, so URL, bind, StartTLS/ldaps and CA handling are the ones `ldap.ResolveTLS` gives the cycle |
+| Baseline | The first successful fingerprint only records it and never triggers. In `sync` mode it is read once the stream is live (the initial refresh of the search is the baseline too, not a series of changes). A change between the first cycle's load and that read is picked up by the interval cycle |
+| Coalescing | A change is reported once it has been quiet for `zmconfigd_ldap_change_debounce_seconds` (default 2 s), or after ten windows of continuous changes at the latest, so one burst of writes yields one fingerprint read and one cycle and a steady stream cannot postpone it forever. `0` reports it at once. In `poll` mode the window starts when a poll sees the change, in `sync` mode when the first notification arrives. Further tokens while a cycle is pending collapse in the one-slot reload channel |
+| Trigger | `MainLoopActionTrigger.TriggerReload`: a non-blocking send on the reload channel SIGHUP and REWRITE use. Unlike SIGHUP it does not send `RELOADING=1` and does not zero the sleep timer, and unlike REWRITE it requests no section; the cycle is a full one (`reloadSignaled`, so `zmconfigd_skip_idle_polls` does not skip it). With no requested section it is a non-REWRITE cycle, so it also releases the restarts a REWRITE cycle deferred (see [restart-behavior.md](restart-behavior.md#a-change-consumed-by-a-rewrite-cycle-deferred-restarts)). It runs on the main loop goroutine like every other cycle, so it can never overlap a REWRITE cycle or another cycle: a REWRITE that arrives while it runs waits for the next iteration |
+| Errors in poll mode | A failed poll is logged as a warning (never an error) and retried after 1 s, 2 s, 4 s, ... capped at 60 s; the first good poll resets the wait. The fingerprint is compared with the last good one, so a change made while LDAP was unreachable triggers after the reconnect |
+| Lost stream | The stream is re-opened after 1 s, 2 s, 4 s, ... capped at 60 s, each loss logged as a warning (`LDAP change stream lost, reconnecting`) and counted in `configd_ldap_watch_stream_failures_total`. The wait only resets once a stream has stayed up for the cap, so a flapping server is not hammered. A new stream starts with a fingerprint read compared with the last good one, so a change made while there was no stream triggers after the reconnect. A failed fingerprint read ends the stream the same way |
+| Safety net | While a stream is live the fingerprint is also read every 5 minutes, so a notification that never arrived (a silently dropped connection that TCP keepalive has not caught yet) costs at most that. The interval cycle is the final net |
+| Client | The fingerprint searches reuse the config manager's native LDAP client (pool, retries, timeouts). Its searches take no context, so `LDAPSource` runs them in a helper goroutine and abandons the wait on cancel; the helper ends with the in-flight search, bounded by the client's operation timeout. The stream uses a dedicated, unpooled connection (`Client.NewStreamConn`) with the same URL failover, StartTLS/ldaps, CA and bind as the cycle, and no request timeout (the search is idle while nothing changes); cancelling the watcher closes it |
+| Lifecycle | Started from the main loop goroutine after the first successful load (the LDAP client and the parameters come from the loaded localconfig), stopped and joined when the key turns `FALSE` and when the daemon loop exits; cancelling the daemon context stops it too. Poll and debounce seconds are copied at start. Never started in `--once` mode, nor when there is no native LDAP client (one warning) |
+| Opt-out | With the key `FALSE` `syncLDAPWatch` returns without starting anything: no goroutine, no timer, no connection, no LDAP query |
+| Directory read | The watcher follows the server configd itself reads from: it reuses the config manager's LDAP client, so URL, bind, StartTLS/ldaps and CA handling are the ones `ldap.ResolveTLS` gives the cycle |
+
+**Default on: what changes operationally.** The watcher used to be opt-in. Legacy zmconfigd
+only polls on its interval, so a cycle, and the restarts it applies, ran at most
+`zmconfigd_interval` after a change; with the watcher on they start within seconds of it
+(`zmconfigd_ldap_change_debounce_seconds` plus the time to read the fingerprint). Concretely:
+
+- A `zmprov` or admin-console change to the global config, a server entry or a domain is
+  rendered and, when it needs a restart or reload, applied within seconds, not at the next
+  interval. A burst of writes is one cycle. A site that must apply changes only in a maintenance
+  window sets the key to `FALSE` (changes then wait for the interval, `SIGHUP` or a REWRITE).
+- The restarts a REWRITE cycle deferred (CO-4566) are released by the first non-REWRITE cycle,
+  and an LDAP-change cycle is one, so they now follow the next directory change instead of
+  the next interval. The interval cycle still releases them.
+- LDAP load: with `syncprov`, one extra idle connection plus a fingerprint read (three
+  searches) per burst of changes and one every 5 minutes; the initial refresh of the stream
+  transfers the DNs of the global config, the servers and every domain once per (re)connect.
+  Without `syncprov`, three searches every `zmconfigd_ldap_change_poll_seconds` (5 s), the
+  domains one walking every `zimbraDomain`: on a directory with many thousands of domains
+  raise the poll seconds or set `FALSE`.
+- On a single-node directory (no `syncprov`) every start of configd logs the fallback `WARN`
+  once.
+- `--once` runs, `configd plan` and the standalone `rewrite` are unaffected: no watcher is started.
 
 Logs (component `ldapwatch`): `LDAP change watcher started` and `... stopped` at info,
-`LDAP change detected, requesting configuration reload` at info with the changed components
-and how many changes were coalesced, the baseline and each observed change at debug, and
-`LDAP change poll failed, backing off` at warn. The same events are counted in the
-[metrics](#metrics-opt-in).
+`LDAP change stream established (content sync)` at info, `LDAP change detected, requesting
+configuration reload` at info with the changed components and how many changes (poll
+observations or stream notifications) were coalesced, the baseline and each observed change
+at debug, and at warn `LDAP content sync is not available, falling back to polling` (once),
+`LDAP change stream lost, reconnecting` and `LDAP change poll failed, backing off`. The same
+events are counted in the [metrics](#metrics-opt-in), which also tell the mode
+(`configd_ldap_watch_mode`).
 
-Tests: the watcher against a fake source on a manual clock (`internal/ldapwatch`, `cmd/configd`),
-and against a real slapd through the daemon's LDAP client (`make test-integration-ldap`,
-`TestOpenLDAP_ChangeTriggersAWatcherReload`: a change to the global config, a server entry or a
-domain is reported once, within seconds, and a change to an entry no cycle reads is not).
+Tests: the watcher against a fake source and a scripted subscriber on a manual clock
+(`internal/ldapwatch`, `cmd/configd`), the subscriber against a scripted sync response, and against
+a real slapd through the daemon's LDAP client (`make test-integration-ldap`): without a
+subscriber, with the subscriber on a directory without `syncprov` and on one that loads the
+module without the overlay (both must fall back and behave as the poller), and with the
+`syncprov` overlay (`TestOpenLDAP_SyncStreamTriggersAWatcherReload`: a change to the global
+config, a server entry or a domain is reported once, within seconds, a burst of five writes is
+one trigger and one fingerprint read, nothing polls while the stream is live, and a change to an
+entry no cycle reads is not reported).
 
 ## Package map
 
@@ -479,7 +521,7 @@ domain is reported once, within seconds, and a change to an entry no cycle reads
 | `internal/fileutil` | Atomic writes, copies and other shared file helpers |
 | `internal/intern` | Canonical (interned) strings for hot-path keys, attribute names and service names |
 | `internal/ldap` | Native LDAP client: pool, retries and error classification, TLS/StartTLS resolution, timeouts |
-| `internal/ldapwatch` | Opt-in LDAP change watcher: polls `entryCSN`/`modifyTimestamp` fingerprints, coalesces bursts, backs off on errors, requests an early cycle |
+| `internal/ldapwatch` | LDAP change watcher: RFC 4533 content-sync stream when the directory has `syncprov`, `entryCSN`/`modifyTimestamp` fingerprint polling otherwise; coalesces bursts, backs off on errors, requests an early cycle |
 | `internal/localconfig` | Native `localconfig.xml` reader, defaults registry, `CONFIGD_LC_<key>` overlay (`LoadEffective`), `${var}` expansion; replaces the `zmlocalconfig` subprocess |
 | `internal/logger` | `log/slog` setup, component/correlation context, redacting handler |
 | `internal/lookup` | `ConfigLookup` interface for local/global/server/misc value lookups |
