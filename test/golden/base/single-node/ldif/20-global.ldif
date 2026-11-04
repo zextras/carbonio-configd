@@ -1,0 +1,10 @@
+dn: cn=config,cn=zimbra
+changetype: modify
+replace: zimbraReverseProxyAvailableLookupTargets
+zimbraReverseProxyAvailableLookupTargets: 192.0.2.10
+-
+replace: zimbraMtaMyNetworks
+zimbraMtaMyNetworks: 127.0.0.0/8 [::1]/128 172.17.0.0/16
+-
+replace: zimbraDefaultDomainName
+zimbraDefaultDomainName: golden.test

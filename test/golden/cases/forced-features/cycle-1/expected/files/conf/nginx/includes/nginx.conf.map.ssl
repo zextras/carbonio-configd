@@ -1,0 +1,10 @@
+# Defines mapping for server name -> certificate
+map $ssl_server_name $targetCert {
+   default /opt/zextras/conf/nginx.crt;
+   include /opt/zextras/conf/nginx/includes/nginx.conf.map.crt;
+}
+
+map $ssl_server_name $targetCertKey {
+   default /opt/zextras/conf/nginx.key;
+   include /opt/zextras/conf/nginx/includes/nginx.conf.map.key;
+}

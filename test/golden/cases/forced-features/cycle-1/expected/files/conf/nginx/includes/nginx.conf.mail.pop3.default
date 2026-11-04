@@ -1,0 +1,19 @@
+# POP3 proxy default configuration
+#
+server
+{
+    #listen                  [::]:110 so_keepalive=on;
+    listen                110 so_keepalive=on;
+    #listen                [::]:110 so_keepalive=on;
+    ssl_dhparam         /opt/zextras/conf/dhparam.pem;
+    protocol                pop3;
+    proxy                   on;
+    timeout                 60;
+    proxy_timeout           60;
+    sasl_service_name       "pop";
+    starttls                only;
+    ssl_certificate         /opt/zextras/conf/nginx.crt;
+    ssl_certificate_key     /opt/zextras/conf/nginx.key;
+}
+
+

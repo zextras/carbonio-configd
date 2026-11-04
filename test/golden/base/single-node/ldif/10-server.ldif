@@ -1,0 +1,46 @@
+# Single all-in-one server, as a carbonio-bootstrap CE single install creates it.
+# The server is named by a literal address because ProxyConfGen resolves the
+# lookup handler host name: no DNS is then needed in either implementation.
+dn: cn=192.0.2.10,cn=servers,cn=zimbra
+objectClass: zimbraServer
+cn: 192.0.2.10
+zimbraServiceHostname: 192.0.2.10
+zimbraId: 3f1c2a54-7a0e-4d2b-9b2e-6c0a5d1e0001
+zimbraCreateTimestamp: 20261029000000.000Z
+zimbraServiceEnabled: amavis
+zimbraServiceEnabled: opendkim
+zimbraServiceEnabled: stats
+zimbraServiceEnabled: proxy
+zimbraServiceEnabled: memcached
+zimbraServiceEnabled: service
+zimbraServiceEnabled: mailbox
+zimbraServiceEnabled: directory-server
+zimbraServiceEnabled: mta
+zimbraServiceEnabled: antivirus
+zimbraServiceEnabled: service-discover
+zimbraServiceInstalled: amavis
+zimbraServiceInstalled: antivirus
+zimbraServiceInstalled: antispam
+zimbraServiceInstalled: opendkim
+zimbraServiceInstalled: mta
+zimbraServiceInstalled: directory-server
+zimbraServiceInstalled: mailbox
+zimbraServiceInstalled: memcached
+zimbraServiceInstalled: proxy
+zimbraServiceInstalled: stats
+zimbraServiceInstalled: service-discover
+zimbraIPMode: ipv4
+zimbraMailMode: http
+zimbraMtaAuthTarget: TRUE
+zimbraMailPort: 8080
+zimbraMailSSLPort: 8443
+zimbraMailProxyPort: 80
+zimbraMailSSLProxyPort: 443
+zimbraMailReferMode: reverse-proxied
+zimbraReverseProxyLookupTarget: TRUE
+zimbraReverseProxyMailEnabled: TRUE
+zimbraReverseProxyHttpEnabled: TRUE
+zimbraReverseProxyMailMode: https
+zimbraReverseProxyGenConfigPerVirtualHostname: TRUE
+zimbraSSLCertificate: GOLDEN-PLACEHOLDER-zimbraSSLCertificate
+zimbraSSLPrivateKey: GOLDEN-PLACEHOLDER-zimbraSSLPrivateKey

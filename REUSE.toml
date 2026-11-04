@@ -5,3 +5,19 @@ version = 1
 path = ["THIRDPARTIES", ".ci/thirdparties/thirdparties-go-rules.json", ".ci/thirdparties/thirdparties-go-deps.tmpl"]
 SPDX-FileCopyrightText = "2026 Zextras <https://www.zextras.com>"
 SPDX-License-Identifier = "AGPL-3.0-only"
+
+# The legacy install tree vendored from the product image (templates,
+# zmconfigd.cf, attrs.xml, directory seed) and the output the legacy zmconfigd
+# and ProxyConfGen generated from it are GPL-2.0-only (Synacor/Zextras).
+[[annotations]]
+path = ["test/golden/tree/**", "test/golden/cases/**/expected/**"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = ["2022 Synacor, Inc.", "2022 Zextras <https://www.zextras.com>"]
+SPDX-License-Identifier = "GPL-2.0-only"
+
+# Inputs of the corpus written for this repository.
+[[annotations]]
+path = ["test/golden/base/**", "test/golden/cases/**/case.txt", "test/golden/cases/**/sections", "test/golden/cases/**/ldif/**", "test/golden/README.md"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Zextras <https://www.zextras.com>"
+SPDX-License-Identifier = "AGPL-3.0-only"

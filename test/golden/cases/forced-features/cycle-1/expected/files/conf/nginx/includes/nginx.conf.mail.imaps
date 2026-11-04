@@ -1,0 +1,22 @@
+# IMAPS proxy configuration
+#
+server
+{
+    server_name         mail.example.com;
+    # The listen address prefix is empty (all addresses) unless zimbraReverseProxySNIEnabled is
+    # FALSE, in which case the deprecated zimbraVirtualIPAddress of the domain is used. IP-based
+    # virtual hosting is deprecated; note that the nginx mail module cannot select a certificate
+    # by SNI, so a per-domain certificate here only works with the legacy Virtual IP setup.
+    #listen              993 ssl;
+    listen            993 ssl;
+    #listen            993 ssl;
+    protocol            imap;
+    proxy               on;
+    timeout             60;
+    proxy_timeout       2100;
+    ssl_certificate     /opt/zextras/conf/domaincerts/example.com.crt;
+    ssl_certificate_key /opt/zextras/conf/domaincerts/example.com.key;
+    sasl_service_name   "imap";
+}
+
+

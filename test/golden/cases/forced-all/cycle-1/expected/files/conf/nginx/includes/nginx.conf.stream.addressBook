@@ -1,0 +1,23 @@
+# Address Book Proxy Configuration
+
+include /opt/zextras/conf/nginx/includes/nginx.conf.map.ssl;
+
+server
+{
+    #listen                  8636 ssl so_keepalive=on;
+    listen                8636 ssl so_keepalive=on;
+    #listen                [::]:8636 ssl so_keepalive=on;
+    ssl_protocols            TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_ciphers             ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384;
+    ssl_ecdh_curve          auto;
+    ssl_certificate         $targetCert;
+    ssl_certificate_key     $targetCertKey;
+    proxy_ssl_protocols            TLSv1.2 TLSv1.3;
+    proxy_ssl_ciphers             ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384;
+    #ssl_dhparam             /opt/zextras/conf/dhparam.pem;
+    proxy_pass address-book;
+    # Address Book is exposed with TLS natively
+    proxy_protocol on;
+    proxy_ssl on;
+}

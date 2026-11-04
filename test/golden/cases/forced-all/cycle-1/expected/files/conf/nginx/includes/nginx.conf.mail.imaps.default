@@ -1,0 +1,17 @@
+# IMAPS proxy default configuration
+#
+server
+{
+    #listen                  [::]:993 ssl so_keepalive=on;
+    listen                993 ssl so_keepalive=on;
+    #listen                [::]:993 ssl so_keepalive=on;
+    #ssl_dhparam         /opt/zextras/conf/dhparam.pem;
+    protocol            imap;
+    proxy               on;
+    timeout             60;
+    proxy_timeout       2100;
+    ssl_certificate     /opt/zextras/conf/nginx.crt;
+    ssl_certificate_key /opt/zextras/conf/nginx.key;
+    sasl_service_name   "imap";
+}
+

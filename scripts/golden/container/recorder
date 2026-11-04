@@ -1,0 +1,14 @@
+#!/usr/bin/python3
+# SPDX-FileCopyrightText: 2026 Zextras <https://www.zextras.com>
+#
+# SPDX-License-Identifier: AGPL-3.0-only
+#
+# Stand-in for the external commands zmconfigd runs for its side effects
+# (bin/postconf, the bin/zm*ctl service controllers, bin/ldap). It appends the
+# invocation to the exec log as one JSON array per line: [command, arg...].
+import json
+import os
+import sys
+
+with open("/var/tmp/golden/exec.jsonl", "a") as f:
+    f.write(json.dumps([os.path.basename(sys.argv[0])] + sys.argv[1:]) + "\n")

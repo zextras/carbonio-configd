@@ -1,0 +1,3 @@
+description: Single all-in-one server, forced rewrite of every section.
+base: single-node
+mode: forced

@@ -28,7 +28,7 @@ BUILD_FLAGS_PROFILING=-trimpath -tags profiling $(LDFLAGS)
 BUILD_FLAGS_TRACING=-trimpath -tags tracing $(LDFLAGS)
 BUILD_FLAGS_FULL=-trimpath -tags "profiling tracing" $(LDFLAGS)
 
-.PHONY: all build clean test test-integration test-integration-ldap deps fmt lint help install deadcode dup dup-baseline fuzz check reuse thirdparties generate generate-check
+.PHONY: golden golden-update all build clean test test-integration test-integration-ldap deps fmt lint help install deadcode dup dup-baseline fuzz check reuse thirdparties generate generate-check
 
 # REUSE compliance (same gate as the Jenkins 'REUSE Lint' stage)
 reuse:
@@ -215,6 +215,15 @@ dup:
 
 dup-baseline:
 	scripts/dup-check.sh --update
+
+# Legacy parity corpus (test/golden): render every case with the Go code and
+# compare with the output the legacy Jython zmconfigd/ProxyConfGen produced.
+golden:
+	$(GOTEST) ./cmd/configd -run TestGoldenParity -count=1 -v
+
+# Regenerate the expected outputs from the real legacy stack (podman, network).
+golden-update:
+	scripts/golden/regen.sh
 
 # Run every fuzz target for FUZZTIME (default 30s) each
 fuzz:

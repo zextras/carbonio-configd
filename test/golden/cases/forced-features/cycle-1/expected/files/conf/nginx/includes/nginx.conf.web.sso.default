@@ -1,0 +1,46 @@
+#client cert auth
+server {
+    #listen                  [::]:3443 default ssl so_keepalive=on;
+    listen                3443 default ssl so_keepalive=on;
+    #listen                [::]:3443 default ssl so_keepalive=on;
+    add_header Expect-CT max-age=86400;
+    add_header Permissions-Policy "geolocation=(self), microphone=(self)";
+    add_header Referrer-Policy "same-origin";
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload";
+    add_header X-Content-Type-Options "nosniff";
+    add_header X-Frame-Options "sameorigin";
+    add_header X-Robots-Tag "noindex, nofollow";
+    add_header X-XSS-Protection "1; mode=block";
+    add_header Content-Security-Policy "default-src 'self' data: blob: cid:; script-src 'self' 'unsafe-inline' 'unsafe-eval' *.zextras.tools *.jsdelivr.net; style-src * 'unsafe-inline'; img-src * data: blob: cid:; font-src * data:; connect-src 'self' *.zextras.tools *.jsdelivr.net; media-src * blob: data: cid:; object-src 'self'; child-src 'self' blob: data: cid:; frame-src 'self' blob: data: cid:; frame-ancestors 'self'; form-action 'self';";
+    ssl_protocols            TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_session_cache       shared:SSL:10m;
+    ssl_session_timeout     600;
+    ssl_ciphers             ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384;
+    ssl_ecdh_curve          auto;
+    ssl_certificate         /opt/zextras/conf/nginx.crt;
+    ssl_certificate_key     /opt/zextras/conf/nginx.key;
+    ssl_verify_client       off;
+    ssl_verify_depth        10;
+    proxy_ssl_protocols            TLSv1.2 TLSv1.3;
+    proxy_ssl_ciphers             ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384;
+    ssl_dhparam             /opt/zextras/conf/dhparam.pem;
+
+    error_page 495 496 497 =403 /50x.html;
+
+#    location = /certauth {
+#        zm_sso certauth;
+#        zm_sso_redirect_url 443;
+#    }
+
+#    location = /certauth/admin {
+#        zm_sso certauth_admin;
+#        zm_sso_redirect_url 9071;
+#    }
+
+    location / {
+        return 403; #other resource access is forbidden
+    }
+}
+
+    

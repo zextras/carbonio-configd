@@ -1,0 +1,81 @@
+# Features layered over the single-node base.
+dn: cn=192.0.2.10,cn=servers,cn=zimbra
+changetype: modify
+add: zimbraServiceEnabled
+zimbraServiceEnabled: antispam
+zimbraServiceEnabled: cbpolicyd
+-
+add: zimbraMtaRestriction
+zimbraMtaRestriction: reject_rbl zen.spamhaus.org
+zimbraMtaRestriction: reject_non_fqdn_helo_hostname
+-
+add: zimbraMtaRelayHost
+zimbraMtaRelayHost: relay.golden.test:25
+-
+add: zimbraAmavisMaxServers
+zimbraAmavisMaxServers: 4
+
+dn: cn=config,cn=zimbra
+changetype: modify
+add: zimbraSSLDHParam
+zimbraSSLDHParam:: LS0tLS1CRUdJTiBESCBQQVJBTUVURVJTLS0tLS0KTUlJQkNBS0NBUUVBR09MREVOR09MREVOR09MREVOR09MREVOR09MREVOR09MREVOR09MREVOR09MREVOMDEyMzQKR09MREVOR09MREVOR09MREVOR09MREVOMDEyMzQ1Njc4OWFiY2RlZkdPTERFTkdPTERFTkdPTERFTkdPTERFTj09Ci0tLS0tRU5EIERIIFBBUkFNRVRFUlMtLS0tLQo=
+-
+add: zimbraReverseProxyAvailableLookupTargets
+zimbraReverseProxyAvailableLookupTargets: 192.0.2.11
+
+# A second mailstore the proxy balances to.
+dn: cn=192.0.2.11,cn=servers,cn=zimbra
+objectClass: zimbraServer
+cn: 192.0.2.11
+zimbraServiceHostname: 192.0.2.11
+zimbraId: 3f1c2a54-7a0e-4d2b-9b2e-6c0a5d1e0002
+zimbraCreateTimestamp: 20261029000100.000Z
+zimbraServiceEnabled: service
+zimbraServiceEnabled: mailbox
+zimbraServiceInstalled: mailbox
+zimbraServiceInstalled: service-discover
+zimbraMailMode: http
+zimbraMailPort: 8080
+zimbraMailSSLPort: 8443
+zimbraReverseProxyLookupTarget: TRUE
+
+# Domains: one with a virtual host and its own certificate, one plain.
+dn: dc=com
+objectClass: dcObject
+objectClass: organization
+dc: com
+o: com
+
+dn: dc=example,dc=com
+objectClass: dcObject
+objectClass: organization
+objectClass: zimbraDomain
+o: example.com
+dc: example
+zimbraId: 8c2f7b1e-0000-4000-8000-000000000001
+zimbraDomainName: example.com
+zimbraDomainStatus: active
+zimbraDomainType: local
+zimbraVirtualHostname: mail.example.com
+zimbraVirtualIPAddress: 192.0.2.50
+zimbraSSLCertificate:: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUJHT0xERU5ET01BSU5DRVJUMDEyMzQ1Njc4OQotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg==
+zimbraSSLPrivateKey:: LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCk1JSUJHT0xERU5ET01BSU5LRVkwMTIzNDU2Nzg5Ci0tLS0tRU5EIFBSSVZBVEUgS0VZLS0tLS0K
+zimbraCreateTimestamp: 20261029000200.000Z
+
+dn: dc=test
+objectClass: dcObject
+objectClass: organization
+dc: test
+o: test
+
+dn: dc=plain,dc=test
+objectClass: dcObject
+objectClass: organization
+objectClass: zimbraDomain
+o: plain.test
+dc: plain
+zimbraId: 8c2f7b1e-0000-4000-8000-000000000002
+zimbraDomainName: plain.test
+zimbraDomainStatus: active
+zimbraDomainType: local
+zimbraCreateTimestamp: 20261029000300.000Z

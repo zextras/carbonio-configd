@@ -1,0 +1,279 @@
+# HTTPS Proxy Configuration
+#
+server
+{
+    server_name             mail.example.com;
+
+    # The listen address prefix is empty (all addresses, certificate chosen via SNI) unless
+    # zimbraReverseProxySNIEnabled is FALSE, in which case the deprecated zimbraVirtualIPAddress
+    # of the domain is used. IP-based virtual hosting is deprecated in favour of SNI.
+    #listen                    6071 ssl;
+    listen                  6071 ssl;
+    #listen                  6071 ssl;
+    http2 on;
+    ssl_protocols            TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_session_cache       shared:SSL:10m;
+    ssl_session_timeout     600;
+    ssl_ciphers             ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384;
+    ssl_ecdh_curve          auto;
+    ssl_certificate         /opt/zextras/conf/domaincerts/example.com.crt;
+    ssl_certificate_key     /opt/zextras/conf/domaincerts/example.com.key;
+    proxy_ssl_protocols            TLSv1.2 TLSv1.3;
+    proxy_ssl_ciphers             ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384;
+    ssl_dhparam             /opt/zextras/conf/dhparam.pem;
+
+    # no maximum limit imposed on the size of the request body
+    client_max_body_size    0;
+
+    # nginx compression
+    
+    gzip on;
+    gzip_disable "msie6";
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_comp_level 6;
+    gzip_buffers 16 8k;
+    gzip_http_version 1.1;
+    gzip_min_length 256;
+    gzip_types
+        application/atom+xml
+        application/geo+json
+        application/javascript
+        application/x-javascript
+        application/json
+        application/graphql-response+json
+        application/ld+json
+        application/manifest+json
+        application/rdf+xml
+        application/rss+xml
+        application/xhtml+xml
+        application/xml
+        font/eot
+        font/otf
+        font/ttf
+        font/woff2
+        image/svg+xml
+        text/css
+        text/javascript
+        text/plain
+        text/xml;
+
+
+    brotli on;
+    brotli_static on;
+    brotli_types
+        application/atom+xml
+        application/geo+json
+        application/javascript
+        application/x-javascript
+        application/json
+        application/graphql-response+json
+        application/ld+json
+        application/manifest+json
+        application/rdf+xml
+        application/rss+xml
+        application/xhtml+xml
+        application/xml
+        font/eot
+        font/otf
+        font/ttf
+        font/woff2
+        image/svg+xml
+        text/css
+        text/javascript
+        text/plain
+        text/xml;
+
+
+
+    # response headers
+    add_header Expect-CT max-age=86400;
+    add_header Permissions-Policy "geolocation=(self), microphone=(self)";
+    add_header Referrer-Policy "same-origin";
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload";
+    add_header X-Content-Type-Options "nosniff";
+    add_header X-Frame-Options "sameorigin";
+    add_header X-Robots-Tag "noindex, nofollow";
+    add_header X-XSS-Protection "1; mode=block";
+    add_header Content-Security-Policy "default-src 'self' data: blob: cid:; script-src 'self' 'unsafe-inline' 'unsafe-eval' *.zextras.tools *.jsdelivr.net; style-src * 'unsafe-inline'; img-src * data: blob: cid:; font-src * data:; connect-src 'self' *.zextras.tools *.jsdelivr.net; media-src * blob: data: cid:; object-src 'self'; child-src 'self' blob: data: cid:; frame-src 'self' blob: data: cid:; frame-ancestors 'self'; form-action 'self';";
+
+    # Block subresource requests flagged by $untrusted_subresource (nginx.conf.web)
+    if ($untrusted_subresource) {
+        return 403;
+    }
+
+    location = /favicon.ico
+    {
+      return 404;
+    }
+
+    location /
+    {
+        if ($http_cookie !~ "ZM_ADMIN_AUTH_TOKEN=") {
+            return 307 /static/login/;
+        }
+        return 307 "/carbonioAdmin";
+    }
+
+    location /services/storages/
+    {
+        proxy_request_buffering off;
+        proxy_pass http://carbonio-storages/;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+    }
+
+    location /services/catalog/
+    {
+        proxy_request_buffering off;
+        proxy_pass http://carbonio-catalog/;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+    }
+
+    location ^~ /service
+    {
+        # Proxy to Zimbra Upstream
+        proxy_pass          https://zimbra_admin;
+
+        # For audit
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+        # For admin console, the proxied request must have 7071
+        # in Host header. Otherwise, the web client page or error might be returned.
+        #
+        set $relhost $host;
+        if ($host = '') {
+            set $relhost $server_addr;
+        }
+        proxy_set_header Host            $relhost:7071;
+
+        # Avoid leak the 7071 in the response such as 302 redirection
+        #
+        proxy_redirect https://$relhost:7071/ https://$relhost:6071/;
+    }
+
+    location /login
+    {
+        add_header Expect-CT max-age=86400;
+    add_header Permissions-Policy "geolocation=(self), microphone=(self)";
+    add_header Referrer-Policy "same-origin";
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload";
+    add_header X-Content-Type-Options "nosniff";
+    add_header X-Frame-Options "sameorigin";
+    add_header X-Robots-Tag "noindex, nofollow";
+    add_header X-XSS-Protection "1; mode=block";
+    add_header Content-Security-Policy "default-src 'self' data: blob: cid:; script-src 'self' 'unsafe-inline' 'unsafe-eval' *.zextras.tools *.jsdelivr.net; style-src * 'unsafe-inline'; img-src * data: blob: cid:; font-src * data:; connect-src 'self' *.zextras.tools *.jsdelivr.net; media-src * blob: data: cid:; object-src 'self'; child-src 'self' blob: data: cid:; frame-src 'self' blob: data: cid:; frame-ancestors 'self'; form-action 'self';";
+        add_header Cache-Control "no-cache,must-revalidate,no-transform,max-age=604800";
+        alias /opt/zextras/admin/login;
+    }
+
+    location /carbonioAdmin
+    {
+        try_files index.html /carbonioAdmin/;
+        add_header Expect-CT max-age=86400;
+    add_header Permissions-Policy "geolocation=(self), microphone=(self)";
+    add_header Referrer-Policy "same-origin";
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload";
+    add_header X-Content-Type-Options "nosniff";
+    add_header X-Frame-Options "sameorigin";
+    add_header X-Robots-Tag "noindex, nofollow";
+    add_header X-XSS-Protection "1; mode=block";
+    add_header Content-Security-Policy "default-src 'self' data: blob: cid:; script-src 'self' 'unsafe-inline' 'unsafe-eval' *.zextras.tools *.jsdelivr.net; style-src * 'unsafe-inline'; img-src * data: blob: cid:; font-src * data:; connect-src 'self' *.zextras.tools *.jsdelivr.net; media-src * blob: data: cid:; object-src 'self'; child-src 'self' blob: data: cid:; frame-src 'self' blob: data: cid:; frame-ancestors 'self'; form-action 'self';";
+        add_header Cache-Control "no-cache,must-revalidate,no-transform,max-age=604800";
+        alias /opt/zextras/admin/iris/carbonio-admin-ui/current/;
+    }
+
+    location ~ "^/static/(iris/[^/]+/[a-f0-9]{7,}/.*)$"
+    {
+        add_header Expect-CT max-age=86400;
+    add_header Permissions-Policy "geolocation=(self), microphone=(self)";
+    add_header Referrer-Policy "same-origin";
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload";
+    add_header X-Content-Type-Options "nosniff";
+    add_header X-Frame-Options "sameorigin";
+    add_header X-Robots-Tag "noindex, nofollow";
+    add_header X-XSS-Protection "1; mode=block";
+    add_header Content-Security-Policy "default-src 'self' data: blob: cid:; script-src 'self' 'unsafe-inline' 'unsafe-eval' *.zextras.tools *.jsdelivr.net; style-src * 'unsafe-inline'; img-src * data: blob: cid:; font-src * data:; connect-src 'self' *.zextras.tools *.jsdelivr.net; media-src * blob: data: cid:; object-src 'self'; child-src 'self' blob: data: cid:; frame-src 'self' blob: data: cid:; frame-ancestors 'self'; form-action 'self';";
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        etag off;
+        alias /opt/zextras/admin/$1;
+    }
+
+    location ~ "^/static/(login/assets/[a-f0-9]{8,}\..+)$"
+    {
+        add_header Expect-CT max-age=86400;
+    add_header Permissions-Policy "geolocation=(self), microphone=(self)";
+    add_header Referrer-Policy "same-origin";
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload";
+    add_header X-Content-Type-Options "nosniff";
+    add_header X-Frame-Options "sameorigin";
+    add_header X-Robots-Tag "noindex, nofollow";
+    add_header X-XSS-Protection "1; mode=block";
+    add_header Content-Security-Policy "default-src 'self' data: blob: cid:; script-src 'self' 'unsafe-inline' 'unsafe-eval' *.zextras.tools *.jsdelivr.net; style-src * 'unsafe-inline'; img-src * data: blob: cid:; font-src * data:; connect-src 'self' *.zextras.tools *.jsdelivr.net; media-src * blob: data: cid:; object-src 'self'; child-src 'self' blob: data: cid:; frame-src 'self' blob: data: cid:; frame-ancestors 'self'; form-action 'self';";
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        etag off;
+        alias /opt/zextras/admin/$1;
+    }
+
+    location ~/static/(.*)
+    {
+        add_header Expect-CT max-age=86400;
+    add_header Permissions-Policy "geolocation=(self), microphone=(self)";
+    add_header Referrer-Policy "same-origin";
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload";
+    add_header X-Content-Type-Options "nosniff";
+    add_header X-Frame-Options "sameorigin";
+    add_header X-Robots-Tag "noindex, nofollow";
+    add_header X-XSS-Protection "1; mode=block";
+    add_header Content-Security-Policy "default-src 'self' data: blob: cid:; script-src 'self' 'unsafe-inline' 'unsafe-eval' *.zextras.tools *.jsdelivr.net; style-src * 'unsafe-inline'; img-src * data: blob: cid:; font-src * data:; connect-src 'self' *.zextras.tools *.jsdelivr.net; media-src * blob: data: cid:; object-src 'self'; child-src 'self' blob: data: cid:; frame-src 'self' blob: data: cid:; frame-ancestors 'self'; form-action 'self';";
+        add_header Cache-Control "no-cache,must-revalidate,no-transform,max-age=604800";
+        alias /opt/zextras/admin/$1;
+    }
+
+    location ~* ^/zmerror_.*\.html$ {
+        # for custom error pages, internal use only
+        internal;
+    }
+
+    location ~* ^/carbonio_error_.*\.html$ {
+        # for custom error pages, internal use only
+        internal;
+    }
+
+    location = /logout
+    {
+        # Logout changes state, so it is accepted only via POST
+        if ($request_method != POST) {
+            add_header Allow "POST" always;
+            return 405;
+        }
+
+        add_header Set-Cookie "ZM_ADMIN_AUTH_TOKEN=; Path=/; Expires=Thu, 01-Jan-1970 00:00:00 GMT; Max-Age=0; HttpOnly; Secure; SameSite=Strict";
+        add_header Set-Cookie "ZX_AUTH_TOKEN=; Path=/; Expires=Thu, 01-Jan-1970 00:00:00 GMT; Max-Age=0; HttpOnly; Secure; SameSite=Strict";
+        add_header Set-Cookie "JSESSIONID=; Path=/; Expires=Thu, 01-Jan-1970 00:00:00 GMT; Max-Age=0; HttpOnly; Secure; SameSite=Strict";
+        add_header Set-Cookie "AUTH_TOKEN_TYPE=; Path=/; Expires=Thu, 01-Jan-1970 00:00:00 GMT; Max-Age=0; HttpOnly; Secure; SameSite=Strict";
+        add_header Set-Cookie "T=; Path=/; Expires=Thu, 01-Jan-1970 00:00:00 GMT; Max-Age=0; HttpOnly; Secure; SameSite=Strict";
+        add_header Set-Cookie "Y=; Path=/; Expires=Thu, 01-Jan-1970 00:00:00 GMT; Max-Age=0; HttpOnly; Secure; SameSite=Strict";
+        add_header Set-Cookie "ADMIN_AUTH_KEY=; Path=/; Expires=Thu, 01-Jan-1970 00:00:00 GMT; Max-Age=0; HttpOnly; Secure; SameSite=Strict";
+        return 303 /static/login/;
+    }
+
+    location ^~ /zx/powerstore/
+    {
+        return 404;
+    }
+
+    location ^~ /zx/
+    {
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Port $server_port;
+        proxy_set_header Host $http_host;
+        proxy_pass https://zx_ssl;
+        proxy_http_version 1.0;
+        proxy_set_header  Connection close;
+    }
+}
+

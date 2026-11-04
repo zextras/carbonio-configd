@@ -1,0 +1,3 @@
+description: Antispam and cbpolicyd enabled, DH parameters, custom MTA restrictions, a second mailstore and virtual-host domains with their own certificates; forced rewrite of every section.
+base: single-node
+mode: forced

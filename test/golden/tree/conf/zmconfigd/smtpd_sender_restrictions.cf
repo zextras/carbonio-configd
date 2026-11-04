@@ -1,0 +1,8 @@
+%%exact VAR:zimbraMtaSmtpdSenderRestrictions reject_authenticated_sender_login_mismatch%%
+%%contains VAR:zimbraMtaSmtpdSenderRestrictions check_sender_access lmdb:/opt/zextras/conf/postfix_reject_sender%%
+%%contains VAR:zimbraServiceEnabled cbpolicyd^ check_policy_service inet:localhost:%%zimbraCBPolicydBindPort%%%%
+%%contains VAR:zimbraServiceEnabled amavis^ check_sender_access regexp:/opt/zextras/common/conf/tag_as_originating.re%%
+permit_mynetworks, reject_sender_login_mismatch
+permit_sasl_authenticated
+permit_tls_clientcerts
+%%contains VAR:zimbraServiceEnabled amavis^ check_sender_access regexp:/opt/zextras/common/conf/tag_as_foreign.re%%

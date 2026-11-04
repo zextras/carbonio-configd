@@ -1,0 +1,3 @@
+zimbraMilterServerEnabled=TRUE
+zimbraMilterBindAddress=127.0.0.1
+zimbraMilterBindPort=7026

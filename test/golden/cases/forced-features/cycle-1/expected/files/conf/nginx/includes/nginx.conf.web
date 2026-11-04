@@ -1,0 +1,81 @@
+http
+{
+    # necessary to have content-type while serving files
+    include /opt/zextras/common/conf/mime.types;
+    types
+    {
+        application/javascript mjs;
+    }
+
+    # disable nginx version on error pages
+    server_tokens off;
+
+
+
+    root /opt/zextras/data/nginx/html;
+
+    # You need to customize these two values by setting local config
+    # proxy_server_names_hash_max_size and proxy_names_hash_bucket_size
+    # when too many virtual host names are added
+    server_names_hash_max_size 512;
+    server_names_hash_bucket_size 64;
+
+
+
+    include /opt/zextras/conf/nginx/includes/nginx.conf.web.upstreams;
+
+    # Flag subresource requests (image, font, style, script, media, workers...) outside asset
+    # paths, so HTML content cannot trigger authenticated GETs via <img>, CSS url(), @import and
+    # similar. Navigations, frames, fetch/XHR and websockets are never flagged. Sec-Fetch-Dest is
+    # set by the browser (HTTPS only) and cannot be forged by page markup; requests without it
+    # match only the default. Regexes are evaluated in order, first match wins.
+    map "$http_sec_fetch_dest:$uri" $untrusted_subresource {
+        default 0;
+        "~^(document|iframe|frame|empty|websocket):" 0;
+        "~^[a-z]+:/static/" 0;
+        "~^[a-z]+:/service/home/~/" 0;
+        "~^[a-z]+:/service/preview/" 0;
+        "~^[a-z]+:/services/files/preview/" 0;
+        "~^(video|audio):/services/files/download/" 0;
+        "~^[a-z]+:/services/docs/editor/" 0;
+        "~^[a-z]+:/services/chats/preview/" 0;
+        "~^[a-z]+:/services/chats/attachments/" 0;
+        "~^[a-z]+:/services/chats/rooms/[^/]+/picture$" 0;
+        "~^[a-z]+:/meeting(/|$)" 0;
+        "~^[a-z]+:/files/public/link/access/assets/" 0;
+        "~^[a-z]+:" 1;
+    }
+
+    # Enable Access logs for web traffic
+    log_format upstream '$remote_addr:$remote_port - $remote_user [$time_local]  '
+      '"$request_method $scheme://$host$request_uri $server_protocol" $status $bytes_sent '
+      '"$http_referer" "$http_user_agent" "$upstream_addr" "$server_addr:$server_port"';
+    access_log /opt/zextras/log/nginx.access.log upstream;
+
+    # Set proxy timeout
+    proxy_connect_timeout 25;
+    proxy_read_timeout 60;
+    proxy_send_timeout 60;
+
+    # Custom error pages for upstream connection errors
+    proxy_intercept_errors on;
+    error_page 502 /zmerror_upstream_502.html;
+    error_page 504 /zmerror_upstream_504.html;
+    error_page 404 /carbonio_error_404.html;
+
+    #ssl_client_certificate  /opt/zextras/conf/nginx.client.ca.crt;
+
+    #include /opt/zextras/conf/nginx/includes/nginx.conf.web.http;
+    #include /opt/zextras/conf/nginx/includes/nginx.conf.web.http.default;
+    include /opt/zextras/conf/nginx/includes/nginx.conf.web.https;
+    include /opt/zextras/conf/nginx/includes/nginx.conf.web.https.default;
+    #include /opt/zextras/conf/nginx/includes/nginx.conf.web.sso;
+    #include /opt/zextras/conf/nginx/includes/nginx.conf.web.sso.default;
+    #include /opt/zextras/conf/nginx/includes/nginx.conf.web.admin;
+    #include /opt/zextras/conf/nginx/includes/nginx.conf.web.admin.default;
+    include /opt/zextras/conf/nginx/includes/nginx.conf.web.carbonio.admin;
+    include /opt/zextras/conf/nginx/includes/nginx.conf.web.carbonio.admin.default;
+    include /opt/zextras/conf/nginx/includes/nginx.conf.web.clamav.signature.provider;
+    include /opt/zextras/conf/nginx/extensions/upstream-*.conf;
+
+}
