@@ -13,6 +13,17 @@ CONFIGD=/opt/zextras/bin/configd
 PASS=0
 FAIL=0
 SKIP=0
+REAL_LC=/opt/zextras/conf/localconfig.xml
+WAIT_TIMEOUT=${WAIT_TIMEOUT:-30}
+
+# Scratch localconfig: every read/write test below runs against this copy so
+# the real localconfig.xml is never modified.
+WORKDIR=$(mktemp -d /tmp/configd-suite.XXXXXX)
+trap 'rm -rf "$WORKDIR"' EXIT
+TEST_LC="$WORKDIR/localconfig.xml"
+cp "$REAL_LC" "$TEST_LC" 2>/dev/null || : >"$TEST_LC"
+chmod 755 "$WORKDIR"
+chmod 666 "$TEST_LC"
 
 pass() {
   ((PASS++))
@@ -29,6 +40,33 @@ skip() {
 
 assert_contains() { echo "$1" | grep -q "$2" && pass "$3" || fail "$3" "output missing '$2'"; }
 assert_exit_ok() { eval "$1" >/dev/null 2>&1 && pass "$2" || fail "$2" "non-zero exit"; }
+
+# wait_until TIMEOUT_SECONDS COMMAND...: poll COMMAND (every 0.1s) until it
+# succeeds or the deadline passes. Returns COMMAND's success.
+wait_until() {
+  local timeout=$1 deadline
+  shift
+  deadline=$((SECONDS + timeout))
+  while ! "$@" >/dev/null 2>&1; do
+    [ "$SECONDS" -ge "$deadline" ] && return 1
+    sleep 0.1
+  done
+  return 0
+}
+# wait_until_not: poll until COMMAND fails.
+wait_until_not() {
+  local timeout=$1 deadline
+  shift
+  deadline=$((SECONDS + timeout))
+  while "$@" >/dev/null 2>&1; do
+    [ "$SECONDS" -ge "$deadline" ] && return 1
+    sleep 0.1
+  done
+  return 0
+}
+svc_running() { $CONFIGD service status "$1"; }
+memcached_running() { pgrep -f memcached; }
+
 assert_exit_fail() { eval "$1" >/dev/null 2>&1 && fail "$2" "should have failed" || pass "$2"; }
 
 echo "============================================"
@@ -66,11 +104,12 @@ echo "$out" | grep -qv '\*\*\*\*\*\*\*\*\*\*' && pass "-s shows password" || fai
 # --- 4. Localconfig Write ---
 echo ""
 echo "## 4. Localconfig Write"
-su - zextras -c "$CONFIGD localconfig -e _test_key=hello" 2>/dev/null
-assert_contains "$(su - zextras -c "$CONFIGD localconfig -s -k _test_key" 2>&1)" "hello" "-e writes"
-su - zextras -c "$CONFIGD localconfig -u _test_key" 2>/dev/null
-assert_contains "$(su - zextras -c "$CONFIGD localconfig -k _test_key" 2>&1)" "not found" "-u removes"
-assert_exit_fail "su - zextras -c '$CONFIGD localconfig -e zimbra_ldap_password=x' 2>/dev/null" "dangerous key blocked"
+# Operates on the scratch copy ($TEST_LC), never on the real localconfig.xml.
+su - zextras -c "$CONFIGD localconfig -c $TEST_LC -e _test_key=hello" 2>/dev/null
+assert_contains "$(su - zextras -c "$CONFIGD localconfig -c $TEST_LC -s -k _test_key" 2>&1)" "hello" "-e writes"
+su - zextras -c "$CONFIGD localconfig -c $TEST_LC -u _test_key" 2>/dev/null
+assert_contains "$(su - zextras -c "$CONFIGD localconfig -c $TEST_LC -k _test_key" 2>&1)" "null valued key" "-u removes"
+assert_exit_fail "su - zextras -c '$CONFIGD localconfig -c $TEST_LC -e zimbra_ldap_password=x' 2>/dev/null" "dangerous key blocked"
 
 # --- 5. Eval Compat (zmsetvars) ---
 echo ""
@@ -108,16 +147,13 @@ echo "## 8. Service Lifecycle (systemd)"
 if systemctl is-active carbonio-milter.service >/dev/null 2>&1; then
   SVC=milter
   $CONFIGD service restart $SVC >/dev/null 2>&1
-  sleep 3
-  $CONFIGD service status $SVC >/dev/null 2>&1 && pass "restart $SVC" || fail "restart $SVC" "not running after restart"
+  wait_until "$WAIT_TIMEOUT" svc_running $SVC && pass "restart $SVC" || fail "restart $SVC" "not running after restart"
 
   $CONFIGD service stop $SVC >/dev/null 2>&1
-  sleep 3
-  $CONFIGD service status $SVC >/dev/null 2>&1 && fail "stop $SVC" "still running" || pass "stop $SVC"
+  wait_until_not "$WAIT_TIMEOUT" svc_running $SVC && pass "stop $SVC" || fail "stop $SVC" "still running"
 
   $CONFIGD service start $SVC >/dev/null 2>&1
-  sleep 3
-  $CONFIGD service status $SVC >/dev/null 2>&1 && pass "start $SVC" || fail "start $SVC" "not running"
+  wait_until "$WAIT_TIMEOUT" svc_running $SVC && pass "start $SVC" || fail "start $SVC" "not running"
 else
   skip "lifecycle-systemd" "milter not running"
 fi
@@ -129,18 +165,15 @@ echo "## 8b. Service Lifecycle (direct fallback)"
 if [ -x /opt/zextras/common/bin/memcached ]; then
   # Start via direct fallback
   $CONFIGD service start memcached >/dev/null 2>&1
-  sleep 2
-  pgrep -f memcached >/dev/null 2>&1 && pass "start memcached (direct)" || fail "start memcached (direct)" "process not found"
+  wait_until "$WAIT_TIMEOUT" memcached_running && pass "start memcached (direct)" || fail "start memcached (direct)" "process not found"
 
   # Stop via pkill fallback
   $CONFIGD service stop memcached >/dev/null 2>&1
-  sleep 2
-  pgrep -f memcached >/dev/null 2>&1 && fail "stop memcached (direct)" "still running" || pass "stop memcached (direct)"
+  wait_until_not "$WAIT_TIMEOUT" memcached_running && pass "stop memcached (direct)" || fail "stop memcached (direct)" "still running"
 
   # Restart via direct
   $CONFIGD service start memcached >/dev/null 2>&1
-  sleep 2
-  pgrep -f memcached >/dev/null 2>&1 && pass "restart memcached (direct)" || fail "restart memcached (direct)" "process not found"
+  wait_until "$WAIT_TIMEOUT" memcached_running && pass "restart memcached (direct)" || fail "restart memcached (direct)" "process not found"
 else
   skip "lifecycle-direct" "memcached binary not found"
 fi

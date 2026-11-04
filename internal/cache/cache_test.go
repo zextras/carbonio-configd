@@ -624,10 +624,7 @@ func TestCleanupMemoryCache(t *testing.T) {
 		// Stop the cache
 		cache.Stop()
 
-		// Wait a bit to ensure cleanup goroutine has stopped
-		time.Sleep(100 * time.Millisecond)
-
-		// Verify stop channel is closed
+		// Stop closes the channel synchronously: no waiting needed.
 		select {
 		case <-cache.stop:
 			// Expected
@@ -718,9 +715,6 @@ func TestRunCleanup_ViaParentContextCancel(t *testing.T) {
 
 	// Cancel the parent context to stop the goroutine via the parent.Done() branch.
 	cancel()
-
-	// Give the goroutine a moment to exit.
-	time.Sleep(50 * time.Millisecond)
 
 	// The stop channel should still be open (we used ctx cancellation, not Stop()).
 	select {
