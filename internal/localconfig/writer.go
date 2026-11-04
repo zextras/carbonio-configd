@@ -5,6 +5,7 @@
 package localconfig
 
 import (
+	"context"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -14,14 +15,17 @@ import (
 	"slices"
 	"strconv"
 	"syscall"
+	"time"
 
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/fileutil"
+	"github.com/zextras/carbonio-configd/internal/logger"
 )
 
-// SaveLocalConfig writes a LocalConfig struct to an XML file atomically.
-// It writes to a temp file first, then renames to avoid partial writes.
-func SaveLocalConfig(path string, lc *LocalConfig) error {
+// saveLocalConfig writes lc atomically (temp file, then rename). It takes no
+// lock: the only callers are SetKeys and RemoveKeys, which hold it, so there is
+// no exported unlocked write path.
+func saveLocalConfig(path string, lc *LocalConfig) error {
 	data, err := xml.MarshalIndent(lc, "", "    ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal localconfig: %w", err)
@@ -50,7 +54,7 @@ func SetKeys(path string, pairs []Key) error {
 			setKey(lc, pair)
 		}
 
-		return SaveLocalConfig(path, lc)
+		return saveLocalConfig(path, lc)
 	})
 }
 
@@ -104,7 +108,7 @@ func RemoveKeys(path string, keys []string) error {
 			}
 		}
 
-		return SaveLocalConfig(path, lc)
+		return saveLocalConfig(path, lc)
 	})
 }
 
@@ -172,12 +176,15 @@ func withFileLock(path string, fn func() error) error {
 		_ = lockFile.Close()
 	}()
 
-	// If running as root, ensure lock file is owned by zextras
-	_ = ensureZextrasOwnership(lockPath)
+	// If running as root, ensure lock file is owned by zextras. A failure is
+	// not fatal (the lock still works) but would leave a root-owned lock file
+	// the zextras user cannot open, so it must be visible.
+	if err := ensureZextrasOwnership(lockPath); err != nil {
+		logger.WarnContext(context.Background(), "localconfig: lock file ownership", "error", err)
+	}
 
-	// #nosec G115 - fd conversion is safe for flock on Linux
-	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
-		return fmt.Errorf("failed to acquire lock: %w", err)
+	if err := flockWithTimeout(lockFile, lockTimeout); err != nil {
+		return err
 	}
 
 	defer func() {
@@ -186,6 +193,37 @@ func withFileLock(path string, fn func() error) error {
 	}()
 
 	return fn()
+}
+
+// lockTimeout bounds the wait for the localconfig lock (a var so tests can
+// shorten it).
+var lockTimeout = 30 * time.Second
+
+// lockPollInterval is how often a contended lock is retried.
+const lockPollInterval = 50 * time.Millisecond
+
+// flockWithTimeout takes an exclusive flock on f, polling non-blockingly so a
+// stuck holder cannot hang the caller forever.
+func flockWithTimeout(f *os.File, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+
+	for {
+		// #nosec G115 - fd conversion is safe for flock on Linux
+		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			return nil
+		}
+
+		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EINTR) {
+			return fmt.Errorf("failed to acquire lock: %w", err)
+		}
+
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timed out after %s waiting for %s: %w", timeout, f.Name(), err)
+		}
+
+		time.Sleep(lockPollInterval)
+	}
 }
 
 // ensureZextrasOwnership changes the ownership of the given path to zextras:zextras

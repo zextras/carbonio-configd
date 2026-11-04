@@ -123,17 +123,16 @@ func NewWithBaseURL(baseURL string, localCfg map[string]string) *Client {
 }
 
 // tlsConfig returns the TLS policy for the admin endpoint. The LDAP master
-// password is posted to it, so it follows the same localconfig rule as the
-// LDAP client (ldap.ResolveTLS, the legacy Java behavior): with
-// ssl_allow_untrusted_certs=false the server certificate is verified against
-// the system roots plus the Carbonio CA files (conf/ca/ca.pem,
-// ssl/carbonio/commercial/commercial_ca.crt) and the host name must match
-// zimbra_server_hostname; the legacy default (true) skips verification.
+// password is posted to it, so the server certificate is ALWAYS verified
+// (ssl_allow_untrusted_certs is deliberately ignored here) against the system
+// roots plus the Carbonio CA files (ldap.VerifiedTLSConfig). The certificate is
+// issued for the server FQDN, not localhost, so the TLS server name is
+// zimbra_server_hostname while the connection still dials the base URL host.
+// Without zimbra_server_hostname the URL host is used and verification
+// normally fails: the credential is never sent unverified.
 func tlsConfig(localCfg map[string]string) *tls.Config {
-	cfg := ldap.ResolveTLS(context.Background(), localCfg, sys.RealFS{}).Config
-	if !cfg.InsecureSkipVerify {
-		cfg.ServerName = strings.TrimSpace(localCfg["zimbra_server_hostname"])
-	}
+	cfg := ldap.VerifiedTLSConfig(context.Background(), localCfg, sys.RealFS{})
+	cfg.ServerName = strings.TrimSpace(localCfg["zimbra_server_hostname"])
 
 	return cfg
 }

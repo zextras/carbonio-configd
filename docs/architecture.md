@@ -147,6 +147,7 @@ RESPONSE = RESULT_STRING NEWLINE
 |---|---|---|
 | `STATUS` | `STATUS\n` | `SUCCESS ACTIVE\n` |
 | `REWRITE section [section ...]` | `REWRITE proxy mta\n` | `SUCCESS REWRITES COMPLETE\n` once the main loop has rewritten the sections; `ERROR REWRITE TIMEOUT\n` after 60 s (the request stays queued); `ERROR SHUTTING DOWN\n` if the daemon stops meanwhile |
+| `REWRITE` with names that are not sections of `zmconfigd.cf` | `REWRITE bogus\n` | Same reply as above: the legacy listener queues such names and no section matches them. configd logs a WARN and drops them, so they never reach the main loop; a request naming only unknown sections is acknowledged without a cycle. Requests are capped at 4096 bytes and 256 arguments |
 | `REWRITE` (no sections) | `REWRITE\n` | `ERROR NO SERVICES LISTED\n` (as the legacy listener) |
 | _(anything else, empty line)_ | `FOO\n` | `ERROR UNKNOWN COMMAND\n` |
 
@@ -373,6 +374,17 @@ exec `configd` subcommands. The Jython daemon could not be partitioned by sectio
 the whole cycle and port 7171; a forced run per section starts a JVM and never restarts services).
 Shadow mode is the safety net instead; rolling back is installing the previous package.
 
+Shadow mode is not run in Jenkins, and there is no legacy comparison there. `configd shadow` needs
+a configured Carbonio node (the install tree under `/opt/zextras`, `localconfig.xml`, the LDAP
+server with the real global config, servers and domains, and the service templates), and the
+repository contains neither such a fixture nor the legacy Jython implementation to produce the
+reference output. The CI pod has none of them, so a comparison there would diff against nothing.
+What CI covers instead: the shadow command's side-effect freedom (`cmd/configd/shadow_test.go`),
+the plan/render logic on fakes, and the OpenLDAP container suite (`make test-integration-ldap`,
+the Jenkins 'LDAP integration' stage, nightly or with `RUN_LDAP_INTEGRATION`). The legacy
+comparison is a manual QA-node step: run `configd shadow --single-cycle --shadow-dir DIR` on a
+node and diff `DIR` against the files legacy rendered.
+
 ## LDAP transport security and timeouts
 
 Source: `internal/ldap/tls.go` (`ResolveTLS`), `internal/ldap/client.go`
@@ -386,6 +398,13 @@ transport from localconfig with the rule of the legacy Java client
 | `ldap_starttls_supported` = `1` **and** `ldap_starttls_required` (default `true`) **and** `zimbra_require_interprocess_security` = `1` | `ldap://` URLs are upgraded with StartTLS. A failed upgrade fails the connection: there is no clear-text fallback |
 | `ldaps://` URL | TLS from the first byte; StartTLS is never issued on it |
 | `ssl_allow_untrusted_certs` (default `true`) | `true` skips certificate verification, like the Java dummy trust manager. `false` verifies the server against the system roots plus `conf/ca/ca.pem` and `ssl/carbonio/commercial/commercial_ca.crt` under `zimbra_home` (the CAs `zmcertmgr` adds to the Java truststore) |
+
+The admin HTTPS client (`internal/zxadmin`, `https://localhost:7071`, used by `status`, `localconfig reload`
+and the Advanced hook) is the exception: it POSTs the LDAP master password, so it **always** verifies the
+mailbox certificate, whatever `ssl_allow_untrusted_certs` says, against the system roots plus the same Carbonio
+CA files (`ldap.VerifiedTLSConfig`). The certificate is issued for the server FQDN, so the TLS server name is
+`zimbra_server_hostname` while the connection still dials localhost. A missing `zimbra_server_hostname` or an
+untrusted CA makes the call fail instead of sending the password. There is no opt-out.
 
 Booleans follow Java `Boolean.valueOf`: only `true` (any case) is true; `ldap_starttls_supported` and
 `zimbra_require_interprocess_security` are compared with `"1"`. TLS 1.2 is the minimum and the TLS server
