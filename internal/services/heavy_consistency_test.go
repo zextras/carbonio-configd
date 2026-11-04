@@ -14,13 +14,18 @@ import (
 )
 
 // TestHeavyServicesMatchRegistry keeps the restart policy's heavy set in step
-// with the registry: every heavy name resolves to mailbox, appserver-db, store
-// or ldap, and no light service (clamd, antivirus, antispam, ...) is heavy.
+// with the registry: every heavy name resolves to a ServiceDef marked Heavy
+// (mailbox, appserver-db, store, ldap), and no light service (clamd, antivirus,
+// antispam, ...) is heavy.
 func TestHeavyServicesMatchRegistry(t *testing.T) {
 	t.Parallel()
 
 	ctl := newRealController(t)
 	heavy := map[string]bool{svcMailbox: true, svcAppserverDB: true, svcStore: true, svcLdap: true}
+
+	for _, name := range ctl.AllServiceNames() {
+		assert.Equal(t, heavy[name], ctl.LookupService(name).Heavy, name)
+	}
 
 	for _, name := range []string{"mailbox", "mailboxd", "service", "appserver-db", "mysql", "mariadb",
 		"store", "ldap", "directory", "directory-server"} {

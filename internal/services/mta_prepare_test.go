@@ -362,7 +362,7 @@ func TestRunPostalias_FailureIsNonFatal(t *testing.T) {
 	ctl.runPostalias(context.Background())
 }
 
-// --- startPostfixDaemon / mtaIsRunning / sudoRun error paths ---
+// --- controlCommand / commandRunning / sudoRun error paths ---
 
 func TestStartPostfixDaemon_Error(t *testing.T) {
 	t.Parallel()
@@ -370,7 +370,7 @@ func TestStartPostfixDaemon_Error(t *testing.T) {
 	ctl, f := newFakeController(t)
 	f.Exec.FailStart(func(c *sys.Cmd) bool { return c.Path == sudoBin }, errors.New("sudo: not found"))
 
-	if err := ctl.startPostfixDaemon(context.Background()); err == nil {
+	if _, err := ctl.controlCommand(context.Background(), ctl.registry[serviceMTA], []string{"start"}); err == nil {
 		t.Fatal("expected error when sudo is missing")
 	}
 }
@@ -380,7 +380,7 @@ func TestStartPostfixDaemon_RunsStart(t *testing.T) {
 
 	ctl, f := newFakeController(t)
 
-	if err := ctl.startPostfixDaemon(context.Background()); err != nil {
+	if _, err := ctl.controlCommand(context.Background(), ctl.registry[serviceMTA], []string{"start"}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -396,7 +396,7 @@ func TestMtaIsRunning_Error(t *testing.T) {
 	ctl, f := newFakeController(t)
 	f.Exec.FailStart(func(c *sys.Cmd) bool { return c.Path == sudoBin }, errors.New("sudo: not found"))
 
-	if ctl.mtaIsRunning(context.Background()) {
+	if ctl.commandRunning(context.Background(), ctl.registry[serviceMTA]) {
 		t.Error("expected false when sudo is missing")
 	}
 }
@@ -406,7 +406,7 @@ func TestMtaIsRunning_Running(t *testing.T) {
 
 	ctl, f := newFakeController(t)
 
-	if !ctl.mtaIsRunning(context.Background()) {
+	if !ctl.commandRunning(context.Background(), ctl.registry[serviceMTA]) {
 		t.Error("expected true when `postfix status` succeeds")
 	}
 
@@ -453,7 +453,7 @@ func TestMtaCustomStart_LoadConfigFails(t *testing.T) {
 		return nil, fmt.Errorf("test error")
 	}
 
-	err := ctl.mtaCustomStart(context.Background(), nil)
+	err := ctl.startCommands(context.Background(), ctl.registry[serviceMTA])
 	if err == nil {
 		t.Fatal("expected error when ctl.loadConfig fails")
 	}
@@ -467,7 +467,7 @@ func TestMtaCustomStart_RunningSkip(t *testing.T) {
 	}))
 
 	// `postfix status` succeeds (fake default): the start is skipped.
-	if err := ctl.mtaCustomStart(context.Background(), nil); err != nil {
+	if err := ctl.startCommands(context.Background(), ctl.registry[serviceMTA]); err != nil {
 		t.Fatalf("mtaCustomStart (running skip): %v", err)
 	}
 
@@ -488,7 +488,7 @@ func TestMtaCustomStart_StartsWhenNotRunning(t *testing.T) {
 	f.FS.Put(ctl.p.mainCf, []byte("existing config\n"), 0o644) // bootstrap is a no-op
 	f.FS.PutDir(ctl.p.conf, 0o755)
 
-	if err := ctl.mtaCustomStart(context.Background(), nil); err != nil {
+	if err := ctl.startCommands(context.Background(), ctl.registry[serviceMTA]); err != nil {
 		t.Fatalf("mtaCustomStart: %v", err)
 	}
 
@@ -513,7 +513,7 @@ func TestMtaCustomStart_BootstrapError(t *testing.T) {
 	}))
 	f.Exec.When(func(c *sys.Cmd) bool { return slices.Contains(c.Args, "status") }, systest.Fail(1, ""))
 
-	if err := ctl.mtaCustomStart(context.Background(), nil); err == nil {
+	if err := ctl.startCommands(context.Background(), ctl.registry[serviceMTA]); err == nil {
 		t.Fatal("expected error when ctl.loadConfig fails")
 	}
 }
@@ -526,7 +526,7 @@ func TestMtaCustomStop_NotRunningFromLaunchers(t *testing.T) {
 	ctl, f := newFakeController(t)
 	f.Exec.OnPath(sudoBin, systest.Fail(1, "postfix/postfix-script: the Postfix mail system is not running"))
 
-	if err := ctl.mtaCustomStop(context.Background(), nil); err != nil {
+	if err := ctl.stopCommands(context.Background(), ctl.registry[serviceMTA]); err != nil {
 		t.Errorf("expected nil when postfix reports 'not running', got %v", err)
 	}
 }
@@ -537,7 +537,7 @@ func TestMtaCustomStop_Error(t *testing.T) {
 	ctl, f := newFakeController(t)
 	f.Exec.OnPath(sudoBin, systest.Fail(2, "fatal error"))
 
-	if err := ctl.mtaCustomStop(context.Background(), nil); err == nil {
+	if err := ctl.stopCommands(context.Background(), ctl.registry[serviceMTA]); err == nil {
 		t.Fatal("expected error when postfix stop fails with unexpected output")
 	}
 }

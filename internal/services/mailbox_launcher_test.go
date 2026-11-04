@@ -29,7 +29,9 @@ func TestMailboxCustomStart_LoadConfigFails(t *testing.T) {
 		return nil, fmt.Errorf("test config error")
 	}
 
-	err := ctl.mailboxCustomStart(context.Background(), &ServiceDef{Name: "mailbox"})
+	ctl.registry = ctl.defaultRegistry()
+
+	err := ctl.startJava(context.Background(), ctl.registry[svcMailbox])
 	if err == nil {
 		t.Fatal("expected error when ctl.loadConfig fails")
 	}
@@ -54,7 +56,9 @@ func TestMailboxCustomStart_JavaBinaryMissing(t *testing.T) {
 		}, nil
 	}
 
-	err := ctl.mailboxCustomStart(context.Background(), &ServiceDef{Name: "mailbox"})
+	ctl.registry = ctl.defaultRegistry()
+
+	err := ctl.startJava(context.Background(), ctl.registry[svcMailbox])
 	if err == nil {
 		t.Fatal("expected error when java binary is missing")
 	}
@@ -103,13 +107,15 @@ func TestMailboxCustomStart_JavaBinaryPresent(t *testing.T) {
 
 	ctl.p.mailbox = filepath.Join(tmp, "mailbox")
 
-	err := ctl.mailboxCustomStart(context.Background(), &ServiceDef{Name: "mailbox"})
+	ctl.registry = ctl.defaultRegistry()
+
+	err := ctl.startJava(context.Background(), ctl.registry[svcMailbox])
 	if err != nil {
 		t.Errorf("mailboxCustomStart returned error: %v", err)
 	}
 }
 
-// --- mailboxJavaBinary ---
+// --- javaBinary ---
 
 func TestMailboxJavaBinary_Missing(t *testing.T) {
 	t.Parallel()
@@ -120,7 +126,7 @@ func TestMailboxJavaBinary_Missing(t *testing.T) {
 		"mailboxd_java_home": "/nonexistent",
 	}
 
-	_, err := ctl.mailboxJavaBinary(context.Background(), lc)
+	_, err := ctl.javaBinary(context.Background(), lc)
 	if err == nil {
 		t.Fatal("expected error for missing java binary")
 	}
@@ -144,7 +150,7 @@ func TestMailboxJavaBinary_FallbackPath(t *testing.T) {
 	ctl.p.common = tmp
 
 	lc := map[string]string{}
-	bin, err := ctl.mailboxJavaBinary(context.Background(), lc)
+	bin, err := ctl.javaBinary(context.Background(), lc)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -266,7 +272,9 @@ func TestMailboxCustomStart_DirCreation(t *testing.T) {
 
 	ctl.p.common = filepath.Join(tmp, "common")
 
-	err := ctl.mailboxCustomStart(context.Background(), &ServiceDef{Name: "mailbox"})
+	ctl.registry = ctl.defaultRegistry()
+
+	err := ctl.startJava(context.Background(), ctl.registry[svcMailbox])
 	if err != nil {
 		t.Logf("mailboxCustomStart: %v (may fail if args issue)", err)
 	}
@@ -329,7 +337,9 @@ func TestMailboxCustomStart_GCLogCreation(t *testing.T) {
 
 	ctl.p.mailbox = filepath.Join(tmp, "mailbox")
 
-	err := ctl.mailboxCustomStart(context.Background(), &ServiceDef{Name: "mailbox"})
+	ctl.registry = ctl.defaultRegistry()
+
+	err := ctl.startJava(context.Background(), ctl.registry[svcMailbox])
 	if err != nil {
 		t.Logf("mailboxCustomStart: %v", err)
 	}
@@ -351,7 +361,7 @@ func TestMailboxCustomStop_NoProcessName(t *testing.T) {
 		return map[string]string{}, nil
 	}
 
-	err := ctl.mailboxCustomStop(context.Background(), &ServiceDef{Name: "mailbox"})
+	err := ctl.stopWithoutSystemd(context.Background(), svcMailbox, ctl.registry[svcMailbox])
 	if err != nil {
 		t.Fatalf("expected nil when ProcessName is empty, got %v", err)
 	}
@@ -370,9 +380,9 @@ func TestMailboxCustomStop_WithProcessName(t *testing.T) {
 		Name:        "mailbox",
 		ProcessName: "nonexistent-mailboxd-process-xyz",
 	}
-	err := ctl.mailboxCustomStop(context.Background(), def)
+	err := ctl.stopWithoutSystemd(context.Background(), def.Name, def)
 	if err != nil {
-		t.Logf("mailboxCustomStop with ProcessName: %v (stopAppserverDB error is expected)", err)
+		t.Logf("stop with ProcessName: %v (stopAppserverDB error is expected)", err)
 	}
 }
 
@@ -397,7 +407,7 @@ func TestMailboxJavaBinary_ZimbraJavaHome(t *testing.T) {
 		"mailboxd_java_home": "",
 		"zimbra_java_home":   filepath.Join(tmp, "zimbra-jdk"),
 	}
-	bin, err := ctl.mailboxJavaBinary(context.Background(), lc)
+	bin, err := ctl.javaBinary(context.Background(), lc)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

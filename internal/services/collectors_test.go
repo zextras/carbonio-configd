@@ -29,7 +29,7 @@ func TestStatsCustomStart_MysqlCollectorEnabled(t *testing.T) {
 
 	// This test verifies the function call path does not panic
 	// even when localconfig is unavailable.
-	err := ctl.statsCustomStart(context.Background(), &ServiceDef{Name: "stats"})
+	err := ctl.startCollectors(context.Background(), ctl.registry[svcStats])
 	if err == nil {
 		t.Log("statsCustomStart succeeded unexpectedly (localconfig available)")
 	}
@@ -50,7 +50,7 @@ func TestStatsCustomStart_LoadConfigFails(t *testing.T) {
 		return nil, fmt.Errorf("test config error")
 	}
 
-	err := ctl.statsCustomStart(context.Background(), &ServiceDef{Name: "stats"})
+	err := ctl.startCollectors(context.Background(), ctl.registry[svcStats])
 	if err == nil {
 		t.Fatal("expected error when ctl.loadConfig fails")
 	}
@@ -77,7 +77,7 @@ func TestStatsCustomStart_NoCollectorBinariesWithConfig(t *testing.T) {
 
 	ctl.p.log = filepath.Join(tmp, "log")
 
-	err := ctl.statsCustomStart(context.Background(), &ServiceDef{Name: "stats"})
+	err := ctl.startCollectors(context.Background(), ctl.registry[svcStats])
 	if err == nil {
 		t.Fatal("expected error when no collector binaries exist")
 	}
@@ -115,7 +115,7 @@ func TestStatsCustomStart_SomeCollectorsPresent(t *testing.T) {
 
 	ctl.p.log = logDir
 
-	err := ctl.statsCustomStart(context.Background(), &ServiceDef{Name: "stats"})
+	err := ctl.startCollectors(context.Background(), ctl.registry[svcStats])
 	if err != nil {
 		t.Errorf("statsCustomStart returned error: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestStatsCustomStart_ConditionalMysqlCollectorEnabled(t *testing.T) {
 
 	ctl.p.log = logDir
 
-	err := ctl.statsCustomStart(context.Background(), &ServiceDef{Name: "stats"})
+	err := ctl.startCollectors(context.Background(), ctl.registry[svcStats])
 	if err != nil {
 		t.Errorf("statsCustomStart returned error: %v", err)
 	}

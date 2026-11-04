@@ -28,7 +28,9 @@ func TestMilterCustomStart_LoadConfigFails(t *testing.T) {
 		return nil, fmt.Errorf("test config error")
 	}
 
-	err := ctl.milterCustomStart(context.Background(), nil)
+	ctl.registry = ctl.defaultRegistry()
+
+	err := ctl.startJava(context.Background(), ctl.registry[svcMilter])
 	if err == nil {
 		t.Fatal("expected error when ctl.loadConfig fails")
 	}
@@ -53,7 +55,9 @@ func TestMilterCustomStart_JavaBinaryMissing(t *testing.T) {
 		}, nil
 	}
 
-	err := ctl.milterCustomStart(context.Background(), nil)
+	ctl.registry = ctl.defaultRegistry()
+
+	err := ctl.startJava(context.Background(), ctl.registry[svcMilter])
 	if err == nil {
 		t.Fatal("expected error when java binary is missing")
 	}
@@ -100,7 +104,9 @@ func TestMilterCustomStart_JavaBinaryPresent(t *testing.T) {
 
 	ctl.p.base = tmp
 
-	err := ctl.milterCustomStart(context.Background(), nil)
+	ctl.registry = ctl.defaultRegistry()
+
+	err := ctl.startJava(context.Background(), ctl.registry[svcMilter])
 	if err != nil {
 		t.Errorf("milterCustomStart returned error: %v", err)
 	}

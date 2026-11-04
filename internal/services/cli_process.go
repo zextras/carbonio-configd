@@ -49,33 +49,37 @@ func (c *Controller) startService(ctx context.Context, name string, def *Service
 
 // startWithoutSystemd is the fast-path for hosts where /run/systemd/system is
 // missing. We never invoke systemctl — its failure mode is verbose and noisy.
-// Precedence: CustomStart hook (fully custom launch) > BinaryPath direct spawn.
+// The launch strategy the ServiceDef declares decides how: a CustomStart hook
+// (fully custom launch), a Java, Mysqld, Commands or Collectors spec (the
+// generic launchers of launch*.go and collectors.go), else a BinaryPath
+// direct spawn.
 func (c *Controller) startWithoutSystemd(ctx context.Context, name string, def *ServiceDef) error {
-	if def.CustomStart != nil {
-		logger.InfoContext(ctx, "Starting service via custom launcher (legacy mode)",
+	logger.InfoContext(ctx, "Starting service in legacy mode", "service", name)
+
+	switch {
+	case def.CustomStart != nil:
+		return def.CustomStart(ctx, def)
+	case def.Java != nil:
+		return c.startJava(ctx, def)
+	case def.Mysqld != nil:
+		return c.startMysqld(ctx, def)
+	case def.Commands != nil:
+		return c.startCommands(ctx, def)
+	case def.Collectors != nil:
+		return c.startCollectors(ctx, def)
+	case def.BinaryPath != "":
+		return c.startDirect(ctx, name, def)
+	case def.ProcessName != "":
+		logger.DebugContext(ctx, "No direct launcher; service managed via dependencies",
 			"service", name)
 
-		return def.CustomStart(ctx, def)
-	}
-
-	if def.BinaryPath == "" {
-		if def.ProcessName != "" {
-			logger.DebugContext(ctx, "No direct launcher; service managed via dependencies",
-				"service", name)
-
-			return nil
-		}
-
+		return nil
+	default:
 		return fmt.Errorf(
 			"cannot start %s in legacy mode: no direct launcher registered "+
-				"(set ServiceDef.BinaryPath or ServiceDef.CustomStart, "+
+				"(declare a launch strategy or BinaryPath in its ServiceDef, "+
 				"or enable a Carbonio systemd target)", name)
 	}
-
-	logger.InfoContext(ctx, "Starting service directly (legacy mode)",
-		"service", name, "binary", def.BinaryPath)
-
-	return c.startDirect(ctx, name, def)
 }
 
 // stopService stops a service. Mirrors startService's bifurcation on
@@ -108,9 +112,9 @@ func (c *Controller) stopService(ctx context.Context, name string, def *ServiceD
 }
 
 // stopWithoutSystemd is the fast-path stop for non-systemd hosts.
-// Precedence: CustomStop hook (fully custom shutdown) > GracefulStop
-// (SIGTERM the identity-validated pidfile process, bounded wait, SIGKILL) >
-// ProcessName pkill.
+// Precedence: CustomStop hook (fully custom shutdown) > the Mysqld, Commands
+// or Collectors spec > GracefulStop (SIGTERM the identity-validated pidfile
+// process, bounded wait, SIGKILL) > ProcessName pkill.
 //
 // For services with UseSDNotify, an sd_notify shutdown observer is started
 // in parallel with killProcess: it listens on the persistent NOTIFY_SOCKET
@@ -120,11 +124,15 @@ func (c *Controller) stopService(ctx context.Context, name string, def *ServiceD
 // log, a clean graceful shutdown from an SIGTERM-ignoring process that only
 // died via the SIGKILL escalation.
 func (c *Controller) stopWithoutSystemd(ctx context.Context, name string, def *ServiceDef) error {
-	if def.CustomStop != nil {
-		logger.InfoContext(ctx, "Stopping service via custom shutdown (legacy mode)",
-			"service", name)
-
+	switch {
+	case def.CustomStop != nil:
 		return def.CustomStop(ctx, def)
+	case def.Mysqld != nil:
+		return c.stopMysqldService(ctx, def)
+	case def.Commands != nil && def.Commands.Stop != nil:
+		return c.stopCommands(ctx, def)
+	case def.Collectors != nil:
+		return c.stopCollectors(ctx, def)
 	}
 
 	if def.GracefulStop > 0 && def.PidFile != "" {
@@ -165,30 +173,13 @@ func (c *Controller) stopWithoutSystemd(ctx context.Context, name string, def *S
 }
 
 // reloadWithoutSystemd is the fast-path reload for non-systemd hosts.
-// systemctl is never invoked. MTA has a native reload ("postfix reload",
-// mirroring mta_launcher.go's direct sudo-postfix pattern); every other
-// service falls back to stopService+startService, which — already being in
-// legacy mode — resolve to CustomStop/CustomStart or ProcessName/BinaryPath,
-// never systemctl.
+// systemctl is never invoked. A service with a Reload verb in its CommandSpec
+// (the MTA's "postfix reload") reloads natively; every other service falls
+// back to stopService+startService, which — already being in legacy mode —
+// resolve to its launch strategy or ProcessName/BinaryPath, never systemctl.
 func (c *Controller) reloadWithoutSystemd(ctx context.Context, name string, def *ServiceDef) error {
-	if name == serviceMTA {
-		// Legacy zmmtactl reload runs "reload" on each START_SCRIPTS entry:
-		// zmmilterctl and zmsaslauthdctl implement reload as stop+start, then
-		// postfix reload (carbonio-core 4.6.7 src/bin/mtactl.sh).
-		for _, dep := range def.Dependencies {
-			if !c.isDepEnabled(ctx, dep) {
-				continue
-			}
-
-			if err := c.ServiceRestart(ctx, dep); err != nil {
-				logger.WarnContext(ctx, "Dependency restart failed during MTA reload",
-					"dependency", dep, "error", err)
-			}
-		}
-
-		logger.InfoContext(ctx, "Reloading service via postfix reload (legacy mode)", "service", name)
-
-		return c.sudoRun(ctx, c.p.postfixBin, actionReload)
+	if def.Commands != nil && def.Commands.Reload != nil {
+		return c.reloadCommands(ctx, def)
 	}
 
 	logger.InfoContext(ctx, "No native reload for service, restarting (legacy mode)", "service", name)
@@ -223,12 +214,16 @@ func (c *Controller) startDirect(ctx context.Context, name string, def *ServiceD
 		return fmt.Errorf("no binary path defined for %s", name)
 	}
 
+	args, err := c.launchArgs(def)
+	if err != nil {
+		return err
+	}
+
 	if _, err := c.env.FS.Stat(def.BinaryPath); err != nil {
 		return fmt.Errorf("%s binary not found at %s: %w", name, def.BinaryPath, err)
 	}
 
 	binary := def.BinaryPath
-	args := def.BinaryArgs
 
 	// Services like postfix require root. If current user is not root, use sudo.
 	if def.NeedsRoot && c.env.Proc.UID() != 0 {
@@ -240,7 +235,7 @@ func (c *Controller) startDirect(ctx context.Context, name string, def *ServiceD
 		"service", name, "binary", binary, "args", args, "detached", def.Detached)
 
 	if def.Detached {
-		return c.startDetached(ctx, name, def)
+		return c.startDetached(ctx, name, def, args)
 	}
 
 	if def.UseSDNotify {
@@ -254,13 +249,29 @@ func (c *Controller) startDirect(ctx context.Context, name string, def *ServiceD
 		return fmt.Errorf("failed to start %s directly: %s: %w", name, strings.TrimSpace(string(output)), err)
 	}
 
-	return nil
+	return c.awaitReady(ctx, def, nil)
+}
+
+// launchArgs returns the arguments of a BinaryPath launch: BinaryArgs, or what
+// ArgsFromConfig computes from localconfig.
+func (c *Controller) launchArgs(def *ServiceDef) ([]string, error) {
+	if def.ArgsFromConfig == nil {
+		return def.BinaryArgs, nil
+	}
+
+	lc, err := c.loadConfig()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load localconfig: %w", err)
+	}
+
+	return def.ArgsFromConfig(lc), nil
 }
 
 // startDetached spawns a long-running daemon in its own session, releasing the
 // controlling terminal so the parent CLI can exit cleanly. stdout+stderr are
-// redirected to def.LogFile (default: c.p.base/log/<name>.out).
-func (c *Controller) startDetached(_ context.Context, name string, def *ServiceDef) error {
+// redirected to def.LogFile (default: c.p.base/log/<name>.out). With a
+// readiness probe (def.Ready) the start returns once the probe passes.
+func (c *Controller) startDetached(ctx context.Context, name string, def *ServiceDef, args []string) error {
 	logFilePath := def.LogFile
 	if logFilePath == "" {
 		logFilePath = c.p.log + "/" + name + ".out"
@@ -271,12 +282,14 @@ func (c *Controller) startDetached(_ context.Context, name string, def *ServiceD
 		return fmt.Errorf("open log file %s for %s: %w", logFilePath, name, err)
 	}
 
+	defer func() { _ = logFile.Close() }()
+
 	// Note: the daemon is started with context.Background(), not the CLI's
 	// context — it must outlive the CLI. The daemon is supervised by its own
 	// logic (systemd-style sd_notify, watchdog, signal handlers).
 	cmd := &sys.Cmd{
 		Path:   def.BinaryPath,
-		Args:   def.BinaryArgs,
+		Args:   args,
 		Stdout: logFile,
 		Stderr: logFile,
 		Setsid: true,
@@ -286,17 +299,12 @@ func (c *Controller) startDetached(_ context.Context, name string, def *ServiceD
 	// startWithSDNotify starts the process internally.
 	if def.UseSDNotify {
 		proc, err := c.startWithSDNotify(context.Background(), cmd, name)
-		_ = logFile.Close()
-
 		if err != nil {
 			return fmt.Errorf("failed to start %s: %w", name, err)
 		}
 
 		if proc != nil {
-			if releaseErr := proc.Release(); releaseErr != nil {
-				logger.WarnContext(context.Background(), "Failed to release child handle",
-					"service", name, "pid", proc.Pid(), "error", releaseErr)
-			}
+			c.releaseChild(name, proc)
 		}
 
 		return nil
@@ -304,20 +312,32 @@ func (c *Controller) startDetached(_ context.Context, name string, def *ServiceD
 
 	proc, err := c.env.Exec.Start(context.Background(), cmd)
 	if err != nil {
-		_ = logFile.Close()
-
 		return fmt.Errorf("failed to spawn %s: %w", name, err)
 	}
 
-	// Once the daemon has its own session it owns the fd; the parent can drop it.
-	_ = logFile.Close()
+	if def.Ready == ReadyLDAP {
+		// The probe fails fast when the daemon dies during startup, so a
+		// goroutine reaps it and reports its exit; that goroutine owns the
+		// handle from here on.
+		exited := make(chan error, 1)
+
+		go func() { exited <- proc.Wait() }()
+
+		return c.awaitReady(ctx, def, exited)
+	}
+
 	// Reap eventually — Release lets the kernel clean up when daemon exits.
+	c.releaseChild(name, proc)
+
+	return c.awaitReady(ctx, def, nil)
+}
+
+// releaseChild frees the handle of a detached child the CLI never waits for.
+func (c *Controller) releaseChild(name string, proc sys.Process) {
 	if err := proc.Release(); err != nil {
 		logger.WarnContext(context.Background(), "Failed to release child handle",
 			"service", name, "pid", proc.Pid(), "error", err)
 	}
-
-	return nil
 }
 
 // killProcess terminates every process of the identity processName (exe/argv
@@ -444,6 +464,22 @@ func (c *Controller) sudoKill(ctx context.Context, pid int, signal string, group
 			"pid", pid, "signal", signal, "group", groupKill,
 			"error", err, "output", strings.TrimSpace(string(out)))
 	}
+}
+
+// sudoRun runs binary with args through sudo and reports a failure with the
+// command line and what it printed. Binary paths are registry constants and
+// args localconfig scalars or literals.
+func (c *Controller) sudoRun(ctx context.Context, binary string, args ...string) error {
+	full := append([]string{binary}, args...)
+	// #nosec G204 — binary path is a registry constant; args are localconfig scalars or literals
+	out, err := sys.CombinedOutput(ctx, c.env.Exec, sudoBin, full...)
+	if err != nil {
+		return fmt.Errorf("%s %s: %s: %w",
+			binary, strings.Join(args, " "),
+			strings.TrimSpace(string(out)), err)
+	}
+
+	return nil
 }
 
 // killByPIDWithGroupAndSudo is the workhorse for pidfile-driven shutdowns of

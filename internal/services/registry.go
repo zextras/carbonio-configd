@@ -157,9 +157,25 @@ type ServiceDef struct {
 	// process, signaled directly (as the zextras user) in every mode. Zero
 	// means the service has no refresh (only milter: SIGCONT).
 	RefreshSignal syscall.Signal
-	// Rotate is the `rotate` action for services that reopen their logs on a
-	// signal (stats: SIGHUP to every collector). Nil means no rotate.
-	Rotate func(ctx context.Context) (SignalReport, error)
+	// ArgsFromConfig computes the arguments of a BinaryPath launch from
+	// localconfig, replacing BinaryArgs (slapd's -h bind URL).
+	ArgsFromConfig func(lc map[string]string) []string
+	// Ready is the probe the launcher runs after starting the service, before
+	// the start is reported done (see ReadyKind).
+	Ready ReadyKind
+	// Java, Mysqld, Commands and Collectors are the launch strategies of
+	// services that BinaryPath alone cannot describe (see spec.go). A service
+	// declares at most one, and none together with CustomStart.
+	Java       *JavaSpec
+	Mysqld     *MysqldSpec
+	Commands   *CommandSpec
+	Collectors *CollectorSpec
+	// Heavy marks a service whose restart is costly (the mailbox JVM, its
+	// database, the directory server): on a systemd host a configuration
+	// change flags it restart-pending instead of restarting it. internal/plan
+	// (HeavyService) lists the same names, which services cannot import back;
+	// a test keeps both in step.
+	Heavy bool
 }
 
 // SignalReport is the outcome of signaling a service's processes: the pids a
@@ -268,9 +284,7 @@ func (c *Controller) defaultRegistry() map[string]*ServiceDef {
 			DisplayName:  svcStats,
 			SystemdUnits: []string{"carbonio-stats.service"},
 			ProcessName:  c.p.statsGlob,
-			CustomStart:  c.statsCustomStart,
-			CustomStop:   c.statsCustomStop,
-			Rotate:       c.statsRotate,
+			Collectors:   statsCollectors(),
 		},
 		svcOpendkim: {
 			Name:         svcOpendkim,
@@ -312,7 +326,11 @@ func (c *Controller) defaultRegistry() map[string]*ServiceDef {
 			SystemdUnits: []string{"carbonio-milter.service"},
 			ProcessName:  milterMainClass,
 			EnableCheck:  c.milterEnabled,
-			CustomStart:  c.milterCustomStart,
+			Java: &JavaSpec{
+				Label:   "milter",
+				LogFile: c.p.log + "/milter.out",
+				Args:    c.milterJavaArgs,
+			},
 			// zmmilterctl refresh: SIGCONT makes MilterServer re-read its config.
 			RefreshSignal: syscall.SIGCONT,
 		},
@@ -367,9 +385,13 @@ func (c *Controller) defaultRegistry() map[string]*ServiceDef {
 			SystemdUnits: []string{"carbonio-antispam.service"},
 			PidFile:      c.p.antispamDBPidFile,
 			ProcessName:  c.p.common + "/sbin/m*d* --defaults-file=" + c.p.conf + "/antispam-my.cnf",
-			CustomStart:  c.antispamDBCustomStart,
-			CustomStop:   c.antispamDBCustomStop,
-			Component:    true,
+			Mysqld: &MysqldSpec{
+				DefaultsKey:      "antispam_mysql_mycnf",
+				ErrlogKey:        "antispam_mysql_errlogfile",
+				OptionalDefaults: true,
+				Active:           c.antispamDBEnabled,
+			},
+			Component: true,
 		},
 		// antispam is legacy zmantispamctl: the amavisd mariadb (when local),
 		// then amavisd, all of it only on hosts running the antispam service.
@@ -385,16 +407,22 @@ func (c *Controller) defaultRegistry() map[string]*ServiceDef {
 			IdleWhenDisabled:   true,
 		},
 		serviceMTA: {
-			Name:          serviceMTA,
-			DisplayName:   serviceMTA,
-			SystemdUnits:  []string{unitPostfix},
-			BinaryPath:    c.p.postfixBin,
-			BinaryArgs:    []string{actionStart},
-			NeedsRoot:     true,
-			PidFile:       c.p.data + "/postfix/spool/pid/master.pid",
-			ProcessName:   c.p.common + "/libexec/master",
-			CustomStart:   c.mtaCustomStart,
-			CustomStop:    c.mtaCustomStop,
+			Name:         serviceMTA,
+			DisplayName:  serviceMTA,
+			SystemdUnits: []string{unitPostfix},
+			BinaryPath:   c.p.postfixBin,
+			NeedsRoot:    true,
+			PidFile:      c.p.data + "/postfix/spool/pid/master.pid",
+			ProcessName:  c.p.common + "/libexec/master",
+			Commands: &CommandSpec{
+				Start:                      []string{actionStart},
+				Stop:                       []string{"stop"},
+				Status:                     []string{"status"},
+				Reload:                     []string{actionReload},
+				Prepare:                    []func(context.Context) error{c.prepareMainCf, c.prepareLDAPTables, c.rebuildAliases},
+				RestartAsReload:            true,
+				ReloadRestartsDependencies: true,
+			},
 			Dependencies:  []string{svcSaslauthd, svcMilter},
 			ConfigRewrite: []string{svcAntispam, svcAntivirus, svcOpendkim, serviceMTA, svcSasl},
 		},
@@ -423,11 +451,20 @@ func (c *Controller) defaultRegistry() map[string]*ServiceDef {
 			ConfigRewrite: mailboxConfigRewrite,
 			// carbonio-appserver.service has Wants=carbonio-appserver-db.service:
 			// starting the JVM brings the database up, stopping it leaves it up.
-			Wants:       []string{svcAppserverDB},
-			CustomStart: c.mailboxCustomStart,
-			CustomStop:  c.mailboxCustomStop,
-			PostStart:   []Hook{c.MailboxAdvancedStatusHook},
-			Component:   true,
+			Wants: []string{svcAppserverDB},
+			Java: &JavaSpec{
+				Label:   svcMailbox,
+				LogFile: c.p.log + "/zmmailboxd.out",
+				Args:    c.mailboxJavaArgs,
+				Mkdirs:  []string{c.p.mailboxd + "/work/service/jsp", c.p.mailboxd + "/work"},
+				Touch:   []string{c.p.log + "/gc.log"},
+			},
+			// Start returns once the mail port accepts connections (legacy
+			// zmmailboxdctl start).
+			Ready:     ReadyMailboxPort,
+			PostStart: []Hook{c.MailboxAdvancedStatusHook},
+			Component: true,
+			Heavy:     true,
 		},
 		svcAppserverDB: {
 			Name:         svcAppserverDB,
@@ -437,11 +474,14 @@ func (c *Controller) defaultRegistry() map[string]*ServiceDef {
 			// mariadbd (or mysqld) of the mailbox defaults file; the antispam
 			// database runs the same binary with its own defaults file.
 			ProcessName: c.p.common + "/sbin/m*d* --defaults-file=" + c.p.conf + "/my.cnf",
-			CustomStart: c.appserverDBCustomStart,
-			CustomStop:  c.appserverDBCustomStop,
+			Mysqld: &MysqldSpec{
+				DefaultsKey: "mysql_mycnf",
+				ErrlogKey:   "mysql_errlogfile",
+			},
 			// The InnoDB flush must precede the stop in both orchestration modes.
 			PreStop:   []Hook{c.appserverDBFlushHook},
 			Component: true,
+			Heavy:     true,
 		},
 		// store is legacy zmstorectl: appserver-db then mailbox; stopped in
 		// reverse so the JVM is gone before the database shuts down.
@@ -453,6 +493,7 @@ func (c *Controller) defaultRegistry() map[string]*ServiceDef {
 			ForceMembersNoRewrite: true,
 			DetailMember:          svcMailbox,
 			ConfigRewrite:         mailboxConfigRewrite,
+			Heavy:                 true,
 		},
 		svcLdap: {
 			Name:         svcLdap,
@@ -460,14 +501,20 @@ func (c *Controller) defaultRegistry() map[string]*ServiceDef {
 			SystemdUnits: []string{unitOpenldap},
 			PidFile:      c.p.run + "/slapd.pid",
 			ProcessName:  c.p.common + "/libexec/slapd",
+			BinaryPath:   c.p.common + "/libexec/slapd",
+			Detached:     true,
+			LogFile:      c.p.log + "/slapd.out",
+			// slapd listens where localconfig says (bind URL plus ldapi).
+			ArgsFromConfig: c.slapdArgs,
 			// slapd is built without libsystemd and never emits sd_notify
 			// (READY=1 / STOPPING=1). Readiness is determined by an active LDAP
-			// probe in ldapCustomStart instead; leave UseSDNotify false so the
-			// stop path does not wait on a STOPPING datagram that never arrives.
+			// probe instead; leave UseSDNotify false so the stop path does not
+			// wait on a STOPPING datagram that never arrives.
 			UseSDNotify: false,
-			CustomStart: c.ldapCustomStart,
+			Ready:       ReadyLDAP,
 			// Declarative stop: see ldapStopTimeout.
 			GracefulStop: ldapStopTimeout,
+			Heavy:        true,
 		},
 		svcConfigd: {
 			Name:         svcConfigd,
@@ -479,7 +526,7 @@ func (c *Controller) defaultRegistry() map[string]*ServiceDef {
 			ProcessName:  c.p.bin + "/configd",
 			// Start returns once the daemon answers STATUS (legacy
 			// zmconfigdctl start): control start's later steps rely on it.
-			CustomStart: c.configdCustomStart,
+			Ready: ReadyConfigd,
 		},
 		svcServiceDiscover: {
 			Name:                svcServiceDiscover,

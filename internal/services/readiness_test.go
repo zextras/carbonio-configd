@@ -330,7 +330,7 @@ func TestConfigdCustomStart_StartsDaemonThenWaitsReady(t *testing.T) {
 		return nil
 	}
 
-	require.NoError(t, ctl.configdCustomStart(context.Background(), def))
+	require.NoError(t, ctl.startDirect(context.Background(), def.Name, def))
 	assert.Equal(t, 1, ready)
 }
 
@@ -344,7 +344,7 @@ func TestConfigdCustomStart_ReadyFailureIsReturned(t *testing.T) {
 
 	ctl.configdReady = func(context.Context) error { return assert.AnError }
 
-	require.ErrorIs(t, ctl.configdCustomStart(context.Background(), def), assert.AnError)
+	require.ErrorIs(t, ctl.startDirect(context.Background(), def.Name, def), assert.AnError)
 }
 
 func TestConfigdCustomStart_StartFailureSkipsReadiness(t *testing.T) {
@@ -359,5 +359,5 @@ func TestConfigdCustomStart_StartFailureSkipsReadiness(t *testing.T) {
 		return nil
 	}
 
-	require.Error(t, ctl.configdCustomStart(context.Background(), def))
+	require.Error(t, ctl.startDirect(context.Background(), def.Name, def))
 }

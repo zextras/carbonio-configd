@@ -503,7 +503,7 @@ func TestStatsCustomStop_WithValidPidFile(t *testing.T) {
 
 	ctl.p.statsPidDir = tmp
 
-	err := ctl.statsCustomStop(context.Background(), nil)
+	err := ctl.stopCollectors(context.Background(), ctl.registry[svcStats])
 	if err != nil {
 		t.Errorf("statsCustomStop returned error: %v", err)
 	}

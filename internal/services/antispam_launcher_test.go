@@ -218,7 +218,7 @@ func TestAntispamCustomStart_Disabled(t *testing.T) {
 		}, nil
 	}
 
-	err := ctl.antispamDBCustomStart(context.Background(), nil)
+	err := ctl.startMysqld(context.Background(), ctl.registry[svcAntispamDB])
 	if err != nil {
 		t.Fatalf("expected nil when disabled, got %v", err)
 	}
@@ -235,7 +235,7 @@ func TestAntispamCustomStop_Disabled(t *testing.T) {
 		}, nil
 	}
 
-	err := ctl.antispamDBCustomStop(context.Background(), nil)
+	err := ctl.stopMysqldService(context.Background(), ctl.registry[svcAntispamDB])
 	if err != nil {
 		t.Fatalf("expected nil when disabled, got %v", err)
 	}
@@ -261,7 +261,7 @@ func TestAntispamCustomStart_EnabledButLocal(t *testing.T) {
 
 	ctl.p.antispamDBPidFile = pidFile
 
-	err := ctl.antispamDBCustomStart(context.Background(), nil)
+	err := ctl.startMysqld(context.Background(), ctl.registry[svcAntispamDB])
 	t.Logf("antispamCustomStart returned: %v", err)
 }
 
@@ -276,7 +276,7 @@ func TestStartAntispamDB_EmptyMycnf(t *testing.T) {
 		return map[string]string{}, nil
 	}
 
-	err := ctl.startAntispamDB(context.Background())
+	err := ctl.startMysqld(context.Background(), ctl.registry[svcAntispamDB])
 	if err != nil {
 		t.Fatalf("expected nil when mycnf empty, got %v", err)
 	}
@@ -318,6 +318,6 @@ func TestStartAntispamDB_WithConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := ctl.startAntispamDB(context.Background())
+	err := ctl.startMysqld(context.Background(), ctl.registry[svcAntispamDB])
 	t.Logf("startAntispamDB: %v", err)
 }

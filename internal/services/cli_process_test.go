@@ -949,7 +949,7 @@ func TestStartDetached_LogFilePath(t *testing.T) {
 		LogFile:    logFile,
 	}
 
-	err := ctl.startDetached(context.Background(), "test-detached-logfile", def)
+	err := ctl.startDetached(context.Background(), "test-detached-logfile", def, def.BinaryArgs)
 	if err != nil {
 		t.Fatalf("startDetached with LogFile: %v", err)
 	}
@@ -977,7 +977,7 @@ func TestStartDetached_DefaultLogFile(t *testing.T) {
 		BinaryPath: script,
 	}
 
-	err := ctl.startDetached(context.Background(), "test-detached-default", def)
+	err := ctl.startDetached(context.Background(), "test-detached-default", def, def.BinaryArgs)
 	if err != nil {
 		t.Fatalf("startDetached default log path: %v", err)
 	}
@@ -1047,7 +1047,7 @@ func TestStartDetached_SpawnAndRelease(t *testing.T) {
 		LogFile:    logFile,
 	}
 
-	err := ctl.startDetached(context.Background(), "test-det-spawn", def)
+	err := ctl.startDetached(context.Background(), "test-det-spawn", def, def.BinaryArgs)
 	if err != nil {
 		t.Fatalf("startDetached: %v", err)
 	}
@@ -1137,8 +1137,7 @@ func TestMailboxCustomStart_AppserverDBFail(t *testing.T) {
 		return nil, fmt.Errorf("test config error")
 	}
 
-	def := &ServiceDef{Name: "mailbox"}
-	err := ctl.mailboxCustomStart(context.Background(), def)
+	err := ctl.startJava(context.Background(), ctl.registry[svcMailbox])
 	if err == nil {
 		t.Fatal("expected error when ctl.loadConfig fails")
 	}
@@ -1154,7 +1153,7 @@ func TestMtaIsRunning_NotRunning(t *testing.T) {
 
 	f.Exec.OnPath(sudoBin, systest.Fail(1, ""))
 
-	if ctl.mtaIsRunning(context.Background()) {
+	if ctl.commandRunning(context.Background(), ctl.registry[serviceMTA]) {
 		t.Error("expected mtaIsRunning=false with failing sudo")
 	}
 }
