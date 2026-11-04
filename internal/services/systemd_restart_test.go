@@ -108,6 +108,23 @@ func TestApplySystemd(t *testing.T) {
 			callsWithPrefix(f, systemctlBin))
 	})
 
+	t.Run("start does not send a REWRITE to the daemon that is applying it", func(t *testing.T) {
+		t.Parallel()
+
+		reg := systemdTestRegistry()
+		reg["single"].ConfigRewrite = []string{"single"}
+
+		ctl, f := newFakeController(t, WithRegistry(reg))
+		f.FS.Put(ctl.p.configrewrite, []byte("#!/bin/sh\n"), 0o755)
+		f.Exec.OnCmdline(systemctlBin+" is-active", systest.Fail(3, "")) // not running: the start goes ahead
+		ctl.pinMode(true)
+
+		require.NoError(t, NewServiceManager(ctl).ApplySystemd(context.Background(), "single", plan.ActionStart))
+
+		assert.Contains(t, callsWithPrefix(f, systemctlBin), systemctlBin+" start carbonio-single.service")
+		assert.Empty(t, callsWithPrefix(f, ctl.p.configrewrite))
+	})
+
 	t.Run("stop goes through systemctl stop", func(t *testing.T) {
 		t.Parallel()
 

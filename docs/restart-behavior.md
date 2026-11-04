@@ -100,6 +100,18 @@ nothing, and that is the `ExecStartPre` REWRITE a unit sends when it starts. The
 restart that a periodic cycle runs triggers exactly such a REWRITE (the variable is already the
 baseline), which restarts nothing and defers nothing, so the sequence ends after one restart.
 
+**A restart never rewrites.** The daemon starts, stops and restarts services `norewrite`, like
+legacy `controlProcess`: the cycle that decided the restart has already written the files.
+Without it, starting a service whose `ConfigRewrite` is set ran `configrewrite`, i.e. a REWRITE
+sent to this daemon while its main loop was busy running the restart, which could only answer
+it after the 60 s REWRITE timeout (`Rewrite request timed out`, `Config rewrite failed`) before
+the service started. A REWRITE client is also answered before the restarts of its cycle run
+(`SUCCESS REWRITES COMPLETE` when the rewrite phase is over), so a restart that fails or is slow
+never holds it. A baseline artefact explains restarts right after a bootstrap: variables read from
+a file (`MAPLOCAL`, e.g. `zimbraSSLDHParam`) are observed before the cycle writes that file, so the
+first cycle sees them unset and the next one sees a change, deferred or not, and restarts the
+services that use them once.
+
 **Limits.** The held restarts live in memory, like the carry and the debounce state: a daemon
 restart forgets them (the new process starts with a first run, which re-renders every section
 and restarts nothing). configd keeps no state file between runs (the snapshot baseline, the

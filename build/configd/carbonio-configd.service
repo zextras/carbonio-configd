@@ -31,7 +31,13 @@ WatchdogSec=120
 # configd sends READY=1 after the first successful loop iteration.
 TimeoutStartSec=300
 TimeoutStopSec=10
-KillMode=mixed
+# KillMode=process: stopping or restarting configd signals only the daemon. In
+# legacy (non-systemd) mode the services it started (nginx, mailboxd, clamd,
+# ...) are in this unit's cgroup, and mixed/control-group would SIGKILL them
+# all on `systemctl restart carbonio-configd` (a package upgrade does that),
+# while the legacy zmconfigd never took the services down with it. systemd
+# logs "remains running after unit stopped" for them, which is expected.
+KillMode=process
 KillSignal=SIGTERM
 
 # Restart policy
@@ -40,66 +46,80 @@ RestartSec=3
 StartLimitInterval=300
 StartLimitBurst=5
 
-# Resource limits
-MemoryMax=512M
-MemoryHigh=384M
-CPUQuota=80%
-TasksMax=256
+# Resource limits: none on memory, CPU or tasks (MemoryMax/MemoryHigh/CPUQuota/
+# TasksMax were 512M/384M/80%/256). A cgroup limit applies to everything in
+# the unit's cgroup, and in legacy (non-systemd) mode that includes the
+# services the daemon starts: clamd (~1.5 GB of signatures) was throttled by
+# MemoryHigh until its start timed out, and mailboxd/mysqld would be OOM-killed
+# or hit TasksMax. In systemd mode the services are units of their own and
+# configd itself is a small Go process.
 
 # OOM protection (negative = less likely to be killed, range: -1000 to 1000)
 OOMScoreAdjust=-500
 
+# ── Security: scope of the sandbox ────────────────────────────────────
+# What follows is inherited by every process configd spawns. In legacy
+# (non-systemd) mode the daemon itself starts, stops and restarts the Carbonio
+# services (nginx, postfix, mailboxd, mysqld, ...) through the zm*ctl scripts,
+# nginx and sudo, as the unsandboxed legacy zmconfigd did, so a directive is
+# kept only if those processes still work under it. Every directive that was
+# removed for that reason is listed in the two sections below.
+
 # ── Security: Filesystem ──────────────────────────────────────────────
+# /opt/zextras is writable as a whole, not only conf/log/data: the services
+# the daemon starts keep their state there (db, store, index, redolog, zmstat,
+# jetty, mta/antivirus data). /usr, /etc, /var and /boot are read-only.
 ProtectSystem=strict
-ReadWritePaths=-/opt/zextras/conf -/opt/zextras/log -/opt/zextras/data -/opt/zextras/common/conf -/run/carbonio
+ReadWritePaths=-/opt/zextras -/run/carbonio
 ProtectHome=yes
 PrivateTmp=yes
+ProtectControlGroups=yes
+# Only /proc/<pid> is used (service identity, start time); not /proc/sys etc.
+ProcSubset=pid
+RemoveIPC=yes
 UMask=0027
 
-# ── Security: Process isolation ───────────────────────────────────────
-PrivateDevices=yes
-ProtectKernelModules=yes
-ProtectKernelTunables=yes
-ProtectKernelLogs=yes
-ProtectControlGroups=yes
-ProtectClock=yes
-ProtectHostname=yes
-ProtectProc=invisible
-ProcSubset=pid
+# ── Security: Privileges ──────────────────────────────────────────────
+# configd runs as zextras with no capabilities and never gets ambient ones.
+# The processes it execs must still be able to gain privileges the way they
+# do from a login shell: /opt/zextras/common/sbin/nginx carries file
+# capabilities (cap_net_bind_service=ep, to bind 80/443) and sudo is setuid
+# root (the sudoers rules of zextras: postfix, postconf, postalias, postsuper,
+# postcat, qshape.pl, amavis-mc, zmmailboxdmgr, zmqstat, zmstat-fd, ...).
+# These directives break both and are therefore NOT set:
+#  - NoNewPrivileges=yes: the kernel ignores setuid bits and file
+#    capabilities on exec. sudo fails with 'The "no new privileges" flag is
+#    set', and nginx cannot bind 443.
+#  - an empty CapabilityBoundingSet= (it was): exec of a binary whose file
+#    capabilities are not all in the bounding set fails with EPERM
+#    ("fork/exec /opt/zextras/common/sbin/nginx: operation not permitted"), and
+#    sudo has no CAP_SETUID/CAP_SETGID/CAP_AUDIT_WRITE.
+#  - every directive that systemd implements with a seccomp filter or that
+#    the system manager only honours together with NoNewPrivileges when the
+#    unit has a User=: with User=zextras systemd sets NoNewPrivileges on the
+#    process whatever NoNewPrivileges= says. They are PrivateDevices,
+#    ProtectKernelModules, ProtectKernelTunables, ProtectKernelLogs,
+#    ProtectClock, ProtectHostname, RestrictRealtime, RestrictSUIDSGID,
+#    LockPersonality, RestrictNamespaces, RestrictAddressFamilies,
+#    SystemCallArchitectures, SystemCallFilter and SystemCallErrorNumber
+#    (and MemoryDenyWriteExecute, which is also off for Java).
+# NoNewPrivileges=no is explicit so that a drop-in or a future systemd default
+# is not mistaken for the shipped intent.
+NoNewPrivileges=no
 
-# ── Security: Privilege restrictions ──────────────────────────────────
-# sudo is only used by legacy (non-systemd) and CustomStart paths, which the
-# daemon never takes in systemd mode (systemctl via polkit instead).
-NoNewPrivileges=yes
-RestrictRealtime=yes
-RestrictSUIDSGID=yes
-LockPersonality=yes
-RemoveIPC=yes
-
-# Drop all capabilities — configd runs as unprivileged zextras user
-# and child processes (systemctl, postconf, zm*ctl) communicate via
-# D-Bus / pipes, not kernel capabilities.
-CapabilityBoundingSet=
-
-# ── Security: Namespace restrictions ──────────────────────────────────
-RestrictNamespaces=yes
-
-# ── Security: Network ────────────────────────────────────────────────
-# configd needs: AF_INET/AF_INET6 (LDAP, listener port 7171),
-# AF_UNIX (sd_notify socket, local IPC).
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
-
-# ── Security: System call filtering ──────────────────────────────────
-# @system-service covers all syscalls a typical service needs, including
-# clone (goroutines), socket, read/write, mmap, etc.
-SystemCallArchitectures=native
-SystemCallFilter=@system-service
-SystemCallErrorNumber=EPERM
+# The bounding set is a deny list of capabilities nothing here has a use for,
+# instead of an allow list: the capabilities of what is exec'd (nginx's file
+# capabilities, sudo, postfix's CAP_SYS_CHROOT/CAP_SETUID, the zm*ctl
+# scripts) are open-ended. CAP_SYS_MODULE, CAP_SYS_TIME, CAP_SYSLOG,
+# CAP_SYS_RAWIO and CAP_MKNOD are denied here, which is all that
+# ProtectKernelModules, ProtectClock, ProtectKernelLogs and PrivateDevices
+# would add and that can be had without NoNewPrivileges.
+CapabilityBoundingSet=~CAP_SYS_BOOT CAP_SYS_PACCT CAP_SYS_TTY_CONFIG CAP_LINUX_IMMUTABLE CAP_BPF CAP_PERFMON CAP_MAC_ADMIN CAP_MAC_OVERRIDE CAP_AUDIT_CONTROL CAP_AUDIT_READ CAP_WAKE_ALARM CAP_BLOCK_SUSPEND CAP_SYS_MODULE CAP_SYS_TIME CAP_SYSLOG CAP_SYS_RAWIO CAP_MKNOD
 
 # ── Security: Memory restrictions ─────────────────────────────────────
 # NOTE: MemoryDenyWriteExecute=yes is DISABLED because child processes
-# (zmlocalconfig, zmprov) invoke Java which requires W^X for JIT.
-# This is a documented security trade-off for Java compatibility.
+# (zmlocalconfig, zmprov) invoke Java which requires W^X for JIT, and it
+# implies NoNewPrivileges (see above).
 #MemoryDenyWriteExecute=yes
 
 # Environment

@@ -281,6 +281,10 @@ configd control start|startup|stop|shutdown|restart|status
 `restart` is stop then start, ignoring the result of the stop (as legacy
 `control.pl`). `control status` exits `1` when a service is stopped. Start/stop
 failures print `Error: some services failed to start|stop` and exit `1`.
+After the start loop `control start` probes each service it started once more (the services
+`control status` fails on, so not `stats` or `logger` by default): one that is not running
+prints `<name> is not running after start` and exits `1`, so a service that the config daemon
+restarted or that died right after its start is not reported as `Done`.
 Remote hosts (`zmcontrol -H`) are not supported here, the wrapper rejects `-H`;
 use `/opt/zextras/libexec/zmrc`.
 

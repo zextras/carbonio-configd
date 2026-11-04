@@ -562,3 +562,27 @@ func TestExecuteForced_ExitStatus(t *testing.T) {
 		assert.Equal(t, 0, executeForced(ctx, f.deps.configManager, "configd-test"))
 	})
 }
+
+// TestRunCycle_RewriteReleasedWhenRestartFails: the REWRITE client is answered
+// by the rewrite phase, before the restarts run, so a restart that fails (here
+// the service binary does not exist) neither holds the client nor changes its reply.
+// A REWRITE that waited for the restart phase would block until the 60 s
+// timeout while the loop is busy restarting.
+func TestRunCycle_RewriteReleasedWhenRestartFails(t *testing.T) {
+	f := newCycleFixture(t)
+	f.deps.appState.SetFirstRun(false)
+	f.fakes.FS.Put("/opt/zextras/conf/in.conf", []byte("x"), 0o644)
+	f.publishMTA("conf/in.conf")
+
+	wait := f.deps.trigger.TriggerRewrite(context.Background(), []string{restartSvc})
+
+	runCycleOnce(t, f, &loopIterState{})
+
+	require.True(t, f.restartsRequested(), "the cycle must attempt the restart (it fails: no memcached binary in the fake root)")
+
+	select {
+	case <-wait.Done:
+	default:
+		t.Fatalf("REWRITE client not released by a cycle whose restart failed; exec: %q", f.fakes.Exec.Lines())
+	}
+}

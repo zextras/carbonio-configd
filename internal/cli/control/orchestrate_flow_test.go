@@ -47,6 +47,8 @@ func newFlowEnv(t *testing.T, extra []string, enabled []string) *flowEnv {
 					return errBoom
 				}
 
+				fe.running[name] = true
+
 				return nil
 			},
 			CustomStop: func(context.Context, *services.ServiceDef) error {
@@ -138,6 +140,58 @@ func TestControlStart(t *testing.T) {
 
 			if !slices.Equal(fe.calls, tt.wantCalls) {
 				t.Errorf("calls = %v, want %v", fe.calls, tt.wantCalls)
+			}
+		})
+	}
+}
+
+// A start that returned success but left the service stopped (the config
+// daemon restarted it right after, or it died) must not end as "Done" with
+// rc 0: `control status` would report it Stopped.
+func TestControlStart_ServiceDownAfterStartFails(t *testing.T) {
+	tests := []struct {
+		name       string
+		down       string
+		probeErr   bool
+		wantRC     int
+		wantStderr string
+	}{
+		{name: "started service is down", down: "proxy", wantRC: 1, wantStderr: "proxy is not running after start\n"},
+		{name: "stats is not counted by status", down: "stats"},
+		{name: "probe error is not evidence", down: "proxy", probeErr: true},
+		{name: "all up"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fe := newFlowEnv(t, []string{"proxy", "stats"}, []string{"proxy", "stats"})
+			fe.running["ldap"], fe.running["configd"] = true, true
+
+			fe.o.svcStatus = func(_ context.Context, name string) (bool, error) {
+				switch {
+				case name != tt.down:
+					return slices.Contains(fe.calls, "start "+name) || fe.running[name], nil
+				case tt.probeErr && slices.Contains(fe.calls, "start "+name):
+					return false, errBoom
+				default:
+					return fe.running[name] && !slices.Contains(fe.calls, "start "+name), nil
+				}
+			}
+
+			var out, errOut bytes.Buffer
+
+			c := newConsoleTo(&out, &errOut)
+
+			if rc := fe.o.controlStart(context.Background(), c); rc != tt.wantRC {
+				t.Errorf("rc = %d, want %d", rc, tt.wantRC)
+			}
+
+			if errOut.String() != tt.wantStderr {
+				t.Errorf("stderr = %q, want %q", errOut.String(), tt.wantStderr)
+			}
+
+			if want := []string{"start proxy", "start stats"}; !slices.Equal(fe.calls, want) {
+				t.Errorf("calls = %v, want %v: the check must not start or stop anything", fe.calls, want)
 			}
 		})
 	}
@@ -346,9 +400,19 @@ func TestRun_ActionsLocal(t *testing.T) {
 			fe := newFlowEnv(t, []string{"mta"}, []string{"mta"})
 			fe.failOn[tt.failOn] = true
 
-			// Probe answers flip after a stop so restart sees services down.
+			// The probe follows the last action taken on a service: a stop
+			// leaves it down (so restart sees services down), a start up.
 			fe.o.svcStatus = func(_ context.Context, name string) (bool, error) {
-				return tt.running[name] && !slices.Contains(fe.calls, "stop "+name), nil
+				for i := len(fe.calls) - 1; i >= 0; i-- {
+					switch fe.calls[i] {
+					case "stop " + name:
+						return false, nil
+					case "start " + name:
+						return true, nil
+					}
+				}
+
+				return tt.running[name], nil
 			}
 
 			var stdout, stderr bytes.Buffer

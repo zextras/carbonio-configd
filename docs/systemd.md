@@ -52,14 +52,26 @@ Runtime dependencies are `libsystemd0` and `polkitd` (apt), `systemd-libs` and
 - `ExecStartPre=` runs `/opt/zextras/bin/systemd-envscript`, then runs `configd ldap wait --timeout 120s`: it waits up to 120 s for one of the `ldap_url` URLs (resolved from localconfig and with the same TLS rules as the daemon, space-separated lists fail over) to accept a connection, and fails the start after that. When no `ldap_url` is configured it prints a warning and succeeds at once, because the daemon itself starts without LDAP (its LDAP queries fail until it is configured);
 - `ExecStart=/opt/zextras/bin/configd`, `ExecReload=/bin/kill -HUP $MAINPID`;
 - `WatchdogSec=120`: configd pings systemd every 60 s once READY has been sent (the watchdog only counts after `READY=1`, so a slow first pass is not penalised);
-- `TimeoutStartSec=300`, `TimeoutStopSec=10`, `KillMode=mixed`, `KillSignal=SIGTERM`;
+- `TimeoutStartSec=300`, `TimeoutStopSec=10`, `KillSignal=SIGTERM`;
 - `Restart=on-failure`, `RestartSec=3`, 5 starts per 300 s;
-- limits: `MemoryMax=512M`, `MemoryHigh=384M`, `CPUQuota=80%`, `TasksMax=256`, `OOMScoreAdjust=-500`, `GOMAXPROCS=4`;
-- hardening: `ProtectSystem=strict` with write access only to `/opt/zextras/{conf,log,data,common/conf}` and `/run/carbonio`, `PrivateTmp`, `PrivateDevices`, `NoNewPrivileges`, empty `CapabilityBoundingSet`, `RestrictNamespaces`, `RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX`, `SystemCallFilter=@system-service`, kernel/proc/clock protections, `UMask=0027`. `MemoryDenyWriteExecute` is left off because child tools (`zmprov`) run Java.
+- `KillMode=process`: stopping or restarting configd signals only the daemon. In legacy (non-systemd) mode the services it started are in the unit's cgroup and are left running, as when the legacy `zmconfigd` stopped;
+- no memory, CPU or task limits (they were `MemoryMax=512M`, `MemoryHigh=384M`, `CPUQuota=80%`, `TasksMax=256`), because a cgroup limit applies to the services a legacy-mode daemon starts too: clamd was throttled by `MemoryHigh` until its start timed out. `OOMScoreAdjust=-500` and `GOMAXPROCS=4` stay;
+- hardening, limited to what keeps legacy-mode children working: `ProtectSystem=strict` with write access to `/opt/zextras` and `/run/carbonio`, `ProtectHome`, `PrivateTmp`, `ProtectControlGroups`, `ProcSubset=pid`, `RemoveIPC`, `UMask=0027`, and `CapabilityBoundingSet=` as a deny list (`CAP_SYS_BOOT`, `CAP_SYS_MODULE`, `CAP_SYS_TIME`, `CAP_SYSLOG`, `CAP_SYS_RAWIO`, `CAP_MKNOD`, `CAP_BPF`, `CAP_PERFMON`, `CAP_MAC_*`, `CAP_AUDIT_CONTROL`/`READ`, ...). configd has no capabilities and is granted no ambient ones.
 
-Because the unit drops every capability and sets `NoNewPrivileges`, configd
-never uses `sudo` there: it controls other units through `systemctl` and the
-polkit rule below.
+### What the unit does not restrict, and why
+
+Everything in the unit is inherited by every process configd execs. In legacy mode that is nginx,
+postfix (through `sudo`), mailboxd, mysqld, clamd, the `zm*ctl` scripts: the legacy `zmconfigd`
+ran them with no sandbox, as `zextras`. These are therefore **not** set:
+
+- `NoNewPrivileges`: the kernel then ignores setuid bits and file capabilities on exec. `sudo` (setuid root; used for `postfix`, `postconf`, `postalias`, `postsuper`, `postcat`, `qshape.pl`, `amavis-mc`, `zmmailboxdmgr`, `zmqstat`, `zmstat-fd`, see the `zextras` sudoers rules) fails with `The "no new privileges" flag is set`, and `nginx` (file capability `cap_net_bind_service=ep`, for ports 80/443) cannot bind them.
+- An empty `CapabilityBoundingSet=`: a binary whose file capabilities are not all in the bounding set fails to exec with `EPERM`: `fork/exec /opt/zextras/common/sbin/nginx: operation not permitted`, the restart of proxy that failed. `sudo` also needs `CAP_SETUID`, `CAP_SETGID` and `CAP_AUDIT_WRITE`.
+- Every directive that systemd implements with a seccomp filter: with `User=zextras`, systemd sets NoNewPrivileges on the process for any of them, whatever `NoNewPrivileges=` says (measured per directive on systemd 252 with `systemd-run -p User=zextras`): `PrivateDevices`, `ProtectKernelModules`, `ProtectKernelTunables`, `ProtectKernelLogs`, `ProtectClock`, `ProtectHostname`, `RestrictRealtime`, `RestrictSUIDSGID`, `LockPersonality`, `RestrictNamespaces`, `RestrictAddressFamilies`, `SystemCallArchitectures`, `SystemCallFilter` (and `MemoryDenyWriteExecute`, which also breaks Java). `NoNewPrivileges=no` is written out in the unit so that this stays explicit.
+- `ProtectProc=invisible`: `/proc` hides the processes of other users, so root-owned services (postfix master, `zmstat-fd` started through sudo) would look stopped to the daemon and `zmcontrol status` and be restarted over and over.
+
+In systemd mode configd controls the other units with `systemctl` and the polkit rule below and
+does not use `sudo`; the unit is the same in both modes, because the mode is chosen at run time
+(a `carbonio-*` target is enabled or not).
 
 ## Readiness, reload and shutdown
 
