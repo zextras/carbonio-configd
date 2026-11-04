@@ -157,8 +157,12 @@ func TestCycle_SystemdHostFlagsHeavyServicesAndReloadsTheRest(t *testing.T) {
 // TestSystemdMode pins which service managers put the config manager (and so
 // `configd plan`) in systemd mode.
 func TestSystemdMode_FalseForManagersWithoutTheNotion(t *testing.T) {
-	cm := &ConfigManager{ServiceMgr: &testutil.MockServiceManager{}}
-
+	// A manager the policy can ask about systemd gets the systemd rules; a test
+	// double without the notion never does (see NewConfigManager).
+	cm := &ConfigManager{ServiceMgr: &testutil.MockServiceManager{}, policy: restart.New(nil, nil)}
 	assert.False(t, cm.systemdMode())
-	assert.True(t, (&ConfigManager{ServiceMgr: &systemdFakeManager{}}).systemdMode())
+
+	sd := &systemdFakeManager{}
+	cm = &ConfigManager{ServiceMgr: sd, policy: restart.New(nil, nil).WithSystemd(sd)}
+	assert.True(t, cm.systemdMode())
 }
