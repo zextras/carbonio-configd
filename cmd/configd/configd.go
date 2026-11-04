@@ -6,7 +6,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -113,29 +115,43 @@ func setupProfilingAndTracing(
 // amavisd fails with "Can't locate Amavis/Boot.pm in @INC".
 //
 // Existing values are preserved so operators can override for debugging.
-func ensureZextrasPerlEnv(env sys.System) {
+func ensureZextrasPerlEnv(ctx context.Context, env sys.System) error {
 	if _, ok := os.LookupEnv("PERL5LIB"); ok {
-		return
+		return nil
 	}
 
-	archname := perlArchname(env)
+	archname := perlArchname(ctx, env)
 	if archname == "" {
-		return
+		return nil
 	}
 
 	base := cliutil.BasePath("common", "lib", "perl5")
 	lib := filepath.Join(base, archname) + ":" + base
 
-	_ = os.Setenv("PERLLIB", lib)
-	_ = os.Setenv("PERL5LIB", lib)
+	var errs []error
+
+	for _, key := range []string{"PERLLIB", "PERL5LIB"} {
+		if err := os.Setenv(key, lib); err != nil {
+			errs = append(errs, fmt.Errorf("set %s: %w", key, err))
+		}
+	}
+
+	return errors.Join(errs...)
 }
+
+// perlArchnameTimeout bounds the "perl -V:archname" probe: a wedged perl must
+// not keep every configd command from starting.
+const perlArchnameTimeout = 10 * time.Second
 
 // perlArchname asks the system perl for its architecture tag
 // (e.g. "x86_64-linux-thread-multi" or "aarch64-linux-thread-multi"). Returns
-// empty string when perl is missing or the output cannot be parsed; callers
-// treat that as "skip env setup".
-func perlArchname(env sys.System) string {
-	out, err := sys.Output(context.Background(), env.Exec, "/usr/bin/perl", "-V:archname")
+// empty string when perl is missing, times out (perlArchnameTimeout) or its
+// output cannot be parsed; callers treat that as "skip env setup".
+func perlArchname(ctx context.Context, env sys.System) string {
+	ctx, cancel := context.WithTimeout(ctx, perlArchnameTimeout)
+	defer cancel()
+
+	out, err := sys.Output(ctx, env.Exec, "/usr/bin/perl", "-V:archname")
 	if err != nil {
 		return ""
 	}
@@ -152,30 +168,58 @@ func perlArchname(env sys.System) string {
 	return s[start+1 : end]
 }
 
+// main runs the command line and exits with its status: the only place that
+// ends the process.
 func main() {
-	env := sys.Real()
+	os.Exit(run(os.Args, sys.Real(), os.Stdout, os.Stderr))
+}
 
-	ensureZextrasPerlEnv(env)
+// run executes the command line argv (os.Args-shaped) on env, writing to
+// stdout and stderr, and returns the process exit status. It is main with the
+// process boundary injected, so the status and the stderr text of every
+// command and error path can be checked in-process.
+func run(argv []string, env sys.System, stdout, stderr io.Writer) (status int) {
+	std := &stdio{Out: stdout, Err: stderr, Args: argv}
+
+	// kong ends the process through its exit hook where it would stop
+	// parsing; run turns that into a return.
+	defer func() {
+		if r := recover(); r != nil {
+			req, ok := r.(exitRequest)
+			if !ok {
+				panic(r)
+			}
+
+			status = kongExitStatus(int(req))
+		}
+	}()
+
+	if err := ensureZextrasPerlEnv(context.Background(), env); err != nil {
+		_, _ = fmt.Fprintf(stderr, "Warning: perl environment not set: %v\n", err)
+	}
 
 	cli := &CLI{}
 
 	parser, err := kong.New(cli,
+		kong.Name(filepath.Base(argv[0])),
 		kong.Description("Configuration management daemon for Carbonio"),
 		kong.Vars{"version": formatVersion()},
-		kong.Bind(env),
-		kong.Exit(exitKong),
+		kong.Bind(env, std),
+		kong.Writers(stdout, stderr),
+		kong.Exit(func(code int) { panic(exitRequest(code)) }),
 	)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		_, _ = fmt.Fprintf(stderr, "Error: %v\n", err)
+
+		return 1
 	}
 
 	// Must be called before Parse so the binary can respond to COMP_LINE/COMP_POINT
 	// (set by bash's `complete -C`) and print completions instead of running normally.
 	kongplete.Complete(parser)
 
-	ctx, parseErr := parser.Parse(legacyProxyGenArgs(os.Args[1:]))
+	ctx, parseErr := parser.Parse(legacyProxyGenArgs(argv[1:]))
 	parser.FatalIfErrorf(parseErr)
 
-	os.Exit(exitCode(ctx.Run(cli), os.Stderr))
+	return exitCode(ctx.Run(cli), stderr)
 }

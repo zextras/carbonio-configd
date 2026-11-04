@@ -6,7 +6,6 @@ package main
 
 import (
 	"context"
-	"os"
 
 	"github.com/zextras/carbonio-configd/internal/cli/release"
 	"github.com/zextras/carbonio-configd/internal/sys"
@@ -18,6 +17,6 @@ type ReleaseCmd struct {
 }
 
 // Run executes the release command.
-func (c *ReleaseCmd) Run(env sys.System) error {
-	return exitWith(release.Run(context.Background(), env, os.Stdout, os.Stderr, &release.Options{Packages: c.Packages}))
+func (c *ReleaseCmd) Run(env sys.System, std *stdio) error {
+	return exitWith(release.Run(context.Background(), env, std.Out, std.Err, &release.Options{Packages: c.Packages}))
 }

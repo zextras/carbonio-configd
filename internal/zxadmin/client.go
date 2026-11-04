@@ -27,7 +27,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zextras/carbonio-configd/internal/ldap"
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // ErrAdvancedNotRunning reports that mailboxd is up but the Carbonio Advanced
@@ -82,6 +84,10 @@ type Client struct {
 	username   string
 	password   string
 
+	// authMu serializes authentication so concurrent callers share one
+	// password POST. mu guards only the cached token; neither is held while a
+	// status/reload request is in flight.
+	authMu    sync.Mutex
 	mu        sync.Mutex
 	token     string
 	expiresAt time.Time
@@ -110,16 +116,32 @@ func NewWithBaseURL(baseURL string, localCfg map[string]string) *Client {
 		httpClient: &http.Client{
 			Timeout: defaultTimeout,
 			Transport: &http.Transport{
-				// #nosec G402 - the admin endpoint serves a self-signed cert;
-				// we are talking to localhost over a Unix-style trust boundary.
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+				TLSClientConfig: tlsConfig(localCfg),
 			},
 		},
 	}
 }
 
+// tlsConfig returns the TLS policy for the admin endpoint. The LDAP master
+// password is posted to it, so it follows the same localconfig rule as the
+// LDAP client (ldap.ResolveTLS, the legacy Java behavior): with
+// ssl_allow_untrusted_certs=false the server certificate is verified against
+// the system roots plus the Carbonio CA files (conf/ca/ca.pem,
+// ssl/carbonio/commercial/commercial_ca.crt) and the host name must match
+// zimbra_server_hostname; the legacy default (true) skips verification.
+func tlsConfig(localCfg map[string]string) *tls.Config {
+	cfg := ldap.ResolveTLS(context.Background(), localCfg, sys.RealFS{}).Config
+	if !cfg.InsecureSkipVerify {
+		cfg.ServerName = strings.TrimSpace(localCfg["zimbra_server_hostname"])
+	}
+
+	return cfg
+}
+
 // authenticate performs a SOAP AdminAuthRequest and caches the returned token.
-// Callers must hold c.mu.
+// Callers must hold c.authMu (not c.mu). The password is POSTed at most once
+// per call: a network error or 5xx is returned to the caller, which retries on
+// its own schedule, instead of re-sending the credentials in a retry loop.
 func (c *Client) authenticate(ctx context.Context) error {
 	ctx = logger.ContextWithComponentOnce(ctx, "zxadmin")
 
@@ -131,7 +153,7 @@ func (c *Client) authenticate(ctx context.Context) error {
 
 	body := buildAuthEnvelope(c.username, c.password)
 
-	resp, err := c.doWithRetry(ctx, func() (*http.Request, error) {
+	resp, err := c.doWithRetry(ctx, 0, func() (*http.Request, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+soapPath, strings.NewReader(body))
 		if err != nil {
 			return nil, fmt.Errorf("zxadmin: build auth request: %w", err)
@@ -170,26 +192,63 @@ func (c *Client) authenticate(ctx context.Context) error {
 		return err
 	}
 
-	c.token = token
-
+	expiresAt := time.Now().Add(1 * time.Hour) // conservative fallback if the server omits lifetime
 	if lifetimeMs > 0 {
-		c.expiresAt = time.Now().Add(time.Duration(lifetimeMs)*time.Millisecond - renewSkew)
-	} else {
-		// Conservative fallback if the server omits lifetime.
-		c.expiresAt = time.Now().Add(1 * time.Hour)
+		expiresAt = time.Now().Add(time.Duration(lifetimeMs)*time.Millisecond - renewSkew)
 	}
+
+	c.mu.Lock()
+	c.token = token
+	c.expiresAt = expiresAt
+	c.mu.Unlock()
 
 	return nil
 }
 
-// ensureToken refreshes the cached token if it is missing or near expiry.
-// Caller must hold c.mu.
-func (c *Client) ensureToken(ctx context.Context) error {
+// cachedToken returns the cached token, or "" when it is missing or near expiry.
+func (c *Client) cachedToken() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	if c.token != "" && time.Now().Before(c.expiresAt) {
-		return nil
+		return c.token
 	}
 
-	return c.authenticate(ctx)
+	return ""
+}
+
+// ensureToken returns a valid token, authenticating when the cached one is
+// missing or near expiry. No lock is held across the network calls of the
+// caller's request.
+func (c *Client) ensureToken(ctx context.Context) (string, error) {
+	if token := c.cachedToken(); token != "" {
+		return token, nil
+	}
+
+	c.authMu.Lock()
+	defer c.authMu.Unlock()
+
+	// Another caller may have authenticated while this one waited.
+	if token := c.cachedToken(); token != "" {
+		return token, nil
+	}
+
+	if err := c.authenticate(ctx); err != nil {
+		return "", err
+	}
+
+	return c.cachedToken(), nil
+}
+
+// dropToken forgets token (rejected by the server) unless a newer one replaced it.
+func (c *Client) dropToken(token string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.token == token {
+		c.token = ""
+		c.expiresAt = time.Time{}
+	}
 }
 
 // GetAllServicesStatus calls the `core getAllServicesStatus` action and
@@ -197,10 +256,8 @@ func (c *Client) ensureToken(ctx context.Context) error {
 func (c *Client) GetAllServicesStatus(ctx context.Context) ([]ModuleStatus, error) {
 	ctx = logger.ContextWithComponentOnce(ctx, "zxadmin")
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if err := c.ensureToken(ctx); err != nil {
+	token, err := c.ensureToken(ctx)
+	if err != nil {
 		return nil, err
 	}
 
@@ -212,9 +269,8 @@ func (c *Client) GetAllServicesStatus(ctx context.Context) ([]ModuleStatus, erro
 	q.Set("action", "getAllServicesStatus")
 
 	statusURL := c.baseURL + statusPath + "?" + q.Encode()
-	token := c.token
 
-	resp, err := c.doWithRetry(ctx, func() (*http.Request, error) {
+	resp, err := c.doWithRetry(ctx, maxHTTPRetries, func() (*http.Request, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, statusURL, http.NoBody)
 		if err != nil {
 			return nil, fmt.Errorf("zxadmin: build status request: %w", err)
@@ -240,8 +296,7 @@ func (c *Client) GetAllServicesStatus(ctx context.Context) ([]ModuleStatus, erro
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		// Token may have been invalidated server-side; drop it so the next
 		// call re-authenticates.
-		c.token = ""
-		c.expiresAt = time.Time{}
+		c.dropToken(token)
 
 		logger.WarnContext(ctx, "zxadmin: status auth rejected, dropping cached token",
 			"status", resp.StatusCode)
@@ -283,19 +338,22 @@ func authCookie(token string) *http.Cookie {
 
 // doWithRetry sends the request built by newReq, retrying on network errors
 // and 5xx responses with bounded exponential backoff (mirrors the shape of
-// ldap.Client.executeWithRetry). 401/403/404 and other 4xx responses are
+// ldap.Client.executeWithRetry); retries is the number of retries after the
+// first attempt. 401/403/404 and other 4xx responses are
 // never retried since they signal a request/auth problem a retry cannot
 // fix. newReq is invoked once per attempt because an *http.Request's body
 // cannot be replayed once sent. ctx cancellation is checked between
 // attempts so callers are never blocked past their deadline.
-func (c *Client) doWithRetry(ctx context.Context, newReq func() (*http.Request, error)) (*http.Response, error) {
+func (c *Client) doWithRetry(
+	ctx context.Context, retries int, newReq func() (*http.Request, error),
+) (*http.Response, error) {
 	logCtx := logger.ContextWithComponentOnce(ctx, "zxadmin")
 
 	delay := httpRetryDelay
 
 	var lastErr error
 
-	for attempt := 0; attempt <= maxHTTPRetries; attempt++ {
+	for attempt := 0; attempt <= retries; attempt++ {
 		if attempt > 0 {
 			select {
 			case <-ctx.Done():
@@ -319,7 +377,7 @@ func (c *Client) doWithRetry(ctx context.Context, newReq func() (*http.Request, 
 			lastErr = err
 
 			logger.DebugContext(logCtx, "zxadmin: HTTP request failed, retrying",
-				"attempt", attempt+1, "max_attempts", maxHTTPRetries+1, "error", err)
+				"attempt", attempt+1, "max_attempts", retries+1, "error", err)
 
 			continue
 		}
@@ -329,7 +387,7 @@ func (c *Client) doWithRetry(ctx context.Context, newReq func() (*http.Request, 
 			_ = resp.Body.Close()
 
 			logger.DebugContext(logCtx, "zxadmin: HTTP server error, retrying",
-				"attempt", attempt+1, "max_attempts", maxHTTPRetries+1, "status", resp.StatusCode)
+				"attempt", attempt+1, "max_attempts", retries+1, "status", resp.StatusCode)
 
 			continue
 		}
@@ -337,7 +395,7 @@ func (c *Client) doWithRetry(ctx context.Context, newReq func() (*http.Request, 
 		return resp, nil
 	}
 
-	return nil, fmt.Errorf("zxadmin: request failed after %d attempts: %w", maxHTTPRetries+1, lastErr)
+	return nil, fmt.Errorf("zxadmin: request failed after %d attempts: %w", retries+1, lastErr)
 }
 
 // --- SOAP envelope construction & parsing ---------------------------------

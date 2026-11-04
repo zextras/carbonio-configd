@@ -131,7 +131,7 @@ test-integration-ldap:
 	@echo "Running LDAP container integration tests..."
 	@sock="$${XDG_RUNTIME_DIR:-/run/user/$$(id -u)}/podman/podman.sock"; \
 	if [ -z "$$DOCKER_HOST" ] && [ -S "$$sock" ]; then export DOCKER_HOST="unix://$$sock"; fi; \
-	$(GOTEST) -v -count=1 -tags integration -run '^Test(OpenLDAP|Container)_' ./internal/configmgr ./internal/cli/ldapcmd
+	$(GOTEST) -v -count=1 -tags integration -run '^Test(OpenLDAP|Container)_' ./internal/configmgr ./internal/cli/ldapcmd ./internal/ldapwatch
 
 # Run tests with coverage (all build tag combinations merged)
 test-coverage:

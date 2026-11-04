@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strconv"
 
 	"github.com/zextras/carbonio-configd/internal/cli/rewrite"
@@ -18,7 +17,8 @@ import (
 
 // exitStatus is the error a Kong Run method returns to make main exit with a
 // specific status without printing an "Error:" line: the command already wrote
-// whatever it had to say on stderr. main is the only place that calls os.Exit.
+// whatever it had to say on stderr. run maps it to the process status and main
+// is the only place that calls os.Exit.
 type exitStatus int
 
 func (e exitStatus) Error() string { return "exit status " + strconv.Itoa(int(e)) }
@@ -37,16 +37,32 @@ func exitWith(code int) error {
 // line parse error.
 const kongParseFailure = 80
 
-// exitKong is kong's exit hook: a command line parse error exits 1, the status
-// of the legacy Java/Perl/Jython tools (and of every other failure of this
-// binary), instead of kong's 80. Other statuses (help, version: 0) pass
-// through.
-func exitKong(code int) {
+// kongExitStatus maps the status kong exits with to the one the process
+// exits with: a command line parse error is 1, the status of the legacy
+// Java/Perl/Jython tools (and of every other failure of this binary), instead
+// of kong's 80. Other statuses (help, version: 0) pass through.
+func kongExitStatus(code int) int {
 	if code == kongParseFailure {
-		code = 1
+		return 1
 	}
 
-	os.Exit(code)
+	return code
+}
+
+// exitRequest is the panic value of kong's exit hook in run: kong calls its
+// Exit hook where it would end the process (help, version, a parse error) and
+// expects it not to return, so run unwinds with the status instead.
+type exitRequest int
+
+// stdio is everything a command takes from the process besides the host
+// (sys.System): the standard streams and the command line. main binds the
+// real ones; a test binds buffers, so no command reaches for os.Stdout,
+// os.Stderr or os.Args itself and every exit status and message is observable.
+type stdio struct {
+	// Out and Err are the standard output and error.
+	Out, Err io.Writer
+	// Args is the command line, os.Args-shaped (the program name first).
+	Args []string
 }
 
 // standaloneRewrite returns the in-process rewrite the cli commands fall back

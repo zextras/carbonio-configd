@@ -14,6 +14,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/zextras/carbonio-configd/internal/sys"
 	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
@@ -203,7 +206,7 @@ func TestBootstrapPostfixMainCf_MissingOwner(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	want := []string{sudoBin + " /usr/bin/touch " + ctl.p.mainCf}
+	want := []string{sudoBin + " -n /usr/bin/touch " + ctl.p.mainCf}
 	if got := f.Exec.Lines(); !slices.Equal(got, want) {
 		t.Errorf("commands = %q, want only the touch (postconf seed skipped): %q", got, want)
 	}
@@ -252,8 +255,8 @@ func TestBootstrapPostfixMainCf_NewFile(t *testing.T) {
 	}
 
 	want := []string{
-		sudoBin + " /usr/bin/touch " + ctl.p.mainCf,
-		sudoBin + " " + ctl.p.postconfBin + " -e mail_owner=postfix setgid_group=postdrop",
+		sudoBin + " -n /usr/bin/touch " + ctl.p.mainCf,
+		sudoBin + " -n " + ctl.p.postconfBin + " -e mail_owner=postfix setgid_group=postdrop",
 	}
 	if got := f.Exec.Lines(); !slices.Equal(got, want) {
 		t.Errorf("commands = %q, want %q", got, want)
@@ -346,7 +349,7 @@ func TestRunPostalias_Exists(t *testing.T) {
 
 	ctl.runPostalias(context.Background())
 
-	want := []string{sudoBin + " " + ctl.p.postaliasBin + " " + ctl.p.aliases}
+	want := []string{sudoBin + " -n " + ctl.p.postaliasBin + " " + ctl.p.aliases}
 	if got := f.Exec.Lines(); !slices.Equal(got, want) {
 		t.Errorf("commands = %q, want %q", got, want)
 	}
@@ -362,7 +365,7 @@ func TestRunPostalias_FailureIsNonFatal(t *testing.T) {
 	ctl.runPostalias(context.Background())
 }
 
-// --- startPostfixDaemon / mtaIsRunning / sudoRun error paths ---
+// --- controlCommand / commandRunning / sudoRun error paths ---
 
 func TestStartPostfixDaemon_Error(t *testing.T) {
 	t.Parallel()
@@ -370,7 +373,7 @@ func TestStartPostfixDaemon_Error(t *testing.T) {
 	ctl, f := newFakeController(t)
 	f.Exec.FailStart(func(c *sys.Cmd) bool { return c.Path == sudoBin }, errors.New("sudo: not found"))
 
-	if err := ctl.startPostfixDaemon(context.Background()); err == nil {
+	if _, err := ctl.controlCommand(context.Background(), ctl.registry[serviceMTA], []string{"start"}); err == nil {
 		t.Fatal("expected error when sudo is missing")
 	}
 }
@@ -380,11 +383,11 @@ func TestStartPostfixDaemon_RunsStart(t *testing.T) {
 
 	ctl, f := newFakeController(t)
 
-	if err := ctl.startPostfixDaemon(context.Background()); err != nil {
+	if _, err := ctl.controlCommand(context.Background(), ctl.registry[serviceMTA], []string{"start"}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	want := []string{sudoBin + " " + ctl.p.postfixBin + " start"}
+	want := []string{sudoBin + " -n " + ctl.p.postfixBin + " start"}
 	if got := f.Exec.Lines(); !slices.Equal(got, want) {
 		t.Errorf("commands = %q, want %q", got, want)
 	}
@@ -396,7 +399,7 @@ func TestMtaIsRunning_Error(t *testing.T) {
 	ctl, f := newFakeController(t)
 	f.Exec.FailStart(func(c *sys.Cmd) bool { return c.Path == sudoBin }, errors.New("sudo: not found"))
 
-	if ctl.mtaIsRunning(context.Background()) {
+	if ctl.commandRunning(context.Background(), ctl.registry[serviceMTA]) {
 		t.Error("expected false when sudo is missing")
 	}
 }
@@ -406,11 +409,11 @@ func TestMtaIsRunning_Running(t *testing.T) {
 
 	ctl, f := newFakeController(t)
 
-	if !ctl.mtaIsRunning(context.Background()) {
+	if !ctl.commandRunning(context.Background(), ctl.registry[serviceMTA]) {
 		t.Error("expected true when `postfix status` succeeds")
 	}
 
-	want := []string{sudoBin + " " + ctl.p.postfixBin + " status"}
+	want := []string{sudoBin + " -n " + ctl.p.postfixBin + " status"}
 	if got := f.Exec.Lines(); !slices.Equal(got, want) {
 		t.Errorf("commands = %q, want %q", got, want)
 	}
@@ -436,13 +439,13 @@ func TestSudoRun_WithArgs(t *testing.T) {
 		t.Errorf("expected nil, got %v", err)
 	}
 
-	want := []string{sudoBin + " /bin/true arg1 arg2"}
+	want := []string{sudoBin + " -n /bin/true arg1 arg2"}
 	if got := f.Exec.Lines(); !slices.Equal(got, want) {
 		t.Errorf("commands = %q, want %q", got, want)
 	}
 }
 
-// --- mtaCustomStart error path ---
+// --- startCommands error path ---
 
 func TestMtaCustomStart_LoadConfigFails(t *testing.T) {
 	t.Parallel()
@@ -453,7 +456,7 @@ func TestMtaCustomStart_LoadConfigFails(t *testing.T) {
 		return nil, fmt.Errorf("test error")
 	}
 
-	err := ctl.mtaCustomStart(context.Background(), nil)
+	err := ctl.startCommands(context.Background(), ctl.registry[serviceMTA])
 	if err == nil {
 		t.Fatal("expected error when ctl.loadConfig fails")
 	}
@@ -467,11 +470,11 @@ func TestMtaCustomStart_RunningSkip(t *testing.T) {
 	}))
 
 	// `postfix status` succeeds (fake default): the start is skipped.
-	if err := ctl.mtaCustomStart(context.Background(), nil); err != nil {
-		t.Fatalf("mtaCustomStart (running skip): %v", err)
+	if err := ctl.startCommands(context.Background(), ctl.registry[serviceMTA]); err != nil {
+		t.Fatalf("startCommands (running skip): %v", err)
 	}
 
-	want := []string{sudoBin + " " + ctl.p.postfixBin + " status"}
+	want := []string{sudoBin + " -n " + ctl.p.postfixBin + " status"}
 	if got := f.Exec.Lines(); !slices.Equal(got, want) {
 		t.Errorf("commands = %q, want only the status probe %q", got, want)
 	}
@@ -488,13 +491,13 @@ func TestMtaCustomStart_StartsWhenNotRunning(t *testing.T) {
 	f.FS.Put(ctl.p.mainCf, []byte("existing config\n"), 0o644) // bootstrap is a no-op
 	f.FS.PutDir(ctl.p.conf, 0o755)
 
-	if err := ctl.mtaCustomStart(context.Background(), nil); err != nil {
-		t.Fatalf("mtaCustomStart: %v", err)
+	if err := ctl.startCommands(context.Background(), ctl.registry[serviceMTA]); err != nil {
+		t.Fatalf("startCommands: %v", err)
 	}
 
 	want := []string{
-		sudoBin + " " + ctl.p.postfixBin + " status",
-		sudoBin + " " + ctl.p.postfixBin + " start",
+		sudoBin + " -n " + ctl.p.postfixBin + " status",
+		sudoBin + " -n " + ctl.p.postfixBin + " start",
 	}
 	if got := f.Exec.Lines(); !slices.Equal(got, want) {
 		t.Errorf("commands = %q, want %q", got, want)
@@ -513,31 +516,98 @@ func TestMtaCustomStart_BootstrapError(t *testing.T) {
 	}))
 	f.Exec.When(func(c *sys.Cmd) bool { return slices.Contains(c.Args, "status") }, systest.Fail(1, ""))
 
-	if err := ctl.mtaCustomStart(context.Background(), nil); err == nil {
+	if err := ctl.startCommands(context.Background(), ctl.registry[serviceMTA]); err == nil {
 		t.Fatal("expected error when ctl.loadConfig fails")
 	}
 }
 
-// --- mtaCustomStop ---
+// --- stopCommands (the MTA's Stop verb) ---
 
-func TestMtaCustomStop_NotRunningFromLaunchers(t *testing.T) {
+func postfixCmd(ctl *Controller, verb string) string {
+	return sudoBin + " -n " + ctl.p.postfixBin + " " + verb
+}
+
+// TestMtaStop_NotRunningIsDecidedByExitCode: postfix stop fails and `postfix
+// status` exits non-zero with no master process: the MTA is stopped, whatever
+// language the failing verb printed its complaint in.
+func TestMtaStop_NotRunningIsDecidedByExitCode(t *testing.T) {
 	t.Parallel()
 
 	ctl, f := newFakeController(t)
-	f.Exec.OnPath(sudoBin, systest.Fail(1, "postfix/postfix-script: the Postfix mail system is not running"))
+	f.Exec.OnCmdline(postfixCmd(ctl, "stop"), systest.Fail(1, "postfix/postfix-script: il sistema di posta non è in esecuzione"))
+	f.Exec.OnCmdline(postfixCmd(ctl, "status"), systest.Fail(1, ""))
 
-	if err := ctl.mtaCustomStop(context.Background(), nil); err != nil {
-		t.Errorf("expected nil when postfix reports 'not running', got %v", err)
+	if err := ctl.stopCommands(context.Background(), ctl.registry[serviceMTA]); err != nil {
+		t.Errorf("stopping an MTA that is not running must succeed, got %v", err)
 	}
 }
 
-func TestMtaCustomStop_Error(t *testing.T) {
+// TestMtaStop_FailureOfARunningMTAIsAnError: a stop that fails while `postfix
+// status` says the MTA runs is an error even when the output happens to
+// contain "is not running" — the exit code decides, not the text.
+func TestMtaStop_FailureOfARunningMTAIsAnError(t *testing.T) {
 	t.Parallel()
 
 	ctl, f := newFakeController(t)
-	f.Exec.OnPath(sudoBin, systest.Fail(2, "fatal error"))
+	f.Exec.OnCmdline(postfixCmd(ctl, "stop"), systest.Fail(1, "warning: the Postfix mail system is not running"))
+	// postfix status exits 0 by default in the fake.
 
-	if err := ctl.mtaCustomStop(context.Background(), nil); err == nil {
-		t.Fatal("expected error when postfix stop fails with unexpected output")
+	if err := ctl.stopCommands(context.Background(), ctl.registry[serviceMTA]); err == nil {
+		t.Fatal("a failing stop of a running MTA must be reported")
+	}
+}
+
+// TestMtaStop_StatusThatCannotRunDoesNotHideARunningMTA: when sudo refuses the
+// status call too (exit 1, like a stopped postfix) but the master process is
+// there, the MTA is still running and the failed stop is an error.
+func TestMtaStop_StatusThatCannotRunDoesNotHideARunningMTA(t *testing.T) {
+	t.Parallel()
+
+	ctl, f := newFakeController(t)
+	f.Exec.OnPath(sudoBin, systest.Fail(1, "sudo: a password is required"))
+
+	master := ctl.registry[serviceMTA].ProcessName
+	f.Proc.Add(sys.ProcEntry{PID: 4321, Exe: master, Argv: []string{master}})
+
+	if err := ctl.stopCommands(context.Background(), ctl.registry[serviceMTA]); err == nil {
+		t.Fatal("a refused sudo must not turn a running MTA into a successful stop")
+	}
+}
+
+func TestMtaStop_Success(t *testing.T) {
+	t.Parallel()
+
+	ctl, f := newFakeController(t)
+
+	if err := ctl.stopCommands(context.Background(), ctl.registry[serviceMTA]); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got, want := f.Exec.Lines(), []string{postfixCmd(ctl, "stop")}; !slices.Equal(got, want) {
+		t.Errorf("commands = %q, want %q", got, want)
+	}
+}
+
+// TestMtaSudoNeverPrompts: every sudo call of the MTA control path carries -n,
+// so a missing sudoers grant fails at once instead of hanging on a password
+// prompt.
+func TestMtaSudoNeverPrompts(t *testing.T) {
+	t.Parallel()
+
+	ctl, f := newFakeController(t, WithConfigLoader(func() (map[string]string, error) {
+		return map[string]string{"ldap_url": "ldap://localhost", "ldap_port": "389"}, nil
+	}))
+	f.Exec.OnCmdline(postfixCmd(ctl, "status"), systest.Fail(1, ""))
+	f.FS.Put(ctl.p.aliases, []byte("x"), 0o644)
+
+	ctx := context.Background()
+	require.NoError(t, ctl.startCommands(ctx, ctl.registry[serviceMTA]))
+	require.NoError(t, ctl.stopCommands(ctx, ctl.registry[serviceMTA]))
+	require.NoError(t, ctl.reloadWithoutSystemd(ctx, serviceMTA, ctl.registry[serviceMTA]))
+
+	for _, line := range f.Exec.Lines() {
+		if strings.HasPrefix(line, sudoBin+" ") {
+			assert.True(t, strings.HasPrefix(line, sudoBin+" -n "), "sudo without -n: %q", line)
+		}
 	}
 }

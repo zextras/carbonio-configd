@@ -36,13 +36,33 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
 # for every target.
 FROM --platform=$BUILDPLATFORM docker.io/library/ubuntu:jammy AS installer
 
+# Reproducible template source. The Zextras apt repository is not signed
+# (it publishes no InRelease/Release.gpg, so there is no key to verify it
+# with, and `[trusted=yes]` is the only way apt accepts it). Compensate by
+# pinning what is downloaded:
+#   CARBONIO_VERSION          exact version of both debs (apt-get download
+#                             pkg=version); empty means the newest of the repo.
+#   CARBONIO_CORE_SHA256 / CARBONIO_APPSERVER_CONF_SHA256
+#                             expected SHA-256 of each deb; when set, the build
+#                             fails on a mismatch. Release builds MUST set all
+#                             three.
+ARG CARBONIO_VERSION=
+ARG CARBONIO_CORE_SHA256=
+ARG CARBONIO_APPSERVER_CONF_SHA256=
+
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates \
  && printf 'deb [trusted=yes] https://repo.zextras.tools/repository/ubuntu-devel-jammy jammy main\n' \
     > /etc/apt/sources.list.d/zextras.list \
  && apt-get update \
  && mkdir -p /core /tmp/debs && cd /tmp/debs \
- && apt-get download carbonio-core carbonio-common-appserver-conf \
+ && pin="${CARBONIO_VERSION:+=${CARBONIO_VERSION}}" \
+ && apt-get download "carbonio-core${pin}" "carbonio-common-appserver-conf${pin}" \
+ && check() { \
+      [ -z "$2" ] || echo "$2  $(ls "$1"_*.deb)" | sha256sum -c -; \
+    } \
+ && check carbonio-core "${CARBONIO_CORE_SHA256}" \
+ && check carbonio-common-appserver-conf "${CARBONIO_APPSERVER_CONF_SHA256}" \
  && for deb in /tmp/debs/*.deb; do dpkg -x "$deb" /core; done \
  && rm -rf /tmp/debs
 

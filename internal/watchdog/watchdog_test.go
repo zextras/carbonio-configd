@@ -196,8 +196,8 @@ func TestNewWatchdog(t *testing.T) {
 		t.Fatal("NewWatchdog returned nil")
 	}
 
-	if wd.CheckInterval != 30*time.Second {
-		t.Errorf("Expected CheckInterval=30s, got %v", wd.CheckInterval)
+	if wd.checkInterval != 30*time.Second {
+		t.Errorf("Expected CheckInterval=30s, got %v", wd.checkInterval)
 	}
 
 	if wd.enabled {
@@ -228,8 +228,8 @@ func TestNewWatchdog_DefaultCheckInterval(t *testing.T) {
 
 	wd := NewWatchdog(cfg)
 
-	if wd.CheckInterval != 60*time.Second {
-		t.Errorf("Expected default CheckInterval=60s, got %v", wd.CheckInterval)
+	if wd.checkInterval != 60*time.Second {
+		t.Errorf("Expected default CheckInterval=60s, got %v", wd.checkInterval)
 	}
 }
 
@@ -1146,7 +1146,7 @@ func TestWatchdog_StopDuringRestart(t *testing.T) {
 	h.start()
 
 	// Tick, then stop immediately (potentially during restart)
-	h.clock.Advance(h.wd.CheckInterval)
+	h.clock.Advance(h.wd.checkInterval)
 	wd.Stop(context.Background())
 
 	// Verify watchdog stopped cleanly

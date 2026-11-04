@@ -6,6 +6,7 @@ package services
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"os"
@@ -14,8 +15,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zextras/carbonio-configd/internal/sys"
+	"github.com/stretchr/testify/require"
+
 	"github.com/zextras/carbonio-configd/internal/sys/systest"
+	"github.com/zextras/carbonio-configd/internal/testutil/ldapfake"
+	"github.com/zextras/carbonio-configd/internal/testutil/pki"
 )
 
 // --- buildLDAPBindURL (table-driven consolidation) ---
@@ -67,7 +71,7 @@ func TestBuildLDAPBindURL_TableDriven(t *testing.T) {
 	}
 }
 
-// --- ldapCustomStart (ctl.loadConfig override) ---
+// --- startDirect (ctl.loadConfig override) ---
 
 func TestLdapCustomStart_LoadConfigFails(t *testing.T) {
 	t.Parallel()
@@ -82,7 +86,9 @@ func TestLdapCustomStart_LoadConfigFails(t *testing.T) {
 		return nil, fmt.Errorf("test config error")
 	}
 
-	err := ctl.ldapCustomStart(context.Background(), &ServiceDef{Name: "ldap"})
+	ctl.registry = ctl.defaultRegistry()
+
+	err := ctl.startDirect(context.Background(), svcLdap, ctl.registry[svcLdap])
 	if err == nil {
 		t.Fatal("expected error when ctl.loadConfig fails")
 	}
@@ -134,22 +140,24 @@ func TestLdapCustomStart_WithFakeSlapd(t *testing.T) {
 	ctl.p.log = logDir
 
 	// slapd has no sd_notify; readiness is determined by the LDAP probe.
-	// Stub the probe to succeed so ldapCustomStart returns once the fake
+	// Stub the probe to succeed so startDirect returns once the fake
 	// slapd is launched.
 	withLdapProbe(t, ctl, func(_ context.Context, _ []string) error { return nil })
 
 	done := make(chan error, 1)
+	ctl.registry = ctl.defaultRegistry()
+
 	go func() {
-		done <- ctl.ldapCustomStart(context.Background(), &ServiceDef{Name: "ldap"})
+		done <- ctl.startDirect(context.Background(), svcLdap, ctl.registry[svcLdap])
 	}()
 
 	select {
 	case err := <-done:
 		if err != nil {
-			t.Errorf("ldapCustomStart returned error: %v", err)
+			t.Errorf("startDirect returned error: %v", err)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for ldapCustomStart")
+		t.Fatal("timed out waiting for startDirect")
 	}
 }
 
@@ -200,7 +208,9 @@ func TestLdapCustomStart_ContextTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
-	err := ctl.ldapCustomStart(ctx, &ServiceDef{Name: "ldap"})
+	ctl.registry = ctl.defaultRegistry()
+
+	err := ctl.startDirect(ctx, svcLdap, ctl.registry[svcLdap])
 	if err == nil {
 		t.Fatal("expected error on context timeout")
 	}
@@ -271,7 +281,15 @@ func TestRenderLDAPTable_AllFields(t *testing.T) {
 	}
 }
 
-// --- startThenProbe ---
+// --- readiness probe of the detached slapd launch ---
+
+// startSlapd launches a stand-in slapd the way the registry's ldap entry does:
+// detached, then held until the LDAP readiness probe passes.
+func startSlapd(ctx context.Context, ctl *Controller) error {
+	def := &ServiceDef{Name: "ldap", BinaryPath: "slapd", LogFile: "/slapd.out", Ready: ReadyLDAP}
+
+	return ctl.startDetached(ctx, "ldap", def, nil)
+}
 
 func withLdapProbe(t *testing.T, ctl *Controller, fn func(context.Context, []string) error) {
 	t.Helper()
@@ -279,18 +297,18 @@ func withLdapProbe(t *testing.T, ctl *Controller, fn func(context.Context, []str
 	ctl.ldapProbe = fn
 }
 
-// TestStartThenProbe_ReadyOnProbe verifies a fast return once the probe
+// TestStartSlapd_ReadyOnProbe verifies a fast return once the probe
 // succeeds, without waiting for sd_notify or the full timeout.
-func TestStartThenProbe_ReadyOnProbe(t *testing.T) {
+func TestStartSlapd_ReadyOnProbe(t *testing.T) {
 	t.Parallel()
 
 	ctl, f := newFakeController(t)
 
 	withLdapProbe(t, ctl, func(_ context.Context, _ []string) error { return nil })
 
-	err := ctl.startThenProbe(context.Background(), &sys.Cmd{Path: "slapd"}, "ldap://localhost:389")
+	err := startSlapd(context.Background(), ctl)
 	if err != nil {
-		t.Fatalf("startThenProbe returned error: %v", err)
+		t.Fatalf("startSlapd returned error: %v", err)
 	}
 
 	if got := f.Rec.Of("exec.start"); len(got) != 1 {
@@ -298,9 +316,9 @@ func TestStartThenProbe_ReadyOnProbe(t *testing.T) {
 	}
 }
 
-// TestStartThenProbe_ChildExitFailsFast verifies that if the child exits before
+// TestStartSlapd_ChildExitFailsFast verifies that if the child exits before
 // the probe ever succeeds, we fail immediately rather than polling to timeout.
-func TestStartThenProbe_ChildExitFailsFast(t *testing.T) {
+func TestStartSlapd_ChildExitFailsFast(t *testing.T) {
 	t.Parallel()
 
 	ctl, f := newFakeController(t)
@@ -313,7 +331,7 @@ func TestStartThenProbe_ChildExitFailsFast(t *testing.T) {
 	// Child exits immediately with a failure.
 	f.Exec.OnPath("slapd", systest.Fail(1, ""))
 
-	err := ctl.startThenProbe(context.Background(), &sys.Cmd{Path: "slapd"}, "ldap://localhost:389")
+	err := startSlapd(context.Background(), ctl)
 	if err == nil {
 		t.Fatal("expected error when child exits before readiness")
 	}
@@ -322,8 +340,8 @@ func TestStartThenProbe_ChildExitFailsFast(t *testing.T) {
 	}
 }
 
-// TestStartThenProbe_CtxCancel verifies ctx cancellation aborts the wait.
-func TestStartThenProbe_CtxCancel(t *testing.T) {
+// TestStartSlapd_CtxCancel verifies ctx cancellation aborts the wait.
+func TestStartSlapd_CtxCancel(t *testing.T) {
 	t.Parallel()
 
 	ctl, _ := newFakeController(t)
@@ -336,15 +354,15 @@ func TestStartThenProbe_CtxCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := ctl.startThenProbe(ctx, &sys.Cmd{Path: "slapd"}, "ldap://localhost:389")
+	err := startSlapd(ctx, ctl)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("error = %v, want context.Canceled", err)
 	}
 }
 
-// TestStartThenProbe_Timeout verifies the readiness wait gives up once
+// TestStartSlapd_Timeout verifies the readiness wait gives up once
 // ldapReadyTimeout of (manual) clock time has elapsed without a successful probe.
-func TestStartThenProbe_Timeout(t *testing.T) {
+func TestStartSlapd_Timeout(t *testing.T) {
 	t.Parallel()
 
 	ctl, f := newFakeController(t)
@@ -356,7 +374,7 @@ func TestStartThenProbe_Timeout(t *testing.T) {
 
 	pumpClock(t, f.Clock, ldapProbeInterval)
 
-	err := ctl.startThenProbe(context.Background(), &sys.Cmd{Path: "slapd"}, "ldap://localhost:389")
+	err := startSlapd(context.Background(), ctl)
 	if err == nil || !strings.Contains(err.Error(), "did not become ready within") {
 		t.Fatalf("error = %v, want readiness timeout", err)
 	}
@@ -366,7 +384,7 @@ func TestStartThenProbe_Timeout(t *testing.T) {
 func TestProbeLDAPReady_EmptyURLs(t *testing.T) {
 	t.Parallel()
 
-	err := probeLDAPReady(context.Background(), []string{})
+	err := probeLDAPReady(context.Background(), []string{}, nil)
 	if err == nil {
 		t.Error("expected non-nil error for empty URL list")
 	}
@@ -377,8 +395,64 @@ func TestProbeLDAPReady_EmptyURLs(t *testing.T) {
 func TestProbeLDAPReady_UnreachableURL(t *testing.T) {
 	t.Parallel()
 
-	err := probeLDAPReady(context.Background(), []string{"ldap://127.0.0.1:1"})
+	err := probeLDAPReady(context.Background(), []string{"ldap://127.0.0.1:1"}, nil)
 	if err == nil {
 		t.Error("expected non-nil error for unreachable LDAP URL")
+	}
+}
+
+// --- readiness probe TLS (S12) ---
+
+// ldapsHost starts an in-process ldaps:// server with a certificate issued by
+// a private CA and returns the probe URL plus that CA's PEM.
+func ldapsHost(t *testing.T) (url string, caPEM []byte) {
+	t.Helper()
+
+	pk := pki.NewServer(t, "localhost", "127.0.0.1")
+	srv := ldapfake.New(t, ldapfake.Options{
+		TLS:         &tls.Config{Certificates: []tls.Certificate{pk.Certificate}, MinVersion: tls.VersionTLS12},
+		ImplicitTLS: true,
+	})
+
+	return srv.URL("ldaps", "localhost"), pk.CAPEM
+}
+
+// TestProbeLDAP_DefaultAcceptsUntrustedCertificate: with ssl_allow_untrusted_certs
+// unset (legacy default: true) a healthy slapd behind a certificate no CA
+// vouches for is still ready.
+func TestProbeLDAP_DefaultAcceptsUntrustedCertificate(t *testing.T) {
+	t.Parallel()
+
+	url, _ := ldapsHost(t)
+	ctl := newRealController(t)
+
+	if err := ctl.probeLDAP(context.Background(), []string{url}); err != nil {
+		t.Fatalf("probe of a healthy slapd with an untrusted certificate: %v", err)
+	}
+}
+
+// TestProbeLDAP_VerifiesWhenUntrustedCertsAreNotAllowed: with
+// ssl_allow_untrusted_certs=false the probe verifies the certificate against
+// the Carbonio CA, so an unknown CA fails the probe and the CA under
+// conf/ca/ca.pem makes it pass.
+func TestProbeLDAP_VerifiesWhenUntrustedCertsAreNotAllowed(t *testing.T) {
+	t.Parallel()
+
+	url, caPEM := ldapsHost(t)
+	home := t.TempDir()
+
+	ctl := newRealController(t, WithConfigLoader(func() (map[string]string, error) {
+		return map[string]string{"ssl_allow_untrusted_certs": "false", "zimbra_home": home}, nil
+	}))
+
+	if err := ctl.probeLDAP(context.Background(), []string{url}); err == nil {
+		t.Fatal("a certificate of an unknown CA must fail a verifying probe")
+	}
+
+	require.NoError(t, os.MkdirAll(filepath.Join(home, "conf", "ca"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(home, "conf", "ca", "ca.pem"), caPEM, 0o644))
+
+	if err := ctl.probeLDAP(context.Background(), []string{url}); err != nil {
+		t.Fatalf("a certificate of the Carbonio CA must pass: %v", err)
 	}
 }

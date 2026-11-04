@@ -64,7 +64,17 @@ func (r *Reporter) PrintServiceStatus(ctx context.Context, c *cliutil.Console, n
 	}
 
 	if !running {
-		c.Printf("%s is not running.\n", def.DisplayName)
+		// A composite names the member that is down (the store with only its
+		// database stopped is not "mailbox is not running"), as the legacy
+		// storectl, antispamctl and antivirusctl do.
+		down := r.ctl.NotRunningMembers(ctx, def)
+		if len(down) == 0 {
+			down = []string{def.DisplayName}
+		}
+
+		for _, name := range down {
+			c.Printf("%s is not running.\n", name)
+		}
 
 		return fmt.Errorf("service %s: %w", name, ErrNotRunning)
 	}

@@ -83,7 +83,8 @@ change plus a `deferred` reason. The daemon (`ConfigManager.Plan`, `holdDeferred
 2. holds them in memory (merged per service across REWRITE cycles; a later REWRITE cycle never
    drops them);
 3. in the next cycle that is **not** a REWRITE (no requested or forced section, not the first
-   run) merges them into that plan's restarts through `plan.MergeRestarts` (the plan's own
+   run; the interval, SIGHUP and an LDAP-change wake-up all qualify, since none of them
+   requests a section) merges them into that plan's restarts through `plan.MergeRestarts` (the plan's own
    entry of a service wins, with the reasons of both) and logs an INFO line
    `Executing restart deferred from a REWRITE cycle` per service. From there they take the
    normal path: the hybrid systemd policy (heavy services are only flagged `pending-restart`,
@@ -215,6 +216,10 @@ Source: `internal/watchdog/watchdog.go`
   - after the watchdog's own restart attempt, successful or not, the service is tracked again: a
     service still down after a failed restart is retried by the next tick (previously it was left
     untracked and never retried).
+- The services watched are exactly the ones named by `zmconfigd_watchdog_services`; the watchdog
+  carries no list of its own.
+- `Stop` followed by `Start` never overlaps two loops: the new loop waits for the old one to exit
+  before arming its ticker, and a stop wins over a simultaneous tick.
 
 ## Service control priority
 

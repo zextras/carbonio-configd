@@ -8,11 +8,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"os"
-	"os/exec"
 	"testing"
-
-	"github.com/alecthomas/kong"
 )
 
 func TestExitWith(t *testing.T) {
@@ -59,25 +55,14 @@ func TestExitCode(t *testing.T) {
 	}
 }
 
-func TestExitKongParseFailureIsLegacyStatus(t *testing.T) {
-	if os.Getenv("CONFIGD_TEST_EXIT_KONG") != "" {
-		parser, err := kong.New(&CLI{}, kong.Vars{"version": "test"}, kong.Exit(exitKong))
-		if err != nil {
-			os.Exit(99)
-		}
-
-		_, perr := parser.Parse([]string{"localconfig", "--no-such-flag"})
-		parser.FatalIfErrorf(perr)
-		os.Exit(98)
+func TestKongExitStatus(t *testing.T) {
+	if got := kongExitStatus(kongParseFailure); got != 1 {
+		t.Errorf("a parse failure exits %d, want the legacy status 1", got)
 	}
 
-	cmd := exec.Command(os.Args[0], "-test.run=^TestExitKongParseFailureIsLegacyStatus$")
-	cmd.Env = append(os.Environ(), "CONFIGD_TEST_EXIT_KONG=1")
-
-	err := cmd.Run()
-
-	var exitErr *exec.ExitError
-	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
-		t.Fatalf("parse error exit = %v, want status 1", err)
+	for _, code := range []int{0, 1, 2} {
+		if got := kongExitStatus(code); got != code {
+			t.Errorf("kongExitStatus(%d) = %d, want it passed through", code, got)
+		}
 	}
 }

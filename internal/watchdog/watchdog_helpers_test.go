@@ -29,7 +29,7 @@ func (w *Watchdog) SetServiceEnabled(ctx context.Context, service string, enable
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	w.ServiceEnabled[service] = enabled
+	w.serviceEnabled[service] = enabled
 	logger.DebugContext(ctx, "Watchdog monitoring status changed",
 		"service", service,
 		"enabled", enabled)
@@ -103,7 +103,7 @@ func (h *harness) awaitArmed() {
 func (h *harness) cycle() {
 	h.t.Helper()
 
-	h.clock.Advance(h.wd.CheckInterval)
+	h.clock.Advance(h.wd.checkInterval)
 
 	select {
 	case <-h.started:

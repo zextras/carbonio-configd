@@ -21,7 +21,7 @@ import (
 //
 //	ldap_url = "ldap://srv3.example.com:389 ldap://srv1.example.com:389"
 //
-// Legacy Perl tooling (control.pl) and the existing Go ldap_launcher both
+// Legacy Perl tooling (control.pl) and the existing Go ldap launcher both
 // already split this form. Centralising the parser here lets every native
 // LDAP construction site handle the multi-URL convention uniformly and
 // prevents reintroduction of the CO-3565 regression where the raw string

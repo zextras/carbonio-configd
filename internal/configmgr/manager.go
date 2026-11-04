@@ -11,6 +11,7 @@ package configmgr
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -183,6 +184,8 @@ func (cm *ConfigManager) initNativeLdapClient(ctx context.Context) {
 		return
 	}
 
+	params.Context = ctx
+
 	nativeClient, err := ldap.NewClient(params)
 	if err != nil {
 		logger.WarnContext(ctx, "Failed to create native LDAP client - LDAP queries will fail",
@@ -238,6 +241,7 @@ func (cm *ConfigManager) initConfigLdapClient(ctx context.Context, localCfg map[
 		PoolSize: 1, // serialized low-volume reconcile writes
 		StartTLS: false,
 		FS:       cm.env.FS,
+		Context:  ctx,
 	})
 	if err != nil {
 		logger.ErrorContext(ctx, "Failed to create config LDAP client - cn=config writes will fail",
@@ -256,7 +260,7 @@ func (cm *ConfigManager) initConfigLdapClient(ctx context.Context, localCfg map[
 
 // lookupFileKey returns the value for key from the file cache or disk.
 func (cm *ConfigManager) lookupFileKey(ctx context.Context, key string) (string, error) {
-	if val, ok := cm.State.LookupFile(key); ok {
+	if val, ok := cm.lookupCachedFile(ctx, key); ok {
 		logger.DebugContext(ctx, "Loaded from cache", "key", key, "value", redact.ForLog(key, val))
 
 		return val, nil
@@ -288,7 +292,7 @@ func (cm *ConfigManager) lookupFileKey(ctx context.Context, key string) (string,
 	}
 
 	value := strings.Join(filteredLines, ", ")
-	cm.State.StoreFile(key, value)
+	cm.storeCachedFile(ctx, key, value)
 
 	logger.DebugContext(ctx, "Loaded file content", "key", key, "value", redact.ForLog(key, value))
 
@@ -301,7 +305,7 @@ func (cm *ConfigManager) lookupMappedFileKey(ctx context.Context, cfgType, key s
 	if !ok {
 		logger.WarnContext(ctx, "Key not in MAPPEDFILES", "config_type", cfgType, "key", key)
 
-		return "", fmt.Errorf("key '%s' not in MAPPEDFILES", key)
+		return "", fmt.Errorf("key '%s' not in MAPPEDFILES: %w", key, errLookupNotFound)
 	}
 
 	fullPath := cm.mainConfig.BaseDir + "/" + mappedPath
@@ -321,6 +325,10 @@ func (cm *ConfigManager) lookupMappedFileKey(ctx context.Context, cfgType, key s
 
 	return value, nil
 }
+
+// errLookupNotFound marks a lookup whose key is simply not defined, as opposed
+// to a lookup that could not be performed (I/O or transform failure).
+var errLookupNotFound = errors.New("key not found")
 
 // LookUpConfig retrieves a configuration value based on its type and key.
 // This method implements the lookup.ConfigLookup interface.
@@ -364,7 +372,7 @@ func (cm *ConfigManager) LookUpConfig(ctx context.Context, cfgType, key string) 
 	}
 
 	if !found {
-		return "", fmt.Errorf("key %s not found in type %s", key, cfgType)
+		return "", fmt.Errorf("key %s not found in type %s: %w", key, cfgType, errLookupNotFound)
 	}
 
 	logger.DebugContext(ctx, "Config lookup completed",

@@ -44,7 +44,9 @@ Inside `RunMainLoop` before the first iteration:
   `zmconfigd_service_hooks` is set (see below). `env` is the `sys.System` built once in `main`
   (`sys.Real()`).
 - On a host, the manager gates on `Controller.IsSystemdMode()` (a Carbonio systemd target is
-  enabled) — there is no per-instance mode flag to set. The mode selects the restart policy
+  enabled) — there is no per-instance mode flag to set. The restart policy, the config manager
+  and the watchdog all consult that one answer (the `systemd.Mode` interface the service manager
+  implements); none of them detects it on its own. The mode selects the restart policy
   (heavy services only flagged, others `try-reload-or-restart`) and turns the watchdog into a
   no-op; see [restart-behavior.md](restart-behavior.md). A hook backend is never in systemd mode:
   the hooks decide what a restart does and the watchdog checks the services through their
@@ -66,7 +68,11 @@ the filesystem (`sys.FS`), inspecting or signalling processes (`sys.Proc`) and b
 `sys.System`. `main` builds `sys.Real()` once and passes it through constructors and struct fields
 (`configmgr.NewConfigManager`, `services.NewController`, `mtaops.NewExecutor`,
 `proxy.NewGenerator`, `watchdog.Config.Clock`, the `Run` entry points of `internal/cli/*`); there
-are no package-level seam variables.
+are no package-level seam variables. The process boundary is injected the same way: `main` only
+calls `os.Exit(run(os.Args, sys.Real(), os.Stdout, os.Stderr))`, every Kong command receives the
+streams and the command line as a `*stdio`, and the commands return their exit status through
+`exitWith` (one place turns it into the process status, `exitCode`). `cmd/configd/run_test.go`
+therefore checks the status and the exact stdout/stderr of each command in-process.
 
 Tests use the recording fakes in `internal/sys/systest` (`systest.New()`): an in-memory
 filesystem, a scripted `Exec`, a process table and a manual clock, all writing to one ordered
@@ -310,6 +316,8 @@ node_exporter textfile collector directory (`--collector.textfile.directory`).
 | `configd_restart_requests_total` | counter | `service`, `reason` (plan reason kind) | Restarts the restart policy queued; a restart with several reasons counts once under each |
 | `configd_watchdog_restarts_total` | counter | `service`, `result` (`success`, `failure`) | Restarts attempted by the watchdog |
 | `configd_load_failures_total` | counter | `source` (`lc`, `gc`, `mc`, `sc`, `timeout`, `mta_config`) | Failed configuration loads |
+| `configd_ldap_change_triggers_total` | counter | `component` (`global`, `servers`, `domains`), `result` (`cycle_requested`, `already_pending`) | Changes the [LDAP change watcher](#ldap-change-detection-opt-in) reported, once per changed component. `cycle_requested`: the main loop was woken and a cycle follows; `already_pending`: a wake-up (SIGHUP, REWRITE or an earlier change) was already queued and the change rides on that cycle. Only exists with `zmconfigd_ldap_change_trigger=TRUE` |
+| `configd_ldap_watch_poll_failures_total` | counter | | Failed polls of the watcher (each is also a `WARN`) |
 
 Output is sorted (metrics, then label sets) with one `# HELP` and `# TYPE` line per metric, so
 equal state renders to identical bytes. Counters reset when the process restarts, as
@@ -439,16 +447,23 @@ the injected `sys.Clock`):
 |---|---|
 | Baseline | The first successful poll only records the fingerprint and never triggers. A change between the first cycle's load and that poll is picked up by the interval poll |
 | Coalescing | A change is reported once it has been quiet for `zmconfigd_ldap_change_debounce_seconds` (default 2 s), or after ten windows of continuous changes at the latest, so one burst of writes yields one cycle and a steady stream cannot postpone it forever. `0` reports it in the poll that sees it. Further tokens while a cycle is pending collapse in the one-slot reload channel |
-| Trigger | `MainLoopActionTrigger.TriggerReload`: a non-blocking send on the reload channel SIGHUP and REWRITE use. Unlike SIGHUP it does not send `RELOADING=1` and does not zero the sleep timer, and unlike REWRITE it requests no section; the cycle is a full one (`reloadSignaled`, so `zmconfigd_skip_idle_polls` does not skip it) |
+| Trigger | `MainLoopActionTrigger.TriggerReload`: a non-blocking send on the reload channel SIGHUP and REWRITE use. Unlike SIGHUP it does not send `RELOADING=1` and does not zero the sleep timer, and unlike REWRITE it requests no section; the cycle is a full one (`reloadSignaled`, so `zmconfigd_skip_idle_polls` does not skip it). With no requested section it is a non-REWRITE cycle, so it also releases the restarts a REWRITE cycle deferred (see [restart-behavior.md](restart-behavior.md#a-change-consumed-by-a-rewrite-cycle-deferred-restarts)). It runs on the main loop goroutine like every other cycle, so it can never overlap a REWRITE cycle: a REWRITE that arrives while it runs waits for the next iteration |
 | Errors | A failed poll is logged as a warning (never an error) and retried after 1 s, 2 s, 4 s, ... capped at 60 s; the first good poll resets the wait. The fingerprint is compared with the last good one, so a change made while LDAP was unreachable triggers after the reconnect |
 | Client | The watcher reuses the config manager's native LDAP client (pool, retries, timeouts). Its searches take no context, so `LDAPSource` runs them in a helper goroutine and abandons the wait on cancel; the helper ends with the in-flight search, bounded by the client's operation timeout |
 | Lifecycle | Started from the main loop goroutine after the first successful load (the LDAP client and the parameters come from the loaded localconfig), stopped and joined when the key turns `FALSE` and when the daemon loop exits; cancelling the daemon context stops it too. Poll and debounce seconds are copied at start. Never started in `--once` mode |
-| Default off | With the key off `syncLDAPWatch` returns without starting anything: no goroutine, no timer, no LDAP query |
+| Default off | With the key off `syncLDAPWatch` returns without starting anything: no goroutine, no timer, no LDAP query. It stays opt-in on purpose: legacy zmconfigd only polls, so cycles and the restarts they apply would otherwise start at arbitrary moments instead of at most `zmconfigd_interval` after a change, and three searches every 5 s are new LDAP load on every node. Failure already degrades cleanly (warning, exponential back-off, the interval poll keeps running), so turning it on is safe; making it the default is a behaviour change for the cutover to decide |
+| Directory read | The watcher polls the replica configd itself reads from: it reuses the config manager's LDAP client, so URL, bind, StartTLS/ldaps and CA handling are the ones `ldap.ResolveTLS` gives the cycle |
 
 Logs (component `ldapwatch`): `LDAP change watcher started` and `... stopped` at info,
 `LDAP change detected, requesting configuration reload` at info with the changed components
 and how many changes were coalesced, the baseline and each observed change at debug, and
-`LDAP change poll failed, backing off` at warn.
+`LDAP change poll failed, backing off` at warn. The same events are counted in the
+[metrics](#metrics-opt-in).
+
+Tests: the watcher against a fake source on a manual clock (`internal/ldapwatch`, `cmd/configd`),
+and against a real slapd through the daemon's LDAP client (`make test-integration-ldap`,
+`TestOpenLDAP_ChangeTriggersAWatcherReload`: a change to the global config, a server entry or a
+domain is reported once, within seconds, and a change to an entry no cycle reads is not).
 
 ## Package map
 
@@ -478,7 +493,7 @@ and how many changes were coalesced, the baseline and each observed change at de
 | `internal/restart` | Restart policy: systemd hybrid (pending-restart / try-reload-or-restart) or legacy queue, debounce, max failed restarts |
 | `internal/sdnotify` | systemd `sd_notify` protocol: `READY=1`, `RELOADING=1`, `STOPPING=1`, `STATUS=`, watchdog pings |
 | `internal/security` | Runtime user validation (must be `zextras`, not root) |
-| `internal/services` | Service registry, `ServiceManager` (start order, retries, restart queue), host `Controller`, `HookBackend`, service launchers |
+| `internal/services` | Service registry, `ServiceManager` (start order, retries, restart queue), host `Controller`, `HookBackend`; each service is a declarative entry run by generic launch executors, see [service-registry.md](service-registry.md) |
 | `internal/shadow` | `configd shadow`: side-effect-free Load/Plan cycle with a plan log and an optional report directory |
 | `internal/snapshot` | Immutable configuration snapshot (values + accessors) |
 | `internal/state` | Process state; holds the current snapshot behind an `atomic.Pointer` plus first-run, forced and requested bookkeeping |

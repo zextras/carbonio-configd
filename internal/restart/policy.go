@@ -35,19 +35,21 @@ import (
 	"github.com/zextras/carbonio-configd/internal/plan"
 	"github.com/zextras/carbonio-configd/internal/services"
 	"github.com/zextras/carbonio-configd/internal/sys"
+	"github.com/zextras/carbonio-configd/internal/systemd"
 )
 
-// maxSystemdAttempts is how many cycles a failing systemd action is tried
-// before it is dropped (the units' own Restart= handles crashes); it mirrors
-// the service manager's MaxFailedRestarts.
-const maxSystemdAttempts = 3
+// maxAttempts is how many cycles a failing restart (the manager refusing it,
+// or a failing systemd action) is tried before it is dropped. For systemd it
+// mirrors the service manager's MaxFailedRestarts (the units' own Restart=
+// handles crashes); the legacy path uses the same cap so a permanently refused
+// request does not retry forever.
+const maxAttempts = 3
 
 // Systemd is the host side of the systemd mode: whether services are managed
 // through units, and how a plan entry is carried out on them. It is satisfied
 // by *services.ServiceManager.
 type Systemd interface {
-	// IsSystemdMode reports whether services are managed through systemd units.
-	IsSystemdMode() bool
+	systemd.Mode
 	// ApplySystemd carries out a restart (try-reload-or-restart), start or
 	// stop of service.
 	ApplySystemd(ctx context.Context, service string, action plan.Action) error
@@ -111,9 +113,11 @@ func (p *Policy) WithSystemd(sd Systemd) *Policy {
 	return p
 }
 
-// systemdMode reports whether this cycle follows the systemd rules.
-func (p *Policy) systemdMode() bool {
-	return p.systemd != nil && p.systemd.IsSystemdMode()
+// SystemdMode reports whether this cycle follows the systemd rules: the policy
+// holds the one systemd-mode answer of the config manager. A nil policy or one
+// without a systemd host is never in systemd mode.
+func (p *Policy) SystemdMode() bool {
+	return p != nil && systemd.Managed(p.systemd)
 }
 
 // Apply runs the restart policy for one cycle and returns the plan restarts
@@ -167,7 +171,7 @@ func (p *Policy) queue(ctx context.Context, restarts []plan.Restart) []plan.Rest
 func (p *Policy) dispatch(
 	ctx context.Context, service string, action plan.Action, reasons, kinds []string,
 ) (retry bool) {
-	if !p.systemdMode() {
+	if !p.SystemdMode() {
 		return p.queueLegacy(ctx, service, reasons, kinds)
 	}
 
@@ -186,13 +190,24 @@ func (p *Policy) dispatch(
 // manager refused it.
 func (p *Policy) queueLegacy(ctx context.Context, service string, reasons, kinds []string) (retry bool) {
 	if err := p.mgr.AddRestartWithReasons(ctx, service, slices.Clone(reasons)); err != nil {
-		logger.WarnContext(ctx, "Failed to queue restart",
+		p.failures[service]++
+
+		if p.failures[service] >= maxAttempts {
+			delete(p.failures, service)
+			logger.ErrorContext(ctx, "Giving up on restart after repeated failures",
+				"service", service, "attempts", maxAttempts, "error", err)
+
+			return false
+		}
+
+		logger.WarnContext(ctx, "Failed to queue restart, will retry next cycle",
 			"service", service,
 			"error", err)
 
 		return true
 	}
 
+	delete(p.failures, service)
 	p.metrics.RestartRequested(service, kinds)
 
 	return false
@@ -218,10 +233,10 @@ func (p *Policy) applySystemd(
 
 	p.failures[service]++
 
-	if p.failures[service] >= maxSystemdAttempts {
+	if p.failures[service] >= maxAttempts {
 		delete(p.failures, service)
 		logger.ErrorContext(ctx, "Giving up on service action after repeated failures",
-			"service", service, "action", string(action), "attempts", maxSystemdAttempts, "error", err)
+			"service", service, "action", string(action), "attempts", maxAttempts, "error", err)
 
 		return false
 	}

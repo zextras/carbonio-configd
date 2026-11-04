@@ -6,7 +6,6 @@ package main
 
 import (
 	"context"
-	"os"
 
 	"github.com/zextras/carbonio-configd/internal/cli/cliutil"
 	lccli "github.com/zextras/carbonio-configd/internal/cli/localconfig"
@@ -39,8 +38,8 @@ type LocalconfigCmd struct {
 
 // Run executes the localconfig subcommand; a failure exits the process with
 // the status chosen by the CLI.
-func (c *LocalconfigCmd) Run() error {
-	return exitWith(lccli.Run(context.Background(), os.Stdout, os.Stderr, c.options(os.Args)))
+func (c *LocalconfigCmd) Run(std *stdio) error {
+	return exitWith(lccli.Run(context.Background(), std.Out, std.Err, c.options(std.Args)))
 }
 
 func (c *LocalconfigCmd) options(args []string) *lccli.Options {
