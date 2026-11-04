@@ -139,10 +139,23 @@ func (c *Controller) stopWithoutSystemd(ctx context.Context, name string, def *S
 	}
 
 	if def.UseSDNotify {
+		// The observer owns the notify socket path and unlinks it on exit: it
+		// must be gone before this stop returns, or a start that follows
+		// (restart, reload) would have its own socket path unlinked from under
+		// it and never see READY=1.
 		observerCtx, cancel := context.WithCancel(ctx)
-		defer cancel()
+		observerDone := make(chan struct{})
 
-		go c.awaitSDNotifyStopping(observerCtx, name)
+		go func() {
+			defer close(observerDone)
+
+			c.awaitSDNotifyStopping(observerCtx, name)
+		}()
+
+		defer func() {
+			cancel()
+			<-observerDone
+		}()
 	}
 
 	logger.InfoContext(ctx, "Stopping service via pkill (legacy mode)",
