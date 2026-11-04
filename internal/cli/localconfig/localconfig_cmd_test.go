@@ -21,13 +21,13 @@ func newTestLocalconfig(t *testing.T, keys map[string]string) string {
 	t.Helper()
 
 	path := filepath.Join(t.TempDir(), "localconfig.xml")
-	cfg := &lcfg.LocalConfig{}
+	pairs := make([]lcfg.Key, 0, len(keys))
 
 	for name, value := range keys {
-		cfg.Keys = append(cfg.Keys, lcfg.Key{Name: name, Value: value})
+		pairs = append(pairs, lcfg.Key{Name: name, Value: value})
 	}
 
-	require.NoError(t, lcfg.SaveLocalConfig(path, cfg))
+	require.NoError(t, lcfg.SetKeys(path, pairs))
 
 	return path
 }

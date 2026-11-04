@@ -8,6 +8,15 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 This package (`github.com/zextras/carbonio-configd/test`) contains reusable test helpers for spinning up Carbonio service containers (LDAP) via Docker, Podman, or Kubernetes. The shell suite `tests/integration/configd-test-suite.sh` is separate: it runs the installed `/opt/zextras/bin/configd` inside a Carbonio container.
 
+## Shell Suite (`tests/integration/configd-test-suite.sh`)
+
+Run it as root inside a Carbonio container (it needs `/opt/zextras`, the `zextras` user and systemd, so it cannot run on a plain developer host). Design rules:
+
+- **No fixed sleeps.** Waiting for a service to start or stop uses `wait_until` / `wait_until_not`, which poll every 100 ms and give up after `WAIT_TIMEOUT` seconds (default 30, override via the environment).
+- **The real localconfig is never written.** The write tests (`-e`, `-u`, protected key) run against a scratch copy via `localconfig -c`; the copy lives in a `mktemp` directory removed by an `EXIT` trap.
+
+Test code in Go follows the same rule: wait for a condition with `require.Eventually` (or a deadline-bounded poll), never `time.Sleep` as synchronization. A sleep is acceptable only where elapsed time is the thing under test (timeouts, debounce windows, simulated slow servers).
+
 ## Running Integration Tests
 
 Integration tests require a container runtime (Docker, Podman, or Kubernetes) and are excluded from default builds by the `integration` build tag. `make test-integration` runs every tagged test (`go test -v -tags integration ./...`); some of them (e.g. `internal/ldap/ldap_integration_test.go`) need a live Carbonio environment and skip themselves when it is absent.

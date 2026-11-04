@@ -30,7 +30,7 @@ BUILD_FLAGS_PROFILING=-trimpath -tags profiling $(LDFLAGS)
 BUILD_FLAGS_TRACING=-trimpath -tags tracing $(LDFLAGS)
 BUILD_FLAGS_FULL=-trimpath -tags "profiling tracing" $(LDFLAGS)
 
-.PHONY: all build clean test test-race test-tags test-integration test-integration-ldap deps fmt lint help install deadcode dup dup-baseline fuzz fuzz-smoke check vet-tags reuse thirdparties generate generate-check security
+.PHONY: all build clean test test-race test-tags test-integration test-integration-ldap deps fmt lint help install deadcode dup dup-baseline fuzz fuzz-smoke check vet-tags reuse thirdparties generate lc-sync generate-check security
 
 # REUSE compliance (same gate as the Jenkins 'REUSE Lint' stage)
 reuse:
@@ -40,19 +40,22 @@ reuse:
 thirdparties:
 	bash .ci/thirdparties/thirdparties-go.sh THIRDPARTIES
 
-# Regenerate internal/localconfig/lcdocs.go and lcdefaults.go from carbonio-mailbox
-# LC.java at the tag pinned in scripts/lc-mailbox-tag (needs a local clone; override
-# with MAILBOX_REPO=DIR).
+# Regenerate internal/localconfig/lcdocs.go and lcdefaults.go from the carbonio-mailbox
+# sources vendored in scripts/lc-source (pinned by scripts/lc-mailbox-tag).
+generate:
+	python3 scripts/gen-lc.py
+
+# Refresh scripts/lc-source from a local carbonio-mailbox clone at the tag pinned in
+# scripts/lc-mailbox-tag (run after bumping the tag, then `make generate`).
 MAILBOX_REPO ?= $(HOME)/zextras/carbonio-mailbox
 
-generate:
-	python3 scripts/gen-lc.py --mailbox-repo $(MAILBOX_REPO)
+lc-sync:
+	python3 scripts/gen-lc.py --sync-from $(MAILBOX_REPO)
 
-# Regenerate into a temp dir and diff against the committed files. Without a
-# local clone at MAILBOX_REPO the pinned tag is cloned from GitHub (needs
-# network and python3; this is how Jenkins runs it).
+# Regenerate into a temp dir and diff against the committed files. Hermetic (python3
+# only, no network): this is how Jenkins runs it.
 generate-check:
-	scripts/gen-lc-check.sh $(MAILBOX_REPO)
+	scripts/gen-lc-check.sh
 
 # Default target
 all: clean deps fmt lint test build
@@ -303,7 +306,8 @@ help:
 	@echo "  fuzz-smoke     - Run every fuzz target for 10s each (as in Jenkins)"
 	@echo "  vet-tags       - go vet for the default, integration, tracing, profiling and tracing+profiling tags"
 	@echo "  test-tags      - Race tests for the tracing, profiling and tracing+profiling tags"
-	@echo "  generate-check - Fail when lcdocs.go/lcdefaults.go differ from the pinned carbonio-mailbox tag"
+	@echo "  generate-check - Fail when lcdocs.go/lcdefaults.go differ from the vendored carbonio-mailbox inputs"
+	@echo "  lc-sync        - Refresh scripts/lc-source from a carbonio-mailbox clone at the pinned tag"
 	@echo "  check          - lint, vet-tags, test-race, test-tags, deadcode, dup"
 	@echo "  update-deps    - Update dependencies"
 	@echo "  verify         - Verify dependencies"

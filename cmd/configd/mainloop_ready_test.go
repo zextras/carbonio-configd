@@ -13,9 +13,11 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -37,7 +39,9 @@ import (
 
 // notifyRecorder is a NOTIFY_SOCKET that records the datagrams it receives.
 type notifyRecorder struct {
-	conn *net.UnixConn
+	conn     *net.UnixConn
+	notifier *sdnotify.Notifier
+	sentinel atomic.Int64
 
 	mu   sync.Mutex
 	msgs []string
@@ -63,7 +67,7 @@ func newNotifyRecorder(t *testing.T) (*notifyRecorder, *sdnotify.Notifier) {
 	notifier, err := sdnotify.New()
 	require.NoError(t, err)
 
-	rec := &notifyRecorder{conn: conn}
+	rec := &notifyRecorder{conn: conn, notifier: notifier}
 
 	go func() {
 		buf := make([]byte, 512)
@@ -83,13 +87,20 @@ func newNotifyRecorder(t *testing.T) (*notifyRecorder, *sdnotify.Notifier) {
 	return rec, notifier
 }
 
-// count returns how many datagrams equal msg, once the recorder had time to
-// receive what was sent (datagrams on a unix socket are delivered in order, so
-// waiting for a sentinel is enough).
+// count returns how many datagrams equal msg. Datagrams on a unix socket are
+// delivered in order, so it sends a unique sentinel and waits for it to be
+// recorded: everything sent before it has been recorded too.
 func (r *notifyRecorder) count(t *testing.T, msg string) int {
 	t.Helper()
 
-	time.Sleep(50 * time.Millisecond)
+	sentinel := "TEST_SENTINEL=" + strconv.FormatInt(r.sentinel.Add(1), 10)
+	require.NoError(t, r.notifier.Notify(sentinel))
+	require.Eventually(t, func() bool {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+
+		return slices.Contains(r.msgs, sentinel)
+	}, 5*time.Second, time.Millisecond, "sentinel datagram never recorded")
 
 	r.mu.Lock()
 	defer r.mu.Unlock()

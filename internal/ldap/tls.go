@@ -68,17 +68,26 @@ func ResolveTLS(ctx context.Context, lc map[string]string, fsys sys.FS) TLSSetup
 		lcBool(lc, lcStartTLSRequired, true) &&
 		strings.TrimSpace(lc[lcRequireInterprocessSecurity]) == "1"
 
-	cfg := &tls.Config{MinVersion: tls.VersionTLS12}
+	var cfg *tls.Config
 
 	if lcBool(lc, lcAllowUntrustedCerts, true) {
+		cfg = &tls.Config{MinVersion: tls.VersionTLS12}
 		// Legacy parity (LdapSSLUtil dummy trust manager). Operators opt in to
 		// verification with ssl_allow_untrusted_certs=false.
 		cfg.InsecureSkipVerify = true //nolint:gosec // G402: legacy ssl_allow_untrusted_certs semantics
 	} else {
-		cfg.RootCAs = caPool(ctx, lc, fsys)
+		cfg = VerifiedTLSConfig(ctx, lc, fsys)
 	}
 
 	return TLSSetup{StartTLS: startTLS, Config: cfg}
+}
+
+// VerifiedTLSConfig returns a TLS 1.2+ client config that always verifies the
+// server certificate against the system roots plus the Carbonio CA files under
+// zimbra_home, regardless of ssl_allow_untrusted_certs. Use it for calls that
+// carry credentials over HTTPS.
+func VerifiedTLSConfig(ctx context.Context, lc map[string]string, fsys sys.FS) *tls.Config {
+	return &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: caPool(ctx, lc, fsys)}
 }
 
 // lcBool reads a Java-style boolean localconfig value, using def when the key

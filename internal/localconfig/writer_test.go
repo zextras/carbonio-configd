@@ -8,8 +8,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func createTestConfig(t *testing.T) string {
@@ -243,7 +245,7 @@ func TestSaveLocalConfig_AtomicWrite(t *testing.T) {
 		},
 	}
 
-	err := SaveLocalConfig(path, config)
+	err := saveLocalConfig(path, config)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -513,5 +515,80 @@ func TestRemoveKeys_RemovesAll(t *testing.T) {
 
 	if _, ok := config["smtp_port"]; ok {
 		t.Error("expected smtp_port to be removed")
+	}
+}
+
+// A second locker waits for the holder and then proceeds.
+func TestWithFileLock_SerializesLockers(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "localconfig.xml")
+	held := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan error, 1)
+
+	go func() {
+		done <- withFileLock(path, func() error {
+			close(held)
+			<-release
+
+			return nil
+		})
+	}()
+
+	<-held
+
+	second := make(chan error, 1)
+
+	go func() { second <- withFileLock(path, func() error { return nil }) }()
+
+	select {
+	case err := <-second:
+		t.Fatalf("second locker did not wait (err=%v)", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	close(release)
+
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+
+	if err := <-second; err != nil {
+		t.Fatalf("second locker failed after release: %v", err)
+	}
+}
+
+// A lock held beyond the timeout makes the writer fail instead of
+// hanging.
+func TestSetKeys_LockTimesOut(t *testing.T) {
+	old := lockTimeout
+	lockTimeout = 150 * time.Millisecond
+
+	t.Cleanup(func() { lockTimeout = old })
+
+	path := filepath.Join(t.TempDir(), "localconfig.xml")
+	held := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan error, 1)
+
+	go func() {
+		done <- withFileLock(path, func() error {
+			close(held)
+			<-release
+
+			return nil
+		})
+	}()
+
+	<-held
+
+	err := SetKeys(path, nil)
+	if err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("want timeout error, got %v", err)
+	}
+
+	close(release)
+
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }

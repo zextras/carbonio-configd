@@ -7,6 +7,7 @@ package localconfig
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -19,6 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	lcfg "github.com/zextras/carbonio-configd/internal/localconfig"
+	"github.com/zextras/carbonio-configd/internal/testutil/pki"
 )
 
 // runLC executes cmd the way Run does, but captures the output and returns the
@@ -356,13 +358,24 @@ func TestReloadLocalConfig_Success(t *testing.T) {
 			`</soap:Body></soap:Envelope>`))
 	})
 
-	srv := httptest.NewTLSServer(mux)
+	// The admin certificate is verified: trust a generated CA and name.
+	pk := pki.NewServer(t, "mailbox.example.com")
+	home := t.TempDir()
+	require.NoError(t, os.MkdirAll(home+"/conf/ca", 0o755))
+	require.NoError(t, os.WriteFile(home+"/conf/ca/ca.pem", pk.CAPEM, 0o600))
+
+	srv := httptest.NewUnstartedServer(mux)
+	srv.TLS = &tls.Config{Certificates: []tls.Certificate{pk.Certificate}, MinVersion: tls.VersionTLS12}
+	srv.StartTLS()
 	defer srv.Close()
 
 	host, port, err := net.SplitHostPort(strings.TrimPrefix(srv.URL, "https://"))
 	require.NoError(t, err)
 
-	cfg := map[string]string{lcKeySoapServer: host, lcKeyAdminPort: port, "zimbra_ldap_password": "pw"}
+	cfg := map[string]string{
+		lcKeySoapServer: host, lcKeyAdminPort: port, "zimbra_ldap_password": "pw",
+		"zimbra_home": home, "zimbra_server_hostname": "mailbox.example.com",
+	}
 	require.NoError(t, reloadLocalConfig(context.Background(), cfg))
 	assert.True(t, gotReload, "the server must receive a ReloadLocalConfigRequest")
 }

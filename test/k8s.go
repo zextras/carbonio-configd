@@ -172,33 +172,62 @@ func newLdapPod(name, namespace, image string) *corev1.Pod {
 	}
 }
 
+// pollUntil calls cond every interval until it reports done, returns an error,
+// ctx is cancelled, or timeout elapses (then it returns errTimeout). cond is
+// evaluated immediately, so an already-satisfied condition costs no wait.
+func pollUntil(
+	ctx context.Context,
+	timeout, interval time.Duration,
+	errTimeout error,
+	cond func(ctx context.Context) (bool, error),
+) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		done, err := cond(ctx)
+		if err != nil {
+			return err
+		}
+
+		if done {
+			return nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return errTimeout
+		case <-ticker.C:
+		}
+	}
+}
+
 func waitForPodRunning(
 	ctx context.Context,
 	clientset *kubernetes.Clientset,
 	namespace, podName string,
 ) error {
-	timeout := 5 * time.Minute
-	interval := 2 * time.Second
-	deadline := time.Now().Add(timeout)
+	return pollUntil(ctx, 5*time.Minute, 2*time.Second,
+		fmt.Errorf("%w: %s", errPodTimeout, podName),
+		func(ctx context.Context) (bool, error) {
+			pod, err := clientset.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
+			if err != nil {
+				return false, err
+			}
 
-	for time.Now().Before(deadline) {
-		pod, err := clientset.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
-		if err != nil {
-			return err
-		}
+			switch pod.Status.Phase {
+			case corev1.PodRunning:
+				return true, nil
+			case corev1.PodFailed, corev1.PodSucceeded:
+				return false, fmt.Errorf("%w: %s (%s)", errPodTerminal, podName, pod.Status.Phase)
+			case corev1.PodPending, corev1.PodUnknown:
+			}
 
-		switch pod.Status.Phase {
-		case corev1.PodRunning:
-			return nil
-		case corev1.PodFailed, corev1.PodSucceeded:
-			return fmt.Errorf("%w: %s (%s)", errPodTerminal, podName, pod.Status.Phase)
-		case corev1.PodPending, corev1.PodUnknown:
-		}
-
-		time.Sleep(interval)
-	}
-
-	return fmt.Errorf("%w: %s", errPodTimeout, podName)
+			return false, nil
+		})
 }
 
 func waitForLdapReady(
@@ -206,47 +235,39 @@ func waitForLdapReady(
 	clientset *kubernetes.Clientset,
 	namespace, podName, podIP string,
 ) error {
-	timeout := 5 * time.Minute
-	interval := 5 * time.Second
-	deadline := time.Now().Add(timeout)
+	const requiredOK = 3
+
 	expectedLog := `modifying entry "uid=zimbra,cn=admins,cn=zimbra"`
 	addr := net.JoinHostPort(podIP, "1389")
 	dialer := net.Dialer{Timeout: 2 * time.Second}
 
 	logSeen := false
 	consecutiveOK := 0
-	requiredOK := 3
 
-	for time.Now().Before(deadline) {
-		if !logSeen {
-			logs, err := getPodLogs(ctx, clientset, namespace, podName)
-			if err == nil && strings.Contains(logs, expectedLog) {
-				logSeen = true
-			}
-		}
-
-		if logSeen {
-			conn, err := dialer.DialContext(ctx, "tcp", addr)
-			if err == nil {
-				_ = conn.Close()
-
-				consecutiveOK++
-				if consecutiveOK >= requiredOK {
-					return nil
+	return pollUntil(ctx, 5*time.Minute, time.Second,
+		fmt.Errorf("%w: %s", errLdapTimeout, podName),
+		func(ctx context.Context) (bool, error) {
+			if !logSeen {
+				logs, err := getPodLogs(ctx, clientset, namespace, podName)
+				if err != nil || !strings.Contains(logs, expectedLog) {
+					return false, nil
 				}
 
-				time.Sleep(2 * time.Second)
-
-				continue
+				logSeen = true
 			}
 
-			consecutiveOK = 0
-		}
+			conn, err := dialer.DialContext(ctx, "tcp", addr)
+			if err != nil {
+				consecutiveOK = 0
 
-		time.Sleep(interval)
-	}
+				return false, nil //nolint:nilerr // dial failure means "not ready yet"
+			}
 
-	return fmt.Errorf("%w: %s", errLdapTimeout, podName)
+			_ = conn.Close()
+			consecutiveOK++
+
+			return consecutiveOK >= requiredOK, nil
+		})
 }
 
 func getPodLogs(
