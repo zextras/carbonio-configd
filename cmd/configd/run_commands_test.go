@@ -39,36 +39,38 @@ func TestCommands_RefuseANonZextrasCaller(t *testing.T) {
 		name string
 		run  func(env sys.System) error
 	}{
-		{"daemon", func(env sys.System) error { return (&DaemonCmd{}).Run(cli, env) }},
-		{"shadow", func(env sys.System) error { return (&ShadowCmd{Once: true}).Run(cli, env) }},
-		{"rewrite", func(env sys.System) error { return (&RewriteCmd{ConfigNames: []string{"mta"}}).Run(cli, env) }},
-		{"plan", func(env sys.System) error { return (&PlanCmd{JSON: true}).Run(cli, env) }},
-		{"service start", func(env sys.System) error { return (&ServiceStartCmd{Name: "mta"}).Run(env) }},
+		{"daemon", func(env sys.System) error { return (&DaemonCmd{}).Run(cli, env, discardStdio()) }},
+		{"shadow", func(env sys.System) error { return (&ShadowCmd{Once: true}).Run(cli, env, discardStdio()) }},
+		{"rewrite", func(env sys.System) error {
+			return (&RewriteCmd{ConfigNames: []string{"mta"}}).Run(cli, env, discardStdio())
+		}},
+		{"plan", func(env sys.System) error { return (&PlanCmd{JSON: true}).Run(cli, env, discardStdio()) }},
+		{"service start", func(env sys.System) error { return (&ServiceStartCmd{Name: "mta"}).Run(env, discardStdio()) }},
 		{"service start norewrite", func(env sys.System) error {
-			return (&ServiceStartCmd{Name: "mta", Extra: []string{norewriteArg}}).Run(env)
+			return (&ServiceStartCmd{Name: "mta", Extra: []string{norewriteArg}}).Run(env, discardStdio())
 		}},
-		{"service stop", func(env sys.System) error { return (&ServiceStopCmd{Name: "mta"}).Run(env) }},
+		{"service stop", func(env sys.System) error { return (&ServiceStopCmd{Name: "mta"}).Run(env, discardStdio()) }},
 		{"service restart", func(env sys.System) error {
-			return (&ServiceRestartCmd{Name: "mta", NoRewrite: true}).Run(env)
+			return (&ServiceRestartCmd{Name: "mta", NoRewrite: true}).Run(env, discardStdio())
 		}},
-		{"service kill", func(env sys.System) error { return (&ServiceKillCmd{Name: "mta"}).Run(env) }},
+		{"service kill", func(env sys.System) error { return (&ServiceKillCmd{Name: "mta"}).Run(env, discardStdio()) }},
 		{"service refresh", func(env sys.System) error {
-			return (&ServiceRefreshCmd{Name: "milter"}).Run(env)
+			return (&ServiceRefreshCmd{Name: "milter"}).Run(env, discardStdio())
 		}},
 		{"service rotate", func(env sys.System) error {
-			return (&ServiceRotateCmd{Name: "stats"}).Run(env)
+			return (&ServiceRotateCmd{Name: "stats"}).Run(env, discardStdio())
 		}},
-		{"service reload", func(env sys.System) error { return (&ServiceReloadCmd{Name: "mta"}).Run(env) }},
+		{"service reload", func(env sys.System) error { return (&ServiceReloadCmd{Name: "mta"}).Run(env, discardStdio()) }},
 		{"service start-systemd", func(env sys.System) error {
-			return (&ServiceStartSystemdCmd{Name: "mta"}).Run(env)
+			return (&ServiceStartSystemdCmd{Name: "mta"}).Run(env, discardStdio())
 		}},
 		{"service stop-systemd", func(env sys.System) error {
-			return (&ServiceStopSystemdCmd{Name: "mta"}).Run(env)
+			return (&ServiceStopSystemdCmd{Name: "mta"}).Run(env, discardStdio())
 		}},
-		{"proxy gen", func(env sys.System) error { return (&ProxyGenCmd{}).Run(env) }},
-		{"proxy rewrite", func(env sys.System) error { return (&ProxyRewriteCmd{}).Run(env) }},
-		{"proxy enable", func(env sys.System) error { return (&ProxyEnableCmd{Protocol: "imap"}).Run(env) }},
-		{"proxy disable", func(env sys.System) error { return (&ProxyDisableCmd{Protocol: "imap"}).Run(env) }},
+		{"proxy gen", func(env sys.System) error { return (&ProxyGenCmd{}).Run(env, discardStdio()) }},
+		{"proxy rewrite", func(env sys.System) error { return (&ProxyRewriteCmd{}).Run(env, discardStdio()) }},
+		{"proxy enable", func(env sys.System) error { return (&ProxyEnableCmd{Protocol: "imap"}).Run(env, discardStdio()) }},
+		{"proxy disable", func(env sys.System) error { return (&ProxyDisableCmd{Protocol: "imap"}).Run(env, discardStdio()) }},
 	}
 
 	for _, tt := range tests {
@@ -89,19 +91,19 @@ func TestProxyConfCmd_NginxNotInstalled(t *testing.T) {
 	t.Setenv("CARBONIO_BASE_DIR", "/nonexistent-base")
 
 	// legacy zmproxyconf prints the message on stdout and exits 1
-	assert.Equal(t, exitStatus(1), (&ProxyConfCmd{}).Run(systest.New().System()))
+	assert.Equal(t, exitStatus(1), (&ProxyConfCmd{}).Run(systest.New().System(), discardStdio()))
 }
 
 func TestServiceListCmd_ListsWithoutAnError(t *testing.T) {
 	t.Setenv("CARBONIO_BASE_DIR", "/nonexistent-base")
 
-	require.NoError(t, (&ServiceListCmd{}).Run(systest.New().System()))
+	require.NoError(t, (&ServiceListCmd{}).Run(systest.New().System(), discardStdio()))
 }
 
 func TestServiceStatusCmd_UnknownServiceFails(t *testing.T) {
 	t.Setenv("CARBONIO_BASE_DIR", "/nonexistent-base")
 
-	err := (&ServiceStatusCmd{Name: "nosuch"}).Run(systest.New().System())
+	err := (&ServiceStatusCmd{Name: "nosuch"}).Run(systest.New().System(), discardStdio())
 
 	assert.Equal(t, exitStatus(1), err)
 }

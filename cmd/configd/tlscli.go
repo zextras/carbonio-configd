@@ -6,7 +6,6 @@ package main
 
 import (
 	"context"
-	"os"
 
 	"github.com/zextras/carbonio-configd/internal/cli/tls"
 	"github.com/zextras/carbonio-configd/internal/sys"
@@ -22,8 +21,8 @@ type TLSCmd struct {
 }
 
 // Run executes the tls command.
-func (c *TLSCmd) Run(cli *CLI, env sys.System) error {
-	return exitWith(tls.Run(context.Background(), os.Stdout, os.Stderr, &tls.Options{
+func (c *TLSCmd) Run(cli *CLI, env sys.System, std *stdio) error {
+	return exitWith(tls.Run(context.Background(), std.Out, std.Err, &tls.Options{
 		Mode:       c.Mode,
 		Force:      c.Force,
 		Host:       c.Host,

@@ -44,7 +44,9 @@ Inside `RunMainLoop` before the first iteration:
   `zmconfigd_service_hooks` is set (see below). `env` is the `sys.System` built once in `main`
   (`sys.Real()`).
 - On a host, the manager gates on `Controller.IsSystemdMode()` (a Carbonio systemd target is
-  enabled) — there is no per-instance mode flag to set. The mode selects the restart policy
+  enabled) — there is no per-instance mode flag to set. The restart policy, the config manager
+  and the watchdog all consult that one answer (the `systemd.Mode` interface the service manager
+  implements); none of them detects it on its own. The mode selects the restart policy
   (heavy services only flagged, others `try-reload-or-restart`) and turns the watchdog into a
   no-op; see [restart-behavior.md](restart-behavior.md). A hook backend is never in systemd mode:
   the hooks decide what a restart does and the watchdog checks the services through their
@@ -66,7 +68,11 @@ the filesystem (`sys.FS`), inspecting or signalling processes (`sys.Proc`) and b
 `sys.System`. `main` builds `sys.Real()` once and passes it through constructors and struct fields
 (`configmgr.NewConfigManager`, `services.NewController`, `mtaops.NewExecutor`,
 `proxy.NewGenerator`, `watchdog.Config.Clock`, the `Run` entry points of `internal/cli/*`); there
-are no package-level seam variables.
+are no package-level seam variables. The process boundary is injected the same way: `main` only
+calls `os.Exit(run(os.Args, sys.Real(), os.Stdout, os.Stderr))`, every Kong command receives the
+streams and the command line as a `*stdio`, and the commands return their exit status through
+`exitWith` (one place turns it into the process status, `exitCode`). `cmd/configd/run_test.go`
+therefore checks the status and the exact stdout/stderr of each command in-process.
 
 Tests use the recording fakes in `internal/sys/systest` (`systest.New()`): an in-memory
 filesystem, a scripted `Exec`, a process table and a manual clock, all writing to one ordered

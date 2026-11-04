@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/zextras/carbonio-configd/internal/cli/cliutil"
@@ -33,8 +32,8 @@ type ShadowCmd struct {
 
 // Run executes the shadow command. It never exits on its own: like the daemon
 // it runs until SIGINT or SIGTERM.
-func (c *ShadowCmd) Run(cli *CLI, env sys.System) error {
-	if !cliutil.RequireZextras(os.Stderr) {
+func (c *ShadowCmd) Run(cli *CLI, env sys.System, std *stdio) error {
+	if !cliutil.RequireZextras(std.Err) {
 		return exitStatus(1)
 	}
 
@@ -43,7 +42,7 @@ func (c *ShadowCmd) Run(cli *CLI, env sys.System) error {
 		return err
 	}
 
-	ctx := cliutil.InitLogging(os.Stderr)
+	ctx := cliutil.InitLogging(std.Err)
 	ctx = logger.ContextWithComponent(ctx, "main")
 
 	// The runtime gets the read-only system: whatever the manager, or anything

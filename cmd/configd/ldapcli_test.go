@@ -6,6 +6,7 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"testing"
 
@@ -85,14 +86,13 @@ func runLDAPCLIOn(t *testing.T, env sys.System, dir *directory, argv ...string) 
 		dialed *carboldap.ClientConfig
 	)
 
-	cli.LDAP.stdout = &out
 	cli.LDAP.dial = func(cfg *carboldap.ClientConfig) (ldapcmd.Conn, error) {
 		dialed = cfg
 
 		return dir, nil
 	}
 
-	err = kctx.Run(env)
+	err = kctx.Run(env, &stdio{Out: &out, Err: io.Discard})
 
 	return out.String(), dialed, err
 }
