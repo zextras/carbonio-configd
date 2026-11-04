@@ -9,9 +9,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"slices"
 	"strings"
 
+	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/ldap"
 	"github.com/zextras/carbonio-configd/internal/logger"
 )
@@ -132,7 +134,7 @@ func (tp *TemplateProcessor) processExplodeDomain(
 	}
 
 	// For each domain, set vhn/vip variables and process template
-	for i, domain := range domains {
+	for _, domain := range domains {
 		// Check if domain meets requirements specified in args
 		if !tp.domainMeetsRequirements(&domain, args) {
 			continue
@@ -140,17 +142,17 @@ func (tp *TemplateProcessor) processExplodeDomain(
 
 		// Set domain-specific variables
 		tp.setDomainVariables(&domain)
+		tp.generator.Variables["vip"].Value = tp.virtualIPPrefix(ctx, &domain)
 
 		// Process template lines with domain variables
 		if err := tp.processTemplateLines(ctx, templateLines, writer, false); err != nil {
 			return err
 		}
 
-		// Add blank line between domains (except after last one)
-		if i < len(domains)-1 {
-			if _, err := writer.WriteString("\n"); err != nil {
-				return fmt.Errorf("error writing separator: %w", err)
-			}
+		// A blank line ends every domain block, the last one included
+		// (ProxyConfGen.expandTemplateByExplodeDomain: conf.newLine()).
+		if _, err := writer.WriteString("\n"); err != nil {
+			return fmt.Errorf("error writing separator: %w", err)
 		}
 
 		// Clear domain-specific variables
@@ -490,11 +492,62 @@ func (tp *TemplateProcessor) domainMeetsRequirements(domain *DomainInfo, args []
 	return true
 }
 
+// virtualIPPrefix returns the value of the vip template variable, the prefix of
+// a listen directive, as ProxyConfGen.fillVarsWithDomainAttrs computes it. The
+// address is the domain's zimbraVirtualIPAddress, or else the address the
+// virtual hostname resolves to. With zimbraReverseProxySNIEnabled (default
+// TRUE) the nginx listens on every address, so the prefix is empty ("[::]:" for
+// an IPv6 address); with SNI disabled (deprecated IP-based virtual hosting) it
+// is "<ip>:" or "[<ip>]:". An address that does not resolve gives no prefix.
+func (tp *TemplateProcessor) virtualIPPrefix(ctx context.Context, domain *DomainInfo) string {
+	sni := true
+	if v, ok := tp.generator.getConfigValue("zimbraReverseProxySNIEnabled", sourceServer, sourceGlobal); ok {
+		sni = config.IsTruthy(v)
+	}
+
+	host := domain.VirtualIPAddress
+	if host == "" {
+		host = domain.VirtualHostname
+	}
+
+	ip := resolveVirtualHost(ctx, host)
+
+	switch {
+	case ip == nil:
+		return ""
+	case ip.To4() == nil && sni:
+		return "[::]:"
+	case ip.To4() == nil:
+		return "[" + ip.String() + "]:"
+	case sni:
+		return ""
+	default:
+		return ip.String() + ":"
+	}
+}
+
+// resolveVirtualHost parses host as an IP literal (an IPv6 one may be
+// bracketed) or resolves it, like InetAddress.getByName. It returns nil when
+// host does not resolve.
+func resolveVirtualHost(ctx context.Context, host string) net.IP {
+	if ip := net.ParseIP(strings.Trim(host, "[]")); ip != nil {
+		return ip
+	}
+
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil || len(ips) == 0 {
+		return nil
+	}
+
+	return ips[0].IP
+}
+
 // setDomainVariables sets domain-specific variables for template processing.
 //
 // Sets the following variables:
 //   - vhn: Domain's virtual hostname
-//   - vip: Domain's virtual IP address
+//   - vip: the domain's raw virtual IP address; processDomainExplode replaces it
+//     with the listen address prefix (virtualIPPrefix)
 //   - ssl.crt: Domain's SSL certificate (if specified, otherwise uses global default)
 //   - ssl.key: Domain's SSL private key (if specified, otherwise uses global default)
 //
