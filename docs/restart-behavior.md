@@ -17,7 +17,9 @@ excluded:
 
 ```go
 if !firstRun && !forced[section] && !requested[section] {
-    compileSectionRestarts(...)
+    compileSectionRestarts(restarts, ...)        // restart now
+} else if !firstRun && hasVarChange(section) {
+    compileSectionRestarts(deferred, ...)        // restart in a later non-REWRITE cycle
 }
 ```
 
@@ -25,8 +27,10 @@ The skip is **section-scoped**, not cycle-wide:
 
 - On the first run no section restarts anything.
 - A section named by `configd rewrite <section>` (forced) or by a TCP `REWRITE` command
-  (requested) is rewritten but its own services are not restarted. Restarting them would
-  trigger the `ExecStartPre` REWRITE of the very service being restarted.
+  (requested) is rewritten but its own services are not restarted in that cycle. Restarting
+  them would trigger the `ExecStartPre` REWRITE of the very service being restarted. If the
+  section also had a real variable change, the restart is deferred to the next periodic cycle
+  instead of being lost (see below).
 - Any other section in the same cycle whose variables changed still restarts its services.
   A cycle that carries a REWRITE request for `proxy` therefore still restarts `mta` if an
   `mta` variable changed in that cycle.
@@ -56,6 +60,51 @@ pending-restart mailboxd
 restart      memcached
 ```
 
+### A change consumed by a REWRITE cycle: deferred restarts
+
+The skip above must not swallow a real configuration change. A variable change is detected
+once: the cycle that sees it stores the new value as the baseline of the next cycle. If that
+very cycle is a REWRITE of the section (for example `zmprov ms <mta> zimbraMtaMyNetworks ...`
+followed at once by `configd rewrite mta amavis`), the files are rewritten, the change is
+consumed, and no later cycle would ever restart the services that must reload the new
+configuration.
+
+So when a forced or requested section **also has a `var-changed` reason**, `plan.Compute`
+does not drop its restarts; it reports them in `Plan.DeferredRestarts` (JSON
+`deferred_restarts`, shown by `configd plan` as `deferred` lines) with the reasons of the real
+change plus a `deferred` reason. The daemon (`ConfigManager.Plan`, `holdDeferred`) then:
+
+1. logs once per section, at WARN, why:
+
+   ```
+   level=WARN msg="Config changed in a REWRITE cycle; restart deferred to next cycle" section=amavis services="[amavis antivirus mta]" reasons="[section amavis changed because VAR zimbraMtaMyNetworks changed 'a'->'b']"
+   ```
+
+2. holds them in memory (merged per service across REWRITE cycles; a later REWRITE cycle never
+   drops them);
+3. in the next cycle that is **not** a REWRITE (no requested or forced section, not the first
+   run) merges them into that plan's restarts through `plan.MergeRestarts` (the plan's own
+   entry of a service wins, with the reasons of both) and logs an INFO line
+   `Executing restart deferred from a REWRITE cycle` per service. From there they take the
+   normal path: the hybrid systemd policy (heavy services are only flagged `pending-restart`,
+   the others are try-reload-or-restart), or the service manager queue on legacy hosts. They
+   leave the held set when merged into the plan; the plan's restarts are carried by `Execute`
+   until `ApplyRestarts` consumes them, so a failed rewrite or disabled config restarts
+   (`zmconfigd_enable_config_restarts=false`) do not lose them.
+
+**No REWRITE loop.** A section that is forced or requested with **no** variable change defers
+nothing, and that is the `ExecStartPre` REWRITE a unit sends when it starts. The deferred
+restart that a periodic cycle runs triggers exactly such a REWRITE (the variable is already the
+baseline), which restarts nothing and defers nothing, so the sequence ends after one restart.
+
+**Limits.** The held restarts live in memory, like the carry and the debounce state: a daemon
+restart forgets them (the new process starts with a first run, which re-renders every section
+and restarts nothing). configd keeps no state file between runs (the snapshot baseline, the
+carried actions and the debounce state are all in memory), so persisting this one set would add
+a new on-disk format and failure mode to cover a window of one poll interval. A standalone
+`configd rewrite` (no daemon listening) is a first run with no
+baseline: it renders everything, has no variable change to consume and defers nothing.
+
 ## Reasons
 
 Every plan restart carries the reasons that caused it, and so does every other plan entry:
@@ -65,6 +114,7 @@ Every plan restart carries the reasons that caused it, and so does every other p
 | `first-run` | first cycle of the process |
 | `forced` | section named on the command line |
 | `requested` | section named by a REWRITE command |
+| `deferred` | rendered as `restart deferred from the REWRITE of section <name>`: the restart was held back from a REWRITE cycle of that section and runs in a later cycle; listed next to the `var-changed` reasons that caused it |
 | `var-changed` | a variable the section requires changed (`old->new`; secret values redacted, long values truncated) |
 | `service-enabled` / `service-disabled` | the service changed state on this node |
 | `dependency` | rendered as `dependency of <name>`: the service manager restarted it because `<name>` was restarted through `DEPENDS` (watchdog restarts only, see Dependency cascading) |

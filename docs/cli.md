@@ -112,7 +112,7 @@ wrapper).
 - The client waits up to `zimbra_configrewrite_timeout` seconds for the reply (default `120`, longer than the daemon's 60 s so the daemon's timeout arrives first).
 - It exits `0` on success and `1` on an `ERROR` reply, timeout or lost connection.
 - Only when **nothing listens** on the daemon port (tried on both loopback families, IPv4 and IPv6) does it fall back to a standalone forced rewrite in its own process, as legacy `zmconfigd <sections>` did; the exit code is `1` if its plan or a rewrite failed. A daemon that is alive but failing is never bypassed.
-- A forced rewrite never restarts services.
+- A rewrite never restarts the services of the sections it names in that cycle (their `ExecStartPre` sends `REWRITE`). When a variable of such a section changed in the same cycle, the daemon logs a WARN and runs the restarts in its next periodic cycle ([restart-behavior.md](restart-behavior.md#a-change-consumed-by-a-rewrite-cycle-deferred-restarts)). The standalone fallback has no daemon and no baseline, so it restarts nothing.
 
 The same port speaks a tiny line protocol (`STATUS` → `SUCCESS ACTIVE`,
 `REWRITE <sections...>`); there is no need to call it by hand.
@@ -146,7 +146,7 @@ Limitations:
 
 - LDAP `cn=config` attributes cannot be read back, so planned `ldap` writes are always listed.
 - `proxygen` is listed only when another action of one of its sections drifted; the generated proxy files themselves are not rendered.
-- The restarts shown are those the drifted sections would trigger. The running daemon restarts only on variable changes and a forced rewrite never restarts. On a systemd host the heavy services (mailbox, appserver-db, store, ldap) appear as `pending-restart` ([restart-behavior.md](restart-behavior.md#systemd-hosts-hybrid-restart-policy)).
+- The restarts shown are those the drifted sections would trigger. The running daemon restarts only on variable changes (a change consumed by a REWRITE cycle is restarted by the next periodic one and shown as a `deferred` line) and a forced rewrite never restarts. On a systemd host the heavy services (mailbox, appserver-db, store, ldap) appear as `pending-restart` ([restart-behavior.md](restart-behavior.md#systemd-hosts-hybrid-restart-policy)).
 
 ## shadow
 

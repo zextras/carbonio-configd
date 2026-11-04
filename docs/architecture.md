@@ -169,8 +169,10 @@ but answers `ERROR ...` is never bypassed (a second rewriter would race it): the
 
 **REWRITE skips restarts**: the TCP REWRITE command queues the named sections as
 `requested`. `plan.Compute` still renders them, but compiles no service restart for a
-requested section. Config files are rewritten but the section's services are not restarted.
-See [restart-behavior.md](restart-behavior.md) for the full rule.
+requested section in that cycle. Config files are rewritten but the section's services are not
+restarted; when the section also had a variable change (consumed by that cycle), its restarts
+are reported as `Plan.DeferredRestarts`, held by the config manager and run by the next cycle
+that is not a REWRITE. See [restart-behavior.md](restart-behavior.md) for the full rule.
 
 ## Service backend and hooks
 
