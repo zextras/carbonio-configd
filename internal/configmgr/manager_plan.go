@@ -100,6 +100,7 @@ func (cm *ConfigManager) Plan(ctx context.Context) (*plan.Plan, error) {
 	cm.State.Publish(cur)
 
 	requested := cm.State.TakeRequestedConfigs()
+	forced := cm.State.ForcedSections()
 	firstRun := cm.State.IsFirstRun()
 
 	pl, err := plan.Compute(plan.Input{
@@ -107,7 +108,7 @@ func (cm *ConfigManager) Plan(ctx context.Context) (*plan.Plan, error) {
 		Cur:       cur,
 		Conf:      conf,
 		Scope:     cm.mainConfig.Sections,
-		Forced:    cm.State.ForcedSections(),
+		Forced:    forced,
 		Requested: requested,
 		FirstRun:  firstRun,
 		Tracked:   cm.tracked,
@@ -124,9 +125,98 @@ func (cm *ConfigManager) Plan(ctx context.Context) (*plan.Plan, error) {
 	cm.prev = cur
 	cm.tracked = pl.Tracked
 
+	cm.holdDeferred(ctx, &pl, !firstRun && len(requested) == 0 && len(forced) == 0)
+
 	logPlan(ctx, &pl, firstRun)
 
 	return &pl, nil
+}
+
+// holdDeferred keeps the restarts the plan deferred, and in a cycle that is
+// not a REWRITE (release) merges the held ones into the plan's restarts.
+//
+// A section rewritten by a REWRITE command does not restart its services in
+// that cycle (the unit being restarted would send the REWRITE again), but a
+// variable change consumed by that cycle is never seen by a later one, so the
+// restart it needs is held here until a periodic cycle can run it. The held
+// restarts are handed over with the plan's own: Execute carries them until
+// ApplyRestarts consumes them, so they are dropped from the held set only
+// once they are in the plan. A REWRITE cycle keeps whatever it already holds.
+func (cm *ConfigManager) holdDeferred(ctx context.Context, pl *plan.Plan, release bool) {
+	systemd := cm.systemdMode()
+
+	if len(pl.DeferredRestarts) > 0 {
+		logDeferred(ctx, pl)
+
+		cm.deferred = plan.MergeRestarts(cm.deferred, pl.DeferredRestarts, systemd)
+	}
+
+	if !release || len(cm.deferred) == 0 {
+		return
+	}
+
+	for i := range cm.deferred {
+		r := &cm.deferred[i]
+
+		logger.InfoContext(ctx, "Executing restart deferred from a REWRITE cycle",
+			"service", r.Service,
+			"action", string(r.Action),
+			"sections", r.Sections,
+			"reasons", plan.Strings(r.Reasons))
+	}
+
+	pl.Restarts = plan.MergeRestarts(cm.deferred, pl.Restarts, systemd)
+	cm.deferred = nil
+}
+
+// logDeferred warns, once per section, that its restarts were deferred and
+// which variable changes they are for.
+func logDeferred(ctx context.Context, pl *plan.Plan) {
+	by := deferredBySection(pl)
+
+	for _, section := range slices.Sorted(maps.Keys(by)) {
+		d := by[section]
+
+		logger.WarnContext(ctx, "Config changed in a REWRITE cycle; restart deferred to next cycle",
+			"section", section,
+			"services", d.services,
+			"reasons", plan.Strings(d.reasons))
+	}
+}
+
+// sectionDeferral is what one section deferred.
+type sectionDeferral struct {
+	services []string
+	reasons  []plan.Reason
+}
+
+// deferredBySection groups the deferred restarts of the plan by the section
+// that deferred them, with that section's variable changes as the reasons.
+func deferredBySection(pl *plan.Plan) map[string]*sectionDeferral {
+	by := map[string]*sectionDeferral{}
+
+	for i := range pl.DeferredRestarts {
+		r := &pl.DeferredRestarts[i]
+
+		for _, section := range r.Sections {
+			d := by[section]
+			if d == nil {
+				d = &sectionDeferral{}
+				by[section] = d
+			}
+
+			d.services = append(d.services, r.Service)
+
+			for j := range r.Reasons {
+				reason := &r.Reasons[j]
+				if reason.Kind == plan.ReasonVarChanged && reason.Section == section && !slices.Contains(d.reasons, *reason) {
+					d.reasons = append(d.reasons, *reason)
+				}
+			}
+		}
+	}
+
+	return by
 }
 
 // logPlan reports the variable changes behind the plan, as the comparison

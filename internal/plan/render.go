@@ -56,7 +56,7 @@ func (p *Plan) WriteText(w io.Writer) error {
 	red := p.Redacted()
 	tw := &textWriter{w: w}
 
-	if red.IsEmpty() && len(red.Heal) == 0 {
+	if red.IsEmpty() && len(red.Heal) == 0 && len(red.DeferredRestarts) == 0 {
 		tw.printf("No changes.\n")
 
 		return tw.err
@@ -99,6 +99,11 @@ func (p *Plan) WriteText(w io.Writer) error {
 	for i := range red.Restarts {
 		r := &red.Restarts[i]
 		tw.item(string(r.Action), r.Service, r.Reasons)
+	}
+
+	for i := range red.DeferredRestarts {
+		r := &red.DeferredRestarts[i]
+		tw.item("deferred", string(r.Action)+" "+r.Service, r.Reasons)
 	}
 
 	return tw.err

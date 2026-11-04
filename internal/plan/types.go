@@ -62,6 +62,13 @@ type Plan struct {
 	Proxygen *Proxygen `json:"proxygen,omitempty"`
 	// Restarts are the services to restart (or stop/start) directly.
 	Restarts []Restart `json:"restarts"`
+	// DeferredRestarts are the restarts of sections that were forced or
+	// requested (a REWRITE cycle) and also had a variable change. They are not
+	// executed by this cycle, to avoid the restart -> ExecStartPre REWRITE ->
+	// restart loop; the caller holds them and merges them into the restarts of
+	// a later cycle that is not a REWRITE (MergeRestarts). They are not part of
+	// IsEmpty: they are not an effect of this cycle.
+	DeferredRestarts []Restart `json:"deferred_restarts"`
 	// Tracked is the service tracking map after this cycle (service ->
 	// "running"/"stopped"); the caller feeds it to the next Compute.
 	Tracked map[string]string `json:"-"`
