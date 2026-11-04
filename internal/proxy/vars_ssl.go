@@ -81,7 +81,7 @@ func (g *Generator) registerSSLVariables() {
 		withValueType(ValueTypeString),
 		withDescription("SSL ECDH cipher curve for web proxy"),
 	)
-	g.registerVar("web.ssl.dhparam.file", "/opt/zextras/conf/dhparam.pem",
+	g.registerVar("web.ssl.dhparam.file", g.ConfDir+"/dhparam.pem",
 		withDescription("Filename with DH parameters for EDH ciphers to be used by the proxy"),
 	)
 	g.registerVar("ssl.clientcertmode", "off",
