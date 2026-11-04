@@ -317,8 +317,10 @@ func (c *Client) dialAndBind(rawURL string) (*ldap.Conn, error) {
 		budget = defaultBindTimeout
 	}
 
-	conn.SetTimeout(budget)
-
+	// The watchdog is the only deadline for StartTLS+bind. A go-ldap request
+	// timeout with the same budget would race it: whichever fires first decides
+	// whether the failure is reported as errConnectAborted. executeWithRetry sets
+	// the per-operation timeout before every request on the bound connection.
 	release := c.watchdog(conn, budget)
 
 	err = c.upgradeAndBind(conn, rawURL, tlsConfig)
