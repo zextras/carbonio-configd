@@ -144,18 +144,65 @@ func (o *orchestrator) startEnabledServices(
 	startCtx := services.WithNoRewriteContext(ctx)
 	rc := 0
 
+	var started []string
+
 	for _, name := range toStart {
 		def := o.ctl.LookupService(name)
 		if def == nil {
 			continue
 		}
 
-		if !o.startOne(ctx, startCtx, c, name, def.DisplayName, threshold) {
+		if o.startOne(ctx, startCtx, c, name, def.DisplayName, threshold) {
+			started = append(started, name)
+		} else {
 			rc = 1
 		}
 	}
 
+	if !o.verifyStarted(ctx, c, started) {
+		rc = 1
+	}
+
 	return rc
+}
+
+// verifyStarted checks, once every service has been started, that each one
+// whose start reported success is still running, and reports (stderr) and fails
+// the start for those that are not. A start that returned success only says the
+// service was up when the launcher returned: the config daemon may restart the
+// service for a configuration change right after (its own, concurrent restart
+// can stop and fail to start what this run just started), and a service that
+// died on its own is the same. Without this check `zmcontrol start` printed
+// "Done" and exited 0 for a service that `zmcontrol status` then reported
+// Stopped. Only the services whose stopped state fails `control status` count
+// (stats and logger by default are not), and a probe error is not evidence of a
+// stopped service.
+func (o *orchestrator) verifyStarted(ctx context.Context, c *cliutil.Console, started []string) bool {
+	if len(started) == 0 {
+		return true
+	}
+
+	ctx = o.ctl.WithProcessSnapshot(ctx)
+	counted := o.ctl.StatusListServices()
+	ok := true
+
+	for _, name := range started {
+		if !statusCounts(counted, name) {
+			continue
+		}
+
+		running, err := o.svcStatus(ctx, name)
+		if err != nil || running {
+			continue
+		}
+
+		def := o.ctl.LookupService(name)
+		c.Errorf("%s is not running after start\n", def.DisplayName)
+
+		ok = false
+	}
+
+	return ok
 }
 
 // servicesToStart returns the control services (minus ldap and configd) that

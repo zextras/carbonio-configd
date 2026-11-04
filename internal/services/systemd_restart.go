@@ -109,7 +109,8 @@ func (sm *ServiceManager) ApplySystemd(ctx context.Context, service string, acti
 
 		return host.ServiceTryReloadOrRestart(ctx, service)
 	case plan.ActionStart:
-		return sm.ctl.ServiceStart(ctx, service)
+		// No rewrite: the daemon's own cycle has written the files (see ControlProcess).
+		return sm.ctl.ServiceStart(WithNoRewriteContext(ctx), service)
 	case plan.ActionStop:
 		return sm.ctl.ServiceStop(ctx, service)
 	case plan.ActionPendingRestart:

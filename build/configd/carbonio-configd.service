@@ -31,6 +31,11 @@ WatchdogSec=120
 # configd sends READY=1 after the first successful loop iteration.
 TimeoutStartSec=300
 TimeoutStopSec=10
+# KillMode=mixed: in systemd mode every service is a unit of its own, so this
+# cgroup holds only the daemon and its short-lived helpers (zmprov, postconf,
+# systemctl): SIGTERM to the daemon, then SIGKILL to any helper still around.
+# Legacy mode (services started by the daemon, no carbonio target enabled) is not
+# supported by this unit; see legacy-mode.conf, which sets KillMode=process.
 KillMode=mixed
 KillSignal=SIGTERM
 
@@ -48,6 +53,12 @@ TasksMax=256
 
 # OOM protection (negative = less likely to be killed, range: -1000 to 1000)
 OOMScoreAdjust=-500
+
+# The sandbox below assumes systemd mode: the daemon calls systemctl (polkit) and
+# never needs sudo or file capabilities. A host that runs the daemon in legacy mode
+# needs the opt-in drop-in /usr/share/carbonio-configd/systemd/legacy-mode.conf
+# (docs/systemd.md, "Legacy mode on a systemd host"); the daemon logs a WARN at
+# startup when it finds itself in that situation under this unit.
 
 # ── Security: Filesystem ──────────────────────────────────────────────
 ProtectSystem=strict

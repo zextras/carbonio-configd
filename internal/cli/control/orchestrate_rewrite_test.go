@@ -67,7 +67,7 @@ func newRewriteFlow(t *testing.T, lc map[string]string, enabled ...string) *rewr
 
 	rf.o, rf.fakes = testOrchestrator(registry, base)
 	rf.o.svcStatus = func(_ context.Context, name string) (bool, error) {
-		return name == "ldap" || name == "configd", nil
+		return name == "ldap" || name == "configd" || slices.Contains(rf.starts, name), nil
 	}
 
 	rf.fakes.FS.Put(testBase+"/log/.zmcontrol.cache", []byte(strings.Join(enabled, "\n")+"\n"), 0o600)

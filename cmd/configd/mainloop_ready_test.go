@@ -28,6 +28,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/configmgr"
 	"github.com/zextras/carbonio-configd/internal/network"
+	"github.com/zextras/carbonio-configd/internal/plan"
 	"github.com/zextras/carbonio-configd/internal/sdnotify"
 	"github.com/zextras/carbonio-configd/internal/services"
 	"github.com/zextras/carbonio-configd/internal/snapshot"
@@ -455,6 +456,31 @@ func TestRewriteWaiters(t *testing.T) {
 		assert.True(t, released(w))
 	})
 
+	t.Run("a restarting cycle answers at once for the sections it just rewrote", func(t *testing.T) {
+		tr := newTrigger()
+		tr.beginRestarts([]plan.Section{{Name: "proxy"}, {Name: "mta"}})
+
+		w := tr.TriggerRewrite(context.Background(), []string{"proxy"})
+
+		assert.True(t, released(w), "the unit's ExecStartPre must not wait for a loop blocked on that very unit")
+		assert.Empty(t, tr.State.TakeRequestedConfigs(), "nothing is left to rewrite")
+
+		tr.endRestarts()
+
+		w = tr.TriggerRewrite(context.Background(), []string{"proxy"})
+		assert.False(t, released(w), "outside the restart phase a REWRITE waits for the loop")
+	})
+
+	t.Run("a restarting cycle still holds a REWRITE of another section", func(t *testing.T) {
+		tr := newTrigger()
+		tr.beginRestarts([]plan.Section{{Name: "proxy"}})
+
+		w := tr.TriggerRewrite(context.Background(), []string{"proxy", "mta"})
+
+		assert.False(t, released(w), "mta was not rewritten by this cycle")
+		assert.ElementsMatch(t, []string{"proxy", "mta"}, tr.State.TakeRequestedConfigs())
+	})
+
 	t.Run("cancel forgets the client and keeps the request queued", func(t *testing.T) {
 		tr := newTrigger()
 		w := tr.TriggerRewrite(context.Background(), []string{"mta"})
@@ -561,4 +587,28 @@ func TestExecuteForced_ExitStatus(t *testing.T) {
 
 		assert.Equal(t, 0, executeForced(ctx, f.deps.configManager, "configd-test"))
 	})
+}
+
+// TestRunCycle_RewriteReleasedWhenRestartFails: the REWRITE client is answered
+// by the rewrite phase, before the restarts run, so a restart that fails (here
+// the service binary does not exist) neither holds the client nor changes its reply.
+// A REWRITE that waited for the restart phase would block until the 60 s
+// timeout while the loop is busy restarting.
+func TestRunCycle_RewriteReleasedWhenRestartFails(t *testing.T) {
+	f := newCycleFixture(t)
+	f.deps.appState.SetFirstRun(false)
+	f.fakes.FS.Put("/opt/zextras/conf/in.conf", []byte("x"), 0o644)
+	f.publishMTA("conf/in.conf")
+
+	wait := f.deps.trigger.TriggerRewrite(context.Background(), []string{restartSvc})
+
+	runCycleOnce(t, f, &loopIterState{})
+
+	require.True(t, f.restartsRequested(), "the cycle must attempt the restart (it fails: no memcached binary in the fake root)")
+
+	select {
+	case <-wait.Done:
+	default:
+		t.Fatalf("REWRITE client not released by a cycle whose restart failed; exec: %q", f.fakes.Exec.Lines())
+	}
 }
