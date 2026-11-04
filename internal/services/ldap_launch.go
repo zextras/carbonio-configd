@@ -120,22 +120,36 @@ func (c *Controller) awaitLDAPReady(ctx context.Context, lc map[string]string, e
 	}
 }
 
+// probeLDAP is the default Controller.ldapProbe: probeLDAPReady with the TLS
+// settings the LDAP client itself runs with (carboldap.ResolveTLS): the
+// legacy ssl_allow_untrusted_certs semantics, so with ssl_allow_untrusted_certs
+// =false an ldaps:// bind URL is verified against the system roots and the
+// Carbonio CA files.
+func (c *Controller) probeLDAP(ctx context.Context, urls []string) error {
+	lc, err := c.loadConfig()
+	if err != nil {
+		// No localconfig, no basis for stricter settings than the default.
+		lc = nil
+	}
+
+	return probeLDAPReady(ctx, urls, carboldap.ResolveTLS(ctx, lc, c.env.FS).Config)
+}
+
 // probeLDAPReady dials the first reachable LDAP URL and performs an anonymous
 // rootDSE base search. Success means slapd is accepting connections AND serving
 // queries — a half-open listener that hasn't finished initializing fails the
 // search, so this does not false-positive. No credentials are required.
 //
-// The probe carries no credentials and only asks whether slapd serves queries,
-// so ldaps:// URLs skip certificate verification (the local self-signed
-// chain must not make a healthy slapd look dead). Dial and request are bounded
-// so a wedged listener cannot stall the start sequence.
-func probeLDAPReady(ctx context.Context, urls []string) error {
+// ldaps:// URLs are verified as tlsConfig says. Its default (ResolveTLS with
+// ssl_allow_untrusted_certs unset) skips verification, like every legacy
+// client of this directory server: the local certificate is often a
+// self-signed chain, and a probe that only asks "does slapd serve queries?"
+// must not make a healthy slapd look dead. Dial and request are bounded so a
+// wedged listener cannot stall the start sequence.
+func probeLDAPReady(ctx context.Context, urls []string, tlsConfig *tls.Config) error {
 	conn, _, err := carboldap.DialFirstReachable(ctx, urls,
 		ldap.DialWithDialer(&net.Dialer{Timeout: ldapProbeDialTimeout}),
-		ldap.DialWithTLSConfig(&tls.Config{
-			MinVersion:         tls.VersionTLS12,
-			InsecureSkipVerify: true, //nolint:gosec // G402: anonymous readiness probe, no secrets exchanged
-		}),
+		ldap.DialWithTLSConfig(tlsConfig),
 	)
 	if err != nil {
 		return err

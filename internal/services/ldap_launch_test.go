@@ -6,6 +6,7 @@ package services
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"os"
@@ -14,7 +15,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/zextras/carbonio-configd/internal/sys/systest"
+	"github.com/zextras/carbonio-configd/internal/testutil/ldapfake"
+	"github.com/zextras/carbonio-configd/internal/testutil/pki"
 )
 
 // --- buildLDAPBindURL (table-driven consolidation) ---
@@ -379,7 +384,7 @@ func TestStartSlapd_Timeout(t *testing.T) {
 func TestProbeLDAPReady_EmptyURLs(t *testing.T) {
 	t.Parallel()
 
-	err := probeLDAPReady(context.Background(), []string{})
+	err := probeLDAPReady(context.Background(), []string{}, nil)
 	if err == nil {
 		t.Error("expected non-nil error for empty URL list")
 	}
@@ -390,8 +395,64 @@ func TestProbeLDAPReady_EmptyURLs(t *testing.T) {
 func TestProbeLDAPReady_UnreachableURL(t *testing.T) {
 	t.Parallel()
 
-	err := probeLDAPReady(context.Background(), []string{"ldap://127.0.0.1:1"})
+	err := probeLDAPReady(context.Background(), []string{"ldap://127.0.0.1:1"}, nil)
 	if err == nil {
 		t.Error("expected non-nil error for unreachable LDAP URL")
+	}
+}
+
+// --- readiness probe TLS (S12) ---
+
+// ldapsHost starts an in-process ldaps:// server with a certificate issued by
+// a private CA and returns the probe URL plus that CA's PEM.
+func ldapsHost(t *testing.T) (url string, caPEM []byte) {
+	t.Helper()
+
+	pk := pki.NewServer(t, "localhost", "127.0.0.1")
+	srv := ldapfake.New(t, ldapfake.Options{
+		TLS:         &tls.Config{Certificates: []tls.Certificate{pk.Certificate}, MinVersion: tls.VersionTLS12},
+		ImplicitTLS: true,
+	})
+
+	return srv.URL("ldaps", "localhost"), pk.CAPEM
+}
+
+// TestProbeLDAP_DefaultAcceptsUntrustedCertificate: with ssl_allow_untrusted_certs
+// unset (legacy default: true) a healthy slapd behind a certificate no CA
+// vouches for is still ready.
+func TestProbeLDAP_DefaultAcceptsUntrustedCertificate(t *testing.T) {
+	t.Parallel()
+
+	url, _ := ldapsHost(t)
+	ctl := newRealController(t)
+
+	if err := ctl.probeLDAP(context.Background(), []string{url}); err != nil {
+		t.Fatalf("probe of a healthy slapd with an untrusted certificate: %v", err)
+	}
+}
+
+// TestProbeLDAP_VerifiesWhenUntrustedCertsAreNotAllowed: with
+// ssl_allow_untrusted_certs=false the probe verifies the certificate against
+// the Carbonio CA, so an unknown CA fails the probe and the CA under
+// conf/ca/ca.pem makes it pass.
+func TestProbeLDAP_VerifiesWhenUntrustedCertsAreNotAllowed(t *testing.T) {
+	t.Parallel()
+
+	url, caPEM := ldapsHost(t)
+	home := t.TempDir()
+
+	ctl := newRealController(t, WithConfigLoader(func() (map[string]string, error) {
+		return map[string]string{"ssl_allow_untrusted_certs": "false", "zimbra_home": home}, nil
+	}))
+
+	if err := ctl.probeLDAP(context.Background(), []string{url}); err == nil {
+		t.Fatal("a certificate of an unknown CA must fail a verifying probe")
+	}
+
+	require.NoError(t, os.MkdirAll(filepath.Join(home, "conf", "ca"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(home, "conf", "ca", "ca.pem"), caPEM, 0o644))
+
+	if err := ctl.probeLDAP(context.Background(), []string{url}); err != nil {
+		t.Fatalf("a certificate of the Carbonio CA must pass: %v", err)
 	}
 }
