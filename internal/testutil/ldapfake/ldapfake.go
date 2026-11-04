@@ -25,10 +25,13 @@ const (
 	opBindRequest     ber.Tag = 0
 	opUnbindRequest   ber.Tag = 2
 	opSearchRequest   ber.Tag = 3
+	opModifyRequest   ber.Tag = 6
 	opExtendedRequest ber.Tag = 23
 
 	opBindResponse       ber.Tag = 1
+	opSearchResultEntry  ber.Tag = 4
 	opSearchResultDone   ber.Tag = 5
+	opModifyResponse     ber.Tag = 7
 	opExtendedResponse   ber.Tag = 24
 	resultSuccess        int64   = 0
 	resultProtocolError  int64   = 2
@@ -47,6 +50,9 @@ type Options struct {
 	// HangOn is "starttls" or "bind": the server reads that request and never
 	// answers, like a wedged slapd.
 	HangOn string
+	// Directory, when set, makes search and modify operate on it instead of
+	// answering every search with an empty result.
+	Directory *Directory
 }
 
 // Server is a minimal in-process LDAP server: it answers StartTLS,
@@ -60,6 +66,9 @@ type Server struct {
 	bindsInTLS  atomic.Int32
 
 	wg sync.WaitGroup
+
+	connMu sync.Mutex
+	conns  map[net.Conn]struct{}
 }
 
 // New starts a server on a loopback port and stops it when the test ends.
@@ -85,6 +94,13 @@ func New(t *testing.T, opts Options) *Server {
 
 	t.Cleanup(func() {
 		_ = ln.Close()
+
+		// Clients may still hold pooled connections open.
+		s.connMu.Lock()
+		for c := range s.conns {
+			_ = c.Close()
+		}
+		s.connMu.Unlock()
 
 		s.wg.Wait()
 	})
@@ -125,6 +141,14 @@ func (s *Server) serve() {
 			return
 		}
 
+		s.connMu.Lock()
+		if s.conns == nil {
+			s.conns = map[net.Conn]struct{}{}
+		}
+
+		s.conns[conn] = struct{}{}
+		s.connMu.Unlock()
+
 		s.wg.Go(func() {
 			defer func() { _ = conn.Close() }()
 
@@ -154,15 +178,15 @@ func (s *Server) handle(conn net.Conn) {
 
 		id, _ := p.Children[0].Value.(int64)
 
-		if !ss.dispatch(id, p.Children[1].Tag) {
+		if !ss.dispatch(id, p.Children[1]) {
 			return
 		}
 	}
 }
 
 // dispatch answers one request and reports whether the connection stays open.
-func (ss *session) dispatch(id int64, op ber.Tag) bool {
-	switch op {
+func (ss *session) dispatch(id int64, req *ber.Packet) bool {
+	switch op := req.Tag; op {
 	case opExtendedRequest:
 		return ss.startTLS(id)
 	case opBindRequest:
@@ -178,7 +202,17 @@ func (ss *session) dispatch(id int64, op ber.Tag) bool {
 
 		return writePacket(ss.conn, result(id, opBindResponse, resultSuccess)) == nil
 	case opSearchRequest:
+		if ss.s.opts.Directory != nil {
+			return ss.search(id, req)
+		}
+
 		return writePacket(ss.conn, result(id, opSearchResultDone, resultSuccess)) == nil
+	case opModifyRequest:
+		if ss.s.opts.Directory != nil {
+			return ss.modify(id, req)
+		}
+
+		return writePacket(ss.conn, result(id, opExtendedResponse, resultUnavailableErr)) == nil
 	case opUnbindRequest:
 		return false
 	default:
