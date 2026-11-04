@@ -180,9 +180,7 @@ func TestServiceManager_ConcurrentUse(t *testing.T) {
 	var wg sync.WaitGroup
 
 	for range 4 {
-
 		wg.Go(func() {
-
 			for range 20 {
 				_ = sm.AddRestart(context.Background(), "svc")
 				_ = sm.ProcessRestarts(context.Background(), lookup)
