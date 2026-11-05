@@ -82,9 +82,7 @@ func newTraceHost(t *testing.T, strict bool) *traceHost {
 
 	// sd_notify sockets are real unix sockets: give the host a short, private
 	// runtime directory (unix socket paths are limited to ~100 bytes).
-	runDir, err := os.MkdirTemp("", "cfgd")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = os.RemoveAll(runDir) })
+	runDir := socketDir(t)
 
 	f := systest.New()
 	env := f.System()

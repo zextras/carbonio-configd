@@ -492,7 +492,7 @@ func TestWaitForSDNotify_NonReadyDatagram(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	tmp := t.TempDir()
+	tmp := socketDir(t)
 	socketPath := filepath.Join(tmp, "test-nonready.sock")
 
 	conn, err := listenUnixgramAt(socketPath)

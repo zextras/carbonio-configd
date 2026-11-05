@@ -33,7 +33,7 @@ func newSDController(t *testing.T) (*Controller, *systest.Fakes) {
 	env.Clock = f.Clock
 
 	ctl := NewController(withMode(env, false),
-		WithBaseDir(t.TempDir()), WithRunDir(t.TempDir()),
+		WithBaseDir(t.TempDir()), WithRunDir(socketDir(t)),
 		WithConfigLoader(emptyConfig))
 
 	return ctl, f
@@ -178,7 +178,7 @@ func TestStartWithSDNotify_ChildExitFailsFast(t *testing.T) {
 	env.Exec = f.Exec
 	env.Clock = f.Clock
 
-	ctl := NewController(withMode(env, false), WithBaseDir(t.TempDir()), WithRunDir(t.TempDir()),
+	ctl := NewController(withMode(env, false), WithBaseDir(t.TempDir()), WithRunDir(socketDir(t)),
 		WithConfigLoader(emptyConfig))
 
 	_, err := ctl.startWithSDNotify(context.Background(), &sys.Cmd{Path: "slapd"}, "test-exit")
