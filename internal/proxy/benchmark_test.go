@@ -152,33 +152,30 @@ server { listen ${web.http.port}; ssl_certificate ${ssl.crt.default}; }`,
 		}
 	}
 
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		b.Fatalf("Failed to create output dir: %v", err)
+	}
+
+	cfg := &config.Config{
+		BaseDir:  tmpDir,
+		Hostname: "test.example.com",
+	}
+
+	gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
+	if err != nil {
+		b.Fatalf("NewGenerator failed: %v", err)
+	}
+
+	gen.TemplateDir = templateDir
+	gen.ConfDir = outputDir
+
+	processor := NewTemplateProcessor(gen, gen.env.FS, templateDir, outputDir)
+
+	// Only generation is timed; outputs are overwritten on each iteration.
 	for b.Loop() {
-		// Recreate output dir for each iteration
-		iterOutputDir := filepath.Join(outputDir, b.Name())
-		if err := os.MkdirAll(iterOutputDir, 0755); err != nil {
-			b.Fatalf("Failed to create output dir: %v", err)
-		}
-
-		cfg := &config.Config{
-			BaseDir:  tmpDir,
-			Hostname: "test.example.com",
-		}
-
-		gen, err := NewGenerator(context.Background(), sys.Real(), cfg, Sources{})
-		if err != nil {
-			b.Fatalf("NewGenerator(, nil) failed: %v", err)
-		}
-
-		gen.TemplateDir = templateDir
-		gen.ConfDir = iterOutputDir
-
-		processor := NewTemplateProcessor(gen, gen.env.FS, templateDir, iterOutputDir)
 		if err := processor.ProcessAllTemplates(context.Background()); err != nil {
 			b.Fatalf("ProcessAllTemplates() failed: %v", err)
 		}
-
-		// Cleanup for next iteration
-		os.RemoveAll(iterOutputDir)
 	}
 }
 
