@@ -15,29 +15,6 @@ import (
 	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
 
-func TestComputeStringMD5(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name     string
-		content  string
-		expected string
-	}{
-		{"empty string", "", "d41d8cd98f00b204e9800998ecf8427e"},
-		{"simple string", "hello world", "5eb63bbbe01eeed093cb22bb8f5acdc3"},
-		{"multiline string", "line1\nline2\nline3", "81facad50c8e6244de64a98cf4f56f77"},
-		{"config-like string", "mynetworks = 127.0.0.0/8, 10.0.0.0/8", "8e8652894d5c3b10b6a39d728f22d3b2"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.Equal(t, tt.expected, ComputeStringMD5(tt.content))
-		})
-	}
-}
-
 func TestComputeFileMD5(t *testing.T) {
 	t.Parallel()
 

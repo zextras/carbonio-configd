@@ -47,15 +47,6 @@ func ComputeFileMD5(ctx context.Context, fsys sys.FS, filepath string) (string, 
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
-// ComputeStringMD5 computes the MD5 hash of a string.
-// Returns the hex-encoded MD5 hash string.
-func ComputeStringMD5(content string) string {
-	hash := md5.New() //nolint:gosec // MD5 used for non-cryptographic checksumming only
-	hash.Write([]byte(content))
-
-	return hex.EncodeToString(hash.Sum(nil))
-}
-
 // GetFileMD5 retrieves the cached MD5 hash for a file path.
 // Returns empty string if no cached hash exists.
 func (s *State) GetFileMD5(filepath string) string {
