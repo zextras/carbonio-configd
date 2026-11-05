@@ -257,7 +257,7 @@ func TestKillStatsPidFile_ValidPidSelfNoError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_ = ctl.killStatsPidFile(context.Background(), pidFile)
+	_ = ctl.killStatsPidFile(context.Background(), pidFile, "")
 }
 
 // ============================================================
