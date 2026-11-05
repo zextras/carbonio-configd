@@ -72,6 +72,10 @@ func (c *Controller) startWithSDNotify(ctx context.Context, cmd *sys.Cmd, servic
 // sdNotifyReadyTimeout bounds how long startWithSDNotify waits for READY=1.
 const sdNotifyReadyTimeout = 30 * time.Second
 
+// sdNotifyObserverReadDeadline is the read deadline the stop-side STOPPING=1
+// observer re-arms on each loop iteration.
+const sdNotifyObserverReadDeadline = 500 * time.Millisecond
+
 // awaitSDNotifyStopping opens the service's persistent notify socket and
 // waits for a STOPPING=1 datagram from the daemon, logging the observation
 // as soon as it arrives. Run as a goroutine from the stop path alongside
@@ -117,7 +121,7 @@ func (c *Controller) awaitSDNotifyStopping(ctx context.Context, service string) 
 		default:
 		}
 
-		_ = conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+		_ = conn.SetReadDeadline(time.Now().Add(sdNotifyObserverReadDeadline))
 
 		// A cancellation that slipped in before the deadline was re-armed
 		// must not leave the read waiting.
