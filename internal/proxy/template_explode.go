@@ -256,12 +256,12 @@ type ServerInfo struct {
 // cachedLDAPQuery executes an LDAP query with optional caching.
 // If cache is available, the result is cached under cacheKey.
 // The queryFunc performs the actual LDAP query; entityName is used in log messages.
-func cachedLDAPQuery[T any](ctx context.Context, cache interface {
+func cachedLDAPQuery[T any](ctx context.Context, cfgCache interface {
 	GetCachedConfig(context.Context, string, func() (any, error)) (any, error)
 }, cacheKey, entityName string, queryFunc func() (T, error),
 ) (T, error) {
-	if !isNilCache(cache) {
-		cachedData, err := cache.GetCachedConfig(ctx, cacheKey, func() (any, error) {
+	if !isNilCache(cfgCache) {
+		cachedData, err := cfgCache.GetCachedConfig(ctx, cacheKey, func() (any, error) {
 			return queryFunc()
 		})
 		if err != nil {
