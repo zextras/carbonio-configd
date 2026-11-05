@@ -17,9 +17,6 @@ func TestStartDirect_EmptyBinaryPath(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	def := &ServiceDef{
 		Name:       "testservice",
 		BinaryPath: "",
@@ -37,9 +34,6 @@ func TestStartDirect_MissingBinary(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	def := &ServiceDef{
 		Name:       "testservice",
 		BinaryPath: "/nonexistent/binary/xyz-configd-test-direct",

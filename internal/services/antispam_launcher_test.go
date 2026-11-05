@@ -176,9 +176,6 @@ func TestAntispamDBEnabled_WithConfig(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	tmp := t.TempDir()
 	pidFile := filepath.Join(tmp, "amavisd-mysql.pid")
 	if err := os.WriteFile(pidFile, []byte("999999998\n"), 0o644); err != nil {

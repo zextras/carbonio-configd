@@ -42,9 +42,6 @@ func TestStartDetached_LogFileOpenError(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	def := &ServiceDef{
 		Name:       "testservice",
 		BinaryPath: "/bin/true",
@@ -63,9 +60,6 @@ func TestStartDetached_LogOpenFails(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	def := &ServiceDef{
 		Name:       "testdetached",
 		BinaryPath: "/usr/bin/true",
@@ -138,9 +132,6 @@ func TestStartDetached_DefaultLogPath(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	ctl.p.base = "/nonexistent-base-path-xyz"
 
 	def := &ServiceDef{

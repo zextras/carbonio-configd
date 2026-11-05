@@ -15,9 +15,6 @@ func TestStopWithoutSystemd_CustomStop(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	called := false
 	def := &ServiceDef{
 		Name: "testservice",
@@ -43,9 +40,6 @@ func TestStopWithoutSystemd_NoProcessName(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	def := &ServiceDef{
 		Name: "testservice",
 	}

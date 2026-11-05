@@ -106,9 +106,6 @@ func TestServiceReload_NoSystemdUnits(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	ctl.pinMode(true)
 
 	origDef := ctl.registry["memcached"]

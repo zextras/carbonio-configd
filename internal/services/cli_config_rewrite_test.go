@@ -17,9 +17,6 @@ import (
 func TestServiceActionString_Default(t *testing.T) {
 	t.Parallel()
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	got := ServiceAction(42).String()
 	if got != "unknown" {
 		t.Errorf("ServiceAction(42).String() = %q, want %q", got, "unknown")
@@ -33,9 +30,6 @@ func TestRewriteConfigs_NoConfigrewriteBinary(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	tmp := t.TempDir()
 	ctl.p.base = tmp
 
@@ -111,9 +105,6 @@ func TestRewriteViaConfigd_ConnectionRefused(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	err := ctl.rewriteViaConfigd(context.Background(), []string{"testconfig"})
 	if err == nil {
 		t.Error("expected error when no configd server is running")

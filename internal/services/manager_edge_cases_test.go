@@ -29,9 +29,6 @@ func TestAddRestartLogged_Deduplication(t *testing.T) {
 
 	ctl, _ := newFakeController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	sm := NewServiceManager(ctl)
 	sm.addRestartLogged(context.Background(), "mta", "r", "mta-label")
 	sm.addRestartLogged(context.Background(), "mta", "r", "mta-label")
@@ -46,9 +43,6 @@ func TestAddRestartLogged_MultipleDifferentServices(t *testing.T) {
 
 	ctl, _ := newFakeController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	sm := NewServiceManager(ctl)
 	sm.addRestartLogged(context.Background(), "mta", "r", "mta")
 	sm.addRestartLogged(context.Background(), "proxy", "r", "proxy")
@@ -66,9 +60,6 @@ func TestAddRestartLogged_LabelDiffersFromService(t *testing.T) {
 
 	ctl, _ := newFakeController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	sm := NewServiceManager(ctl)
 	sm.addRestartLogged(context.Background(), "mta", "r", "mta-display-label")
 
@@ -88,9 +79,6 @@ func TestAttemptServiceRestart_SuccessWithDependencies(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	ctl.pinMode(false)
 
 	ctl.registry["testservice"] = &ServiceDef{
@@ -130,9 +118,6 @@ func TestAttemptServiceRestart_SuccessNilConfigLookup(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	ctl.pinMode(false)
 
 	ctl.registry["testservice"] = &ServiceDef{
@@ -163,9 +148,6 @@ func TestAttemptServiceRestart_FailBelowMax(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	ctl.pinMode(false)
 
 	ctl.registry["testservice"] = &ServiceDef{
@@ -200,9 +182,6 @@ func TestAttemptServiceRestart_FailAtMax(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	ctl.pinMode(false)
 
 	ctl.registry["testservice"] = &ServiceDef{
@@ -239,9 +218,6 @@ func TestProcessRestartRound_AllSucceed(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	ctl.pinMode(false)
 
 	succeed := &ServiceDef{
@@ -277,9 +253,6 @@ func TestProcessRestartRound_AlreadyProcessed(t *testing.T) {
 
 	ctl, _ := newFakeController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	sm := NewServiceManager(ctl)
 	sm.RestartQueue["svc1"] = true
 
@@ -301,9 +274,6 @@ func TestProcessRestartRound_EmptyQueue(t *testing.T) {
 
 	ctl, _ := newFakeController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	sm := NewServiceManager(ctl)
 	failedRestarts := make(map[string]int)
 	processedThisRound := make(map[string]bool)
@@ -325,9 +295,6 @@ func TestProcessRestarts_ServiceSucceedsEventually(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	ctl.pinMode(false)
 
 	succeed := &ServiceDef{
@@ -358,9 +325,6 @@ func TestProcessRestarts_NoProgressBreaksLoop(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	ctl.pinMode(false)
 
 	ctl.registry["svc1"] = &ServiceDef{
@@ -392,9 +356,6 @@ func TestMilterEnabled(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	tempDir := t.TempDir()
 	filePath := filepath.Join(tempDir, "mta_milter_options")
 	ctl.p.milterOptions = filePath
@@ -531,9 +492,6 @@ func TestWaitForSDNotify_NonReadyDatagram(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	tmp := t.TempDir()
 	socketPath := filepath.Join(tmp, "test-nonready.sock")
 
