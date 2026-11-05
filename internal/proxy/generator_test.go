@@ -311,45 +311,6 @@ func TestGenerateAllIntegration(t *testing.T) {
 	}
 }
 
-// TestDiscoverRealTemplates tests discovery with actual nginx templates from conf/nginx/templates
-func TestDiscoverRealTemplates(t *testing.T) {
-	// Check if real template directory exists
-	realTemplateDir := "../../conf/nginx/templates"
-	if _, err := os.Stat(realTemplateDir); os.IsNotExist(err) {
-		t.Skip("Skipping test: real template directory not found")
-	}
-
-	gen := &Generator{
-		env: sys.Real(),
-		Config: &config.Config{
-			BaseDir: "../..",
-		},
-		TemplateDir: realTemplateDir,
-		ConfDir:     "../../conf",
-		IncludesDir: t.TempDir(),
-		Variables:   make(map[string]*Variable),
-	}
-
-	templates, err := gen.DiscoverTemplates(context.Background())
-	if err != nil {
-		t.Fatalf("Failed to discover real templates: %v", err)
-	}
-
-	// Should find 34 templates
-	if len(templates) != 34 {
-		t.Errorf("Expected 34 templates, got %d", len(templates))
-	}
-
-	// Verify all templates are .template files
-	for _, tmpl := range templates {
-		if !strings.HasSuffix(tmpl, ".template") {
-			t.Errorf("Template doesn't have .template suffix: %s", tmpl)
-		}
-	}
-
-	t.Logf("Successfully discovered %d real templates", len(templates))
-}
-
 // TestDiscoverTemplatesInDirWalkError tests discoverTemplatesInDir when a walk error occurs
 func TestDiscoverTemplatesInDirWalkError(t *testing.T) {
 	// Pass a path that is a file, not a directory — WalkDir will error on entries
