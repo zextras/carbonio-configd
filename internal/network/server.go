@@ -364,11 +364,6 @@ func readRequest(ctx context.Context, conn net.Conn) (string, bool) {
 }
 
 func (s *ThreadedStreamServer) handleConnection(ctx context.Context, conn net.Conn) {
-	// Closing the conn when ctx ends (Shutdown cancels it) unblocks a handler
-	// stuck in a read, so Shutdown never waits on an idle client.
-	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
-	defer stop()
-
 	defer func() {
 		if r := recover(); r != nil {
 			logger.ErrorContext(ctx, "Panic in connection handler",
@@ -390,6 +385,14 @@ func (s *ThreadedStreamServer) handleConnection(ctx context.Context, conn net.Co
 
 		return
 	}
+
+	// Expiring the read deadline when ctx ends (Shutdown cancels it) unblocks a
+	// handler stuck in a read, so Shutdown never waits on an idle client. The
+	// conn stays writable, so a handler past its read still sends its reply
+	// (e.g. a released REWRITE answers "ERROR SHUTTING DOWN"). Registered after
+	// the initial deadline so that one cannot override it.
+	stop := context.AfterFunc(ctx, func() { _ = conn.SetReadDeadline(time.Now()) })
+	defer stop()
 
 	request, ok := readRequest(ctx, conn)
 	if !ok {
