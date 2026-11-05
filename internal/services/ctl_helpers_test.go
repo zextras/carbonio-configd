@@ -147,7 +147,7 @@ func (c *Controller) pinMode(strict bool) {
 	}
 
 	c.systemd = systemd.NewManager(c.env)
-	c.modeOnce = sync.Once{}
+	c.modeKnown = false
 }
 
 // useProcRoot points the Controller's process table at root, a directory laid

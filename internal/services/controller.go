@@ -57,7 +57,8 @@ type Controller struct {
 	killTimeout time.Duration
 
 	systemd     *systemd.Manager
-	modeOnce    sync.Once
+	modeMu      sync.Mutex
+	modeKnown   bool
 	systemdMode bool
 }
 

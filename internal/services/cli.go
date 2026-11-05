@@ -50,12 +50,30 @@ type ServiceInfo struct {
 //
 // Callers must NOT gate on systemd.IsBooted() — the init system being systemd
 // does not imply Carbonio is managed by it. Only target enablement does.
+//
+// The verdict is cached for the Controller's lifetime, except when the probe
+// failed (systemctl missing, hung or timed out): that is not an answer, so the
+// call reports legacy mode and the next call probes again instead of pinning
+// the daemon to a mode decided by a transient failure.
 func (c *Controller) IsSystemdMode() bool {
-	c.modeOnce.Do(func() {
-		c.systemdMode = c.systemd.IsSystemdEnabled(context.Background())
-	})
+	c.modeMu.Lock()
+	defer c.modeMu.Unlock()
 
-	return c.systemdMode
+	if c.modeKnown {
+		return c.systemdMode
+	}
+
+	enabled, err := c.systemd.IsSystemdEnabled(context.Background())
+	if err != nil {
+		logger.WarnContext(context.Background(), "systemd mode probe failed; not caching the verdict",
+			"error", err)
+
+		return false
+	}
+
+	c.systemdMode, c.modeKnown = enabled, true
+
+	return enabled
 }
 
 // noRewriteKey marks a context whose start skips config regeneration for this
