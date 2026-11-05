@@ -196,9 +196,13 @@ func (c *Controller) stopMysqld(ctx context.Context, def *ServiceDef) error {
 
 	c.signalPID(pid, syscall.SIGTERM)
 
-	if !c.pollUntilExit(ctx, pid, timeout, mysqlPollInterval) {
+	switch c.pollUntilExit(ctx, pid, timeout, mysqlPollInterval) {
+	case pollCancelled:
+		return fmt.Errorf("%s (pid %d) still running after SIGTERM; wait interrupted: %w", def.Name, pid, ctx.Err())
+	case pollTimedOut:
 		return fmt.Errorf("%s (pid %d) still running %s after SIGTERM; not forcing termination "+
 			"(SIGKILL would require InnoDB crash recovery)", def.Name, pid, timeout)
+	case pollExited:
 	}
 
 	_ = c.env.FS.Remove(def.PidFile)

@@ -399,10 +399,15 @@ func (c *Controller) waitAndEscalate(ctx context.Context, pids []int, timeout ti
 
 	for _, pid := range pids {
 		go func(p int) {
-			if !c.pollUntilExit(ctx, p, timeout, 200*time.Millisecond) {
+			switch c.pollUntilExit(ctx, p, timeout, 200*time.Millisecond) {
+			case pollTimedOut:
 				logger.WarnContext(ctx, "SIGTERM grace expired, escalating to SIGKILL",
 					"pid", p, "timeout", timeout)
 				c.signalPID(p, syscall.SIGKILL)
+			case pollCancelled:
+				logger.WarnContext(ctx, "Cancelled while waiting for SIGTERM exit, not escalating to SIGKILL",
+					"pid", p)
+			case pollExited:
 			}
 
 			done <- struct{}{}
@@ -420,29 +425,51 @@ func (c *Controller) processAlive(pid int) bool {
 	return c.env.Proc.Alive(pid)
 }
 
+// pollResult is the outcome of pollUntilExit.
+type pollResult int
+
+const (
+	// pollExited: the process is confirmed gone.
+	pollExited pollResult = iota
+	// pollTimedOut: the process was still alive when the timeout elapsed.
+	pollTimedOut
+	// pollCancelled: ctx ended first and the process is still alive. The
+	// grace period was not exhausted, so callers must not escalate to SIGKILL.
+	pollCancelled
+)
+
 // pollUntilExit polls c.processAlive(pid) at the given interval until it
-// exits, ctx is cancelled, or timeout elapses. Returns true once the
-// process is confirmed gone. Shared poll core for waitForProcessExit
-// (helpers.go, 50ms/single pid), waitAndEscalate (200ms/N pids in
-// parallel), and killByPIDWithGroupAndSudo (200ms/process group). What
-// happens after a false return (which signal, which target) differs per
-// caller and is intentionally left to them.
-func (c *Controller) pollUntilExit(ctx context.Context, pid int, timeout, interval time.Duration) bool {
+// exits, ctx is cancelled, or timeout elapses. Shared poll core for
+// waitForProcessExit (helpers.go, 50ms/single pid), waitAndEscalate
+// (200ms/N pids in parallel), killByPIDWithGroupAndSudo (200ms/process
+// group) and stopMysqld. Cancellation is reported apart from the timeout so
+// that a daemon shutdown never turns an unfinished SIGTERM grace period into
+// a SIGKILL; what happens after pollTimedOut (which signal, which target)
+// differs per caller and is left to them.
+func (c *Controller) pollUntilExit(ctx context.Context, pid int, timeout, interval time.Duration) pollResult {
 	deadline := c.env.Clock.Now().Add(timeout)
 
 	for c.env.Clock.Now().Before(deadline) {
 		if !c.processAlive(pid) {
-			return true
+			return pollExited
 		}
 
 		select {
 		case <-ctx.Done():
-			return !c.processAlive(pid)
+			if !c.processAlive(pid) {
+				return pollExited
+			}
+
+			return pollCancelled
 		case <-c.env.Clock.After(interval):
 		}
 	}
 
-	return !c.processAlive(pid)
+	if !c.processAlive(pid) {
+		return pollExited
+	}
+
+	return pollTimedOut
 }
 
 // killProcessGroup sends sig to the process group led by pgid (negative PID
@@ -510,8 +537,15 @@ func (c *Controller) killByPIDWithGroupAndSudo(ctx context.Context, pid int) boo
 		}
 	}
 
-	if c.pollUntilExit(ctx, pid, c.killTimeout, 200*time.Millisecond) {
+	switch c.pollUntilExit(ctx, pid, c.killTimeout, 200*time.Millisecond) {
+	case pollExited:
 		return true
+	case pollCancelled:
+		logger.WarnContext(ctx, "Cancelled while waiting for group SIGTERM exit, not escalating to SIGKILL",
+			"pid", pid)
+
+		return false
+	case pollTimedOut:
 	}
 
 	logger.WarnContext(ctx, "SIGTERM grace expired, escalating to SIGKILL on process group",

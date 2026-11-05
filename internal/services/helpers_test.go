@@ -169,14 +169,13 @@ func TestWaitForProcessExit_AlreadyGone(t *testing.T) {
 		t.Skip("slow: may invoke real system commands")
 	}
 	// PID 0x7FFFFFFF is effectively never a live process.
-	if !ctl.waitForProcessExit(context.Background(), 0x7FFFFFFF, time.Second) {
+	if ctl.waitForProcessExit(context.Background(), 0x7FFFFFFF, time.Second) != pollExited {
 		t.Error("expected non-existent pid to be reported as exited")
 	}
 }
 
-// TestWaitForProcessExit_ContextCancelled verifies waitForProcessExit returns
-// the alive status when the context is cancelled while the process is still
-// running.
+// TestWaitForProcessExit_ContextCancelled verifies waitForProcessExit reports
+// the cancellation when the context ends while the process is still running.
 func TestWaitForProcessExit_ContextCancelled(t *testing.T) {
 	t.Parallel()
 
@@ -199,8 +198,8 @@ func TestWaitForProcessExit_ContextCancelled(t *testing.T) {
 	// Cancel immediately so the ctx.Done() branch fires
 	cancel()
 
-	if ctl.waitForProcessExit(ctx, cmd.Process.Pid, 5*time.Second) {
-		t.Error("expected false when context cancelled while process is alive")
+	if got := ctl.waitForProcessExit(ctx, cmd.Process.Pid, 5*time.Second); got != pollCancelled {
+		t.Errorf("waitForProcessExit = %v, want pollCancelled while the process is alive", got)
 	}
 }
 
