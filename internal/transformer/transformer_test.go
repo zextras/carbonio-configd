@@ -121,7 +121,9 @@ func BenchmarkTransform_SimpleVarSubstitution(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = transformer.Transform(ctx, line)
+		if _, err := transformer.Transform(ctx, line); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
@@ -133,7 +135,9 @@ func BenchmarkTransform_LocalConfigSubstitution(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = transformer.Transform(ctx, line)
+		if _, err := transformer.Transform(ctx, line); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
@@ -145,7 +149,9 @@ func BenchmarkTransform_CommentDirective(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = transformer.Transform(ctx, line)
+		if _, err := transformer.Transform(ctx, line); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
@@ -157,7 +163,9 @@ func BenchmarkTransform_BinaryDirective(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = transformer.Transform(ctx, line)
+		if _, err := transformer.Transform(ctx, line); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
@@ -169,7 +177,9 @@ func BenchmarkTransform_ListDirective(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = transformer.Transform(ctx, line)
+		if _, err := transformer.Transform(ctx, line); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
@@ -181,7 +191,9 @@ func BenchmarkTransform_ContainsDirective(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = transformer.Transform(ctx, line)
+		if _, err := transformer.Transform(ctx, line); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
@@ -193,7 +205,9 @@ func BenchmarkTransform_ComplexLine(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = transformer.Transform(ctx, line)
+		if _, err := transformer.Transform(ctx, line); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
@@ -205,7 +219,9 @@ func BenchmarkTransform_NoSubstitution(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = transformer.Transform(ctx, line)
+		if _, err := transformer.Transform(ctx, line); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
@@ -217,7 +233,9 @@ func BenchmarkXformConfig_Comment(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = transformer.xformConfig(ctx, match)
+		if _, err := transformer.xformConfig(ctx, match); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
@@ -229,7 +247,9 @@ func BenchmarkXformConfig_Binary(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = transformer.xformConfig(ctx, match)
+		if _, err := transformer.xformConfig(ctx, match); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
@@ -241,6 +261,8 @@ func BenchmarkXformConfig_List(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = transformer.xformConfig(ctx, match)
+		if _, err := transformer.xformConfig(ctx, match); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
