@@ -261,7 +261,9 @@ func (cm *ConfigManager) initConfigLdapClient(ctx context.Context, localCfg map[
 // lookupFileKey returns the value for key from the file cache or disk.
 func (cm *ConfigManager) lookupFileKey(ctx context.Context, key string) (string, error) {
 	if val, ok := cm.lookupCachedFile(ctx, key); ok {
-		logger.DebugContext(ctx, "Loaded from cache", "key", key, "value", redact.ForLog(key, val))
+		if logger.IsDebug(ctx) {
+			logger.DebugContext(ctx, "Loaded from cache", "key", key, "value", redact.ForLog(key, val))
+		}
 
 		return val, nil
 	}
@@ -271,8 +273,6 @@ func (cm *ConfigManager) lookupFileKey(ctx context.Context, key string) (string,
 	//nolint:gosec // G304: File path comes from trusted configuration
 	contentBytes, err := cm.env.FS.ReadFile(filePath)
 	if err != nil {
-		logger.ErrorContext(ctx, "Error reading file", "file_path", filePath, "error", err)
-
 		return "", fmt.Errorf("error reading file %s: %w", filePath, err)
 	}
 
@@ -294,7 +294,9 @@ func (cm *ConfigManager) lookupFileKey(ctx context.Context, key string) (string,
 	value := strings.Join(filteredLines, ", ")
 	cm.storeCachedFile(ctx, key, value)
 
-	logger.DebugContext(ctx, "Loaded file content", "key", key, "value", redact.ForLog(key, value))
+	if logger.IsDebug(ctx) {
+		logger.DebugContext(ctx, "Loaded file content", "key", key, "value", redact.ForLog(key, value))
+	}
 
 	return value, nil
 }
@@ -315,13 +317,13 @@ func (cm *ConfigManager) lookupMappedFileKey(ctx context.Context, cfgType, key s
 	if _, err := cm.env.FS.Stat(fullPath); err == nil {
 		value = fullPath
 	} else if !os.IsNotExist(err) {
-		logger.ErrorContext(ctx, "Error stating file", "file_path", fullPath, "error", err)
-
 		return "", fmt.Errorf("error stating file %s: %w", fullPath, err)
 	}
 
-	logger.DebugContext(ctx, "Mapped file lookup result",
-		"config_type", cfgType, "key", key, "value", redact.ForLog(key, value))
+	if logger.IsDebug(ctx) {
+		logger.DebugContext(ctx, "Mapped file lookup result",
+			"config_type", cfgType, "key", key, "value", redact.ForLog(key, value))
+	}
 
 	return value, nil
 }
@@ -329,6 +331,17 @@ func (cm *ConfigManager) lookupMappedFileKey(ctx context.Context, cfgType, key s
 // errLookupNotFound marks a lookup whose key is simply not defined, as opposed
 // to a lookup that could not be performed (I/O or transform failure).
 var errLookupNotFound = errors.New("key not found")
+
+// lookupMissError is the miss of LookUpConfig: the message is only formatted if
+// someone reads it (misses are routine for optional keys), and errors.Is
+// matches errLookupNotFound.
+type lookupMissError struct{ cfgType, key string }
+
+func (e *lookupMissError) Error() string {
+	return "key " + e.key + " not found in type " + e.cfgType + ": " + errLookupNotFound.Error()
+}
+
+func (e *lookupMissError) Is(target error) bool { return target == errLookupNotFound }
 
 // LookUpConfig retrieves a configuration value based on its type and key.
 // This method implements the lookup.ConfigLookup interface.
@@ -372,11 +385,13 @@ func (cm *ConfigManager) LookUpConfig(ctx context.Context, cfgType, key string) 
 	}
 
 	if !found {
-		return "", fmt.Errorf("key %s not found in type %s: %w", key, cfgType, errLookupNotFound)
+		return "", &lookupMissError{cfgType: cfgType, key: key}
 	}
 
-	logger.DebugContext(ctx, "Config lookup completed",
-		"key", key, "config_type", cfgType, "value", redact.ForLog(key, value))
+	if logger.IsDebug(ctx) {
+		logger.DebugContext(ctx, "Config lookup completed",
+			"key", key, "config_type", cfgType, "value", redact.ForLog(key, value))
+	}
 
 	return value, nil
 }
