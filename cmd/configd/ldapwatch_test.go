@@ -144,6 +144,27 @@ func TestSyncLDAPWatch_WithoutLDAPClientStartsNothingAndWarnsOnce(t *testing.T) 
 	w.stop() // must be a no-op
 }
 
+// A watcher that could not start for lack of an LDAP client starts on the
+// first cycle after the client becomes available.
+func TestSyncLDAPWatch_StartsOnceTheLDAPClientAppears(t *testing.T) {
+	deps, clock, src := newWatchFixture(t)
+	deps.ldapSource = nil
+	deps.cfg.LdapChangeTrigger = true
+	requireNoWatcherGoroutines(t)
+
+	idle := syncLDAPWatch(context.Background(), deps, nil)
+	require.NotNil(t, idle)
+
+	deps.ldapSource = src
+	w := syncLDAPWatch(context.Background(), deps, idle)
+	require.NotSame(t, idle, w, "the never-started handle is replaced by a running watcher")
+	t.Cleanup(w.stop)
+
+	waitForWaiters(t, clock, 1)
+	assert.True(t, watcherGoroutines(t))
+	assert.Same(t, w, syncLDAPWatch(context.Background(), deps, w), "a running watcher is not restarted")
+}
+
 func TestSyncLDAPWatch_FollowsTheKey(t *testing.T) {
 	deps, clock, src := newWatchFixture(t)
 	ctx := context.Background()
