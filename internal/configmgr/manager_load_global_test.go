@@ -13,7 +13,6 @@ import (
 
 // TestFetchGlobalConfig_Success tests successful global config fetching
 func TestFetchGlobalConfig_Success(t *testing.T) {
-
 	cm := newTestConfigManager(t)
 
 	// Mock gacf command to return valid LDAP output
@@ -49,7 +48,6 @@ zimbraSSLIncludeCipherSuites: ECDHE-RSA-AES256-GCM-SHA384 AES256-GCM-SHA384`
 
 // TestFetchGlobalConfig_CommandNotAvailable tests behavior when gacf command unavailable
 func TestFetchGlobalConfig_CommandNotAvailable(t *testing.T) {
-
 	cm := newTestConfigManager(t)
 
 	cm.CommandRegistry.Commands = make(map[string]*commands.Command)
@@ -66,7 +64,6 @@ func TestFetchGlobalConfig_CommandNotAvailable(t *testing.T) {
 
 // TestFetchGlobalConfig_CommandFails tests retry logic
 func TestFetchGlobalConfig_CommandFails(t *testing.T) {
-
 	cm := newTestConfigManager(t)
 
 	attempts := 0
@@ -115,7 +112,6 @@ func TestFetchGlobalConfig_EmptyOutput(t *testing.T) {
 
 // TestFetchGlobalConfig_QuarantineBannedItemsFalse tests conditional logic
 func TestFetchGlobalConfig_QuarantineBannedItemsFalse(t *testing.T) {
-
 	cm := newTestConfigManager(t)
 
 	// Mock output where conditions are NOT met
@@ -140,7 +136,6 @@ zimbraAmavisQuarantineAccount: `
 
 // TestLoadGlobalConfigWithRetry_Success tests successful global config loading with cache
 func TestLoadGlobalConfigWithRetry_Success(t *testing.T) {
-
 	cm := newTestConfigManager(t)
 
 	mockOutput := `zimbraMtaBlockedExtensionWarnRecipient: TRUE
@@ -171,7 +166,6 @@ zimbraMailboxdSSLProtocols: TLSv1.2 TLSv1.3`
 
 // TestLoadGlobalConfigWithRetry_NoCache tests loading without cache
 func TestLoadGlobalConfigWithRetry_NoCache(t *testing.T) {
-
 	cm := newTestConfigManager(t)
 	cm.Cache = nil // Disable cache
 
@@ -195,7 +189,6 @@ func TestLoadGlobalConfigWithRetry_NoCache(t *testing.T) {
 
 // TestLoadGlobalConfigWithRetry_CachedData tests cache hit scenario
 func TestLoadGlobalConfigWithRetry_CachedData(t *testing.T) {
-
 	cm := newTestConfigManager(t)
 
 	callCount := 0

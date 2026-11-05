@@ -14,7 +14,6 @@ import (
 
 // TestFetchMiscCommand_Success tests successful command execution
 func TestFetchMiscCommand_Success(t *testing.T) {
-
 	cm := newTestConfigManager(t)
 
 	mockOutput := "test output data"
@@ -38,7 +37,6 @@ func TestFetchMiscCommand_Success(t *testing.T) {
 
 // TestFetchMiscCommand_CommandNotAvailable tests behavior when command unavailable
 func TestFetchMiscCommand_CommandNotAvailable(t *testing.T) {
-
 	cm := newTestConfigManager(t)
 
 	cm.CommandRegistry.Commands = make(map[string]*commands.Command)
@@ -55,7 +53,6 @@ func TestFetchMiscCommand_CommandNotAvailable(t *testing.T) {
 
 // TestFetchMiscCommand_CommandFails tests behavior when command fails
 func TestFetchMiscCommand_CommandFails(t *testing.T) {
-
 	cm := newTestConfigManager(t)
 
 	cm.CommandRegistry.Commands["failcmd"] = commands.NewCommand(
@@ -78,7 +75,6 @@ func TestFetchMiscCommand_CommandFails(t *testing.T) {
 
 // TestFetchMiscCommand_EmptyOutput tests behavior with empty output
 func TestFetchMiscCommand_EmptyOutput(t *testing.T) {
-
 	cm := newTestConfigManager(t)
 
 	cm.CommandRegistry.Commands["emptycmd"] = commands.NewCommand(
@@ -102,7 +98,6 @@ func TestFetchMiscCommand_EmptyOutput(t *testing.T) {
 
 // TestLoadMiscConfig_Success tests successful misc config loading
 func TestLoadMiscConfig_Success(t *testing.T) {
-
 	cm := newTestConfigManager(t)
 
 	// Mock all 4 misc commands
@@ -151,7 +146,6 @@ func TestLoadMiscConfig_Success(t *testing.T) {
 
 // TestLoadMiscConfig_NoCache tests misc config loading without cache
 func TestLoadMiscConfig_NoCache(t *testing.T) {
-
 	cm := newTestConfigManager(t)
 	cm.Cache = nil // Disable cache
 
@@ -179,7 +173,6 @@ func TestLoadMiscConfig_NoCache(t *testing.T) {
 
 // TestLoadMiscConfig_PartialFailure tests misc config when some commands fail
 func TestLoadMiscConfig_PartialFailure(t *testing.T) {
-
 	cm := newTestConfigManager(t)
 
 	successCount := 0

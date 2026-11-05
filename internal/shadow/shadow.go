@@ -136,8 +136,8 @@ func New(opts *Options) (*Shadow, error) {
 // appends the missing rest, so it works for a directory not created yet. A
 // path that cannot be resolved is returned unchanged.
 func resolvePath(path string) string {
-	if real, err := filepath.EvalSymlinks(path); err == nil {
-		return real
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
 	}
 
 	parent := filepath.Dir(path)
