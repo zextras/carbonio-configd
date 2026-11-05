@@ -6,6 +6,11 @@
 
 package tracing
 
+import (
+	"sync"
+	"time"
+)
+
 // Clear removes all recorded spans.
 func (t *Tracer) Clear() {
 	t.mu.Lock()
@@ -17,4 +22,27 @@ func (t *Tracer) Clear() {
 // Clear removes all spans from the default tracer.
 func Clear() {
 	DefaultTracer.Clear()
+}
+
+// stepClockInterval is how far stepClock advances on every reading.
+const stepClockInterval = time.Millisecond
+
+// stepClock is a deterministic clock: each reading is stepClockInterval after
+// the previous one, so tests need no sleeps to get ordered, non-zero durations.
+type stepClock struct {
+	mu  sync.Mutex
+	cur time.Time
+}
+
+func newStepClock() *stepClock {
+	return &stepClock{cur: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
+}
+
+func (c *stepClock) now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.cur = c.cur.Add(stepClockInterval)
+
+	return c.cur
 }
