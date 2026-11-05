@@ -9,7 +9,6 @@ package proxy
 import (
 	"context"
 	"github.com/zextras/carbonio-configd/internal/config"
-	"github.com/zextras/carbonio-configd/internal/config/configtest"
 	"github.com/zextras/carbonio-configd/internal/sys"
 	"os"
 	"path/filepath"

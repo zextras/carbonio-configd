@@ -7,6 +7,7 @@ package services
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -38,13 +39,24 @@ func TestStartWithSDNotify_ChildIsNotBoundToCallerContext(t *testing.T) {
 	ctl.env.Exec = rec
 
 	ctx, cancel := context.WithCancel(context.Background())
-	done := startAsync(ctx, ctl, &sys.Cmd{Path: "opendkim"}, "test-ctx-bound")
+	done := startAsync(ctx, t, ctl, &sys.Cmd{Path: "opendkim"}, "test-ctx-bound")
 
-	startCtx := <-rec.startCtx
+	// startWithSDNotify returning before it starts the child (e.g. it could
+	// not bind its notify socket) must fail the test, not leave it waiting for
+	// a context that is never recorded.
+	var startCtx context.Context
+
+	select {
+	case startCtx = <-rec.startCtx:
+	case r := <-done:
+		require.FailNow(t, "startWithSDNotify returned before starting the child", "error: %v", r.err)
+	case <-time.After(sdWaitBound):
+		require.FailNow(t, "the child was not started", "within %s", sdWaitBound)
+	}
 
 	cancel()
 
-	r := <-done
+	r := awaitSDResult(t, done)
 	require.ErrorIs(t, r.err, context.Canceled, "the readiness wait still honours the caller's context")
 	assert.NoError(t, startCtx.Err(), "the child's context must outlive the caller's")
 	assert.Nil(t, startCtx.Done(), "the child gets a context that is never cancelled")
