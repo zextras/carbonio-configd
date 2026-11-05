@@ -185,24 +185,8 @@ func (r *Rewriter) RewriteConfig(ctx context.Context, source, target, mode strin
 		}
 	}()
 
-	scanErr := r.scanAndWrite(ctx, sourceFile, tmpFile)
-
-	// Flush to stable storage before the rename so a crash cannot leave an
-	// empty or truncated file under the target name. Fakes without Sync skip it.
-	if syncer, ok := tmpFile.(interface{ Sync() error }); ok && scanErr == nil {
-		if serr := syncer.Sync(); serr != nil {
-			scanErr = fmt.Errorf("failed to sync temporary file %s: %w", tmpPath, serr)
-		}
-	}
-
-	cerr := tmpFile.Close()
-
-	if scanErr != nil {
-		return scanErr
-	}
-
-	if cerr != nil {
-		return fmt.Errorf("failed to close temporary file %s: %w", tmpPath, cerr)
+	if err := r.writeTemp(ctx, sourceFile, tmpFile); err != nil {
+		return err
 	}
 
 	if err := r.atomicReplace(ctx, tmpPath, targetPath, os.FileMode(fileMode)); err != nil {
@@ -212,6 +196,31 @@ func (r *Rewriter) RewriteConfig(ctx context.Context, source, target, mode strin
 	logger.DebugContext(ctx, "Template rewrite completed",
 		"target_path", targetPath,
 		"file_mode", fmt.Sprintf("%o", fileMode))
+
+	return nil
+}
+
+// writeTemp renders source into tmp, flushes it to stable storage and closes
+// it, so a crash or a failed close cannot leave a truncated file to be renamed
+// over the live config. Fakes without Sync skip the flush.
+func (r *Rewriter) writeTemp(ctx context.Context, source, tmp sys.File) error {
+	err := r.scanAndWrite(ctx, source, tmp)
+
+	if syncer, ok := tmp.(interface{ Sync() error }); ok && err == nil {
+		if serr := syncer.Sync(); serr != nil {
+			err = fmt.Errorf("failed to sync temporary file %s: %w", tmp.Name(), serr)
+		}
+	}
+
+	cerr := tmp.Close()
+
+	if err != nil {
+		return err
+	}
+
+	if cerr != nil {
+		return fmt.Errorf("failed to close temporary file %s: %w", tmp.Name(), cerr)
+	}
 
 	return nil
 }

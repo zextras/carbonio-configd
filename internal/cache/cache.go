@@ -10,7 +10,7 @@ package cache
 
 import (
 	"context"
-	"crypto/md5"
+	"crypto/md5" //nolint:gosec // MD5 used for non-cryptographic change detection only
 	"encoding/hex"
 	"encoding/json"
 	"sort"
