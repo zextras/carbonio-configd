@@ -6,81 +6,57 @@ package commands
 
 import (
 	"context"
-	"crypto/tls"
 	"testing"
-
-	"github.com/zextras/carbonio-configd/internal/ldap"
 )
 
-// BenchmarkGetServer benchmarks the native LDAP ServerAttrs function.
+// benchExecutor returns an executor over canned LDAP data so the benchmarks
+// measure command processing, not network dial failures.
+func benchExecutor() *CommandExecutor {
+	return &CommandExecutor{ldapClient: &stubProvisioningLDAP{
+		serverConfig: map[string]string{"zimbraServiceHostname": "mail.example.com", "zimbraServiceEnabled": "proxy\nmta"},
+		globalConfig: map[string]string{"zimbraDefaultDomainName": "example.com"},
+		allServers: map[string]map[string]string{
+			"mail1": {"cn": "mail1", "zimbraServiceHostname": "mail1.example.com"},
+			"mail2": {"cn": "mail2", "zimbraServiceHostname": "mail2.example.com"},
+		},
+	}}
+}
+
+// BenchmarkGetServer benchmarks the ServerAttrs function.
 func BenchmarkGetServer(b *testing.B) {
-	// Setup: Create a mock LDAP client for benchmarking
-	// In real usage, this would connect to actual LDAP server
-	client, err := ldap.NewClient(&ldap.ClientConfig{
-		URL:      "ldap://localhost:389",
-		BindDN:   "uid=zimbra,cn=admins,cn=zimbra",
-		Password: "test",
-		BaseDN:   "cn=zimbra",
-		PoolSize: 5,
-		// #nosec G402 - InsecureSkipVerify is intentional for benchmarks
-		TLSConfig: &tls.Config{InsecureSkipVerify: true},
-	})
-	if err != nil {
-		b.Skipf("Cannot create LDAP client for benchmark: %v", err)
-	}
-
-	executor := NewCommandExecutor(client)
+	executor := benchExecutor()
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, _ = executor.ServerAttrs(context.Background(), "localhost")
-	}
-}
 
-// BenchmarkGetGlobal benchmarks the native LDAP GlobalAttrs function.
-func BenchmarkGetGlobal(b *testing.B) {
-	client, err := ldap.NewClient(&ldap.ClientConfig{
-		URL:      "ldap://localhost:389",
-		BindDN:   "uid=zimbra,cn=admins,cn=zimbra",
-		Password: "test",
-		BaseDN:   "cn=zimbra",
-		PoolSize: 5,
-		// #nosec G402 - InsecureSkipVerify is intentional for benchmarks
-		TLSConfig: &tls.Config{InsecureSkipVerify: true},
-	})
-	if err != nil {
-		b.Skipf("Cannot create LDAP client for benchmark: %v", err)
-	}
-
-	executor := NewCommandExecutor(client)
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, _ = executor.GlobalAttrs(context.Background())
-	}
-}
-
-// BenchmarkGetAllServersWithAttribute benchmarks the native LDAP query
-// for servers with specific attributes (e.g., garpb).
-func BenchmarkGetAllServersWithAttribute(b *testing.B) {
-	client, err := ldap.NewClient(&ldap.ClientConfig{
-		URL:      "ldap://localhost:389",
-		BindDN:   "uid=zimbra,cn=admins,cn=zimbra",
-		Password: "test",
-		BaseDN:   "cn=zimbra",
-		PoolSize: 5,
-		// #nosec G402 - InsecureSkipVerify is intentional for benchmarks
-		TLSConfig: &tls.Config{InsecureSkipVerify: true},
-	})
-	if err != nil {
-		b.Skipf("Cannot create LDAP client for benchmark: %v", err)
-	}
-
-	executor := NewCommandExecutor(client)
-
-	b.Run("garpb", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			_, _ = executor.garpb(context.Background())
+	for b.Loop() {
+		if _, err := executor.ServerAttrs(context.Background(), "localhost"); err != nil {
+			b.Fatal(err)
 		}
-	})
+	}
+}
+
+// BenchmarkGetGlobal benchmarks the GlobalAttrs function.
+func BenchmarkGetGlobal(b *testing.B) {
+	executor := benchExecutor()
+
+	b.ResetTimer()
+
+	for b.Loop() {
+		if _, err := executor.GlobalAttrs(context.Background()); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// BenchmarkGetAllServersWithAttribute benchmarks the garpb query.
+func BenchmarkGetAllServersWithAttribute(b *testing.B) {
+	executor := benchExecutor()
+
+	b.ResetTimer()
+
+	for b.Loop() {
+		if _, err := executor.garpb(context.Background()); err != nil {
+			b.Fatal(err)
+		}
+	}
 }
