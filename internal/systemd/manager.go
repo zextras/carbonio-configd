@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/sys"
@@ -77,19 +78,34 @@ func (m *Manager) IsEnabled(ctx context.Context, unit string) (bool, error) {
 	return false, fmt.Errorf("systemctl is-enabled %s: %w", unit, err)
 }
 
+// probeTimeout bounds the whole IsSystemdEnabled probe: a hung systemctl (dbus
+// not ready at boot) must not stall the caller indefinitely.
+const probeTimeout = 15 * time.Second
+
 // IsSystemdEnabled checks if Carbonio is running with systemd.
 // Returns true if at least one of the five Carbonio systemd targets is enabled.
 // carbonio.target is deliberately excluded — it is a top-level umbrella target
 // that may be enabled on any install regardless of orchestration mode, so it
 // is not a reliable signal that services are managed via systemctl.
 // This matches the logic in carbonio-core-utils/src/bin/shutil.sh:is_systemd()
-func (m *Manager) IsSystemdEnabled(ctx context.Context) bool {
-	ctx = logger.ContextWithComponent(ctx, "systemd")
+//
+// The probe is bounded by probeTimeout. When no target is found enabled and at
+// least one probe failed (systemctl missing or hung, timeout), the false result
+// is not a verdict and the joined probe errors are returned: callers must not
+// cache it.
+func (m *Manager) IsSystemdEnabled(ctx context.Context) (bool, error) {
+	ctx, cancel := context.WithTimeout(logger.ContextWithComponent(ctx, "systemd"), probeTimeout)
+	defer cancel()
+
+	var probeErr error
+
 	for _, target := range carbonioTargets {
 		enabled, err := m.IsEnabled(ctx, target)
 		if err != nil {
 			logger.WarnContext(ctx, "Cannot tell whether a Carbonio systemd target is enabled",
 				"target", target, "error", err)
+
+			probeErr = errors.Join(probeErr, err)
 
 			continue
 		}
@@ -98,11 +114,15 @@ func (m *Manager) IsSystemdEnabled(ctx context.Context) bool {
 			logger.DebugContext(ctx, "Detected enabled systemd target",
 				"target", target)
 
-			return true
+			return true, nil
 		}
+	}
+
+	if probeErr != nil {
+		return false, probeErr
 	}
 
 	logger.DebugContext(ctx, "No Carbonio systemd targets enabled, using traditional zm*ctl scripts")
 
-	return false
+	return false, nil
 }

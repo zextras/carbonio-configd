@@ -108,7 +108,9 @@ func TestIsSystemdEnabled(t *testing.T) {
 
 			m := NewManager(f.System())
 
-			assert.Equal(t, tt.want, m.IsSystemdEnabled(context.Background()))
+			got, err := m.IsSystemdEnabled(context.Background())
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
 			assert.Len(t, f.Exec.Calls(), tt.probes)
 		})
 	}
@@ -136,5 +138,21 @@ func TestIsEnabled_CannotRunSystemctlIsAnError(t *testing.T) {
 	enabled, err := m.IsEnabled(context.Background(), "x.target")
 	require.Error(t, err)
 	assert.False(t, enabled)
-	assert.False(t, m.IsSystemdEnabled(context.Background()))
+
+	got, err := m.IsSystemdEnabled(context.Background())
+	require.Error(t, err, "failed probes are no verdict: the caller must not cache false")
+	assert.False(t, got)
+}
+
+func TestIsSystemdEnabled_EnabledTargetWinsOverProbeFailure(t *testing.T) {
+	t.Parallel()
+
+	f := systest.New()
+	f.Exec.OnCmdline("systemctl is-enabled", systest.Reply("enabled"))
+	f.Exec.FailStart(func(c *sys.Cmd) bool { return c.String() == "systemctl is-enabled "+carbonioTargets[0] },
+		errors.New("exec: systemctl: transient"))
+
+	got, err := NewManager(f.System()).IsSystemdEnabled(context.Background())
+	require.NoError(t, err)
+	assert.True(t, got)
 }
