@@ -329,7 +329,6 @@ func TestDoPostconf_SingleLiteral(t *testing.T) {
 // booleans (TRUE->yes, FALSE->no), while literal values pass through unchanged.
 // This mirrors the legacy zmconfigd (jylibs/mtaconfig.py).
 func TestDoPostconf_BooleanNormalization(t *testing.T) {
-
 	tests := []struct {
 		name      string
 		valueSpec string
@@ -721,7 +720,6 @@ func newRestartTestCM(mgr *testutil.MockServiceManager) *ConfigManager {
 // TestApplyRestarts_QueuesPlanRestarts checks that every restart of the plan is
 // queued on the service manager with its reasons and then processed.
 func TestApplyRestarts_QueuesPlanRestarts(t *testing.T) {
-
 	var (
 		queued    = map[string][]string{}
 		processed int
@@ -759,7 +757,6 @@ func TestApplyRestarts_QueuesPlanRestarts(t *testing.T) {
 // TestApplyRestarts_AddRestartError exercises the queue error path: the
 // failed restart is carried into the next cycle and nothing panics.
 func TestApplyRestarts_AddRestartError(t *testing.T) {
-
 	mgr := &testutil.MockServiceManager{
 		AddRestartWithReasonsFn: func(_ context.Context, _ string, _ []string) error {
 			return &testError{msg: "add restart failed"}
@@ -779,7 +776,6 @@ func TestApplyRestarts_AddRestartError(t *testing.T) {
 // TestApplyRestarts_ProcessRestartsError exercises the ProcessRestarts error
 // logging branch (no panic).
 func TestApplyRestarts_ProcessRestartsError(t *testing.T) {
-
 	mgr := &testutil.MockServiceManager{
 		ProcessRestartsFn: func(_ context.Context, _ func(string) string) error {
 			return &testError{msg: "process restarts failed"}
@@ -794,7 +790,6 @@ func TestApplyRestarts_ProcessRestartsError(t *testing.T) {
 // semantics: config-driven restarts never cascade through DEPENDS, so the
 // restart policy hands the (watchdog-shared) manager no enabled-service lookup.
 func TestApplyRestarts_ProcessRestartsGetsNoCascadeLookup(t *testing.T) {
-
 	called := false
 
 	mgr := &testutil.MockServiceManager{

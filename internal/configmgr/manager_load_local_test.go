@@ -16,7 +16,6 @@ import (
 
 // TestLoadLocalConfigWithRetry_Success tests successful local config loading
 func TestLoadLocalConfigWithRetry_Success(t *testing.T) {
-
 	cm := newTestConfigManager(t)
 
 	// Pre-populate cached output to bypass XML file reading
@@ -63,7 +62,6 @@ func TestLoadLocalConfigWithRetry_XMLNotAvailable(t *testing.T) {
 // TestLoadLocalConfigWithRetry_CommandFails tests the error of a loader that fails
 // (an unreadable or malformed localconfig.xml).
 func TestLoadLocalConfigWithRetry_CommandFails(t *testing.T) {
-
 	cm := newTestConfigManager(t)
 	cm.loadLocalConfig = func() (map[string]string, error) {
 		return nil, errors.New("parse error")
@@ -82,7 +80,6 @@ func TestLoadLocalConfigWithRetry_CommandFails(t *testing.T) {
 
 // TestLoadLocalConfigWithRetry_EmptyOutput tests behavior with empty output
 func TestLoadLocalConfigWithRetry_EmptyOutput(t *testing.T) {
-
 	cm := newTestConfigManager(t)
 
 	// Pre-populate cached output with whitespace-only content
@@ -107,7 +104,6 @@ func TestLoadLocalConfigWithRetry_EmptyOutput(t *testing.T) {
 
 // TestLoadLocalConfigWithRetry_CachedOutput tests that cached output is reused
 func TestLoadLocalConfigWithRetry_CachedOutput(t *testing.T) {
-
 	cm := newTestConfigManager(t)
 
 	// Pre-populate cached output
@@ -138,7 +134,6 @@ func TestLoadLocalConfigWithRetry_CachedOutput(t *testing.T) {
 
 // TestPostProcessLocalConfig tests OpenDKIM URI generation
 func TestPostProcessLocalConfig(t *testing.T) {
-
 	data := map[string]string{
 		"ldap_url": "ldap://server1:389 ldap://server2:389",
 	}
@@ -172,7 +167,6 @@ func TestPostProcessLocalConfig(t *testing.T) {
 
 // TestPostProcessLocalConfig_DefaultPort tests default port setting
 func TestPostProcessLocalConfig_DefaultPort(t *testing.T) {
-
 	data := map[string]string{
 		"some_key": "some_value",
 	}
@@ -188,7 +182,6 @@ func TestPostProcessLocalConfig_DefaultPort(t *testing.T) {
 
 // TestPostProcessLocalConfig_NoLDAPUrl tests behavior without ldap_url
 func TestPostProcessLocalConfig_NoLDAPUrl(t *testing.T) {
-
 	data := map[string]string{
 		"key1": "value1",
 	}

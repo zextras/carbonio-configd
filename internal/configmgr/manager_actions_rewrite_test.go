@@ -21,7 +21,6 @@ import (
 
 // TestRewriteWorker_HappyPath tests rewriteWorker with a successful rewrite
 func TestRewriteWorker_HappyPath(t *testing.T) {
-
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
@@ -63,7 +62,6 @@ func TestRewriteWorker_HappyPath(t *testing.T) {
 
 // TestRewriteWorker_ErrorPath tests rewriteWorker when source file doesn't exist
 func TestRewriteWorker_ErrorPath(t *testing.T) {
-
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
@@ -93,7 +91,6 @@ func TestRewriteWorker_ErrorPath(t *testing.T) {
 
 // TestRewriteWorker_DebugLogging tests rewriteWorker with debug logging enabled
 func TestRewriteWorker_DebugLogging(t *testing.T) {
-
 	tmpDir := t.TempDir()
 
 	// Create a source file
@@ -148,7 +145,6 @@ func TestRewriteWorker_DebugLogging(t *testing.T) {
 
 // TestRewriteAtomicCommit_HappyPath tests successful atomic commit with default mode
 func TestRewriteAtomicCommit_HappyPath(t *testing.T) {
-
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
@@ -176,7 +172,6 @@ func TestRewriteAtomicCommit_HappyPath(t *testing.T) {
 
 // TestRewriteAtomicCommit_InvalidMode tests rewriteAtomicCommit with invalid mode string
 func TestRewriteAtomicCommit_InvalidMode(t *testing.T) {
-
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
@@ -196,7 +191,6 @@ func TestRewriteAtomicCommit_InvalidMode(t *testing.T) {
 
 // TestRewriteAtomicCommit_CustomMode tests rewriteAtomicCommit with custom octal mode
 func TestRewriteAtomicCommit_CustomMode(t *testing.T) {
-
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
@@ -220,7 +214,6 @@ func TestRewriteAtomicCommit_CustomMode(t *testing.T) {
 
 // TestRewriteTransform tests rewriteTransform with a source file
 func TestRewriteTransform(t *testing.T) {
-
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
@@ -260,7 +253,6 @@ func TestRewriteTransform(t *testing.T) {
 
 // TestRewriteTransform_NonexistentSource tests rewriteTransform with non-existent source
 func TestRewriteTransform_NonexistentSource(t *testing.T) {
-
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 

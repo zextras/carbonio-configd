@@ -166,7 +166,6 @@ func TestProcessIsNotRunning(t *testing.T) {
 
 // TestIsAlreadyClosedError tests the isAlreadyClosedError utility function
 func TestIsAlreadyClosedError(t *testing.T) {
-
 	// A real double-close reproduces the exact error shape production code
 	// hits: an *fs.PathError wrapping os.ErrClosed.
 	tmpFile, err := os.CreateTemp(t.TempDir(), "already-closed")
@@ -1514,7 +1513,6 @@ func TestExecute_ErrorSurfacing(t *testing.T) {
 // rewrite that failed in one cycle is planned again (as a retry) in the next
 // one even though no variable changed.
 func TestPlan_RewriteRetriedUntilSuccess(t *testing.T) {
-
 	cm := newPlanTestCM(t)
 	cm.Transformer = newTestTransformer(cm)
 	cm.State.SetFirstRun(true)
