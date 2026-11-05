@@ -72,9 +72,7 @@ func TestAntispamDBEnabled_MatchingHostname(t *testing.T) {
 	tmp := t.TempDir()
 	ctl.p.bin = tmp
 
-	if err := os.WriteFile(filepath.Join(tmp, "zmhostname"), []byte("#!/bin/sh\necho testhost\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeExecutable(t, filepath.Join(tmp, "zmhostname"), []byte("#!/bin/sh\necho testhost\n"))
 
 	ctl.loadConfig = func() (map[string]string, error) {
 		return map[string]string{
@@ -126,9 +124,7 @@ func TestAntispamDBEnabled_HostnameMismatch(t *testing.T) {
 	tmp := t.TempDir()
 	ctl.p.bin = tmp
 
-	if err := os.WriteFile(filepath.Join(tmp, "zmhostname"), []byte("#!/bin/sh\necho realhost\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeExecutable(t, filepath.Join(tmp, "zmhostname"), []byte("#!/bin/sh\necho realhost\n"))
 
 	ctl.loadConfig = func() (map[string]string, error) {
 		return map[string]string{
@@ -307,9 +303,7 @@ func TestStartAntispamDB_WithConfig(t *testing.T) {
 	}
 
 	fakeMysqldSafe := filepath.Join(tmp, "mysqld_safe")
-	if err := os.WriteFile(fakeMysqldSafe, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeExecutable(t, fakeMysqldSafe, []byte("#!/bin/sh\nexit 0\n"))
 
 	ctl.p.mysqldSafeBin = fakeMysqldSafe
 

@@ -82,9 +82,7 @@ func TestMailboxCustomStart_JavaBinaryPresent(t *testing.T) {
 		t.Fatal(err)
 	}
 	javaBin := filepath.Join(javaDir, "java")
-	if err := os.WriteFile(javaBin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeExecutable(t, javaBin, []byte("#!/bin/sh\nexit 0\n"))
 
 	logDir := filepath.Join(tmp, "log")
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
@@ -143,9 +141,7 @@ func TestMailboxJavaBinary_FallbackPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	javaBin := filepath.Join(javaDir, "java")
-	if err := os.WriteFile(javaBin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeExecutable(t, javaBin, []byte("#!/bin/sh\nexit 0\n"))
 
 	ctl.p.common = tmp
 
@@ -242,9 +238,7 @@ func TestMailboxCustomStart_DirCreation(t *testing.T) {
 		t.Fatal(err)
 	}
 	javaBin := filepath.Join(javaDir, "java")
-	if err := os.WriteFile(javaBin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeExecutable(t, javaBin, []byte("#!/bin/sh\nexit 0\n"))
 
 	logDir := filepath.Join(tmp, "log")
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
@@ -312,9 +306,7 @@ func TestMailboxCustomStart_GCLogCreation(t *testing.T) {
 		t.Fatal(err)
 	}
 	javaBin := filepath.Join(javaDir, "java")
-	if err := os.WriteFile(javaBin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeExecutable(t, javaBin, []byte("#!/bin/sh\nexit 0\n"))
 
 	logDir := filepath.Join(tmp, "log")
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
@@ -399,9 +391,7 @@ func TestMailboxJavaBinary_ZimbraJavaHome(t *testing.T) {
 		t.Fatal(err)
 	}
 	javaBin := filepath.Join(javaDir, "java")
-	if err := os.WriteFile(javaBin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeExecutable(t, javaBin, []byte("#!/bin/sh\nexit 0\n"))
 
 	lc := map[string]string{
 		"mailboxd_java_home": "",

@@ -406,9 +406,7 @@ func TestStopWithSDNotify_RestartKeepsNotifySocket(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := os.WriteFile(def.BinaryPath, []byte("x"), 0o755); err != nil { //nolint:gosec // test stand-in binary
-		t.Fatal(err)
-	}
+	writeExecutable(t, def.BinaryPath, []byte("x"))
 
 	// The daemon reports READY=1 a moment after the launch, after the window
 	// in which the stop-side observer (500 ms read deadline) used to unlink the

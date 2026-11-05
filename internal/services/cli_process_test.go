@@ -786,9 +786,7 @@ func TestStartDirect_NonDaemon(t *testing.T) {
 
 	tmp := t.TempDir()
 	script := filepath.Join(tmp, "testbin")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeExecutable(t, script, []byte("#!/bin/sh\nexit 0\n"))
 
 	def := &ServiceDef{
 		Name:       "test-direct",
@@ -884,9 +882,7 @@ func TestStartDirect_NeedsRootNonRoot(t *testing.T) {
 	}
 	tmp := t.TempDir()
 	script := filepath.Join(tmp, "mybin")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeExecutable(t, script, []byte("#!/bin/sh\nexit 0\n"))
 
 	def := &ServiceDef{
 		Name:       "test-root-svc",
@@ -910,9 +906,7 @@ func TestStartDirect_SDNotifyTimeout(t *testing.T) {
 	}
 	tmp := t.TempDir()
 	script := filepath.Join(tmp, "sleeper")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nsleep 5\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeExecutable(t, script, []byte("#!/bin/sh\nsleep 5\n"))
 
 	def := &ServiceDef{
 		Name:        "test-sdnotify-direct",
@@ -938,9 +932,7 @@ func TestStartDetached_LogFilePath(t *testing.T) {
 
 	tmp := t.TempDir()
 	script := filepath.Join(tmp, "daemon")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nsleep 5\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeExecutable(t, script, []byte("#!/bin/sh\nsleep 5\n"))
 	logFile := filepath.Join(tmp, "test.log")
 
 	def := &ServiceDef{
@@ -962,9 +954,7 @@ func TestStartDetached_DefaultLogFile(t *testing.T) {
 
 	tmp := t.TempDir()
 	script := filepath.Join(tmp, "daemon")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nsleep 5\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeExecutable(t, script, []byte("#!/bin/sh\nsleep 5\n"))
 
 	logDir := filepath.Join(tmp, "log")
 	ctl.p.log = logDir
@@ -1036,9 +1026,7 @@ func TestStartDetached_SpawnAndRelease(t *testing.T) {
 	}
 	tmp := t.TempDir()
 	script := filepath.Join(tmp, "sleeper")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nsleep 1\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeExecutable(t, script, []byte("#!/bin/sh\nsleep 1\n"))
 	logFile := filepath.Join(tmp, "test.out")
 
 	def := &ServiceDef{
@@ -1060,9 +1048,7 @@ func TestStartDirect_OutputCaptured(t *testing.T) {
 
 	tmp := t.TempDir()
 	script := filepath.Join(tmp, "failbin")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\necho 'startup failed'\nexit 1\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeExecutable(t, script, []byte("#!/bin/sh\necho 'startup failed'\nexit 1\n"))
 
 	def := &ServiceDef{
 		Name:       "test-direct-fail",

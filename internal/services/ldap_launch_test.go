@@ -117,9 +117,7 @@ func TestLdapCustomStart_WithFakeSlapd(t *testing.T) {
 		t.Fatal(err)
 	}
 	slapdBin := filepath.Join(slapdDir, "slapd")
-	if err := os.WriteFile(slapdBin, []byte("#!/bin/sh\nsleep 5\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeExecutable(t, slapdBin, []byte("#!/bin/sh\nsleep 5\n"))
 
 	ldapCfgDir := filepath.Join(tmp, "ldap", "config")
 	if err := os.MkdirAll(ldapCfgDir, 0o755); err != nil {
@@ -181,9 +179,7 @@ func TestLdapCustomStart_ContextTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 	slapdBin := filepath.Join(slapdDir, "slapd")
-	if err := os.WriteFile(slapdBin, []byte("#!/bin/sh\nsleep 60\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeExecutable(t, slapdBin, []byte("#!/bin/sh\nsleep 60\n"))
 
 	ldapCfgDir := filepath.Join(tmp, "ldap", "config")
 	if err := os.MkdirAll(ldapCfgDir, 0o755); err != nil {
