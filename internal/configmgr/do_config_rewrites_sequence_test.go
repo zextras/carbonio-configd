@@ -103,13 +103,13 @@ func TestDoConfigRewrites_SideEffectSequence(t *testing.T) {
 	assert.Equal(t, "fs.write-atomic "+base+"/conf/dhparam.pem mode=0640", ops[0])
 
 	// Concurrent phase: each step's own side effects keep their order.
-	const tmp = "/tmp/zmconfigd-rewrite-000001"
+	tmp := base + "/conf/.zmconfigd-rewrite-000001.tmp"
 
 	assert.Equal(t, []string{
 		"fs.create-temp " + tmp,
 		"fs.chmod " + tmp + " mode=0640",
 		"fs.rename " + tmp + " -> " + base + "/conf/main.cf",
-	}, subsequence(ops[1:], "zmconfigd-rewrite"), "rewrite step")
+	}, subsequence(ops[1:], ".zmconfigd-rewrite"), "rewrite step")
 	assert.Equal(t, []string{"exec " + base + "/common/sbin/postconf -e myhostname=mail.example.com"},
 		subsequence(ops[1:], "postconf -e"), "postconf step")
 	assert.Equal(t, []string{"exec " + base + "/common/sbin/postconf -X smtpd_banner"},
