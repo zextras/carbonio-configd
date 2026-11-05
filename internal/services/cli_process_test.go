@@ -263,9 +263,6 @@ func TestIsRunningByPidFile_MissingFile(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	_, ok := ctl.isRunningByPidFile("/nonexistent/path/test.pid")
 	if ok {
 		t.Error("expected ok=false for missing pidfile")
@@ -278,9 +275,6 @@ func TestIsRunningByPidFile_EmptyFile(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	tmpDir := t.TempDir()
 	pidFile := filepath.Join(tmpDir, "empty.pid")
 	if err := os.WriteFile(pidFile, []byte(""), 0o644); err != nil {
@@ -299,9 +293,6 @@ func TestIsRunningByPidFile_InvalidPid(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	tmpDir := t.TempDir()
 	pidFile := filepath.Join(tmpDir, "corrupt.pid")
 	if err := os.WriteFile(pidFile, []byte("notanumber\n"), 0o644); err != nil {
@@ -320,9 +311,6 @@ func TestIsRunningByPidFile_ZeroPid(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	tmpDir := t.TempDir()
 	pidFile := filepath.Join(tmpDir, "zero.pid")
 	if err := os.WriteFile(pidFile, []byte("0\n"), 0o644); err != nil {
@@ -677,9 +665,6 @@ func TestStartWithoutSystemd_CustomStartError(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	wantErr := fmt.Errorf("custom start failed")
 	def := &ServiceDef{
 		Name: "test-custom-err",
@@ -702,9 +687,6 @@ func TestStartWithoutSystemd_ProcessNameOnly(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	def := &ServiceDef{
 		Name:        "test-proc-only",
 		ProcessName: "some-process",
@@ -1114,10 +1096,6 @@ func TestMailboxCustomStart_AppserverDBFail(t *testing.T) {
 	t.Parallel()
 
 	ctl := newRealController(t)
-
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 
 	ctl.loadConfig = func() (map[string]string, error) {
 		return nil, fmt.Errorf("test config error")

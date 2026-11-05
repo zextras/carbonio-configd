@@ -84,10 +84,6 @@ func TestStopService_LegacyMode_BypassesSystemctl(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-
 	ctl.pinMode(false)
 
 	orig := ctl.registry["memcached"]

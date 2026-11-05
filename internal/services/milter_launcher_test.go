@@ -20,10 +20,6 @@ func TestMilterCustomStart_LoadConfigFails(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-
 	ctl.loadConfig = func() (map[string]string, error) {
 		return nil, fmt.Errorf("test config error")
 	}
@@ -44,9 +40,6 @@ func TestMilterCustomStart_JavaBinaryMissing(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	tmp := t.TempDir()
 
 	ctl.loadConfig = func() (map[string]string, error) {

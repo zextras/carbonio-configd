@@ -16,9 +16,6 @@ import (
 func TestMapLDAPServiceToRegistry(t *testing.T) {
 	t.Parallel()
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	tests := []struct {
 		ldapName string
 		expected string
@@ -44,9 +41,6 @@ func TestMapLDAPServiceToRegistry(t *testing.T) {
 func TestLegacyServiceFiltering(t *testing.T) {
 	t.Parallel()
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	if !legacyServiceNames["zimlet"] {
 		t.Error("zimlet should be a legacy service name")
 	}
@@ -67,9 +61,6 @@ func TestLegacyServiceFiltering(t *testing.T) {
 func TestCacheReadWrite(t *testing.T) {
 	t.Parallel()
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	// Use a temp dir for cache
 	dir := t.TempDir()
 
@@ -131,9 +122,6 @@ func TestIsLDAPLocal_NoConfig(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	// Without localconfig.xml, should return false (not crash)
 	result := ctl.IsLDAPLocal()
 	// Just verify it doesn't panic — result depends on environment
@@ -146,9 +134,6 @@ func TestReadCache_Success(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	dir := t.TempDir()
 	testCache := filepath.Join(dir, ".zmcontrol.cache")
 
@@ -183,9 +168,6 @@ func TestReadCache_EmptyLines(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	dir := t.TempDir()
 	testCache := filepath.Join(dir, ".zmcontrol.cache")
 
@@ -213,9 +195,6 @@ func TestReadCache_MissingFile(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	ctl.p.cacheFile = "/nonexistent/path/.zmcontrol.cache"
 
 	_, err := ctl.readCache(context.Background())
@@ -230,9 +209,6 @@ func TestReadCache_SingleService(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	dir := t.TempDir()
 	testCache := filepath.Join(dir, ".zmcontrol.cache")
 
@@ -258,9 +234,6 @@ func TestWriteCache_Success(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	dir := t.TempDir()
 	testCache := filepath.Join(dir, ".zmcontrol.cache")
 
@@ -286,9 +259,6 @@ func TestWriteCache_Empty(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	dir := t.TempDir()
 	testCache := filepath.Join(dir, ".zmcontrol.cache")
 
@@ -313,9 +283,6 @@ func TestWriteCache_UnwritablePath(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	ctl.p.cacheFile = "/nonexistent/dir/.zmcontrol.cache"
 
 	// Should not panic — just logs a warning
@@ -328,9 +295,6 @@ func TestWriteReadCache_RoundTrip(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	dir := t.TempDir()
 	testCache := filepath.Join(dir, ".zmcontrol.cache")
 
@@ -363,9 +327,6 @@ func TestIsLDAPLocal_HostnameInURL(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	ctl.loadConfig = func() (map[string]string, error) {
 		return map[string]string{
 			"zimbra_server_hostname": "mail01.example.com",
@@ -384,9 +345,6 @@ func TestIsLDAPLocal_HostnameNotInURL(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	ctl.loadConfig = func() (map[string]string, error) {
 		return map[string]string{
 			"zimbra_server_hostname": "mail01.example.com",
@@ -405,9 +363,6 @@ func TestIsLDAPLocal_EmptyHostname(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	ctl.loadConfig = func() (map[string]string, error) {
 		return map[string]string{
 			"zimbra_server_hostname": "",
@@ -427,9 +382,6 @@ func TestDiscoverEnabledServices_LoadConfigFails(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	ctl.loadConfig = func() (map[string]string, error) {
 		return nil, fmt.Errorf("no localconfig.xml")
 	}
@@ -450,9 +402,6 @@ func TestDiscoverEnabledServices_EmptyHostname(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	ctl.loadConfig = func() (map[string]string, error) {
 		return map[string]string{
 			"ldap_url": "ldap://localhost:389",

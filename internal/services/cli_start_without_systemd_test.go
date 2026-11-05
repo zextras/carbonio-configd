@@ -15,9 +15,6 @@ func TestStartWithoutSystemd_CustomStart(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	called := false
 	def := &ServiceDef{
 		Name: "testservice",
@@ -42,9 +39,6 @@ func TestStartWithoutSystemd_NoBinaryWithProcessName(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	def := &ServiceDef{
 		Name:        "testservice",
 		ProcessName: "someprocess",
@@ -62,9 +56,6 @@ func TestStartWithoutSystemd_NoBinaryNoProcessName(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	def := &ServiceDef{
 		Name: "testservice",
 	}
@@ -81,9 +72,6 @@ func TestStartWithoutSystemd_BinaryNotFound(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	def := &ServiceDef{
 		Name:       "testservice",
 		BinaryPath: "/nonexistent/binary/xyz-configd-test",

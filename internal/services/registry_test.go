@@ -15,9 +15,6 @@ func TestLookupService_Known(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	def := ctl.LookupService("mta")
 	if def == nil {
 		t.Fatal("expected mta to be registered")
@@ -37,9 +34,6 @@ func TestLookupService_Unknown(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	def := ctl.LookupService("nonexistent")
 	if def != nil {
 		t.Error("expected nil for unknown service")
@@ -51,9 +45,6 @@ func TestAllServiceNames_ContainsExpected(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	names := ctl.AllServiceNames()
 	expected := []string{"ldap", "mta", "proxy", "mailbox", "memcached"}
 
@@ -69,9 +60,6 @@ func TestAllServiceNames_Ordered(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	names := ctl.AllServiceNames()
 	order := getDefaultStartOrder()
 
@@ -91,9 +79,6 @@ func TestRegistryDependencies_MTA(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	def := ctl.LookupService("mta")
 	if def == nil {
 		t.Fatal("mta not found")
@@ -120,9 +105,6 @@ func TestRegistryDependencies_Antivirus(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	def := ctl.LookupService("antivirus")
 	if def == nil {
 		t.Fatal("antivirus not found")
@@ -145,9 +127,6 @@ func TestRegistryConfigRewrite_Proxy(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	def := ctl.LookupService("proxy")
 	if def == nil {
 		t.Fatal("proxy not found")
@@ -163,9 +142,6 @@ func TestRegistrySimpleService_NoDepsnorHooks(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	def := ctl.LookupService("memcached")
 	if def == nil {
 		t.Fatal("memcached not found")
@@ -185,9 +161,6 @@ func TestRegistryDisplayNames_AllLowercase(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	for name, def := range ctl.registry {
 		if def.DisplayName != strings.ToLower(def.DisplayName) {
 			t.Errorf("service %q has non-lowercase DisplayName %q, want %q",
@@ -207,9 +180,6 @@ func TestLookupService_ZmconfigdAlias(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	def := ctl.LookupService("zmconfigd")
 	if def == nil {
 		t.Fatal("expected zmconfigd alias to resolve to a service definition")
@@ -233,9 +203,6 @@ func TestRegistryClamdLegacyFields(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	def := ctl.LookupService("clamd")
 	if def == nil {
 		t.Fatal("antivirus not found")
@@ -310,9 +277,6 @@ func TestLookupService_ClamdIsNotAnAliasOfAntivirus(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	clamdDef := ctl.LookupService("clamd")
 	if clamdDef == nil {
 		t.Fatal("expected clamd to resolve to a service definition")
@@ -337,10 +301,6 @@ func TestServiceAliasesNotInRegistry(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-
 	names := ctl.AllServiceNames()
 	nameSet := make(map[string]struct{}, len(names))
 	for _, n := range names {
@@ -364,9 +324,6 @@ func TestServiceAliasesResolve(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	for alias, canonical := range ServiceAliases {
 		aliasDef := ctl.LookupService(alias)
 		canonicalDef := ctl.LookupService(canonical)
@@ -389,10 +346,6 @@ func TestServiceStartClamdDefinition(t *testing.T) {
 	t.Parallel()
 
 	ctl := newRealController(t)
-
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 
 	// clamd is its own service (zmclamdctl), not an alias of antivirus.
 	def := ctl.LookupService("clamd")

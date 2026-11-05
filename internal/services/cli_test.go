@@ -23,9 +23,6 @@ func TestIsDepEnabled_UnknownService(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	if ctl.isDepEnabled(context.Background(), "nonexistent-service-xyz") {
 		t.Error("expected isDepEnabled to return false for unknown service")
 	}
@@ -37,9 +34,6 @@ func TestIsDepEnabled_NoEnableCheck(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	// "memcached" is a real service with no EnableCheck — always enabled.
 	if !ctl.isDepEnabled(context.Background(), "memcached") {
 		t.Error("expected isDepEnabled to return true for service with no EnableCheck")
@@ -52,9 +46,6 @@ func TestIsDepEnabled_EnableCheckTrue(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	orig := ctl.registry["memcached"]
 	defer func() { ctl.registry["memcached"] = orig }()
 
@@ -73,9 +64,6 @@ func TestIsDepEnabled_EnableCheckFalse(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	orig := ctl.registry["memcached"]
 	defer func() { ctl.registry["memcached"] = orig }()
 
@@ -94,9 +82,6 @@ func TestServiceStart_UnknownService(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	err := ctl.ServiceStart(context.Background(), "nonexistent-xyz")
 	if err == nil {
 		t.Fatal("expected error for unknown service")
@@ -109,9 +94,6 @@ func TestServiceStop_UnknownService(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	err := ctl.ServiceStop(context.Background(), "nonexistent-xyz")
 	if err == nil {
 		t.Fatal("expected error for unknown service")
@@ -124,9 +106,6 @@ func TestServiceRestart_UnknownService(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	err := ctl.ServiceRestart(context.Background(), "nonexistent-xyz")
 	if err == nil {
 		t.Fatal("expected error for unknown service")
@@ -139,9 +118,6 @@ func TestServiceReload_UnknownService(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	err := ctl.ServiceReload(context.Background(), "nonexistent-xyz")
 	if err == nil {
 		t.Fatal("expected error for unknown service")
@@ -154,9 +130,6 @@ func TestServiceStatus_UnknownService(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	_, err := ctl.ServiceStatus(context.Background(), "nonexistent-xyz")
 	if err == nil {
 		t.Fatal("expected error for unknown service")
@@ -169,9 +142,6 @@ func TestRunPreStartHooks_NoHooks(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	sm := NewServiceManager(ctl)
 	def := &ServiceDef{Name: "test"}
 	err := runPreStartHooks(context.Background(), "test", sm, def)
@@ -186,9 +156,6 @@ func TestRunPreStartHooks_HookError(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	sm := NewServiceManager(ctl)
 	wantErr := errors.New("hook failure")
 	def := &ServiceDef{
@@ -212,9 +179,6 @@ func TestRunPreStartHooks_HookSuccess(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	sm := NewServiceManager(ctl)
 	called := false
 	def := &ServiceDef{
@@ -242,9 +206,6 @@ func TestRunPostStartHooks_HookError(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	sm := NewServiceManager(ctl)
 	called := false
 	def := &ServiceDef{
@@ -270,9 +231,6 @@ func TestStartEnabledDependencies_UnknownDep(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	def := &ServiceDef{
 		Name:         "parent",
 		Dependencies: []string{"nonexistent-dep-xyz"},
@@ -289,9 +247,6 @@ func TestStartEnabledDependencies_NoDeps(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	def := &ServiceDef{Name: "parent"}
 	err := ctl.startEnabledDependencies(context.Background(), "parent", def)
 	if err != nil {
@@ -378,9 +333,6 @@ func TestRewriteViaConfigd_NoPortFallsToDefault(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	ctl.loadConfig = func() (map[string]string, error) {
 		return map[string]string{}, nil
 	}
@@ -636,10 +588,6 @@ func TestNoRewrite_SkipConfigRewrite(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-
 	ctl.pinMode(false)
 	ctl.noRewrite = true
 
@@ -730,10 +678,6 @@ func TestServiceStatus_LegacyMode_NoPidFileNoProcessName(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
-
 	ctl.pinMode(false)
 
 	def := &ServiceDef{
@@ -792,9 +736,6 @@ func TestRewriteConfigs_NoScript(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	ctl.p.base = "/nonexistent/path/for/test"
 
 	def := &ServiceDef{

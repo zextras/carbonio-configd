@@ -21,9 +21,6 @@ func TestOpenLogFile_CreatesFile(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "test.log")
 
@@ -43,9 +40,6 @@ func TestOpenLogFile_AppendsToExisting(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "existing.log")
 
@@ -77,9 +71,6 @@ func TestOpenLogFile_InvalidPath(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	_, err := ctl.openLogFile("/nonexistent/directory/test.log")
 	if err == nil {
 		t.Error("expected error for invalid path")
@@ -91,9 +82,6 @@ func TestGracefulStopViaPidfile_NoPidfile(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	err := ctl.gracefulStopViaPidfile(context.Background(), "/nonexistent/x.pid", "svc", "", time.Second)
 	if err != nil {
 		t.Errorf("missing pidfile should be treated as stopped, got: %v", err)
@@ -105,9 +93,6 @@ func TestGracefulStopViaPidfile_InvalidPid(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	tmp := t.TempDir()
 	pidFile := filepath.Join(tmp, "bad.pid")
 	if err := os.WriteFile(pidFile, []byte("notapid\n"), 0o644); err != nil {
@@ -165,9 +150,6 @@ func TestWaitForProcessExit_AlreadyGone(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	// PID 0x7FFFFFFF is effectively never a live process.
 	if ctl.waitForProcessExit(context.Background(), 0x7FFFFFFF, time.Second) != pollExited {
 		t.Error("expected non-existent pid to be reported as exited")

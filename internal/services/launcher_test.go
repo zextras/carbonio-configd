@@ -18,9 +18,6 @@ import (
 func TestBuildLDAPBindURL_ExplicitBindURL(t *testing.T) {
 	t.Parallel()
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	lc := map[string]string{
 		"ldap_bind_url": "ldap://myldap.example.com:389",
 	}
@@ -33,9 +30,6 @@ func TestBuildLDAPBindURL_ExplicitBindURL(t *testing.T) {
 func TestBuildLDAPBindURL_MultipleBindURLs(t *testing.T) {
 	t.Parallel()
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	// Multiple space-separated URLs: return all of them (preserves spaces).
 	lc := map[string]string{
 		"ldap_bind_url": "ldap://host1:389 ldap://host2:389",
@@ -49,9 +43,6 @@ func TestBuildLDAPBindURL_MultipleBindURLs(t *testing.T) {
 func TestBuildLDAPBindURL_FallbackToLdapURL(t *testing.T) {
 	t.Parallel()
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	lc := map[string]string{
 		"ldap_url": "ldap://primary:389 ldap://secondary:389",
 	}
@@ -65,9 +56,6 @@ func TestBuildLDAPBindURL_FallbackToLdapURL(t *testing.T) {
 func TestBuildLDAPBindURL_ReconstructFromHostPort(t *testing.T) {
 	t.Parallel()
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	lc := map[string]string{
 		"zimbra_server_hostname": "myserver.example.com",
 		"ldap_port":              "636",
@@ -81,9 +69,6 @@ func TestBuildLDAPBindURL_ReconstructFromHostPort(t *testing.T) {
 func TestBuildLDAPBindURL_DefaultsWhenEmpty(t *testing.T) {
 	t.Parallel()
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	lc := map[string]string{}
 	got := buildLDAPBindURL(lc)
 	if got != "ldap://localhost:389" {
@@ -94,9 +79,6 @@ func TestBuildLDAPBindURL_DefaultsWhenEmpty(t *testing.T) {
 func TestBuildLDAPBindURL_DefaultPort(t *testing.T) {
 	t.Parallel()
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	lc := map[string]string{
 		"zimbra_server_hostname": "myhost",
 	}
@@ -109,9 +91,6 @@ func TestBuildLDAPBindURL_DefaultPort(t *testing.T) {
 func TestBuildLDAPBindURL_DefaultHost(t *testing.T) {
 	t.Parallel()
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	lc := map[string]string{
 		"ldap_port": "636",
 	}
@@ -128,9 +107,6 @@ func TestMailboxJavaArgs_DefaultHeapAndStack(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	lc := map[string]string{}
 	args := ctl.mailboxJavaArgs(lc)
 
@@ -152,9 +128,6 @@ func TestMailboxJavaArgs_CustomHeap(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	lc := map[string]string{
 		"mailboxd_java_heap_size": "2048",
 	}
@@ -168,9 +141,6 @@ func TestMailboxJavaArgs_CustomThreadStack(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	lc := map[string]string{
 		"mailboxd_thread_stack_size": "512k",
 	}
@@ -183,9 +153,6 @@ func TestMailboxJavaArgs_NetworkTTL(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	lc := map[string]string{
 		"networkaddress_cache_ttl": "30",
 	}
@@ -198,9 +165,6 @@ func TestMailboxJavaArgs_DefaultNetworkTTL(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	lc := map[string]string{}
 	args := ctl.mailboxJavaArgs(lc)
 	assertContainsPrefix(t, args, "-Dsun.net.inetaddr.ttl=60")
@@ -211,9 +175,6 @@ func TestMailboxJavaArgs_Log4jProps(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	lc := map[string]string{
 		"zimbra_log4j_properties": "/etc/carbonio/log4j.xml",
 	}
@@ -226,9 +187,6 @@ func TestMailboxJavaArgs_GcLogStripped(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	// GC log flag must be stripped from java options.
 	gcFlag := "-Xlog:gc*=info,safepoint=info:file=" + ctl.p.log + "/gc.log:time:filecount=20,filesize=10m"
 	lc := map[string]string{
@@ -247,9 +205,6 @@ func TestMailboxJavaArgs_NoXssDoubleInjection(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	// If java options already contain Xss, don't add another.
 	lc := map[string]string{
 		"mailboxd_java_options": "-Xss1m",
@@ -271,9 +226,6 @@ func TestMailboxJavaArgs_ContainsCpAndMainClass(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	lc := map[string]string{}
 	args := ctl.mailboxJavaArgs(lc)
 	assertContains(t, args, "-cp")
@@ -343,9 +295,6 @@ func TestMilterJavaArgs_DefaultJavaOpts(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	lc := map[string]string{}
 	args := ctl.milterJavaArgs(lc)
 
@@ -360,9 +309,6 @@ func TestMilterJavaArgs_CustomJavaOpts(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	lc := map[string]string{
 		"zimbra_zmjava_options": "-Xmx512m -Xms128m",
 	}
@@ -376,9 +322,6 @@ func TestMilterJavaArgs_CustomLibPath(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	lc := map[string]string{
 		"zimbra_zmjava_java_library_path": "/custom/lib",
 	}
@@ -391,9 +334,6 @@ func TestMilterJavaArgs_DefaultLibPath(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	lc := map[string]string{}
 	args := ctl.milterJavaArgs(lc)
 	assertContainsPrefix(t, args, "-Djava.library.path=")
@@ -404,9 +344,6 @@ func TestMilterJavaArgs_ContainsMainClass(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	lc := map[string]string{}
 	args := ctl.milterJavaArgs(lc)
 	assertContains(t, args, "com.zimbra.cs.milter.MilterServer")
@@ -417,9 +354,6 @@ func TestMilterJavaArgs_ContainsClasspath(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	lc := map[string]string{}
 	args := ctl.milterJavaArgs(lc)
 	assertContains(t, args, "-classpath")
@@ -430,9 +364,6 @@ func TestMilterJavaArgs_ContainsZimbraHome(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	lc := map[string]string{}
 	args := ctl.milterJavaArgs(lc)
 	assertContainsPrefix(t, args, "-Dzimbra.home=")
@@ -443,9 +374,6 @@ func TestMilterJavaArgs_TLSProtocols(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	// Default opts must contain TLS settings.
 	lc := map[string]string{}
 	args := ctl.milterJavaArgs(lc)
@@ -460,9 +388,6 @@ func TestMilterJavaArgs_TLSProtocols(t *testing.T) {
 func TestOrderOf_KnownService(t *testing.T) {
 	t.Parallel()
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	order := map[string]int{"ldap": 0, "mailbox": 50, "mta": 150}
 
 	if got := orderOf("ldap", order); got != 0 {
@@ -479,9 +404,6 @@ func TestOrderOf_KnownService(t *testing.T) {
 func TestOrderOf_UnknownServiceReturns1000(t *testing.T) {
 	t.Parallel()
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	order := map[string]int{"ldap": 0}
 	if got := orderOf("unknown-svc", order); got != 1000 {
 		t.Errorf("orderOf(unknown) = %d, want 1000", got)
@@ -491,9 +413,6 @@ func TestOrderOf_UnknownServiceReturns1000(t *testing.T) {
 func TestSortByOrder_SortsCorrectly(t *testing.T) {
 	t.Parallel()
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	order := map[string]int{"ldap": 0, "mailbox": 50, "proxy": 70, "mta": 150}
 	names := []string{"mta", "proxy", "ldap", "mailbox"}
 	sortByOrder(names, order)
@@ -509,9 +428,6 @@ func TestSortByOrder_SortsCorrectly(t *testing.T) {
 func TestSortByOrder_UnknownServicesAppended(t *testing.T) {
 	t.Parallel()
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	order := map[string]int{"ldap": 0}
 	names := []string{"unknown2", "ldap", "unknown1"}
 	sortByOrder(names, order)
@@ -528,9 +444,6 @@ func TestSortByOrder_UnknownServicesAppended(t *testing.T) {
 func TestSortByOrder_EqualOrderAlphabetical(t *testing.T) {
 	t.Parallel()
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	order := map[string]int{"beta": 10, "alpha": 10}
 	names := []string{"beta", "alpha"}
 	sortByOrder(names, order)
@@ -547,9 +460,6 @@ func TestIsCustomEnabled_UnknownService(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	if ctl.IsCustomEnabled(context.Background(), "nonexistent-service") {
 		t.Error("expected false for unknown service")
 	}
@@ -560,9 +470,6 @@ func TestIsCustomEnabled_ServiceWithoutEnableCheck(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	// mta has no EnableCheck
 	if ctl.IsCustomEnabled(context.Background(), "mta") {
 		t.Error("expected false for service without EnableCheck")
@@ -574,9 +481,6 @@ func TestIsCustomEnabled_MilterWithEnableCheck(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	// milter has an EnableCheck (milterEnabled); we can test it without caring about the result
 	// — just verify IsCustomEnabled doesn't panic and reads EnableCheck.
 	tmp := t.TempDir()
@@ -612,9 +516,6 @@ func TestKillStatsPidFile_MissingFile(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	ctx := context.Background()
 	result := ctl.killStatsPidFile(ctx, "/nonexistent/path/zmstat-cpu.pid", "")
 	if result {
@@ -627,9 +528,6 @@ func TestKillStatsPidFile_InvalidPid(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	tmp := t.TempDir()
 	pidFile := filepath.Join(tmp, "zmstat-cpu.pid")
 	if err := os.WriteFile(pidFile, []byte("notanumber\n"), 0o644); err != nil {

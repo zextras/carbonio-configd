@@ -19,9 +19,6 @@ func TestNewServiceManager(t *testing.T) {
 
 	ctl, _ := newFakeController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	sm := NewServiceManager(ctl)
 
 	if sm == nil {
@@ -49,9 +46,6 @@ func TestNewServiceManager(t *testing.T) {
 func TestGetDefaultStartOrder(t *testing.T) {
 	t.Parallel()
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	order := getDefaultStartOrder()
 
 	// Verify LDAP starts first
@@ -84,9 +78,6 @@ func TestAddRestart(t *testing.T) {
 
 	ctl, _ := newFakeController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	sm := NewServiceManager(ctl)
 
 	tests := []string{"mta", "proxy", "mailbox"}
@@ -113,9 +104,6 @@ func TestAddRestartCaseInsensitive(t *testing.T) {
 
 	ctl, _ := newFakeController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	sm := NewServiceManager(ctl)
 
 	sm.AddRestart(context.Background(), "MTA")
@@ -138,9 +126,6 @@ func TestClearRestarts(t *testing.T) {
 
 	ctl, _ := newFakeController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	sm := NewServiceManager(ctl)
 
 	sm.AddRestart(context.Background(), "mta")
@@ -163,9 +148,6 @@ func TestGetPendingRestarts(t *testing.T) {
 
 	ctl, _ := newFakeController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	sm := NewServiceManager(ctl)
 
 	services := []string{"mta", "proxy", "mailbox"}
@@ -200,9 +182,6 @@ func TestGetSortedServices(t *testing.T) {
 
 	ctl, _ := newFakeController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	sm := NewServiceManager(ctl)
 
 	// Add services in reverse order
@@ -232,9 +211,6 @@ func TestGetSortedServicesWithUndefinedService(t *testing.T) {
 
 	ctl, _ := newFakeController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	sm := NewServiceManager(ctl)
 
 	sm.AddRestart(context.Background(), "ldap")          // order 0
@@ -273,9 +249,6 @@ func TestControlProcessInvalidAction(t *testing.T) {
 
 	ctl, _ := newFakeController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	sm := NewServiceManager(ctl)
 
 	// Invalid action value
@@ -291,9 +264,6 @@ func TestControlProcessUndefinedService(t *testing.T) {
 
 	ctl, _ := newFakeController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	sm := NewServiceManager(ctl)
 
 	err := sm.ControlProcess(context.Background(), "nonexistent", ActionStatus)
@@ -306,9 +276,6 @@ func TestControlProcessUndefinedService(t *testing.T) {
 func TestServiceActionString(t *testing.T) {
 	t.Parallel()
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	tests := []struct {
 		action ServiceAction
 		want   string
@@ -333,9 +300,6 @@ func TestProcessRestartsEmptyQueue(t *testing.T) {
 
 	ctl, _ := newFakeController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	sm := NewServiceManager(ctl)
 
 	err := sm.ProcessRestarts(context.Background(), nil)
@@ -350,9 +314,6 @@ func TestProcessRestarts_DryRunMode(t *testing.T) {
 
 	ctl, _ := newFakeController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	sm := NewServiceManager(ctl)
 	sm.DisableRestarts = true // Enable dry-run mode
 
@@ -384,9 +345,6 @@ func TestProcessRestartsClearsSuccessfulRestarts(t *testing.T) {
 
 	ctl, _ := newFakeController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	sm := NewServiceManager(ctl)
 
 	// Add some services
@@ -413,9 +371,6 @@ func TestProcessRestarts_FailedServiceWithNoProgress(t *testing.T) {
 	ctl, f := newFakeController(t)
 	f.Exec.When(func(*sys.Cmd) bool { return true }, systest.Fail(1, "command not found")) // every start fails
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	sm := NewServiceManager(ctl)
 	sm.MaxFailedRestarts = 3 // Set retry limit
 
@@ -448,9 +403,6 @@ func TestProcessRestarts_MultipleServicesOneSucceeds(t *testing.T) {
 	ctl, f := newFakeController(t)
 	f.Exec.When(func(*sys.Cmd) bool { return true }, systest.Fail(1, "command not found")) // every start fails
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	sm := NewServiceManager(ctl)
 
 	// Add two services - both will fail
@@ -479,9 +431,6 @@ func TestIsRunningUsesControlProcess(t *testing.T) {
 
 	ctl, _ := newFakeController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	sm := NewServiceManager(ctl)
 
 	// IsRunning should return false and potentially an error for nonexistent service
@@ -495,9 +444,6 @@ func TestIsRunningUsesControlProcess(t *testing.T) {
 func TestManagerInterface(t *testing.T) {
 	t.Parallel()
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	var _ Manager = (*ServiceManager)(nil)
 }
 
@@ -533,9 +479,6 @@ func TestSetDependencies(t *testing.T) {
 
 	ctl, _ := newFakeController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	sm := NewServiceManager(ctl)
 
 	deps := map[string][]string{
@@ -564,9 +507,6 @@ func TestAddDependencyRestarts_NoDependencies(t *testing.T) {
 
 	ctl, _ := newFakeController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	sm := NewServiceManager(ctl)
 
 	configLookup := func(key string) string {
@@ -587,9 +527,6 @@ func TestAddDependencyRestarts_EnabledServices(t *testing.T) {
 
 	ctl, _ := newFakeController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	sm := NewServiceManager(ctl)
 
 	// Set up dependencies
@@ -626,9 +563,6 @@ func TestAddDependencyRestarts_DisabledServices(t *testing.T) {
 
 	ctl, _ := newFakeController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	sm := NewServiceManager(ctl)
 
 	sm.SetDependencies(context.Background(), map[string][]string{
@@ -653,9 +587,6 @@ func TestAddDependencyRestarts_AmavisSpecialCase(t *testing.T) {
 
 	ctl, _ := newFakeController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	sm := NewServiceManager(ctl)
 
 	sm.SetDependencies(context.Background(), map[string][]string{
@@ -684,9 +615,6 @@ func TestAddDependencyRestarts_MixedStatus(t *testing.T) {
 
 	ctl, _ := newFakeController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	sm := NewServiceManager(ctl)
 
 	sm.SetDependencies(context.Background(), map[string][]string{
@@ -726,9 +654,6 @@ func TestAddDependencyRestarts_CaseInsensitive(t *testing.T) {
 
 	ctl, _ := newFakeController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	sm := NewServiceManager(ctl)
 
 	sm.SetDependencies(context.Background(), map[string][]string{
@@ -765,9 +690,6 @@ func TestHasCommand(t *testing.T) {
 
 	ctl, _ := newFakeController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	sm := NewServiceManager(ctl)
 
 	tests := []struct {

@@ -23,9 +23,6 @@ func TestCbpolicydInitDB_DBAlreadyExists(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	tmp := t.TempDir()
 	dbFile := filepath.Join(tmp, "cbpolicyd.sqlitedb")
 	if err := os.WriteFile(dbFile, []byte("fake"), 0o644); err != nil {
@@ -132,9 +129,6 @@ func TestMilterEnabled_FileNotFound(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	ctl.p.milterOptions = "/nonexistent/path/mta_milter_options"
 
 	if ctl.milterEnabled(context.Background()) {
@@ -216,9 +210,6 @@ func TestStatsCustomStop_ReadDirError(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	tmp := t.TempDir()
 	fakePidDir := filepath.Join(tmp, "fakestatsdir")
 	if err := os.WriteFile(fakePidDir, []byte("not a dir"), 0o644); err != nil {
@@ -244,9 +235,6 @@ func TestKillStatsPidFile_ValidPidSelfNoError(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	tmp := t.TempDir()
 	pidFile := filepath.Join(tmp, "self.pid")
 	if err := os.WriteFile(pidFile, []byte("2147483646\n"), 0o644); err != nil {
@@ -267,9 +255,6 @@ func TestStatsCustomStart_NoCollectors(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	tmp := t.TempDir()
 
 	ctl.p.libexec = tmp
@@ -342,9 +327,6 @@ func TestStatsCustomStart_LocalconfigFailError(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	tmp := t.TempDir()
 
 	ctl.p.libexec = tmp
@@ -456,9 +438,6 @@ func TestMailboxJavaBinary_FixedFallbackMissing(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	tmp := t.TempDir()
 	ctl.p.common = tmp
 
@@ -475,9 +454,6 @@ func TestMailboxJavaBinary_BinaryNotFound(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	tmp := t.TempDir()
 	lc := map[string]string{
 		"mailboxd_java_home": tmp,
@@ -541,9 +517,6 @@ func TestMilterCustomStart_LocalconfigError(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	ctl.registry = ctl.defaultRegistry()
 
 	err := ctl.startJava(context.Background(), ctl.registry[svcMilter])
@@ -556,9 +529,6 @@ func TestMailboxCustomStart_LocalconfigError(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	ctl.registry = ctl.defaultRegistry()
 
 	err := ctl.startJava(context.Background(), ctl.registry[svcMailbox])
@@ -571,9 +541,6 @@ func TestLdapCustomStart_LocalconfigError(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	ctl.registry = ctl.defaultRegistry()
 
 	err := ctl.startDirect(context.Background(), svcLdap, ctl.registry[svcLdap])
@@ -607,9 +574,6 @@ func TestGetDiskThreshold_UsesDefault(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	_ = ctl.GetDiskThreshold()
 }
 
@@ -619,9 +583,6 @@ func TestGetDiskThreshold_RepeatedCalls(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	for i := range 3 {
 		v := ctl.GetDiskThreshold()
 		if v <= 0 {
@@ -641,9 +602,6 @@ func TestIsLDAPLocal_ConfigPresentNoMatch(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 	result := ctl.IsLDAPLocal()
 	_ = result
 }
@@ -662,10 +620,6 @@ func TestClamdDirInit_CreatesDir(t *testing.T) {
 	t.Parallel()
 
 	ctl := newRealController(t)
-
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 
 	tmp := t.TempDir()
 	testPath := filepath.Join(tmp, "clamav", "db")
@@ -695,10 +649,6 @@ func TestClamdDirInit_Idempotent(t *testing.T) {
 	t.Parallel()
 
 	ctl := newRealController(t)
-
-	if testing.Short() {
-		t.Skip("slow: may invoke real system commands")
-	}
 
 	tmp := t.TempDir()
 	testPath := filepath.Join(tmp, "clamav", "db")
