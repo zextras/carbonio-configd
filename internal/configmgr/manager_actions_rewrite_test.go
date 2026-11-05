@@ -83,6 +83,8 @@ func TestRewriteWorker_ErrorPath(t *testing.T) {
 	cacheInstance := cache.New(ctx, false)
 	cm := NewConfigManager(ctx, cfg, st, nil, cacheInstance, hostEnv(), hostServices())
 
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "dest"), 0o755))
+
 	// Create a rewrite entry pointing to non-existent source
 	entry := config.RewriteEntry{
 		Value: "dest/output.txt",
