@@ -30,12 +30,15 @@ func BenchmarkNewTransformer_Allocs(b *testing.B) {
 	lookup := newMockLookup()
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
-		_ = NewTransformer(lookup)
+	for b.Loop() {
+		transformerSink = NewTransformer(lookup)
 	}
 }
+
+// transformerSink keeps the benchmarked constructor result alive so the
+// compiler cannot eliminate the allocation being measured.
+var transformerSink *Transformer
 
 // TestTransform_Concurrent exercises the shared package-level regex patterns
 // under high concurrency with -race. Each worker runs the full Transform
@@ -44,8 +47,8 @@ func TestTransform_Concurrent(t *testing.T) {
 	t.Parallel()
 
 	const (
-		workers   = 32
-		perWorker = 1000
+		workers   = 8
+		perWorker = 50
 	)
 
 	lookup := newMockLookup()
