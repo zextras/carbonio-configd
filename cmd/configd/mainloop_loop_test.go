@@ -3,9 +3,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Tests for the daemon main-loop helpers: iteration control flow, idle
-// handling, listener startup, and finalization. The full success path of
-// runLoadAndParse requires a live Carbonio environment and is exercised by
-// the integration suite; here we pin down the control-flow contracts.
+// handling, listener startup, and finalization. runLoadAndParse is covered in
+// mainloop_load_test.go.
 package main
 
 import (
@@ -194,19 +193,6 @@ func TestNotifyReady_NotifierDisabled(t *testing.T) {
 	require.NoError(t, err)
 	notifyReady(context.Background(), notifier, true)
 	notifyReady(context.Background(), notifier, false)
-}
-
-func TestRunLoadAndParse_LoadFailure(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr load retries take ~5s")
-	}
-
-	deps := newLoopFixture(t)
-
-	loadDur, parseDur, err := runLoadAndParse(context.Background(), deps.configManager, deps.cfg)
-	require.Error(t, err, "load must fail without a Carbonio environment")
-	assert.GreaterOrEqual(t, loadDur, time.Duration(0))
-	assert.Equal(t, time.Duration(0), parseDur)
 }
 
 func TestMaybeStartListener_SkipConditions(t *testing.T) {

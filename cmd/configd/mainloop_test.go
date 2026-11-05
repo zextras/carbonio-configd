@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"reflect"
 	"testing"
 	"time"
 
@@ -90,19 +91,36 @@ func newFakeServiceManager() *services.ServiceManager {
 	return services.NewServiceManager(services.NewController(systest.New().System()))
 }
 
+// depsRecorder records the dependencies handed to SetDependencies; the
+// embedded nil Manager makes any other call panic.
+type depsRecorder struct {
+	services.Manager
+	calls int
+	deps  map[string][]string
+}
+
+func (r *depsRecorder) SetDependencies(_ context.Context, deps map[string][]string) {
+	r.calls++
+	r.deps = deps
+}
+
 func TestBuildServiceDependencies_NilSections(t *testing.T) {
 	ctx := context.Background()
-	sm := newFakeServiceManager()
+	rec := &depsRecorder{}
 	appState := state.NewState()
 	// MtaConfig.Sections is initialized to empty map by NewState, set nil to test guard
 	appState.MtaConfig.Sections = nil
-	// Must not panic
-	buildServiceDependencies(ctx, sm, appState)
+
+	buildServiceDependencies(ctx, rec, appState)
+
+	if rec.calls != 0 {
+		t.Errorf("SetDependencies called %d times for nil sections, want 0", rec.calls)
+	}
 }
 
 func TestBuildServiceDependencies_WithDeps(t *testing.T) {
 	ctx := context.Background()
-	sm := newFakeServiceManager()
+	rec := &depsRecorder{}
 	appState := state.NewState()
 
 	appState.MtaConfig.Sections["mta"] = &config.MtaConfigSection{
@@ -112,22 +130,30 @@ func TestBuildServiceDependencies_WithDeps(t *testing.T) {
 		Depends: map[string]bool{},
 	}
 
-	// Must not panic and should call SetDependencies
-	buildServiceDependencies(ctx, sm, appState)
+	buildServiceDependencies(ctx, rec, appState)
+
+	want := map[string][]string{"mta": {"configd", "ldap"}}
+	if !reflect.DeepEqual(rec.deps, want) {
+		t.Errorf("SetDependencies got %v, want %v", rec.deps, want)
+	}
 }
 
 func TestBuildServiceDependencies_EmptySections(t *testing.T) {
 	ctx := context.Background()
-	sm := newFakeServiceManager()
+	rec := &depsRecorder{}
 	appState := state.NewState()
 	// Empty sections — no deps to set
-	buildServiceDependencies(ctx, sm, appState)
+	buildServiceDependencies(ctx, rec, appState)
+
+	if len(rec.deps) != 0 {
+		t.Errorf("SetDependencies got %v, want none", rec.deps)
+	}
 }
 
 func TestUpdateWatchdogServices_EmptyList(t *testing.T) {
 	ctx := context.Background()
 	appState := state.NewState()
-	tracked := map[string]string{}
+	tracked := map[string]string{"antivirus": "running", "mta": "running"}
 	mainCfg, _ := config.NewConfigWithHostname("")
 	mainCfg.WdList = []string{}
 
@@ -139,14 +165,22 @@ func TestUpdateWatchdogServices_EmptyList(t *testing.T) {
 		ConfigLookup:   func(_ string) string { return "" },
 	})
 
-	// Must not panic; defaults to ["antivirus"]
+	// An empty list defaults to ["antivirus"]
 	updateWatchdogServices(ctx, wd, tracked, mainCfg)
+
+	if !wd.IsServiceTracked("antivirus") {
+		t.Error("expected the default antivirus entry to be tracked")
+	}
+
+	if wd.IsServiceTracked("mta") {
+		t.Error("mta is not in the default watchdog list and must not be tracked")
+	}
 }
 
 func TestUpdateWatchdogServices_WithList(t *testing.T) {
 	ctx := context.Background()
 	appState := state.NewState()
-	tracked := map[string]string{}
+	tracked := map[string]string{"mta": "running", "proxy": "running"}
 	mainCfg, _ := config.NewConfigWithHostname("")
 	mainCfg.WdList = []string{"antivirus", "mta"}
 
@@ -159,6 +193,14 @@ func TestUpdateWatchdogServices_WithList(t *testing.T) {
 	})
 
 	updateWatchdogServices(ctx, wd, tracked, mainCfg)
+
+	if !wd.IsServiceTracked("mta") {
+		t.Error("expected mta, tracked and listed, to be tracked")
+	}
+
+	if wd.IsServiceTracked("proxy") {
+		t.Error("proxy is tracked by the plan but not listed; it must not be watched")
+	}
 }
 
 func TestUpdateWatchdogServices_ServiceInWatchdogList(t *testing.T) {
