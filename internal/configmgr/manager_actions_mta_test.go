@@ -108,9 +108,6 @@ func planMapfileKeys(pl *plan.Plan) map[string]bool {
 // TestMapfilePlan_HappyPath: a changed section plans one mapped-file operation
 // per MAPFILE/MAPLOCAL lookup (VAR lookups are skipped) and Execute runs them.
 func TestMapfilePlan_HappyPath(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 
 	mockExec := &mockMtaExecutorForMta{}
 	cm := newMapfileCM(t, true, mockExec, map[string]string{
@@ -133,9 +130,6 @@ func TestMapfilePlan_HappyPath(t *testing.T) {
 
 // TestMapfilePlan_ErrorPath: an executor failure is reported by Execute.
 func TestMapfilePlan_ErrorPath(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 
 	mockExec := &mockMtaExecutorForMta{mapfileErr: errors.New("mapfile execution failed")}
 	cm := newMapfileCM(t, true, mockExec, map[string]string{"zimbraSSLDHParam": "MAPFILE"})
@@ -150,9 +144,6 @@ func TestMapfilePlan_ErrorPath(t *testing.T) {
 // first run, no mapped-file write is planned. MAPLOCAL is never touched; the
 // MAPFILE is only healed (re-synced from the snapshot), which is not a change.
 func TestMapfilePlan_NoChanges(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 
 	mockExec := &mockMtaExecutorForMta{}
 	cm := newMapfileCM(t, true, mockExec, map[string]string{
@@ -176,9 +167,6 @@ func TestMapfilePlan_NoChanges(t *testing.T) {
 // TestMapfilePlan_FirstRunNoChanges: the first run plans the mapped files even
 // if nothing changed.
 func TestMapfilePlan_FirstRunNoChanges(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 
 	mockExec := &mockMtaExecutorForMta{}
 	cm := newMapfileCM(t, true, mockExec, map[string]string{"zimbraSSLDHParam": "MAPFILE"})
@@ -192,9 +180,6 @@ func TestMapfilePlan_FirstRunNoChanges(t *testing.T) {
 // TestMapfilePlan_MultipleErrors: every failing mapped-file operation is
 // reported.
 func TestMapfilePlan_MultipleErrors(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 
 	mockExec := &mockMtaExecutorForMta{mapfileErr: errors.New("mapfile execution failed")}
 	cm := newMapfileCM(t, true, mockExec, map[string]string{

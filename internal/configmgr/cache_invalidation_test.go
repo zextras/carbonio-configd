@@ -14,9 +14,6 @@ import (
 )
 
 func TestInvalidateLDAPCache(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	ctx := context.Background()
 	// Create a cache instance
 	cacheInstance := cache.New(ctx, false)
@@ -69,9 +66,6 @@ func TestInvalidateLDAPCache(t *testing.T) {
 }
 
 func TestInvalidateLDAPCache_NilCache(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	ctx := context.Background()
 	// Create ConfigManager without cache
 	mainCfg := &config.Config{BaseDir: "/tmp", Hostname: "test"}

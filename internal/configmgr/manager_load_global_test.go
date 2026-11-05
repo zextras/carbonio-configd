@@ -13,9 +13,6 @@ import (
 
 // TestFetchGlobalConfig_Success tests successful global config fetching
 func TestFetchGlobalConfig_Success(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: has retry delays")
-	}
 
 	cm := newTestConfigManager(t)
 
@@ -52,9 +49,6 @@ zimbraSSLIncludeCipherSuites: ECDHE-RSA-AES256-GCM-SHA384 AES256-GCM-SHA384`
 
 // TestFetchGlobalConfig_CommandNotAvailable tests behavior when gacf command unavailable
 func TestFetchGlobalConfig_CommandNotAvailable(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: fetchGlobalConfig has retry delays")
-	}
 
 	cm := newTestConfigManager(t)
 
@@ -72,9 +66,6 @@ func TestFetchGlobalConfig_CommandNotAvailable(t *testing.T) {
 
 // TestFetchGlobalConfig_CommandFails tests retry logic
 func TestFetchGlobalConfig_CommandFails(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: has retry delays")
-	}
 
 	cm := newTestConfigManager(t)
 
@@ -100,9 +91,6 @@ func TestFetchGlobalConfig_CommandFails(t *testing.T) {
 
 // TestFetchGlobalConfig_EmptyOutput tests behavior with blank values
 func TestFetchGlobalConfig_EmptyOutput(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: has retry delays")
-	}
 	cm := newTestConfigManager(t)
 
 	cm.CommandRegistry.GlobalAttrs = func(_ context.Context) (map[string]string, error) {
@@ -127,9 +115,6 @@ func TestFetchGlobalConfig_EmptyOutput(t *testing.T) {
 
 // TestFetchGlobalConfig_QuarantineBannedItemsFalse tests conditional logic
 func TestFetchGlobalConfig_QuarantineBannedItemsFalse(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: has retry delays")
-	}
 
 	cm := newTestConfigManager(t)
 
@@ -155,9 +140,6 @@ zimbraAmavisQuarantineAccount: `
 
 // TestLoadGlobalConfigWithRetry_Success tests successful global config loading with cache
 func TestLoadGlobalConfigWithRetry_Success(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: has retry delays")
-	}
 
 	cm := newTestConfigManager(t)
 
@@ -189,9 +171,6 @@ zimbraMailboxdSSLProtocols: TLSv1.2 TLSv1.3`
 
 // TestLoadGlobalConfigWithRetry_NoCache tests loading without cache
 func TestLoadGlobalConfigWithRetry_NoCache(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: has retry delays")
-	}
 
 	cm := newTestConfigManager(t)
 	cm.Cache = nil // Disable cache
@@ -216,9 +195,6 @@ func TestLoadGlobalConfigWithRetry_NoCache(t *testing.T) {
 
 // TestLoadGlobalConfigWithRetry_CachedData tests cache hit scenario
 func TestLoadGlobalConfigWithRetry_CachedData(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: has retry delays")
-	}
 
 	cm := newTestConfigManager(t)
 

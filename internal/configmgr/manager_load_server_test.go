@@ -14,9 +14,6 @@ import (
 
 // TestLoadServerConfigWithRetry_Success tests successful server config loading
 func TestLoadServerConfigWithRetry_Success(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: has retry delays")
-	}
 
 	cm := newTestConfigManager(t)
 
@@ -72,9 +69,6 @@ zimbraMtaHeaderChecks: pcre:/opt/zextras/conf/postfix_header_checks`
 
 // TestLoadServerConfigWithRetry_NoHostname tests error when hostname is missing
 func TestLoadServerConfigWithRetry_NoHostname(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: has retry delays")
-	}
 
 	cm := newTestConfigManager(t)
 	cm.mainConfig.Hostname = "" // Clear hostname
@@ -91,9 +85,6 @@ func TestLoadServerConfigWithRetry_NoHostname(t *testing.T) {
 
 // TestLoadServerConfigWithRetry_CommandNotAvailable tests error when gs command unavailable
 func TestLoadServerConfigWithRetry_CommandNotAvailable(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: has retry delays")
-	}
 
 	cm := newTestConfigManager(t)
 
@@ -111,9 +102,6 @@ func TestLoadServerConfigWithRetry_CommandNotAvailable(t *testing.T) {
 
 // TestLoadServerConfigWithRetry_CommandFails tests retry logic
 func TestLoadServerConfigWithRetry_CommandFails(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: has retry delays")
-	}
 
 	cm := newTestConfigManager(t)
 
@@ -135,9 +123,6 @@ func TestLoadServerConfigWithRetry_CommandFails(t *testing.T) {
 
 // TestLoadServerConfigWithRetry_EmptyOutput tests behavior with blank values
 func TestLoadServerConfigWithRetry_EmptyOutput(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: has retry delays")
-	}
 
 	cm := newTestConfigManager(t)
 
@@ -158,9 +143,6 @@ func TestLoadServerConfigWithRetry_EmptyOutput(t *testing.T) {
 
 // TestLoadServerConfigWithRetry_NoCache tests loading without cache
 func TestLoadServerConfigWithRetry_NoCache(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: has retry delays")
-	}
 
 	cm := newTestConfigManager(t)
 	cm.Cache = nil // Disable cache
@@ -186,9 +168,6 @@ zimbraMailboxdSSLProtocols: TLSv1.3`
 
 // TestLoadServerConfigWithRetry_ServiceMapping tests service config mapping
 func TestLoadServerConfigWithRetry_ServiceMapping(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: has retry delays")
-	}
 
 	cm := newTestConfigManager(t)
 

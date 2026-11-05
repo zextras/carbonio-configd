@@ -12,9 +12,6 @@ import (
 
 // TestProcessIPModeConfig tests IP mode configuration processing
 func TestProcessIPModeConfig(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	tests := []struct {
 		name      string
 		ipMode    string
@@ -95,9 +92,6 @@ func TestProcessIPModeConfig(t *testing.T) {
 
 // TestProcessIPModeConfig_NoIPMode tests behavior when zimbraIPMode is not set
 func TestProcessIPModeConfig_NoIPMode(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm := newTestConfigManager(t)
 
 	data := map[string]string{"someKey": "someValue"}
@@ -112,9 +106,6 @@ func TestProcessIPModeConfig_NoIPMode(t *testing.T) {
 
 // TestExtractRBLMatches tests the extractRBLMatches function
 func TestExtractRBLMatches(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	tests := []struct {
 		name     string
 		text     string
@@ -177,9 +168,6 @@ func TestExtractRBLMatches(t *testing.T) {
 
 // TestRemoveRBLEntries tests the removeRBLEntries function
 func TestRemoveRBLEntries(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	tests := []struct {
 		name     string
 		text     string
@@ -236,9 +224,6 @@ func TestRemoveRBLEntries(t *testing.T) {
 
 // TestProcessRBLPatterns tests the processRBLPatterns function
 func TestProcessRBLPatterns(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	tests := []struct {
 		name              string
 		restriction       string
@@ -320,9 +305,6 @@ func TestProcessRBLPatterns(t *testing.T) {
 
 // TestProcessMtaRestrictionRBLsForData tests processMtaRestrictionRBLsForData
 func TestProcessMtaRestrictionRBLsForData(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	t.Run("extracts all rbl types and cleans restriction", func(t *testing.T) {
 		data := map[string]string{
 			"zimbraMtaRestriction": "permit_mynetworks reject_rbl_client zen.spamhaus.org reject_rhsbl_client dbl.spamhaus.org reject_rhsbl_sender rhsbl.example.com reject_rhsbl_reverse_client rcbl.example.com reject_unauth_destination",
@@ -388,9 +370,6 @@ func TestProcessMtaRestrictionRBLsForData(t *testing.T) {
 
 // TestProcessMilterConfig tests milter configuration processing
 func TestProcessMilterConfig(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	tests := []struct {
 		name     string
 		input    map[string]string

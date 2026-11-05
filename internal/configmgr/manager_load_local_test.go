@@ -16,9 +16,6 @@ import (
 
 // TestLoadLocalConfigWithRetry_Success tests successful local config loading
 func TestLoadLocalConfigWithRetry_Success(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: has retry delays")
-	}
 
 	cm := newTestConfigManager(t)
 
@@ -66,9 +63,6 @@ func TestLoadLocalConfigWithRetry_XMLNotAvailable(t *testing.T) {
 // TestLoadLocalConfigWithRetry_CommandFails tests the error of a loader that fails
 // (an unreadable or malformed localconfig.xml).
 func TestLoadLocalConfigWithRetry_CommandFails(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: has retry delays")
-	}
 
 	cm := newTestConfigManager(t)
 	cm.loadLocalConfig = func() (map[string]string, error) {
@@ -88,9 +82,6 @@ func TestLoadLocalConfigWithRetry_CommandFails(t *testing.T) {
 
 // TestLoadLocalConfigWithRetry_EmptyOutput tests behavior with empty output
 func TestLoadLocalConfigWithRetry_EmptyOutput(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: has retry delays")
-	}
 
 	cm := newTestConfigManager(t)
 
@@ -116,9 +107,6 @@ func TestLoadLocalConfigWithRetry_EmptyOutput(t *testing.T) {
 
 // TestLoadLocalConfigWithRetry_CachedOutput tests that cached output is reused
 func TestLoadLocalConfigWithRetry_CachedOutput(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: has retry delays")
-	}
 
 	cm := newTestConfigManager(t)
 
@@ -150,9 +138,6 @@ func TestLoadLocalConfigWithRetry_CachedOutput(t *testing.T) {
 
 // TestPostProcessLocalConfig tests OpenDKIM URI generation
 func TestPostProcessLocalConfig(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 
 	data := map[string]string{
 		"ldap_url": "ldap://server1:389 ldap://server2:389",
@@ -187,9 +172,6 @@ func TestPostProcessLocalConfig(t *testing.T) {
 
 // TestPostProcessLocalConfig_DefaultPort tests default port setting
 func TestPostProcessLocalConfig_DefaultPort(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 
 	data := map[string]string{
 		"some_key": "some_value",
@@ -206,9 +188,6 @@ func TestPostProcessLocalConfig_DefaultPort(t *testing.T) {
 
 // TestPostProcessLocalConfig_NoLDAPUrl tests behavior without ldap_url
 func TestPostProcessLocalConfig_NoLDAPUrl(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 
 	data := map[string]string{
 		"key1": "value1",

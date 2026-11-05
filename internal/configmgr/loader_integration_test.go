@@ -177,6 +177,8 @@ func TestConfigLoader_CompareWithReference(t *testing.T) {
 
 // compareConfigs compares two configuration maps and reports differences.
 func compareConfigs(t *testing.T, name string, expected, actual map[string]string) {
+	t.Helper()
+
 	missingKeys := []string{}
 	extraKeys := []string{}
 	differentValues := []string{}
