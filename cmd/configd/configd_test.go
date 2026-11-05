@@ -17,10 +17,8 @@ import (
 )
 
 func TestInitializeConfig(t *testing.T) {
-	os.Setenv("CONFIGD_LOG_FORMAT", "text")
-	os.Setenv("CONFIGD_LOG_LEVEL", "error")
-	defer os.Unsetenv("CONFIGD_LOG_FORMAT")
-	defer os.Unsetenv("CONFIGD_LOG_LEVEL")
+	t.Setenv("CONFIGD_LOG_FORMAT", "text")
+	t.Setenv("CONFIGD_LOG_LEVEL", "error")
 
 	cliutil.InitLogging(os.Stderr)
 
@@ -166,10 +164,8 @@ func unsetEnv(t *testing.T, key string) {
 }
 
 func TestSetupProfilingAndTracing_TracingEnabled(t *testing.T) {
-	os.Setenv("CONFIGD_LOG_FORMAT", "text")
-	os.Setenv("CONFIGD_LOG_LEVEL", "error")
-	defer os.Unsetenv("CONFIGD_LOG_FORMAT")
-	defer os.Unsetenv("CONFIGD_LOG_LEVEL")
+	t.Setenv("CONFIGD_LOG_FORMAT", "text")
+	t.Setenv("CONFIGD_LOG_LEVEL", "error")
 
 	cliutil.InitLogging(os.Stderr)
 
