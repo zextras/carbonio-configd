@@ -173,10 +173,6 @@ func (l *Ldap) ModifyAttribute(ctx context.Context, key, value string) error {
 	// Validation happens outside retry logic (not retryable)
 	entry, err := l.lookupKey(ctx, key)
 	if err != nil {
-		logger.ErrorContext(ctx, "LDAP lookup error",
-			"error", err,
-			"key", key)
-
 		return err
 	}
 
@@ -328,10 +324,6 @@ func (l *Ldap) ModifyAttributeBatch(ctx context.Context, changes map[string]stri
 	for key, value := range changes {
 		entry, err := l.lookupKey(ctx, key)
 		if err != nil {
-			logger.ErrorContext(ctx, "LDAP batch lookup error",
-				"key", key,
-				"error", err)
-
 			return err
 		}
 
