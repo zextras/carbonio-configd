@@ -592,3 +592,34 @@ func TestSetKeys_LockTimesOut(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestWithFileLock_RefusesSymlinkedLockFile(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "localconfig.xml")
+	victim := filepath.Join(dir, "victim")
+
+	if err := os.WriteFile(victim, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Symlink(victim, path+".lock"); err != nil {
+		t.Fatal(err)
+	}
+
+	called := false
+
+	err := withFileLock(path, func() error {
+		called = true
+
+		return nil
+	})
+	if err == nil {
+		t.Fatal("expected error for symlinked lock file")
+	}
+
+	if called {
+		t.Error("fn must not run when the lock file is a symlink")
+	}
+}
