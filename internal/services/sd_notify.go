@@ -21,7 +21,9 @@ import (
 // the sd_notify protocol (READY=1 datagram). It:
 //  1. Creates a Unix datagram socket at c.p.run/notify-<service>.sock
 //  2. Injects NOTIFY_SOCKET into the child environment (overriding any inherited value)
-//  3. Starts the process
+//  3. Starts the process, detached from ctx: the child is a long-lived daemon
+//     that must outlive both this call and the caller's context, so ctx
+//     bounds only the readiness wait (cancelling it never kills the daemon)
 //  4. Blocks until READY=1 is received or the 30-second timeout expires
 //
 // After this function returns (success or failure of the readiness wait) the
@@ -52,7 +54,7 @@ func (c *Controller) startWithSDNotify(ctx context.Context, cmd *sys.Cmd, servic
 	// inherited NOTIFY_SOCKET.
 	cmd.Env = append(cmd.Env, "NOTIFY_SOCKET="+socketPath)
 
-	proc, err := c.env.Exec.Start(ctx, cmd)
+	proc, err := c.env.Exec.Start(context.Background(), cmd)
 	if err != nil {
 		return nil, fmt.Errorf("start %s: %w", service, err)
 	}
