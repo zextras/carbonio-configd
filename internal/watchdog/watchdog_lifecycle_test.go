@@ -8,6 +8,7 @@ import (
 	"context"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/zextras/carbonio-configd/internal/state"
@@ -52,69 +53,66 @@ func (o *overlapProbe) IsRunning(ctx context.Context, service string) (bool, err
 func TestWatchdog_RestartedLoopWaitsForTheOldOne(t *testing.T) {
 	t.Parallel()
 
-	probe := &overlapProbe{
-		MockServiceManager: NewMockServiceManager(),
-		entered:            make(chan struct{}, 1),
-		release:            make(chan struct{}),
-	}
-	probe.setRunning("amavis", true)
+	// synctest.Wait returns once every goroutine of the bubble is blocked, so
+	// "the new loop did not arm its ticker" is observed, not waited out.
+	synctest.Test(t, func(t *testing.T) {
+		probe := &overlapProbe{
+			MockServiceManager: NewMockServiceManager(),
+			entered:            make(chan struct{}, 1),
+			release:            make(chan struct{}),
+		}
+		probe.setRunning("amavis", true)
 
-	h := newHarness(t, Config{
-		ServiceManager: probe,
-		State:          state.NewState(),
-		CheckInterval:  time.Second,
-	})
-	h.wd.AddService(context.Background(), "amavis")
-	h.wd.SetServiceEnabled(context.Background(), "amavis", true)
+		h := newHarness(t, Config{
+			ServiceManager: probe,
+			State:          state.NewState(),
+			CheckInterval:  time.Second,
+		})
+		h.wd.AddService(context.Background(), "amavis")
+		h.wd.SetServiceEnabled(context.Background(), "amavis", true)
 
-	h.start()
-	h.clock.Advance(h.wd.checkInterval)
-
-	select {
-	case <-probe.entered:
-	case <-time.After(5 * time.Second):
-		close(probe.release)
-		t.Fatal("watchdog never probed the service")
-	}
-
-	// The old loop is stuck in its cycle: Stop gives up, Start replaces it.
-	stopCtx, cancel := context.WithCancel(context.Background())
-	cancel()
-	h.wd.Stop(stopCtx)
-	h.wd.Start(context.Background())
-
-	// The new loop must not arm its ticker while the old loop is alive; give a
-	// loop that ignores this a chance to show it.
-	deadline := time.Now().Add(100 * time.Millisecond)
-	for time.Now().Before(deadline) && h.clock.Waiters() < 2 {
-		time.Sleep(time.Millisecond)
-	}
-
-	h.clock.Advance(h.wd.checkInterval)
-
-	for deadline = time.Now().Add(100 * time.Millisecond); time.Now().Before(deadline) && probe.calls.Load() < 2; {
-		time.Sleep(time.Millisecond)
-	}
-
-	close(probe.release)
-
-	// Once the old loop is gone the new one runs cycles of its own: keep
-	// ticking until it has armed its ticker and probed.
-	deadline = time.Now().Add(5 * time.Second)
-	for probe.calls.Load() < 2 && time.Now().Before(deadline) {
+		h.start()
 		h.clock.Advance(h.wd.checkInterval)
-		time.Sleep(time.Millisecond)
-	}
 
-	if got := probe.calls.Load(); got < 2 {
-		t.Fatalf("the new loop never ran a cycle, probes = %d", got)
-	}
+		<-probe.entered
 
-	h.stop()
+		// The old loop is stuck in its cycle: Stop gives up, Start replaces it.
+		stopCtx, cancel := context.WithCancel(context.Background())
+		cancel()
+		h.wd.Stop(stopCtx)
+		h.wd.Start(context.Background())
+		synctest.Wait()
 
-	if got := probe.maxSeen.Load(); got != 1 {
-		t.Errorf("check cycles overlapped: %d probes ran at once", got)
-	}
+		// The new loop must not arm its ticker while the old loop is alive.
+		if got := h.clock.Waiters(); got >= 2 {
+			t.Fatalf("new loop armed its ticker next to the live old loop (waiters = %d)", got)
+		}
+
+		h.clock.Advance(h.wd.checkInterval)
+		synctest.Wait()
+
+		if got := probe.calls.Load(); got != 1 {
+			t.Fatalf("probes while the old cycle is stuck = %d, want 1", got)
+		}
+
+		close(probe.release)
+		synctest.Wait()
+
+		// Once the old loop is gone the new one has armed its ticker and runs
+		// cycles of its own.
+		h.clock.Advance(h.wd.checkInterval)
+		synctest.Wait()
+
+		if got := probe.calls.Load(); got < 2 {
+			t.Fatalf("the new loop never ran a cycle, probes = %d", got)
+		}
+
+		h.stop()
+
+		if got := probe.maxSeen.Load(); got != 1 {
+			t.Errorf("check cycles overlapped: %d probes ran at once", got)
+		}
+	})
 }
 
 // TestCheckServices_WatchesEveryConfiguredService pins that the monitored
