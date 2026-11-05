@@ -75,6 +75,17 @@ func sendReady(t *testing.T, socketPath string) {
 	t.Fatalf("socket %s never appeared within 2 seconds", socketPath)
 }
 
+// waitForSocket fails the test unless the notify socket at path appears.
+func waitForSocket(t *testing.T, path string) {
+	t.Helper()
+
+	require.Eventually(t, func() bool {
+		_, err := os.Stat(path)
+
+		return err == nil
+	}, 3*time.Second, time.Millisecond, "notify socket %s never appeared", path)
+}
+
 // startAsync runs startWithSDNotify in a goroutine and returns its result channel.
 type sdResult struct {
 	proc sys.Process
@@ -189,15 +200,7 @@ func TestStartWithSDNotify_ContextCancel(t *testing.T) {
 	done := startAsync(ctx, ctl, &sys.Cmd{Path: "slapd"}, "test-cancel")
 
 	// Wait until the socket exists (startWithSDNotify is in the wait loop).
-	deadline := time.Now().Add(2 * time.Second)
-
-	for time.Now().Before(deadline) {
-		if _, err := os.Stat(socketPath); err == nil {
-			break
-		}
-
-		time.Sleep(10 * time.Millisecond)
-	}
+	waitForSocket(t, socketPath)
 
 	cancel()
 
@@ -293,14 +296,7 @@ func TestAwaitSDNotifyStopping_ReturnsOnStoppingDatagram(t *testing.T) {
 		close(done)
 	}()
 
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, err := os.Stat(socketPath); err == nil {
-			break
-		}
-
-		time.Sleep(20 * time.Millisecond)
-	}
+	waitForSocket(t, socketPath)
 
 	conn, err := net.DialUnix("unixgram", nil, &net.UnixAddr{Name: socketPath, Net: "unixgram"})
 	if err != nil {
@@ -328,10 +324,6 @@ func TestAwaitSDNotifyStopping_ReturnsOnContextCancel(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if testing.Short() {
-		t.Skip("slow: uses a real Unix datagram socket")
-	}
-
 	_ = os.Remove(expectedSocketPath(ctl, "test-cancel-stopping"))
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -348,11 +340,7 @@ func TestAwaitSDNotifyStopping_ReturnsOnContextCancel(t *testing.T) {
 	// start-up.
 	socketPath := expectedSocketPath(ctl, "test-cancel-stopping")
 
-	require.Eventually(t, func() bool {
-		_, err := os.Stat(socketPath)
-
-		return err == nil
-	}, 2*time.Second, time.Millisecond, "observer socket never appeared")
+	waitForSocket(t, socketPath)
 
 	cancel()
 
@@ -409,13 +397,16 @@ func TestStopWithSDNotify_RestartKeepsNotifySocket(t *testing.T) {
 	writeExecutable(t, def.BinaryPath, []byte("x"))
 
 	// The daemon reports READY=1 a moment after the launch, after the window
-	// in which the stop-side observer (500 ms read deadline) used to unlink the
-	// socket path.
+	// in which the stop-side observer (one read deadline) used to unlink the
+	// socket path: derived from the production constant, so the test keeps
+	// exercising that window if the deadline changes.
+	readyDelay := 2 * sdNotifyObserverReadDeadline
+
 	f.Exec.OnPath(def.BinaryPath, func(c *sys.Cmd) (sys.Result, error) {
 		for _, e := range c.Env {
 			if socket, ok := strings.CutPrefix(e, "NOTIFY_SOCKET="); ok {
 				go func() {
-					time.Sleep(900 * time.Millisecond)
+					time.Sleep(readyDelay)
 
 					if conn, err := net.Dial("unixgram", socket); err == nil {
 						_, _ = conn.Write([]byte("READY=1\n"))
