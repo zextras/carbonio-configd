@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -363,8 +364,21 @@ func readRequest(ctx context.Context, conn net.Conn) (string, bool) {
 }
 
 func (s *ThreadedStreamServer) handleConnection(ctx context.Context, conn net.Conn) {
+	// Closing the conn when ctx ends (Shutdown cancels it) unblocks a handler
+	// stuck in a read, so Shutdown never waits on an idle client.
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
+
 	defer func() {
-		if err := conn.Close(); err != nil {
+		if r := recover(); r != nil {
+			logger.ErrorContext(ctx, "Panic in connection handler",
+				"panic", r,
+				"stack", string(debug.Stack()))
+		}
+	}()
+
+	defer func() {
+		if err := conn.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
 			logger.ErrorContext(ctx, "Error closing connection",
 				"error", err)
 		}
