@@ -11,9 +11,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/zextras/carbonio-configd/internal/config"
@@ -253,7 +255,7 @@ func rewriteFileMode(modeStr string) (os.FileMode, error) {
 }
 
 // rewriteAtomicCommit sets permissions on tmpFileName and atomically replaces
-// destPath, falling back to copy+delete when rename crosses filesystems.
+// destPath, falling back to copy+delete only when rename crosses filesystems (EXDEV).
 func (cm *ConfigManager) rewriteAtomicCommit(ctx context.Context, tmpFileName, destPath, modeStr string) error {
 	fileMode, err := rewriteFileMode(modeStr)
 	if err != nil {
@@ -264,11 +266,18 @@ func (cm *ConfigManager) rewriteAtomicCommit(ctx context.Context, tmpFileName, d
 		return fmt.Errorf("chmod temp file: %w", err)
 	}
 
-	if err := cm.env.FS.Rename(tmpFileName, destPath); err == nil {
+	err = cm.env.FS.Rename(tmpFileName, destPath)
+	if err == nil {
 		return nil
 	}
 
-	// Cross-device fallback: copy then delete.
+	if !errors.Is(err, syscall.EXDEV) {
+		return fmt.Errorf("rename temp to dest %s: %w", destPath, err)
+	}
+
+	// Cross-device fallback (the temp normally lives in destPath's directory,
+	// so this only fires on unusual mounts): copy then delete. CopyFile
+	// publishes with the temp's mode, already fileMode.
 	if err := cm.env.FS.CopyFile(ctx, tmpFileName, destPath); err != nil {
 		return fmt.Errorf("copy temp to dest %s: %w", destPath, err)
 	}
@@ -289,7 +298,7 @@ func (cm *ConfigManager) processRewrite(ctx context.Context, filePath string, re
 	srcPath := cm.mainConfig.TemplatePath(filePath)
 	destPath := cm.mainConfig.BaseDir + "/" + rewriteEntry.Value
 
-	tmpFile, err := cm.env.FS.CreateTemp("", "zmconfigd-rewrite-")
+	tmpFile, err := cm.env.FS.CreateTemp(filepath.Dir(destPath), ".zmconfigd-rewrite-*.tmp")
 	if err != nil {
 		logger.ErrorContext(ctx, "Failed to create temporary file for rewrite", "error", err)
 
