@@ -81,9 +81,7 @@ func TestCbpolicydInitDB_DBMissingBinaryFails(t *testing.T) {
 	dbFile := filepath.Join(tmp, "subdir", "cbpolicyd.sqlitedb")
 
 	initBin := filepath.Join(tmp, "zmcbpolicydinit")
-	if err := os.WriteFile(initBin, []byte("#!/bin/sh\necho 'init error'; exit 1\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeExecutable(t, initBin, []byte("#!/bin/sh\necho 'init error'; exit 1\n"))
 
 	ctl.p.cbpolicydDB = dbFile
 
@@ -110,9 +108,7 @@ func TestCbpolicydInitDB_DBMissingBinarySucceeds(t *testing.T) {
 	dbFile := filepath.Join(tmp, "subdir", "cbpolicyd.sqlitedb")
 
 	initBin := filepath.Join(tmp, "zmcbpolicydinit")
-	if err := os.WriteFile(initBin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeExecutable(t, initBin, []byte("#!/bin/sh\nexit 0\n"))
 
 	ctl.p.cbpolicydDB = dbFile
 
@@ -299,9 +295,7 @@ func TestStatsCustomStart_WithFakeCollector(t *testing.T) {
 	tmp := t.TempDir()
 
 	fakebin := filepath.Join(tmp, "zmstat-proc")
-	if err := os.WriteFile(fakebin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeExecutable(t, fakebin, []byte("#!/bin/sh\nexit 0\n"))
 
 	logDir := filepath.Join(tmp, "log")
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
@@ -329,9 +323,7 @@ func TestStatsCustomStart_LogOpenFails(t *testing.T) {
 	tmp := t.TempDir()
 
 	fakebin := filepath.Join(tmp, "zmstat-proc")
-	if err := os.WriteFile(fakebin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeExecutable(t, fakebin, []byte("#!/bin/sh\nexit 0\n"))
 
 	ctl.p.libexec = tmp
 
@@ -385,9 +377,7 @@ func TestStatsCustomStart_ConditionalCollectors(t *testing.T) {
 	}
 	for _, c := range collectors {
 		bin := filepath.Join(tmp, c)
-		if err := os.WriteFile(bin, []byte("#!/bin/sh\nsleep 0\nexit 0\n"), 0o755); err != nil {
-			t.Fatal(err)
-		}
+		writeExecutable(t, bin, []byte("#!/bin/sh\nsleep 0\nexit 0\n"))
 	}
 
 	ctl.p.libexec = tmp
@@ -417,9 +407,7 @@ func TestMailboxJavaBinary_ExplicitJavaHome(t *testing.T) {
 		t.Fatal(err)
 	}
 	javaBin := filepath.Join(javaDir, "java")
-	if err := os.WriteFile(javaBin, []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeExecutable(t, javaBin, []byte("#!/bin/sh\n"))
 
 	lc := map[string]string{
 		"mailboxd_java_home": tmp,
@@ -448,9 +436,7 @@ func TestMailboxJavaBinary_FallbackToZimbraJavaHome(t *testing.T) {
 		t.Fatal(err)
 	}
 	javaBin := filepath.Join(javaDir, "java")
-	if err := os.WriteFile(javaBin, []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeExecutable(t, javaBin, []byte("#!/bin/sh\n"))
 
 	lc := map[string]string{
 		"zimbra_java_home": tmp,

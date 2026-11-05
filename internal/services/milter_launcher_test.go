@@ -81,9 +81,7 @@ func TestMilterCustomStart_JavaBinaryPresent(t *testing.T) {
 		t.Fatal(err)
 	}
 	javaBin := filepath.Join(javaDir, "java")
-	if err := os.WriteFile(javaBin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeExecutable(t, javaBin, []byte("#!/bin/sh\nexit 0\n"))
 
 	logDir := filepath.Join(tmp, "log")
 	if err := os.MkdirAll(logDir, 0o755); err != nil {

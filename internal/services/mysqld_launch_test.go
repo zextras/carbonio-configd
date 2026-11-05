@@ -49,9 +49,7 @@ func TestFlushAppserverDBDirtyPages_WithPassword(t *testing.T) {
 
 	tmp := t.TempDir()
 	mysqlBin := filepath.Join(tmp, "mysql")
-	if err := os.WriteFile(mysqlBin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeExecutable(t, mysqlBin, []byte("#!/bin/sh\nexit 0\n"))
 
 	ctl.p.bin = tmp
 
@@ -72,9 +70,7 @@ func TestFlushAppserverDBDirtyPages_CmdFails(t *testing.T) {
 	tmp := t.TempDir()
 	mysqlBin := filepath.Join(tmp, "mysql")
 	script := "#!/bin/sh\nif [ \"$1\" = \"-e\" ]; then echo 'error' >&2; exit 1; fi\nexit 0\n"
-	if err := os.WriteFile(mysqlBin, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeExecutable(t, mysqlBin, []byte(script))
 
 	ctl.p.bin = tmp
 
@@ -158,9 +154,7 @@ func TestSpawnMysqldSafe_WithErrLog(t *testing.T) {
 	ctl.p.appserverDBPidFile = pidFile
 
 	fakeMysqldSafe := filepath.Join(tmp, "mysqld_safe")
-	if err := os.WriteFile(fakeMysqldSafe, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeExecutable(t, fakeMysqldSafe, []byte("#!/bin/sh\nexit 0\n"))
 
 	ctl.p.mysqldSafeBin = fakeMysqldSafe
 
@@ -193,9 +187,7 @@ func TestSpawnMysqldSafe_NoErrLog(t *testing.T) {
 	ctl.p.appserverDBPidFile = pidFile
 
 	fakeMysqldSafe := filepath.Join(tmp, "mysqld_safe")
-	if err := os.WriteFile(fakeMysqldSafe, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeExecutable(t, fakeMysqldSafe, []byte("#!/bin/sh\nexit 0\n"))
 
 	ctl.p.mysqldSafeBin = fakeMysqldSafe
 
@@ -297,9 +289,7 @@ func TestStartAppserverDB_WithConfig(t *testing.T) {
 	}
 
 	fakeMysqldSafe := filepath.Join(tmp, "mysqld_safe")
-	if err := os.WriteFile(fakeMysqldSafe, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeExecutable(t, fakeMysqldSafe, []byte("#!/bin/sh\nexit 0\n"))
 
 	ctl.p.mysqldSafeBin = fakeMysqldSafe
 

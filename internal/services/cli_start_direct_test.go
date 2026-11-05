@@ -95,9 +95,7 @@ func TestStartDirect_NeedsRootAsNonRoot(t *testing.T) {
 
 	tmp := t.TempDir()
 	fakeBin := filepath.Join(tmp, "fakebinary")
-	if err := os.WriteFile(fakeBin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeExecutable(t, fakeBin, []byte("#!/bin/sh\nexit 0\n"))
 
 	def := &ServiceDef{
 		Name:        "testservice",
@@ -121,9 +119,7 @@ func TestStartDirect_DirectExec_Success(t *testing.T) {
 	}
 	tmp := t.TempDir()
 	fakeBin := filepath.Join(tmp, "fakebinary")
-	if err := os.WriteFile(fakeBin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeExecutable(t, fakeBin, []byte("#!/bin/sh\nexit 0\n"))
 
 	def := &ServiceDef{
 		Name:        "testservice",
@@ -150,9 +146,7 @@ func TestStartDirect_DirectExec_Failure(t *testing.T) {
 	}
 	tmp := t.TempDir()
 	fakeBin := filepath.Join(tmp, "fakebinary")
-	if err := os.WriteFile(fakeBin, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeExecutable(t, fakeBin, []byte("#!/bin/sh\nexit 1\n"))
 
 	def := &ServiceDef{
 		Name:        "testservice",

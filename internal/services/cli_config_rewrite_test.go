@@ -64,9 +64,7 @@ func TestRewriteConfigs_WithConfigrewriteBinary(t *testing.T) {
 	}
 
 	scriptPath := filepath.Join(libexec, "configrewrite")
-	if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeExecutable(t, scriptPath, []byte("#!/bin/sh\nexit 0\n"))
 
 	ctl.p.base = tmp
 
@@ -95,9 +93,7 @@ func TestRewriteConfigs_ConfigrewriteFailure(t *testing.T) {
 	}
 
 	scriptPath := filepath.Join(libexec, "configrewrite")
-	if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\necho 'error output'; exit 1\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeExecutable(t, scriptPath, []byte("#!/bin/sh\necho 'error output'; exit 1\n"))
 
 	ctl.p.base = tmp
 
