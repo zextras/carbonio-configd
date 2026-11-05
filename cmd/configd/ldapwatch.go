@@ -68,6 +68,10 @@ func syncLDAPWatch(ctx context.Context, deps *daemonLoopDeps, cur *ldapWatch) *l
 	switch {
 	case enabled && cur == nil:
 		return startLDAPWatch(ctx, deps)
+	case enabled && cur.cancel == nil && ldapSourceAvailable(deps):
+		// The watcher could not start earlier because the LDAP client was
+		// missing; the config manager has since built it.
+		return startLDAPWatch(ctx, deps)
 	case !enabled && cur != nil:
 		ctx = logger.ContextWithComponent(ctx, "ldapwatch")
 		logger.InfoContext(ctx, "LDAP change watcher stopped", "reason", "disabled")
@@ -78,6 +82,11 @@ func syncLDAPWatch(ctx context.Context, deps *daemonLoopDeps, cur *ldapWatch) *l
 	default:
 		return cur
 	}
+}
+
+// ldapSourceAvailable reports whether ldapWatchSource would return a source.
+func ldapSourceAvailable(deps *daemonLoopDeps) bool {
+	return deps.ldapSource != nil || deps.configManager.NativeLdapClient != nil
 }
 
 // ldapWatchSource returns the source the watcher reads fingerprints from and
