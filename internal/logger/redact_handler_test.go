@@ -191,3 +191,13 @@ func TestRedactHandler_WithAttrsPlainKeyKeepsValue(t *testing.T) {
 
 	assert.Contains(t, buf.String(), "value=7143")
 }
+
+func TestRedactHandler_SecretGroupKeyMasksChildren(t *testing.T) {
+	t.Parallel()
+
+	out := emit(t, true, FormatText, "g", slog.Group("ldap_root_password", "a", "hunter2", "n", slog.GroupValue(slog.String("b", "hunter3"))))
+
+	assert.NotContains(t, out, "hunter2")
+	assert.NotContains(t, out, "hunter3")
+	assert.Contains(t, out, redact.Placeholder)
+}

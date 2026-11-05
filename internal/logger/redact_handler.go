@@ -131,6 +131,10 @@ func redactAttr(a slog.Attr, forced bool) (slog.Attr, bool) {
 	v := a.Value.Resolve()
 
 	if v.Kind() == slog.KindGroup {
+		if forced || redact.IsSecretKey(a.Key) {
+			return slog.Attr{Key: a.Key, Value: slog.GroupValue(maskGroup(v.Group())...)}, true
+		}
+
 		group, changed := redactAttrs(v.Group(), false)
 		if !changed {
 			return a, false
@@ -151,6 +155,28 @@ func redactAttr(a slog.Attr, forced bool) (slog.Attr, bool) {
 	}
 
 	return a, false
+}
+
+// maskGroup returns attrs with every non-empty leaf value replaced by the
+// placeholder, recursing into nested groups. It is used for groups whose key
+// names a secret.
+func maskGroup(attrs []slog.Attr) []slog.Attr {
+	out := make([]slog.Attr, len(attrs))
+
+	for i, a := range attrs {
+		v := a.Value.Resolve()
+
+		switch {
+		case v.Kind() == slog.KindGroup:
+			out[i] = slog.Attr{Key: a.Key, Value: slog.GroupValue(maskGroup(v.Group())...)}
+		case v.Kind() == slog.KindString && v.String() == "", v.Kind() == slog.KindAny && v.Any() == nil:
+			out[i] = a
+		default:
+			out[i] = slog.String(a.Key, redact.Placeholder)
+		}
+	}
+
+	return out
 }
 
 // redactString masks a string attribute: wholly when secret, else any
