@@ -6,6 +6,7 @@ package template
 
 import (
 	"context"
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -167,4 +168,35 @@ func TestRewriteConfig_MasksSpecialModeBits(t *testing.T) {
 	mode, ok := fakes.FS.Mode(filepath.Join(fakeBase, "a.conf"))
 	require.True(t, ok)
 	assert.Equal(t, os.FileMode(0o755), mode, "setuid bit must be dropped")
+}
+
+type closeFailFile struct{ sys.File }
+
+func (closeFailFile) Close() error { return errors.New("disk full") }
+
+type closeFailFS struct{ sys.FS }
+
+func (f closeFailFS) CreateTemp(dir, pattern string) (sys.File, error) {
+	tmp, err := f.FS.CreateTemp(dir, pattern)
+	if err != nil {
+		return nil, err
+	}
+
+	return closeFailFile{tmp}, nil
+}
+
+func TestRewriteConfig_TempCloseFailureAborts(t *testing.T) {
+	t.Parallel()
+
+	fakes := systest.New()
+	sysv := fakes.System()
+	sysv.FS = closeFailFS{sysv.FS}
+	r := NewRewriter(fakeBase, newMockLookup(), sysv)
+	fakes.FS.Put(filepath.Join(fakeBase, "a.in"), []byte("x\n"), 0o644)
+
+	err := r.RewriteConfig(context.Background(), "a.in", "a.out", "0644")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to close temporary file")
+	assert.False(t, fakes.FS.Exists(filepath.Join(fakeBase, "a.out")))
 }

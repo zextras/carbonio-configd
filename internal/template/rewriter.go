@@ -23,8 +23,6 @@ import (
 	"github.com/zextras/carbonio-configd/internal/transformer"
 )
 
-const warnCloseTempFile = "Failed to close temp file"
-
 // ErrPathEscapesBaseDir is returned when a REWRITE source or target is not a
 // local path relative to the rewriter base directory.
 var ErrPathEscapesBaseDir = errors.New("path escapes base directory")
@@ -188,12 +186,23 @@ func (r *Rewriter) RewriteConfig(ctx context.Context, source, target, mode strin
 	}()
 
 	scanErr := r.scanAndWrite(ctx, sourceFile, tmpFile)
-	if cerr := tmpFile.Close(); cerr != nil {
-		logger.WarnContext(ctx, warnCloseTempFile, "path", tmpPath, "error", cerr)
+
+	// Flush to stable storage before the rename so a crash cannot leave an
+	// empty or truncated file under the target name. Fakes without Sync skip it.
+	if syncer, ok := tmpFile.(interface{ Sync() error }); ok && scanErr == nil {
+		if serr := syncer.Sync(); serr != nil {
+			scanErr = fmt.Errorf("failed to sync temporary file %s: %w", tmpPath, serr)
+		}
 	}
+
+	cerr := tmpFile.Close()
 
 	if scanErr != nil {
 		return scanErr
+	}
+
+	if cerr != nil {
+		return fmt.Errorf("failed to close temporary file %s: %w", tmpPath, cerr)
 	}
 
 	if err := r.atomicReplace(ctx, tmpPath, targetPath, os.FileMode(fileMode)); err != nil {
