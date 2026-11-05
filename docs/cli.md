@@ -171,7 +171,7 @@ in [architecture.md](architecture.md#shadow-mode).
 
 | Flag | Meaning |
 |---|---|
-| `--shadow-dir DIR` | write the would-be files and plan JSON under `DIR` (created `0700`, files `0600`); must not be or contain the install tree |
+| `--shadow-dir DIR` | write the would-be files and plan JSON under `DIR` (created `0700`, files `0600`); must not be, contain or lie inside the install tree |
 | `--single-cycle` | run one cycle and exit (`1` when it failed) |
 
 `--cpuprofile`, `--memprofile`, `--trace` and `--enable-tracing` are refused

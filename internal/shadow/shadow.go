@@ -89,7 +89,7 @@ type Options struct {
 	// FS, deliberately distinct from the read-only one the Source runs on.
 	Out sys.FS
 	// BaseDir is the install tree (/opt/zextras) the plan is about; Dir must
-	// not be, or contain, it.
+	// not be, contain or lie inside it.
 	BaseDir string
 }
 
@@ -115,13 +115,37 @@ func New(opts *Options) (*Shadow, error) {
 		return nil, fmt.Errorf("resolve shadow directory %q: %w", opts.Dir, err)
 	}
 
-	if base := filepath.Clean(opts.BaseDir); contains(dir, base) {
+	// Compare real paths, so a symlink cannot hide an overlap with BaseDir.
+	dir = resolvePath(dir)
+	base := resolvePath(filepath.Clean(opts.BaseDir))
+
+	if contains(dir, base) {
 		return nil, fmt.Errorf("%w: %s contains or is %s", ErrUnsafeDir, dir, base)
+	}
+
+	if contains(base, dir) {
+		return nil, fmt.Errorf("%w: %s lies inside %s", ErrUnsafeDir, dir, base)
 	}
 
 	s.dir = dir
 
 	return s, nil
+}
+
+// resolvePath resolves symlinks in the longest existing prefix of path and
+// appends the missing rest, so it works for a directory not created yet. A
+// path that cannot be resolved is returned unchanged.
+func resolvePath(path string) string {
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		return real
+	}
+
+	parent := filepath.Dir(path)
+	if parent == path {
+		return path
+	}
+
+	return filepath.Join(resolvePath(parent), filepath.Base(path))
 }
 
 // contains reports whether path is dir or lies below it.

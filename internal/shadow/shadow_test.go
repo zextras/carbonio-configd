@@ -12,6 +12,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -350,7 +351,7 @@ func TestNew_RejectsADirectoryOverlappingTheInstallTree(t *testing.T) {
 		require.ErrorIs(t, err, shadow.ErrUnsafeDir, dir)
 	}
 
-	for _, dir := range []string{"/var/shadow", "/opt/zextras/tmp/shadow", "/opt/zextras2", ""} {
+	for _, dir := range []string{"/var/shadow", "/opt/zextras2", ""} {
 		_, err := shadow.New(&shadow.Options{Dir: dir, BaseDir: base})
 		require.NoError(t, err, dir)
 	}
@@ -422,4 +423,25 @@ func (d durationSpy) NewTimer(dur time.Duration) sys.Timer {
 	d.cancel()
 
 	return d.Clock.NewTimer(dur)
+}
+
+func TestNew_RejectsOverlapHiddenBehindASymlink(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	baseDir := filepath.Join(root, "zextras")
+	require.NoError(t, os.MkdirAll(filepath.Join(baseDir, "conf"), 0o755))
+	require.NoError(t, os.Symlink(baseDir, filepath.Join(root, "alias")))
+
+	for _, dir := range []string{
+		filepath.Join(root, "alias"),
+		filepath.Join(root, "alias", "conf", "shadow"),
+		filepath.Join(baseDir, "conf", "shadow"),
+	} {
+		_, err := shadow.New(&shadow.Options{Dir: dir, BaseDir: baseDir})
+		require.ErrorIs(t, err, shadow.ErrUnsafeDir, dir)
+	}
+
+	_, err := shadow.New(&shadow.Options{Dir: filepath.Join(root, "report"), BaseDir: baseDir})
+	require.NoError(t, err)
 }
