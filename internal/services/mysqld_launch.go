@@ -250,11 +250,15 @@ func (c *Controller) flushAppserverDBDirtyPages(ctx context.Context) {
 	}
 
 	query := func(stmt string) (string, error) {
-		//nolint:gosec // password is from localconfig, mysql binary path is fixed
-		out, qErr := sys.Output(ctx, c.env.Exec, c.p.bin+"/mysql",
-			"-u", "zextras", "--password="+password, "-e", stmt)
+		// The password travels in MYSQL_PWD, not argv, so it never shows in
+		// /proc/<pid>/cmdline.
+		res, qErr := c.env.Exec.Run(ctx, &sys.Cmd{
+			Path: c.p.bin + "/mysql",
+			Args: []string{"-u", "zextras", "-e", stmt},
+			Env:  []string{"MYSQL_PWD=" + password},
+		})
 
-		return string(out), qErr
+		return string(res.Stdout), qErr
 	}
 
 	if engines, qErr := query("show engines;"); qErr == nil && innodbDisabled(engines) {
