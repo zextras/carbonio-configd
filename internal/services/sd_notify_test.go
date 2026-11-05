@@ -86,13 +86,25 @@ func waitForSocket(t *testing.T, path string) {
 	}, 3*time.Second, time.Millisecond, "notify socket %s never appeared", path)
 }
 
-// startAsync runs startWithSDNotify in a goroutine and returns its result channel.
+// sdWaitBound bounds every wait of the sd_notify tests on the code under test:
+// a regression must fail the test, never hang the package until the go test
+// timeout.
+const sdWaitBound = 5 * time.Second
+
 type sdResult struct {
 	proc sys.Process
 	err  error
 }
 
-func startAsync(ctx context.Context, ctl *Controller, cmd *sys.Cmd, service string) <-chan sdResult {
+// startAsync runs startWithSDNotify in a goroutine and returns its result
+// channel. ctx is cancelled when the test ends, so a call that never reaches
+// READY=1 (its deadline runs on a manual clock) cannot outlive the test.
+func startAsync(ctx context.Context, t *testing.T, ctl *Controller, cmd *sys.Cmd, service string) <-chan sdResult {
+	t.Helper()
+
+	ctx, cancel := context.WithCancel(ctx)
+	t.Cleanup(cancel)
+
 	done := make(chan sdResult, 1)
 
 	go func() {
@@ -103,6 +115,21 @@ func startAsync(ctx context.Context, ctl *Controller, cmd *sys.Cmd, service stri
 	return done
 }
 
+// awaitSDResult returns the result of startAsync, failing the test if it does
+// not arrive within sdWaitBound.
+func awaitSDResult(t *testing.T, done <-chan sdResult) sdResult {
+	t.Helper()
+
+	select {
+	case r := <-done:
+		return r
+	case <-time.After(sdWaitBound):
+		t.Fatalf("startWithSDNotify did not return within %s", sdWaitBound)
+
+		return sdResult{}
+	}
+}
+
 // TestStartWithSDNotify_Ready verifies that startWithSDNotify returns nil and
 // the started process when READY=1 is sent to the notify socket.
 func TestStartWithSDNotify_Ready(t *testing.T) {
@@ -111,21 +138,17 @@ func TestStartWithSDNotify_Ready(t *testing.T) {
 	ctl, f := newSDController(t)
 	cmd := &sys.Cmd{Path: "slapd"}
 
-	done := startAsync(context.Background(), ctl, cmd, "test-ready")
+	done := startAsync(context.Background(), t, ctl, cmd, "test-ready")
 
 	sendReady(t, expectedSocketPath(ctl, "test-ready"))
 
-	select {
-	case r := <-done:
-		if r.err != nil {
-			t.Errorf("expected nil, got %v", r.err)
-		}
+	r := awaitSDResult(t, done)
+	if r.err != nil {
+		t.Errorf("expected nil, got %v", r.err)
+	}
 
-		if r.proc == nil {
-			t.Error("expected the started process to be returned")
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for startWithSDNotify to return")
+	if r.proc == nil {
+		t.Error("expected the started process to be returned")
 	}
 
 	if got := f.Rec.Of("exec.start"); len(got) != 1 {
@@ -140,7 +163,8 @@ func TestStartWithSDNotify_Timeout(t *testing.T) {
 
 	ctl, f := newSDController(t)
 
-	done := startAsync(context.Background(), ctl, &sys.Cmd{Path: "slapd"}, "test-timeout")
+	done := startAsync(context.Background(), t, ctl, &sys.Cmd{Path: "slapd"}, "test-timeout")
+	bound := time.After(sdWaitBound)
 
 	for {
 		select {
@@ -158,6 +182,8 @@ func TestStartWithSDNotify_Timeout(t *testing.T) {
 			}
 
 			return
+		case <-bound:
+			t.Fatalf("startWithSDNotify did not time out within %s of the readiness deadline passing", sdWaitBound)
 		case <-time.After(time.Millisecond):
 			// Keep the clock beyond the deadline: it is computed after the
 			// process start, so a single early Advance could be missed.
@@ -181,9 +207,9 @@ func TestStartWithSDNotify_ChildExitFailsFast(t *testing.T) {
 	ctl := NewController(withMode(env, false), WithBaseDir(t.TempDir()), WithRunDir(socketDir(t)),
 		WithConfigLoader(emptyConfig))
 
-	_, err := ctl.startWithSDNotify(context.Background(), &sys.Cmd{Path: "slapd"}, "test-exit")
-	if err == nil || !strings.Contains(err.Error(), "exited during startup before signaling READY=1") {
-		t.Fatalf("error = %v, want early-exit failure", err)
+	r := awaitSDResult(t, startAsync(context.Background(), t, ctl, &sys.Cmd{Path: "slapd"}, "test-exit"))
+	if r.err == nil || !strings.Contains(r.err.Error(), "exited during startup before signaling READY=1") {
+		t.Fatalf("error = %v, want early-exit failure", r.err)
 	}
 }
 
@@ -197,20 +223,15 @@ func TestStartWithSDNotify_ContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	socketPath := expectedSocketPath(ctl, "test-cancel")
 
-	done := startAsync(ctx, ctl, &sys.Cmd{Path: "slapd"}, "test-cancel")
+	done := startAsync(ctx, t, ctl, &sys.Cmd{Path: "slapd"}, "test-cancel")
 
 	// Wait until the socket exists (startWithSDNotify is in the wait loop).
 	waitForSocket(t, socketPath)
 
 	cancel()
 
-	select {
-	case r := <-done:
-		if !errors.Is(r.err, context.Canceled) {
-			t.Errorf("expected context.Canceled, got: %v", r.err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for startWithSDNotify to return after cancel")
+	if r := awaitSDResult(t, done); !errors.Is(r.err, context.Canceled) {
+		t.Errorf("expected context.Canceled, got: %v", r.err)
 	}
 }
 
@@ -223,10 +244,10 @@ func TestStartWithSDNotify_NotifySocketInEnv(t *testing.T) {
 	cmd := &sys.Cmd{Path: "slapd"}
 	socketPath := expectedSocketPath(ctl, "test-env")
 
-	done := startAsync(context.Background(), ctl, cmd, "test-env")
+	done := startAsync(context.Background(), t, ctl, cmd, "test-env")
 
 	sendReady(t, socketPath)
-	<-done
+	awaitSDResult(t, done)
 
 	started := f.Exec.Calls()
 	if len(started) != 1 {
@@ -259,10 +280,10 @@ func TestStartWithSDNotify_SocketCleanedUp(t *testing.T) {
 	ctl, _ := newSDController(t)
 	socketPath := expectedSocketPath(ctl, "test-cleanup")
 
-	done := startAsync(context.Background(), ctl, &sys.Cmd{Path: "slapd"}, "test-cleanup")
+	done := startAsync(context.Background(), t, ctl, &sys.Cmd{Path: "slapd"}, "test-cleanup")
 
 	sendReady(t, socketPath)
-	<-done
+	awaitSDResult(t, done)
 
 	if _, err := os.Stat(socketPath); !os.IsNotExist(err) {
 		t.Errorf("socket %s still exists after startWithSDNotify returned", socketPath)
@@ -327,6 +348,8 @@ func TestAwaitSDNotifyStopping_ReturnsOnContextCancel(t *testing.T) {
 	_ = os.Remove(expectedSocketPath(ctl, "test-cancel-stopping"))
 
 	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel) // a failed wait below must not leave the observer running
+
 	done := make(chan struct{})
 
 	go func() {
