@@ -11,6 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/zextras/carbonio-configd/internal/cache"
+	"github.com/zextras/carbonio-configd/internal/ldap"
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
@@ -110,4 +112,57 @@ func TestFormatCapabilities_DropsQuoteBreakout(t *testing.T) {
 	got, err := formatIMAPCapabilities([]string{"IMAP4rev1", `X" ; evil on; "`, "ID\ninject", "ENABLE"})
 	require.NoError(t, err)
 	assert.Equal(t, ` "IMAP4rev1" "ENABLE"`, got)
+}
+
+func TestValidClientCertMode(t *testing.T) {
+	t.Parallel()
+
+	for _, mode := range []string{"", "off", "on", "optional", "optional_no_ca"} {
+		assert.True(t, validClientCertMode(mode), mode)
+		assert.NoError(t, validateDomainInfo(&DomainInfo{Name: "a.com", ClientCertMode: mode}), mode)
+	}
+
+	for _, mode := range []string{"ON", "yes", "on;\nroot /", "optional }", " on"} {
+		assert.False(t, validClientCertMode(mode), mode)
+		assert.Error(t, validateDomainInfo(&DomainInfo{Name: "a.com", ClientCertMode: mode}), mode)
+	}
+}
+
+func TestCollectVirtualIPAddresses_SkipsInvalidLiterals(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	cc := cache.New(ctx, false)
+
+	_, err := cc.GetCachedConfig(ctx, "ldap:domains", func() (any, error) {
+		return []ldap.Domain{
+			{DomainName: "a.com", VirtualIPAddress: "192.0.2.1"},
+			{DomainName: "b.com", VirtualIPAddress: "1.1.1.1; } server { listen 1"},
+			{DomainName: "c.com", VirtualIPAddress: "2001:db8::1"},
+			{DomainName: "d.com"},
+		}, nil
+	})
+	require.NoError(t, err)
+
+	g := &Generator{
+		env:        sys.Real(),
+		Cache:      cc,
+		LdapClient: &ldap.Ldap{NativeClient: &ldap.Client{}},
+	}
+
+	got := g.collectVirtualIPAddresses(ctx, "")
+
+	assert.Equal(t, map[string]bool{"192.0.2.1": true, "2001:db8::1": true}, got)
+}
+
+func TestCachedLDAPQuery_TypedNilCacheFallsBackToDirectQuery(t *testing.T) {
+	t.Parallel()
+
+	var nilCache *cache.ConfigCache
+
+	got, err := cachedLDAPQuery(context.Background(), nilCache, "k", "things",
+		func() ([]string, error) { return []string{"x"}, nil })
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"x"}, got)
 }

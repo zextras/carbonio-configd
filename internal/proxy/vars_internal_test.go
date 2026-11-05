@@ -6,13 +6,16 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/config/configtest"
+	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
@@ -345,5 +348,38 @@ func TestSSLProtocolsCustomFormatter_ScalarFallback(t *testing.T) {
 	}
 	if result != " 42" {
 		t.Errorf("expected ' 42', got %q", result)
+	}
+}
+
+func TestLookupValue_DoesNotLogSecretValues(t *testing.T) {
+	var buf bytes.Buffer
+
+	ctx := logger.ContextWithLogger(context.Background(),
+		slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+
+	g := &Generator{
+		env: sys.Real(),
+		GlobalConfig: &config.GlobalConfig{Data: configtest.NewConfigMapFrom(map[string]string{
+			"zimbraLdapPassword": "hunter2-secret",
+		})},
+	}
+	v := &Variable{
+		Keyword:      "ldap.pw",
+		OverrideType: OverrideConfig,
+		ValueType:    ValueTypeString,
+		Attribute:    "zimbraLdapPassword",
+	}
+
+	got, err := g.LookupValue(ctx, v)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got != "hunter2-secret" {
+		t.Fatalf("value must still resolve, got %v", got)
+	}
+
+	if strings.Contains(buf.String(), "hunter2-secret") {
+		t.Errorf("secret leaked into debug log: %s", buf.String())
 	}
 }
