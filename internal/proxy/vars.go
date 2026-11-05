@@ -11,7 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/redact"
 )
 
 // varOpt is a functional option for configuring a Variable during registration.
@@ -86,15 +88,13 @@ func (g *Generator) RegisterVariables(_ context.Context) {
 }
 
 // lookupAttr returns the value of attr from data.
-// Returns ("", false) when attr is empty; safe on nil maps.
-func lookupAttr(data map[string]string, attr string) (string, bool) {
-	if attr == "" {
+// Returns ("", false) when attr is empty or data is nil.
+func lookupAttr(data *config.ConfigMap, attr string) (string, bool) {
+	if attr == "" || data == nil {
 		return "", false
 	}
 
-	v, ok := data[attr]
-
-	return v, ok
+	return data.Get(attr)
 }
 
 // LookupValue resolves a variable's value from the appropriate configuration source.
@@ -105,18 +105,17 @@ func (g *Generator) LookupValue(ctx context.Context, v *Variable) (any, error) {
 		return v.CustomResolver(ctx)
 	}
 
-	// Extract nil-safe data maps once. Indexing a nil map is safe in Go.
-	var globalData, serverData, localData map[string]string
+	var globalData, serverData, localData *config.ConfigMap
 	if g.GlobalConfig != nil {
-		globalData = g.GlobalConfig.Data.Snapshot()
+		globalData = g.GlobalConfig.Data
 	}
 
 	if g.ServerConfig != nil {
-		serverData = g.ServerConfig.Data.Snapshot()
+		serverData = g.ServerConfig.Data
 	}
 
 	if g.LocalConfig != nil {
-		localData = g.LocalConfig.Data.Snapshot()
+		localData = g.LocalConfig.Data
 	}
 
 	switch v.OverrideType {
@@ -124,7 +123,7 @@ func (g *Generator) LookupValue(ctx context.Context, v *Variable) (any, error) {
 		if val, ok := lookupAttr(globalData, v.Attribute); ok {
 			logger.DebugContext(ctx, "LookupValue found in GlobalConfig",
 				"keyword", v.Keyword,
-				"value", val,
+				"value", redact.ForLog(v.Attribute, val),
 				"attribute", v.Attribute)
 
 			return g.convertValue(ctx, val, v.ValueType)
@@ -154,9 +153,7 @@ func (g *Generator) LookupValue(ctx context.Context, v *Variable) (any, error) {
 
 // convertValue converts a string value to the appropriate type.
 func (g *Generator) convertValue(ctx context.Context, val string, vt ValueType) (any, error) {
-	logger.DebugContext(ctx, "Converting value",
-		"value", val,
-		"value_type", vt)
+	logger.DebugContext(ctx, "Converting value", "value_type", vt)
 
 	switch vt {
 	case ValueTypeInteger:
