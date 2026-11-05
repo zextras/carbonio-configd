@@ -10,6 +10,8 @@ package cache
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"sort"
 	"strings"
@@ -20,7 +22,6 @@ import (
 	"github.com/zextras/carbonio-configd/internal/config"
 	errs "github.com/zextras/carbonio-configd/internal/errors"
 	"github.com/zextras/carbonio-configd/internal/logger"
-	"github.com/zextras/carbonio-configd/internal/state"
 )
 
 // MemoryCacheEntry represents an in-memory cache entry
@@ -169,7 +170,9 @@ func (cc *ConfigCache) generateHash(data any) string {
 		return ""
 	}
 
-	return state.ComputeStringMD5(string(jsonData))
+	sum := md5.Sum(jsonData) //nolint:gosec // MD5 used for non-cryptographic change detection only
+
+	return hex.EncodeToString(sum[:])
 }
 
 // getFromMemoryCache retrieves data from in-memory cache
