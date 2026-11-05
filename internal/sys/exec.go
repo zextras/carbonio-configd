@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 )
 
 // Cmd describes one external command. Timeouts are the caller's context
@@ -177,9 +178,52 @@ func mergeEnv(base, extra []string) []string {
 	return append(env, extra...)
 }
 
+// runWaitDelay bounds how long Run waits for the output pipes to drain after
+// the process is gone or cancelled, so a grandchild holding a pipe open cannot
+// hang the caller.
+const runWaitDelay = 5 * time.Second
+
+// killGroupOnCancel makes cancelling a Run kill the whole process group, not
+// just the direct child, and bounds the pipe drain with WaitDelay. It applies
+// to Run only: Start'ed daemons keep their own lifecycle. A Setsid child is
+// already its own group leader (and Setpgid would conflict with it).
+func killGroupOnCancel(cmd *exec.Cmd, c *Cmd) {
+	cmd.WaitDelay = runWaitDelay
+
+	if c.Setsid {
+		cmd.Cancel = func() error {
+			return killPgid(cmd)
+		}
+
+		return
+	}
+
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+
+	cmd.SysProcAttr.Setpgid = true
+	cmd.Cancel = func() error {
+		return killPgid(cmd)
+	}
+}
+
+func killPgid(cmd *exec.Cmd) error {
+	if cmd.Process == nil {
+		return nil
+	}
+
+	if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil {
+		return cmd.Process.Kill() //nolint:wrapcheck // same semantics as the default Cancel
+	}
+
+	return nil
+}
+
 // Run implements Exec.
 func (r RealExec) Run(ctx context.Context, c *Cmd) (Result, error) {
 	cmd := r.command(ctx, c)
+	killGroupOnCancel(cmd, c)
 
 	var out, errOut bytes.Buffer
 
