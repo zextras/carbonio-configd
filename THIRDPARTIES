@@ -16,7 +16,7 @@ List of third-party dependencies grouped by their license type.
         * github.com/riywo/loginshell (v0.0.0-20200815045211-7d26008be1ab)
         * github.com/stretchr/testify (v1.12.1)
         * github.com/willabides/kongplete (v0.4.0)
-        * go.yaml.in/yaml/v3 (v3.0.5)
+        * go.yaml.in/yaml/v3 (v3.0.6)
 
     MPL-2.0:
 
