@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -477,4 +478,18 @@ func TestCommandExecutor_requireLDAP(t *testing.T) {
 	if err := e.requireLDAP(); err != nil {
 		t.Errorf("requireLDAP() with configured client = %v, want nil", err)
 	}
+}
+
+func TestExecuteWithContext_ConcurrentRunsDoNotRace(t *testing.T) {
+	t.Parallel()
+
+	cmd := NewCommand("d", "n", func(context.Context, ...string) (string, error) { return "ok", nil })
+
+	var wg sync.WaitGroup
+
+	for range 8 {
+		wg.Go(func() { cmd.ExecuteWithContext(t.Context()) })
+	}
+
+	wg.Wait()
 }

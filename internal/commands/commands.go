@@ -15,6 +15,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zextras/carbonio-configd/internal/ldap"
@@ -76,6 +77,8 @@ type Command struct {
 	Output      string
 	Error       string
 	LastChecked time.Time
+
+	mu sync.Mutex // guards the state fields above
 }
 
 // NewCommand creates a new Command instance.
@@ -122,68 +125,69 @@ func (c *Command) Execute(ctx context.Context, args ...string) (exitCode int, st
 // The context can be used for cancellation, deadlines, or passing values.
 func (c *Command) ExecuteWithContext(ctx context.Context, args ...string) (exitCode int, stdout string, stderr string) {
 	ctx = logger.ContextWithComponent(ctx, "commands")
-	logger.DebugContext(ctx, "Executing command",
-		"command", c.String())
+
+	if logger.IsDebug(ctx) {
+		logger.DebugContext(ctx, "Executing command",
+			"command", c.String())
+	}
+
+	// State is written under the lock only; Func runs unlocked so a slow
+	// command never blocks readers, and a timed-out run still in flight
+	// cannot interleave with the next cycle's writes.
+	c.mu.Lock()
 	c.resetState()
 	c.LastChecked = time.Now()
+	fn := c.Func
+	c.mu.Unlock()
 
 	t1 := time.Now()
 
 	var (
 		output string
 		err    error
-		rc     int
 	)
 
-	if c.Func != nil {
-		output, err = c.Func(ctx, args...)
-		if err != nil {
-			rc = 1 // Indicate error
-		}
+	if fn != nil {
+		output, err = fn(ctx, args...)
 	}
 
 	dt := time.Since(t1)
 
-	c.Status = rc
 	if err != nil {
-		c.Error = fmt.Sprintf("UNKNOWN: %s died with error: %v", c.Name, err)
+		msg := fmt.Sprintf("UNKNOWN: %s died with error: %v", c.Name, err)
+
+		c.mu.Lock()
+		c.Status = 1
+		c.Error = msg
+		status, out := c.Status, c.Output
+		c.mu.Unlock()
+
 		logger.ErrorContext(ctx, "Command execution failed",
-			"error", c.Error,
+			"error", msg,
 			"name", c.Name)
-		// In Jython, this raises an exception, here we return the error status
-		return c.Status, c.Output, c.Error
+
+		return status, out, msg
 	}
 
 	if output == "" {
 		output = "UNKNOWN OUTPUT"
 	}
 
-	if rc == 0 {
-		c.Error = "OK"
-	} else {
-		c.Error = "UNKNOWN ERROR"
-	}
-
+	c.mu.Lock()
+	c.Status = 0
+	c.Error = "OK"
 	c.Output = output
+	c.mu.Unlock()
 
-	if rc != 0 {
-		logger.InfoContext(ctx, "Command executed with error",
-			"command", c.String(),
-			"return_code", rc,
-			"output_len", len(output),
-			"error_len", len(c.Error),
-			"duration_sec", fmt.Sprintf("%.2f", dt.Seconds()),
-			"output", output)
-	} else {
+	if logger.IsDebug(ctx) {
 		logger.DebugContext(ctx, "Command executed successfully",
 			"command", c.String(),
-			"return_code", rc,
+			"return_code", 0,
 			"output_len", len(output),
-			"error_len", len(c.Error),
-			"duration_sec", fmt.Sprintf("%.2f", dt.Seconds()))
+			"duration_seconds", dt.Seconds())
 	}
 
-	return c.Status, c.Output, c.Error
+	return 0, output, "OK"
 }
 
 func (c *Command) String() string {
