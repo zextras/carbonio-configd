@@ -91,9 +91,19 @@ func (g *Generator) collectVirtualIPAddresses(ctx context.Context, fallback stri
 	addressSet := make(map[string]bool)
 
 	for _, domain := range domains {
-		if domain.VirtualIPAddress != "" {
-			addressSet[domain.VirtualIPAddress] = true
+		if domain.VirtualIPAddress == "" {
+			continue
 		}
+
+		if !validIPLiteral(domain.VirtualIPAddress) {
+			logger.WarnContext(ctx, "Skipping invalid virtual IP address",
+				"domain", truncateForLog(domain.DomainName),
+				"address", truncateForLog(domain.VirtualIPAddress))
+
+			continue
+		}
+
+		addressSet[domain.VirtualIPAddress] = true
 	}
 
 	return addressSet
