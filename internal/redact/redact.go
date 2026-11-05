@@ -83,7 +83,7 @@ var pemPrivateKey = regexp.MustCompile(
 
 // urlUserinfo matches the password part of the userinfo of a URL (the text
 // between the colon after the user name and the at sign before the host).
-var urlUserinfo = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://[^/\s:@]*:)[^/\s@]+(@)`)
+var urlUserinfo = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://[^/\s:@]*:)[^\s@]+(@)`)
 
 // Text returns s with every PEM private key block and every URL userinfo
 // password replaced by Placeholder and reports whether anything was replaced.

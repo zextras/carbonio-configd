@@ -147,3 +147,13 @@ func TestArgs(t *testing.T) {
 	assert.Equal(t, snapshot, in, "Args must not modify its input")
 	assert.Empty(t, Args(nil))
 }
+
+func TestText_URLUserinfoPasswordWithSlash(t *testing.T) {
+	t.Parallel()
+
+	got, changed := Text("ldap://admin:pa/ss/word@host:389/base")
+
+	assert.True(t, changed)
+	assert.NotContains(t, got, "pa/ss")
+	assert.Contains(t, got, "@host:389/base")
+}
