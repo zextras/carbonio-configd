@@ -126,8 +126,14 @@ func (c *Controller) gracefulStopPID(ctx context.Context, pid int, serviceName s
 		return fmt.Errorf("failed to SIGTERM process %d: %w", pid, err)
 	}
 
-	if c.waitForProcessExit(ctx, pid, timeout) {
+	switch c.waitForProcessExit(ctx, pid, timeout) {
+	case pollExited:
 		return nil
+	case pollCancelled:
+		// The grace period was not exhausted: leave the process to finish
+		// its SIGTERM shutdown rather than SIGKILL it.
+		return fmt.Errorf("stopping %s (pid %d) interrupted: %w", serviceName, pid, ctx.Err())
+	case pollTimedOut:
 	}
 
 	// Still alive at the deadline: escalate to SIGKILL.
@@ -143,9 +149,8 @@ func (c *Controller) gracefulStopPID(ctx context.Context, pid int, serviceName s
 }
 
 // waitForProcessExit polls (signal 0) until pid is gone, ctx is cancelled, or
-// timeout elapses. Returns true if the process exited within the budget.
-// Thin wrapper around the shared pollUntilExit core (cli_process.go) at the
+// timeout elapses; the result says which. Thin wrapper around the shared pollUntilExit core (cli_process.go) at the
 // original 50ms cadence.
-func (c *Controller) waitForProcessExit(ctx context.Context, pid int, timeout time.Duration) bool {
+func (c *Controller) waitForProcessExit(ctx context.Context, pid int, timeout time.Duration) pollResult {
 	return c.pollUntilExit(ctx, pid, timeout, 50*time.Millisecond)
 }
