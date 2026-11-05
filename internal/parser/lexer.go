@@ -24,6 +24,7 @@ type lexer struct {
 	column    int
 	current   rune
 	eof       bool
+	readErr   error // non-EOF read failure; surfaced by NextToken instead of a silent EOF
 	peeked    Token // stored peeked token (valid only when hasPeeked is true)
 	hasPeeked bool  // true when peeked holds a valid lookahead token
 }
@@ -59,6 +60,7 @@ func (l *lexer) readChar() {
 	if err != nil {
 		l.eof = true
 		l.current = 0
+		l.readErr = err
 
 		return
 	}
@@ -175,6 +177,11 @@ func (l *lexer) NextToken() (Token, error) {
 
 	// EOF
 	if l.eof {
+		if l.readErr != nil {
+			return Token{Type: TokenError, Literal: l.readErr.Error(), Line: line, Column: col},
+				fmt.Errorf("read error at line %d, column %d: %w", line, col, l.readErr)
+		}
+
 		return Token{Type: TokenEOF, Line: line, Column: col}, nil
 	}
 
