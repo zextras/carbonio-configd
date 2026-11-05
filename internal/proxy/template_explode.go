@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/zextras/carbonio-configd/internal/cache"
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/ldap"
 	"github.com/zextras/carbonio-configd/internal/logger"
@@ -259,7 +260,7 @@ func cachedLDAPQuery[T any](ctx context.Context, cache interface {
 	GetCachedConfig(context.Context, string, func() (any, error)) (any, error)
 }, cacheKey, entityName string, queryFunc func() (T, error),
 ) (T, error) {
-	if cache != nil {
+	if !isNilCache(cache) {
 		cachedData, err := cache.GetCachedConfig(ctx, cacheKey, func() (any, error) {
 			return queryFunc()
 		})
@@ -284,6 +285,21 @@ func cachedLDAPQuery[T any](ctx context.Context, cache interface {
 	}
 
 	return result, nil
+}
+
+// isNilCache reports whether c is nil or holds a nil pointer (a typed nil such
+// as a nil *cache.ConfigCache stored in the interface), which would panic on use.
+func isNilCache(c interface {
+	GetCachedConfig(context.Context, string, func() (any, error)) (any, error)
+},
+) bool {
+	if c == nil {
+		return true
+	}
+
+	cc, ok := c.(*cache.ConfigCache)
+
+	return ok && cc == nil
 }
 
 func (tp *TemplateProcessor) getDomains(ctx context.Context) []DomainInfo {
