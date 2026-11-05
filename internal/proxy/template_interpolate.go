@@ -70,7 +70,7 @@ func (g *Generator) ExpandVariable(ctx context.Context, name string) (string, er
 	}
 
 	// Log for debugging port issues
-	if strings.Contains(name, "port") {
+	if strings.Contains(name, "port") && logger.IsDebug(ctx) {
 		logger.DebugContext(ctx, "ExpandVariable",
 			"name", name,
 			"value", v.Value,
