@@ -8,16 +8,17 @@ package tracing
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestSpanBasics(t *testing.T) {
 	tracer := &Tracer{
 		spans:   make([]*Span, 0),
 		enabled: true,
+		now:     newStepClock().now,
 	}
 
 	span := tracer.StartSpan("test-operation")
@@ -34,7 +35,6 @@ func TestSpanBasics(t *testing.T) {
 	}
 
 	// Simulate some work
-	time.Sleep(10 * time.Millisecond)
 
 	span.AddMetadata("key", "value")
 	tracer.EndSpan(span)
@@ -156,14 +156,13 @@ func TestExportTimeline(t *testing.T) {
 	tracer := &Tracer{
 		spans:   make([]*Span, 0),
 		enabled: true,
+		now:     newStepClock().now,
 	}
 
 	span1 := tracer.StartSpan("operation-1")
-	time.Sleep(5 * time.Millisecond)
 	tracer.EndSpan(span1)
 
 	span2 := tracer.StartSpan("operation-2")
-	time.Sleep(5 * time.Millisecond)
 	tracer.EndSpan(span2)
 
 	var buf bytes.Buffer
@@ -374,11 +373,11 @@ func TestTracer_ExportJSON_ValidStructure(t *testing.T) {
 	tracer := &Tracer{
 		spans:   make([]*Span, 0),
 		enabled: true,
+		now:     newStepClock().now,
 	}
 
 	span := tracer.StartSpan("test-operation")
 	span.AddMetadata("key", "value")
-	time.Sleep(1 * time.Millisecond)
 	tracer.EndSpan(span)
 
 	var buf bytes.Buffer
@@ -448,14 +447,13 @@ func TestTracer_ExportTimeline_WithParentIndentation(t *testing.T) {
 	tracer := &Tracer{
 		spans:   make([]*Span, 0),
 		enabled: true,
+		now:     newStepClock().now,
 	}
 
 	parent := tracer.StartSpan("parent")
-	time.Sleep(5 * time.Millisecond)
 
 	child := tracer.StartSpan("child")
 	child.SetParent(parent.SpanID)
-	time.Sleep(5 * time.Millisecond)
 	tracer.EndSpan(child)
 
 	tracer.EndSpan(parent)
@@ -489,12 +487,12 @@ func TestTracer_ExportTimeline_Statistics(t *testing.T) {
 	tracer := &Tracer{
 		spans:   make([]*Span, 0),
 		enabled: true,
+		now:     newStepClock().now,
 	}
 
 	// Create multiple spans with the same name
 	for i := 0; i < 3; i++ {
 		span := tracer.StartSpan("repeated-op")
-		time.Sleep(5 * time.Millisecond)
 		tracer.EndSpan(span)
 	}
 
@@ -533,10 +531,10 @@ func TestTracer_ExportToFile_JSON(t *testing.T) {
 	tracer := &Tracer{
 		spans:   make([]*Span, 0),
 		enabled: true,
+		now:     newStepClock().now,
 	}
 
 	span := tracer.StartSpan("test-operation")
-	time.Sleep(1 * time.Millisecond)
 	tracer.EndSpan(span)
 
 	tmpDir := t.TempDir()
@@ -557,10 +555,10 @@ func TestTracer_ExportToFile_Timeline(t *testing.T) {
 	tracer := &Tracer{
 		spans:   make([]*Span, 0),
 		enabled: true,
+		now:     newStepClock().now,
 	}
 
 	span := tracer.StartSpan("test-operation")
-	time.Sleep(1 * time.Millisecond)
 	tracer.EndSpan(span)
 
 	tmpDir := t.TempDir()
@@ -581,10 +579,10 @@ func TestTracer_ExportToFile_TxtFormat(t *testing.T) {
 	tracer := &Tracer{
 		spans:   make([]*Span, 0),
 		enabled: true,
+		now:     newStepClock().now,
 	}
 
 	span := tracer.StartSpan("test-operation")
-	time.Sleep(1 * time.Millisecond)
 	tracer.EndSpan(span)
 
 	tmpDir := t.TempDir()
@@ -628,7 +626,6 @@ func TestGlobalExportToFile(t *testing.T) {
 	Enable()
 
 	span := StartSpan("file-test")
-	time.Sleep(1 * time.Millisecond)
 	EndSpan(span)
 
 	tmpDir := t.TempDir()
@@ -666,16 +663,15 @@ func TestSpan_DurationCalculation(t *testing.T) {
 	tracer := &Tracer{
 		spans:   make([]*Span, 0),
 		enabled: true,
+		now:     newStepClock().now,
 	}
 
 	span := tracer.StartSpan("duration-test")
-	sleepTime := 50 * time.Millisecond
-	time.Sleep(sleepTime)
 	tracer.EndSpan(span)
 
-	// Duration should be at least the sleep time
-	if span.Duration < sleepTime {
-		t.Errorf("Expected duration >= %v, got %v", sleepTime, span.Duration)
+	// The step clock advances one step per reading: start, then end.
+	if span.Duration != stepClockInterval {
+		t.Errorf("Expected duration %v, got %v", stepClockInterval, span.Duration)
 	}
 
 	// Duration should equal EndTime - StartTime
@@ -690,14 +686,13 @@ func TestTracer_GetSpans_Sorting(t *testing.T) {
 	tracer := &Tracer{
 		spans:   make([]*Span, 0),
 		enabled: true,
+		now:     newStepClock().now,
 	}
 
 	// Create spans with delays
 	span1 := tracer.StartSpan("first")
-	time.Sleep(10 * time.Millisecond)
 
 	span2 := tracer.StartSpan("second")
-	time.Sleep(10 * time.Millisecond)
 
 	span3 := tracer.StartSpan("third")
 
@@ -776,5 +771,38 @@ func TestSpanSliceIsBounded(t *testing.T) {
 
 	if tracer.dropped != 10 {
 		t.Errorf("dropped = %d, want 10", tracer.dropped)
+	}
+}
+
+func TestExportTimeline_TotalUsesLatestEnd(t *testing.T) {
+	tracer := &Tracer{enabled: true, now: newStepClock().now}
+
+	outer := tracer.StartSpan("outer") // start t+1
+	inner := tracer.StartSpan("inner") // start t+2
+	tracer.EndSpan(inner)              // end t+3
+	tracer.EndSpan(outer)              // end t+4: latest, though it started first
+
+	var buf bytes.Buffer
+	if err := tracer.ExportTimeline(&buf); err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(buf.String(), "Total time: 3.000ms") {
+		t.Errorf("total must span first start to latest end, got:\n%s", buf.String())
+	}
+}
+
+func TestStartSpanContext_NestsViaContext(t *testing.T) {
+	tracer := &Tracer{enabled: true, now: newStepClock().now}
+
+	ctx, parent := tracer.StartSpanContext(context.Background(), "parent")
+	_, child := tracer.StartSpanContext(ctx, "child")
+
+	if parent.ParentID != "" {
+		t.Errorf("root span must have no parent, got %q", parent.ParentID)
+	}
+
+	if child.ParentID != parent.SpanID {
+		t.Errorf("child parent = %q, want %q", child.ParentID, parent.SpanID)
 	}
 }

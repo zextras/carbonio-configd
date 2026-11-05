@@ -10,6 +10,7 @@
 package tracing
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -37,8 +38,9 @@ type Tracer struct {
 	spans    []*Span
 	enabled  bool
 	spanSeq  int
-	dropped  int  // Spans discarded because maxSpans was reached
-	disabled bool // Master disable flag
+	dropped  int              // Spans discarded because maxSpans was reached
+	disabled bool             // Master disable flag
+	now      func() time.Time // clock; nil means time.Now (injected by tests)
 }
 
 // maxSpans bounds the recorded spans so a long-running daemon traced for hours
@@ -53,6 +55,15 @@ var (
 		enabled: false,
 	}
 )
+
+// clock returns the current time from the injected clock, or time.Now.
+func (t *Tracer) clock() time.Time {
+	if t.now != nil {
+		return t.now()
+	}
+
+	return time.Now()
+}
 
 // Enable enables tracing.
 func (t *Tracer) Enable() {
@@ -87,12 +98,30 @@ func (t *Tracer) StartSpan(name string) *Span {
 	t.spanSeq++
 	span := &Span{
 		Name:      name,
-		StartTime: time.Now(),
+		StartTime: t.clock(),
 		SpanID:    fmt.Sprintf("span-%d", t.spanSeq),
 		Metadata:  make(map[string]string),
 	}
 
 	return span
+}
+
+type parentKey struct{}
+
+// StartSpanContext starts a span whose parent is the span carried by ctx (if
+// any) and returns a context carrying the new span, so spans started from it
+// nest under it. When tracing is disabled it returns ctx and nil.
+func (t *Tracer) StartSpanContext(ctx context.Context, name string) (context.Context, *Span) {
+	span := t.StartSpan(name)
+	if span == nil {
+		return ctx, nil
+	}
+
+	if parentID, ok := ctx.Value(parentKey{}).(string); ok {
+		span.SetParent(parentID)
+	}
+
+	return context.WithValue(ctx, parentKey{}, span.SpanID), span
 }
 
 // EndSpan marks a span as complete and records it.
@@ -101,7 +130,7 @@ func (t *Tracer) EndSpan(span *Span) {
 		return
 	}
 
-	span.EndTime = time.Now()
+	span.EndTime = t.clock()
 	span.Duration = span.EndTime.Sub(span.StartTime)
 
 	// Record a snapshot: the caller keeps the live span and may still call
@@ -210,8 +239,16 @@ func (t *Tracer) ExportTimeline(w io.Writer) error {
 	fmt.Fprintln(w, "-------")
 
 	// Calculate total time
-	lastSpan := spans[len(spans)-1]
-	totalTime := lastSpan.EndTime.Sub(refTime)
+	// Spans are sorted by start time, so the last one is not necessarily the
+	// last to finish: use the latest end time.
+	latestEnd := spans[0].EndTime
+	for _, span := range spans[1:] {
+		if span.EndTime.After(latestEnd) {
+			latestEnd = span.EndTime
+		}
+	}
+
+	totalTime := latestEnd.Sub(refTime)
 	fmt.Fprintf(w, "Total time: %.3fms\n", float64(totalTime.Microseconds())/1000)
 
 	// Group by operation name and calculate stats
@@ -311,6 +348,11 @@ func IsEnabled() bool {
 // StartSpan starts a new span using the default tracer.
 func StartSpan(name string) *Span {
 	return DefaultTracer.StartSpan(name)
+}
+
+// StartSpanContext starts a span nested under the span in ctx, using the default tracer.
+func StartSpanContext(ctx context.Context, name string) (context.Context, *Span) {
+	return DefaultTracer.StartSpanContext(ctx, name)
 }
 
 // EndSpan ends a span using the default tracer.

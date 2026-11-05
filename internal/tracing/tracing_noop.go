@@ -8,7 +8,10 @@
 // This file is compiled by default (without build tags) for zero overhead.
 package tracing
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 // Span represents a single traced operation (no-op).
 type Span struct {
@@ -28,6 +31,11 @@ func (span *Span) AddMetadata(key, value string) { // no-op: tracing disabled at
 // StartSpan returns nil (no-op).
 func StartSpan(name string) *Span {
 	return nil
+}
+
+// StartSpanContext returns ctx and nil (no-op).
+func StartSpanContext(ctx context.Context, name string) (context.Context, *Span) {
+	return ctx, nil
 }
 
 // EndSpan does nothing (no-op).
