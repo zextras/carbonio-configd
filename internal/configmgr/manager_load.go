@@ -184,7 +184,7 @@ func (cm *ConfigManager) ensureNativeLdapClient(ctx context.Context) {
 func (cm *ConfigManager) LoadAllConfigsWithRetry(ctx context.Context, maxRetries int) error {
 	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
 
-	span := tracing.StartSpan("LoadAllConfigs")
+	ctx, span := tracing.StartSpanContext(ctx, "LoadAllConfigs")
 	defer tracing.EndSpan(span)
 
 	cm.ensureNativeLdapClient(ctx)

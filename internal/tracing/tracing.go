@@ -345,11 +345,6 @@ func IsEnabled() bool {
 	return DefaultTracer.IsEnabled()
 }
 
-// StartSpan starts a new span using the default tracer.
-func StartSpan(name string) *Span {
-	return DefaultTracer.StartSpan(name)
-}
-
 // StartSpanContext starts a span nested under the span in ctx, using the default tracer.
 func StartSpanContext(ctx context.Context, name string) (context.Context, *Span) {
 	return DefaultTracer.StartSpanContext(ctx, name)

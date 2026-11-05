@@ -7,6 +7,7 @@
 package tracing
 
 import (
+	"context"
 	"testing"
 )
 
@@ -103,7 +104,7 @@ func TestStopTracing_ExportsAndDisables(t *testing.T) {
 	// Start tracing and record a span
 	Enable()
 	Clear()
-	span := StartSpan("stop-tracing-test")
+	_, span := StartSpanContext(context.Background(), "stop-tracing-test")
 	EndSpan(span)
 
 	// StopTracing should export and disable
@@ -122,7 +123,7 @@ func TestStopTracing_InvalidOutputPath(t *testing.T) {
 
 	Enable()
 	Clear()
-	span := StartSpan("test")
+	_, span := StartSpanContext(context.Background(), "test")
 	EndSpan(span)
 
 	// Should not panic even if export fails.

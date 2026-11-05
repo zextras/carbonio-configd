@@ -212,9 +212,9 @@ func TestGlobalFunctions(t *testing.T) {
 
 	Clear()
 
-	span := StartSpan("global-test")
+	_, span := StartSpanContext(context.Background(), "global-test")
 	if span == nil {
-		t.Fatal("Global StartSpan returned nil")
+		t.Fatal("Global StartSpanContext returned nil")
 	}
 
 	EndSpan(span)
@@ -625,7 +625,7 @@ func TestGlobalExportToFile(t *testing.T) {
 	Clear()
 	Enable()
 
-	span := StartSpan("file-test")
+	_, span := StartSpanContext(context.Background(), "file-test")
 	EndSpan(span)
 
 	tmpDir := t.TempDir()

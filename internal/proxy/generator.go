@@ -141,7 +141,7 @@ func discoverTemplatesInDir(fsys sys.FS, dir string) ([]string, error) {
 func (g *Generator) GenerateAll(ctx context.Context) error {
 	ctx = logger.ContextWithComponentOnce(ctx, "proxy")
 
-	span := tracing.StartSpan("GenerateAllProxyConfigs")
+	ctx, span := tracing.StartSpanContext(ctx, "GenerateAllProxyConfigs")
 	defer tracing.EndSpan(span)
 
 	startTime := time.Now()

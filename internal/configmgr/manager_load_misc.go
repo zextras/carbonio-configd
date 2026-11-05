@@ -27,7 +27,7 @@ type miscCmdResult struct {
 func (cm *ConfigManager) LoadMiscConfig(ctx context.Context) error {
 	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
 
-	span := tracing.StartSpan("LoadMiscConfig")
+	ctx, span := tracing.StartSpanContext(ctx, "LoadMiscConfig")
 	defer tracing.EndSpan(span)
 
 	t1 := time.Now()
@@ -172,7 +172,7 @@ func (cm *ConfigManager) fetchMiscCommand(ctx context.Context, cmdName string) (
 func (cm *ConfigManager) LoadGlobalConfig(ctx context.Context) error {
 	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
 
-	span := tracing.StartSpan("LoadGlobalConfig")
+	ctx, span := tracing.StartSpanContext(ctx, "LoadGlobalConfig")
 	defer tracing.EndSpan(span)
 
 	return cm.loadGlobalConfigWithRetry(ctx, 3) // Retry up to 3 times for LDAP operations

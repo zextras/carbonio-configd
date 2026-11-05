@@ -21,7 +21,7 @@ import (
 func (cm *ConfigManager) LoadLocalConfig(ctx context.Context) error {
 	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
 
-	span := tracing.StartSpan("LoadLocalConfig")
+	ctx, span := tracing.StartSpanContext(ctx, "LoadLocalConfig")
 	defer tracing.EndSpan(span)
 
 	return cm.loadLocalConfigWithRetry(ctx, 3) // Retry up to 3 times

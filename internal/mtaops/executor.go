@@ -97,7 +97,7 @@ func (e *executor) ExecutePostconfBatch(ctx context.Context, ops []PostconfOpera
 		return nil
 	}
 
-	span := tracing.StartSpan("MTA.PostconfBatch")
+	ctx, span := tracing.StartSpanContext(ctx, "MTA.PostconfBatch")
 	if span != nil {
 		span.AddMetadata("count", fmt.Sprintf("%d", len(ops)))
 	}
@@ -172,7 +172,7 @@ func (e *executor) ExecutePostconfdBatch(ctx context.Context, ops []PostconfdOpe
 		return nil
 	}
 
-	span := tracing.StartSpan("MTA.PostconfdBatch")
+	ctx, span := tracing.StartSpanContext(ctx, "MTA.PostconfdBatch")
 	if span != nil {
 		span.AddMetadata("count", fmt.Sprintf("%d", len(ops)))
 	}
@@ -342,7 +342,7 @@ func (e *executor) handleEmptyMapfileData(ctx context.Context, op MapfileOperati
 func (e *executor) ExecuteMapfile(ctx context.Context, op MapfileOperation) error {
 	ctx = logger.ContextWithComponentOnce(ctx, "mtaops")
 
-	span := tracing.StartSpan("MTA.Mapfile")
+	ctx, span := tracing.StartSpanContext(ctx, "MTA.Mapfile")
 	if span != nil {
 		span.AddMetadata("key", op.Key)
 
@@ -445,7 +445,7 @@ func (e *executor) writeMapfile(path string, data []byte) error {
 func (e *executor) ExecuteLdapWrite(ctx context.Context, op LdapOperation) error {
 	ctx = logger.ContextWithComponentOnce(ctx, "mtaops")
 
-	span := tracing.StartSpan("MTA.LdapWrite")
+	ctx, span := tracing.StartSpanContext(ctx, "MTA.LdapWrite")
 	if span != nil {
 		span.AddMetadata("key", op.Key)
 	}

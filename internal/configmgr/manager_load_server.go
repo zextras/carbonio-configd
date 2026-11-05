@@ -18,7 +18,7 @@ import (
 func (cm *ConfigManager) LoadServerConfig(ctx context.Context) error {
 	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
 
-	span := tracing.StartSpan("LoadServerConfig")
+	ctx, span := tracing.StartSpanContext(ctx, "LoadServerConfig")
 	defer tracing.EndSpan(span)
 
 	return cm.loadServerConfigWithRetry(ctx, 3) // Retry up to 3 times for LDAP operations

@@ -7,7 +7,10 @@
 // Package tracing provides noop tests compiled without the 'tracing' build tag.
 package tracing
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestNoop_Span_AddMetadata_NilReceiver(t *testing.T) {
 	var span *Span
@@ -15,10 +18,16 @@ func TestNoop_Span_AddMetadata_NilReceiver(t *testing.T) {
 	span.AddMetadata("key", "value")
 }
 
-func TestNoop_Global_StartSpan(t *testing.T) {
-	span := StartSpan("op")
+func TestNoop_Global_StartSpanContext(t *testing.T) {
+	ctx := context.Background()
+
+	got, span := StartSpanContext(ctx, "op")
 	if span != nil {
-		t.Error("noop global StartSpan() should return nil")
+		t.Error("noop global StartSpanContext() should return a nil span")
+	}
+
+	if got != ctx {
+		t.Error("noop global StartSpanContext() should return ctx unchanged")
 	}
 }
 
