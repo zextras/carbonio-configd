@@ -125,3 +125,42 @@ func TestAtomicWrite(t *testing.T) {
 		}
 	})
 }
+
+func TestAtomicWriteOwned_ChownsBeforePublish(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "owned.conf")
+
+	if err := fileutil.AtomicWriteOwned(path, []byte("x"), 0o640, os.Getuid(), os.Getgid()); err != nil {
+		t.Fatalf("AtomicWriteOwned: %v", err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if info.Mode().Perm() != 0o640 {
+		t.Errorf("mode = %v, want 0640", info.Mode().Perm())
+	}
+}
+
+func TestAtomicWriteOwned_ChownFailureLeavesNoTemp(t *testing.T) {
+	t.Parallel()
+
+	if os.Getuid() == 0 {
+		t.Skip("root can chown to any uid")
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "owned.conf")
+
+	if err := fileutil.AtomicWriteOwned(path, []byte("x"), 0o640, 0, 0); err == nil {
+		t.Fatal("expected chown to root to fail")
+	}
+
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 0 {
+		t.Errorf("expected empty dir after failed write, got %d entries", len(entries))
+	}
+}

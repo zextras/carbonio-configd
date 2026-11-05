@@ -137,26 +137,23 @@ func readLocalConfigXML(path string) (*LocalConfig, error) {
 	return &lc, nil
 }
 
-// atomicWrite writes content to the target path via fileutil.AtomicWrite,
+// atomicWrite writes content to the target path via fileutil.AtomicWriteOwned,
 // preserving the target's existing permissions, or the temp file's default
 // 0600 mode when path does not yet exist.
-// If running as root, ensures the file is owned by zextras:zextras.
+// If running as root, the temp file is chowned to zextras:zextras before the
+// rename, so the published file never carries another owner.
 func atomicWrite(path string, content []byte) error {
 	perm := os.FileMode(0o600)
 	if info, err := os.Stat(path); err == nil {
 		perm = info.Mode()
 	}
 
-	if err := fileutil.AtomicWrite(path, content, perm); err != nil {
-		return err
-	}
-
-	// If running as root, ensure file is owned by zextras
-	if err := ensureZextrasOwnership(path); err != nil {
+	uid, gid, err := zextrasIDs()
+	if err != nil {
 		return fmt.Errorf("failed to set ownership: %w", err)
 	}
 
-	return nil
+	return fileutil.AtomicWriteOwned(path, content, perm, uid, gid)
 }
 
 // withFileLock acquires an exclusive flock on a .lock file adjacent to the
@@ -165,9 +162,15 @@ func withFileLock(path string, fn func() error) error {
 	lockPath := path + ".lock"
 
 	// #nosec G304 - lock path derived from config path
-	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_WRONLY, 0o600)
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_WRONLY|syscall.O_NOFOLLOW, 0o600)
 	if err != nil {
 		return fmt.Errorf("failed to open lock file: %w", err)
+	}
+
+	if info, err := lockFile.Stat(); err != nil || !info.Mode().IsRegular() {
+		_ = lockFile.Close()
+
+		return fmt.Errorf("lock file %s is not a regular file", lockPath)
 	}
 
 	defer func() {
@@ -226,24 +229,48 @@ func flockWithTimeout(f *os.File, timeout time.Duration) error {
 	}
 }
 
-// ensureZextrasOwnership changes the ownership of the given path to zextras:zextras
-// if the current user is root. It returns nil if the user is not root, if the
-// zextras user does not exist on this system, or if ownership is changed successfully.
-func ensureZextrasOwnership(path string) error {
+// zextrasIDs returns the zextras uid/gid when running as root and the zextras
+// user exists; otherwise (-1, -1, nil), meaning "leave ownership alone". A
+// non-numeric uid/gid is an error.
+func zextrasIDs() (uid, gid int, err error) {
 	if os.Getuid() != 0 {
+		return -1, -1, nil
+	}
+
+	zUser, lookupErr := user.Lookup(config.ZextrasUser)
+	if lookupErr != nil {
+		// zextras user not present (e.g. dev/CI environment) — skip chown.
+		return -1, -1, nil //nolint:nilerr
+	}
+
+	uid, err = strconv.Atoi(zUser.Uid)
+	if err != nil {
+		return -1, -1, fmt.Errorf("invalid %s uid %q: %w", config.ZextrasUser, zUser.Uid, err)
+	}
+
+	gid, err = strconv.Atoi(zUser.Gid)
+	if err != nil {
+		return -1, -1, fmt.Errorf("invalid %s gid %q: %w", config.ZextrasUser, zUser.Gid, err)
+	}
+
+	return uid, gid, nil
+}
+
+// ensureZextrasOwnership changes the ownership of the given path to zextras:zextras
+// if the current user is root, without following a symlink at path. It returns
+// nil if the user is not root, if the zextras user does not exist on this
+// system, or if ownership is changed successfully.
+func ensureZextrasOwnership(path string) error {
+	uid, gid, err := zextrasIDs()
+	if err != nil {
+		return err
+	}
+
+	if uid < 0 {
 		return nil
 	}
 
-	zUser, err := user.Lookup(config.ZextrasUser)
-	if err != nil {
-		// zextras user not present (e.g. dev/CI environment) — skip chown.
-		return nil //nolint:nilerr
-	}
-
-	uid, _ := strconv.Atoi(zUser.Uid)
-	gid, _ := strconv.Atoi(zUser.Gid)
-
-	if err := os.Chown(path, uid, gid); err != nil {
+	if err := os.Lchown(path, uid, gid); err != nil {
 		return fmt.Errorf("failed to chown %s to zextras: %w", path, err)
 	}
 

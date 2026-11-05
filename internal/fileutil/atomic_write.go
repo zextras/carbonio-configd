@@ -16,6 +16,13 @@ import (
 // the parent directory so the rename is durable. The
 // temp file is removed on any failure path.
 func AtomicWrite(path string, data []byte, perm os.FileMode) error {
+	return AtomicWriteOwned(path, data, perm, -1, -1)
+}
+
+// AtomicWriteOwned is AtomicWrite that also chowns the temp file to uid:gid
+// before the rename, so the published file is never visible with the wrong
+// owner. A negative uid or gid leaves that id unchanged.
+func AtomicWriteOwned(path string, data []byte, perm os.FileMode, uid, gid int) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".configd-*.tmp")
 	if err != nil {
 		return fmt.Errorf("failed to create temp file: %w", err)
@@ -42,6 +49,15 @@ func AtomicWrite(path string, data []byte, perm os.FileMode) error {
 		_ = os.Remove(tmpPath)
 
 		return fmt.Errorf("failed to set permissions: %w", err)
+	}
+
+	if uid >= 0 || gid >= 0 {
+		if err := tmp.Chown(uid, gid); err != nil {
+			_ = tmp.Close()
+			_ = os.Remove(tmpPath)
+
+			return fmt.Errorf("failed to set owner: %w", err)
+		}
 	}
 
 	if err := tmp.Close(); err != nil {
