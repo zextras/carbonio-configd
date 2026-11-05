@@ -170,12 +170,24 @@ func (cm *ConfigManager) LoadAllConfigs(ctx context.Context) error {
 	return cm.LoadAllConfigsWithRetry(ctx, 1) // Default: single attempt (no retry)
 }
 
+// ensureNativeLdapClient retries building the native LDAP client while it is
+// missing. It is built once at construction; if localconfig was not ready then,
+// every load retries until it exists (it registers the LDAP commands and feeds
+// the LDAP change watcher).
+func (cm *ConfigManager) ensureNativeLdapClient(ctx context.Context) {
+	if cm.NativeLdapClient == nil {
+		cm.initNativeLdapClient(ctx)
+	}
+}
+
 // LoadAllConfigsWithRetry loads all configurations with specified retry attempts.
 func (cm *ConfigManager) LoadAllConfigsWithRetry(ctx context.Context, maxRetries int) error {
 	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
 
 	span := tracing.StartSpan("LoadAllConfigs")
 	defer tracing.EndSpan(span)
+
+	cm.ensureNativeLdapClient(ctx)
 
 	logger.DebugContext(ctx, "Fetching all configs")
 

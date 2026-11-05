@@ -262,3 +262,57 @@ func TestInitNativeLdapClient_ConfigClientNilWithoutRootPassword(t *testing.T) {
 		t.Error("ConfigLdapClient should be nil when ldap_root_password is absent")
 	}
 }
+
+func TestEnsureNativeLdapClient_RetriesUntilLocalconfigIsReady(t *testing.T) {
+	t.Parallel()
+
+	srv := ldapfake.New(t, ldapfake.Options{})
+	ready := false
+
+	load := func() (map[string]string, error) {
+		if !ready {
+			return nil, errors.New("localconfig not ready")
+		}
+
+		return map[string]string{
+			"ldap_url":             srv.URL("ldap", "127.0.0.1"),
+			"zimbra_ldap_userdn":   "uid=zimbra,cn=admins,cn=zimbra",
+			"zimbra_ldap_password": "secret",
+		}, nil
+	}
+
+	cm := &ConfigManager{
+		env:             hostEnv(),
+		loadLocalConfig: load,
+		mainConfig:      &config.Config{},
+		CommandRegistry: commands.NewRegistry(),
+	}
+
+	cm.ensureNativeLdapClient(context.Background())
+
+	if cm.NativeLdapClient != nil {
+		t.Fatal("client must stay nil while localconfig is not ready")
+	}
+
+	ready = true
+
+	cm.ensureNativeLdapClient(context.Background())
+
+	if cm.NativeLdapClient == nil {
+		t.Fatal("client not built on retry")
+	}
+
+	t.Cleanup(func() { _ = cm.NativeLdapClient.Close() })
+
+	if _, ok := cm.CommandRegistry.Commands["garpu"]; !ok {
+		t.Error("LDAP commands not registered after retry")
+	}
+
+	built := cm.NativeLdapClient
+
+	cm.ensureNativeLdapClient(context.Background())
+
+	if cm.NativeLdapClient != built {
+		t.Error("an existing client must not be rebuilt")
+	}
+}
