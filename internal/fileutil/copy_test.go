@@ -282,3 +282,32 @@ func TestCopyFile_DoesNotFollowDestSymlink(t *testing.T) {
 		t.Errorf("temp files left behind: %v", entries)
 	}
 }
+
+func TestCopyFile_PublishesWithSourceMode(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src")
+	dst := filepath.Join(dir, "dst")
+
+	if err := os.WriteFile(src, []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Chmod(src, 0o440); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := fileutil.CopyFile(context.Background(), src, dst); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := os.Stat(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if info.Mode().Perm() != 0o440 {
+		t.Errorf("dst mode = %v, want 0440", info.Mode().Perm())
+	}
+}

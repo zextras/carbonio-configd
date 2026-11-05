@@ -40,8 +40,9 @@ type writerOnly struct{ io.Writer }
 // CopyFile copies a file from src to dst, preserving content but not metadata.
 // The content is written to a temp file in dst's directory and renamed over
 // dst, so this works even when the existing file is read-only (e.g. mode 0440)
-// and is not subject to a remove/create race. The caller is responsible for
-// setting the desired permissions on the new file after this function returns.
+// and is not subject to a remove/create race. The temp file is chmodded to the
+// source's permission bits before the rename, so dst is never published with
+// the umask-derived default mode; callers needing another mode chmod afterwards.
 func CopyFile(ctx context.Context, src, dst string) error {
 	//nolint:gosec // G304: File path comes from trusted configuration
 	sourceFile, err := os.Open(src)
@@ -90,6 +91,15 @@ func CopyFile(ctx context.Context, src, dst string) error {
 		return fmt.Errorf("failed to sync destination: %w", err)
 	}
 
+	srcInfo, err := sourceFile.Stat()
+	if err != nil {
+		return fmt.Errorf("failed to stat source: %w", err)
+	}
+
+	if err := destFile.Chmod(srcInfo.Mode().Perm()); err != nil {
+		return fmt.Errorf("failed to set destination mode: %w", err)
+	}
+
 	if err := destFile.Close(); err != nil {
 		return fmt.Errorf("failed to close destination: %w", err)
 	}
@@ -119,8 +129,8 @@ func discardTemp(ctx context.Context, f *os.File, path string) {
 }
 
 // createExclusiveTemp creates a new file next to dst with O_EXCL (so it can
-// never be a pre-existing file or symlink), mode 0666 before umask like
-// os.Create.
+// never be a pre-existing file or symlink), mode 0600 (the final mode is
+// set before the rename).
 func createExclusiveTemp(dst string) (*os.File, string, error) {
 	dir := filepath.Dir(dst)
 
@@ -133,7 +143,7 @@ func createExclusiveTemp(dst string) (*os.File, string, error) {
 		tmpPath := filepath.Join(dir, ".configd-copy-"+hex.EncodeToString(suffix[:])+".tmp")
 
 		//nolint:gosec // G304: File path comes from trusted configuration
-		f, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o666)
+		f, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if err == nil {
 			return f, tmpPath, nil
 		}
