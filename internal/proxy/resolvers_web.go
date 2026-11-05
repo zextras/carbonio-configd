@@ -145,7 +145,9 @@ func (g *Generator) resolveAddHeadersDefault(ctx context.Context) (any, error) {
 	// Generate add_header directives
 	var result strings.Builder
 
-	for i, header := range headers {
+	written := 0
+
+	for _, header := range headers {
 		// Parse header into name and value
 		parts := strings.SplitN(header, ":", 2)
 		if len(parts) != 2 {
@@ -158,16 +160,52 @@ func (g *Generator) resolveAddHeadersDefault(ctx context.Context) (any, error) {
 		headerName := strings.TrimSpace(parts[0])
 		headerValue := strings.TrimSpace(parts[1])
 
+		if !validHeaderName(headerName) || !validHeaderValue(headerValue) {
+			logger.WarnContext(ctx, "Skipping header with unsafe name or value",
+				"header", truncateForLog(headerName))
+
+			continue
+		}
+
 		// Add indentation for subsequent headers
-		if i > 0 {
+		if written > 0 {
 			result.WriteString("\n    ")
 		}
+
+		written++
 
 		// Generate add_header directive
 		fmt.Fprintf(&result, "add_header %s %s;", headerName, headerValue)
 	}
 
 	return result.String(), nil
+}
+
+// validHeaderName reports whether s is an RFC 7230 token, so it cannot inject
+// extra nginx directive arguments or terminate the directive.
+func validHeaderName(s string) bool {
+	if s == "" {
+		return false
+	}
+
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		case strings.IndexByte("!#$%&'*+-.^_`|~", c) >= 0:
+		default:
+			return false
+		}
+	}
+
+	return true
+}
+
+// validHeaderValue reports whether s is safe to splice into an unquoted
+// add_header argument: no directive terminators, block delimiters or line breaks.
+func validHeaderValue(s string) bool {
+	return s != "" && !strings.ContainsAny(s, ";{}\r\n")
 }
 
 // normalizeMultiValue replaces newline and comma separators with spaces in a single pass,

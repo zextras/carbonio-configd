@@ -45,9 +45,23 @@ func TestResolveAddHeadersDefault(t *testing.T) {
 		{
 			name: "multiple headers with newlines",
 			globalData: configtest.NewConfigMapFrom(map[string]string{
-				"zimbraReverseProxyResponseHeaders": "X-Frame-Options: SAMEORIGIN\nX-XSS-Protection: 1; mode=block",
+				"zimbraReverseProxyResponseHeaders": "X-Frame-Options: SAMEORIGIN\nX-Content-Type-Options: nosniff",
 			}),
-			contains: []string{"add_header X-Frame-Options SAMEORIGIN;", "add_header X-XSS-Protection 1; mode=block;"},
+			contains: []string{"add_header X-Frame-Options SAMEORIGIN;", "add_header X-Content-Type-Options nosniff;"},
+		},
+		{
+			name: "header value with directive terminator is skipped",
+			globalData: configtest.NewConfigMapFrom(map[string]string{
+				"zimbraReverseProxyResponseHeaders": "X-A: 1; } server { listen 1",
+			}),
+			empty: true,
+		},
+		{
+			name: "header name that is not a token is skipped",
+			globalData: configtest.NewConfigMapFrom(map[string]string{
+				"zimbraReverseProxyResponseHeaders": "X A: b",
+			}),
+			empty: true,
 		},
 		{
 			name: "malformed header without colon is skipped",
