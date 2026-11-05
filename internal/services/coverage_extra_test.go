@@ -240,7 +240,7 @@ func TestKillStatsPidFile_BadPath(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	if ctl.killStatsPidFile(context.Background(), filepath.Join(t.TempDir(), "nope.pid")) {
+	if ctl.killStatsPidFile(context.Background(), filepath.Join(t.TempDir(), "nope.pid"), "") {
 		t.Error("expected false for missing pidfile")
 	}
 }
@@ -256,7 +256,7 @@ func TestKillStatsPidFile_GarbagePID(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if ctl.killStatsPidFile(context.Background(), p) {
+	if ctl.killStatsPidFile(context.Background(), p, "") {
 		t.Error("expected false for garbage pid")
 	}
 	if _, err := os.Stat(p); !os.IsNotExist(err) {
@@ -275,9 +275,9 @@ func TestKillStatsPidFile_SafeNonexistentPID(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// safePID does not exist, so killByPIDWithGroupAndSudo hits ESRCH and
-	// reports success without signaling any real process.
-	if !ctl.killStatsPidFile(context.Background(), p) {
+	// safePID does not exist, so the pidfile is stale: it is removed and
+	// reported gone without signaling any real process.
+	if !ctl.killStatsPidFile(context.Background(), p, "") {
 		t.Error("expected true for nonexistent PID (ESRCH is success)")
 	}
 }

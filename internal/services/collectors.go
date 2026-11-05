@@ -136,7 +136,7 @@ func (c *Controller) stopCollectors(ctx context.Context, def *ServiceDef) error 
 			continue
 		}
 
-		if c.killStatsPidFile(ctx, filepath.Join(c.p.statsPidDir, entry.Name())) {
+		if c.killStatsPidFile(ctx, filepath.Join(c.p.statsPidDir, entry.Name()), def.ProcessName) {
 			killed++
 		}
 	}
@@ -154,7 +154,13 @@ func (c *Controller) stopCollectors(ctx context.Context, def *ServiceDef) error 
 // with the parent), escalates to SIGKILL after a grace period, and escalates
 // via sudo when the PID is root-owned (sudo-spawned zmstat-fd). Removes the
 // pid file regardless. Returns true when the leader is confirmed gone.
-func (c *Controller) killStatsPidFile(ctx context.Context, pidPath string) bool {
+//
+// The group kill is signaled only for a positive PID that is a live process of
+// the collectors' identity (processName, see pidBelongsTo): 0 and negative
+// values would address configd's own group or every process, and a PID
+// recycled by an unrelated process must not have its whole group killed. Such
+// a stale or invalid pid file is just removed.
+func (c *Controller) killStatsPidFile(ctx context.Context, pidPath, processName string) bool {
 	data, readErr := c.env.FS.ReadFile(pidPath)
 	if readErr != nil {
 		logger.WarnContext(ctx, "Failed to read stats PID file", "path", pidPath, "error", readErr)
@@ -163,11 +169,19 @@ func (c *Controller) killStatsPidFile(ctx context.Context, pidPath string) bool 
 	}
 
 	pid, parseErr := strconv.Atoi(strings.TrimSpace(string(data)))
-	if parseErr != nil {
+	if parseErr != nil || pid <= 0 {
 		logger.WarnContext(ctx, "Invalid PID in stats PID file", "path", pidPath, "error", parseErr)
 		_ = c.env.FS.Remove(pidPath)
 
 		return false
+	}
+
+	if !c.pidBelongsTo(ctx, pid, processName) {
+		logger.InfoContext(ctx, "Stats PID file does not name a running collector, treating it as stale",
+			"path", pidPath, "pid", pid)
+		_ = c.env.FS.Remove(pidPath)
+
+		return true
 	}
 
 	killed := c.killByPIDWithGroupAndSudo(ctx, pid)

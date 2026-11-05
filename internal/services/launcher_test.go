@@ -616,7 +616,7 @@ func TestKillStatsPidFile_MissingFile(t *testing.T) {
 		t.Skip("slow: may invoke real system commands")
 	}
 	ctx := context.Background()
-	result := ctl.killStatsPidFile(ctx, "/nonexistent/path/zmstat-cpu.pid")
+	result := ctl.killStatsPidFile(ctx, "/nonexistent/path/zmstat-cpu.pid", "")
 	if result {
 		t.Error("expected false for missing pid file")
 	}
@@ -637,7 +637,7 @@ func TestKillStatsPidFile_InvalidPid(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	result := ctl.killStatsPidFile(ctx, pidFile)
+	result := ctl.killStatsPidFile(ctx, pidFile, "")
 	if result {
 		t.Error("expected false for invalid pid")
 	}

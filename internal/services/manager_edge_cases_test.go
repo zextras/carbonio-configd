@@ -465,7 +465,7 @@ func TestKillStatsPidFile_ValidPidKilled(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result := ctl.killStatsPidFile(context.Background(), pidFile)
+	result := ctl.killStatsPidFile(context.Background(), pidFile, "")
 	if !result {
 		t.Error("expected killStatsPidFile to return true for a live process")
 	}
