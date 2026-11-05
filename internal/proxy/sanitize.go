@@ -69,7 +69,23 @@ func validateDomainInfo(d *DomainInfo) error {
 		return fmt.Errorf("invalid virtual IP address %q", truncateForLog(d.VirtualIPAddress))
 	}
 
+	if !validClientCertMode(d.ClientCertMode) {
+		return fmt.Errorf("invalid client cert mode %q", truncateForLog(d.ClientCertMode))
+	}
+
 	return nil
+}
+
+// validClientCertMode reports whether mode is a value nginx accepts for
+// ssl_verify_client (or empty, meaning unset). It is spliced into the nginx
+// configuration, so anything else is rejected.
+func validClientCertMode(mode string) bool {
+	switch mode {
+	case "", "off", "on", "optional", "optional_no_ca":
+		return true
+	default:
+		return false
+	}
 }
 
 // truncateForLog bounds attacker-controlled values echoed into logs.
