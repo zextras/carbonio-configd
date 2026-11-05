@@ -142,9 +142,6 @@ func newTestCMWithExecutor(t *testing.T) (*ConfigManager, *mockMtaExecutor) {
 
 // TestDoRewrites_EmptyRewrites exercises the early-return path (len == 0).
 func TestDoRewrites_EmptyRewrites(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, _ := newTestCMWithExecutor(t)
 	// No rewrites added — must be a no-op.
 	pending, err := cm.doRewrites(context.Background(), nil)
@@ -156,9 +153,6 @@ func TestDoRewrites_EmptyRewrites(t *testing.T) {
 // TestDoRewrites_SingleFile exercises the happy path: source file exists,
 // default mode (empty), successful rename.
 func TestDoRewrites_SingleFile(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, _ := newTestCMWithExecutor(t)
 	baseDir := cm.mainConfig.BaseDir
 
@@ -182,9 +176,6 @@ func TestDoRewrites_SingleFile(t *testing.T) {
 
 // TestDoRewrites_ExplicitMode exercises the octal mode parsing branch.
 func TestDoRewrites_ExplicitMode(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, _ := newTestCMWithExecutor(t)
 	baseDir := cm.mainConfig.BaseDir
 
@@ -212,9 +203,6 @@ func TestDoRewrites_ExplicitMode(t *testing.T) {
 // TestDoRewrites_InvalidMode exercises the invalid mode error branch: the
 // rewrite fails, is reported and stays pending for the next cycle.
 func TestDoRewrites_InvalidMode(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, _ := newTestCMWithExecutor(t)
 	baseDir := cm.mainConfig.BaseDir
 
@@ -239,9 +227,6 @@ func TestDoRewrites_InvalidMode(t *testing.T) {
 
 // TestDoRewrites_MissingSourceFile exercises the os.Open error branch.
 func TestDoRewrites_MissingSourceFile(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, _ := newTestCMWithExecutor(t)
 
 	// Should not panic
@@ -255,9 +240,6 @@ func TestDoRewrites_MissingSourceFile(t *testing.T) {
 // TestDoRewrites_MultipleFiles exercises the semaphore / WaitGroup path with
 // multiple concurrent rewrites.
 func TestDoRewrites_MultipleFiles(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, _ := newTestCMWithExecutor(t)
 	baseDir := cm.mainConfig.BaseDir
 
@@ -289,9 +271,6 @@ func TestDoRewrites_MultipleFiles(t *testing.T) {
 // TestDoRewrites_CancelledContext exercises the ctx.Done() early-exit path:
 // nothing runs and every rewrite stays pending.
 func TestDoRewrites_CancelledContext(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, _ := newTestCMWithExecutor(t)
 	baseDir := cm.mainConfig.BaseDir
 
@@ -319,9 +298,6 @@ func TestDoRewrites_CancelledContext(t *testing.T) {
 
 // TestDoPostconf_Empty exercises the early-return path (no entries).
 func TestDoPostconf_Empty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, exec := newTestCMWithExecutor(t)
 	if _, err := cm.doPostconf(context.Background(), nil); err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -333,9 +309,6 @@ func TestDoPostconf_Empty(t *testing.T) {
 
 // TestDoPostconf_SingleLiteral exercises the happy path with a LITERAL value spec.
 func TestDoPostconf_SingleLiteral(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, exec := newTestCMWithExecutor(t)
 
 	_, _ = cm.doPostconf(context.Background(), []plan.Postconf{{Key: "myhostname", Value: "mail.example.com"}})
@@ -356,9 +329,6 @@ func TestDoPostconf_SingleLiteral(t *testing.T) {
 // booleans (TRUE->yes, FALSE->no), while literal values pass through unchanged.
 // This mirrors the legacy zmconfigd (jylibs/mtaconfig.py).
 func TestDoPostconf_BooleanNormalization(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 
 	tests := []struct {
 		name      string
@@ -398,9 +368,6 @@ func TestDoPostconf_BooleanNormalization(t *testing.T) {
 
 // TestDoPostconf_MultipleEntries exercises the batch with multiple entries.
 func TestDoPostconf_MultipleEntries(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, exec := newTestCMWithExecutor(t)
 
 	pending, _ := cm.doPostconf(context.Background(), []plan.Postconf{
@@ -422,9 +389,6 @@ func TestDoPostconf_MultipleEntries(t *testing.T) {
 // must leave the directive pending so the next cycle retries it, and the
 // error must be returned rather than swallowed.
 func TestDoPostconf_ExecutorError(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, exec := newTestCMWithExecutor(t)
 	exec.postconfErr = &testError{msg: "postconf command failed"}
 
@@ -440,9 +404,6 @@ func TestDoPostconf_ExecutorError(t *testing.T) {
 
 // TestDoPostconf_ResolverError exercises the resolveValueSpec error path (continue).
 func TestDoPostconf_ResolverError(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, exec := newTestCMWithExecutor(t)
 	// Override resolver to return an error
 	cm.mtaResolver = &mockMtaResolver{err: &testError{msg: "resolver failed"}}
@@ -461,9 +422,6 @@ func TestDoPostconf_ResolverError(t *testing.T) {
 
 // TestDoPostconf_CancelledContext exercises the ctx.Done() check inside the loop.
 func TestDoPostconf_CancelledContext(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, exec := newTestCMWithExecutor(t)
 	var entries []plan.Postconf
 	for i := range 5 {
@@ -484,9 +442,6 @@ func TestDoPostconf_CancelledContext(t *testing.T) {
 
 // TestDoPostconfd_Empty exercises the early-return path.
 func TestDoPostconfd_Empty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, exec := newTestCMWithExecutor(t)
 	_, _ = cm.doPostconfd(context.Background(), nil)
 	if len(exec.postconfdOps) != 0 {
@@ -496,9 +451,6 @@ func TestDoPostconfd_Empty(t *testing.T) {
 
 // TestDoPostconfd_SingleEntry exercises the happy path.
 func TestDoPostconfd_SingleEntry(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, exec := newTestCMWithExecutor(t)
 
 	pending, _ := cm.doPostconfd(context.Background(),
@@ -518,9 +470,6 @@ func TestDoPostconfd_SingleEntry(t *testing.T) {
 
 // TestDoPostconfd_MultipleEntries exercises the batch path.
 func TestDoPostconfd_MultipleEntries(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, exec := newTestCMWithExecutor(t)
 
 	_, _ = cm.doPostconfd(context.Background(), []plan.Postconfd{
@@ -537,9 +486,6 @@ func TestDoPostconfd_MultipleEntries(t *testing.T) {
 // batch must leave the directive pending so the next cycle retries it, and
 // the error must be returned rather than swallowed.
 func TestDoPostconfd_ExecutorError(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, exec := newTestCMWithExecutor(t)
 	exec.postconfdErr = &testError{msg: "postconfd failed"}
 
@@ -555,9 +501,6 @@ func TestDoPostconfd_ExecutorError(t *testing.T) {
 
 // TestDoPostconfd_CancelledContext exercises the ctx.Done() path inside loop.
 func TestDoPostconfd_CancelledContext(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, exec := newTestCMWithExecutor(t)
 	var entries []plan.Postconfd
 	for i := range 5 {
@@ -575,9 +518,6 @@ func TestDoPostconfd_CancelledContext(t *testing.T) {
 
 // TestDoLdap_Empty exercises the early-return path (no entries).
 func TestDoLdap_Empty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, exec := newTestCMWithExecutor(t)
 	_, _ = cm.doLdap(context.Background(), nil)
 	if len(exec.ldapOps) != 0 {
@@ -587,9 +527,6 @@ func TestDoLdap_Empty(t *testing.T) {
 
 // TestDoLdap_SingleLiteralEntry exercises the happy path.
 func TestDoLdap_SingleLiteralEntry(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, exec := newTestCMWithExecutor(t)
 
 	_, _ = cm.doLdap(context.Background(), []plan.Ldap{{Key: "ldap_uri", Value: "ldap://localhost"}})
@@ -607,9 +544,6 @@ func TestDoLdap_SingleLiteralEntry(t *testing.T) {
 
 // TestDoLdap_MultipleEntries exercises the full loop.
 func TestDoLdap_MultipleEntries(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, exec := newTestCMWithExecutor(t)
 
 	_, _ = cm.doLdap(context.Background(), []plan.Ldap{
@@ -626,9 +560,6 @@ func TestDoLdap_MultipleEntries(t *testing.T) {
 // TestDoLdap_ExecutorError exercises the ExecuteLdapWrite error path
 // (the entry must stay pending on failure).
 func TestDoLdap_ExecutorError(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, exec := newTestCMWithExecutor(t)
 	exec.ldapErr = &testError{msg: "ldap write failed"}
 
@@ -642,9 +573,6 @@ func TestDoLdap_ExecutorError(t *testing.T) {
 
 // TestDoLdap_ResolverError exercises the resolver error path (continue).
 func TestDoLdap_ResolverError(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, exec := newTestCMWithExecutor(t)
 	// Override resolver to return an error
 	cm.mtaResolver = &mockMtaResolver{err: &testError{msg: "resolver failed"}}
@@ -662,9 +590,6 @@ func TestDoLdap_ResolverError(t *testing.T) {
 
 // TestDoLdap_CancelledContext exercises the ctx.Done() path.
 func TestDoLdap_CancelledContext(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, exec := newTestCMWithExecutor(t)
 	var entries []plan.Ldap
 	for i := range 5 {
@@ -681,9 +606,6 @@ func TestDoLdap_CancelledContext(t *testing.T) {
 // TestDoLdap_SuccessfulWriteLeavesNothingPending checks that a successful
 // write is not retried.
 func TestDoLdap_SuccessfulWriteLeavesNothingPending(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, _ := newTestCMWithExecutor(t)
 
 	pending, err := cm.doLdap(context.Background(), []plan.Ldap{{Key: "ldap_uri", Value: "ldap://localhost"}})
@@ -702,9 +624,6 @@ func TestDoLdap_SuccessfulWriteLeavesNothingPending(t *testing.T) {
 
 // TestDoMapfile_NoEntries exercises the empty plan.
 func TestDoMapfile_NoEntries(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, exec := newTestCMWithExecutor(t)
 	if err := cm.doMapfile(context.Background(), nil); err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -716,9 +635,6 @@ func TestDoMapfile_NoEntries(t *testing.T) {
 
 // TestDoMapfile_MAPFILE exercises the MAPFILE path.
 func TestDoMapfile_MAPFILE(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, exec := newTestCMWithExecutor(t)
 
 	if err := cm.doMapfile(context.Background(), []plan.Mapfile{{Key: "myVar", Sections: []string{"mta"}}}); err != nil {
@@ -738,9 +654,6 @@ func TestDoMapfile_MAPFILE(t *testing.T) {
 
 // TestDoMapfile_MAPLOCAL exercises the MAPLOCAL (isLocal=true) path.
 func TestDoMapfile_MAPLOCAL(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, exec := newTestCMWithExecutor(t)
 
 	if err := cm.doMapfile(context.Background(),
@@ -759,9 +672,6 @@ func TestDoMapfile_MAPLOCAL(t *testing.T) {
 // TestDoMapfile_ExecutorError checks that a failing executor is reported and
 // does not stop the remaining entries.
 func TestDoMapfile_ExecutorError(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, exec := newTestCMWithExecutor(t)
 	exec.mapfileErr = &testError{msg: "mapfile failed"}
 
@@ -776,9 +686,6 @@ func TestDoMapfile_ExecutorError(t *testing.T) {
 
 // TestDoMapfile_CancelledContext exercises the ctx.Done() check.
 func TestDoMapfile_CancelledContext(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, exec := newTestCMWithExecutor(t)
 
 	var entries []plan.Mapfile
@@ -814,9 +721,6 @@ func newRestartTestCM(mgr *testutil.MockServiceManager) *ConfigManager {
 // TestApplyRestarts_QueuesPlanRestarts checks that every restart of the plan is
 // queued on the service manager with its reasons and then processed.
 func TestApplyRestarts_QueuesPlanRestarts(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 
 	var (
 		queued    = map[string][]string{}
@@ -855,9 +759,6 @@ func TestApplyRestarts_QueuesPlanRestarts(t *testing.T) {
 // TestApplyRestarts_AddRestartError exercises the queue error path: the
 // failed restart is carried into the next cycle and nothing panics.
 func TestApplyRestarts_AddRestartError(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 
 	mgr := &testutil.MockServiceManager{
 		AddRestartWithReasonsFn: func(_ context.Context, _ string, _ []string) error {
@@ -878,9 +779,6 @@ func TestApplyRestarts_AddRestartError(t *testing.T) {
 // TestApplyRestarts_ProcessRestartsError exercises the ProcessRestarts error
 // logging branch (no panic).
 func TestApplyRestarts_ProcessRestartsError(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 
 	mgr := &testutil.MockServiceManager{
 		ProcessRestartsFn: func(_ context.Context, _ func(string) string) error {
@@ -896,9 +794,6 @@ func TestApplyRestarts_ProcessRestartsError(t *testing.T) {
 // semantics: config-driven restarts never cascade through DEPENDS, so the
 // restart policy hands the (watchdog-shared) manager no enabled-service lookup.
 func TestApplyRestarts_ProcessRestartsGetsNoCascadeLookup(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 
 	called := false
 
@@ -926,9 +821,6 @@ func TestApplyRestarts_ProcessRestartsGetsNoCascadeLookup(t *testing.T) {
 
 // TestCleanupRewriteFiles_AlreadyClosed exercises the isAlreadyClosedError path.
 func TestCleanupRewriteFiles_AlreadyClosed(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 
@@ -956,9 +848,6 @@ func TestCleanupRewriteFiles_AlreadyClosed(t *testing.T) {
 
 // TestParseLocalConfigOutput_ValidInput exercises the happy path.
 func TestParseLocalConfigOutput_ValidInput(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm := newTestConfigManager(t)
 
 	output := "key1 = value1\nkey2 = value2\nkey3 = value with spaces"
@@ -979,9 +868,6 @@ func TestParseLocalConfigOutput_ValidInput(t *testing.T) {
 
 // TestParseLocalConfigOutput_EmptyOutput exercises the no-data path.
 func TestParseLocalConfigOutput_EmptyOutput(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm := newTestConfigManager(t)
 
 	// Only whitespace — TrimSpace then Split gives [""] — len==1 non-empty slice but
@@ -994,9 +880,6 @@ func TestParseLocalConfigOutput_EmptyOutput(t *testing.T) {
 
 // TestParseLocalConfigOutput_MalformedLines exercises the "skip non-pair lines" path.
 func TestParseLocalConfigOutput_MalformedLines(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm := newTestConfigManager(t)
 
 	// Mix of valid and malformed lines
@@ -1020,9 +903,6 @@ func TestParseLocalConfigOutput_MalformedLines(t *testing.T) {
 
 // TestExecuteLocalConfigCommand_CacheHit exercises the cached-output branch.
 func TestExecuteLocalConfigCommand_CacheHit(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm := newTestConfigManager(t)
 	cm.cachedLocalConfigOutput = "cached = output"
 
@@ -1037,9 +917,6 @@ func TestExecuteLocalConfigCommand_CacheHit(t *testing.T) {
 
 // TestExecuteLocalConfigCommand_CacheMiss exercises the XML-load branch (no XML → error).
 func TestExecuteLocalConfigCommand_CacheMiss(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm := newTestConfigManager(t)
 	// No cached output — will try to load XML file which doesn't exist in test env
 
@@ -1059,9 +936,6 @@ func TestExecuteLocalConfigCommand_CacheMiss(t *testing.T) {
 
 // TestLoadAllConfigsWithRetry_ContextCancelled exercises the ctx.Done() path.
 func TestLoadAllConfigsWithRetry_ContextCancelled(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: LoadAllConfigsWithRetry has retry delays")
-	}
 	cm := newTestConfigManager(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1076,9 +950,6 @@ func TestLoadAllConfigsWithRetry_ContextCancelled(t *testing.T) {
 
 // TestLoadAllConfigsWithRetry_SingleAttemptFailure exercises the "errors on final attempt" path.
 func TestLoadAllConfigsWithRetry_SingleAttemptFailure(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: LoadAllConfigsWithRetry has retry delays")
-	}
 	cm := newTestConfigManager(t)
 
 	// With maxRetries=1 and no commands available, all load functions will fail.
@@ -1091,9 +962,6 @@ func TestLoadAllConfigsWithRetry_SingleAttemptFailure(t *testing.T) {
 // TestLoadAllConfigsWithRetry_CachedLocalConfig exercises that a pre-cached local config
 // is used (cache-hit branch in executeLocalConfigCommand).
 func TestLoadAllConfigsWithRetry_CachedLocalConfig(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: LoadAllConfigsWithRetry has retry delays")
-	}
 	cm := newTestConfigManager(t)
 	// Pre-cache the local config to exercise the cache-hit branch.
 	cm.cachedLocalConfigOutput = "key = value"
@@ -1106,9 +974,6 @@ func TestLoadAllConfigsWithRetry_CachedLocalConfig(t *testing.T) {
 
 // TestRunProxygenWithConfigs_LoadConfigurationError exercises the proxy.LoadConfiguration failure path.
 func TestRunProxygenWithConfigs_LoadConfigurationError(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm := newTestConfigManager(t)
 	// With nil LDAP client and empty configs, LoadConfiguration should fail.
 	err := cm.RunProxygenWithConfigs(context.Background())
@@ -1122,9 +987,6 @@ func TestRunProxygenWithConfigs_LoadConfigurationError(t *testing.T) {
 
 // TestExecute_AllEmpty exercises Execute when the plan has no actions.
 func TestExecute_AllEmpty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, _ := newTestCMWithExecutor(t)
 	// All plan slices are empty — all goroutines return immediately.
 	err := cm.Execute(context.Background(), &plan.Plan{})
@@ -1135,9 +997,6 @@ func TestExecute_AllEmpty(t *testing.T) {
 
 // TestExecute_WithPostconfAndLdap exercises concurrent execution with real operations.
 func TestExecute_WithPostconfAndLdap(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, exec := newTestCMWithExecutor(t)
 
 	err := cm.Execute(context.Background(), &plan.Plan{
@@ -1211,9 +1070,6 @@ func TestExecute_MapfilesBeforeOtherSteps(t *testing.T) {
 // TestProcessIsRunning_IsRunningError exercises the WarnContext logging branch when
 // IsRunning returns an error.
 func TestProcessIsRunning_IsRunningError(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	ctx := context.Background()
 	cacheInstance := cache.New(ctx, false)
 
@@ -1243,9 +1099,6 @@ func TestProcessIsRunning_IsRunningError(t *testing.T) {
 // TestCleanupRewriteFiles_TmpFileRemoveError exercises the Remove error logging branch.
 // We simulate this by passing a path that exists but is a directory (not removable as file).
 func TestCleanupRewriteFiles_TmpFileIsDirectory(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	subDir := tmpDir + "/subdir"
@@ -1267,9 +1120,6 @@ func TestCleanupRewriteFiles_TmpFileIsDirectory(t *testing.T) {
 
 // TestProcessRewrite_SuccessfulRename verifies the happy path with default mode (0440).
 func TestProcessRewrite_SuccessfulRename(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, _ := newTestCMWithExecutor(t)
 	baseDir := cm.mainConfig.BaseDir
 
@@ -1300,9 +1150,6 @@ func TestProcessRewrite_SuccessfulRename(t *testing.T) {
 
 // TestProcessRewrite_InvalidMode exercises the ParseInt error branch in processRewrite.
 func TestProcessRewrite_InvalidMode(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, _ := newTestCMWithExecutor(t)
 	baseDir := cm.mainConfig.BaseDir
 
@@ -1326,9 +1173,6 @@ func TestProcessRewrite_InvalidMode(t *testing.T) {
 
 // TestProcessRewrite_MissingSourceFile exercises the os.Open error branch.
 func TestProcessRewrite_MissingSourceFile(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, _ := newTestCMWithExecutor(t)
 
 	entry := config.RewriteEntry{Value: "out.cf", Mode: ""}
@@ -1340,9 +1184,6 @@ func TestProcessRewrite_MissingSourceFile(t *testing.T) {
 
 // TestProcessRewrite_ExplicitMode verifies the 0600 mode is applied correctly.
 func TestProcessRewrite_ExplicitMode(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, _ := newTestCMWithExecutor(t)
 	baseDir := cm.mainConfig.BaseDir
 
@@ -1372,9 +1213,6 @@ func TestProcessRewrite_ExplicitMode(t *testing.T) {
 // indirectly — since we can't easily inject a mock generator, we rely on the existing
 // LoadConfiguration failure path and confirm the error propagation is clean.
 func TestRunProxygenWithConfigs_ReturnsErrorNotPanic(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, _ := newTestCMWithExecutor(t)
 	err := cm.RunProxygenWithConfigs(context.Background())
 	// The function either errors from LoadConfiguration or GenerateAll.
@@ -1388,9 +1226,6 @@ func TestRunProxygenWithConfigs_ReturnsErrorNotPanic(t *testing.T) {
 
 // TestLoadAllConfigsWithRetry_MultipleRetries exercises the retry-on-error path.
 func TestLoadAllConfigsWithRetry_MultipleRetries(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: LoadAllConfigsWithRetry has retry delays")
-	}
 	cm := newTestConfigManager(t)
 
 	// Two retries — both will fail since no localconfig XML exists.
@@ -1403,9 +1238,6 @@ func TestLoadAllConfigsWithRetry_MultipleRetries(t *testing.T) {
 // TestLoadAllConfigsWithRetry_ZeroRetries exercises the single-pass path with maxRetries=0.
 // When maxRetries is 0, the loop body runs 0 times and lastErr is nil.
 func TestLoadAllConfigsWithRetry_ZeroRetries(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: LoadAllConfigsWithRetry has retry delays")
-	}
 	cm := newTestConfigManager(t)
 	// With maxRetries=0, loop doesn't execute, returns nil immediately
 	err := cm.LoadAllConfigsWithRetry(context.Background(), 0)
@@ -1415,9 +1247,6 @@ func TestLoadAllConfigsWithRetry_ZeroRetries(t *testing.T) {
 // TestLoadAllConfigsWithRetry_LdapReadTimeoutFromLocalConfig exercises the
 // strconv.Atoi branch for ldap_read_timeout parsing.
 func TestLoadAllConfigsWithRetry_LdapReadTimeoutParsing(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: LoadAllConfigsWithRetry has retry delays")
-	}
 	cm := newTestConfigManager(t)
 	// Set a valid ldap_read_timeout so the Atoi branch is taken
 	setLocal(cm, map[string]string{"ldap_read_timeout": "30000"}) // Pre-cache local config so it doesn't fail on XML load
@@ -1434,9 +1263,6 @@ func TestLoadAllConfigsWithRetry_LdapReadTimeoutParsing(t *testing.T) {
 // In test environments without localconfig.xml, the function returns an error.
 // We verify that when cache is empty, it attempts to load XML (and errors gracefully).
 func TestExecuteLocalConfigCommand_EmptyCacheAttemptsXML(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm := newTestConfigManager(t)
 	// cachedLocalConfigOutput is "" — must attempt XML load
 	_, err := cm.executeLocalConfigCommand(context.Background())
@@ -1460,9 +1286,6 @@ func TestExecuteLocalConfigCommand_EmptyCacheAttemptsXML(t *testing.T) {
 // If rename succeeds (same fs), the test is still valid — it just exercises the
 // rename-success path, which is fine.
 func TestProcessRewrite_CopyFallback_SameFS(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, _ := newTestCMWithExecutor(t)
 	baseDir := cm.mainConfig.BaseDir
 
@@ -1491,9 +1314,6 @@ func TestProcessRewrite_CopyFallback_SameFS(t *testing.T) {
 // TestProcessRewrite_EmptySourceFile verifies an empty source file rewrites
 // to an empty destination (scanner loop body never executes).
 func TestProcessRewrite_EmptySourceFile(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, _ := newTestCMWithExecutor(t)
 	baseDir := cm.mainConfig.BaseDir
 
@@ -1515,9 +1335,6 @@ func TestProcessRewrite_EmptySourceFile(t *testing.T) {
 
 // TestProcessRewrite_ModeLoggedOnSuccess verifies rewrite with Mode set logs the mode value.
 func TestProcessRewrite_ModeLoggedOnSuccess(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, _ := newTestCMWithExecutor(t)
 	baseDir := cm.mainConfig.BaseDir
 
@@ -1546,9 +1363,6 @@ func TestProcessRewrite_ModeLoggedOnSuccess(t *testing.T) {
 // to the caller, which keeps the rewrite pending for the next cycle (see
 // TestDoRewrites_MissingSourceFile).
 func TestProcessRewrite_ErrorReturned(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, _ := newTestCMWithExecutor(t)
 
 	entry := config.RewriteEntry{Value: "out.cf", Mode: ""}
@@ -1563,9 +1377,6 @@ func TestProcessRewrite_ErrorReturned(t *testing.T) {
 // passing a non-empty directory as tmpFileName — os.Remove on a non-empty dir
 // fails with ENOTEMPTY, which triggers the WarnContext log branch.
 func TestCleanupRewriteFiles_NonEmptyDir(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 
@@ -1587,9 +1398,6 @@ func TestCleanupRewriteFiles_NonEmptyDir(t *testing.T) {
 // TestLoadAllConfigsWithRetry_ContextCancelledDuringLoad exercises the ctx.Done()
 // path inside the select that waits for load goroutines.
 func TestLoadAllConfigsWithRetry_ContextCancelledDuringLoad(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: LoadAllConfigsWithRetry has retry delays")
-	}
 	cm := newTestConfigManager(t)
 
 	// Use a very short timeout so the context cancels while goroutines are running
@@ -1604,9 +1412,6 @@ func TestLoadAllConfigsWithRetry_ContextCancelledDuringLoad(t *testing.T) {
 // TestLoadAllConfigsWithRetry_RetryOnError exercises the retry-on-error path
 // when maxRetries > 1 and all attempts fail (no localconfig XML in test env).
 func TestLoadAllConfigsWithRetry_RetryOnError(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: LoadAllConfigsWithRetry has retry delays")
-	}
 	cm := newTestConfigManager(t)
 	// With maxRetries=2, the first failure triggers a retry
 	// (2s sleep is in the impl, but tests should be fast — we accept the delay)
@@ -1620,9 +1425,6 @@ func TestLoadAllConfigsWithRetry_RetryOnError(t *testing.T) {
 // TestLoadAllConfigsWithRetry_WithCachedLocalConfig exercises the successful
 // load path for the lc (LocalConfig) goroutine by pre-caching local config.
 func TestLoadAllConfigsWithRetry_WithCachedLocalConfig_AndCommands(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: LoadAllConfigsWithRetry has retry delays")
-	}
 	cm := newTestConfigManager(t)
 	// Pre-cache to make the lc goroutine succeed
 	cm.cachedLocalConfigOutput = "ldap_url = ldap://localhost:389\nzimbra_server_hostname = testhost"
@@ -1639,9 +1441,6 @@ func TestLoadAllConfigsWithRetry_WithCachedLocalConfig_AndCommands(t *testing.T)
 // XML load, the result is stored in cachedLocalConfigOutput.
 // This path is only exercised when a real localconfig.xml exists.
 func TestExecuteLocalConfigCommand_CachesOnSuccess(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm := newTestConfigManager(t)
 	// If no cached output and no XML, we get an error. Accept either outcome.
 	result, err := cm.executeLocalConfigCommand(context.Background())
@@ -1665,9 +1464,6 @@ func TestExecuteLocalConfigCommand_CachesOnSuccess(t *testing.T) {
 // TestRunProxygenWithConfigs_WithPopulatedState exercises RunProxygenWithConfigs
 // with some state populated (still fails at LoadConfiguration but exercises more code).
 func TestRunProxygenWithConfigs_WithPopulatedState(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	cm, _ := newTestCMWithExecutor(t)
 
 	// Populate some state to exercise the parameter-passing code paths

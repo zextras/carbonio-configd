@@ -21,9 +21,6 @@ import (
 
 // TestParseMtaConfig_ValidFile tests parsing a valid zmconfigd.cf file
 func TestParseMtaConfig_ValidFile(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	tempDir := t.TempDir()
 	configFile := filepath.Join(tempDir, "zmconfigd.cf")
 
@@ -107,9 +104,6 @@ SECTION mta DEPENDS amavis
 
 // TestParseMtaConfig_InvalidFile tests parsing with non-existent file
 func TestParseMtaConfig_InvalidFile(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	tempDir := t.TempDir()
 	configFile := filepath.Join(tempDir, "nonexistent.cf")
 
@@ -124,9 +118,6 @@ func TestParseMtaConfig_InvalidFile(t *testing.T) {
 // TestParseMtaConfig_EmptyFile tests that an empty config file is rejected,
 // mirroring jylibs/mtaconfig.py load() which raises on an empty cf.
 func TestParseMtaConfig_EmptyFile(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	tempDir := t.TempDir()
 	configFile := filepath.Join(tempDir, "empty.cf")
 
@@ -145,9 +136,6 @@ func TestParseMtaConfig_EmptyFile(t *testing.T) {
 
 // TestParseMtaConfig_WithConditionals tests parsing conditionals
 func TestParseMtaConfig_WithConditionals(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	tempDir := t.TempDir()
 	configFile := filepath.Join(tempDir, "zmconfigd.cf")
 
@@ -228,9 +216,6 @@ func TestParseMtaConfig_WithNestedConditionals(t *testing.T) {
 
 // TestParseMtaConfig_LDAPLookup tests LDAP directive with lookup
 func TestParseMtaConfig_LDAPLookup(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	tempDir := t.TempDir()
 	configFile := filepath.Join(tempDir, "zmconfigd.cf")
 
@@ -285,9 +270,6 @@ func TestParseMtaConfig_LDAPLookup(t *testing.T) {
 
 // TestParseMtaConfig_LDAPLookupFailure tests LDAP directive with failed lookup
 func TestParseMtaConfig_LDAPLookupFailure(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	tempDir := t.TempDir()
 	configFile := filepath.Join(tempDir, "zmconfigd.cf")
 
@@ -326,9 +308,6 @@ func TestParseMtaConfig_LDAPLookupFailure(t *testing.T) {
 
 // TestParseMtaConfig_InvalidLDAPSpec tests LDAP directive with invalid format
 func TestParseMtaConfig_InvalidLDAPSpec(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	tempDir := t.TempDir()
 	configFile := filepath.Join(tempDir, "zmconfigd.cf")
 
@@ -363,9 +342,6 @@ func TestParseMtaConfig_InvalidLDAPSpec(t *testing.T) {
 
 // TestParseMtaConfig_MultipleRewritesAndRestarts tests multiple REWRITE and RESTART directives
 func TestParseMtaConfig_MultipleRewritesAndRestarts(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	tempDir := t.TempDir()
 	configFile := filepath.Join(tempDir, "zmconfigd.cf")
 
@@ -408,9 +384,6 @@ func TestParseMtaConfig_MultipleRewritesAndRestarts(t *testing.T) {
 
 // TestParseMtaConfig_ServiceConditional tests SERVICE conditional
 func TestParseMtaConfig_ServiceConditional(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	tempDir := t.TempDir()
 	configFile := filepath.Join(tempDir, "zmconfigd.cf")
 
@@ -468,9 +441,6 @@ func TestParseMtaConfig_ServiceConditional(t *testing.T) {
 
 // TestParseMtaConfig_ProxygenDirective tests PROXYGEN directive
 func TestParseMtaConfig_ProxygenDirective(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	tempDir := t.TempDir()
 	configFile := filepath.Join(tempDir, "zmconfigd.cf")
 
@@ -503,9 +473,6 @@ func TestParseMtaConfig_ProxygenDirective(t *testing.T) {
 
 // TestParseMtaConfig_AllDirectiveTypes tests parsing with all directive types
 func TestParseMtaConfig_AllDirectiveTypes(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	tempDir := t.TempDir()
 	configFile := filepath.Join(tempDir, "zmconfigd.cf")
 

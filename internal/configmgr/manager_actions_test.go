@@ -80,9 +80,6 @@ func newTestTransformer(cm *ConfigManager) *transformer.Transformer {
 
 // TestProcessIsRunning tests the ProcessIsRunning method
 func TestProcessIsRunning(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	ctx := context.Background()
 	cacheInstance := cache.New(ctx, false)
 
@@ -126,9 +123,6 @@ func TestProcessIsRunning(t *testing.T) {
 
 // TestProcessIsNotRunning tests the ProcessIsNotRunning method
 func TestProcessIsNotRunning(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	ctx := context.Background()
 	cacheInstance := cache.New(ctx, false)
 
@@ -172,9 +166,6 @@ func TestProcessIsNotRunning(t *testing.T) {
 
 // TestIsAlreadyClosedError tests the isAlreadyClosedError utility function
 func TestIsAlreadyClosedError(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 
 	// A real double-close reproduces the exact error shape production code
 	// hits: an *fs.PathError wrapping os.ErrClosed.
@@ -245,9 +236,6 @@ func (e *testError) Error() string {
 
 // TestParseValueSpec tests the parseValueSpec utility function
 func TestParseValueSpec(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	tests := []struct {
 		name         string
 		valueSpec    string
@@ -375,9 +363,6 @@ func newApplyRestartsCM(t *testing.T, restartsEnabled bool) (*ConfigManager, *[]
 
 // TestApplyRestarts tests that the plan's restarts reach the service manager.
 func TestApplyRestarts(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	ctx := context.Background()
 
 	t.Run("restart services from plan", func(t *testing.T) {
@@ -421,9 +406,6 @@ func TestApplyRestarts(t *testing.T) {
 
 // TestClearLocalConfigCache tests the ClearLocalConfigCache method
 func TestClearLocalConfigCache(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	ctx := context.Background()
 	cacheInstance := cache.New(ctx, false)
 
@@ -477,9 +459,6 @@ func TestClearLocalConfigCache(t *testing.T) {
 
 // TestCleanupRewriteFiles tests the cleanupRewriteFiles utility function
 func TestCleanupRewriteFiles(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 
@@ -648,9 +627,6 @@ func rewriteSources(pl *plan.Plan) []string {
 
 // TestPlan_SectionSelection tests which sections a cycle processes.
 func TestPlan_SectionSelection(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	ctx := context.Background()
 
 	t.Run("plan with first run", func(t *testing.T) {
@@ -765,9 +741,6 @@ func TestPlan_SectionSelection(t *testing.T) {
 // section's own restart is skipped, while a sibling section whose variables
 // changed still gets its restart planned.
 func TestPlan_ForcedSectionRestartsAreSectionScoped(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	ctx := context.Background()
 
 	newSection := func(name string) *config.MtaConfigSection {
@@ -825,9 +798,6 @@ func TestPlan_ForcedSectionRestartsAreSectionScoped(t *testing.T) {
 
 // TestLookUpConfig tests the LookUpConfig method
 func TestLookUpConfig(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	ctx := context.Background()
 	cacheInstance := cache.New(ctx, false)
 	tmpDir := t.TempDir()
@@ -1221,9 +1191,6 @@ func TestLookUpConfig(t *testing.T) {
 
 // TestPlan_SectionActions tests the actions Plan derives from a section.
 func TestPlan_SectionActions(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	ctx := context.Background()
 
 	t.Run("plan rewrites", func(t *testing.T) {
@@ -1477,9 +1444,6 @@ func TestPlan_SectionActions(t *testing.T) {
 // tracked service looks disabled the cycle is aborted and the requested
 // sections stay queued for the next attempt.
 func TestPlan_ErrAllServicesDisabledKeepsRequests(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	ctx := context.Background()
 
 	cm := newPlanTestCM(t)
@@ -1497,9 +1461,6 @@ func TestPlan_ErrAllServicesDisabledKeepsRequests(t *testing.T) {
 // TestExecute_ErrorCollection verifies that Execute lets every step finish and
 // reports the failure of the ones that failed, without deadlocking.
 func TestExecute_ErrorCollection(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	ctx := context.Background()
 
 	cm := newPlanTestCM(t)
@@ -1521,9 +1482,6 @@ func TestExecute_ErrorCollection(t *testing.T) {
 // TestExecute_ErrorSurfacing verifies that errors from rewrite operations are
 // surfaced through Execute and the failed rewrite is carried for a retry.
 func TestExecute_ErrorSurfacing(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 	ctx := context.Background()
 
 	cm := newPlanTestCM(t)
@@ -1556,9 +1514,6 @@ func TestExecute_ErrorSurfacing(t *testing.T) {
 // rewrite that failed in one cycle is planned again (as a retry) in the next
 // one even though no variable changed.
 func TestPlan_RewriteRetriedUntilSuccess(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: configmgr test may have retry delays")
-	}
 
 	cm := newPlanTestCM(t)
 	cm.Transformer = newTestTransformer(cm)

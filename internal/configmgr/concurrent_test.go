@@ -6,44 +6,66 @@ package configmgr
 
 import (
 	"context"
-	"github.com/zextras/carbonio-configd/internal/config"
-	"github.com/zextras/carbonio-configd/internal/ldap"
-	"github.com/zextras/carbonio-configd/internal/state"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/zextras/carbonio-configd/internal/cache"
+	"github.com/zextras/carbonio-configd/internal/commands"
+	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/state"
+	"github.com/zextras/carbonio-configd/internal/testutil"
+	"github.com/zextras/carbonio-configd/internal/transformer"
 )
+
+// newFakeBackedConfigManager returns a manager whose LDAP-backed loaders
+// (global and server attributes) and localconfig are served by in-memory fakes,
+// so LoadAllConfigs runs end to end without a Carbonio installation.
+func newFakeBackedConfigManager(t *testing.T) *ConfigManager {
+	t.Helper()
+
+	baseDir := t.TempDir()
+
+	cm := &ConfigManager{
+		env: hostEnv(),
+		mainConfig: &config.Config{
+			BaseDir:    baseDir,
+			ConfigFile: baseDir + "/zmconfigd.cf",
+			Hostname:   "testhost",
+		},
+		State:           state.NewState(),
+		Cache:           cache.New(context.Background(), false),
+		ServiceMgr:      &testutil.MockServiceManager{},
+		CommandRegistry: commands.NewRegistry(),
+		loadLocalConfig: func() (map[string]string, error) {
+			return map[string]string{"zmconfigd_listen_port": "7171", "zimbra_server_hostname": "testhost"}, nil
+		},
+	}
+	cm.CommandRegistry.GlobalAttrs = func(context.Context) (map[string]string, error) {
+		return map[string]string{"zimbraSmtpPort": "25"}, nil
+	}
+	cm.CommandRegistry.ServerAttrs = func(context.Context, string) (map[string]string, error) {
+		return map[string]string{"zimbraServiceEnabled": "mta"}, nil
+	}
+	cm.Transformer = transformer.NewTransformer(cm)
+
+	return cm
+}
 
 // TestConfigManager_ConcurrentLoading tests concurrent configuration loading.
 // This test validates thread safety and ensures no race conditions exist
 // when multiple goroutines attempt to load configurations simultaneously.
 func TestConfigManager_ConcurrentLoading(t *testing.T) {
 	ctx := context.Background()
-	if testing.Short() {
-		t.Skip("Skipping concurrent loading test in short mode")
-	}
 
-	mainCfg, err := config.NewConfigWithHostname("")
-	if err != nil {
-		t.Fatalf("NewConfig failed: %v", err)
-	}
-	mainCfg.Progname = "configd-concurrent-test"
-	appState := state.NewState()
-	ldapClient := ldap.NewLdap(context.Background(), mainCfg)
+	cm := newFakeBackedConfigManager(t)
+	require.NoError(t, cm.LoadAllConfigs(context.Background()))
 
-	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv(), hostServices())
-
-	// Try initial load to check if environment is available
-	err = cm.LoadAllConfigs(context.Background())
-	if err != nil {
-		t.Skipf("Skipping test - requires live Carbonio environment: %v", err)
-	}
-
-	const numGoroutines = 20
-	const numIterations = 10
+	const numGoroutines = 8
+	const numIterations = 3
 
 	var wg sync.WaitGroup
 	var successCount atomic.Int32
@@ -57,8 +79,8 @@ func TestConfigManager_ConcurrentLoading(t *testing.T) {
 			defer wg.Done()
 
 			for j := range numIterations {
-				// Each goroutine gets its own ConfigManager instance
-				localCM := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv(), hostServices())
+				// Each iteration gets its own ConfigManager instance
+				localCM := newFakeBackedConfigManager(t)
 
 				err := localCM.LoadAllConfigs(context.Background())
 				if err != nil {
@@ -119,25 +141,9 @@ func TestConfigManager_ConcurrentLoading(t *testing.T) {
 // This validates that configuration reads are safe while loads are happening.
 func TestConfigManager_ConcurrentLoadAndLookup(t *testing.T) {
 	ctx := context.Background()
-	if testing.Short() {
-		t.Skip("Skipping concurrent load and lookup test in short mode")
-	}
 
-	mainCfg, err := config.NewConfigWithHostname("")
-	if err != nil {
-		t.Fatalf("NewConfig failed: %v", err)
-	}
-	mainCfg.Progname = "configd-concurrent-test"
-	appState := state.NewState()
-	ldapClient := ldap.NewLdap(context.Background(), mainCfg)
-
-	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv(), hostServices())
-
-	// Initial load
-	err = cm.LoadAllConfigs(context.Background())
-	if err != nil {
-		t.Skipf("Skipping test - requires live Carbonio environment: %v", err)
-	}
+	cm := newFakeBackedConfigManager(t)
+	require.NoError(t, cm.LoadAllConfigs(context.Background()))
 
 	const duration = 10 * time.Second
 	const numReaders = 10
@@ -241,26 +247,8 @@ func TestConfigManager_ConcurrentLoadAndLookup(t *testing.T) {
 // lookups behind change detection. This validates that Observe (the read side
 // of Plan) is thread-safe.
 func TestConfigManager_ConcurrentObserve(t *testing.T) {
-	ctx := context.Background()
-	if testing.Short() {
-		t.Skip("Skipping concurrent observe test in short mode")
-	}
-
-	mainCfg, err := config.NewConfigWithHostname("")
-	if err != nil {
-		t.Fatalf("NewConfig failed: %v", err)
-	}
-	mainCfg.Progname = "configd-concurrent-test"
-	appState := state.NewState()
-	ldapClient := ldap.NewLdap(context.Background(), mainCfg)
-
-	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv(), hostServices())
-
-	// Initial load
-	err = cm.LoadAllConfigs(context.Background())
-	if err != nil {
-		t.Skipf("Skipping test - requires live Carbonio environment: %v", err)
-	}
+	cm := newFakeBackedConfigManager(t)
+	require.NoError(t, cm.LoadAllConfigs(context.Background()))
 
 	const numGoroutines = 10
 	const numIterations = 50
@@ -311,25 +299,9 @@ func TestConfigManager_ConcurrentObserve(t *testing.T) {
 // Run with: go test -race -run=TestConfigManager_RaceConditions
 func TestConfigManager_RaceConditions(t *testing.T) {
 	ctx := context.Background()
-	if testing.Short() {
-		t.Skip("Skipping race condition test in short mode")
-	}
 
-	mainCfg, err := config.NewConfigWithHostname("")
-	if err != nil {
-		t.Fatalf("NewConfig failed: %v", err)
-	}
-	mainCfg.Progname = "configd-race-test"
-	appState := state.NewState()
-	ldapClient := ldap.NewLdap(context.Background(), mainCfg)
-
-	cm := NewConfigManager(ctx, mainCfg, appState, ldapClient, nil, hostEnv(), hostServices())
-
-	// Try initial load
-	err = cm.LoadAllConfigs(context.Background())
-	if err != nil {
-		t.Skipf("Skipping test - requires live Carbonio environment: %v", err)
-	}
+	cm := newFakeBackedConfigManager(t)
+	require.NoError(t, cm.LoadAllConfigs(context.Background()))
 
 	const numWorkers = 5
 	const duration = 3 * time.Second
