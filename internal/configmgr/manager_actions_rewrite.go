@@ -32,7 +32,7 @@ func (cm *ConfigManager) runStep(
 	step func(context.Context) error,
 ) {
 	wg.Go(func() {
-		if err := step(ctx); err != nil {
+		if err := runRecovered(ctx, "rewrite-step", func() error { return step(ctx) }); err != nil {
 			errChan <- err
 		}
 	})
@@ -143,7 +143,9 @@ func (cm *ConfigManager) doRewrites(ctx context.Context, entries []plan.Rewrite)
 			defer func() { <-semaphore }()
 
 			re := config.RewriteEntry{Value: entry.Target, Mode: entry.Mode}
-			record(entry.Source, cm.rewriteWorker(ctx, entry.Source, re, i+1, totalFiles))
+			record(entry.Source, runRecovered(ctx, "rewrite-worker", func() error {
+				return cm.rewriteWorker(ctx, entry.Source, re, i+1, totalFiles)
+			}))
 		}()
 	}
 
