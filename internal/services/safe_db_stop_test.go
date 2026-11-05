@@ -51,6 +51,9 @@ type mysqlRecorder struct {
 	stmts   []string
 	engines string
 	status  func(n int) string
+	// argvs and envs hold the argv line and the Env of every client call.
+	argvs []string
+	envs  [][]string
 }
 
 func (m *mysqlRecorder) install(ctl *Controller, f *systest.Fakes) {
@@ -61,6 +64,8 @@ func (m *mysqlRecorder) install(ctl *Controller, f *systest.Fakes) {
 		defer m.mu.Unlock()
 
 		m.stmts = append(m.stmts, stmt)
+		m.argvs = append(m.argvs, c.String())
+		m.envs = append(m.envs, c.Env)
 
 		switch {
 		case stmt == "show engines;":
@@ -94,6 +99,22 @@ func (m *mysqlRecorder) count(prefix string) int {
 	}
 
 	return n
+}
+
+// assertPasswordInEnvOnly checks every client call carried the password in
+// MYSQL_PWD and none of them on argv (visible in /proc/<pid>/cmdline).
+func (m *mysqlRecorder) assertPasswordInEnvOnly(t *testing.T) {
+	t.Helper()
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	require.NotEmpty(t, m.envs)
+
+	for i, env := range m.envs {
+		assert.Contains(t, env, "MYSQL_PWD="+dbPassword)
+		assert.NotContains(t, m.argvs[i], dbPassword)
+	}
 }
 
 const enginesEnabled = "Engine\tSupport\nInnoDB\tDEFAULT\tSupports transactions\n"
@@ -267,7 +288,7 @@ func TestFlushDirtyPages_SetsPctThenPollsUntilZero(t *testing.T) {
 	}
 
 	assert.Less(t, setIdx, statusIdx)
-	assert.Contains(t, strings.Join(f.Exec.Lines(), "\n"), "--password="+dbPassword)
+	m.assertPasswordInEnvOnly(t)
 	assert.Empty(t, f.Proc.Signals(), "the flush never signals the server")
 }
 
