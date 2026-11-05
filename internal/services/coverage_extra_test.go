@@ -403,7 +403,7 @@ func TestWaitForSDNotify_CtxCancelled(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	dir := t.TempDir()
+	dir := socketDir(t)
 	addr := &net.UnixAddr{Name: filepath.Join(dir, "s.sock"), Net: "unixgram"}
 	conn, err := net.ListenUnixgram("unixgram", addr)
 	if err != nil {
@@ -424,7 +424,7 @@ func TestWaitForSDNotify_ReadyReceived(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	dir := t.TempDir()
+	dir := socketDir(t)
 	sockPath := filepath.Join(dir, "r.sock")
 	addr := &net.UnixAddr{Name: sockPath, Net: "unixgram"}
 	conn, err := net.ListenUnixgram("unixgram", addr)
@@ -455,7 +455,7 @@ func TestWaitForSDNotify_ChildExitFailsFast(t *testing.T) {
 
 	ctl := newRealController(t)
 
-	dir := t.TempDir()
+	dir := socketDir(t)
 	addr := &net.UnixAddr{Name: filepath.Join(dir, "e.sock"), Net: "unixgram"}
 	conn, err := net.ListenUnixgram("unixgram", addr)
 	if err != nil {

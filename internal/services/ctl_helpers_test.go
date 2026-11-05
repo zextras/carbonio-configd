@@ -6,9 +6,12 @@ package services
 
 import (
 	"context"
+	"os"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/zextras/carbonio-configd/internal/sys"
 	"github.com/zextras/carbonio-configd/internal/sys/systest"
@@ -62,9 +65,35 @@ func newFakeController(t *testing.T, opts ...Option) (*Controller, *systest.Fake
 	return ctl, f
 }
 
+// maxSocketDirLen is the longest directory path socketDir accepts: sun_path
+// holds 108 bytes including the NUL, and the longest notify socket name the
+// tests bind ("/notify-<service>.sock", service names up to ~20 bytes, 33 in
+// all) must still fit under it, with some slack.
+const maxSocketDirLen = 70
+
+// socketDir returns a fresh private directory short enough to hold a unix
+// socket. t.TempDir() is unsuitable for that: it embeds the test name and
+// honours GOTMPDIR (which `go test` users routinely point at a long path),
+// so the resulting socket path can exceed the 108-byte sun_path limit and
+// bind fails with EINVAL. The directory lives under os.TempDir() (TMPDIR) and
+// the helper fails the test loudly if even that is too long for a socket.
+func socketDir(t *testing.T) string {
+	t.Helper()
+
+	dir, err := os.MkdirTemp("", "cfgd")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+
+	require.LessOrEqual(t, len(dir), maxSocketDirLen,
+		"temp dir %q is too long to hold a unix socket (sun_path is 108 bytes): set TMPDIR to a shorter path", dir)
+
+	return dir
+}
+
 // newRealController returns a Controller over the real host (sys.Real()) in
 // legacy mode, with the production /opt/zextras layout (registry paths are
-// literal in the assertions) and a fresh temp run dir, with an empty
+// literal in the assertions) and a fresh short temp run dir (see socketDir:
+// the sd_notify sockets live in it), with an empty
 // localconfig. Tests that write files point the relevant ctl.p field at a
 // temp dir. Use it when a test is about real files, real processes
 // or real signals; options override the defaults (later options win).
@@ -73,7 +102,7 @@ func newRealController(t *testing.T, opts ...Option) *Controller {
 
 	env := withMode(sys.Real(), false)
 	defaults := []Option{
-		WithRunDir(t.TempDir()),
+		WithRunDir(socketDir(t)),
 		WithConfigLoader(emptyConfig),
 	}
 
