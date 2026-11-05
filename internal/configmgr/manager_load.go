@@ -101,7 +101,7 @@ func runLoadAttempt(
 			logger.DebugContext(loadCtx, "Starting config load", "thread", lf.name)
 
 			threadStart := time.Now()
-			loadErr := lf.fn(loadCtx)
+			loadErr := runRecovered(loadCtx, "load-"+lf.name, func() error { return lf.fn(loadCtx) })
 
 			logger.DebugContext(loadCtx, "Timing: Config load duration",
 				"thread", lf.name,

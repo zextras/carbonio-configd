@@ -40,7 +40,16 @@ func (cm *ConfigManager) LoadMiscConfig(ctx context.Context) error {
 
 	for _, cmdName := range miscCommands {
 		wg.Go(func() {
-			result := cm.executeMiscCommand(ctx, cmdName)
+			var result miscCmdResult
+
+			if err := runRecovered(ctx, "misc-"+cmdName, func() error {
+				result = cm.executeMiscCommand(ctx, cmdName)
+
+				return nil
+			}); err != nil {
+				result = miscCmdResult{cmdName: cmdName, err: err}
+			}
+
 			resultsChan <- result
 		})
 	}
