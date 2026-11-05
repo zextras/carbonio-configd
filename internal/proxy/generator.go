@@ -394,11 +394,7 @@ func (g *Generator) ProcessTemplateWithProcessor(
 	// Load template
 	tpl, err := processor.LoadTemplate(ctx, templatePath)
 	if err != nil {
-		logger.ErrorContext(ctx, "Failed to load template",
-			"template", templatePath,
-			"error", err)
-
-		return fmt.Errorf("failed to load template: %w", err)
+		return fmt.Errorf("failed to load template %s: %w", templatePath, err)
 	}
 
 	logger.DebugContext(ctx, "Template loaded",
@@ -408,11 +404,7 @@ func (g *Generator) ProcessTemplateWithProcessor(
 	// Process template
 	result, err := processor.ProcessTemplate(ctx, tpl)
 	if err != nil {
-		logger.ErrorContext(ctx, "Failed to process template",
-			"template", templatePath,
-			"error", err)
-
-		return fmt.Errorf("failed to process template: %w", err)
+		return fmt.Errorf("failed to process template %s: %w", templatePath, err)
 	}
 
 	logger.DebugContext(ctx, "Template processed",
@@ -429,7 +421,7 @@ func (g *Generator) ProcessTemplateWithProcessor(
 		"byte_count", len(result))
 
 	if err := g.writeFile(ctx, outputPath, []byte(result)); err != nil {
-		return fmt.Errorf("failed to write output: %w", err)
+		return fmt.Errorf("failed to write output %s: %w", outputPath, err)
 	}
 
 	logger.DebugContext(ctx, "Successfully wrote file",
