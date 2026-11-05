@@ -6,38 +6,22 @@ package services
 
 import (
 	"context"
-	"os/exec"
 	"testing"
+
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
-
-// startFakeProcess runs a process whose /proc/<pid>/cmdline contains argv
-// (`sh -c "sleep 30; :" argv...`; the trailing ":" keeps the shell from
-// exec'ing sleep and losing argv) and kills it when the test ends.
-func startFakeProcess(t *testing.T, argv ...string) {
-	t.Helper()
-
-	cmd := exec.CommandContext(context.Background(), "sh", append([]string{"-c", "sleep 30; :"}, argv...)...)
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start fake process: %v", err)
-	}
-
-	t.Cleanup(func() {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-	})
-}
 
 // A process that merely mentions the service name (Consul Connect sidecar
 // "-sidecar-for carbonio-<svc>", a tail on its log, ...) must not make the
 // service look running in legacy mode; the service binary itself must.
 // Before CO-4569 the bare-name ProcessName made memcached look "already
 // running" at boot, so zmcontrol skipped starting it.
+//
+// The process table is the systest fake, so the verdict depends neither on the
+// host's /proc (a really running slapd/memcached, a concurrent copy of this
+// test) nor on real child processes.
 func TestServiceStatus_IgnoresProcessesMentioningTheName(t *testing.T) {
 	t.Parallel()
-
-	ctl := newRealController(t)
-
-	ctl.pinMode(false)
 
 	for _, tc := range []struct {
 		service   string
@@ -55,22 +39,18 @@ func TestServiceStatus_IgnoresProcessesMentioningTheName(t *testing.T) {
 		{svcLdap, []string{"less", "/opt/zextras/log/slapd.log"}},
 	} {
 		t.Run(tc.service, func(t *testing.T) {
+			t.Parallel()
+
+			ctl, f := newFakeController(t)
 			def := ctl.LookupService(tc.service)
-			if running, _ := ctl.isRunningByPidFile(def.PidFile); running {
-				t.Skipf("%s pid file reports a live process on this host", tc.service)
-			}
 
-			if ctl.pidFromProcessName(context.Background(), def.ProcessName) > 0 {
-				t.Skipf("%s is really running on this host", tc.service)
-			}
-
-			startFakeProcess(t, tc.unrelated...)
+			f.Proc.Add(sys.ProcEntry{PID: 4001, Argv: tc.unrelated})
 
 			if running, err := ctl.ServiceStatus(context.Background(), tc.service); err != nil || running {
 				t.Errorf("unrelated process %v: ServiceStatus = %v, %v; want false, nil", tc.unrelated, running, err)
 			}
 
-			startFakeProcess(t, def.ProcessName, "-d")
+			f.Proc.Add(sys.ProcEntry{PID: 4002, Argv: []string{def.ProcessName, "-d"}})
 
 			if running, err := ctl.ServiceStatus(context.Background(), tc.service); err != nil || !running {
 				t.Errorf("process %q: ServiceStatus = %v, %v; want true, nil", def.ProcessName, running, err)
