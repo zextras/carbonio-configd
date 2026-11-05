@@ -5,6 +5,7 @@
 package cache
 
 import (
+	"strconv"
 	"testing"
 )
 
@@ -76,9 +77,8 @@ func BenchmarkCache_GetCacheKeys(b *testing.B) {
 		return "config_value", nil
 	}
 
-	for range 100 {
-		key := "config_key"
-		_, err := cache.GetCachedConfig(ctx, key, fetchFunc)
+	for i := range 100 {
+		_, err := cache.GetCachedConfig(ctx, "config_key_"+strconv.Itoa(i), fetchFunc)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -99,9 +99,8 @@ func BenchmarkCache_ClearCache(b *testing.B) {
 		return "config_value", nil
 	}
 
-	for range 100 {
-		key := "config_key"
-		_, err := cache.GetCachedConfig(ctx, key, fetchFunc)
+	for i := range 100 {
+		_, err := cache.GetCachedConfig(ctx, "config_key_"+strconv.Itoa(i), fetchFunc)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -113,9 +112,11 @@ func BenchmarkCache_ClearCache(b *testing.B) {
 			b.Fatal(err)
 		}
 		// Re-populate for next iteration
-		_, err = cache.GetCachedConfig(ctx, "config_key", fetchFunc)
-		if err != nil {
-			b.Fatal(err)
+		for i := range 100 {
+			_, err = cache.GetCachedConfig(ctx, "config_key_"+strconv.Itoa(i), fetchFunc)
+			if err != nil {
+				b.Fatal(err)
+			}
 		}
 	}
 }
