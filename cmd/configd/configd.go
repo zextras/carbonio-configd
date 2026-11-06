@@ -11,11 +11,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
-	"github.com/alecthomas/kong"
-	"github.com/willabides/kongplete"
+	"github.com/spf13/cobra"
+
 	"github.com/zextras/carbonio-configd/internal/cli/cliutil"
 	"github.com/zextras/carbonio-configd/internal/localconfig"
 	"github.com/zextras/carbonio-configd/internal/logger"
@@ -178,48 +179,29 @@ func main() {
 // stdout and stderr, and returns the process exit status. It is main with the
 // process boundary injected, so the status and the stderr text of every
 // command and error path can be checked in-process.
-func run(argv []string, env sys.System, stdout, stderr io.Writer) (status int) {
+func run(argv []string, env sys.System, stdout, stderr io.Writer) int {
 	std := &stdio{Out: stdout, Err: stderr, Args: argv}
 
-	// kong ends the process through its exit hook where it would stop
-	// parsing; run turns that into a return.
-	defer func() {
-		if r := recover(); r != nil {
-			req, ok := r.(exitRequest)
-			if !ok {
-				panic(r)
-			}
-
-			status = kongExitStatus(int(req))
+	// Shell completion asks for a list of words, and must stay quick and quiet.
+	if !isCompletionRequest(argv[1:]) {
+		if err := ensureZextrasPerlEnv(context.Background(), env); err != nil {
+			_, _ = fmt.Fprintf(stderr, "Warning: perl environment not set: %v\n", err)
 		}
-	}()
-
-	if err := ensureZextrasPerlEnv(context.Background(), env); err != nil {
-		_, _ = fmt.Fprintf(stderr, "Warning: perl environment not set: %v\n", err)
 	}
 
+	name := filepath.Base(argv[0])
 	cli := &CLI{}
+	root, a := newRootCmd(name, cli, env, std)
+	root.SetArgs(legacyProxyGenArgs(argv[1:]))
 
-	parser, err := kong.New(cli,
-		kong.Name(filepath.Base(argv[0])),
-		kong.Description("Configuration management daemon for Carbonio"),
-		kong.Vars{"version": formatVersion()},
-		kong.Bind(env, std),
-		kong.Writers(stdout, stderr),
-		kong.Exit(func(code int) { panic(exitRequest(code)) }),
-	)
-	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "Error: %v\n", err)
+	err := root.Execute()
 
-		return 1
-	}
+	return a.exitStatus(err, name, stderr)
+}
 
-	// Must be called before Parse so the binary can respond to COMP_LINE/COMP_POINT
-	// (set by bash's `complete -C`) and print completions instead of running normally.
-	kongplete.Complete(parser)
-
-	ctx, parseErr := parser.Parse(legacyProxyGenArgs(argv[1:]))
-	parser.FatalIfErrorf(parseErr)
-
-	return exitCode(ctx.Run(cli), stderr)
+// isCompletionRequest reports whether args ask for a completion: the hidden
+// __complete verbs the generated scripts call, or the completion command.
+func isCompletionRequest(args []string) bool {
+	return len(args) > 0 && slices.Contains(
+		[]string{cobra.ShellCompRequestCmd, cobra.ShellCompNoDescRequestCmd, "completion"}, args[0])
 }

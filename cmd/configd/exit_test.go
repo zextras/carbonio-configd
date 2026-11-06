@@ -24,7 +24,7 @@ func TestExitWith(t *testing.T) {
 	}
 }
 
-// TestExitCode pins the process-level contract of every Kong command: success
+// TestExitCode pins the process-level contract of every command: success
 // is 0; a command that already reported on stderr chooses its own status and
 // adds nothing; any other error is "Error: <err>" on stderr with status 1.
 func TestExitCode(t *testing.T) {
@@ -52,17 +52,5 @@ func TestExitCode(t *testing.T) {
 				t.Errorf("stderr = %q, want %q", stderr.String(), tt.wantStderr)
 			}
 		})
-	}
-}
-
-func TestKongExitStatus(t *testing.T) {
-	if got := kongExitStatus(kongParseFailure); got != 1 {
-		t.Errorf("a parse failure exits %d, want the legacy status 1", got)
-	}
-
-	for _, code := range []int{0, 1, 2} {
-		if got := kongExitStatus(code); got != code {
-			t.Errorf("kongExitStatus(%d) = %d, want it passed through", code, got)
-		}
 	}
 }

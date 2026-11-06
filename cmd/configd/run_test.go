@@ -81,8 +81,8 @@ func TestRun_ExitStatusAndStreams(t *testing.T) {
 	}
 }
 
-// TestRun_HelpAndVersionExitZero pins that kong's exit hook (help, version)
-// ends the run with status 0 and prints on stdout.
+// TestRun_HelpAndVersionExitZero pins that --help and --version end the run
+// with status 0 and print on stdout.
 func TestRun_HelpAndVersionExitZero(t *testing.T) {
 	status, stdout, stderr := runConfigd(t, "--version")
 	assert.Equal(t, 0, status)

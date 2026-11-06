@@ -7,7 +7,6 @@ package main
 import (
 	"testing"
 
-	"github.com/alecthomas/kong"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -39,11 +38,7 @@ func TestLegacyProxyGenArgs(t *testing.T) {
 func parseCLI(t *testing.T, args ...string) *CLI {
 	t.Helper()
 
-	cli := &CLI{}
-	parser, err := kong.New(cli, kong.Vars{"version": "test"})
-	require.NoError(t, err)
-
-	_, err = parser.Parse(legacyProxyGenArgs(args))
+	cli, _, err := parseArgv(t, args...)
 	require.NoError(t, err)
 
 	return cli

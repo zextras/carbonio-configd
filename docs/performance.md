@@ -108,7 +108,7 @@ Source: `cmd/configd/args_profiling.go`, `cmd/configd/profiling.go`, `cmd/config
 `Makefile`
 
 Profiling and tracing are compiled in only when the binary is built with the matching build tag.
-A default binary (`make build`, and the packaged one) has none of the flags below: kong rejects them
+A default binary (`make build`, and the packaged one) has none of the flags below: the command line rejects them
 as unknown, and the no-op stubs (`profiling_noop.go`, `args_profiling_noop.go`) keep the code paths
 out of the build.
 

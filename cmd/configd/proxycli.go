@@ -6,7 +6,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"strings"
+
+	"github.com/spf13/cobra"
 
 	"github.com/zextras/carbonio-configd/internal/cli/proxy"
 	"github.com/zextras/carbonio-configd/internal/sys"
@@ -14,14 +17,65 @@ import (
 
 // ProxyCmd handles the "configd proxy" subcommand.
 type ProxyCmd struct {
-	Conf    ProxyConfCmd    `cmd:"" help:"Print assembled nginx configuration (zmproxyconf replacement)"`
-	Gen     ProxyGenCmd     `cmd:"" help:"Generate nginx proxy configuration files (zmproxyconfgen replacement)"`
-	Enable  ProxyEnableCmd  `cmd:"" help:"Enable a proxy protocol"`
-	Disable ProxyDisableCmd `cmd:"" help:"Disable a proxy protocol"`
-	Status  ProxyStatusCmd  `cmd:"" help:"Show all protocol statuses"`
+	Conf    ProxyConfCmd
+	Gen     ProxyGenCmd
+	Enable  ProxyEnableCmd
+	Disable ProxyDisableCmd
+	Status  ProxyStatusCmd
 	// Template holds the offline tools for the nginx templates (no LDAP, no zextras user).
-	Template ProxyTemplateCmd `cmd:"" help:"Format, lint and render the nginx proxy templates"`
-	Rewrite  ProxyRewriteCmd  `cmd:"" default:"withargs" hidden:""`
+	Template ProxyTemplateCmd
+	Rewrite  ProxyRewriteCmd
+}
+
+// proxyCmd builds "configd proxy". Without a verb it is a forced rewrite of
+// the proxy configs, with the arguments as additional config names.
+func (a *app) proxyCmd() *cobra.Command {
+	p := &a.cli.Proxy
+
+	cmd := &cobra.Command{
+		Use:   "proxy <command>",
+		Short: "Proxy protocol management",
+		Args:  cobra.ArbitraryArgs,
+		PreRunE: func(_ *cobra.Command, args []string) error {
+			p.Rewrite.ExtraConfigs = args
+
+			return nil
+		},
+		RunE: func(*cobra.Command, []string) error {
+			a.started = true
+
+			return p.Rewrite.Run(a.env, a.std)
+		},
+	}
+
+	describeArgs(cmd, [2]string{"[<extra-configs> ...]", "Additional config names"})
+
+	cmd.AddCommand(
+		a.proxyConfCmd(),
+		a.proxyGenCmd(),
+		a.proxyProtocolCmd("enable", "Enable a proxy protocol", &p.Enable.Protocol,
+			func() error { return p.Enable.Run(a.env, a.std) }),
+		a.proxyProtocolCmd("disable", "Disable a proxy protocol", &p.Disable.Protocol,
+			func() error { return p.Disable.Run(a.env, a.std) }),
+		a.leaf("status", "Show all protocol statuses", posArgs(nil, nil, false), nil,
+			func() error { return p.Status.Run(a.env, a.std) }),
+		a.proxyTemplateCmd(),
+	)
+
+	return cmd
+}
+
+// proxyProtocolCmd builds "proxy enable" and "proxy disable".
+func (a *app) proxyProtocolCmd(verb, short string, protocol *string, run func() error) *cobra.Command {
+	cmd := a.leaf(verb+" <protocol>", short, posArgs([]string{"<protocol>"}, nil, false),
+		func(_ *cobra.Command, args []string) error {
+			*protocol = args[0]
+
+			return nil
+		}, run)
+	cmd.ValidArgsFunction = staticFirstArg(proxyProtocolNames...)
+
+	return describeArgs(cmd, [2]string{"<protocol>", "Protocol (http, https, mail, imap, imaps, pop3, pop3s)"})
 }
 
 // runProxy executes a proxy action with the process's stdio.
@@ -35,11 +89,37 @@ func runProxy(env sys.System, std *stdio, opts *proxy.Options) error {
 // directives. Go replacement for the legacy zmproxyconf Perl script, which
 // spells the filters --nocomments and --noempty.
 type ProxyConfCmd struct {
-	Markers    bool   `short:"m" help:"Print file inclusion markers"`
-	Indent     bool   `short:"i" help:"Indent included files"`
-	NoComments bool   `short:"n" aliases:"nocomments" help:"Do not print comment lines (beginning with #)"`
-	NoEmpty    bool   `short:"e" aliases:"noempty" help:"Do not print empty lines"`
-	ConfigFile string `arg:"" optional:"" help:"Path to nginx.conf"`
+	Markers    bool
+	Indent     bool
+	NoComments bool
+	NoEmpty    bool
+	ConfigFile string
+}
+
+func (a *app) proxyConfCmd() *cobra.Command {
+	c := &a.cli.Proxy.Conf
+
+	cmd := a.leaf("conf [<config-file>]", "Print assembled nginx configuration (zmproxyconf replacement)",
+		posArgs(nil, []string{"[<config-file>]"}, false),
+		func(_ *cobra.Command, args []string) error {
+			c.ConfigFile = ""
+			if len(args) > 0 {
+				c.ConfigFile = args[0]
+			}
+
+			return nil
+		},
+		func() error { return c.Run(a.env, a.std) })
+
+	fs := cmd.Flags()
+	fs.SortFlags = false
+	flagAliases(fs, map[string]string{"nocomments": "no-comments", "noempty": "no-empty"})
+	fs.BoolVarP(&c.Markers, "markers", "m", false, "Print file inclusion markers")
+	fs.BoolVarP(&c.Indent, "indent", "i", false, "Indent included files")
+	fs.BoolVarP(&c.NoComments, "no-comments", "n", false, "Do not print comment lines (beginning with #)")
+	fs.BoolVarP(&c.NoEmpty, "no-empty", "e", false, "Do not print empty lines")
+
+	return describeArgs(cmd, [2]string{"[<config-file>]", "Path to nginx.conf"})
 }
 
 // Run prints the assembled nginx configuration.
@@ -57,22 +137,53 @@ func (c *ProxyConfCmd) Run(env sys.System, std *stdio) error {
 // ProxyGenCmd generates the nginx proxy configuration synchronously in this
 // process. Replaces the legacy zmproxyconfgen (Java ProxyConfGen) and takes
 // its flags.
-//
-//nolint:lll // kong help texts stay on the tag line
 type ProxyGenCmd struct {
-	Verbose        bool     `name:"verbose" help:"Be verbose (-v, rewritten to --verbose: the root -v is --version)"`
-	WorkDir        string   `short:"w" name:"workdir" help:"Proxy working directory (default /opt/zextras)"`
-	TemplateDir    string   `short:"t" name:"templatedir" help:"Proxy template directory (default $workdir/conf/nginx/templates)"`
-	DryRun         bool     `short:"n" name:"dry-run" help:"Do not write any configuration, just show which files would be written"`
-	Defaults       bool     `short:"d" name:"defaults" help:"Print default variable map"`
-	Definitions    bool     `short:"D" name:"definitions" help:"Print variable map definitions after loading the configuration"`
-	Prefix         string   `short:"p" name:"prefix" help:"Config file prefix (default nginx.conf)"`
-	TemplatePrefix string   `short:"P" name:"template-prefix" help:"Template file prefix (default $prefix)"`
-	IncludeDir     string   `short:"i" name:"include-dir" help:"Directory (relative to $workdir/conf) where included files are written (default nginx/includes)"`
-	Server         string   `short:"s" name:"server" help:"Generate from the attributes of this server object instead of the local server"`
-	ForceDNS       bool     `short:"f" name:"force-dns-resolution" help:"Stop if the virtual hostname of a domain does not resolve"`
-	Config         []string `short:"c" name:"config" sep:"none" help:"Override a config variable, name=value (repeatable; see -d/-D for the names)"`
-	Args           []string `arg:"" optional:"" hidden:""`
+	Verbose        bool
+	WorkDir        string
+	TemplateDir    string
+	DryRun         bool
+	Defaults       bool
+	Definitions    bool
+	Prefix         string
+	TemplatePrefix string
+	IncludeDir     string
+	Server         string
+	ForceDNS       bool
+	Config         []string
+	Args           []string
+}
+
+//nolint:lll // help texts stay on the flag line
+func (a *app) proxyGenCmd() *cobra.Command {
+	c := &a.cli.Proxy.Gen
+
+	cmd := a.leaf("gen [<args> ...]", "Generate nginx proxy configuration files (zmproxyconfgen replacement)",
+		posArgs(nil, nil, true),
+		func(_ *cobra.Command, args []string) error {
+			c.Args = args
+
+			return nil
+		},
+		func() error { return c.Run(a.env, a.std) })
+
+	fs := cmd.Flags()
+	fs.SortFlags = false
+	fs.BoolVar(&c.Verbose, "verbose", false, "Be verbose (-v, rewritten to --verbose: the root -v is --version)")
+	fs.StringVarP(&c.WorkDir, "workdir", "w", "", "Proxy working directory (default /opt/zextras)")
+	fs.StringVarP(&c.TemplateDir, "templatedir", "t", "", "Proxy template directory (default $workdir/conf/nginx/templates)")
+	fs.BoolVarP(&c.DryRun, "dry-run", "n", false, "Do not write any configuration, just show which files would be written")
+	fs.BoolVarP(&c.Defaults, "defaults", "d", false, "Print default variable map")
+	fs.BoolVarP(&c.Definitions, "definitions", "D", false, "Print variable map definitions after loading the configuration")
+	fs.StringVarP(&c.Prefix, "prefix", "p", "", "Config file prefix (default nginx.conf)")
+	fs.StringVarP(&c.TemplatePrefix, "template-prefix", "P", "", "Template file prefix (default $prefix)")
+	fs.StringVarP(&c.IncludeDir, "include-dir", "i", "", "Directory (relative to $workdir/conf) where included files are written (default nginx/includes)")
+	fs.StringVarP(&c.Server, "server", "s", "", "Generate from the attributes of this server object instead of the local server")
+	fs.BoolVarP(&c.ForceDNS, "force-dns-resolution", "f", false, "Stop if the virtual hostname of a domain does not resolve")
+	fs.StringArrayVarP(&c.Config, "config", "c", nil, "Override a config variable, `name=value` (repeatable; see -d/-D for the names)")
+
+	noFileCompletion(cmd, "verbose", "server", "prefix", "template-prefix", "include-dir", "config")
+
+	return describeArgs(cmd, [2]string{"[<args> ...]", ""})
 }
 
 // Run generates the proxy configs.
@@ -105,18 +216,52 @@ func (c *ProxyGenCmd) Run(env sys.System, std *stdio) error {
 // ProxyTemplateCmd groups the template tools: they work on files only, so they
 // run anywhere, as any user.
 type ProxyTemplateCmd struct {
-	Fmt    ProxyTemplateFmtCmd    `cmd:"" help:"Re-indent and align nginx templates"`
-	Lint   ProxyTemplateLintCmd   `cmd:"" help:"Report unknown variables, bad enablers and braces, stray whitespace"`
-	Render ProxyTemplateRenderCmd `cmd:"" help:"Render nginx templates from a fixture, without LDAP"`
+	Fmt    ProxyTemplateFmtCmd
+	Lint   ProxyTemplateLintCmd
+	Render ProxyTemplateRenderCmd
+}
+
+// proxyTemplateCmd builds "configd proxy template".
+func (a *app) proxyTemplateCmd() *cobra.Command {
+	t := &a.cli.Proxy.Template
+
+	return group("template <command>", "Format, lint and render the nginx proxy templates",
+		a.proxyTemplateFmtCmd(&t.Fmt),
+		a.proxyTemplateLintCmd(&t.Lint),
+		a.proxyTemplateRenderCmd(&t.Render),
+	)
 }
 
 // ProxyTemplateFmtCmd is "configd proxy template fmt".
-//
-//nolint:lll // kong help texts stay on the tag line
 type ProxyTemplateFmtCmd struct {
-	Check bool     `help:"List the files that would change and print the diff; exit 1 if there are any" xor:"mode"`
-	Write bool     `short:"w" help:"Rewrite the files in place" xor:"mode"`
-	Paths []string `arg:"" name:"path" help:"Template files, or directories searched for *.template files"`
+	Check bool
+	Write bool
+	Paths []string
+}
+
+// templatePathsArg is the positional shared by "fmt" and "lint".
+var templatePathsArg = [2]string{"<path> ...", "Template files, or directories searched for *.template files"}
+
+func (a *app) proxyTemplateFmtCmd(c *ProxyTemplateFmtCmd) *cobra.Command {
+	cmd := a.leaf("fmt <path> ...", "Re-indent and align nginx templates", posArgs([]string{"<path>"}, nil, true),
+		func(_ *cobra.Command, args []string) error {
+			if c.Check && c.Write {
+				return errors.New("--check and --write can't be used together")
+			}
+
+			c.Paths = args
+
+			return nil
+		},
+		func() error { return c.Run(a.env, a.std) })
+
+	fs := cmd.Flags()
+	fs.SortFlags = false
+	fs.BoolVar(&c.Check, "check", false, "List the files that would change and print the diff; exit 1 if there are any")
+	fs.BoolVarP(&c.Write, "write", "w", false, "Rewrite the files in place")
+	cmd.MarkFlagsMutuallyExclusive("check", "write")
+
+	return describeArgs(cmd, templatePathsArg)
 }
 
 // Run formats the templates.
@@ -129,7 +274,20 @@ func (c *ProxyTemplateFmtCmd) Run(env sys.System, std *stdio) error {
 
 // ProxyTemplateLintCmd is "configd proxy template lint".
 type ProxyTemplateLintCmd struct {
-	Paths []string `arg:"" name:"path" help:"Template files, or directories searched for *.template files"`
+	Paths []string
+}
+
+func (a *app) proxyTemplateLintCmd(c *ProxyTemplateLintCmd) *cobra.Command {
+	cmd := a.leaf("lint <path> ...", "Report unknown variables, bad enablers and braces, stray whitespace",
+		posArgs([]string{"<path>"}, nil, true),
+		func(_ *cobra.Command, args []string) error {
+			c.Paths = args
+
+			return nil
+		},
+		func() error { return c.Run(a.env, a.std) })
+
+	return describeArgs(cmd, templatePathsArg)
 }
 
 // Run lints the templates.
@@ -141,12 +299,28 @@ func (c *ProxyTemplateLintCmd) Run(env sys.System, std *stdio) error {
 }
 
 // ProxyTemplateRenderCmd is "configd proxy template render".
-//
-//nolint:lll // kong help texts stay on the tag line
 type ProxyTemplateRenderCmd struct {
-	Values    string `required:"" type:"path" help:"Fixture (YAML): the configuration to render with"`
-	Templates string `required:"" type:"path" help:"Template directory"`
-	Out       string `required:"" type:"path" help:"Directory the files are written to, standing for the conf directory (nginx.conf, nginx/includes/...)"`
+	Values    string
+	Templates string
+	Out       string
+}
+
+//nolint:lll // help texts stay on the flag line
+func (a *app) proxyTemplateRenderCmd(c *ProxyTemplateRenderCmd) *cobra.Command {
+	cmd := a.leaf("render", "Render nginx templates from a fixture, without LDAP", posArgs(nil, nil, false), nil,
+		func() error { return c.Run(a.env, a.std) })
+
+	fs := cmd.Flags()
+	fs.SortFlags = false
+	fs.Var(pathValue{&c.Values}, "values", "Fixture (YAML): the configuration to render with")
+	fs.Var(pathValue{&c.Templates}, "templates", "Template directory")
+	fs.Var(pathValue{&c.Out}, "out", "Directory the files are written to, standing for the conf directory (nginx.conf, nginx/includes/...)")
+
+	for _, name := range []string{"values", "templates", "out"} {
+		_ = cmd.MarkFlagRequired(name)
+	}
+
+	return cmd
 }
 
 // Run renders the templates.
@@ -159,7 +333,7 @@ func (c *ProxyTemplateRenderCmd) Run(env sys.System, std *stdio) error {
 
 // ProxyEnableCmd enables a proxy protocol.
 type ProxyEnableCmd struct {
-	Protocol string `arg:"" help:"Protocol (http, https, mail, imap, imaps, pop3, pop3s)"`
+	Protocol string
 }
 
 // Run enables the protocol.
@@ -169,7 +343,7 @@ func (c *ProxyEnableCmd) Run(env sys.System, std *stdio) error {
 
 // ProxyDisableCmd disables a proxy protocol.
 type ProxyDisableCmd struct {
-	Protocol string `arg:"" help:"Protocol (http, https, mail, imap, imaps, pop3, pop3s)"`
+	Protocol string
 }
 
 // Run disables the protocol.
@@ -188,7 +362,7 @@ func (c *ProxyStatusCmd) Run(env sys.System, std *stdio) error {
 // ProxyRewriteCmd handles the fallthrough case: "configd proxy" without
 // enable/disable/status triggers a forced config rewrite for proxy.
 type ProxyRewriteCmd struct {
-	ExtraConfigs []string `arg:"" optional:"" help:"Additional config names"`
+	ExtraConfigs []string
 }
 
 // Run rewrites the proxy configs.
@@ -200,8 +374,8 @@ func (c *ProxyRewriteCmd) Run(env sys.System, std *stdio) error {
 const proxyGenValueFlags = "wtpPisc"
 
 // legacyProxyGenArgs rewrites the legacy "-v" of "configd proxy gen" into
-// "--verbose". The root command owns -v (--version), and kong resolves a short
-// flag against the root, so the subcommand cannot declare its own. Bundles
+// "--verbose". The root command owns -v (--version) as a global flag, so the
+// subcommand cannot declare its own. Bundles
 // ("-vn") are split; a bundle stops at the first option taking a value, as in
 // commons-cli. Everything outside "proxy gen" is returned untouched.
 func legacyProxyGenArgs(args []string) []string {

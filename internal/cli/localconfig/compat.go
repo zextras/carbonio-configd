@@ -42,7 +42,7 @@ var optionsWithValue = []string{optConfig, optFormat, "k"}
 
 // longOptionIDs maps every accepted long flag name to its option id: the legacy
 // LocalConfigCLI names (--config, --path, --default, --changed, --show, --format,
-// ...) and the names Kong derives for LocalconfigCmd, so both spellings are
+// ...) and the names of the LocalconfigCmd flags, so both spellings are
 // ordered on the command line.
 var longOptionIDs = map[string]string{
 	"--config":         optConfig,
@@ -121,8 +121,8 @@ func (c *Options) givenOptions() []string {
 }
 
 // optionSequence returns the option ids in the order they appear on the
-// "configd localconfig ..." command line. It only orders what Kong already
-// accepted; without a "localconfig" word in args (tests) it returns nil.
+// "configd localconfig ..." command line. It only orders what the command
+// line parser already accepted; without a "localconfig" word in args (tests) it returns nil.
 func optionSequence(args []string) []string {
 	start := slices.Index(args, "localconfig")
 	if start < 0 {

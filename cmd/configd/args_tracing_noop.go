@@ -6,8 +6,15 @@
 
 package main
 
+import "github.com/spf13/pflag"
+
 // TracingArgs is empty when tracing is disabled at build time.
 type TracingArgs struct{}
+
+// register is a no-op when tracing is disabled at build time.
+func (p *TracingArgs) register(_ *pflag.FlagSet) {
+	// no-op: without the tracing build tag there are no tracing flags to add
+}
 
 // applyTo is a no-op when tracing is disabled.
 func (p *TracingArgs) applyTo(_ *Args) {

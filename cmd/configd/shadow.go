@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/zextras/carbonio-configd/internal/cli/cliutil"
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/configmgr"
@@ -26,8 +28,21 @@ var errShadowFlag = errors.New("is not supported by \"configd shadow\": it must 
 // ShadowCmd runs the daemon cycle next to a real configd without any side
 // effect: it only logs the plan and, optionally, writes the would-be files.
 type ShadowCmd struct {
-	Dir  string `name:"shadow-dir" type:"path" placeholder:"DIR" help:"Write the would-be files and plan JSON under DIR"`
-	Once bool   `name:"single-cycle" help:"Run a single cycle and exit (status 1 when it failed)"`
+	Dir  string
+	Once bool
+}
+
+func (a *app) shadowCmd() *cobra.Command {
+	c := &a.cli.Shadow
+
+	cmd := a.leaf("shadow", "Run the cycle next to a real configd, without side effects", posArgs(nil, nil, false), nil,
+		func() error { return c.Run(a.cli, a.env, a.std) })
+
+	fs := cmd.Flags()
+	fs.Var(pathValue{&c.Dir}, "shadow-dir", "Write the would-be files and plan JSON under `DIR`")
+	fs.BoolVar(&c.Once, "single-cycle", false, "Run a single cycle and exit (status 1 when it failed)")
+
+	return cmd
 }
 
 // Run executes the shadow command. It never exits on its own: like the daemon

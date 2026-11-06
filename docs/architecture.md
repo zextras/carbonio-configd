@@ -69,7 +69,7 @@ the filesystem (`sys.FS`), inspecting or signalling processes (`sys.Proc`) and b
 (`configmgr.NewConfigManager`, `services.NewController`, `mtaops.NewExecutor`,
 `proxy.NewGenerator`, `watchdog.Config.Clock`, the `Run` entry points of `internal/cli/*`); there
 are no package-level seam variables. The process boundary is injected the same way: `main` only
-calls `os.Exit(run(os.Args, sys.Real(), os.Stdout, os.Stderr))`, every Kong command receives the
+calls `os.Exit(run(os.Args, sys.Real(), os.Stdout, os.Stderr))`, every cobra command receives the
 streams and the command line as a `*stdio`, and the commands return their exit status through
 `exitWith` (one place turns it into the process status, `exitCode`). `cmd/configd/run_test.go`
 therefore checks the status and the exact stdout/stderr of each command in-process.
@@ -531,7 +531,7 @@ entry no cycle reads is not reported).
 
 | Package | Role |
 |---|---|
-| `cmd/configd` | The binary: kong CLI (`cli.go`), `buildRuntime`, main loop, signals, systemd bootstrap, shadow/plan/proxy/ldap/tls/localconfig/service/control commands |
+| `cmd/configd` | The binary: cobra CLI (`cli.go`, one builder per command, `completion.go` for the dynamic completion), `buildRuntime`, main loop, signals, systemd bootstrap, shadow/plan/proxy/ldap/tls/localconfig/service/control commands |
 | `internal/cache` | In-memory TTL cache of LDAP-derived configuration with MD5 change detection; invalidated at the start of every load, disabled for `configd plan` |
 | `internal/cli` | Subcommand implementations, one package each: `cliutil` (user check, logging, base dir), `control`, `initcmd`, `ldapcmd`, `localconfig`, `plancmd`, `proxy`, `release`, `rewrite` (daemon client, standalone fallback), `service`, `status`, `tls` |
 | `internal/commands` | LDAP-backed provisioning lookups (`garpu`, `garpb`, `gamau`, typed server/global attributes) the config manager reads |

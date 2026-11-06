@@ -7,14 +7,32 @@ package main
 import (
 	"context"
 
+	"github.com/spf13/cobra"
+
 	"github.com/zextras/carbonio-configd/internal/cli/initcmd"
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // InitCmd handles the "configd init <component>" subcommand.
 type InitCmd struct {
-	Component string `arg:"" help:"Component to initialize (mta, proxy)"`
-	Force     bool   `short:"f" name:"force" help:"Allow reinitialization even if configs exist"`
+	Component string
+	Force     bool
+}
+
+func (a *app) initCmd() *cobra.Command {
+	c := &a.cli.Init
+
+	cmd := a.leaf("init <component>", "Initialize components", posArgs([]string{"<component>"}, nil, false),
+		func(_ *cobra.Command, args []string) error {
+			c.Component = args[0]
+
+			return nil
+		},
+		func() error { return c.Run(a.env, a.std) })
+	cmd.Flags().BoolVarP(&c.Force, "force", "f", false, "Allow reinitialization even if configs exist")
+	cmd.ValidArgsFunction = staticFirstArg(initComponentNames...)
+
+	return describeArgs(cmd, [2]string{"<component>", "Component to initialize (mta, proxy)"})
 }
 
 // Run executes the init subcommand.

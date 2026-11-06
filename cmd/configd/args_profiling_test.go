@@ -8,24 +8,16 @@ package main
 
 import (
 	"testing"
-
-	"github.com/alecthomas/kong"
 )
 
-// parseCLIArgs parses argv (without the program name) through the Kong CLI and
+// parseCLIArgs parses argv (without the program name) through the command tree and
 // returns the resulting CLI and its Args conversion. Callers pass a trivial
-// subcommand so that Kong's required-command check is satisfied.
+// subcommand so that nothing is started.
 func parseCLIArgs(t *testing.T, argv ...string) (*CLI, *Args) {
 	t.Helper()
 
-	cli := &CLI{}
-
-	parser, err := kong.New(cli, kong.Vars{"version": "test"})
+	cli, _, err := parseArgv(t, argv...)
 	if err != nil {
-		t.Fatalf("kong.New failed: %v", err)
-	}
-
-	if _, err := parser.Parse(argv); err != nil {
 		t.Fatalf("Parse(%v) failed: %v", argv, err)
 	}
 

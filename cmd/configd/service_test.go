@@ -7,7 +7,6 @@ package main
 import (
 	"testing"
 
-	"github.com/alecthomas/kong"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -15,17 +14,7 @@ import (
 func parseServiceCLI(t *testing.T, argv ...string) (*CLI, string, error) {
 	t.Helper()
 
-	cli := &CLI{}
-
-	parser, err := kong.New(cli, kong.Vars{"version": "test"})
-	require.NoError(t, err)
-
-	ctx, err := parser.Parse(append([]string{"service"}, argv...))
-	if err != nil {
-		return cli, "", err
-	}
-
-	return cli, ctx.Command(), nil
+	return parseArgv(t, append([]string{"service"}, argv...)...)
 }
 
 // The core wrappers exec `configd service "${1:-}" <name> "${@:2}"`: every verb

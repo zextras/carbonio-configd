@@ -7,7 +7,6 @@ package main
 import (
 	"testing"
 
-	"github.com/alecthomas/kong"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -15,15 +14,10 @@ import (
 func parsePlanCLI(t *testing.T, argv ...string) (*CLI, string) {
 	t.Helper()
 
-	cli := &CLI{}
-
-	parser, err := kong.New(cli, kong.Vars{"version": "test"})
+	cli, cmd, err := parseArgv(t, argv...)
 	require.NoError(t, err)
 
-	ctx, err := parser.Parse(argv)
-	require.NoError(t, err)
-
-	return cli, ctx.Command()
+	return cli, cmd
 }
 
 func TestCLI_Plan(t *testing.T) {
@@ -37,7 +31,7 @@ func TestCLI_Plan(t *testing.T) {
 func TestCLI_PlanSectionsAndJSON(t *testing.T) {
 	cli, cmd := parsePlanCLI(t, "plan", "mta", "proxy", "--json")
 
-	assert.Equal(t, "plan <sections>", cmd)
+	assert.Equal(t, "plan", cmd)
 	assert.Equal(t, []string{"mta", "proxy"}, cli.Plan.Sections)
 	assert.True(t, cli.Plan.JSON)
 }

@@ -7,13 +7,25 @@ package main
 import (
 	"context"
 
+	"github.com/spf13/cobra"
+
 	"github.com/zextras/carbonio-configd/internal/cli/release"
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // ReleaseCmd handles the "configd release" subcommand.
 type ReleaseCmd struct {
-	Packages bool `name:"packages" short:"V" help:"Show installed package versions"`
+	Packages bool
+}
+
+func (a *app) releaseCmd() *cobra.Command {
+	c := &a.cli.Release
+
+	cmd := a.leaf("release", "Show Carbonio release and package versions", posArgs(nil, nil, false), nil,
+		func() error { return c.Run(a.env, a.std) })
+	cmd.Flags().BoolVarP(&c.Packages, "packages", "V", false, "Show installed package versions")
+
+	return cmd
 }
 
 // Run executes the release command.
