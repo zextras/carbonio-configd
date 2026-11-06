@@ -207,23 +207,7 @@ func (t *Tracer) ExportTimeline(w io.Writer) error {
 	fmt.Fprintln(w)
 
 	for _, span := range spans {
-		offset := span.StartTime.Sub(refTime)
-		indent := ""
-		if span.ParentID != "" {
-			indent = "  "
-		}
-
-		fmt.Fprintf(w, "[+%8.3fms] %s%-40s  %8.3fms",
-			float64(offset.Microseconds())/1000,
-			indent,
-			span.Name,
-			float64(span.Duration.Microseconds())/1000,
-		)
-
-		if len(span.Metadata) > 0 {
-			fmt.Fprintf(w, "  %v", span.Metadata)
-		}
-		fmt.Fprintln(w)
+		writeTimelineRow(w, span, refTime)
 	}
 
 	t.mu.RLock()
@@ -238,76 +222,99 @@ func (t *Tracer) ExportTimeline(w io.Writer) error {
 	fmt.Fprintln(w, "Summary")
 	fmt.Fprintln(w, "-------")
 
-	// Calculate total time
-	// Spans are sorted by start time, so the last one is not necessarily the
-	// last to finish: use the latest end time.
-	latestEnd := spans[0].EndTime
-	for _, span := range spans[1:] {
-		if span.EndTime.After(latestEnd) {
-			latestEnd = span.EndTime
-		}
-	}
-
-	totalTime := latestEnd.Sub(refTime)
+	totalTime := latestEnd(spans).Sub(refTime)
 	fmt.Fprintf(w, "Total time: %.3fms\n", float64(totalTime.Microseconds())/1000)
-
-	// Group by operation name and calculate stats
-	stats := make(map[string]struct {
-		count    int
-		totalDur time.Duration
-		minDur   time.Duration
-		maxDur   time.Duration
-	})
-
-	for _, span := range spans {
-		s := stats[span.Name]
-		s.count++
-		s.totalDur += span.Duration
-		if s.minDur == 0 || span.Duration < s.minDur {
-			s.minDur = span.Duration
-		}
-		if span.Duration > s.maxDur {
-			s.maxDur = span.Duration
-		}
-		stats[span.Name] = s
-	}
 
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "%-40s  %6s  %10s  %10s  %10s  %10s\n",
 		"Operation", "Count", "Total", "Avg", "Min", "Max")
 	fmt.Fprintln(w, "--------------------------------------------------------------------------------")
 
-	// Sort by total duration (descending)
-	type statEntry struct {
-		name string
-		stat struct {
-			count    int
-			totalDur time.Duration
-			minDur   time.Duration
-			maxDur   time.Duration
-		}
-	}
-	entries := make([]statEntry, 0, len(stats))
-	for name, stat := range stats {
-		entries = append(entries, statEntry{name: name, stat: stat})
-	}
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].stat.totalDur > entries[j].stat.totalDur
-	})
-
-	for _, entry := range entries {
-		avgDur := entry.stat.totalDur / time.Duration(entry.stat.count)
+	for _, s := range operationStats(spans) {
+		avgDur := s.totalDur / time.Duration(s.count)
 		fmt.Fprintf(w, "%-40s  %6d  %8.3fms  %8.3fms  %8.3fms  %8.3fms\n",
-			entry.name,
-			entry.stat.count,
-			float64(entry.stat.totalDur.Microseconds())/1000,
+			s.name,
+			s.count,
+			float64(s.totalDur.Microseconds())/1000,
 			float64(avgDur.Microseconds())/1000,
-			float64(entry.stat.minDur.Microseconds())/1000,
-			float64(entry.stat.maxDur.Microseconds())/1000,
+			float64(s.minDur.Microseconds())/1000,
+			float64(s.maxDur.Microseconds())/1000,
 		)
 	}
 
 	return nil
+}
+
+// writeTimelineRow writes one span line of the timeline, offset from refTime.
+func writeTimelineRow(w io.Writer, span *Span, refTime time.Time) {
+	offset := span.StartTime.Sub(refTime)
+
+	indent := ""
+	if span.ParentID != "" {
+		indent = "  "
+	}
+
+	fmt.Fprintf(w, "[+%8.3fms] %s%-40s  %8.3fms",
+		float64(offset.Microseconds())/1000,
+		indent,
+		span.Name,
+		float64(span.Duration.Microseconds())/1000,
+	)
+
+	if len(span.Metadata) > 0 {
+		fmt.Fprintf(w, "  %v", span.Metadata)
+	}
+	fmt.Fprintln(w)
+}
+
+// latestEnd returns the latest end time of spans (non-empty). Spans are sorted
+// by start time, so the last one is not necessarily the last to finish.
+func latestEnd(spans []*Span) time.Time {
+	end := spans[0].EndTime
+	for _, span := range spans[1:] {
+		if span.EndTime.After(end) {
+			end = span.EndTime
+		}
+	}
+
+	return end
+}
+
+// opStat aggregates the durations of the spans sharing one operation name.
+type opStat struct {
+	name     string
+	count    int
+	totalDur time.Duration
+	minDur   time.Duration
+	maxDur   time.Duration
+}
+
+// operationStats groups spans by name, sorted by total duration descending.
+func operationStats(spans []*Span) []opStat {
+	byName := make(map[string]*opStat)
+	for _, span := range spans {
+		s := byName[span.Name]
+		if s == nil {
+			s = &opStat{name: span.Name, minDur: span.Duration}
+			byName[span.Name] = s
+		}
+
+		s.count++
+		s.totalDur += span.Duration
+		s.minDur = min(s.minDur, span.Duration)
+		s.maxDur = max(s.maxDur, span.Duration)
+	}
+
+	stats := make([]opStat, 0, len(byName))
+	for _, s := range byName {
+		stats = append(stats, *s)
+	}
+
+	sort.Slice(stats, func(i, j int) bool {
+		return stats[i].totalDur > stats[j].totalDur
+	})
+
+	return stats
 }
 
 // ExportToFile exports spans to a file in the specified format.
