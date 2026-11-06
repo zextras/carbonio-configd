@@ -90,7 +90,6 @@ func runProxy(env sys.System, std *stdio, opts *proxy.Options) error {
 // spells the filters --nocomments and --noempty.
 type ProxyConfCmd struct {
 	Markers    bool
-	Indent     bool
 	NoComments bool
 	NoEmpty    bool
 	ConfigFile string
@@ -99,7 +98,7 @@ type ProxyConfCmd struct {
 func (a *app) proxyConfCmd() *cobra.Command {
 	c := &a.cli.Proxy.Conf
 
-	cmd := a.leaf("conf [<config-file>]", "Print assembled nginx configuration (zmproxyconf replacement)",
+	cmd := a.leaf("conf [<config-file>]", "Print assembled nginx configuration",
 		posArgs(nil, []string{"[<config-file>]"}, false),
 		func(_ *cobra.Command, args []string) error {
 			c.ConfigFile = ""
@@ -115,7 +114,6 @@ func (a *app) proxyConfCmd() *cobra.Command {
 	fs.SortFlags = false
 	flagAliases(fs, map[string]string{"nocomments": "no-comments", "noempty": "no-empty"})
 	fs.BoolVarP(&c.Markers, "markers", "m", false, "Print file inclusion markers")
-	fs.BoolVarP(&c.Indent, "indent", "i", false, "Indent included files")
 	fs.BoolVarP(&c.NoComments, "no-comments", "n", false, "Do not print comment lines (beginning with #)")
 	fs.BoolVarP(&c.NoEmpty, "no-empty", "e", false, "Do not print empty lines")
 
@@ -128,7 +126,6 @@ func (c *ProxyConfCmd) Run(env sys.System, std *stdio) error {
 		Action:     proxy.ActionConf,
 		ConfigFile: c.ConfigFile,
 		Markers:    c.Markers,
-		Indent:     c.Indent,
 		NoComments: c.NoComments,
 		NoEmpty:    c.NoEmpty,
 	})
@@ -157,7 +154,7 @@ type ProxyGenCmd struct {
 func (a *app) proxyGenCmd() *cobra.Command {
 	c := &a.cli.Proxy.Gen
 
-	cmd := a.leaf("gen [<args> ...]", "Generate nginx proxy configuration files (zmproxyconfgen replacement)",
+	cmd := a.leaf("gen [<args> ...]", "Generate nginx proxy configuration files",
 		posArgs(nil, nil, true),
 		func(_ *cobra.Command, args []string) error {
 			c.Args = args

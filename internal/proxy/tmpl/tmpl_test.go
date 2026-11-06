@@ -281,3 +281,55 @@ func TestDiff(t *testing.T) {
 		t.Errorf("missing no-newline marker: %q", got)
 	}
 }
+
+func TestRenderLineIndentsMultilineValues(t *testing.T) {
+	t.Parallel()
+
+	r := fakeResolver{
+		enablers: map[string]bool{"on": true, "off": false},
+		values: map[string]string{
+			"three": "add_header A 1;\nadd_header B 2;\nadd_header C 3;",
+			"gaps":  "a;\n\nb;\n",
+			"one":   "single;",
+		},
+	}
+
+	for _, tc := range []struct{ name, in, want string }{
+		{
+			"nested placeholder at 8 spaces, three lines",
+			"        ${three}",
+			"        add_header A 1;\n        add_header B 2;\n        add_header C 3;",
+		},
+		{
+			"placeholder after text uses the line indentation",
+			"    set $x ${three}",
+			"    set $x add_header A 1;\n    add_header B 2;\n    add_header C 3;",
+		},
+		{
+			"empty lines stay empty, trailing newline kept",
+			"    ${gaps}",
+			"    a;\n\n    b;\n",
+		},
+		{"single-line value unaffected", "        ${one}", "        single;"},
+		{"column 0 adds nothing", "${three}", "add_header A 1;\nadd_header B 2;\nadd_header C 3;"},
+		{
+			"enabler on keeps the whitespace after it",
+			"    ${on}    ${three}",
+			"        add_header A 1;\n        add_header B 2;\n        add_header C 3;",
+		},
+		{
+			"enabler off comments every line, not only the first",
+			"    ${off}    ${three}",
+			"    #    add_header A 1;\n    #    add_header B 2;\n    #    add_header C 3;",
+		},
+		{
+			"enabler off keeps blank lines blank",
+			"    ${off}${gaps}",
+			"    #a;\n\n    #b;\n",
+		},
+	} {
+		if got := RenderLine(tc.in, r); got != tc.want {
+			t.Errorf("%s: RenderLine(%q) = %q, want %q", tc.name, tc.in, got, tc.want)
+		}
+	}
+}

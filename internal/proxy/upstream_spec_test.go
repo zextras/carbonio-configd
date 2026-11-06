@@ -113,7 +113,7 @@ func TestFormatServersVar(t *testing.T) {
 	}
 
 	got := formatServersVar([]string{"a:1 fail_timeout=60s", "b:2 fail_timeout=60s"})
-	want := "server    a:1 fail_timeout=60s;\n        server    b:2 fail_timeout=60s;\n"
+	want := "server    a:1 fail_timeout=60s;\nserver    b:2 fail_timeout=60s;\n"
 
 	if got != want {
 		t.Errorf("formatServersVar =\n%q\nwant\n%q", got, want)

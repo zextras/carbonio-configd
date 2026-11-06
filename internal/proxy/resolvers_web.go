@@ -67,21 +67,24 @@ func (g *Generator) resolveProxyHTTPCompression(ctx context.Context) (any, error
 	}
 
 	// Return full compression directive block
+	// Continuation lines carry no indentation (the template renderer indents
+	// them to the placeholder's column); the MIME types keep their relative
+	// 4-space nesting under gzip_types/brotli_types.
 	// This matches Java's ProxyCompressionServerVar.G_ZIP_COMPRESSION_DIRECTIVE + BROTLI_COMPRESSION_DIRECTIVE
 	compressionDirectives := `
-    gzip on;
-    gzip_disable "msie6";
-    gzip_vary on;
-    gzip_proxied any;
-    gzip_comp_level 6;
-    gzip_buffers 16 8k;
-    gzip_http_version 1.1;
-    gzip_min_length 256;
-    gzip_types
+gzip on;
+gzip_disable "msie6";
+gzip_vary on;
+gzip_proxied any;
+gzip_comp_level 6;
+gzip_buffers 16 8k;
+gzip_http_version 1.1;
+gzip_min_length 256;
+gzip_types
 ` + compressionMIMETypes + `
-    brotli on;
-    brotli_static on;
-    brotli_types
+brotli on;
+brotli_static on;
+brotli_types
 ` + compressionMIMETypes
 
 	return compressionDirectives, nil
@@ -167,9 +170,8 @@ func (g *Generator) resolveAddHeadersDefault(ctx context.Context) (any, error) {
 			continue
 		}
 
-		// Add indentation for subsequent headers
 		if written > 0 {
-			result.WriteString("\n    ")
+			result.WriteString("\n")
 		}
 
 		written++

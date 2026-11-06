@@ -19,8 +19,8 @@ func TestPrintNginxConfFile_MissingFileWithMarkers(t *testing.T) {
 
 	var buf bytes.Buffer
 
-	opts := &nginxConfOpts{fs: systest.New().FS, markers: true, indent: true}
-	printNginxConfFile(&buf, "/missing/nginx.conf", 2, opts)
+	opts := &nginxConfOpts{fs: systest.New().FS, markers: true}
+	printNginxConfFile(&buf, "/missing/nginx.conf", "    ", opts)
 
 	got := buf.String()
 
@@ -40,7 +40,7 @@ func TestPrintNginxConf_FollowsIncludeDirective(t *testing.T) {
 
 	var buf bytes.Buffer
 
-	printNginxConf(&buf, "/cb/nginx.conf", 0, &nginxConfOpts{fs: f.FS})
+	printNginxConf(&buf, "/cb/nginx.conf", "", &nginxConfOpts{fs: f.FS})
 
 	if want := "working_directory /cb/inc;\nincluded;\nlast;\n"; buf.String() != want {
 		t.Errorf("output = %q, want %q", buf.String(), want)

@@ -135,10 +135,10 @@ func TestCommandTree_Parse(t *testing.T) {
 		{name: "proxy rewrites by default", argv: []string{"proxy"}, want: "proxy"},
 		{name: "proxy takes config names", argv: []string{"proxy", "mta", "x"}, want: "proxy",
 			check: func(t *testing.T, cli *CLI) { assert.Equal(t, []string{"mta", "x"}, cli.Proxy.Rewrite.ExtraConfigs) }},
-		{name: "proxy conf short flags", argv: []string{"proxy", "conf", "/etc/nginx.conf", "-m", "-i", "-n", "-e"},
+		{name: "proxy conf short flags", argv: []string{"proxy", "conf", "/etc/nginx.conf", "-m", "-n", "-e"},
 			want: "proxy conf", check: func(t *testing.T, cli *CLI) {
 				c := cli.Proxy.Conf
-				assert.True(t, c.Markers && c.Indent && c.NoComments && c.NoEmpty)
+				assert.True(t, c.Markers && c.NoComments && c.NoEmpty)
 				assert.Equal(t, "/etc/nginx.conf", c.ConfigFile)
 			}},
 		{name: "proxy conf legacy long names", argv: []string{"proxy", "conf", "--nocomments", "--noempty"},
@@ -301,7 +301,7 @@ func TestCommandTree_Flags(t *testing.T) {
 		"release":               {"packages:V"},
 		"plan":                  {"json"},
 		"shadow":                {"shadow-dir", "single-cycle"},
-		"proxy conf":            {"markers:m", "indent:i", "no-comments:n", "no-empty:e"},
+		"proxy conf":            {"markers:m", "no-comments:n", "no-empty:e"},
 		"proxy gen":             {"verbose", "workdir:w", "templatedir:t", "dry-run:n", "defaults:d", "definitions:D", "prefix:p", "template-prefix:P", "include-dir:i", "server:s", "force-dns-resolution:f", "config:c"},
 		"proxy template fmt":    {"check", "write:w"},
 		"proxy template render": {"values", "templates", "out"},

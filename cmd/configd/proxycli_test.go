@@ -75,10 +75,10 @@ func TestProxyGenCmd_ParsesLongFlags(t *testing.T) {
 }
 
 func TestProxyConfCmd_ParsesLegacyLongFlags(t *testing.T) {
-	cli := parseCLI(t, "proxy", "conf", "--nocomments", "--noempty", "-mi", "/f")
+	cli := parseCLI(t, "proxy", "conf", "--nocomments", "--noempty", "-m", "/f")
 
 	c := cli.Proxy.Conf
-	assert.True(t, c.NoComments && c.NoEmpty && c.Markers && c.Indent)
+	assert.True(t, c.NoComments && c.NoEmpty && c.Markers)
 	assert.Equal(t, "/f", c.ConfigFile)
 
 	cli = parseCLI(t, "proxy", "conf", "--no-comments", "--no-empty")

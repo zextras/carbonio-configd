@@ -72,7 +72,7 @@ func (a *app) localconfigCmd() *cobra.Command {
 	fs.BoolVarP(&c.Edit, "edit", "e", false, "Edit: set key=value pairs")
 	fs.BoolVarP(&c.Unset, "unset", "u", false, "Unset (remove) keys")
 	fs.BoolVarP(&c.Random, "random", "r", false, "Set key to random password (use with -e)")
-	fs.BoolVarP(&c.Force, "force", "f", false, "Allow editing dangerous keys (legacy zmlocalconfig -f)")
+	fs.BoolVarP(&c.Force, "force", "f", false, "Allow editing dangerous keys")
 	fs.BoolVarP(&c.Expand, "expand", "x", false, "Expand ${key} references (shell and export always expand)")
 	fs.BoolVarP(&c.Info, "info", "i", false, "Show documentation for the keys listed in [args]")
 	fs.BoolVar(&c.All, "all", false, "Show documentation for all keys, including unsupported ones")

@@ -92,7 +92,7 @@ complete -F _zmctl_completions zmstatctl
 # zmproxyconf — delegates to configd proxy conf
 _zmproxyconf_completions() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
-  local flags="-m -i -n -e --markers --indent --no-comments --no-empty"
+  local flags="-m -n -e --markers --no-comments --no-empty"
   COMPREPLY=($(compgen -W "$flags" -- "$cur"))
 }
 complete -F _zmproxyconf_completions zmproxyconf

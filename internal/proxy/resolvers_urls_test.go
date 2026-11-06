@@ -146,7 +146,7 @@ func TestResolveErrorPages(t *testing.T) {
 func TestCompressionMIMETypes_LegacyShape(t *testing.T) {
 	t.Parallel()
 
-	if !strings.Contains(compressionMIMETypes, "application/json\n        application/graphql-response+json\n") {
+	if !strings.Contains(compressionMIMETypes, "application/json\n    application/graphql-response+json\n") {
 		t.Error("missing application/graphql-response+json after application/json")
 	}
 

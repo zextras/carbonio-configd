@@ -407,8 +407,9 @@ Exit `0` on success (also for `-d`, `-D`, and stray non-`name=value`
 arguments, which print the usage), `1` on any error.
 
 `proxy conf` flags: `-m`/`--markers` (print file inclusion markers),
-`-i`/`--indent` (indent included files), `-n`/`--no-comments` (alias
-`--nocomments`), `-e`/`--no-empty` (alias `--noempty`).
+`-n`/`--no-comments` (alias `--nocomments`), `-e`/`--no-empty` (alias
+`--noempty`). Included files are always indented to the column of their
+`include` directive, so the output nests like a single nginx.conf.
 
 `proxy enable|disable <protocol>` sets the matching
 `zimbraReverseProxy…Enabled` attribute in LDAP to `TRUE`/`FALSE`; `proxy

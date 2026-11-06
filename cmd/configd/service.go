@@ -70,7 +70,7 @@ func (a *app) serviceCmd() *cobra.Command {
 			func() error { return s.Start.Run(a.env, a.std) }),
 		a.serviceVerb("stop", "Stop a service", false, &s.Stop.serviceArgs, nil,
 			func() error { return s.Stop.Run(a.env, a.std) }),
-		a.serviceVerb("kill", "Stop a service (legacy alias of stop)", false, &s.Kill.serviceArgs, nil,
+		a.serviceVerb("kill", "Stop a service (alias of stop)", false, &s.Kill.serviceArgs, nil,
 			func() error { return s.Kill.Run(a.env, a.std) }),
 		a.serviceVerb("restart", "Restart a service", false, &s.Restart.serviceArgs, &s.Restart.NoRewrite,
 			func() error { return s.Restart.Run(a.env, a.std) }),
@@ -109,7 +109,9 @@ func (a *app) serviceVerb(
 		cmd.Flags().BoolVar(noRewrite, "no-rewrite", false, "Skip config regeneration")
 	}
 
-	return describeArgs(cmd, [2]string{"<name>", "Service name"}, [2]string{"[<extra> ...]", "Legacy wrapper arguments"})
+	return describeArgs(cmd,
+		[2]string{"<name>", "Service name"},
+		[2]string{"[<extra> ...]", `Extra arguments; "norewrite" skips config regeneration, others are ignored`})
 }
 
 // runService executes one "configd service" action.

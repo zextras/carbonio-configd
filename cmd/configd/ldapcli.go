@@ -51,7 +51,7 @@ func (a *app) ldapCmd() *cobra.Command {
 		return a.leaf(use, short, args, bind, func() error { return run(l, a.env, a.std) })
 	}
 
-	gcf := verb("gcf <attrs> ...", "Print attributes of the global config (zmprov gcf)",
+	gcf := verb("gcf <attrs> ...", "Print attributes of the global config",
 		posArgs([]string{"<attrs>"}, nil, true),
 		func(_ *cobra.Command, args []string) error {
 			l.Gcf.Attrs = args
@@ -60,7 +60,7 @@ func (a *app) ldapCmd() *cobra.Command {
 		}, l.Gcf.Run)
 	describeArgs(gcf, [2]string{"<attrs> ...", "Attributes to print"})
 
-	gs := verb("gs [<server>]", "Print a server entry with global inheritance (zmprov gs)",
+	gs := verb("gs [<server>]", "Print a server entry with global inheritance",
 		posArgs(nil, []string{"[<server>]"}, false),
 		func(_ *cobra.Command, args []string) error {
 			l.Gs.Server = ""
@@ -74,7 +74,7 @@ func (a *app) ldapCmd() *cobra.Command {
 
 	// mcf takes its arguments verbatim, so a "-attr" removal is not mistaken
 	// for a flag; the connection flags go before "mcf".
-	mcf := verb("mcf <changes> ...", "Modify the global config: [+|-]attr value ... (zmprov mcf)",
+	mcf := verb("mcf <changes> ...", "Modify the global config: [+|-]attr value ...",
 		posArgs([]string{"<changes>"}, nil, true),
 		func(_ *cobra.Command, args []string) error {
 			l.Mcf.Changes = args
@@ -84,8 +84,8 @@ func (a *app) ldapCmd() *cobra.Command {
 	mcf.DisableFlagParsing = true
 	describeArgs(mcf, [2]string{"<changes> ...", "[+|-]attr value pairs: + adds, - removes, none replaces"})
 
-	cmd := group("ldap <command>", "Query and modify LDAP (zmprov verbs, no JVM)",
-		verb("gacf", "Print the global config (zmprov gacf)", posArgs(nil, nil, false), nil, l.Gacf.Run),
+	cmd := group("ldap <command>", "Query and modify LDAP",
+		verb("gacf", "Print the global config", posArgs(nil, nil, false), nil, l.Gacf.Run),
 		gcf,
 		gs,
 		mcf,
@@ -98,7 +98,7 @@ func (a *app) ldapCmd() *cobra.Command {
 	pf.StringArrayVar(&l.URL, "url", nil, "LDAP URL; repeat for failover (default: ldap_master_url, ldap_url)")
 	pf.StringVar(&l.BindDN, "bind-dn", "", "Bind DN (default: zimbra_ldap_userdn)")
 	pf.StringVar(&l.PasswordFile, "password-file", "", "File holding the bind password (default: zimbra_ldap_password)")
-	pf.BoolVar(&l.JSON, "json", false, "Print JSON instead of zmprov-style attr: value lines")
+	pf.BoolVar(&l.JSON, "json", false, "Print JSON instead of attr: value lines")
 	noFileCompletion(cmd, "url", "bind-dn")
 
 	return cmd
