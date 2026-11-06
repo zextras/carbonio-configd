@@ -188,11 +188,7 @@ func RenderLine(line string, r Resolver) string {
 		}
 	}
 
-	result := VarPattern.ReplaceAllStringFunc(line, func(match string) string {
-		text, _ := r.Value(match[2 : len(match)-1])
-
-		return text
-	})
+	result := expandVars(line, r)
 
 	// An indented directive left without arguments is commented out.
 	if EmptyDirectivePattern.MatchString(result) {
@@ -200,6 +196,60 @@ func RenderLine(line string, r Resolver) string {
 	}
 
 	return result
+}
+
+// expandVars substitutes every ${var} of line. A multi-line value is indented
+// to the placeholder's column: each non-empty continuation line is prefixed
+// with the whitespace preceding the placeholder (or, when the placeholder
+// follows other text, with the line's leading indentation), so the value lines
+// up with the directive it replaces. This deliberately diverges from the legacy
+// generator, which leaves continuation lines to the value itself (a fixed
+// indentation baked into the resolver).
+func expandVars(line string, r Resolver) string {
+	locs := VarPattern.FindAllStringIndex(line, -1)
+	if locs == nil {
+		return line
+	}
+
+	var sb strings.Builder
+
+	last := 0
+
+	for _, loc := range locs {
+		sb.WriteString(line[last:loc[0]])
+
+		text, _ := r.Value(line[loc[0]+2 : loc[1]-1])
+		sb.WriteString(indentContinuation(text, placeholderIndent(line[:loc[0]])))
+
+		last = loc[1]
+	}
+
+	sb.WriteString(line[last:])
+
+	return sb.String()
+}
+
+// placeholderIndent returns the indentation a multi-line value takes: the
+// whole of before when it is only whitespace, else its leading whitespace.
+func placeholderIndent(before string) string {
+	return before[:len(before)-len(strings.TrimLeft(before, " \t"))]
+}
+
+// indentContinuation prefixes every non-empty line of text but the first with
+// indent. Empty lines stay empty (no trailing whitespace).
+func indentContinuation(text, indent string) string {
+	if indent == "" || !strings.Contains(text, "\n") {
+		return text
+	}
+
+	lines := strings.Split(text, "\n")
+	for i := 1; i < len(lines); i++ {
+		if lines[i] != "" {
+			lines[i] = indent + lines[i]
+		}
+	}
+
+	return strings.Join(lines, "\n")
 }
 
 // renderEnabler renders a line whose enabler prefix is name; ok is false when
@@ -216,22 +266,19 @@ func renderEnabler(indent, name, rest string, r Resolver) (out string, ok bool) 
 		return rendered, true
 	}
 
-	// Comment out every line of the expanded value (multi-line :servers
-	// expansions produce one "server host:port;" line per upstream).
+	// Comment out every line of the expanded value (a multi-line expansion,
+	// e.g. :servers, produces one directive per line; left alone, the
+	// continuation lines would stay live inside a commented block). Legacy
+	// StringUtil.fillTemplate substitutes the enabler with "#" in place, so
+	// whitespace following the enabler is preserved verbatim; continuation
+	// lines get the same treatment.
 	lines := strings.Split(rendered, "\n")
 	for i, l := range lines {
-		trimmed := strings.TrimLeft(l, " \t")
-
-		switch {
-		case trimmed == "":
-			lines[i] = l // preserve blank lines as-is
-		case i == 0:
-			// Legacy StringUtil.fillTemplate substitutes the enabler with "#" in
-			// place, so whitespace following the enabler is preserved verbatim.
-			lines[i] = indent + "#" + strings.TrimPrefix(l, indent)
-		default:
-			lines[i] = indent + "#" + trimmed
+		if strings.TrimLeft(l, " \t") == "" {
+			continue // preserve blank lines as-is
 		}
+
+		lines[i] = indent + "#" + strings.TrimPrefix(l, indent)
 	}
 
 	return strings.Join(lines, "\n"), true

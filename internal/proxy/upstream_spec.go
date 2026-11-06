@@ -389,9 +389,10 @@ func (g *Generator) serverAttrOrGlobal(attrs map[string]string, attr string) str
 	return ""
 }
 
-// formatServersVar mirrors Java ServersVar.format: first directive has no
-// leading indent, subsequent directives are indented with 8 spaces; each line
-// is "server    <directive>;" and the block ends with a trailing newline.
+// formatServersVar mirrors Java ServersVar.format except for indentation: each
+// line is "server    <directive>;" without leading indent (the template
+// renderer indents continuation lines to the placeholder's column; Java used a
+// fixed 8 spaces) and the block ends with a trailing newline.
 func formatServersVar(directives []string) string {
 	if len(directives) == 0 {
 		return ""
@@ -399,12 +400,8 @@ func formatServersVar(directives []string) string {
 
 	var sb strings.Builder
 
-	for i, d := range directives {
-		if i == 0 {
-			fmt.Fprintf(&sb, "server    %s;\n", d)
-		} else {
-			fmt.Fprintf(&sb, "        server    %s;\n", d)
-		}
+	for _, d := range directives {
+		fmt.Fprintf(&sb, "server    %s;\n", d)
 	}
 
 	return sb.String()

@@ -287,7 +287,8 @@ func (g *Generator) getAllMemcachedServers(ctx context.Context) ([]MemcacheServe
 }
 
 // formatMemcacheServers formats memcache servers for nginx config
-// Returns properly formatted server directive lines with indentation
+// Returns server directive lines without indentation: the template renderer
+// indents continuation lines to the placeholder's column.
 func formatMemcacheServers(servers []MemcacheServer) string {
 	if len(servers) == 0 {
 		return ""
@@ -295,7 +296,7 @@ func formatMemcacheServers(servers []MemcacheServer) string {
 
 	lines := make([]string, 0, len(servers))
 	for _, s := range servers {
-		lines = append(lines, fmt.Sprintf("  servers   %s:%d;", s.Hostname, s.Port))
+		lines = append(lines, fmt.Sprintf("servers   %s:%d;", s.Hostname, s.Port))
 	}
 
 	return strings.Join(lines, "\n")

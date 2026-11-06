@@ -59,6 +59,40 @@ server_name mail.example.com;
 proxy_pass  http://127.0.0.1:7143;
 ```
 
+**Multi-line values.** When a value contains newlines (for example `${web.add.headers.default}`
+or an upstream `:servers` list), every non-empty continuation line is prefixed with the
+whitespace that precedes the placeholder on its template line (or, if the placeholder follows
+other text, with the line's leading indentation). Empty lines stay empty. A value therefore
+lines up with the directive it replaces, at any nesting depth:
+
+```nginx
+# Template
+    location /static/
+    {
+        ${web.add.headers.default}
+    }
+
+# Output
+    location /static/
+    {
+        add_header X-Frame-Options "sameorigin";
+        add_header X-Robots-Tag "noindex, nofollow";
+    }
+```
+
+If the line starts with an enabler that renders `#`, every line of the value is commented, not
+only the first.
+
+> **Intentional divergence from the legacy Java generator.** `ProxyConfGen` leaves the
+> continuation lines to the value, which indents them with a fixed number of spaces, so the
+> second and later `add_header` lines of a nested block come out misaligned (4 spaces inside an
+> 8-space block). configd indents them to the placeholder's column instead. This is the only
+> intended output difference: `diff -w` between the Java and Go output is empty. Resolvers
+> therefore emit continuation lines without indentation (except indentation that is relative
+> structure of the value, such as the MIME types under `gzip_types`). `${listen.:addresses}` is
+> the one exception: it is placed at column 0 in the templates, so each line carries its own
+> `listen` indentation and strict-servername prefix.
+
 ### 2. Enabler variables: `${VAR}` at line start
 
 When `${VAR}` appears at the very start of a line (optionally preceded by whitespace), the

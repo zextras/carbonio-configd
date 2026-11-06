@@ -113,7 +113,8 @@ func (g *Generator) resolveDHParamEnabled(ctx context.Context) (any, error) {
 }
 
 // resolveMailWhitelistIPs renders zimbraReverseProxyIPThrottleWhitelist as nginx
-// mail_whitelist_ip directives, one per IP, matching legacy ServersVar formatting.
+// mail_whitelist_ip directives, one per IP, matching legacy ServersVar formatting
+// apart from indentation (continuation lines are indented by the renderer).
 func (g *Generator) resolveMailWhitelistIPs(_ context.Context) (any, error) {
 	raw, ok := g.getConfigValue("zimbraReverseProxyIPThrottleWhitelist", sourceServer, sourceGlobal)
 	if !ok || raw == "" {
@@ -127,13 +128,8 @@ func (g *Generator) resolveMailWhitelistIPs(_ context.Context) (any, error) {
 
 	var sb strings.Builder
 
-	for i, ip := range ips {
-		if i == 0 {
-			sb.WriteString("mail_whitelist_ip    ")
-		} else {
-			sb.WriteString("    mail_whitelist_ip    ")
-		}
-
+	for _, ip := range ips {
+		sb.WriteString("mail_whitelist_ip    ")
 		sb.WriteString(ip)
 		sb.WriteString(";\n")
 	}

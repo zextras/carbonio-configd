@@ -277,8 +277,8 @@ func TestResolveMailWhitelistIPs(t *testing.T) {
 		if !strings.Contains(str, "mail_whitelist_ip    1.2.3.4;") {
 			t.Errorf("expected first IP directive in %q", str)
 		}
-		if !strings.Contains(str, "    mail_whitelist_ip    5.6.7.8;") {
-			t.Errorf("expected second IP indented directive in %q", str)
+		if !strings.Contains(str, "\nmail_whitelist_ip    5.6.7.8;") {
+			t.Errorf("expected second IP directive, unindented, in %q", str)
 		}
 	})
 

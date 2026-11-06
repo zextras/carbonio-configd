@@ -411,7 +411,7 @@ func TestFormatMemcacheServers(t *testing.T) {
 			servers: []MemcacheServer{
 				{Hostname: "server1.example.com", Port: 11211},
 			},
-			expected: "  servers   server1.example.com:11211;",
+			expected: "servers   server1.example.com:11211;",
 		},
 		{
 			name: "multiple servers",
@@ -420,7 +420,7 @@ func TestFormatMemcacheServers(t *testing.T) {
 				{Hostname: "server2.example.com", Port: 11212},
 				{Hostname: "server3.example.com", Port: 11213},
 			},
-			expected: "  servers   server1.example.com:11211;\n  servers   server2.example.com:11212;\n  servers   server3.example.com:11213;",
+			expected: "servers   server1.example.com:11211;\nservers   server2.example.com:11212;\nservers   server3.example.com:11213;",
 		},
 		{
 			name:     "empty list",

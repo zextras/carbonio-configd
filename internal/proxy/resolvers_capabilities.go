@@ -35,28 +35,30 @@ const (
 var defaultPOP3Capabilities = []string{pop3ExpireCapability, imapCapTOP, imapCapUIDL, imapCapUSER, "XOIP"}
 
 // compressionMIMETypes is the shared list of MIME types for gzip and brotli compression.
-// The trailing blank line mirrors the legacy installed ProxyCompressionServerVar output.
-const compressionMIMETypes = `        application/atom+xml
-        application/geo+json
-        application/javascript
-        application/x-javascript
-        application/json
-        application/graphql-response+json
-        application/ld+json
-        application/manifest+json
-        application/rdf+xml
-        application/rss+xml
-        application/xhtml+xml
-        application/xml
-        font/eot
-        font/otf
-        font/ttf
-        font/woff2
-        image/svg+xml
-        text/css
-        text/javascript
-        text/plain
-        text/xml;
+// Entries are nested 4 spaces under the directive that owns the list (relative,
+// the renderer adds the placeholder's column). The trailing blank line mirrors
+// the legacy installed ProxyCompressionServerVar output.
+const compressionMIMETypes = `    application/atom+xml
+    application/geo+json
+    application/javascript
+    application/x-javascript
+    application/json
+    application/graphql-response+json
+    application/ld+json
+    application/manifest+json
+    application/rdf+xml
+    application/rss+xml
+    application/xhtml+xml
+    application/xml
+    font/eot
+    font/otf
+    font/ttf
+    font/woff2
+    image/svg+xml
+    text/css
+    text/javascript
+    text/plain
+    text/xml;
 
 `
 

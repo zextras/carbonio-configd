@@ -82,7 +82,7 @@ func TestResolveAddHeadersDefault(t *testing.T) {
 			globalData: configtest.NewConfigMapFrom(map[string]string{
 				"zimbraReverseProxyResponseHeaders": "X-Frame-Options: SAMEORIGIN\nX-Content-Type-Options: nosniff",
 			}),
-			contains: []string{"add_header X-Frame-Options SAMEORIGIN;", "add_header X-Content-Type-Options nosniff;"},
+			contains: []string{"add_header X-Frame-Options SAMEORIGIN;\nadd_header X-Content-Type-Options nosniff;"},
 		},
 		{
 			name: "header value with directive terminator is skipped",
