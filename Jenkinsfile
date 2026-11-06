@@ -28,6 +28,12 @@ pipeline {
             yaml '''\
 spec:
   containers:
+    - name: jnlp
+      resources:
+        requests:
+          memory: 2Gi
+        limits:
+          memory: 3Gi
     - name: reuse
       image: fsfe/reuse:5.0.2-debian
       command: [sleep]
