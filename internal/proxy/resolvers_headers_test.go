@@ -38,9 +38,44 @@ func TestResolveAddHeadersDefault(t *testing.T) {
 		{
 			name: "CSP header generates add_header directive",
 			globalData: configtest.NewConfigMapFrom(map[string]string{
-				"carbonioReverseProxyResponseCSPHeader": "Content-Security-Policy: default-src 'self'",
+				"carbonioReverseProxyResponseCSPHeader": `Content-Security-Policy: "default-src 'self' data:; img-src * data:"`,
 			}),
-			contains: []string{"add_header Content-Security-Policy default-src 'self';"},
+			contains: []string{`add_header Content-Security-Policy "default-src 'self' data:; img-src * data:";`},
+		},
+		{
+			// The LDAP defaults are stored quoted; ';' inside the quotes is literal.
+			name: "quoted default headers with semicolons are kept",
+			globalData: configtest.NewConfigMapFrom(map[string]string{
+				"zimbraReverseProxyResponseHeaders": "Strict-Transport-Security: \"max-age=31536000; includeSubDomains; preload\"\n" +
+					"X-XSS-Protection: \"1; mode=block\"\nX-Robots-Tag: 'noindex, nofollow'\nX-Esc: \"a \\\" b\"",
+			}),
+			contains: []string{
+				`add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload";`,
+				`add_header X-XSS-Protection "1; mode=block";`,
+				`add_header X-Robots-Tag 'noindex, nofollow';`,
+				`add_header X-Esc "a \" b";`,
+			},
+		},
+		{
+			name: "quoted value that closes early to inject is skipped",
+			globalData: configtest.NewConfigMapFrom(map[string]string{
+				"zimbraReverseProxyResponseHeaders": "X-A: \"1\"; } server { \"x\"",
+			}),
+			empty: true,
+		},
+		{
+			name: "quoted value ending in a backslash is skipped",
+			globalData: configtest.NewConfigMapFrom(map[string]string{
+				"zimbraReverseProxyResponseHeaders": "X-A: \"1\\\"",
+			}),
+			empty: true,
+		},
+		{
+			name: "unquoted value with spaces is skipped",
+			globalData: configtest.NewConfigMapFrom(map[string]string{
+				"zimbraReverseProxyResponseHeaders": "X-A: 1 always",
+			}),
+			empty: true,
 		},
 		{
 			name: "multiple headers with newlines",
