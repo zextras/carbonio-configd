@@ -151,7 +151,7 @@ func fmtFile(fsys sys.FS, stdout io.Writer, f string, t *TemplateOptions) (chang
 		return false, err
 	}
 
-	formatted := tmpl.Format(string(src), tmpl.FormatOptions{IsEnabler: proxygen.IsEnabler})
+	formatted := tmpl.Format(string(src), proxygen.FormatOptions())
 
 	switch {
 	case !t.Check && !t.Write:
