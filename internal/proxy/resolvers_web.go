@@ -202,10 +202,51 @@ func validHeaderName(s string) bool {
 	return true
 }
 
-// validHeaderValue reports whether s is safe to splice into an unquoted
-// add_header argument: no directive terminators, block delimiters or line breaks.
+// validHeaderValue reports whether s is safe to splice verbatim as the single
+// value argument of add_header. The LDAP defaults are written already quoted
+// (Strict-Transport-Security: "max-age=31536000; includeSubDomains"), as legacy
+// emitted them, so two forms are accepted:
+//   - one nginx quoted string ("..." or '...'): inside it ';', '{' and '}' are
+//     literal; the closing quote must end the value and any other occurrence of
+//     the quote character must be backslash-escaped;
+//   - a bare word: none of whitespace, quotes, ';', '{' or '}', which would add
+//     arguments, end the directive or open a block.
+//
+// Line breaks are never accepted.
 func validHeaderValue(s string) bool {
-	return s != "" && !strings.ContainsAny(s, ";{}\r\n")
+	if s == "" || strings.ContainsAny(s, "\r\n") {
+		return false
+	}
+
+	if q := s[0]; q == '"' || q == '\'' {
+		return validQuotedArg(s, q)
+	}
+
+	return !strings.ContainsAny(s, " \t\"';{}")
+}
+
+// validQuotedArg reports whether s is exactly one nginx string quoted with q:
+// the only unescaped q characters are the first and the last byte.
+func validQuotedArg(s string, q byte) bool {
+	if len(s) < 2 || s[len(s)-1] != q {
+		return false
+	}
+
+	inner := s[1 : len(s)-1]
+
+	for i := 0; i < len(inner); i++ {
+		switch inner[i] {
+		case '\\':
+			i++ // the escaped byte is literal, whatever it is
+			if i == len(inner) {
+				return false // a trailing backslash would escape the closing quote
+			}
+		case q:
+			return false
+		}
+	}
+
+	return true
 }
 
 // normalizeMultiValue replaces newline and comma separators with spaces in a single pass,
