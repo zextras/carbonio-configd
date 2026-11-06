@@ -99,7 +99,7 @@ type ProxyConfCmd struct {
 func (a *app) proxyConfCmd() *cobra.Command {
 	c := &a.cli.Proxy.Conf
 
-	cmd := a.leaf("conf [<config-file>]", "Print assembled nginx configuration (zmproxyconf replacement)",
+	cmd := a.leaf("conf [<config-file>]", "Print assembled nginx configuration",
 		posArgs(nil, []string{"[<config-file>]"}, false),
 		func(_ *cobra.Command, args []string) error {
 			c.ConfigFile = ""
@@ -157,7 +157,7 @@ type ProxyGenCmd struct {
 func (a *app) proxyGenCmd() *cobra.Command {
 	c := &a.cli.Proxy.Gen
 
-	cmd := a.leaf("gen [<args> ...]", "Generate nginx proxy configuration files (zmproxyconfgen replacement)",
+	cmd := a.leaf("gen [<args> ...]", "Generate nginx proxy configuration files",
 		posArgs(nil, nil, true),
 		func(_ *cobra.Command, args []string) error {
 			c.Args = args

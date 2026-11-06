@@ -25,7 +25,7 @@ type TLSCmd struct {
 func (a *app) tlsCmd() *cobra.Command {
 	c := &a.cli.TLS
 
-	cmd := a.leaf("tls [<mode>]", "Manage Carbonio mail mode (legacy zmtlsctl)", posArgs(nil, []string{"[<mode>]"}, false),
+	cmd := a.leaf("tls [<mode>]", "Manage Carbonio mail mode", posArgs(nil, []string{"[<mode>]"}, false),
 		func(_ *cobra.Command, args []string) error {
 			c.Mode = ""
 			if len(args) > 0 {
