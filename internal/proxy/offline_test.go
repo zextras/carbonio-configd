@@ -147,8 +147,33 @@ func TestRegistry(t *testing.T) {
 		t.Error("unknown variable is known")
 	}
 
-	if !IsEnabler("core.ipboth.enabled") || IsEnabler("web.https.port") || IsEnabler("nope") {
-		t.Error("IsEnabler wrong")
+	for name, want := range map[string]bool{
+		"core.ipboth.enabled":      true,
+		"web.strict.servername":    true, // a text variable that renders "#"
+		"web.ews.upstream.disable": true,
+		"web.https.port":           false,
+		"web.ssl.protocols":        false,
+		"listen.:addresses":        false,
+		"nope":                     false,
+	} {
+		if IsLineSwitch(name) != want {
+			t.Errorf("IsLineSwitch(%s) = %v, want %v", name, !want, want)
+		}
+	}
+
+	// The variables whose value renders with a leading space.
+	for name, want := range map[string]bool{
+		"web.ssl.protocols":  true,
+		"mail.ssl.protocols": true,
+		"mail.imapcapa":      true,
+		"mail.pop3capa":      true,
+		"ssl.protocols":      false,
+		"web.ssl.ciphers":    false,
+		"nope":               false,
+	} {
+		if HasLeadingSpace(name) != want {
+			t.Errorf("HasLeadingSpace(%s) = %v, want %v", name, !want, want)
+		}
 	}
 }
 
@@ -185,8 +210,8 @@ func formatDir(t *testing.T, src string) string {
 			t.Fatal(err)
 		}
 
-		once := tmpl.Format(string(b), tmpl.FormatOptions{IsEnabler: IsEnabler})
-		if twice := tmpl.Format(once, tmpl.FormatOptions{IsEnabler: IsEnabler}); twice != once {
+		once := tmpl.Format(string(b), FormatOptions())
+		if twice := tmpl.Format(once, FormatOptions()); twice != once {
 			t.Errorf("%s: fmt is not idempotent", e.Name())
 		}
 

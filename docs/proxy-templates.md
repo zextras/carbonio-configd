@@ -179,26 +179,54 @@ about what a line means. The tools need no LDAP, no localconfig and not the `zex
 
 ### `fmt [--check | --write] <file|dir>...`
 
-Re-indents each template by brace depth (4 spaces; braces in quotes, in comments and in
-`${...}` do not count) and aligns the values of consecutive directives. Enabler prefixes are
-re-attached to their directive, after the indent: `${core.ipboth.enabled}listen ...`. The
-`!{explode ...}` line is never touched. It never adds or removes a line, and it is idempotent.
-A directory is searched for `*.template` files.
+Lays the template out so that the **rendered** nginx configuration is clean: it re-indents by
+brace depth (4 spaces; braces in quotes, in comments, escaped as `\{` and in `${...}` do not
+count) and aligns the directives that the source already aligns. The `!{explode ...}` line is
+never touched. It never adds or removes a line, changes only whitespace, and is idempotent. A
+directory is searched for `*.template` files.
 
 - no flag: write the result of a single file to stdout;
 - `--check`: write nothing, print a unified diff per file that would change, list those files
   on stderr, exit 1 if there are any (for CI);
 - `--write`: rewrite the files that change and list them.
 
+Line switches. A *switch* is a variable that renders `""` or `#` and so turns the line it
+prefixes on or off: the enabler variables, and the text variables that render `#` by default
+(`web.strict.servername`, the `*.upstream.disable` variables). The registry tells them apart,
+so there is no list in the formatter. A switch at the start of a line stays where the source
+puts it: at column 0 it stays at column 0 and the indent follows it
+(`${web.strict.servername}    listen ...`), indented it is preceded by the indent
+(`    ${core.ipboth.enabled}listen ...`). A line that is only a variable, written at column 0
+(`${listen.:addresses}`), stays at column 0: its expansion carries the indentation. Any other
+`${var}` at the start of a line is text.
+
+Alignment rules (the width of a name never counts its switch prefix, which renders `""` or
+`#`):
+
+- A *run* is a series of consecutive directive lines at the same depth; a comment, a blank
+  line, a block brace or a continuation line ends it.
+- A line is *padded* when the source has more than one space between its name and its value.
+- Two neighbours form a *group* when both are padded, or when one is padded and the other has a
+  single space but its value starts at the padded column or beyond (the longest line of a
+  group cannot have more: `ssl_prefer_server_ciphers` among the `ssl_*` lines). Two
+  single-spaced lines are never grouped, and a single-spaced line whose value starts before the
+  padded column (`http2 on;` below the `listen` lines) is not grouped with them.
+- All values of a group start in one column: the longest name plus one space. A value that
+  renders with a leading space (`web.ssl.protocols`, `mail.ssl.protocols`, `mail.imapcapa`,
+  `mail.pop3capa`: found by rendering every registered variable) is written one space closer, so
+  that the rendered values line up.
+- Any other directive has exactly one space: a lone directive, or a run written with single
+  spaces (`default 0;` in a `map`), keeps it, and a lone padded one gets it. Nothing is aligned
+  that the source did not align.
+- Aligning a group can bring a neighbour into reach (a single-spaced line longer than the new
+  column), so the formatter formats again until nothing changes.
+
 Rules that keep the rendered output the same (up to whitespace):
 
-- only prefixes that are enabler variables are separated from their text; any other
-  `${var}` at the start of a line is text, and left alone;
 - a directive whose values are all variables (`imap_id ${mail.imapid};`) is commented out
   by the generator when it renders empty, but only if it is indented, so its indent is kept
   as it is;
-- a quote that spans lines, and the lines it covers, are left verbatim;
-- already-aligned directives keep their column; otherwise the most common column wins.
+- a quote that spans lines, and the lines it covers, are left verbatim.
 
 ### `lint <file|dir>...`
 

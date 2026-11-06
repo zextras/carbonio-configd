@@ -17,7 +17,7 @@ import (
 
 const (
 	messy = "server\n{\n  ${core.ipboth.enabled}listen   1;\n      b  2;\n}\n"
-	clean = "server\n{\n    ${core.ipboth.enabled}listen   1;\n    b        2;\n}\n"
+	clean = "server\n{\n    ${core.ipboth.enabled}listen 1;\n    b      2;\n}\n"
 )
 
 func runTemplateCmd(t *testing.T, action Action, opts *TemplateOptions) (code int, stdout, stderr string) {
@@ -53,7 +53,7 @@ func TestTemplateFmt_CheckListsAndDiffs(t *testing.T) {
 		t.Errorf("code = %d, want 1", code)
 	}
 
-	if !strings.Contains(stdout, "--- "+bad) || !strings.Contains(stdout, "+    b        2;") {
+	if !strings.Contains(stdout, "--- "+bad) || !strings.Contains(stdout, "+    b      2;") {
 		t.Errorf("no diff of the messy file: %q", stdout)
 	}
 

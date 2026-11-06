@@ -6,6 +6,7 @@ package proxy
 
 import (
 	"context"
+	"strings"
 	"sync"
 
 	"github.com/zextras/carbonio-configd/internal/proxy/tmpl"
@@ -14,18 +15,46 @@ import (
 // defaultWorkDir is the working directory of a Carbonio installation.
 const defaultWorkDir = "/opt/zextras"
 
-// variableKinds maps every variable the generator declares to its kind, built
-// once: the variables are declared in code (vars_*.go), so this needs neither
-// LDAP nor a configuration.
-var variableKinds = sync.OnceValue(func() map[string]tmpl.Kind {
-	g := newBareGenerator(defaultWorkDir)
+// registryInfo is what the template tools learn from the declared variables.
+type registryInfo struct {
+	kinds map[string]tmpl.Kind
+	// switches holds the line switches: the enablers and the text variables
+	// that render as "#" by default (web.strict.servername and the
+	// *.upstream.disable variables), so that they can prefix a line.
+	switches map[string]bool
+	// leadingSpace holds the variables whose value renders with a leading
+	// space (web.ssl.protocols renders " TLSv1.2 TLSv1.3").
+	leadingSpace map[string]bool
+}
 
-	kinds := make(map[string]tmpl.Kind, len(g.Variables))
-	for name, v := range g.Variables {
-		kinds[name] = kindOf(v.ValueType)
+// registry is built once: the variables are declared in code (vars_*.go), so
+// this needs neither LDAP nor a configuration. Switches and leading spaces
+// are found by rendering each variable at its default value.
+var registry = sync.OnceValue(func() registryInfo {
+	g := newBareGenerator(defaultWorkDir)
+	ctx := context.Background()
+
+	info := registryInfo{
+		kinds:        make(map[string]tmpl.Kind, len(g.Variables)),
+		switches:     map[string]bool{},
+		leadingSpace: map[string]bool{},
 	}
 
-	return kinds
+	for name, v := range g.Variables {
+		kind := kindOf(v.ValueType)
+		info.kinds[name] = kind
+
+		text, err := g.ExpandVariable(ctx, name)
+
+		switch {
+		case kind == tmpl.KindEnabler, err == nil && text == "#":
+			info.switches[name] = true
+		case err == nil && strings.HasPrefix(text, " "):
+			info.leadingSpace[name] = true
+		}
+	}
+
+	return info
 })
 
 func kindOf(t ValueType) tmpl.Kind {
@@ -56,13 +85,26 @@ type TemplateRegistry struct{}
 
 // Kind implements tmpl.Registry.
 func (TemplateRegistry) Kind(name string) (tmpl.Kind, bool) {
-	k, ok := variableKinds()[name]
+	k, ok := registry().kinds[name]
 
 	return k, ok
 }
 
-// IsEnabler reports whether name is a declared enabler variable, for the
-// template formatter.
-func IsEnabler(name string) bool {
-	return variableKinds()[name] == tmpl.KindEnabler
+// IsLineSwitch reports whether name is a variable that switches a line on or
+// off when it prefixes it: a declared enabler variable, or a text variable
+// that renders as "#" by default. For the template formatter.
+func IsLineSwitch(name string) bool {
+	return registry().switches[name]
+}
+
+// HasLeadingSpace reports whether the value of the variable name renders with
+// a leading space. For the template formatter.
+func HasLeadingSpace(name string) bool {
+	return registry().leadingSpace[name]
+}
+
+// FormatOptions are the options of tmpl.Format for the variables the
+// generator declares.
+func FormatOptions() tmpl.FormatOptions {
+	return tmpl.FormatOptions{IsSwitch: IsLineSwitch, LeadingSpace: HasLeadingSpace}
 }

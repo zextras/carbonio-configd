@@ -43,11 +43,16 @@ func (f fakeResolver) kind(name string) (Kind, bool) {
 	return 0, false
 }
 
-func (f fakeResolver) isEnabler(name string) bool {
+// isSwitch reports the enablers and "strict", a text variable that renders as
+// "" or "#" (like web.strict.servername).
+func (f fakeResolver) isSwitch(name string) bool {
 	_, ok := f.enablers[name]
 
-	return ok
+	return ok || name == "strict"
 }
+
+// hasLeadingSpace reports "sp", whose value renders with a leading space.
+func (fakeResolver) hasLeadingSpace(name string) bool { return name == "sp" }
 
 var res = fakeResolver{
 	enablers: map[string]bool{"on": true, "off": false},
@@ -132,7 +137,9 @@ func TestExplodeHelpers(t *testing.T) {
 	}
 }
 
-func format(src string) string { return Format(src, FormatOptions{IsEnabler: res.isEnabler}) }
+func format(src string) string {
+	return Format(src, FormatOptions{IsSwitch: res.isSwitch, LeadingSpace: res.hasLeadingSpace})
+}
 
 func TestFormat(t *testing.T) {
 	t.Parallel()
@@ -140,15 +147,17 @@ func TestFormat(t *testing.T) {
 	for name, tc := range map[string]struct{ in, want string }{
 		"braces re-indent": {
 			"server\n{\n  a  1;\n      location /x\n  {\n  b 2;\n  }\n}\n",
-			"server\n{\n    a  1;\n    location /x\n    {\n        b 2;\n    }\n}\n",
+			"server\n{\n    a 1;\n    location /x\n    {\n        b 2;\n    }\n}\n",
 		},
 		"quoted and commented braces": {
 			"a {\n x \"}\" ; # }\n}\n",
 			"a {\n    x \"}\" ; # }\n}\n",
 		},
 		"enabler prefix": {
+			// A prefix at column 0 stays there, the indent follows it; an
+			// indented prefix is preceded by the indent.
 			"a {\n${on}    listen 1;\n  ${on}${off}  listen 2;\n}\n",
-			"a {\n    ${on}listen 1;\n    ${on}${off}listen 2;\n}\n",
+			"a {\n${on}    listen 1;\n    ${on}${off}listen 2;\n}\n",
 		},
 		"unknown prefix is text": {
 			"a {\n${other}  x;\n}\n",
