@@ -8,6 +8,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/zextras/carbonio-configd/internal/cli/ldapcmd"
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
@@ -17,28 +19,128 @@ import (
 // without them the credentials come from the effective localconfig
 // (localconfig.xml and CONFIGD_LC_* environment).
 type LDAPCmd struct {
-	URL          []string `name:"url" help:"LDAP URL; repeat for failover (default: ldap_master_url, ldap_url)" sep:"none"`
-	BindDN       string   `name:"bind-dn" help:"Bind DN (default: zimbra_ldap_userdn)"`
-	PasswordFile string   `name:"password-file" help:"File holding the bind password (default: zimbra_ldap_password)"`
-	JSON         bool     `name:"json" help:"Print JSON instead of zmprov-style attr: value lines"`
+	URL          []string
+	BindDN       string
+	PasswordFile string
+	JSON         bool
 
-	Gacf   LDAPGacfCmd   `cmd:"" help:"Print the global config (zmprov gacf)"`
-	Gcf    LDAPGcfCmd    `cmd:"" help:"Print attributes of the global config (zmprov gcf)"`
-	Gs     LDAPGsCmd     `cmd:"" help:"Print a server entry with global inheritance (zmprov gs)"`
-	Mcf    LDAPMcfCmd    `cmd:"" passthrough:"" help:"Modify the global config: [+|-]attr value ... (zmprov mcf)"`
-	Search LDAPSearchCmd `cmd:"" help:"Search LDAP"`
-	Wait   LDAPWaitCmd   `cmd:"" help:"Wait until LDAP (ldap_url) accepts connections"`
+	Gacf   LDAPGacfCmd
+	Gcf    LDAPGcfCmd
+	Gs     LDAPGsCmd
+	Mcf    LDAPMcfCmd
+	Search LDAPSearchCmd
+	Wait   LDAPWaitCmd
 
 	// dial is the seam of the tests: the connection opener. Unset, the verbs
 	// use a pooled client.
 	dial ldapcmd.Dial
 }
 
+// ldapScopes are the values of "ldap search --scope".
+var ldapScopes = []string{"base", "one", "sub"}
+
+// ldapCmd builds "configd ldap". The connection flags are global to its verbs:
+// they are accepted before and after the verb, except for mcf, whose arguments
+// are taken verbatim.
+func (a *app) ldapCmd() *cobra.Command {
+	l := &a.cli.LDAP
+
+	verb := func(use, short string, args cobra.PositionalArgs, bind func(*cobra.Command, []string) error,
+		run func(*LDAPCmd, sys.System, *stdio) error,
+	) *cobra.Command {
+		return a.leaf(use, short, args, bind, func() error { return run(l, a.env, a.std) })
+	}
+
+	gcf := verb("gcf <attrs> ...", "Print attributes of the global config (zmprov gcf)",
+		posArgs([]string{"<attrs>"}, nil, true),
+		func(_ *cobra.Command, args []string) error {
+			l.Gcf.Attrs = args
+
+			return nil
+		}, l.Gcf.Run)
+	describeArgs(gcf, [2]string{"<attrs> ...", "Attributes to print"})
+
+	gs := verb("gs [<server>]", "Print a server entry with global inheritance (zmprov gs)",
+		posArgs(nil, []string{"[<server>]"}, false),
+		func(_ *cobra.Command, args []string) error {
+			l.Gs.Server = ""
+			if len(args) > 0 {
+				l.Gs.Server = args[0]
+			}
+
+			return nil
+		}, l.Gs.Run)
+	describeArgs(gs, [2]string{"[<server>]", "Server hostname (default: zimbra_server_hostname)"})
+
+	// mcf takes its arguments verbatim, so a "-attr" removal is not mistaken
+	// for a flag; the connection flags go before "mcf".
+	mcf := verb("mcf <changes> ...", "Modify the global config: [+|-]attr value ... (zmprov mcf)",
+		posArgs([]string{"<changes>"}, nil, true),
+		func(_ *cobra.Command, args []string) error {
+			l.Mcf.Changes = args
+
+			return nil
+		}, l.Mcf.Run)
+	mcf.DisableFlagParsing = true
+	describeArgs(mcf, [2]string{"<changes> ...", "[+|-]attr value pairs: + adds, - removes, none replaces"})
+
+	cmd := group("ldap <command>", "Query and modify LDAP (zmprov verbs, no JVM)",
+		verb("gacf", "Print the global config (zmprov gacf)", posArgs(nil, nil, false), nil, l.Gacf.Run),
+		gcf,
+		gs,
+		mcf,
+		a.ldapSearchCmd(l),
+		a.ldapWaitCmd(l),
+	)
+
+	pf := cmd.PersistentFlags()
+	pf.SortFlags = false
+	pf.StringArrayVar(&l.URL, "url", nil, "LDAP URL; repeat for failover (default: ldap_master_url, ldap_url)")
+	pf.StringVar(&l.BindDN, "bind-dn", "", "Bind DN (default: zimbra_ldap_userdn)")
+	pf.StringVar(&l.PasswordFile, "password-file", "", "File holding the bind password (default: zimbra_ldap_password)")
+	pf.BoolVar(&l.JSON, "json", false, "Print JSON instead of zmprov-style attr: value lines")
+	noFileCompletion(cmd, "url", "bind-dn")
+
+	return cmd
+}
+
+func (a *app) ldapSearchCmd(l *LDAPCmd) *cobra.Command {
+	c := &l.Search
+
+	cmd := a.leaf("search", "Search LDAP", posArgs(nil, nil, false), nil,
+		func() error { return c.Run(l, a.env, a.std) })
+
+	fs := cmd.Flags()
+	fs.SortFlags = false
+	fs.StringVar(&c.Base, "base", "", "Search base (default: cn=zimbra)")
+	fs.StringVar(&c.Filter, "filter", "", "LDAP filter (default: (objectClass=*))")
+	enumVar(fs, &c.Scope, "scope", "sub", "Search scope", ldapScopes...)
+	fs.StringArrayVar(&c.Attr, "attr", nil, "Attribute to return; repeat for several (default: all)")
+	mustCompleteFlag(cmd, "scope", staticCompletion(ldapScopes...))
+	noFileCompletion(cmd, "base", "filter", "attr")
+
+	return cmd
+}
+
+func (a *app) ldapWaitCmd(l *LDAPCmd) *cobra.Command {
+	c := &l.Wait
+
+	cmd := a.leaf("wait", "Wait until LDAP (ldap_url) accepts connections", posArgs(nil, nil, false), nil,
+		func() error { return c.Run(l, a.env, a.std) })
+	cmd.Flags().DurationVar(&c.Timeout, "timeout", ldapWaitTimeout, "Give up after this long")
+	noFileCompletion(cmd, "timeout")
+
+	return cmd
+}
+
+// ldapWaitTimeout is the default of "ldap wait --timeout".
+const ldapWaitTimeout = 120 * time.Second
+
 // LDAPWaitCmd is "configd ldap wait", the bounded LDAP wait of the systemd
 // unit. It succeeds at once when no LDAP URL is configured, as the daemon
 // starts without one.
 type LDAPWaitCmd struct {
-	Timeout time.Duration `name:"timeout" default:"120s" help:"Give up after this long"`
+	Timeout time.Duration
 }
 
 // Run executes "configd ldap wait".
@@ -60,7 +162,7 @@ func (c *LDAPGacfCmd) Run(parent *LDAPCmd, env sys.System, std *stdio) error {
 
 // LDAPGcfCmd is "configd ldap gcf".
 type LDAPGcfCmd struct {
-	Attrs []string `arg:"" help:"Attributes to print"`
+	Attrs []string
 }
 
 // Run executes "configd ldap gcf".
@@ -70,7 +172,7 @@ func (c *LDAPGcfCmd) Run(parent *LDAPCmd, env sys.System, std *stdio) error {
 
 // LDAPGsCmd is "configd ldap gs".
 type LDAPGsCmd struct {
-	Server string `arg:"" optional:"" help:"Server hostname (default: zimbra_server_hostname)"`
+	Server string
 }
 
 // Run executes "configd ldap gs".
@@ -86,7 +188,7 @@ func (c *LDAPGsCmd) Run(parent *LDAPCmd, env sys.System, std *stdio) error {
 // LDAPMcfCmd is "configd ldap mcf". Its arguments are taken verbatim, so a
 // "-attr" removal is not mistaken for a flag; connection flags go before "mcf".
 type LDAPMcfCmd struct {
-	Changes []string `arg:"" help:"[+|-]attr value pairs: + adds, - removes, none replaces"`
+	Changes []string
 }
 
 // Run executes "configd ldap mcf".
@@ -102,10 +204,10 @@ func (c *LDAPMcfCmd) Run(parent *LDAPCmd, env sys.System, std *stdio) error {
 
 // LDAPSearchCmd is "configd ldap search".
 type LDAPSearchCmd struct {
-	Base   string   `name:"base" help:"Search base (default: cn=zimbra)"`
-	Filter string   `name:"filter" help:"LDAP filter (default: (objectClass=*))"`
-	Scope  string   `name:"scope" enum:"base,one,sub" default:"sub" help:"Search scope"`
-	Attr   []string `name:"attr" help:"Attribute to return; repeat for several (default: all)" sep:"none"`
+	Base   string
+	Filter string
+	Scope  string
+	Attr   []string
 }
 
 // Run executes "configd ldap search".

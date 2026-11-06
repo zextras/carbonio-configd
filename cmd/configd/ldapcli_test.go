@@ -10,7 +10,6 @@ import (
 	"os"
 	"testing"
 
-	"github.com/alecthomas/kong"
 	goldap "github.com/go-ldap/ldap/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -73,26 +72,22 @@ func runLDAPCLIOn(t *testing.T, env sys.System, dir *directory, argv ...string) 
 		require.NoError(t, os.Unsetenv("CONFIGD_LC_"+key))
 	}
 
-	cli := &CLI{}
-
-	parser, err := kong.New(cli, kong.Vars{"version": "test"})
-	require.NoError(t, err)
-
-	kctx, err := parser.Parse(append([]string{"ldap"}, argv...))
-	require.NoError(t, err)
-
 	var (
 		out    bytes.Buffer
 		dialed *carboldap.ClientConfig
 	)
 
+	cli := &CLI{}
 	cli.LDAP.dial = func(cfg *carboldap.ClientConfig) (ldapcmd.Conn, error) {
 		dialed = cfg
 
 		return dir, nil
 	}
 
-	err = kctx.Run(env, &stdio{Out: &out, Err: io.Discard})
+	root, _ := newRootCmd("configd", cli, env, &stdio{Out: &out, Err: io.Discard})
+	root.SetArgs(append([]string{"ldap"}, argv...))
+
+	err := root.Execute()
 
 	return out.String(), dialed, err
 }

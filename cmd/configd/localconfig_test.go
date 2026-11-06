@@ -7,7 +7,6 @@ package main
 import (
 	"testing"
 
-	"github.com/alecthomas/kong"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -56,11 +55,7 @@ func TestLegacyLongOptionNames(t *testing.T) {
 	parse := func(t *testing.T, argv ...string) *LocalconfigCmd {
 		t.Helper()
 
-		cli := &CLI{}
-		parser, err := kong.New(cli, kong.Vars{"version": "test"})
-		require.NoError(t, err)
-
-		_, err = parser.Parse(append([]string{"localconfig"}, argv...))
+		cli, _, err := parseArgv(t, append([]string{"localconfig"}, argv...)...)
 		require.NoError(t, err, argv)
 
 		return &cli.Localconfig
@@ -87,7 +82,7 @@ func TestLegacyLongOptionNames(t *testing.T) {
 	assert.Equal(t, "xml", parse(t, "--format=xml").Mode)
 	assert.Equal(t, "/y.xml", parse(t, "--config=/y.xml").ConfigPath)
 
-	// The names Kong derived before the aliases keep working.
+	// The names the aliases stand for keep working.
 	current := parse(t, "--config-path", "/z.xml", "--mode", "shell", "--show-passwords", "--show-changed",
 		"--show-path", "--show-defaults")
 	assert.Equal(t, "/z.xml", current.ConfigPath)

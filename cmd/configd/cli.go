@@ -6,10 +6,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
+	"sync"
 
-	"github.com/alecthomas/kong"
-	"github.com/willabides/kongplete"
+	"github.com/spf13/cobra"
 	"github.com/zextras/carbonio-configd/internal/cli/cliutil"
 	"github.com/zextras/carbonio-configd/internal/cli/plancmd"
 	"github.com/zextras/carbonio-configd/internal/cli/rewrite"
@@ -18,28 +20,188 @@ import (
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
-// CLI is the root command struct parsed by Kong.
+// CLI holds the parsed command line: the global flags and one struct per
+// command. newRootCmd binds the flags to its fields.
 type CLI struct {
-	Version         kong.VersionFlag `name:"version" short:"v" help:"Print version information and exit"`
-	DisableRestarts bool             `name:"disable-restarts" help:"Disable all service restarts (dry-run mode)"`
+	Version         bool
+	DisableRestarts bool
 
-	ProfilingArgs `embed:""`
-	TracingArgs   `embed:""`
+	ProfilingArgs
+	TracingArgs
 
-	Localconfig LocalconfigCmd               `cmd:"" help:"Manage local configuration"`
-	Service     ServiceCmd                   `cmd:"" help:"Manage system services"`
-	Status      StatusCmd                    `cmd:"" help:"Show service status"`
-	Control     ControlCmd                   `cmd:"" help:"Orchestrate all services"`
-	Init        InitCmd                      `cmd:"" help:"Initialize components"`
-	Proxy       ProxyCmd                     `cmd:"" help:"Proxy protocol management"`
-	TLS         TLSCmd                       `cmd:"" name:"tls" help:"Manage Carbonio mail mode (legacy zmtlsctl)"`
-	LDAP        LDAPCmd                      `cmd:"" name:"ldap" help:"Query and modify LDAP (zmprov verbs, no JVM)"`
-	Rewrite     RewriteCmd                   `cmd:"" help:"Force configuration rewrite"`
-	Plan        PlanCmd                      `cmd:"" help:"Show what a rewrite would change, without changing anything"`
-	Shadow      ShadowCmd                    `cmd:"" help:"Run the cycle next to a real configd, without side effects"`
-	Release     ReleaseCmd                   `cmd:"" help:"Show Carbonio release and package versions"`
-	Completion  kongplete.InstallCompletions `cmd:"" help:"Install shell completions"`
-	Daemon      DaemonCmd                    `cmd:"" default:"1" hidden:""`
+	Localconfig LocalconfigCmd
+	Service     ServiceCmd
+	Status      StatusCmd
+	Control     ControlCmd
+	Init        InitCmd
+	Proxy       ProxyCmd
+	TLS         TLSCmd
+	LDAP        LDAPCmd
+	Rewrite     RewriteCmd
+	Plan        PlanCmd
+	Shadow      ShadowCmd
+	Release     ReleaseCmd
+	Daemon      DaemonCmd
+}
+
+// newRootCmd builds the command tree of the binary named name, binding its
+// flags and arguments to cli and running the commands on env with std. Without
+// a subcommand the root runs the daemon.
+func newRootCmd(name string, cli *CLI, env sys.System, std *stdio) (*cobra.Command, *app) {
+	a := &app{cli: cli, env: env, std: std}
+
+	configureCobra()
+
+	root := &cobra.Command{
+		Use:               name + " <command>",
+		Short:             "Configuration management daemon for Carbonio",
+		Args:              posArgs(nil, nil, false),
+		SilenceUsage:      true,
+		SilenceErrors:     true,
+		TraverseChildren:  true,
+		PersistentPreRunE: a.printVersion,
+		RunE: func(*cobra.Command, []string) error {
+			a.started = true
+
+			return cli.Daemon.Run(cli, env, std)
+		},
+	}
+
+	root.SetOut(std.Out)
+	root.SetErr(std.Err)
+	root.SetHelpTemplate(helpTemplate)
+	root.SetUsageTemplate(helpTemplate)
+	root.SetHelpCommand(a.helpCommand())
+	root.SetFlagErrorFunc(flagError)
+
+	pf := root.PersistentFlags()
+	pf.SortFlags = false
+	pf.BoolP("help", "h", false, "Show context-sensitive help.")
+	pf.BoolVarP(&cli.Version, "version", "v", false, "Print version information and exit")
+	pf.BoolVar(&cli.DisableRestarts, "disable-restarts", false, "Disable all service restarts (dry-run mode)")
+	cli.ProfilingArgs.register(pf)
+	cli.TracingArgs.register(pf)
+
+	root.AddCommand(
+		a.localconfigCmd(),
+		a.serviceCmd(),
+		a.statusCmd(),
+		a.controlCmd(),
+		a.initCmd(),
+		a.proxyCmd(),
+		a.tlsCmd(),
+		a.ldapCmd(),
+		a.rewriteCmd(),
+		a.planCmd(),
+		a.shadowCmd(),
+		a.releaseCmd(),
+		a.daemonCmd(),
+	)
+
+	// Traversal reads the flag sets before cobra merges the inherited flags
+	// into them; merge now so "--disable-restarts <verb>" is not read as a flag
+	// that takes the verb as its value.
+	mergeInheritedFlags(root)
+
+	return root, a
+}
+
+var cobraSetup sync.Once
+
+// configureCobra sets what cobra keeps process-wide: the commands are listed in
+// the order they are declared, not alphabetically, and the help template can
+// format the flags.
+func configureCobra() {
+	cobraSetup.Do(func() {
+		cobra.EnableCommandSorting = false
+
+		cobra.AddTemplateFunc("flagUsages", flagUsages)
+	})
+}
+
+// mergeInheritedFlags makes every command's flag set include the persistent
+// flags of its ancestors.
+func mergeInheritedFlags(cmd *cobra.Command) {
+	_ = cmd.InheritedFlags()
+
+	for _, sub := range cmd.Commands() {
+		mergeInheritedFlags(sub)
+	}
+}
+
+// flagError words a flag parsing error the way the command line always has:
+// "unknown flag --x" and "unknown flag -x".
+func flagError(_ *cobra.Command, err error) error {
+	msg := err.Error()
+
+	if flag, ok := strings.CutPrefix(msg, "unknown flag: "); ok {
+		return errors.New("unknown flag " + flag)
+	}
+
+	if rest, ok := strings.CutPrefix(msg, "unknown shorthand flag: '"); ok {
+		if letter, _, found := strings.Cut(rest, "'"); found {
+			return errors.New("unknown flag -" + letter)
+		}
+	}
+
+	return err
+}
+
+// printVersion is the root PersistentPreRunE: -v/--version, accepted before or
+// after any command, prints the version and ends the run with status 0.
+func (a *app) printVersion(*cobra.Command, []string) error {
+	if !a.cli.Version {
+		return nil
+	}
+
+	_, _ = fmt.Fprintln(a.std.Out, formatVersion())
+
+	return exitStatus(0)
+}
+
+// helpCommand is the hidden "help [command]" cobra would otherwise list: the
+// command tree never had one, but the usual spelling keeps working.
+func (a *app) helpCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:    "help [command]",
+		Hidden: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target, _, err := cmd.Root().Find(args)
+			if err != nil || target == nil {
+				return fmt.Errorf("unknown help topic %q", strings.Join(args, " "))
+			}
+
+			return target.Help()
+		},
+	}
+}
+
+// helpTemplate is the layout of --help: the usage line first, then the
+// description, the commands and the flags.
+const helpTemplate = `Usage: {{.UseLine}}
+{{with (or .Long .Short)}}
+{{. | trimTrailingWhitespaces}}
+{{end}}{{if .HasAvailableSubCommands}}
+Commands:
+{{range .Commands}}{{if .IsAvailableCommand}}  {{rpad .Name .NamePadding}}  {{.Short}}
+{{end}}{{end}}{{end}}{{if .HasAvailableLocalFlags}}
+Flags:
+{{flagUsages .LocalFlags | trimTrailingWhitespaces}}
+{{end}}{{if .HasAvailableInheritedFlags}}
+Global flags:
+{{flagUsages .InheritedFlags | trimTrailingWhitespaces}}
+{{end}}{{if .HasAvailableSubCommands}}
+Run "{{.CommandPath}} <command> --help" for more information on a command.
+{{end}}`
+
+// daemonCmd is the hidden "daemon" command: what the bare command runs.
+func (a *app) daemonCmd() *cobra.Command {
+	cmd := a.leaf("daemon", "Run the daemon", posArgs(nil, nil, false), nil, func() error {
+		return a.cli.Daemon.Run(a.cli, a.env, a.std)
+	})
+	cmd.Hidden = true
+
+	return cmd
 }
 
 // DaemonCmd handles the default behavior: run the daemon.
@@ -89,7 +251,23 @@ func (c *DaemonCmd) Run(cli *CLI, env sys.System, std *stdio) error {
 
 // RewriteCmd sends a forced configuration rewrite to the running daemon.
 type RewriteCmd struct {
-	ConfigNames []string `arg:"" required:"" help:"Config names to force rewrite (e.g., mta, proxy, all)"`
+	ConfigNames []string
+}
+
+func (a *app) rewriteCmd() *cobra.Command {
+	c := &a.cli.Rewrite
+
+	cmd := a.leaf("rewrite <config-names> ...", "Force configuration rewrite",
+		posArgs([]string{"<config-names>"}, nil, true),
+		func(_ *cobra.Command, args []string) error {
+			c.ConfigNames = args
+
+			return nil
+		},
+		func() error { return c.Run(a.cli, a.env, a.std) })
+	cmd.ValidArgsFunction = a.completeSections(true)
+
+	return describeArgs(cmd, [2]string{"<config-names> ...", "Config names to force rewrite (e.g., mta, proxy, all)"})
 }
 
 // Run executes the rewrite command.
@@ -102,8 +280,25 @@ func (c *RewriteCmd) Run(_ *CLI, env sys.System, std *stdio) error {
 
 // PlanCmd shows what a forced rewrite would change on this host.
 type PlanCmd struct {
-	Sections []string `arg:"" optional:"" help:"Sections to plan (default: all)"`
-	JSON     bool     `name:"json" help:"Print the plan as JSON"`
+	Sections []string
+	JSON     bool
+}
+
+func (a *app) planCmd() *cobra.Command {
+	c := &a.cli.Plan
+
+	cmd := a.leaf("plan [<sections> ...]", "Show what a rewrite would change, without changing anything",
+		posArgs(nil, nil, true),
+		func(_ *cobra.Command, args []string) error {
+			c.Sections = args
+
+			return nil
+		},
+		func() error { return c.Run(a.cli, a.env, a.std) })
+	cmd.Flags().BoolVar(&c.JSON, "json", false, "Print the plan as JSON")
+	cmd.ValidArgsFunction = a.completeSections(false)
+
+	return describeArgs(cmd, [2]string{"[<sections> ...]", "Sections to plan (default: all)"})
 }
 
 // Run executes the plan command. The exit status is 0 when nothing would

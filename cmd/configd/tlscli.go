@@ -7,6 +7,8 @@ package main
 import (
 	"context"
 
+	"github.com/spf13/cobra"
+
 	"github.com/zextras/carbonio-configd/internal/cli/tls"
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
@@ -15,9 +17,33 @@ import (
 type TLSCmd struct {
 	// Target zimbraMailMode (both|http|https|mixed|redirect).
 	// If omitted, only the config rewrite is performed.
-	Mode  string `arg:"" optional:"" help:"Target zimbraMailMode"`
-	Force bool   `name:"force" help:"Skip proxy cross-constraint validation"`
-	Host  string `name:"host" help:"Override detected hostname (defaults to zimbra_server_hostname)"`
+	Mode  string
+	Force bool
+	Host  string
+}
+
+func (a *app) tlsCmd() *cobra.Command {
+	c := &a.cli.TLS
+
+	cmd := a.leaf("tls [<mode>]", "Manage Carbonio mail mode (legacy zmtlsctl)", posArgs(nil, []string{"[<mode>]"}, false),
+		func(_ *cobra.Command, args []string) error {
+			c.Mode = ""
+			if len(args) > 0 {
+				c.Mode = args[0]
+			}
+
+			return nil
+		},
+		func() error { return c.Run(a.cli, a.env, a.std) })
+
+	fs := cmd.Flags()
+	fs.BoolVar(&c.Force, "force", false, "Skip proxy cross-constraint validation")
+	fs.StringVar(&c.Host, "host", "", "Override detected hostname (defaults to zimbra_server_hostname)")
+
+	cmd.ValidArgsFunction = staticFirstArg(mailModeNames()...)
+	noFileCompletion(cmd, "host")
+
+	return describeArgs(cmd, [2]string{"[<mode>]", "Target zimbraMailMode"})
 }
 
 // Run executes the tls command.

@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alecthomas/kong"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -170,15 +169,10 @@ func TestRejectSideEffectFlags(t *testing.T) {
 func TestCLI_Shadow(t *testing.T) {
 	t.Parallel()
 
-	cli := &CLI{}
-
-	parser, err := kong.New(cli, kong.Vars{"version": "test"})
+	cli, cmd, err := parseArgv(t, "shadow", "--shadow-dir", "/tmp/s", "--single-cycle")
 	require.NoError(t, err)
 
-	ctx, err := parser.Parse([]string{"shadow", "--shadow-dir", "/tmp/s", "--single-cycle"})
-	require.NoError(t, err)
-
-	assert.Equal(t, "shadow", ctx.Command())
+	assert.Equal(t, "shadow", cmd)
 	assert.Equal(t, "/tmp/s", cli.Shadow.Dir)
 	assert.True(t, cli.Shadow.Once)
 }
@@ -186,12 +180,7 @@ func TestCLI_Shadow(t *testing.T) {
 func TestCLI_ShadowDefaults(t *testing.T) {
 	t.Parallel()
 
-	cli := &CLI{}
-
-	parser, err := kong.New(cli, kong.Vars{"version": "test"})
-	require.NoError(t, err)
-
-	_, err = parser.Parse([]string{"shadow"})
+	cli, _, err := parseArgv(t, "shadow")
 	require.NoError(t, err)
 
 	assert.Empty(t, cli.Shadow.Dir)

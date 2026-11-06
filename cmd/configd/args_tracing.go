@@ -6,12 +6,20 @@
 
 package main
 
+import "github.com/spf13/pflag"
+
 // TracingArgs holds tracing-related command-line flags.
 // Only compiled when built with -tags tracing.
-// Embedded in CLI via embed:"" tag — fields become root-level flags.
+// Embedded in CLI: its flags are registered on the root as global flags.
 type TracingArgs struct {
-	EnableTracing bool   `name:"enable-tracing" help:"Enable span-based tracing"`
-	TracingOutput string `name:"tracing-output" default:"trace-spans.json" help:"Output file for tracing spans"`
+	EnableTracing bool
+	TracingOutput string
+}
+
+// register binds the fields to the global flags.
+func (p *TracingArgs) register(fs *pflag.FlagSet) {
+	fs.BoolVar(&p.EnableTracing, "enable-tracing", false, "Enable span-based tracing")
+	fs.StringVar(&p.TracingOutput, "tracing-output", "trace-spans.json", "Output file for tracing spans")
 }
 
 // applyTo populates the corresponding fields in Args.

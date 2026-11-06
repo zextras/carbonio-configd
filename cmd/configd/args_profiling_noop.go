@@ -6,8 +6,13 @@
 
 package main
 
+import "github.com/spf13/pflag"
+
 // ProfilingArgs is empty when profiling is disabled at build time.
 type ProfilingArgs struct{}
+
+// register is a no-op when profiling is disabled at build time.
+func (p *ProfilingArgs) register(_ *pflag.FlagSet) {}
 
 // applyTo is a no-op when profiling is disabled.
 func (p *ProfilingArgs) applyTo(_ *Args) {

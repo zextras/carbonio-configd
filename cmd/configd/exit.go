@@ -15,10 +15,10 @@ import (
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
-// exitStatus is the error a Kong Run method returns to make main exit with a
-// specific status without printing an "Error:" line: the command already wrote
-// whatever it had to say on stderr. run maps it to the process status and main
-// is the only place that calls os.Exit.
+// exitStatus is the error a command returns to make main exit with a specific
+// status without printing an "Error:" line: the command already wrote whatever
+// it had to say on stderr. run maps it to the process status and main is the
+// only place that calls os.Exit.
 type exitStatus int
 
 func (e exitStatus) Error() string { return "exit status " + strconv.Itoa(int(e)) }
@@ -32,27 +32,6 @@ func exitWith(code int) error {
 
 	return exitStatus(code)
 }
-
-// kongParseFailure is the status kong's FatalIfErrorf exits with on a command
-// line parse error.
-const kongParseFailure = 80
-
-// kongExitStatus maps the status kong exits with to the one the process
-// exits with: a command line parse error is 1, the status of the legacy
-// Java/Perl/Jython tools (and of every other failure of this binary), instead
-// of kong's 80. Other statuses (help, version: 0) pass through.
-func kongExitStatus(code int) int {
-	if code == kongParseFailure {
-		return 1
-	}
-
-	return code
-}
-
-// exitRequest is the panic value of kong's exit hook in run: kong calls its
-// Exit hook where it would end the process (help, version, a parse error) and
-// expects it not to return, so run unwinds with the status instead.
-type exitRequest int
 
 // stdio is everything a command takes from the process besides the host
 // (sys.System): the standard streams and the command line. main binds the
@@ -87,6 +66,24 @@ func exitCode(err error, stderr io.Writer) int {
 	}
 
 	_, _ = fmt.Fprintf(stderr, "Error: %v\n", err)
+
+	return 1
+}
+
+// exitStatus is the process exit status for the error Execute returned. An
+// exitStatus passes through. Any other error is a usage error ("<name>: error:
+// <msg>", status 1, the status of the legacy tools) while no command has
+// begun to run, and a failure of the command ("Error: <msg>", status 1) after.
+func (a *app) exitStatus(err error, name string, stderr io.Writer) int {
+	if err == nil {
+		return 0
+	}
+
+	if _, ok := errors.AsType[exitStatus](err); ok || a.started {
+		return exitCode(err, stderr)
+	}
+
+	_, _ = fmt.Fprintf(stderr, "%s: error: %v\n", name, err)
 
 	return 1
 }

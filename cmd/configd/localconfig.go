@@ -7,6 +7,8 @@ package main
 import (
 	"context"
 
+	"github.com/spf13/cobra"
+
 	"github.com/zextras/carbonio-configd/internal/cli/cliutil"
 	lccli "github.com/zextras/carbonio-configd/internal/cli/localconfig"
 )
@@ -17,23 +19,72 @@ import (
 // LocalConfigCLI (carbonio-mailbox 4.36.6); the logic lives in
 // internal/cli/localconfig.
 type LocalconfigCmd struct {
-	Mode          string   `short:"m" aliases:"format" help:"Output mode: plain (default), shell, export, nokey, xml"`
-	ConfigPath    string   `short:"c" aliases:"config" help:"Path to localconfig.xml"`
-	Quiet         bool     `short:"q" help:"Quiet mode (suppress warnings and errors)"`
-	ShowPath      bool     `short:"p" aliases:"path" help:"Print config file path and exit"`
-	ShowPasswords bool     `short:"s" aliases:"show" help:"Show password values (default: masked)"`
-	ShowDefaults  bool     `short:"d" aliases:"default" help:"Show default values instead of current"`
-	ShowChanged   bool     `short:"n" aliases:"changed" help:"Show only keys changed from defaults"`
-	Edit          bool     `short:"e" help:"Edit: set key=value pairs"`
-	Unset         bool     `short:"u" help:"Unset (remove) keys"`
-	Random        bool     `short:"r" help:"Set key to random password (use with -e)"`
-	Force         bool     `short:"f" name:"force" help:"Allow editing dangerous keys (legacy zmlocalconfig -f)"`
-	Expand        bool     `short:"x" help:"Expand $${key} references (shell and export always expand)"`
-	Info          bool     `short:"i" name:"info" help:"Show documentation for the keys listed in [args]"`
-	All           bool     `name:"all" hidden:"" help:"Show documentation for all keys, including unsupported ones"`
-	Reload        bool     `short:"l" name:"reload" help:"Send a SOAP request to the server to reload its local config"`
-	Key           []string `short:"k" name:"key" help:"Key to retrieve (can be repeated)" sep:"none"`
-	KeyArgs       []string `arg:"" optional:"" help:"Keys or key=value pairs"`
+	Mode          string
+	ConfigPath    string
+	Quiet         bool
+	ShowPath      bool
+	ShowPasswords bool
+	ShowDefaults  bool
+	ShowChanged   bool
+	Edit          bool
+	Unset         bool
+	Random        bool
+	Force         bool
+	Expand        bool
+	Info          bool
+	All           bool
+	Reload        bool
+	Key           []string
+	KeyArgs       []string
+}
+
+// localconfigModes are the output modes of --mode.
+var localconfigModes = []string{"plain", "shell", "export", "nokey", "xml"}
+
+func (a *app) localconfigCmd() *cobra.Command {
+	c := &a.cli.Localconfig
+
+	cmd := a.leaf("localconfig [<key-args> ...]", "Manage local configuration",
+		posArgs(nil, nil, true),
+		func(_ *cobra.Command, args []string) error {
+			c.KeyArgs = args
+
+			return nil
+		},
+		func() error { return c.Run(a.std) })
+
+	fs := cmd.Flags()
+	fs.SortFlags = false
+	// The long names of the legacy zmlocalconfig keep working next to the names
+	// of the fields.
+	flagAliases(fs, map[string]string{
+		"format": "mode", "config": "config-path", "path": "show-path", "show": "show-passwords",
+		"default": "show-defaults", "changed": "show-changed",
+	})
+
+	fs.StringVarP(&c.Mode, "mode", "m", "", "Output mode: plain (default), shell, export, nokey, xml")
+	fs.StringVarP(&c.ConfigPath, "config-path", "c", "", "Path to localconfig.xml")
+	fs.BoolVarP(&c.Quiet, "quiet", "q", false, "Quiet mode (suppress warnings and errors)")
+	fs.BoolVarP(&c.ShowPath, "show-path", "p", false, "Print config file path and exit")
+	fs.BoolVarP(&c.ShowPasswords, "show-passwords", "s", false, "Show password values (default: masked)")
+	fs.BoolVarP(&c.ShowDefaults, "show-defaults", "d", false, "Show default values instead of current")
+	fs.BoolVarP(&c.ShowChanged, "show-changed", "n", false, "Show only keys changed from defaults")
+	fs.BoolVarP(&c.Edit, "edit", "e", false, "Edit: set key=value pairs")
+	fs.BoolVarP(&c.Unset, "unset", "u", false, "Unset (remove) keys")
+	fs.BoolVarP(&c.Random, "random", "r", false, "Set key to random password (use with -e)")
+	fs.BoolVarP(&c.Force, "force", "f", false, "Allow editing dangerous keys (legacy zmlocalconfig -f)")
+	fs.BoolVarP(&c.Expand, "expand", "x", false, "Expand ${key} references (shell and export always expand)")
+	fs.BoolVarP(&c.Info, "info", "i", false, "Show documentation for the keys listed in [args]")
+	fs.BoolVar(&c.All, "all", false, "Show documentation for all keys, including unsupported ones")
+	fs.BoolVarP(&c.Reload, "reload", "l", false, "Send a SOAP request to the server to reload its local config")
+	fs.StringArrayVarP(&c.Key, "key", "k", nil, "Key to retrieve (can be repeated)")
+	_ = fs.MarkHidden("all")
+
+	mustCompleteFlag(cmd, "mode", staticCompletion(localconfigModes...))
+	mustCompleteFlag(cmd, "key", completeLocalconfigKeys)
+	cmd.ValidArgsFunction = completeLocalconfigKeys
+
+	return describeArgs(cmd, [2]string{"[<key-args> ...]", "Keys or key=value pairs"})
 }
 
 // Run executes the localconfig subcommand; a failure exits the process with

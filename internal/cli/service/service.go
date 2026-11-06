@@ -187,8 +187,8 @@ func (r *runner) ldapReplicaRefused(c *cliutil.Console, opts *Options) bool {
 	return false
 }
 
-// report prints err as the "Error:" line main used to print for a failing Kong
-// Run and returns the matching exit status.
+// report prints err as the "Error:" line main prints for a failing
+// command and returns the matching exit status.
 func report(stderr io.Writer, err error) int {
 	if err == nil {
 		return 0

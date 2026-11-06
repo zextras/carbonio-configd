@@ -7,6 +7,10 @@ package main
 import (
 	"context"
 	"slices"
+	"strings"
+
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/zextras/carbonio-configd/internal/cli/service"
 	"github.com/zextras/carbonio-configd/internal/sys"
@@ -20,19 +24,92 @@ const norewriteArg = "norewrite"
 // legacy arguments (norewrite, ...) and an empty or unknown verb ends in the
 // usage message instead of a parse error.
 type ServiceCmd struct {
-	List           ServiceListCmd           `cmd:"" help:"List all services with status"`
-	Start          ServiceStartCmd          `cmd:"" help:"Start a service"`
-	Stop           ServiceStopCmd           `cmd:"" help:"Stop a service"`
-	Kill           ServiceKillCmd           `cmd:"" help:"Stop a service (legacy alias of stop)"`
-	Restart        ServiceRestartCmd        `cmd:"" help:"Restart a service"`
-	Reload         ServiceReloadCmd         `cmd:"" help:"Reload a service"`
-	Status         ServiceStatusCmd         `cmd:"" help:"Show service status"`
-	Refresh        ServiceRefreshCmd        `cmd:"" help:"Make a service re-read its configuration (milter)"`
-	Rotate         ServiceRotateCmd         `cmd:"" help:"Make a service reopen its logs (stats)"`
-	StartSystemd   ServiceStartSystemdCmd   `cmd:"" name:"start-systemd" hidden:"" help:"systemd ExecStart leaf"`
-	StopSystemd    ServiceStopSystemdCmd    `cmd:"" name:"stop-systemd" hidden:"" help:"systemd ExecStop leaf"`
-	RestartSystemd ServiceRestartSystemdCmd `cmd:"" name:"restart-systemd" hidden:"" help:"stop then start leaf"`
-	Usage          ServiceUsageCmd          `cmd:"" default:"withargs" hidden:"" help:"Print the verb list"`
+	List           ServiceListCmd
+	Start          ServiceStartCmd
+	Stop           ServiceStopCmd
+	Kill           ServiceKillCmd
+	Restart        ServiceRestartCmd
+	Reload         ServiceReloadCmd
+	Status         ServiceStatusCmd
+	Refresh        ServiceRefreshCmd
+	Rotate         ServiceRotateCmd
+	StartSystemd   ServiceStartSystemdCmd
+	StopSystemd    ServiceStopSystemdCmd
+	RestartSystemd ServiceRestartSystemdCmd
+	Usage          ServiceUsageCmd
+}
+
+// serviceCmd builds "configd service". The command itself is what an empty or
+// unknown verb falls through to, and swallows whatever flags such a call has.
+func (a *app) serviceCmd() *cobra.Command {
+	s := &a.cli.Service
+
+	cmd := &cobra.Command{
+		Use:                "service <command>",
+		Short:              "Manage system services",
+		Args:               cobra.ArbitraryArgs,
+		FParseErrWhitelist: cobra.FParseErrWhitelist{UnknownFlags: true},
+		PreRunE: func(_ *cobra.Command, args []string) error {
+			s.Usage.Args = args
+
+			return nil
+		},
+		RunE: func(*cobra.Command, []string) error {
+			a.started = true
+
+			return s.Usage.Run(a.env, a.std)
+		},
+	}
+
+	list := a.leaf("list", "List all services with status", posArgs(nil, nil, false), nil,
+		func() error { return s.List.Run(a.env, a.std) })
+
+	cmd.AddCommand(
+		list,
+		a.serviceVerb("start", "Start a service", false, &s.Start.serviceArgs, &s.Start.NoRewrite,
+			func() error { return s.Start.Run(a.env, a.std) }),
+		a.serviceVerb("stop", "Stop a service", false, &s.Stop.serviceArgs, nil,
+			func() error { return s.Stop.Run(a.env, a.std) }),
+		a.serviceVerb("kill", "Stop a service (legacy alias of stop)", false, &s.Kill.serviceArgs, nil,
+			func() error { return s.Kill.Run(a.env, a.std) }),
+		a.serviceVerb("restart", "Restart a service", false, &s.Restart.serviceArgs, &s.Restart.NoRewrite,
+			func() error { return s.Restart.Run(a.env, a.std) }),
+		a.serviceVerb("reload", "Reload a service", false, &s.Reload.serviceArgs, nil,
+			func() error { return s.Reload.Run(a.env, a.std) }),
+		a.serviceVerb("status", "Show service status", false, &s.Status.serviceArgs, nil,
+			func() error { return s.Status.Run(a.env, a.std) }),
+		a.serviceVerb("refresh", "Make a service re-read its configuration (milter)", false, &s.Refresh.serviceArgs, nil,
+			func() error { return s.Refresh.Run(a.env, a.std) }),
+		a.serviceVerb("rotate", "Make a service reopen its logs (stats)", false, &s.Rotate.serviceArgs, nil,
+			func() error { return s.Rotate.Run(a.env, a.std) }),
+		a.serviceVerb("start-systemd", "systemd ExecStart leaf", true, &s.StartSystemd.serviceArgs, nil,
+			func() error { return s.StartSystemd.Run(a.env, a.std) }),
+		a.serviceVerb("stop-systemd", "systemd ExecStop leaf", true, &s.StopSystemd.serviceArgs, nil,
+			func() error { return s.StopSystemd.Run(a.env, a.std) }),
+		a.serviceVerb("restart-systemd", "stop then start leaf", true, &s.RestartSystemd.serviceArgs, nil,
+			func() error { return s.RestartSystemd.Run(a.env, a.std) }),
+	)
+
+	return cmd
+}
+
+// serviceVerb builds one service verb: "<verb> <name> [<extra> ...]", with
+// --no-rewrite when noRewrite is set. Flags are parsed up to the first extra
+// argument; from there on everything is handed over as it is.
+func (a *app) serviceVerb(
+	verb, short string, hidden bool, args *serviceArgs, noRewrite *bool, run func() error,
+) *cobra.Command {
+	validate := posArgs([]string{"<name>"}, []string{"[<extra> ...]"}, true)
+	cmd := a.leaf(verb+" <name> [<extra> ...]", short, validate, args.bind, run)
+	cmd.Hidden = hidden
+	cmd.Flags().SetInterspersed(false)
+	cmd.ValidArgsFunction = a.completeFirstService
+
+	if noRewrite != nil {
+		cmd.Flags().BoolVar(noRewrite, "no-rewrite", false, "Skip config regeneration")
+	}
+
+	return describeArgs(cmd, [2]string{"<name>", "Service name"}, [2]string{"[<extra> ...]", "Legacy wrapper arguments"})
 }
 
 // runService executes one "configd service" action.
@@ -44,8 +121,75 @@ func runService(env sys.System, std *stdio, opts *service.Options) error {
 // service and whatever the legacy wrapper forwards after it. Extra swallows
 // anything, flags included, so a wrapper call never fails on a stray argument.
 type serviceArgs struct {
-	Name  string   `arg:"" help:"Service name"`
-	Extra []string `arg:"" optional:"" passthrough:"" hidden:"" help:"Legacy wrapper arguments"`
+	Name  string
+	Extra []string
+}
+
+// bind takes the service and the extras from the arguments cobra left after
+// the leading flags. A flag the verb knows right after the service
+// ("start proxy --no-rewrite") is still a flag; the first other argument starts
+// the extras, which are kept as given, flags included.
+func (a *serviceArgs) bind(cmd *cobra.Command, rest []string) error {
+	a.Name = rest[0]
+	a.Extra = peelKnownFlags(cmd.Flags(), rest[1:])
+
+	if len(a.Extra) == 0 {
+		a.Extra = nil
+	}
+
+	return nil
+}
+
+// peelKnownFlags parses the leading arguments of rest that are flags of fs and
+// returns the others. Help and version are left in: after the service name they
+// belong to the legacy wrapper.
+func peelKnownFlags(fs *pflag.FlagSet, rest []string) []string {
+	for len(rest) > 0 {
+		n := knownFlagLen(fs, rest)
+		if n == 0 || fs.Parse(rest[:n]) != nil {
+			break
+		}
+
+		rest = rest[n:]
+	}
+
+	return rest
+}
+
+// isWrapperFlag reports whether f is help or version, which the legacy
+// wrapper's extras may spell.
+func isWrapperFlag(f *pflag.Flag) bool { return f.Name == "help" || f.Name == "version" }
+
+// knownFlagLen is how many arguments of rest the leading flag takes: 0 when it
+// is not a flag of fs, 1 for a switch or "--flag=value", 2 for a flag with a
+// separate value.
+func knownFlagLen(fs *pflag.FlagSet, rest []string) int {
+	tok := rest[0]
+
+	var f *pflag.Flag
+
+	switch {
+	case strings.HasPrefix(tok, "--"):
+		name, _, hasValue := strings.Cut(tok[2:], "=")
+
+		f = fs.Lookup(name)
+		if f != nil && hasValue && !isWrapperFlag(f) {
+			return 1
+		}
+	case len(tok) == 2 && tok[0] == '-':
+		f = fs.ShorthandLookup(tok[1:])
+	}
+
+	switch {
+	case f == nil, isWrapperFlag(f):
+		return 0
+	case f.NoOptDefVal != "":
+		return 1
+	case len(rest) > 1:
+		return 2
+	default:
+		return 0
+	}
 }
 
 // options builds the service.Options of one verb invocation.
@@ -69,7 +213,7 @@ func (c *ServiceListCmd) Run(env sys.System, std *stdio) error {
 // ServiceStartCmd starts a service.
 type ServiceStartCmd struct {
 	serviceArgs
-	NoRewrite bool `name:"no-rewrite" help:"Skip config regeneration"`
+	NoRewrite bool
 }
 
 // Run executes the service start command. Both the --no-rewrite flag and the
@@ -139,7 +283,7 @@ func (c *ServiceKillCmd) Run(env sys.System, std *stdio) error {
 // ServiceRestartCmd restarts a service.
 type ServiceRestartCmd struct {
 	serviceArgs
-	NoRewrite bool `name:"no-rewrite" help:"Skip config regeneration"`
+	NoRewrite bool
 }
 
 // Run executes the service restart command.
@@ -193,7 +337,7 @@ func (c *ServiceRotateCmd) Run(env sys.System, std *stdio) error {
 // ServiceUsageCmd catches an empty or unknown verb (the wrappers forward
 // "${1:-}" unchecked) and prints the legacy usage line.
 type ServiceUsageCmd struct {
-	Args []string `arg:"" optional:"" passthrough:"" hidden:""`
+	Args []string
 }
 
 // Run prints the usage and exits 1.
