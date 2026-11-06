@@ -76,6 +76,12 @@ spec:
             }
         }
 
+        stage('Skip CI') {
+            steps {
+                script { semanticRelease.guard() }
+            }
+        }
+
         stage('REUSE Lint') {
             steps {
                 dt3_reuseCompliance()
@@ -259,6 +265,13 @@ spec:
                     distros: ['ubuntu-jammy'],
                     yapPath: 'build/yap.json',
                 )
+            }
+        }
+
+        stage('Bump version') {
+            when { not { triggeredBy 'TimerTrigger' } }
+            steps {
+                semanticRelease()
             }
         }
     }
