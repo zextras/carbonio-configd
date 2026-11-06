@@ -76,8 +76,6 @@ spec:
             }
         }
 
-        // Halt the redundant build of the chore(release) commit that semantic-release
-        // pushes to main (the release itself is built from its tag).
         stage('Skip CI') {
             steps {
                 script { semanticRelease.guard() }
@@ -270,10 +268,6 @@ spec:
             }
         }
 
-        // semantic-release (release.config.mjs): on main, computes the next version
-        // from the conventional commits since the last v* tag, bumps pkgver in
-        // build/configd/PKGBUILD, pushes the chore(release) commit and the tag, and
-        // creates the GitHub release. Skips itself on tag builds.
         stage('Bump version') {
             when { not { triggeredBy 'TimerTrigger' } }
             steps {
