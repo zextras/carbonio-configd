@@ -261,7 +261,7 @@ not talk to the daemon. It takes the flags of the Java `ProxyConfGen`:
 
 | Flag | Meaning |
 |---|---|
-| `-h`, `--help` | Show the usage (kong help) |
+| `-h`, `--help` | Show the usage |
 | `-v`, `--verbose` | Debug logging (the default is INFO on stderr) |
 | `-w`, `--workdir <dir>` | Working directory, default `/opt/zextras` (`core.workdir`, `<dir>/conf` is the conf dir) |
 | `-t`, `--templatedir <dir>` | Template directory, default `<workdir>/conf/nginx/templates` |

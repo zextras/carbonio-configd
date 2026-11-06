@@ -145,7 +145,7 @@ Source: `internal/cli/localconfig` (flag mapping in `cmd/configd/localconfig.go`
   `Error: failed when reading config file`, then the parse error on a third line). A failed save
   prints `Error: save to <path> failed` and the cause on the next line.
 - Legacy long option names (`--config`, `--path`, `--default`, `--changed`, `--show`, `--format`, ...)
-  are Kong aliases of the flags; the names Kong derived earlier (`--config-path`, `--mode`, ...) still work.
+  are aliases of the flags; the names they were derived from (`--config-path`, `--mode`, ...) work too. Completion offers only the canonical names.
   `-k`/`--key <key>` (repeatable) is an extra way to name a key besides the positional arguments.
 - Option compatibility, like `checkCompatibleOptions`: besides its main option, a mode accepts only
   the listed options, otherwise the first offender in command-line order fails with
@@ -184,7 +184,7 @@ Source: `internal/cli/localconfig` (flag mapping in `cmd/configd/localconfig.go`
   reference to a key without a value fails every invocation, even `-e`
   (`Error: failed with error in config file`, exit 1).
 - A command line parse error (unknown flag, missing option argument) exits 1, like the legacy
-  tool, not Kong's 80.
+  tool.
 - Errors go to stderr as `Error: <message>` (legacy `Logging.error`), exit status 1; `-q`
   silences the message, not the status. Messages: `can not edit key <key>`,
   `argument '<arg>' not in key=value form`, `insufficient arguments`, `key <key> is not set`,

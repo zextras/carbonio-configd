@@ -12,9 +12,9 @@ tools (`zmcontrol`, `zmlocalconfig`, `zm*ctl`, ...) are thin shell wrappers
 shipped by the `carbonio-core` package that `exec` the matching subcommand, see
 [Legacy wrappers](#legacy-wrappers).
 
-Source of truth: the Kong structs in `cmd/configd/` and the packages under
-`internal/cli/`. `configd --help` and `configd <command> --help` print the
-same flags.
+Source of truth: the [cobra](https://github.com/spf13/cobra) command tree in
+`cmd/configd/` (`newRootCmd`) and the packages under `internal/cli/`.
+`configd --help` and `configd <command> --help` print the same flags.
 
 - [Global flags](#global-flags)
 - [Who may run what](#who-may-run-what)
@@ -59,7 +59,7 @@ unbalanced braces and stray whitespace (exit `1` on findings), and `render` rend
 templates from a YAML fixture without LDAP. Details in
 [proxy-templates.md](proxy-templates.md#template-tools-configd-proxy-template).
 
-A command-line parse error exits `1` (not Kong's default `80`), like the legacy tools.
+A command-line parse error exits `1`, like the legacy tools, and prints `configd: error: <message>` on stderr.
 
 ## Who may run what
 
@@ -479,9 +479,24 @@ Always exits `0`, even with a missing `.version` (like legacy `zmcontrol -v`/`-V
 
 ## completion
 
-`configd completion` installs shell completion; `--uninstall` removes it. The
-package also installs bash completion files for `configd` and for the legacy
-wrapper names.
+`configd completion bash|zsh|fish|powershell` prints the completion script of
+that shell on stdout. Completion covers the commands, their flags (long and
+short) and, where the values are cheap to list, the values:
+
+| Where | Completes |
+|---|---|
+| `service <verb> <name>`, `status <name>` | the service names of the registry |
+| `rewrite`, `plan` | the section names of `conf/zmconfigd.cf` (`rewrite` also `all`) |
+| `localconfig <key>`, `localconfig -k` | the localconfig keys |
+| `localconfig --mode`, `ldap search --scope` | the accepted values |
+| `proxy enable/disable`, `init`, `tls` | the protocols, components and mail modes |
+
+The package installs the scripts for bash (`/usr/share/bash-completion/completions/configd`,
+also under `/opt/zextras/common/share` for the `zextras` user), zsh
+(`/usr/share/zsh/site-functions/_configd`) and fish
+(`/usr/share/fish/vendor_completions.d/configd.fish`), generated at build time
+from the binary, plus the bash completion of the legacy wrapper names. To load it
+by hand, for example in fish: `configd completion fish | source`.
 
 ## Legacy wrappers
 

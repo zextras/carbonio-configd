@@ -107,7 +107,7 @@ Build tags `profiling` and `tracing` add flags to the binary
 [CONTRIBUTING.md](CONTRIBUTING.md) for the pre-commit hooks and
 [test/README.md](test/README.md) for the integration tests.
 
-Layout: `cmd/configd/` (entry point and Kong command structs), `internal/`
+Layout: `cmd/configd/` (entry point and cobra commands), `internal/`
 (one package per concern: `cli/` subcommands, `configmgr`, `plan`, `restart`,
 `services`, `ldap`, `localconfig`, `proxy`, `network`, …; see the
 [package map](docs/architecture.md#package-map)), `build/configd/` (PKGBUILD,
