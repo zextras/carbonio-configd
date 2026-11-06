@@ -109,7 +109,9 @@ func (a *app) serviceVerb(
 		cmd.Flags().BoolVar(noRewrite, "no-rewrite", false, "Skip config regeneration")
 	}
 
-	return describeArgs(cmd, [2]string{"<name>", "Service name"}, [2]string{"[<extra> ...]", "Extra arguments; \"norewrite\" skips config regeneration, others are ignored"})
+	return describeArgs(cmd,
+		[2]string{"<name>", "Service name"},
+		[2]string{"[<extra> ...]", `Extra arguments; "norewrite" skips config regeneration, others are ignored`})
 }
 
 // runService executes one "configd service" action.

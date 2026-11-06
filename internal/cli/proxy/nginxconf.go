@@ -24,31 +24,26 @@ var (
 type nginxConfOpts struct {
 	fs         sys.FS
 	markers    bool
-	indent     bool
 	noComments bool
 	noEmpty    bool
 	workingDir string
 }
 
 // printNginxConf prints the nginx config at filename, expanding glob patterns and
-// recursively following include directives — mirroring zmproxyconf behaviour.
-func printNginxConf(w io.Writer, filename string, depth int, opts *nginxConfOpts) {
+// recursively following include directives. Every line is prefixed with prefix,
+// so an included file is indented to the column of its include directive.
+func printNginxConf(w io.Writer, filename, prefix string, opts *nginxConfOpts) {
 	matches, err := opts.fs.Glob(filename)
 	if err != nil || len(matches) == 0 {
 		matches = []string{filename}
 	}
 
 	for _, f := range matches {
-		printNginxConfFile(w, f, depth, opts)
+		printNginxConfFile(w, f, prefix, opts)
 	}
 }
 
-func printNginxConfFile(w io.Writer, filename string, depth int, opts *nginxConfOpts) {
-	prefix := ""
-	if opts.indent {
-		prefix = strings.Repeat("  ", depth)
-	}
-
+func printNginxConfFile(w io.Writer, filename, prefix string, opts *nginxConfOpts) {
 	if opts.markers {
 		_, _ = fmt.Fprintf(w, "%s# begin:%s\n", prefix, filename)
 	}
@@ -78,7 +73,7 @@ func printNginxConfFile(w io.Writer, filename string, depth int, opts *nginxConf
 
 		// Recursively follow include directives.
 		if m := nginxIncludeRe.FindStringSubmatch(line); len(m) > 1 {
-			printNginxInclude(w, m[1], prefix, depth, opts)
+			printNginxInclude(w, m[1], prefix+leadingSpace(line), opts)
 			continue
 		}
 
@@ -91,8 +86,9 @@ func printNginxConfFile(w io.Writer, filename string, depth int, opts *nginxConf
 }
 
 // printNginxInclude handles a single nginx include directive, resolving the path
-// relative to workingDir when needed and recursing into the included file.
-func printNginxInclude(w io.Writer, includePath, prefix string, depth int, opts *nginxConfOpts) {
+// relative to workingDir when needed and recursing into the included file with
+// prefix (the include line's own indentation included).
+func printNginxInclude(w io.Writer, includePath, prefix string, opts *nginxConfOpts) {
 	if opts.workingDir == "" {
 		_, _ = fmt.Fprintf(w, "%s# working directory not defined while including %s\n",
 			prefix, includePath)
@@ -104,7 +100,7 @@ func printNginxInclude(w io.Writer, includePath, prefix string, depth int, opts 
 		includePath = filepath.Join(opts.workingDir, includePath)
 	}
 
-	printNginxConf(w, includePath, depth+1, opts)
+	printNginxConf(w, includePath, prefix, opts)
 }
 
 // printNginxLine writes a single config line to w, applying comment/empty filters.
@@ -119,5 +115,14 @@ func printNginxLine(w io.Writer, line, prefix string, opts *nginxConfOpts) {
 		return
 	}
 
+	if trimmed == "" {
+		prefix = ""
+	}
+
 	_, _ = fmt.Fprintf(w, "%s%s\n", prefix, line)
+}
+
+// leadingSpace returns the run of spaces and tabs line starts with.
+func leadingSpace(line string) string {
+	return line[:len(line)-len(strings.TrimLeft(line, " \t"))]
 }

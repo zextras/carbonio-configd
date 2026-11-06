@@ -64,7 +64,6 @@ type Options struct {
 	// conf: path to nginx.conf (default <base>/conf/nginx.conf) and filters.
 	ConfigFile string
 	Markers    bool
-	Indent     bool
 	NoComments bool
 	NoEmpty    bool
 
@@ -143,10 +142,9 @@ func runConf(fsys sys.FS, stdout, stderr io.Writer, opts *Options) int {
 		return 1
 	}
 
-	printNginxConf(stdout, conf, 0, &nginxConfOpts{
+	printNginxConf(stdout, conf, "", &nginxConfOpts{
 		fs:         fsys,
 		markers:    opts.Markers,
-		indent:     opts.Indent,
 		noComments: opts.NoComments,
 		noEmpty:    opts.NoEmpty,
 	})

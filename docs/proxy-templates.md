@@ -322,6 +322,8 @@ sorted by keyword.
 
 ### `configd proxy conf` (legacy `zmproxyconf`/`zmnginxconf`)
 
-Flags: `-m`/`--markers`, `-i`/`--indent`, `-n`/`--nocomments` (alias `--no-comments`),
+Flags: `-m`/`--markers`, `-n`/`--nocomments` (alias `--no-comments`),
 `-e`/`--noempty` (alias `--no-empty`), optional `NGINX-CONF-FILE`. Exit status `1` with
 `Nginx not installed, exiting` on stdout when the nginx binary is missing, as `proxyconf.pl`.
+Included files are indented to the column of their `include` directive (the Perl script
+pasted them unindented, or with `-i` two spaces per depth), so the output nests correctly.

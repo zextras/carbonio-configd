@@ -94,7 +94,7 @@ func TestPrintNginxConfFile_FileNotFound(t *testing.T) {
 	var buf bytes.Buffer
 	opts := &nginxConfOpts{fs: fk.FS}
 	// Non-existent file: should print an error comment, not panic
-	printNginxConfFile(&buf, "/nonexistent/path/nginx.conf", 0, opts)
+	printNginxConfFile(&buf, "/nonexistent/path/nginx.conf", "", opts)
 	got := buf.String()
 	if !strings.Contains(got, "cannot open") {
 		t.Errorf("expected error comment for missing file, got %q", got)
@@ -111,7 +111,7 @@ func TestPrintNginxConfFile_WithMarkers(t *testing.T) {
 
 	var buf bytes.Buffer
 	opts := &nginxConfOpts{fs: fk.FS, markers: true}
-	printNginxConfFile(&buf, f, 0, opts)
+	printNginxConfFile(&buf, f, "", opts)
 	got := buf.String()
 
 	if !strings.Contains(got, "# begin:") {
@@ -125,22 +125,20 @@ func TestPrintNginxConfFile_WithMarkers(t *testing.T) {
 	}
 }
 
-func TestPrintNginxConfFile_WithIndent(t *testing.T) {
+func TestPrintNginxConf_IndentsIncludesToDirectiveColumn(t *testing.T) {
 	t.Parallel()
 
 	fk := systest.New()
-	dir := "/etc/nginx"
-	f := filepath.Join(dir, "nginx.conf")
-	fk.FS.Put(f, []byte("server_name example.com;\n"), 0o600)
+	fk.FS.Put("/n/nginx.conf", []byte("working_directory /n;\nstream {\n    include inc/stream;\n}\n"), 0o600)
+	fk.FS.Put("/n/inc/stream", []byte("server\n{\n    listen 1;\n\n\tinclude inc/leaf;\n}\n"), 0o600)
+	fk.FS.Put("/n/inc/leaf", []byte("deny all;\n"), 0o600)
 
 	var buf bytes.Buffer
-	opts := &nginxConfOpts{fs: fk.FS, indent: true}
-	printNginxConfFile(&buf, f, 2, opts)
-	got := buf.String()
+	printNginxConf(&buf, "/n/nginx.conf", "", &nginxConfOpts{fs: fk.FS})
 
-	// depth=2 means 4 spaces prefix
-	if !strings.Contains(got, "    server_name") {
-		t.Errorf("expected indented content, got %q", got)
+	want := "working_directory /n;\nstream {\n    server\n    {\n        listen 1;\n\n    \tdeny all;\n    }\n}\n"
+	if got := buf.String(); got != want {
+		t.Errorf("got\n%s\nwant\n%s", got, want)
 	}
 }
 
@@ -155,7 +153,7 @@ func TestPrintNginxConfFile_WorkingDirectory(t *testing.T) {
 
 	var buf bytes.Buffer
 	opts := &nginxConfOpts{fs: fk.FS}
-	printNginxConfFile(&buf, f, 0, opts)
+	printNginxConfFile(&buf, f, "", opts)
 
 	// workingDir should be populated after parsing
 	if opts.workingDir != dir {
@@ -170,7 +168,7 @@ func TestPrintNginxInclude_NoWorkingDir(t *testing.T) {
 	var buf bytes.Buffer
 	opts := &nginxConfOpts{fs: fk.FS, workingDir: ""}
 	// Without workingDir, should print a comment
-	printNginxInclude(&buf, "relative/path.conf", "", 0, opts)
+	printNginxInclude(&buf, "relative/path.conf", "", opts)
 	got := buf.String()
 	if !strings.Contains(got, "working directory not defined") {
 		t.Errorf("expected warning comment, got %q", got)
@@ -187,7 +185,7 @@ func TestPrintNginxInclude_AbsolutePath(t *testing.T) {
 
 	var buf bytes.Buffer
 	opts := &nginxConfOpts{fs: fk.FS, workingDir: dir}
-	printNginxInclude(&buf, included, "", 0, opts)
+	printNginxInclude(&buf, included, "", opts)
 	got := buf.String()
 	if !strings.Contains(got, "include_content") {
 		t.Errorf("expected included file content, got %q", got)
@@ -205,7 +203,7 @@ func TestPrintNginxInclude_RelativePath(t *testing.T) {
 	var buf bytes.Buffer
 	opts := &nginxConfOpts{fs: fk.FS, workingDir: dir}
 	// Pass relative path — should be joined with workingDir
-	printNginxInclude(&buf, "sub.conf", "", 0, opts)
+	printNginxInclude(&buf, "sub.conf", "", opts)
 	got := buf.String()
 	if !strings.Contains(got, "sub_content") {
 		t.Errorf("expected included file content via relative path, got %q", got)
@@ -219,7 +217,7 @@ func TestPrintNginxConf_GlobNoMatch(t *testing.T) {
 	var buf bytes.Buffer
 	opts := &nginxConfOpts{fs: fk.FS}
 	// Non-matching glob — falls back to the pattern itself, which won't open
-	printNginxConf(&buf, "/nonexistent/*.conf", 0, opts)
+	printNginxConf(&buf, "/nonexistent/*.conf", "", opts)
 	got := buf.String()
 	// Should produce an error comment for the unmatched file
 	if !strings.Contains(got, "cannot open") {
@@ -239,7 +237,7 @@ func TestPrintNginxConf_GlobWithMatch(t *testing.T) {
 
 	var buf bytes.Buffer
 	opts := &nginxConfOpts{fs: fk.FS}
-	printNginxConf(&buf, filepath.Join(dir, "*.conf"), 0, opts)
+	printNginxConf(&buf, filepath.Join(dir, "*.conf"), "", opts)
 	got := buf.String()
 
 	if !strings.Contains(got, "content_a") {
