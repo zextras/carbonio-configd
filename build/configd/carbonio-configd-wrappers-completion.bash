@@ -16,15 +16,39 @@ complete -F _zmcontrol_completions zmcontrol
 # zmlocalconfig — delegates to configd localconfig
 _zmlocalconfig_completions() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
+  local prev="${COMP_WORDS[COMP_CWORD-1]}"
   local flags="-m -c -q -p -s -d -n -e -u -r -f -k -x -i -l --force --info --reload"
   local modes="plain shell export nokey xml"
+
   if [[ "$cur" == -* ]]; then
     COMPREPLY=($(compgen -W "$flags" -- "$cur"))
-  elif [[ " ${COMP_WORDS[*]} " == *" -m "* ]]; then
-    COMPREPLY=($(compgen -W "$modes" -- "$cur"))
-  else
-    COMPREPLY=($(compgen -W "$flags" -- "$cur"))
+    return
   fi
+
+  if [[ "$prev" == "-m" ]]; then
+    COMPREPLY=($(compgen -W "$modes" -- "$cur"))
+    return
+  fi
+
+  # Key names come from configd itself; its last output line is the
+  # ":<directive>" marker, which is dropped. Without configd, offer the flags.
+  local keys line
+  while IFS= read -r line; do
+    [[ "$line" == :* ]] || keys+="$line "
+  done < <(configd __completeNoDesc localconfig "$cur" 2>/dev/null)
+  if [[ -z "$keys" ]]; then
+    COMPREPLY=($(compgen -W "$flags" -- "$cur"))
+    return
+  fi
+
+  # -e takes key=value: complete "key=" and let the value follow directly.
+  if [[ " ${COMP_WORDS[*]:1:COMP_CWORD-1} " == *" -e "* ]]; then
+    COMPREPLY=($(compgen -W "$keys" -S '=' -- "$cur"))
+    compopt -o nospace
+    return
+  fi
+
+  COMPREPLY=($(compgen -W "$keys" -- "$cur"))
 }
 complete -F _zmlocalconfig_completions zmlocalconfig
 
