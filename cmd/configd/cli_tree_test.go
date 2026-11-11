@@ -308,6 +308,7 @@ func TestCommandTree_Flags(t *testing.T) {
 		"ldap":                  {"url", "bind-dn", "password-file", "json"},
 		"ldap search":           {"base", "filter", "scope", "attr"},
 		"ldap wait":             {"timeout"},
+		"bootstrap config":      {"config", "legacy-config", "set", "non-interactive", "wizard", "output"},
 		"ldap gacf":             {},
 		"service stop":          {},
 		"control start":         {},
@@ -376,8 +377,8 @@ func TestCommandTree_Visible(t *testing.T) {
 	}
 
 	assert.ElementsMatch(t, []string{
-		"completion", "control", "init", "ldap", "localconfig", "plan", "proxy", "release", "rewrite",
-		"service", "shadow", "status", "tls",
+		"bootstrap", "completion", "control", "init", "ldap", "localconfig", "plan", "proxy", "release",
+		"rewrite", "service", "shadow", "status", "tls",
 	}, names(root))
 
 	find := func(path ...string) *cobra.Command {
@@ -406,7 +407,7 @@ func TestCommandTree_Completion(t *testing.T) {
 	complete := func(args ...string) string {
 		var out, errb bytes.Buffer
 
-		status := run(append([]string{"configd", cobra.ShellCompRequestCmd}, args...), systest.New().System(), &out, &errb)
+		status := run(append([]string{"configd", cobra.ShellCompRequestCmd}, args...), systest.New().System(), nil, &out, &errb)
 		require.Zero(t, status, errb.String())
 		assert.NotContains(t, errb.String(), "Warning:", "completion must not run the perl probe")
 

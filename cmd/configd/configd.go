@@ -172,15 +172,15 @@ func perlArchname(ctx context.Context, env sys.System) string {
 // main runs the command line and exits with its status: the only place that
 // ends the process.
 func main() {
-	os.Exit(run(os.Args, sys.Real(), os.Stdout, os.Stderr))
+	os.Exit(run(os.Args, sys.Real(), os.Stdin, os.Stdout, os.Stderr))
 }
 
 // run executes the command line argv (os.Args-shaped) on env, writing to
 // stdout and stderr, and returns the process exit status. It is main with the
 // process boundary injected, so the status and the stderr text of every
 // command and error path can be checked in-process.
-func run(argv []string, env sys.System, stdout, stderr io.Writer) int {
-	std := &stdio{Out: stdout, Err: stderr, Args: argv}
+func run(argv []string, env sys.System, stdin io.Reader, stdout, stderr io.Writer) int {
+	std := &stdio{In: stdin, Out: stdout, Err: stderr, Args: argv}
 
 	// Shell completion asks for a list of words, and must stay quick and quiet.
 	if !isCompletionRequest(argv[1:]) {

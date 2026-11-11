@@ -1,0 +1,299 @@
+// SPDX-FileCopyrightText: 2026 Zextras <https://www.zextras.com>
+//
+// SPDX-License-Identifier: AGPL-3.0-only
+
+// Package bootstrapcmd implements "configd bootstrap config": it resolves the
+// bootstrap configuration from the YAML file (or a legacy setup.pl config
+// file), the CARBONIO_BOOTSTRAP_* environment, the --set flags and the
+// wizard, validates it, and prints or saves it.
+package bootstrapcmd
+
+import (
+	"bufio"
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"os"
+	"strings"
+
+	"golang.org/x/term"
+
+	"github.com/zextras/carbonio-configd/internal/bootstrap"
+	"github.com/zextras/carbonio-configd/internal/sys"
+)
+
+// Wizard modes of the --wizard flag.
+const (
+	WizardMissing = "missing"
+	WizardAll     = "all"
+)
+
+// saveMode is the permission of a saved configuration: it names the secret
+// files, so it is kept private.
+const saveMode = 0o600
+
+// Options are the parsed flags of "configd bootstrap config".
+type Options struct {
+	// ConfigPath is the YAML configuration file.
+	ConfigPath string
+	// LegacyPath is a setup.pl config file (KEY=VALUE), the -c of
+	// carbonio-bootstrap.
+	LegacyPath string
+	// Sets are "key=value" overrides.
+	Sets []string
+	// NonInteractive never runs the wizard.
+	NonInteractive bool
+	// Wizard is WizardMissing or WizardAll.
+	Wizard string
+	// Output saves the configuration there instead of printing it.
+	Output string
+	// Environ is the process environment ("NAME=value").
+	Environ []string
+}
+
+// Deps are the parts of the node the command reads besides sys.System.
+type Deps struct {
+	Host     bootstrap.Host
+	Resolver bootstrap.Resolver
+	// Terminal reports whether the wizard can run: stdin and stdout are a
+	// terminal.
+	Terminal bool
+	// ReadSecret reads a line without echo (nil: plain line).
+	ReadSecret func() (string, error)
+}
+
+// Run executes the command and returns the exit status: 0 when the
+// configuration is valid, 1 otherwise.
+func Run(ctx context.Context, env sys.System, stdin io.Reader, stdout, stderr io.Writer, opts *Options) int {
+	return run(ctx, env, stdin, stdout, stderr, opts, realDeps(ctx, env, stdin, stdout))
+}
+
+func realDeps(ctx context.Context, env sys.System, stdin io.Reader, stdout io.Writer) Deps {
+	d := Deps{Host: &systemHost{ctx: ctx, env: env}, Resolver: net.DefaultResolver}
+
+	in, inOK := stdin.(*os.File)
+	out, outOK := stdout.(*os.File)
+
+	if inOK && outOK && term.IsTerminal(int(in.Fd())) && term.IsTerminal(int(out.Fd())) {
+		d.Terminal = true
+		d.ReadSecret = func() (string, error) {
+			b, err := term.ReadPassword(int(in.Fd()))
+
+			return string(b), err
+		}
+	}
+
+	return d
+}
+
+func run(ctx context.Context, env sys.System, stdin io.Reader, stdout, stderr io.Writer, opts *Options, deps Deps) int {
+	r, err := resolve(ctx, env, stdin, stdout, stderr, opts, deps)
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, "Error: cannot build the bootstrap configuration:")
+		printErrors(stderr, err)
+
+		return 1
+	}
+
+	if err := bootstrap.Validate(&r.Config); err != nil {
+		_, _ = fmt.Fprintln(stderr, "Error: the bootstrap configuration is not valid:")
+		printErrors(stderr, err)
+
+		return 1
+	}
+
+	if opts.Output == "" {
+		out, err := r.Render(bootstrap.Print)
+		if err != nil {
+			printErrors(stderr, err)
+
+			return 1
+		}
+
+		_, _ = stdout.Write(out)
+
+		return 0
+	}
+
+	if err := save(env, r, opts.Output); err != nil {
+		printErrors(stderr, err)
+
+		return 1
+	}
+
+	_, _ = fmt.Fprintf(stdout, "Configuration saved to %s\n", opts.Output)
+
+	return 0
+}
+
+// resolve builds the configuration from every layer, running the wizard
+// when it applies.
+func resolve(ctx context.Context, env sys.System, stdin io.Reader, stdout, stderr io.Writer,
+	opts *Options, deps Deps,
+) (*bootstrap.Resolved, error) {
+	if opts.ConfigPath != "" && opts.LegacyPath != "" {
+		return nil, errors.New("--config and --legacy-config are mutually exclusive")
+	}
+
+	r := bootstrap.NewResolved(env.FS.ReadFile)
+
+	if err := applyFiles(env, r, stderr, opts); err != nil {
+		return nil, err
+	}
+
+	if err := r.ApplyEnv(opts.Environ); err != nil {
+		return nil, err
+	}
+
+	if err := r.ApplySets(opts.Sets); err != nil {
+		return nil, err
+	}
+
+	if err := r.ApplyDefaults(deps.Host); err != nil {
+		return nil, err
+	}
+
+	if !wantWizard(r, opts, deps) {
+		if opts.Wizard == WizardAll && !opts.NonInteractive {
+			return nil, errors.New("--wizard=all needs a terminal")
+		}
+
+		return r, nil
+	}
+
+	w := &bootstrap.Wizard{
+		In:         bufio.NewReader(stdin),
+		Out:        stdout,
+		ReadSecret: deps.ReadSecret,
+		Resolver:   deps.Resolver,
+		Host:       deps.Host,
+	}
+
+	mode := bootstrap.AskUnset
+	if opts.Wizard == WizardAll {
+		mode = bootstrap.AskAll
+	}
+
+	if err := w.Run(ctx, r, mode); err != nil {
+		return nil, err
+	}
+
+	if opts.Output == "" {
+		if err := offerSave(env, w, r); err != nil {
+			return nil, err
+		}
+	}
+
+	return r, nil
+}
+
+// applyFiles applies the legacy file or the YAML file, reporting the legacy
+// keys that are not imported.
+func applyFiles(env sys.System, r *bootstrap.Resolved, stderr io.Writer, opts *Options) error {
+	if opts.LegacyPath != "" {
+		data, err := env.FS.ReadFile(opts.LegacyPath)
+		if err != nil {
+			return err
+		}
+
+		drops, err := r.ApplyLegacy(data)
+		if err != nil {
+			return inFile(opts.LegacyPath, err)
+		}
+
+		for _, d := range drops {
+			_, _ = fmt.Fprintf(stderr, "Note: legacy key %s not imported: %s\n", d.Key, d.Reason)
+		}
+	}
+
+	if opts.ConfigPath != "" {
+		data, err := env.FS.ReadFile(opts.ConfigPath)
+		if err != nil {
+			return err
+		}
+
+		if err := r.ApplyYAML(data); err != nil {
+			return inFile(opts.ConfigPath, err)
+		}
+	}
+
+	return nil
+}
+
+// wantWizard: on a terminal, unless --non-interactive, the wizard runs when
+// a required key is missing, when no file, environment variable or flag gave
+// any key, or on --wizard=all.
+func wantWizard(r *bootstrap.Resolved, opts *Options, deps Deps) bool {
+	if opts.NonInteractive || !deps.Terminal {
+		return false
+	}
+
+	if opts.Wizard == WizardAll || len(bootstrap.Missing(&r.Config)) > 0 {
+		return true
+	}
+
+	for _, f := range bootstrap.Fields {
+		if r.Source(f.Path) >= bootstrap.SourceLegacy {
+			return false
+		}
+	}
+
+	return true
+}
+
+func offerSave(env sys.System, w *bootstrap.Wizard, r *bootstrap.Resolved) error {
+	_, _ = fmt.Fprint(w.Out, "Save these answers to a file (no passwords are written)? [path, Enter: skip]: ")
+
+	path, err := w.In.ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+
+	if path = strings.TrimSpace(path); path == "" {
+		return nil
+	}
+
+	if err := save(env, r, path); err != nil {
+		return err
+	}
+
+	_, _ = fmt.Fprintf(w.Out, "Configuration saved to %s\n", path)
+
+	return nil
+}
+
+func save(env sys.System, r *bootstrap.Resolved, path string) error {
+	data, err := r.Render(bootstrap.Save)
+	if err != nil {
+		return err
+	}
+
+	return env.FS.WriteFileAtomic(path, data, saveMode)
+}
+
+// inFile prefixes every error joined in err with the file it is about.
+func inFile(path string, err error) error {
+	joined, ok := err.(interface{ Unwrap() []error })
+	if !ok {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+
+	errs := joined.Unwrap()
+	out := make([]error, len(errs))
+
+	for i, e := range errs {
+		out[i] = fmt.Errorf("%s: %w", path, e)
+	}
+
+	return errors.Join(out...)
+}
+
+// printErrors writes err one problem per line (errors.Join puts each joined
+// error on its own line).
+func printErrors(w io.Writer, err error) {
+	for line := range strings.SplitSeq(err.Error(), "\n") {
+		_, _ = fmt.Fprintf(w, "  %s\n", line)
+	}
+}

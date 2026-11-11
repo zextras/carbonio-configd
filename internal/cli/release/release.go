@@ -49,6 +49,27 @@ func installedPackages(ctx context.Context, x sys.Exec, distroID string) []byte 
 	return out
 }
 
+// InstalledPackageNames returns the names of the installed carbonio
+// packages (rpm names without the ".<arch>" suffix).
+func InstalledPackageNames(ctx context.Context, env sys.System) []string {
+	out := installedPackages(ctx, env.Exec, distroID(env.FS, osReleasePath))
+
+	var names []string
+
+	for line := range strings.SplitSeq(string(out), "\n") {
+		name, _, _ := strings.Cut(line, " ")
+		if dot := strings.LastIndexByte(name, '.'); dot > 0 {
+			name = name[:dot]
+		}
+
+		if name != "" {
+			names = append(names, name)
+		}
+	}
+
+	return names
+}
+
 // sortLines returns out with its lines in byte order (rpm -qa lists in
 // database order, `dnf list installed` alphabetically).
 func sortLines(out []byte) []byte {

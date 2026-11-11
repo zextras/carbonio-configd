@@ -481,6 +481,20 @@ configd release -V     # also the installed carbonio packages (dpkg-query or rpm
 
 Always exits `0`, even with a missing `.version` (like legacy `zmcontrol -v`/`-V`).
 
+## bootstrap
+
+```bash
+configd bootstrap config [--config FILE | --legacy-config FILE] [--set key=value]... \
+    [--non-interactive] [--wizard missing|all] [--output FILE]
+```
+
+Builds the node's bootstrap configuration from a YAML file, or a legacy
+`setup.pl` file, plus the `CARBONIO_BOOTSTRAP_*` environment, `--set` and the
+wizard. It validates the result, then prints it with the source of each key
+(passwords masked) or saves it to `--output` (mode `0600`, no passwords).
+Exits `0` when the configuration is valid and `1` otherwise. Keys, layers,
+the wizard and legacy migration are described in [bootstrap.md](bootstrap.md).
+
 ## completion
 
 `configd completion bash|zsh|fish|powershell` prints the completion script of
