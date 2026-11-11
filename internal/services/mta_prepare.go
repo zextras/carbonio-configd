@@ -36,7 +36,9 @@ const startTLSYes = "yes"
 //     localconfig via postconf -e.
 //  3. Hook prepareLDAPTables: write the 8 ldap-*.cf files under /opt/zextras/conf
 //     that postfix's main.cf references (ldap:/opt/zextras/conf/ldap-vmm.cf
-//     etc.). This replaces legacy mtainit.sh.
+//     etc.). This replaces legacy mtainit.sh, and like the legacy wrapper it
+//     also runs before every reload (CommandSpec.ReloadPrepare), so changed
+//     ldap_url / ldap_postfix_password reach postfix without a cold start.
 //  4. Run step: `sudo postalias /etc/aliases` rebuilds the aliases database
 //     when /etc/aliases exists (best effort: a failure is logged).
 //  5. Spawn the daemon (the generic launcher): sudo postfix start. Postfix

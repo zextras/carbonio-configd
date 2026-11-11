@@ -87,6 +87,9 @@ exec.start /opt/zextras/common/libexec/slapd -d 0 -l LOCAL0 -h ldap://ldap.examp
 ## ldap | systemd stop-systemd
 => ok
 
+## ldap | systemd reload-systemd
+=> err: reload service ldap: no native reload
+
 ## configd | legacy start cold
 fs.open /opt/zextras/log/configd.out flag=0x441 perm=0640
 exec.start /opt/zextras/bin/configd
@@ -172,6 +175,9 @@ exec.start /opt/zextras/bin/configd
 ## configd | systemd stop-systemd
 => ok
 
+## configd | systemd reload-systemd
+=> err: reload service configd: no native reload
+
 ## service-discover | legacy start cold
 => ok
 
@@ -238,6 +244,9 @@ exec /usr/bin/systemctl is-active service-discover.service
 
 ## service-discover | systemd stop-systemd
 => ok
+
+## service-discover | systemd reload-systemd
+=> err: reload service service-discover: no native reload
 
 ## appserver-db | legacy start cold
 fs.open /opt/zextras/log/mysqld_safe_appserver-db.out flag=0x441 perm=0640
@@ -330,6 +339,9 @@ exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf
 ## appserver-db | systemd stop-systemd
 fs.remove /run/carbonio/mysql.pid
 => ok
+
+## appserver-db | systemd reload-systemd
+=> err: reload service appserver-db: no native reload
 
 ## store | legacy start cold
 exec /opt/zextras/libexec/configrewrite sasl webxml mailbox service zextras zextrasAdmin zimlet
@@ -481,6 +493,9 @@ exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAM
 fs.remove /run/carbonio/mysql.pid
 => ok
 
+## store | systemd reload-systemd
+=> err: reload service store: no native reload
+
 ## mailbox | legacy start cold
 fs.open /opt/zextras/log/mysqld_safe_appserver-db.out flag=0x441 perm=0640
 exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/my.cnf --external-locking --log-error=/opt/zextras/log/mysql_error.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
@@ -590,6 +605,9 @@ exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAM
 ## mailbox | systemd stop-systemd
 => ok
 
+## mailbox | systemd reload-systemd
+=> err: reload service mailbox: no native reload
+
 ## memcached | legacy start cold
 exec /opt/zextras/common/bin/memcached -d -U 0 -l 127.0.1.1,127.0.0.1 -p 11211
 => ok
@@ -668,6 +686,9 @@ exec /opt/zextras/common/bin/memcached -d -U 0 -l 127.0.1.1,127.0.0.1 -p 11211
 
 ## memcached | systemd stop-systemd
 => ok
+
+## memcached | systemd reload-systemd
+=> err: reload service memcached: no native reload
 
 ## proxy | legacy start cold
 exec /opt/zextras/libexec/configrewrite proxy
@@ -749,6 +770,9 @@ exec.start /opt/zextras/common/sbin/nginx -c /opt/zextras/conf/nginx.conf
 
 ## proxy | systemd stop-systemd
 => ok
+
+## proxy | systemd reload-systemd
+=> err: reload service proxy: no native reload
 
 ## amavis | legacy start cold
 exec /opt/zextras/libexec/configrewrite amavis antispam
@@ -867,6 +891,9 @@ exec /opt/zextras/common/sbin/amavisd -X no_conf_file_writable_check -c /opt/zex
 ## amavis | systemd stop-systemd
 => ok
 
+## amavis | systemd reload-systemd
+=> err: reload service amavis: no native reload
+
 ## antispam-db | legacy start cold
 fs.open /opt/zextras/log/mysqld_safe_antispam-db.out flag=0x441 perm=0640
 exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/antispam-my.cnf --external-locking --log-error=/opt/zextras/log/antispam-mysqld.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
@@ -958,6 +985,9 @@ exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf
 ## antispam-db | systemd stop-systemd
 fs.remove /run/carbonio/amavisd-mysql.pid
 => ok
+
+## antispam-db | systemd reload-systemd
+=> err: reload service antispam-db: no native reload
 
 ## antispam | legacy start cold
 fs.open /opt/zextras/log/mysqld_safe_antispam-db.out flag=0x441 perm=0640
@@ -1112,6 +1142,9 @@ exec /opt/zextras/common/sbin/amavisd -X no_conf_file_writable_check -c /opt/zex
 ## antispam | systemd stop-systemd
 fs.remove /run/carbonio/amavisd-mysql.pid
 => ok
+
+## antispam | systemd reload-systemd
+=> err: reload service antispam: no native reload
 
 ## antivirus | legacy start cold
 exec /opt/zextras/libexec/configrewrite antivirus
@@ -1289,6 +1322,9 @@ exec.start /opt/zextras/common/bin/freshclam --config-file=/opt/zextras/conf/fre
 ## antivirus | systemd stop-systemd
 => ok
 
+## antivirus | systemd reload-systemd
+=> err: reload service antivirus: no native reload
+
 ## clamd | legacy start cold
 exec /opt/zextras/libexec/configrewrite antivirus
 fs.mkdir /opt/zextras/data/clamav/db mode=0755
@@ -1380,6 +1416,9 @@ exec.start /opt/zextras/common/sbin/clamd --config-file=/opt/zextras/conf/clamd.
 ## clamd | systemd stop-systemd
 => ok
 
+## clamd | systemd reload-systemd
+=> err: reload service clamd: no native reload
+
 ## freshclam | legacy start cold
 fs.open /opt/zextras/log/freshclam.out flag=0x441 perm=0640
 exec.start /opt/zextras/common/bin/freshclam --config-file=/opt/zextras/conf/freshclam.conf --quiet -d --checks=12 --foreground=true
@@ -1465,6 +1504,9 @@ exec.start /opt/zextras/common/bin/freshclam --config-file=/opt/zextras/conf/fre
 ## freshclam | systemd stop-systemd
 => ok
 
+## freshclam | systemd reload-systemd
+=> err: reload service freshclam: no native reload
+
 ## opendkim | legacy start cold
 exec.start /opt/zextras/common/sbin/opendkim -f -x /opt/zextras/conf/opendkim.conf -u zextras
 => ok
@@ -1543,6 +1585,9 @@ exec.start /opt/zextras/common/sbin/opendkim -f -x /opt/zextras/conf/opendkim.co
 
 ## opendkim | systemd stop-systemd
 => ok
+
+## opendkim | systemd reload-systemd
+=> err: reload service opendkim: no native reload
 
 ## cbpolicyd | legacy start cold
 exec /opt/zextras/libexec/configrewrite cbpolicyd
@@ -1625,6 +1670,9 @@ exec /opt/zextras/common/bin/cbpolicyd --config /opt/zextras/conf/cbpolicyd.conf
 ## cbpolicyd | systemd stop-systemd
 => ok
 
+## cbpolicyd | systemd reload-systemd
+=> err: reload service cbpolicyd: no native reload
+
 ## saslauthd | legacy start cold
 exec /opt/zextras/libexec/configrewrite sasl
 exec /opt/zextras/common/sbin/saslauthd -r -a zimbra
@@ -1705,6 +1753,9 @@ exec /opt/zextras/common/sbin/saslauthd -r -a zimbra
 
 ## saslauthd | systemd stop-systemd
 => ok
+
+## saslauthd | systemd reload-systemd
+=> err: reload service saslauthd: no native reload
 
 ## milter | legacy start cold
 fs.open /opt/zextras/log/milter.out flag=0x441 perm=0640
@@ -1792,6 +1843,9 @@ exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAM
 ## milter | systemd stop-systemd
 => ok
 
+## milter | systemd reload-systemd
+=> err: reload service milter: no native reload
+
 ## mta | legacy start cold
 exec /opt/zextras/libexec/configrewrite sasl
 exec /opt/zextras/common/sbin/saslauthd -r -a zimbra
@@ -1846,6 +1900,23 @@ exec /opt/zextras/libexec/configrewrite sasl
 exec /opt/zextras/common/sbin/saslauthd -r -a zimbra
 fs.open /opt/zextras/log/milter.out flag=0x441 perm=0640
 exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -client -Xmx256m -Dhttps.protocols=TLSv1.2,TLSv1.3 -Djdk.tls.client.protocols=TLSv1.2,TLSv1.3 -Djava.net.preferIPv4Stack=true -Dzimbra.home=/opt/zextras -Djava.library.path=/opt/zextras/lib -classpath /opt/zextras/mailbox/jars/*:/opt/zextras/conf -Dlog4j.configurationFile=file:/opt/zextras/conf/milter.log4j.properties -Dzimbra.config=/opt/zextras/conf/localconfig.xml com.zimbra.cs.milter.MilterServer
+fs.mkdir /opt/zextras/conf mode=0755
+fs.write-atomic /opt/zextras/conf/ldap-vmm.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-vmd.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-vam.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-vad.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-canonical.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-transport.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-slm.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-splitdomain.cf mode=0640
+fs.chown /opt/zextras/conf/ldap-vmm.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-vmd.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-vam.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-vad.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-canonical.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-transport.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-slm.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-splitdomain.cf -1:1001
 exec /usr/bin/sudo -n /opt/zextras/common/sbin/postfix reload
 => ok
 
@@ -1854,6 +1925,23 @@ exec /opt/zextras/libexec/configrewrite sasl
 exec /opt/zextras/common/sbin/saslauthd -r -a zimbra
 fs.open /opt/zextras/log/milter.out flag=0x441 perm=0640
 exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -client -Xmx256m -Dhttps.protocols=TLSv1.2,TLSv1.3 -Djdk.tls.client.protocols=TLSv1.2,TLSv1.3 -Djava.net.preferIPv4Stack=true -Dzimbra.home=/opt/zextras -Djava.library.path=/opt/zextras/lib -classpath /opt/zextras/mailbox/jars/*:/opt/zextras/conf -Dlog4j.configurationFile=file:/opt/zextras/conf/milter.log4j.properties -Dzimbra.config=/opt/zextras/conf/localconfig.xml com.zimbra.cs.milter.MilterServer
+fs.mkdir /opt/zextras/conf mode=0755
+fs.write-atomic /opt/zextras/conf/ldap-vmm.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-vmd.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-vam.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-vad.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-canonical.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-transport.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-slm.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-splitdomain.cf mode=0640
+fs.chown /opt/zextras/conf/ldap-vmm.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-vmd.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-vam.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-vad.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-canonical.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-transport.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-slm.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-splitdomain.cf -1:1001
 exec /usr/bin/sudo -n /opt/zextras/common/sbin/postfix reload
 => ok
 
@@ -1862,6 +1950,23 @@ exec /opt/zextras/libexec/configrewrite sasl
 exec /opt/zextras/common/sbin/saslauthd -r -a zimbra
 fs.open /opt/zextras/log/milter.out flag=0x441 perm=0640
 exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -client -Xmx256m -Dhttps.protocols=TLSv1.2,TLSv1.3 -Djdk.tls.client.protocols=TLSv1.2,TLSv1.3 -Djava.net.preferIPv4Stack=true -Dzimbra.home=/opt/zextras -Djava.library.path=/opt/zextras/lib -classpath /opt/zextras/mailbox/jars/*:/opt/zextras/conf -Dlog4j.configurationFile=file:/opt/zextras/conf/milter.log4j.properties -Dzimbra.config=/opt/zextras/conf/localconfig.xml com.zimbra.cs.milter.MilterServer
+fs.mkdir /opt/zextras/conf mode=0755
+fs.write-atomic /opt/zextras/conf/ldap-vmm.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-vmd.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-vam.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-vad.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-canonical.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-transport.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-slm.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-splitdomain.cf mode=0640
+fs.chown /opt/zextras/conf/ldap-vmm.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-vmd.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-vam.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-vad.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-canonical.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-transport.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-slm.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-splitdomain.cf -1:1001
 exec /usr/bin/sudo -n /opt/zextras/common/sbin/postfix reload
 => ok
 
@@ -1932,6 +2037,27 @@ exec /usr/bin/sudo -n /opt/zextras/common/sbin/postfix status
 
 ## mta | systemd stop-systemd
 exec /usr/bin/sudo -n /opt/zextras/common/sbin/postfix stop
+=> ok
+
+## mta | systemd reload-systemd
+fs.mkdir /opt/zextras/conf mode=0755
+fs.write-atomic /opt/zextras/conf/ldap-vmm.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-vmd.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-vam.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-vad.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-canonical.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-transport.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-slm.cf mode=0640
+fs.write-atomic /opt/zextras/conf/ldap-splitdomain.cf mode=0640
+fs.chown /opt/zextras/conf/ldap-vmm.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-vmd.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-vam.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-vad.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-canonical.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-transport.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-slm.cf -1:1001
+fs.chown /opt/zextras/conf/ldap-splitdomain.cf -1:1001
+exec /usr/bin/sudo -n /opt/zextras/common/sbin/postfix reload
 => ok
 
 ## stats | legacy start cold
@@ -2140,4 +2266,7 @@ exec.start /opt/zextras/libexec/zmstat-nginx
 
 ## stats | systemd stop-systemd
 => ok
+
+## stats | systemd reload-systemd
+=> err: reload service stats: no native reload
 

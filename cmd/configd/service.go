@@ -35,6 +35,7 @@ type ServiceCmd struct {
 	Rotate         ServiceRotateCmd
 	StartSystemd   ServiceStartSystemdCmd
 	StopSystemd    ServiceStopSystemdCmd
+	ReloadSystemd  ServiceReloadSystemdCmd
 	RestartSystemd ServiceRestartSystemdCmd
 	Usage          ServiceUsageCmd
 }
@@ -86,6 +87,8 @@ func (a *app) serviceCmd() *cobra.Command {
 			func() error { return s.StartSystemd.Run(a.env, a.std) }),
 		a.serviceVerb("stop-systemd", "systemd ExecStop leaf", true, &s.StopSystemd.serviceArgs, nil,
 			func() error { return s.StopSystemd.Run(a.env, a.std) }),
+		a.serviceVerb("reload-systemd", "systemd ExecReload leaf", true, &s.ReloadSystemd.serviceArgs, nil,
+			func() error { return s.ReloadSystemd.Run(a.env, a.std) }),
 		a.serviceVerb("restart-systemd", "stop then start leaf", true, &s.RestartSystemd.serviceArgs, nil,
 			func() error { return s.RestartSystemd.Run(a.env, a.std) }),
 	)
@@ -248,6 +251,17 @@ type ServiceStopSystemdCmd struct {
 // Run executes the systemd-leaf stop command.
 func (c *ServiceStopSystemdCmd) Run(env sys.System, std *stdio) error {
 	return runService(env, std, c.options(service.ActionStopSystemd))
+}
+
+// ServiceReloadSystemdCmd is the systemd ExecReload leaf: it reloads the
+// service in-process and never calls systemctl.
+type ServiceReloadSystemdCmd struct {
+	serviceArgs
+}
+
+// Run executes the systemd-leaf reload command.
+func (c *ServiceReloadSystemdCmd) Run(env sys.System, std *stdio) error {
+	return runService(env, std, c.options(service.ActionReloadSystemd))
 }
 
 // ServiceRestartSystemdCmd stops then starts the service in-process, never
