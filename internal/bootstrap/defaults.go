@@ -45,6 +45,31 @@ var (
 // keys before it (domain.name on host.hostname, admin.account on
 // domain.name).
 func (r *Resolved) ApplyDefaults(host Host) error {
+	for _, s := range r.defaultSteps(host) {
+		f := FieldByPath(s.path)
+		if r.sources[s.path] != SourceUnset {
+			continue
+		}
+
+		v, err := s.val()
+		if err != nil {
+			return fmt.Errorf("default of %s: %w", s.path, err)
+		}
+
+		if v == "" {
+			continue
+		}
+
+		if err := r.Set(f, v, s.src); err != nil {
+			return fmt.Errorf("default of %s: %w", s.path, err)
+		}
+	}
+
+	return nil
+}
+
+// defaultSteps lists the defaults in the order ApplyDefaults computes them.
+func (r *Resolved) defaultSteps(host Host) []defaultStep {
 	c := &r.Config
 
 	steps := []defaultStep{
@@ -73,13 +98,7 @@ func (r *Resolved) ApplyDefaults(host Host) error {
 		{keyNotificationsSMTPSource, SourceDefault, func() (string, error) { return c.Admin.Account, nil }},
 		{keyNotificationsSMTPDestination, SourceDefault, func() (string, error) { return c.Admin.Account, nil }},
 		{keyNotificationsAvNotifyUser, SourceDefault, func() (string, error) { return c.Admin.Account, nil }},
-		{keyMtaMyNetworks, SourceDetected, func() (string, error) {
-			if !c.HasRole(RoleMTA) {
-				return "", nil
-			}
-
-			return strings.Join(append([]string{"127.0.0.0/8", "[::1]/128"}, host.Networks()...), ","), nil
-		}},
+		{keyMtaMyNetworks, SourceDetected, func() (string, error) { return myNetworks(c, host), nil }},
 		{keyMtaAntispam, SourceDefault, constant("true")},
 		{keyMtaAntivirus, SourceDefault, hasRole(c, RoleClamAV)},
 		{keyMtaOpendkim, SourceDefault, constant("true")},
@@ -90,28 +109,14 @@ func (r *Resolved) ApplyDefaults(host Host) error {
 		{keyStoreWebProxy, SourceDefault, constant("true")},
 		{keyStoreSpamTraining, SourceDefault, constant("true")},
 		{keyStoreKeyboardShortcuts, SourceDefault, constant("true")},
-		{keyStoreMailboxdMemoryMb, SourceDetected, func() (string, error) {
-			if !c.HasRole(RoleAppserver) || host.MemoryMB() == 0 {
-				return "", nil
-			}
-
-			return strconv.Itoa(MailboxdMemoryMB(host.MemoryMB())), nil
-		}},
+		{keyStoreMailboxdMemoryMb, SourceDetected, func() (string, error) { return mailboxdMemory(c, host), nil }},
 		{keyStoreMysqlMemoryPercent, SourceDefault, func() (string, error) { return ifRole(c, RoleAppserver, "30"), nil }},
 		{keyStoreSpamAccount, SourceGenerated, r.systemAccount("spam")},
 		{keyStoreHamAccount, SourceGenerated, r.systemAccount("ham")},
 		{keyStoreVirusQuarantineAccount, SourceGenerated, r.systemAccount("virus-quarantine")},
 	}
 
-	for i, k := range portKeys {
-		steps = append(steps, defaultStep{"store.ports." + k, SourceDefault, func() (string, error) {
-			if c.HasRole(RoleProxy) {
-				return strconv.Itoa(storePortsBehindProxy[i]), nil
-			}
-
-			return strconv.Itoa(storePortsDirect[i]), nil
-		}})
-	}
+	steps = append(steps, portSteps(c, "store.ports.", storePortsBehindProxy, storePortsDirect)...)
 
 	steps = append(steps, []defaultStep{
 		{keyProxyMode, SourceDefault, constant("https")},
@@ -120,39 +125,47 @@ func (r *Resolved) ApplyDefaults(host Host) error {
 		{keyProxyStrictServerName, SourceDefault, constant("false")},
 	}...)
 
+	steps = append(steps, portSteps(c, "proxy.ports.", proxyPortsLocal, proxyPortsRemote)...)
+
+	return append(steps, defaultStep{keyStartServices, SourceDefault, constant("true")})
+}
+
+// portSteps defaults the six ports under prefix: onProxy when the node runs
+// the proxy, otherwise notProxy.
+func portSteps(c *Config, prefix string, onProxy, notProxy [6]int) []defaultStep {
+	steps := make([]defaultStep, 0, len(portKeys))
+
 	for i, k := range portKeys {
-		steps = append(steps, defaultStep{"proxy.ports." + k, SourceDefault, func() (string, error) {
+		steps = append(steps, defaultStep{prefix + k, SourceDefault, func() (string, error) {
 			if c.HasRole(RoleProxy) {
-				return strconv.Itoa(proxyPortsLocal[i]), nil
+				return strconv.Itoa(onProxy[i]), nil
 			}
 
-			return strconv.Itoa(proxyPortsRemote[i]), nil
+			return strconv.Itoa(notProxy[i]), nil
 		}})
 	}
 
-	steps = append(steps, defaultStep{keyStartServices, SourceDefault, constant("true")})
+	return steps
+}
 
-	for _, s := range steps {
-		f := FieldByPath(s.path)
-		if r.sources[s.path] != SourceUnset {
-			continue
-		}
-
-		v, err := s.val()
-		if err != nil {
-			return fmt.Errorf("default of %s: %w", s.path, err)
-		}
-
-		if v == "" {
-			continue
-		}
-
-		if err := r.Set(f, v, s.src); err != nil {
-			return fmt.Errorf("default of %s: %w", s.path, err)
-		}
+// myNetworks is the mta.mynetworks default: loopback plus the host's
+// networks, on an MTA node.
+func myNetworks(c *Config, host Host) string {
+	if !c.HasRole(RoleMTA) {
+		return ""
 	}
 
-	return nil
+	return strings.Join(append([]string{"127.0.0.0/8", "[::1]/128"}, host.Networks()...), ",")
+}
+
+// mailboxdMemory is the store.mailboxdmemorymb default, on an appserver
+// with known memory.
+func mailboxdMemory(c *Config, host Host) string {
+	if !c.HasRole(RoleAppserver) || host.MemoryMB() == 0 {
+		return ""
+	}
+
+	return strconv.Itoa(MailboxdMemoryMB(host.MemoryMB()))
 }
 
 // defaultReplicationType is setup.pl changeLdapHost: a directory server is

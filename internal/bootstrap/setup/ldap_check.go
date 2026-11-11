@@ -216,7 +216,7 @@ func ldapCheckReplication(e *Env, k *ldapKit, dn, password string) bool {
 		return false
 	}
 
-	if _, err := conn.Search("cn=accesslog", "cn=accesslog", false, []string{"cn"}); err != nil {
+	if _, err := conn.Search("cn=accesslog", "(cn=accesslog)", false, []string{"cn"}); err != nil {
 		e.Log.Detail("Unable to find accesslog database on master.")
 
 		switch strings.ToLower(e.Cfg.LDAP.ReplicationType) {

@@ -159,11 +159,7 @@ func ldapLDIFSetPassword(data []byte, dn, value string) (out []byte, found bool,
 	var res []string
 
 	for start := 0; start < len(lines); {
-		end := start
-		for end < len(lines) && strings.TrimSpace(lines[end]) != "" {
-			end++
-		}
-
+		end := ldapSkipLines(lines, start, false)
 		block := lines[start:end]
 
 		if !found && len(block) > 0 {
@@ -181,15 +177,23 @@ func ldapLDIFSetPassword(data []byte, dn, value string) (out []byte, found bool,
 		res = append(res, block...)
 
 		// Keep the blank separator lines as they are.
-		for end < len(lines) && strings.TrimSpace(lines[end]) == "" {
-			res = append(res, lines[end])
-			end++
-		}
+		blankEnd := ldapSkipLines(lines, end, true)
+		res = append(res, lines[end:blankEnd]...)
 
-		start = end
+		start = blankEnd
 	}
 
 	return []byte(strings.Join(res, "\n")), found, nil
+}
+
+// ldapSkipLines returns the index of the first line at or after i whose
+// blankness differs from blank.
+func ldapSkipLines(lines []string, i int, blank bool) int {
+	for i < len(lines) && (strings.TrimSpace(lines[i]) == "") == blank {
+		i++
+	}
+
+	return i
 }
 
 // ldapAttrUserPassword is the attribute the password hashes are kept in.
@@ -199,28 +203,43 @@ const ldapAttrUserPassword = "userPassword"
 func ldapLDIFSetBlock(block []string, want, value string) (out []string, ok bool, err error) {
 	groups := ldapLDIFGroups(block)
 
-	dn := ""
-
-	for _, g := range groups {
-		if strings.HasPrefix(g[0], "#") {
-			continue
-		}
-
-		name, v, serr := ldapLDIFSplit(ldapJoinGroup(g))
-		if serr != nil {
-			return nil, false, serr
-		}
-
-		if strings.EqualFold(name, "dn") {
-			dn = v
-
-			break
-		}
+	dn, err := ldapLDIFEntryDN(groups)
+	if err != nil {
+		return nil, false, err
 	}
 
 	if dn == "" || ldapNormDN(dn) != want {
 		return block, false, nil
 	}
+
+	return ldapReplaceUserPassword(groups, value), true, nil
+}
+
+// ldapLDIFEntryDN returns the dn of an entry's line groups, or "" when there
+// is none.
+func ldapLDIFEntryDN(groups [][]string) (string, error) {
+	for _, g := range groups {
+		if strings.HasPrefix(g[0], "#") {
+			continue
+		}
+
+		name, v, err := ldapLDIFSplit(ldapJoinGroup(g))
+		if err != nil {
+			return "", err
+		}
+
+		if strings.EqualFold(name, "dn") {
+			return v, nil
+		}
+	}
+
+	return "", nil
+}
+
+// ldapReplaceUserPassword replaces the userPassword groups by one line,
+// added at the end when there was none.
+func ldapReplaceUserPassword(groups [][]string, value string) []string {
+	var out []string
 
 	replaced := false
 
@@ -241,7 +260,7 @@ func ldapLDIFSetBlock(block []string, want, value string) (out []string, ok bool
 		out = append(out, ldapAttrUserPassword+": "+value)
 	}
 
-	return out, true, nil
+	return out
 }
 
 // ldapJoinGroup unfolds one line group.

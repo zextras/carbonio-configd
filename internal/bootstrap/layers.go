@@ -215,39 +215,45 @@ func (r *Resolved) ApplyEnv(environ []string) error {
 	var errs []error
 
 	for _, name := range names {
-		value := vars[name]
-
-		if f := byEnv[name]; f != nil {
-			if _, both := vars[name+"_FILE"]; both {
-				errs = append(errs, fmt.Errorf("%s and %s_FILE are both set", name, name))
-
-				continue
-			}
-
-			if err := r.Set(f, value, SourceEnv); err != nil {
-				errs = append(errs, fmt.Errorf("%s: %w", name, err))
-			}
-
-			continue
-		}
-
-		f := secretFileVar(byEnv, name)
-		if f == nil {
-			errs = append(errs, fmt.Errorf("unknown environment variable %s", name))
-
-			continue
-		}
-
-		if _, both := vars[f.Env]; both {
-			continue // reported with the direct variable
-		}
-
-		if err := r.setSecretFile(f, value, SourceEnv); err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", name, err))
+		if err := r.applyEnvVar(byEnv, vars, name); err != nil {
+			errs = append(errs, err)
 		}
 	}
 
 	return errors.Join(errs...)
+}
+
+// applyEnvVar applies the variable name of vars: either a field's own
+// variable or its <VAR>_FILE form.
+func (r *Resolved) applyEnvVar(byEnv map[string]*Field, vars map[string]string, name string) error {
+	value := vars[name]
+
+	if f := byEnv[name]; f != nil {
+		if _, both := vars[name+"_FILE"]; both {
+			return fmt.Errorf("%s and %s_FILE are both set", name, name)
+		}
+
+		if err := r.Set(f, value, SourceEnv); err != nil {
+			return fmt.Errorf("%s: %w", name, err)
+		}
+
+		return nil
+	}
+
+	f := secretFileVar(byEnv, name)
+	if f == nil {
+		return fmt.Errorf("unknown environment variable %s", name)
+	}
+
+	if _, both := vars[f.Env]; both {
+		return nil // reported with the direct variable
+	}
+
+	if err := r.setSecretFile(f, value, SourceEnv); err != nil {
+		return fmt.Errorf("%s: %w", name, err)
+	}
+
+	return nil
 }
 
 // secretFileVar returns the secret field that the <VAR>_FILE variable name

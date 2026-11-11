@@ -174,23 +174,7 @@ func svcListeningPorts(e *Env) ([]int, error) {
 			return nil, err
 		}
 
-		sc := bufio.NewScanner(strings.NewReader(string(data)))
-		for sc.Scan() {
-			fields := strings.Fields(sc.Text())
-			// sl local_address rem_address st ...; st 0A is LISTEN.
-			if len(fields) < 4 || fields[3] != "0A" {
-				continue
-			}
-
-			_, hexPort, ok := strings.Cut(fields[1], ":")
-			if !ok {
-				continue
-			}
-
-			if port, err := strconv.ParseInt(hexPort, 16, 32); err == nil {
-				seen[int(port)] = true
-			}
-		}
+		svcParseListening(data, seen)
 	}
 
 	ports := make([]int, 0, len(seen))
@@ -201,6 +185,28 @@ func svcListeningPorts(e *Env) ([]int, error) {
 	sort.Ints(ports)
 
 	return ports, nil
+}
+
+// svcParseListening records in seen the ports of the LISTEN entries of a
+// /proc/net/tcp table.
+func svcParseListening(data []byte, seen map[int]bool) {
+	sc := bufio.NewScanner(strings.NewReader(string(data)))
+	for sc.Scan() {
+		fields := strings.Fields(sc.Text())
+		// sl local_address rem_address st ...; st 0A is LISTEN.
+		if len(fields) < 4 || fields[3] != "0A" {
+			continue
+		}
+
+		_, hexPort, ok := strings.Cut(fields[1], ":")
+		if !ok {
+			continue
+		}
+
+		if port, err := strconv.ParseInt(hexPort, 16, 32); err == nil {
+			seen[int(port)] = true
+		}
+	}
 }
 
 // ErrCoreNotEnabled ends the run when carbonio-core is not enabled.

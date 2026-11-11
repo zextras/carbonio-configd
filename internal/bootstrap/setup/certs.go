@@ -42,6 +42,13 @@ const (
 // file.
 const certDHParamAttr = "zimbraSSLDHParam"
 
+// File names under conf/: the CA certificate (in conf/ca/) and the DH
+// parameters.
+const (
+	certCAFile      = "ca.pem"
+	certDHParamFile = "dhparam.pem.crb"
+)
+
 // certRestartLDAP restarts the local LDAP server so it reads the new
 // certificate (setup.pl stopLdap + startLdap). Tests replace it.
 var certRestartLDAP = func(e *Env) error {
@@ -125,10 +132,10 @@ func StepAddCACert() Step {
 		Title:    "Adding the CA to the trust store",
 		Optional: true,
 		When: func(e *Env) bool {
-			return !e.Facts.NewInstall && certIsFile(e, certFile(e, "conf", "ca", "ca.pem"))
+			return !e.Facts.NewInstall && certIsFile(e, certFile(e, "conf", "ca", certCAFile))
 		},
 		Apply: func(e *Env) error {
-			return certZmcertmgr(e, "addcacert", certFile(e, "conf", "ca", "ca.pem"))
+			return certZmcertmgr(e, "addcacert", certFile(e, "conf", "ca", certCAFile))
 		},
 	}
 }
@@ -170,7 +177,7 @@ func certApplyCASetup(e *Env) error {
 		}
 	}
 
-	caPEM := certFile(e, "conf", "ca", "ca.pem")
+	caPEM := certFile(e, "conf", "ca", certCAFile)
 	if !e.Facts.NewInstall && certIsFile(e, caPEM) && certCAExpired(e, caPEM) {
 		e.Flags.NeedNewCert = true
 	}
@@ -301,28 +308,12 @@ func certApplyCreateCert(e *Env) error {
 			continue
 		}
 
-		var opt string
+		opt, create, err := certCreateOpt(e, t, serverCrt, ranNew)
+		if err != nil {
+			return err
+		}
 
-		switch {
-		case !certIsFile(e, t.have(e)) && !certIsFile(e, serverCrt):
-			if t.pkg == PkgAppserver {
-				if err := certPrepareMailboxd(e); err != nil {
-					return err
-				}
-			}
-
-			opt = certNeedFlag(e)
-
-			e.Log.Info("Creating SSL %s certificate", t.title)
-		case e.Flags.NeedNewCert && certType(e) == certTypeSelf:
-			if ranNew {
-				continue
-			}
-
-			opt = certNewFlag
-
-			e.Log.Info("Creating new %s SSL certificate", t.title)
-		default:
+		if !create {
 			continue
 		}
 
@@ -334,6 +325,34 @@ func certApplyCreateCert(e *Env) error {
 	}
 
 	return nil
+}
+
+// certCreateOpt decides whether zmcertmgr createcrt runs for t and with which
+// flag: the need flag when the package has no certificate, -new to replace
+// a self-signed one (once per run, ranNew), nothing otherwise.
+func certCreateOpt(e *Env, t certTarget, serverCrt string, ranNew bool) (opt string, create bool, err error) {
+	switch {
+	case !certIsFile(e, t.have(e)) && !certIsFile(e, serverCrt):
+		if t.pkg == PkgAppserver {
+			if err := certPrepareMailboxd(e); err != nil {
+				return "", false, err
+			}
+		}
+
+		e.Log.Info("Creating SSL %s certificate", t.title)
+
+		return certNeedFlag(e), true, nil
+	case e.Flags.NeedNewCert && certType(e) == certTypeSelf:
+		if ranNew {
+			return "", false, nil
+		}
+
+		e.Log.Info("Creating new %s SSL certificate", t.title)
+
+		return certNewFlag, true, nil
+	default:
+		return "", false, nil
+	}
 }
 
 // certDetectType sets Flags.CertType and Flags.NeedNewCert from the installed
@@ -521,7 +540,7 @@ func StepGenerateDHParam() Step {
 		Title: "Generating dhparam key",
 		When:  func(e *Env) bool { return e.Facts.NewInstall },
 		Done: func(e *Env) (bool, error) {
-			if !certIsFile(e, certFile(e, "conf", "dhparam.pem.crb")) {
+			if !certIsFile(e, certFile(e, "conf", certDHParamFile)) {
 				return false, nil
 			}
 
@@ -530,14 +549,14 @@ func StepGenerateDHParam() Step {
 				return false, fmt.Errorf("reading the global config: %w", err)
 			}
 
-			return gc[certDHParamAttr] == certFile(e, "conf", "dhparam.pem.crb"), nil
+			return gc[certDHParamAttr] == certFile(e, "conf", certDHParamFile), nil
 		},
 		Apply: certApplyDHParam,
 	}
 }
 
 func certApplyDHParam(e *Env) error {
-	dest := certFile(e, "conf", "dhparam.pem.crb")
+	dest := certFile(e, "conf", certDHParamFile)
 
 	if !certIsFile(e, dest) {
 		tmp := dest + ".tmp"

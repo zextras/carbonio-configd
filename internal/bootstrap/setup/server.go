@@ -33,6 +33,7 @@ const (
 	srvSvcAntispam      = "antispam"
 	srvSvcOpendkim      = "opendkim"
 	srvSvcAmavis        = "amavis"
+	srvSvcDiscover      = "service-discover"
 )
 
 // srvHost is the host name of the server entry (setup.pl $config{HOSTNAME}).
@@ -423,70 +424,94 @@ func StepConfigSetStoreDefaults() Step {
 	return Step{
 		Title: "Setting store defaults",
 		When:  func(e *Env) bool { return e.Facts.IsEnabled(PkgAppserver) },
-		Done: func(e *Env) (bool, error) {
-			host := srvHost(e)
-			done := false
+		Done:  srvStoreDefaultsDone,
+		Apply: srvStoreDefaultsApply,
+	}
+}
 
-			err := srvRead(e, func(d srvDirectory) error {
-				if srvStoreJoins(e) {
-					need, err := srvStoreDefaultsNeedAdd(d, host)
-					if err != nil {
-						return err
-					}
+func srvStoreDefaultsDone(e *Env) (bool, error) {
+	host := srvHost(e)
+	done := false
 
-					g, err := d.Global()
-					if err != nil {
-						return err
-					}
-
-					if need || !slices.Contains(g.values("zimbraReverseProxyUpstreamEwsServers"), host) {
-						return nil
-					}
-				}
-
-				ent, found, err := d.Server(host)
-				done = found && srvEntryMatches(ent, srvStoreServerAttrs(e))
-
+	err := srvRead(e, func(d srvDirectory) error {
+		if srvStoreJoins(e) {
+			joined, err := srvStoreJoined(d, host)
+			if err != nil {
 				return err
-			})
-
-			return done, err
-		},
-		Apply: func(e *Env) error {
-			host := srvHost(e)
-
-			var p Prov
-
-			if srvStoreJoins(e) {
-				var need bool
-
-				err := srvRead(e, func(d srvDirectory) error {
-					var err error
-
-					need, err = srvStoreDefaultsNeedAdd(d, host)
-
-					return err
-				})
-				if err != nil {
-					return err
-				}
-
-				if need {
-					e.Log.Info("Adding %s to ReverseProxyAvailableLookupTargets", host)
-					p.Add("mcf", "+zimbraReverseProxyAvailableLookupTargets", host)
-				}
-
-				p.Add("mcf", "+zimbraReverseProxyUpstreamEwsServers", host)
 			}
 
-			attrs := srvStoreServerAttrs(e)
+			if !joined {
+				return nil
+			}
+		}
 
-			srvMS(&p, host, "zimbraReverseProxyLookupTarget", attrs["zimbraReverseProxyLookupTarget"],
-				"zimbraMtaAuthTarget", attrs["zimbraMtaAuthTarget"])
+		ent, found, err := d.Server(host)
+		done = found && srvEntryMatches(ent, srvStoreServerAttrs(e))
 
-			return e.RunProv(&p)
-		},
+		return err
+	})
+
+	return done, err
+}
+
+// srvStoreJoined reports whether host is already registered as a reverse
+// proxy lookup target and EWS upstream.
+func srvStoreJoined(d srvDirectory, host string) (bool, error) {
+	need, err := srvStoreDefaultsNeedAdd(d, host)
+	if err != nil {
+		return false, err
 	}
+
+	g, err := d.Global()
+	if err != nil {
+		return false, err
+	}
+
+	return !need && slices.Contains(g.values("zimbraReverseProxyUpstreamEwsServers"), host), nil
+}
+
+func srvStoreDefaultsApply(e *Env) error {
+	host := srvHost(e)
+
+	var p Prov
+
+	if srvStoreJoins(e) {
+		if err := srvStoreJoin(e, &p, host); err != nil {
+			return err
+		}
+	}
+
+	attrs := srvStoreServerAttrs(e)
+
+	srvMS(&p, host, "zimbraReverseProxyLookupTarget", attrs["zimbraReverseProxyLookupTarget"],
+		"zimbraMtaAuthTarget", attrs["zimbraMtaAuthTarget"])
+
+	return e.RunProv(&p)
+}
+
+// srvStoreJoin queues the registration of host as a reverse proxy target.
+func srvStoreJoin(e *Env, p *Prov, host string) error {
+	var need bool
+
+	err := srvRead(e, func(d srvDirectory) error {
+		var err error
+
+		need, err = srvStoreDefaultsNeedAdd(d, host)
+
+		return err
+	})
+	if err != nil {
+		return err
+	}
+
+	if need {
+		e.Log.Info("Adding %s to ReverseProxyAvailableLookupTargets", host)
+		p.Add("mcf", "+zimbraReverseProxyAvailableLookupTargets", host)
+	}
+
+	p.Add("mcf", "+zimbraReverseProxyUpstreamEwsServers", host)
+
+	return nil
 }
 
 // srvToggle is what a zmproxyconfig run does to one proxy.
@@ -590,8 +615,8 @@ func StepConfigSetStoreProxy() Step {
 // LDAPHOST eq HOSTNAME (and a time zone is configured). Optional.
 func StepConfigSetTimeZonePref() Step {
 	return Step{
-		Name:  "zimbraPrefTimeZoneId",
-		Title: "Setting TimeZone Preference",
+		Name:     "zimbraPrefTimeZoneId",
+		Title:    "Setting TimeZone Preference",
 		When:     func(e *Env) bool { return e.Facts.IsEnabled(srvPkgDirectory) },
 		Optional: true,
 		// setup.pl records the stage on every directory server, and writes
@@ -914,7 +939,7 @@ func srvServiceLists(e *Env) (installed, enabled []string) {
 		switch {
 		case !e.Facts.IsInstalled(pkg):
 		case pkg == PkgCore:
-			installed = srvAddUnique(installed, "stats", "service-discover")
+			installed = srvAddUnique(installed, "stats", srvSvcDiscover)
 		default:
 			installed = srvAddUnique(installed, srvServiceName(pkg))
 		}
@@ -953,8 +978,8 @@ func srvServiceLists(e *Env) (installed, enabled []string) {
 // entry already lists it: bootstrap preserves that value but never introduces
 // it (CO-4122).
 func srvKeepServiceDiscover(ent srvEntry, enabled []string) []string {
-	if slices.Contains(ent.values("zimbraServiceEnabled"), "service-discover") {
-		return srvAddUnique(slices.Clone(enabled), "service-discover")
+	if slices.Contains(ent.values("zimbraServiceEnabled"), srvSvcDiscover) {
+		return srvAddUnique(slices.Clone(enabled), srvSvcDiscover)
 	}
 
 	return enabled

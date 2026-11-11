@@ -16,6 +16,13 @@ import (
 // password of the zimbra LDAP admin.
 const ldapAdminEntryDN = "uid=zimbra,cn=admins,cn=zimbra"
 
+const (
+	// ldapConfigTreeDir is the slapd configuration tree directory, and
+	// ldapCarbonioLDIF the LDIF template of the carbonio entries.
+	ldapConfigTreeDir = "cn=config"
+	ldapCarbonioLDIF  = "carbonio.ldif"
+)
+
 var errLDAPNoRootPW = errors.New("no olcRootPW line")
 
 // ldapConfigFiles are the files installLdapConfig copies from the package
@@ -46,7 +53,7 @@ func ldapInstallConfig(e *Env) error {
 	dst := ldapConfigDir(e)
 	src := filepath.Join(ldapTemplateDir(e), "config")
 
-	if err := e.Sys.FS.MkdirAll(filepath.Join(dst, "cn=config", "olcDatabase={2}mdb"), 0o750); err != nil {
+	if err := e.Sys.FS.MkdirAll(filepath.Join(dst, ldapConfigTreeDir, "olcDatabase={2}mdb"), 0o750); err != nil {
 		return fmt.Errorf("creating %s: %w", dst, err)
 	}
 
@@ -61,7 +68,7 @@ func ldapInstallConfig(e *Env) error {
 	private := []string{filepath.Join(dst, "cn=config.ldif")}
 
 	for _, f := range ldapConfigFiles() {
-		if filepath.Dir(f) == "cn=config" {
+		if filepath.Dir(f) == ldapConfigTreeDir {
 			private = append(private, filepath.Join(dst, f))
 		}
 	}
@@ -101,7 +108,7 @@ func ldapWritePasswords(e *Env, rootPassword, adminPassword string) error {
 		return err
 	}
 
-	path := filepath.Join(ldapConfigDir(e), "cn=config", "olcDatabase={0}config.ldif")
+	path := filepath.Join(ldapConfigDir(e), ldapConfigTreeDir, "olcDatabase={0}config.ldif")
 
 	data, err := e.Sys.FS.ReadFile(path)
 	if err != nil {
@@ -118,7 +125,7 @@ func ldapWritePasswords(e *Env, rootPassword, adminPassword string) error {
 		return err
 	}
 
-	src := filepath.Join(ldapTemplateDir(e), "carbonio.ldif")
+	src := filepath.Join(ldapTemplateDir(e), ldapCarbonioLDIF)
 
 	tmpl, err := e.Sys.FS.ReadFile(src)
 	if err != nil {
@@ -134,7 +141,7 @@ func ldapWritePasswords(e *Env, rootPassword, adminPassword string) error {
 		return fmt.Errorf("%s: no entry %s", src, ldapAdminEntryDN)
 	}
 
-	return ldapWriteOwned(e, e.Paths.Path("conf", "carbonio.ldif"), out)
+	return ldapWriteOwned(e, e.Paths.Path("conf", ldapCarbonioLDIF), out)
 }
 
 // ldapPreStart is ldapinit.pm preLdapStart: the root and admin passwords go
@@ -173,7 +180,7 @@ func ldapPostStartFiles(e *Env) []string {
 	tmpl := ldapTemplateDir(e)
 
 	return []string{
-		e.Paths.Path("conf", "carbonio.ldif"),
+		e.Paths.Path("conf", ldapCarbonioLDIF),
 		filepath.Join(tmpl, "zimbra_globalconfig.ldif"),
 		filepath.Join(tmpl, "zimbra_defaultcos.ldif"),
 		filepath.Join(tmpl, "zimbra_defaultexternalcos.ldif"),

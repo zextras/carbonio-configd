@@ -153,48 +153,23 @@ func (w *Wizard) ask(ctx context.Context, r *Resolved, mode WizardMode) error {
 // askField asks one question until the answer is valid.
 func (w *Wizard) askField(r *Resolved, q question, f *Field) error {
 	for {
-		var (
-			ans string
-			err error
-		)
-
-		if f.Secret {
-			ans, err = w.secret(r, q, f)
-		} else {
-			ans, err = w.line(fmt.Sprintf("%s [%s]: ", q.prompt, f.Format(&r.Config)))
-		}
-
+		ans, err := w.readAnswer(r, q, f)
 		if err != nil {
 			return err
 		}
 
 		if ans == "" {
-			// Keep the current value; a required empty key is asked again.
-			if !f.IsZero(&r.Config) || !IsRequired(f, &r.Config) {
-				if f.Secret && !explicit(r.Source(f.Path)) {
-					// Keep a generated secret: stop it being redrawn by
-					// Refresh.
-					r.mark(f, SourceWizard)
-				}
-
+			if w.keepCurrent(r, f) {
 				return nil
 			}
 
+			// A required empty key is asked again.
 			_, _ = fmt.Fprintf(w.Out, "  %s is required.\n", f.Path)
 
 			continue
 		}
 
-		restore := r.snapshot(f)
-
-		err = r.Set(f, ans, SourceWizard)
-		if err == nil {
-			err = CheckValue(f, &r.Config)
-		}
-
-		if err != nil {
-			restore()
-
+		if err := w.applyAnswer(r, f, ans); err != nil {
 			_, _ = fmt.Fprintf(w.Out, "  %v\n", err)
 
 			continue
@@ -202,6 +177,48 @@ func (w *Wizard) askField(r *Resolved, q question, f *Field) error {
 
 		return nil
 	}
+}
+
+// readAnswer reads the operator's answer to q: twice and without echo for
+// a secret.
+func (w *Wizard) readAnswer(r *Resolved, q question, f *Field) (string, error) {
+	if f.Secret {
+		return w.secret(r, q, f)
+	}
+
+	return w.line(fmt.Sprintf("%s [%s]: ", q.prompt, f.Format(&r.Config)))
+}
+
+// keepCurrent handles an empty answer: it reports whether the current value
+// stands, which it does unless the key is required and still empty.
+func (w *Wizard) keepCurrent(r *Resolved, f *Field) bool {
+	if f.IsZero(&r.Config) && IsRequired(f, &r.Config) {
+		return false
+	}
+
+	if f.Secret && !explicit(r.Source(f.Path)) {
+		// Keep a generated secret: stop it being redrawn by Refresh.
+		r.mark(f, SourceWizard)
+	}
+
+	return true
+}
+
+// applyAnswer sets and validates ans, restoring the previous value when it
+// is rejected.
+func (w *Wizard) applyAnswer(r *Resolved, f *Field, ans string) error {
+	restore := r.snapshot(f)
+
+	err := r.Set(f, ans, SourceWizard)
+	if err == nil {
+		err = CheckValue(f, &r.Config)
+	}
+
+	if err != nil {
+		restore()
+	}
+
+	return err
 }
 
 // secret reads a secret twice, without echo. Enter keeps the current value

@@ -120,10 +120,13 @@ func (h *systemHost) Networks() []string {
 	return out
 }
 
+// interfaceAddrs lists the interface addresses (a test seam).
+var interfaceAddrs = net.InterfaceAddrs
+
 // interfaceNets returns the global unicast addresses of the node's
 // interfaces (no loopback, no link-local).
 func interfaceNets() []*net.IPNet {
-	addrs, err := net.InterfaceAddrs()
+	addrs, err := interfaceAddrs()
 	if err != nil {
 		return nil
 	}

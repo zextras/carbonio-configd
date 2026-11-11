@@ -17,6 +17,7 @@ import (
 const (
 	existKeyHostname      = "host.hostname"
 	existKeyLDAPHost      = "ldap.host"
+	existKeyLDAPPort      = "ldap.port"
 	existKeyLDAPAdminPass = "ldap.admin_password"
 	existKeyLDAPRootPass  = "ldap.root_password"
 	existKeySMTPHost      = "store.smtp_host"
@@ -106,7 +107,7 @@ func ExistingValues(e *Env) (map[string]string, error) {
 	}
 
 	if e.Facts.NewInstall {
-		return existingFromMaster(e, open), nil
+		return existingFromMaster(e, open, e.LDAPIsAvailable), nil
 	}
 
 	return existingValues(e, open)
@@ -115,18 +116,18 @@ func ExistingValues(e *Env) (map[string]string, error) {
 // existingFromMaster reads the master's LDAP for a new node that joins it.
 // The operator's settings seed the lookup and are not returned: they keep
 // their own layer.
-func existingFromMaster(e *Env, open existOpenLDAP) map[string]string {
+func existingFromMaster(e *Env, open existOpenLDAP, available func() bool) map[string]string {
 	v := existValues{}
 
 	c := e.Cfg
-	if c == nil || c.LDAP.Host == "" || c.LDAP.Host == c.Host.Hostname || !e.LDAPIsAvailable() {
+	if c == nil || c.LDAP.Host == "" || c.LDAP.Host == c.Host.Hostname || !available() {
 		return v
 	}
 
 	seeds := map[string]string{
 		existKeyHostname:      c.Host.Hostname,
 		existKeyLDAPHost:      c.LDAP.Host,
-		"ldap.port":           strconv.Itoa(c.LDAP.Port),
+		existKeyLDAPPort:      strconv.Itoa(c.LDAP.Port),
 		existKeyLDAPAdminPass: c.LDAP.AdminPassword,
 	}
 	maps.Copy(v, seeds)
@@ -180,7 +181,7 @@ func existLDAPHostFromURL(masterURL string) string {
 func existFromLocalConfig(e *Env, lc map[string]string, v existValues) {
 	v.set(existKeyHostname, strings.ToLower(lc["zimbra_server_hostname"]))
 
-	v.set("ldap.port", lc["ldap_port"])
+	v.set(existKeyLDAPPort, lc["ldap_port"])
 
 	if h := existLDAPHostFromURL(lc["ldap_master_url"]); h != "" {
 		v.set(existKeyLDAPHost, h)
@@ -273,7 +274,7 @@ func existReadsLDAP(e *Env, v existValues) bool {
 		return e.Facts.IsEnabled(existPkgDirectory)
 	}
 
-	return v[existKeyLDAPHost] != "" && v["ldap.port"] != "" && v[existKeyLDAPAdminPass] != ""
+	return v[existKeyLDAPHost] != "" && v[existKeyLDAPPort] != "" && v[existKeyLDAPAdminPass] != ""
 }
 
 // existFromLDAP ports setLdapDefaults. Failures to reach or read LDAP are

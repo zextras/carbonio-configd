@@ -7,6 +7,7 @@ package setup
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -14,6 +15,33 @@ import (
 	"strings"
 
 	"github.com/zextras/carbonio-configd/internal/bootstrap"
+)
+
+// factsServices is the part of the service controller the facts use.
+// *services.Controller implements it; the tests use a fake.
+type factsServices interface {
+	IsSystemdMode() bool
+	ServiceStatus(ctx context.Context, name string) (bool, error)
+	ServiceStart(ctx context.Context, name string) error
+}
+
+// factsLDAPReader is the part of the LDAP client the facts use.
+type factsLDAPReader interface {
+	GetServerConfig(hostname string) (map[string]string, error)
+	Close() error
+}
+
+// factsServicesOf and factsOpenLDAP are the seams of the tests.
+var (
+	factsServicesOf = func(e *Env) factsServices { return e.Ctl }
+	factsOpenLDAP   = func(e *Env) (factsLDAPReader, error) {
+		c, err := e.LDAP()
+		if err != nil {
+			return nil, err
+		}
+
+		return c, nil
+	}
 )
 
 // Packages are the carbonio packages setup.pl knew (@packageList), in its
@@ -156,7 +184,7 @@ func DetectFacts(e *Env) (*Facts, error) {
 		EnabledServices: map[string]bool{},
 		Configured:      map[string]bool{},
 		NewInstall:      true,
-		Systemd:         e.Ctl.IsSystemdMode(),
+		Systemd:         factsServicesOf(e).IsSystemdMode(),
 	}
 
 	f.Platform = osReleaseID(e)
@@ -216,7 +244,7 @@ func (f *Facts) readServerEntry(e *Env) error {
 		}
 	}
 
-	client, err := e.LDAP()
+	client, err := factsOpenLDAP(e)
 	if err != nil {
 		return err
 	}
@@ -236,26 +264,8 @@ func (f *Facts) readServerEntry(e *Env) error {
 func (f *Facts) applyServerEntry(e *Env, entry map[string]string) {
 	f.Enabled[PkgCore] = f.Installed[PkgCore]
 
-	for _, svc := range splitValues(entry["zimbraServiceInstalled"]) {
-		if p, ok := serviceToPackage[svc]; ok {
-			f.PrevInstalled[p] = true
-		} else {
-			e.Log.Warn("unknown package installed for %s", svc)
-		}
-	}
-
-	for _, svc := range splitValues(entry["zimbraServiceEnabled"]) {
-		if svc == "imapproxy" {
-			svc = "proxy"
-		}
-
-		if p, ok := serviceToPackage[svc]; ok {
-			f.Enabled[p] = true
-			f.EnabledServices[svc] = true
-		} else {
-			e.Log.Warn("unknown package installed for %s", svc)
-		}
-	}
+	f.applyInstalledServices(e, entry["zimbraServiceInstalled"])
+	f.applyEnabledServices(e, entry["zimbraServiceEnabled"])
 
 	for _, p := range Packages {
 		if f.Installed[p] && !f.PrevInstalled[p] {
@@ -271,16 +281,47 @@ func (f *Facts) applyServerEntry(e *Env, entry map[string]string) {
 	}
 }
 
+func (f *Facts) applyInstalledServices(e *Env, value string) {
+	for _, svc := range splitValues(value) {
+		p, ok := serviceToPackage[svc]
+		if !ok {
+			e.Log.Warn("unknown package installed for %s", svc)
+
+			continue
+		}
+
+		f.PrevInstalled[p] = true
+	}
+}
+
+func (f *Facts) applyEnabledServices(e *Env, value string) {
+	for _, svc := range splitValues(value) {
+		if svc == "imapproxy" {
+			svc = "proxy"
+		}
+
+		p, ok := serviceToPackage[svc]
+		if !ok {
+			e.Log.Warn("unknown package installed for %s", svc)
+
+			continue
+		}
+
+		f.Enabled[p] = true
+		f.EnabledServices[svc] = true
+	}
+}
+
 // EnsureLDAPRunning starts the local LDAP server when it is not running.
 func (e *Env) EnsureLDAPRunning() error {
-	running, err := e.Ctl.ServiceStatus(e.Ctx, "ldap")
+	running, err := factsServicesOf(e).ServiceStatus(e.Ctx, "ldap")
 	if err == nil && running {
 		return nil
 	}
 
 	e.Log.Detail("Starting the local LDAP server")
 
-	if err := e.Ctl.ServiceStart(e.Ctx, "ldap"); err != nil {
+	if err := factsServicesOf(e).ServiceStart(e.Ctx, "ldap"); err != nil {
 		return fmt.Errorf("starting ldap: %w", err)
 	}
 

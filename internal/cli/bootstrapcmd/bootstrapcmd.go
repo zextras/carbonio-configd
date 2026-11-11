@@ -155,23 +155,7 @@ func resolve(ctx context.Context, env sys.System, stdin io.Reader, stdout, stder
 
 	r := bootstrap.NewResolved(env.FS.ReadFile)
 
-	if err := r.ApplyExisting(deps.Existing); err != nil {
-		return nil, err
-	}
-
-	if err := applyFiles(env, r, stderr, opts); err != nil {
-		return nil, err
-	}
-
-	if err := r.ApplyEnv(opts.Environ); err != nil {
-		return nil, err
-	}
-
-	if err := r.ApplySets(opts.Sets); err != nil {
-		return nil, err
-	}
-
-	if err := r.ApplyDefaults(deps.Host); err != nil {
+	if err := applyLayers(env, r, stderr, opts, deps); err != nil {
 		return nil, err
 	}
 
@@ -183,6 +167,40 @@ func resolve(ctx context.Context, env sys.System, stdin io.Reader, stdout, stder
 		return r, nil
 	}
 
+	if err := runWizard(ctx, env, stdin, stdout, r, opts, deps); err != nil {
+		return nil, err
+	}
+
+	return r, nil
+}
+
+// applyLayers applies the existing install, the files, the environment, the
+// --set flags and the defaults, in increasing precedence.
+func applyLayers(env sys.System, r *bootstrap.Resolved, stderr io.Writer, opts *Options, deps Deps) error {
+	if err := r.ApplyExisting(deps.Existing); err != nil {
+		return err
+	}
+
+	if err := applyFiles(env, r, stderr, opts); err != nil {
+		return err
+	}
+
+	if err := r.ApplyEnv(opts.Environ); err != nil {
+		return err
+	}
+
+	if err := r.ApplySets(opts.Sets); err != nil {
+		return err
+	}
+
+	return r.ApplyDefaults(deps.Host)
+}
+
+// runWizard asks the questions and, unless the configuration goes to
+// --output, offers to save the answers.
+func runWizard(ctx context.Context, env sys.System, stdin io.Reader, stdout io.Writer,
+	r *bootstrap.Resolved, opts *Options, deps Deps,
+) error {
 	w := &bootstrap.Wizard{
 		In:         bufio.NewReader(stdin),
 		Out:        stdout,
@@ -197,16 +215,14 @@ func resolve(ctx context.Context, env sys.System, stdin io.Reader, stdout, stder
 	}
 
 	if err := w.Run(ctx, r, mode); err != nil {
-		return nil, err
+		return err
 	}
 
 	if opts.Output == "" {
-		if err := offerSave(env, w, r); err != nil {
-			return nil, err
-		}
+		return offerSave(env, w, r)
 	}
 
-	return r, nil
+	return nil
 }
 
 // applyFiles applies the legacy file or the YAML file, reporting the legacy

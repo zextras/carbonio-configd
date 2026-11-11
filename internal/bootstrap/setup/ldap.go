@@ -17,6 +17,10 @@ import (
 const (
 	ldapStageSetup = "configSetupLdap"
 	ldapSchemaAttr = "zimbraLDAPSchemaVersion"
+
+	// ldapSettingPasswordFmt is the detail line logged for each account
+	// password set.
+	ldapSettingPasswordFmt = "Setting %s password"
 )
 
 func ldapEnableReplicaFile(e *Env) string { return e.Paths.Path(".enable_replica") }
@@ -196,7 +200,7 @@ func ldapApplyPasswords(e *Env, k *ldapKit) error {
 	}
 
 	for _, a := range pending {
-		e.Log.Detail("Setting %s password", a.Name)
+		e.Log.Detail(ldapSettingPasswordFmt, a.Name)
 
 		pw := a.get(&e.Cfg.LDAP)
 
@@ -319,7 +323,7 @@ func ldapConfigNewMaster(e *Env, k *ldapKit) error {
 			continue
 		}
 
-		e.Log.Detail("Setting %s password", a.Name)
+		e.Log.Detail(ldapSettingPasswordFmt, a.Name)
 
 		if err := ldapSetPassword(e, k, a, pw); err != nil {
 			return fmt.Errorf("setting the %s password: %w", a.Name, err)
@@ -426,7 +430,7 @@ func ldapSetAppPassword(e *Env, k *ldapKit, a ldapAccount) error {
 		return nil
 	}
 
-	e.Log.Detail("Setting %s password", a.Name)
+	e.Log.Detail(ldapSettingPasswordFmt, a.Name)
 
 	if err := ldapSetPassword(e, k, a, pw); err != nil {
 		return fmt.Errorf("setting the %s password: %w", a.Name, err)
