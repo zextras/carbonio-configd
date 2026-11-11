@@ -117,7 +117,7 @@ func (r *Resolved) ApplyDefaults(host Host) error {
 		{keyProxyMode, SourceDefault, constant("https")},
 		{keyProxyMailEnabled, SourceDefault, hasRole(c, RoleProxy)},
 		{keyProxyWebEnabled, SourceDefault, hasRole(c, RoleProxy)},
-		{keyProxyStrictServerName, SourceDefault, constant("true")},
+		{keyProxyStrictServerName, SourceDefault, constant("false")},
 	}...)
 
 	for i, k := range portKeys {

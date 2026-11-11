@@ -137,11 +137,11 @@ type HostConfig struct {
 type LDAPConfig struct {
 	Host            string `yaml:"host" legacy:"LDAPHOST" check:"fqdn"`
 	Port            int    `yaml:"port" legacy:"LDAPPORT"`
-	RootPassword    string `yaml:"root_password" legacy:"LDAPROOTPASS" secret:"true"`
-	AdminPassword   string `yaml:"admin_password" legacy:"LDAPADMINPASS" secret:"true"`
-	PostfixPassword string `yaml:"postfix_password" legacy:"LDAPPOSTPASS" secret:"true"`
-	AmavisPassword  string `yaml:"amavis_password" legacy:"LDAPAMAVISPASS" secret:"true"`
-	NginxPassword   string `yaml:"nginx_password" legacy:"ldap_nginx_password" secret:"true"`
+	RootPassword    string `yaml:"root_password" legacy:"LDAPROOTPASS,ldap_root_password" secret:"true"`
+	AdminPassword   string `yaml:"admin_password" legacy:"LDAPADMINPASS,zimbra_ldap_password" secret:"true"`
+	PostfixPassword string `yaml:"postfix_password" legacy:"LDAPPOSTPASS,ldap_postfix_password" secret:"true"`
+	AmavisPassword  string `yaml:"amavis_password" legacy:"LDAPAMAVISPASS,ldap_amavis_password" secret:"true"`
+	NginxPassword   string `yaml:"nginx_password" legacy:"ldap_nginx_password,LDAPNGINXPW" secret:"true"`
 	// BaseDN is the base of the configuration tree (ldap_dit_base_dn_config).
 	BaseDN string `yaml:"base_dn" legacy:"ldap_dit_base_dn_config"`
 	// ReplicationType is the role of a directory server: the master, a
@@ -150,7 +150,7 @@ type LDAPConfig struct {
 	// ServerID is the multi-master server ID (mmr only).
 	ServerID int `yaml:"server_id" legacy:"LDAPSERVERID"`
 	// ReplicationPassword is the password of the replication account.
-	ReplicationPassword string `yaml:"replication_password" legacy:"LDAPREPPASS" secret:"true"`
+	ReplicationPassword string `yaml:"replication_password" legacy:"LDAPREPPASS,ldap_replication_password" secret:"true"`
 	// ForceReplication enables replication on a node whose ldap.host is
 	// itself (legacy FORCEREPLICATION, written to .enable_replica).
 	ForceReplication bool `yaml:"force_replication" legacy:"FORCEREPLICATION"`

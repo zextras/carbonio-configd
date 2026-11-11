@@ -8,8 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 )
+
+// legacyYes is setup.pl's true.
+const legacyYes = "yes"
 
 // Reasons a legacy key is not imported.
 const (
@@ -37,6 +41,8 @@ var legacyDropped = map[string]string{
 	"REMOTEIMAPSSLBINDPORT":          reasonFromLDAP,
 	"REMOVE":                         reasonObsolete,
 	"SERVICEWEBAPP":                  reasonDerived,
+	"UIWEBAPPS":                      reasonDerived,
+	"ldap_bes_searcher_password":     reasonObsolete,
 	"SQLROOTPASS":                    reasonGenerated,
 	"SYSTEMMEMORY":                   reasonDerived,
 	"UPGRADE":                        reasonObsolete,
@@ -82,6 +88,12 @@ func (r *Resolved) applyLegacyKey(key, value string) (LegacyDrop, error) {
 	if f := fieldsByLegacy[key]; f != nil {
 		if value == "" || (key == "PUBLICSERVICEHOSTNAME" && value == "UNSET") {
 			return LegacyDrop{}, nil
+		}
+
+		// setup.pl enables strict server names only for "yes" (L5348); its
+		// own default "TRUE" left them off.
+		if key == "STRICTSERVERNAMEENABLED" {
+			value = strconv.FormatBool(value == legacyYes)
 		}
 
 		if err := r.Set(f, value, SourceLegacy); err != nil {

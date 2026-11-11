@@ -282,7 +282,7 @@ func ldapStoreLDIFPassword(e *Env, dn, hash string) error {
 // ldapWriteOwned writes a file that holds password hashes: mode 0600,
 // owned by the zextras user the tools read it as.
 func ldapWriteOwned(e *Env, path string, data []byte) error {
-	if err := e.Sys.FS.WriteFileAtomic(path, data, 0o600); err != nil {
+	if err := e.Sys.FS.WriteFileAtomic(path, data, 0o640); err != nil {
 		return fmt.Errorf("writing %s: %w", path, err)
 	}
 

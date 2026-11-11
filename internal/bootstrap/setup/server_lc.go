@@ -226,6 +226,7 @@ func srvLCValues(e *Env) map[string]string {
 		"ldap_port":                            strconv.Itoa(c.LDAP.Port),
 		"ldap_host":                            c.LDAP.Host,
 		"zimbra_user":                          config.ZextrasUser,
+		"zimbra_java_home":                     e.Paths.Path("common", "lib", "jvm", "java"),
 		"ssl_default_digest":                   cmp.Or(c.Host.SSLDigest, "sha256"),
 		"mailboxd_directory":                   e.Paths.Path("mailboxd"),
 		"mailboxd_truststore":                  e.Paths.Path("common", "lib", "jvm", "java", "lib", "security", "cacerts"),

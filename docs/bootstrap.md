@@ -102,7 +102,7 @@ comma-separated in the environment and in `--set`. Booleans accept
 | `store.ports.{imap,imaps,pop3,pop3s,http,https}` | `IMAPPORT` ... `HTTPSPORT` | `7143 7993 7110 7995 80 443` with a proxy on the node, else `143 993 110 995 80 443` | |
 | `proxy.mode` | `PROXYMODE` | `https` (`https`, `redirect`) | |
 | `proxy.mail_enabled`, `proxy.web_enabled` | `MAILPROXY`, `HTTPPROXY` | `true` on a proxy | |
-| `proxy.strict_server_name` | `STRICTSERVERNAMEENABLED` | `true` | |
+| `proxy.strict_server_name` | `STRICTSERVERNAMEENABLED` (only `yes` is true, as in `setup.pl`) | `false` | |
 | `proxy.ports.{imap,imaps,pop3,pop3s,http,https}` | `IMAPPROXYPORT` ... `HTTPSPROXYPORT` | `143 993 110 995 8080 8443` on a proxy, else `7143 7993 7110 7995 8080 8443` | |
 | `start_services` | `STARTSERVERS` | `true` | |
 

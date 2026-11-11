@@ -381,7 +381,7 @@ func TestLdapPreStartWritesHashesAndLocalConfig(t *testing.T) {
 	assert.Equal(t, "true", lc[ldapLCIsMaster])
 
 	mode, _ := fakes.FS.Mode("/opt/zextras/conf/carbonio.ldif")
-	assert.Equal(t, os.FileMode(0o600), mode.Perm())
+	assert.Equal(t, os.FileMode(0o640), mode.Perm()) // as setup.pl left it
 	assert.Contains(t, ldapAllLines(fakes), "chown zextras:zextras /opt/zextras/conf/carbonio.ldif")
 	ldapAssertNoSecret(t, fakes)
 }
