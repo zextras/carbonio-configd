@@ -65,7 +65,8 @@ build:
 	@echo "Building $(BINARY_NAME)..."
 	@mkdir -p $(BUILD_DIR)
 	CGO_ENABLED=0 $(GOBUILD) $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) $(MAIN_PATH)
-	@echo "Build complete: $(BUILD_DIR)/$(BINARY_NAME)"
+	CGO_ENABLED=0 $(GOBUILD) $(BUILD_FLAGS) -o $(BUILD_DIR)/carbonio-postfix-conf ./cmd/carbonio-postfix-conf
+	@echo "Build complete: $(BUILD_DIR)/$(BINARY_NAME) $(BUILD_DIR)/carbonio-postfix-conf"
 
 # Build with profiling support enabled
 build-profiling:
@@ -185,6 +186,8 @@ install: build
 	@sudo cp $(BUILD_DIR)/$(BINARY_NAME) /opt/zextras/libexec/
 	@sudo chown zextras:zextras /opt/zextras/libexec/$(BINARY_NAME)
 	@sudo chmod 755 /opt/zextras/libexec/$(BINARY_NAME)
+	@echo "Installing carbonio-postfix-conf (root-owned: the only writer of common/conf)..."
+	@sudo install -m 755 -o root -g root $(BUILD_DIR)/carbonio-postfix-conf /opt/zextras/libexec/carbonio-postfix-conf
 	@echo "Installation complete"
 
 # Build for different architectures

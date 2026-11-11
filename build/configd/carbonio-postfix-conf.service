@@ -1,0 +1,72 @@
+# SPDX-FileCopyrightText: 2026 Zextras <https://www.zextras.com>
+#
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# Applies the Postfix configuration change that carbonio-configd (user zextras)
+# staged in /opt/zextras/data/postfix/conf-staging (CO-4621).
+#
+# /opt/zextras/common/conf is root-owned: Postfix master runs as root and trusts
+# main.cf and master.cf there, so zextras must not be able to write them.
+# configd stages the change and runs "systemctl start carbonio-postfix-conf.service"
+# (allowed for zextras by the polkit rule of carbonio-configd, "start" only). The
+# helper validates everything first (parameter allowlist, master.cf grammar,
+# daemon allowlist and -o checks) and installs the files and runs postconf as root.
+#
+# Not enabled and not wanted by any target: it only ever runs when started.
+# Without RemainAfterExit every start runs again.
+
+[Unit]
+Description=Carbonio Postfix configuration helper (applies staged changes as root)
+Documentation=https://github.com/zextras/carbonio-configd/blob/main/docs/systemd.md
+# configd starts this unit once per Postfix change; the default start rate limit
+# (5 per 10 s) would refuse the sixth start of a busy cycle, and zextras cannot
+# reset-failed (polkit). The helper serializes itself with a lock.
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/opt/zextras/libexec/carbonio-postfix-conf apply
+TimeoutStartSec=60
+UMask=0022
+WorkingDirectory=/
+# /run/carbonio-postfix-conf holds the lock shared with the direct (sudo, uid 0)
+# invocations; it must survive between runs or two helpers could lock different
+# inodes.
+RuntimeDirectory=carbonio-postfix-conf
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
+
+# ── Security: Filesystem ──────────────────────────────────────────────
+ProtectSystem=strict
+ReadWritePaths=/opt/zextras/common/conf -/opt/zextras/data/postfix/conf-staging
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+
+# ── Security: Privileges ──────────────────────────────────────────────
+# Root needs to read zextras-owned 0600 staging files (DAC_OVERRIDE), install files
+# owned by root (CHOWN) and replace files in the conf directory (FOWNER).
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+RestrictAddressFamilies=AF_UNIX
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# Logging: the helper's validation errors land in the journal.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=carbonio-postfix-conf

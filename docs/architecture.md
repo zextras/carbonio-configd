@@ -546,7 +546,8 @@ entry no cycle reads is not reported).
 | `internal/logger` | `log/slog` setup, component/correlation context, redacting handler |
 | `internal/lookup` | `ConfigLookup` interface for local/global/server/misc value lookups |
 | `internal/metrics` | In-memory counters/gauges and the Prometheus textfile renderer/writer |
-| `internal/mtaops` | MTA operations: `postconf`/`postconfd`, LDAP write-back, MAPFILE handling |
+| `internal/mtaops` | MTA operations: `postconf`/`postconfd` (staged for the root helper), LDAP write-back, MAPFILE handling |
+| `internal/postfixconf` | Root-owned Postfix configuration: validator and root-side `apply` of `cmd/carbonio-postfix-conf`; `client/` stages configd's changes and triggers the helper |
 | `internal/network` | TCP 7171 listener (`STATUS`, `REWRITE`), bounded connections, synchronous REWRITE wait |
 | `internal/parser` | Parser interfaces and types for `zmconfigd.cf` |
 | `internal/plan` | Pure `Compute`, plan types, reasons, text/JSON rendering |

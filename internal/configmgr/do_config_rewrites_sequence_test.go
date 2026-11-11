@@ -97,7 +97,9 @@ func TestDoConfigRewrites_SideEffectSequence(t *testing.T) {
 	require.Len(t, pl.Sections, 1)
 
 	ops := fakes.Rec.Strings()
-	require.Len(t, ops, 7, "unexpected side effects:\n%s", strings.Join(ops, "\n"))
+	nOps := len(ops)
+
+	require.Equal(t, 12, nOps, "unexpected side effects:\n%s", strings.Join(ops, "\n"))
 
 	// Serial phase: the mapped file is written before anything else runs.
 	assert.Equal(t, "fs.write-atomic "+base+"/conf/dhparam.pem mode=0640", ops[0])
@@ -110,10 +112,16 @@ func TestDoConfigRewrites_SideEffectSequence(t *testing.T) {
 		"fs.chmod " + tmp + " mode=0640",
 		"fs.rename " + tmp + " -> " + base + "/conf/main.cf",
 	}, subsequence(ops[1:], ".zmconfigd-rewrite"), "rewrite step")
-	assert.Equal(t, []string{"exec " + base + "/common/sbin/postconf -e myhostname=mail.example.com"},
-		subsequence(ops[1:], "postconf -e"), "postconf step")
-	assert.Equal(t, []string{"exec " + base + "/common/sbin/postconf -X smtpd_banner"},
-		subsequence(ops[1:], "postconf -X"), "postconfd step")
+
+	// postconf and postconf -X are never run by configd (common/conf is
+	// root-owned): each step stages its change and runs the root helper (sudo
+	// -n here: the fake is neither root nor in systemd mode). The two steps run
+	// concurrently, their stage+trigger sequences are serialized.
+	helper := "exec /usr/bin/sudo -n " + base + "/libexec/carbonio-postfix-conf apply"
+	assert.Empty(t, subsequence(ops[1:], "postconf -"), "configd must not run postconf itself")
+	assert.Equal(t, []string{helper, helper}, subsequence(ops[1:], "carbonio-postfix-conf"), "helper triggers")
+	assert.Len(t, subsequence(ops[1:], "write-atomic "+base+"/data/postfix/conf-staging/postconf.set"), 1, "set staged")
+	assert.Len(t, subsequence(ops[1:], "write-atomic "+base+"/data/postfix/conf-staging/postconf.unset"), 1, "unset staged")
 	assert.Equal(t, []string{"ldap zimbraMtaMyNetworks=127.0.0.0/8"}, subsequence(ops[1:], "ldap "), "ldap step")
 
 	// Results of the cycle.
@@ -134,5 +142,5 @@ func TestDoConfigRewrites_SideEffectSequence(t *testing.T) {
 
 	next := mustCycle(t, cm)
 	assert.True(t, next.IsEmpty(), "done actions must not be planned again")
-	assert.Len(t, fakes.Rec.Strings(), 7, "second cycle must not touch the host")
+	assert.Len(t, fakes.Rec.Strings(), nOps, "second cycle must not touch the host")
 }

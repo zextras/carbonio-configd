@@ -13,6 +13,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/mtaops"
 	"github.com/zextras/carbonio-configd/internal/plan"
+	"github.com/zextras/carbonio-configd/internal/postfixconf"
 	"github.com/zextras/carbonio-configd/internal/redact"
 )
 
@@ -125,7 +126,18 @@ func (cm *ConfigManager) executePostconfOps(
 		return nil
 	}
 
-	logger.ErrorContext(ctx, "Failed to execute postconf batch, retrying per key",
+	if !errors.Is(batchErr, postfixconf.ErrValidation) {
+		// Trigger or helper failure: retrying per key would only repeat it.
+		logger.ErrorContext(ctx, "Failed to execute postconf batch", "error", batchErr)
+
+		for _, op := range ops {
+			pending[op.Key] = specs[op.Key]
+		}
+
+		return []error{batchErr}
+	}
+
+	logger.ErrorContext(ctx, "Postconf batch rejected, retrying per key",
 		"error", batchErr)
 
 	var errs []error

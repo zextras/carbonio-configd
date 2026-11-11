@@ -11,6 +11,9 @@
 // - unit/verb are null-guarded (action.lookup can return null)
 // - Administrative verbs (enable, disable, mask, preset) are explicitly
 //   denied (NO) on managed units so no other polkit rule can escalate them
+// - carbonio-postfix-conf.service (the root helper that installs Postfix
+//   configuration staged by configd, CO-4621) may only be started: stopping,
+//   restarting or reloading it has no use and is denied
 polkit.addRule(function(action, subject) {
     var allowedUnits = [
         "carbonio-antispam.service",
@@ -26,11 +29,15 @@ polkit.addRule(function(action, subject) {
         "carbonio-opendkim.service",
         "carbonio-openldap.service",
         "carbonio-policyd.service",
+        "carbonio-postfix-conf.service",
         "carbonio-postfix.service",
         "carbonio-saslauthd.service",
         "carbonio-stats.service",
         "service-discover.service"
     ];
+
+    // Units that only support "start" for zextras.
+    var startOnlyUnits = ["carbonio-postfix-conf.service"];
 
     var operationalVerbs = [
         "start", "stop", "restart", "reload",
@@ -54,6 +61,10 @@ polkit.addRule(function(action, subject) {
     // rule can escalate them for the zextras user.
     var verb = action.lookup("verb") || "";
     if (operationalVerbs.indexOf(verb) === -1) {
+        return polkit.Result.NO;
+    }
+
+    if (startOnlyUnits.indexOf(unit) !== -1 && verb !== "start") {
         return polkit.Result.NO;
     }
 

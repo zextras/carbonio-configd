@@ -7,20 +7,22 @@ SPDX-License-Identifier: AGPL-3.0-only
 # Packaging, systemd and containers
 
 Source: `build/configd/` (`PKGBUILD`, `carbonio-configd.service`,
-`carbonio-configd.rules`, completions), `build/yap.json`, `Jenkinsfile`,
-`docker/configd/Dockerfile`, `cmd/configd/mainloop.go`, `cmd/configd/signals.go`.
+`carbonio-configd.rules`, `carbonio-postfix-conf.service`, completions), `build/yap.json`, `Jenkinsfile`,
+`docker/configd/Dockerfile`, `cmd/carbonio-postfix-conf`, `internal/postfixconf`, `cmd/configd/mainloop.go`, `cmd/configd/signals.go`.
 
 - [Package and distributions](#package-and-distributions)
 - [The systemd unit](#the-systemd-unit)
 - [Readiness, reload and shutdown](#readiness-reload-and-shutdown)
 - [Polkit rule](#polkit-rule)
+- [Postfix configuration is root-owned](#postfix-configuration-is-root-owned)
 - [Systemd vs legacy orchestration](#systemd-vs-legacy-orchestration)
 - [Container image](#container-image)
 
 ## Package and distributions
 
 `carbonio-configd` ships one static binary (`/opt/zextras/bin/configd`, built
-with `CGO_ENABLED=0`), the polkit rule
+with `CGO_ENABLED=0`), the root helper `/opt/zextras/libexec/carbonio-postfix-conf`
+(and, on systemd distributions, its `carbonio-postfix-conf.service`), the polkit rule
 (`/usr/share/polkit-1/rules.d/50-carbonio-configd.rules`) and bash completions
 for `configd` and for the legacy wrapper names. Packages are built with
 [yap](https://github.com/M0Rf30/yap) (`build/yap.json`) by the Jenkins
@@ -55,20 +57,94 @@ Runtime dependencies are `libsystemd0` and `polkitd` (apt), `systemd-libs` and
 - `TimeoutStartSec=300`, `TimeoutStopSec=10`, `KillMode=mixed` (in systemd mode the unit's cgroup holds only the daemon and its short-lived helpers, `zmprov`, `postconf`, `systemctl`: SIGTERM to the daemon, SIGKILL to a helper still around; `legacy-mode.conf` below sets `process`), `KillSignal=SIGTERM`;
 - `Restart=on-failure`, `RestartSec=3`, 5 starts per 300 s;
 - limits: `MemoryMax=512M`, `MemoryHigh=384M`, `CPUQuota=80%`, `TasksMax=256`, `OOMScoreAdjust=-500`, `GOMAXPROCS=4`;
-- hardening: `ProtectSystem=strict` with write access only to `/opt/zextras/{conf,log,data,common/conf}` and `/run/carbonio`, `PrivateTmp`, `PrivateDevices`, `NoNewPrivileges`, empty `CapabilityBoundingSet`, `RestrictNamespaces`, `RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX`, `SystemCallFilter=@system-service`, kernel/proc/clock protections, `UMask=0027`. `MemoryDenyWriteExecute` is left off because child tools (`zmprov`) run Java.
+- hardening: `ProtectSystem=strict` with write access only to `/opt/zextras/{conf,log,data}` and `/run/carbonio` (not `common/conf`: see [Postfix configuration](#postfix-configuration-is-root-owned)), `PrivateTmp`, `PrivateDevices`, `NoNewPrivileges`, empty `CapabilityBoundingSet`, `RestrictNamespaces`, `RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX`, `SystemCallFilter=@system-service`, kernel/proc/clock protections, `UMask=0027`. `MemoryDenyWriteExecute` is left off because child tools (`zmprov`) run Java.
 
 Because the unit drops every capability and sets `NoNewPrivileges`, configd
 never uses `sudo` there: it controls other units through `systemctl` and the
 polkit rule below. In systemd mode every service start, stop, restart and
 status goes through `systemctl` (`startService`, `stopService`, `IsSystemdMode`),
-and the other execs of the daemon (`postconf`, `postmap`, `postalias` of the MTA
-config, `zmprov`/`zmlocalconfig` helpers) need neither `sudo` nor file
-capabilities, so the whole sandbox holds, including `ProtectProc=invisible`
+and the other execs of the daemon (read-only `postconf -h/-n`, `zmprov`/`zmlocalconfig`
+helpers) need neither `sudo` nor file capabilities (Postfix configuration
+changes go through `carbonio-postfix-conf.service`, below), so the whole sandbox holds, including `ProtectProc=invisible`
 (status in systemd mode asks systemd, not `/proc`) and the cgroup limits, which
 size configd alone.
 
 The unit is **not** meant for the other layout: see
 [Legacy mode on a systemd host](#legacy-mode-on-a-systemd-host).
+
+## Postfix configuration is root-owned
+
+Postfix master runs as root and trusts `/opt/zextras/common/conf/main.cf` and
+`master.cf` (`daemon_directory`, the commands of master.cf), so a zextras-writable
+copy was a zextras-to-root path (CO-4621). `/opt/zextras/common/conf` is `0755
+root:root` and `main.cf`, `master.cf`, `tag_as_*.re` and their templates are `0644
+root:root`: configd never writes there (`postconf -e/-X` included). It changes
+Postfix configuration only through the root helper
+`/opt/zextras/libexec/carbonio-postfix-conf` (static Go binary of this package,
+`root:root 0755`):
+
+1. configd validates the change, then writes it to the staging directory
+   `/opt/zextras/data/postfix/conf-staging` (`0700 zextras:zextras`, created by
+   carbonio-core): `postconf.set` (`KEY=VALUE` lines), `postconf.unset` (`KEY`
+   lines), and whole `master.cf`, `tag_as_foreign.re`, `tag_as_originating.re`.
+   Every `postconf -e/-X` batch, the master.cf/tag_as_*.re renders of one rewrite
+   pass (together) and the MTA `main.cf` seed (`mail_owner`, `setgid_group`) is
+   one stage-and-trigger run; runs are serialized by a mutex.
+2. configd triggers the helper, chosen like this:
+   - systemd mode: `systemctl start carbonio-postfix-conf.service` (a hardened
+     `Type=oneshot`, `User=root` unit running `carbonio-postfix-conf apply`; the
+     polkit rule allows `start` and nothing else for it);
+   - configd running as uid 0 (containers): `carbonio-postfix-conf apply` directly;
+   - legacy mode: `sudo -n /opt/zextras/libexec/carbonio-postfix-conf apply`
+     (the sudoers of carbonio-core allows the helper, not `postconf`).
+
+   If the trigger fails, configd reports an error that names the helper and never
+   falls back to writing `common/conf` itself; the staged files are discarded and
+   the change is retried by the next cycle.
+3. `apply` takes `flock` on `/run/carbonio-postfix-conf/lock` (the unit's
+   `RuntimeDirectory`; the helper creates the root-only directory when it runs
+   elsewhere), opens every staged
+   entry with `openat` + `O_NOFOLLOW|O_NONBLOCK` and requires a regular file owned by
+   zextras (or root), reads it (1 MiB cap), validates **all** of it, refuses to go on
+   unless `common/conf` is root-owned and not group/world writable (and
+   `main.cf`/`master.cf`, when present, are root-owned regular files), then installs
+   `master.cf`/`tag_as_*.re` atomically through the directory descriptor (temp file,
+   `root:root`, `0644`, fsync, `renameat`), runs `postconf -X` then `postconf -e` by absolute path with
+   a clean environment, and removes the staged files. Nothing is applied when any
+   check fails (exit status 2; 1 for other failures).
+
+Validation:
+- main.cf: only an allowlist of parameters can be set or unset: the `POSTCONF` and
+  `POSTCONFD` entries of `configd.cf` plus `mail_owner` and `setgid_group`
+  (`internal/postfixconf/keys.go`). Parameters that make the root master exec or
+  open attacker-chosen paths (`debugger_command`, `tls_config_file`,
+  `tls_config_name`, `default_privs`, `virtual_minimum_uid`, `virtual_uid_maps`,
+  `virtual_gid_maps`, every `*_directory` and `*_path`, `import_environment`, ...)
+  are not on it. `mail_owner` must be exactly `postfix` and `setgid_group`
+  `postdrop`; values hold no NUL, CR or LF and are at most 64 KiB. configd drops
+  parameters that are not allowlisted before staging, with a warning, so one of
+  them does not fail the batch. Validation errors never echo staged content.
+- master.cf: only printable ASCII, TAB and LF are accepted; fields split on space
+  and TAB only; logical lines (entry plus indented continuation lines, column-0
+  comments skipped) are checked as a whole, and an indented line after a blank line,
+  at the start of the file or an indented comment is refused. Columns follow the
+  Postfix grammar (service name `[A-Za-z0-9_.:\[\]@-]+` without `..`, type
+  `inet|unix|unix-dgram|fifo|pass`, `y|n|-` flags, wakeup, maxproc) and the command
+  must be a Postfix daemon from a fixed list. `-D` is refused anywhere in an option
+  cluster, `{`/`}` only in the `-o` forms, `user=root`/`user=0` is refused, and every
+  `-o name=value` (also `-o{...}` and `{ -o ... }`) is checked: no `debugger_command`,
+  TLS config, account, virtual uid, directory, path or environment parameters.
+
+The helper also works by hand, as root: `carbonio-postfix-conf set KEY=VALUE...` and
+`unset KEY...` validate the same way and run `postconf -e`/`-X`.
+
+**Containers.** The `carbonio-configd` image (`docker/configd`, `FROM scratch`, uid
+999, no sudo, no systemd) ships the helper at the same path and the staging directory,
+but a uid-999 configd there can only stage: the trigger (`sudo -n`) fails and a
+Postfix configuration change is reported as an error naming the helper. Run that
+container as root (configd then execs the helper directly); a failed run discards the
+staged change, so a sidecar cannot apply it later. The `carbonio-mta` image runs as root and has no
+configd.
 
 ## Legacy mode on a systemd host
 
@@ -138,8 +214,10 @@ only packaged for rocky-9 and ubuntu-noble, with the unit.
 `restart`, `reload`, `try-restart` and `try-reload-or-restart` on an explicit
 allowlist of units (`carbonio-antispam`, `-antivirus`, `-appserver-db`,
 `-appserver`, `-configd`, `-freshclam`, `-mailthreat`, `-memcached`, `-milter`,
-`-nginx`, `-opendkim`, `-openldap`, `-policyd`, `-postfix`, `-saslauthd`,
-`-stats` and `service-discover`, all `.service`). Other verbs (`enable`,
+`-nginx`, `-opendkim`, `-openldap`, `-policyd`, `-postfix`, `-postfix-conf`,
+`-saslauthd`, `-stats` and `service-discover`, all `.service`;
+`carbonio-postfix-conf.service`, the [root helper](#postfix-configuration-is-root-owned),
+may only be started). Other verbs (`enable`,
 `disable`, `mask`, ...) on those units are explicitly denied, and other units
 are left to the system policy: no prefix match, so an attacker-created
 `carbonio-*.service` gains nothing.
@@ -191,6 +269,10 @@ binary:
 ```dockerfile
 COPY --from=<registry>/carbonio-configd:main /opt/zextras/ /opt/zextras/
 ```
+
+The image also ships the Postfix configuration helper and its staging directory;
+a uid-999 configd cannot trigger it (no sudo), see
+[Postfix configuration is root-owned](#postfix-configuration-is-root-owned).
 
 There is no systemd in a container: services are controlled through
 `zmconfigd_service_hooks` and the keys come from `CONFIGD_LC_*` variables, see

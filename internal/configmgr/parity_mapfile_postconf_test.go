@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -18,6 +19,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/mtaops"
 	"github.com/zextras/carbonio-configd/internal/plan"
+	"github.com/zextras/carbonio-configd/internal/postfixconf"
 	"github.com/zextras/carbonio-configd/internal/snapshot"
 )
 
@@ -122,11 +124,16 @@ func TestCycle_EmptyValueSteadyState(t *testing.T) {
 // failingBatchExecutor fails the batch call and any per-key call for badKey.
 type failingBatchExecutor struct {
 	mockMtaExecutor
-	badKey string
+	badKey   string
+	batchErr error
 }
 
 func (f *failingBatchExecutor) ExecutePostconfBatch(_ context.Context, _ []mtaops.PostconfOperation) error {
-	return errors.New("batch failed")
+	if f.batchErr != nil {
+		return f.batchErr
+	}
+
+	return fmt.Errorf("batch rejected: %w", postfixconf.ErrValidation)
 }
 
 func (f *failingBatchExecutor) ExecutePostconf(_ context.Context, op mtaops.PostconfOperation) error {
@@ -152,6 +159,21 @@ func TestDoPostconf_BatchFailureFallsBackPerKey(t *testing.T) {
 
 	assert.Len(t, exec.postconfOps, 1)
 	assert.Equal(t, []plan.Postconf{{Key: "bad", Value: "VAR:bad"}}, pending)
+}
+
+// TestDoPostconf_TriggerFailureDoesNotRetryPerKey verifies a trigger failure is
+// not repeated key by key: the helper is down for every key.
+func TestDoPostconf_TriggerFailureDoesNotRetryPerKey(t *testing.T) {
+	cm, _ := newTestCMWithExecutor(t)
+	exec := &failingBatchExecutor{batchErr: errors.New("trigger failed")}
+	cm.mtaExecutor = exec
+	entries := []plan.Postconf{{Key: "a", Value: "VAR:a"}, {Key: "b", Value: "VAR:b"}}
+
+	pending, err := cm.doPostconf(context.Background(), entries)
+	require.Error(t, err)
+
+	assert.Empty(t, exec.postconfOps)
+	assert.Equal(t, entries, pending)
 }
 
 // TestDoPostconf_ResolveFailureStaysPending verifies a directive that could not

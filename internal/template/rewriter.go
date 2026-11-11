@@ -27,6 +27,10 @@ import (
 // local path relative to the rewriter base directory.
 var ErrPathEscapesBaseDir = errors.New("path escapes base directory")
 
+// ErrRootOwnedTarget is returned when a REWRITE target lies under the
+// root-owned common/conf, which only the carbonio-postfix-conf helper writes.
+var ErrRootOwnedTarget = errors.New("target is under root-owned common/conf (written only by carbonio-postfix-conf)")
+
 // Rewriter handles template file generation from .in files using REWRITE directives.
 type Rewriter struct {
 	BaseDir      string
@@ -113,6 +117,37 @@ func (r *Rewriter) atomicReplace(ctx context.Context, tmpPath, targetPath string
 	return nil
 }
 
+// parseRewriteMode parses the octal REWRITE mode (default 0440). Rewritten
+// configs never need setuid/setgid/sticky (no legacy configd.cf entry uses
+// them); only permission bits are kept.
+func parseRewriteMode(mode string) (os.FileMode, error) {
+	if mode == "" {
+		mode = "0440"
+	}
+
+	parsedMode, err := strconv.ParseUint(mode, 8, 32)
+	if err != nil {
+		return 0, fmt.Errorf("invalid file mode %s: %w", mode, err)
+	}
+
+	return os.FileMode(parsedMode & 0o777), nil
+}
+
+// checkRewritePaths refuses a source or target that escapes BaseDir (every
+// legacy configd.cf REWRITE path is relative to it) and any target under the
+// root-owned common/conf, which only carbonio-postfix-conf may write.
+func checkRewritePaths(source, target string) error {
+	if !filepath.IsLocal(source) || !filepath.IsLocal(target) {
+		return fmt.Errorf("%w: source=%q target=%q", ErrPathEscapesBaseDir, source, target)
+	}
+
+	if t := filepath.Clean(target); t == "common/conf" || strings.HasPrefix(t, "common/conf/") {
+		return fmt.Errorf("%w: target=%q", ErrRootOwnedTarget, target)
+	}
+
+	return nil
+}
+
 // RewriteConfig generates a target file from a source template (.in file).
 // It reads the source file line by line, applies transformations, and writes to the target.
 // The operation is atomic: writes to a temporary file first, then renames.
@@ -128,23 +163,13 @@ func (r *Rewriter) RewriteConfig(ctx context.Context, source, target, mode strin
 	ctx = logger.ContextWithComponentOnce(ctx, "template")
 	logger.DebugContext(ctx, "Rewriting template", "source", source, "target", target)
 
-	if mode == "" {
-		mode = "0440"
-	}
-
-	parsedMode, err := strconv.ParseUint(mode, 8, 32)
+	fileMode, err := parseRewriteMode(mode)
 	if err != nil {
-		return fmt.Errorf("invalid file mode %s: %w", mode, err)
+		return err
 	}
 
-	// Rewritten configs never need setuid/setgid/sticky (no legacy configd.cf
-	// entry uses them); keep permission bits only.
-	fileMode := parsedMode & 0o777
-
-	// Every legacy configd.cf REWRITE path is relative to BaseDir; refuse
-	// anything that would escape it.
-	if !filepath.IsLocal(source) || !filepath.IsLocal(target) {
-		return fmt.Errorf("%w: source=%q target=%q", ErrPathEscapesBaseDir, source, target)
+	if err := checkRewritePaths(source, target); err != nil {
+		return err
 	}
 
 	sourcePath := filepath.Join(r.BaseDir, source)
@@ -189,7 +214,7 @@ func (r *Rewriter) RewriteConfig(ctx context.Context, source, target, mode strin
 		return err
 	}
 
-	if err := r.atomicReplace(ctx, tmpPath, targetPath, os.FileMode(fileMode)); err != nil {
+	if err := r.atomicReplace(ctx, tmpPath, targetPath, fileMode); err != nil {
 		return err
 	}
 

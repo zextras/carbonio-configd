@@ -14,9 +14,11 @@ import (
 )
 
 // controlCommand runs one verb of a CommandSpec service: its binary, through
-// sudo -n when the service needs root (zextras has NOPASSWD sudo rights for the
-// postfix binary; -n makes a missing grant fail at once instead of waiting on a
-// password prompt no one will answer). It returns the combined output next to the error so a
+// sudo -n when the service needs root (the sudoers of zextras grants the
+// postfix binary only its exact verbs: start, stop, status, reload, flush, check;
+// -n makes a missing grant fail at once instead of waiting on a password prompt
+// no one will answer). Postfix configuration is never changed through this path:
+// postconf is not in sudoers, see postfixconf (CO-4621). It returns the combined output next to the error so a
 // failing verb can be reported with what the binary said.
 func (c *Controller) controlCommand(ctx context.Context, def *ServiceDef, verb []string) ([]byte, error) {
 	binary, args := def.BinaryPath, verb

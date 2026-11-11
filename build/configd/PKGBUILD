@@ -35,12 +35,14 @@ source=(
   "${pkgname}.rules"
   "${pkgname}.service"
   "legacy-mode.conf"
+  "carbonio-postfix-conf.service"
 )
 sha256sums=(
   '4ded5cc77624f3343b99eb68577b7628e59f8d68f434a443f56ee647cd375ef1'
-  '2852da97671727f9ddd10d07289f25976d4032364bae8912687186bc4ae3d4ad'
-  '200d66b1adcfe6260ae8cde5cc2cdca0a9db51404e17c827c57db8ecb043af2b'
-  '42a6929c84b1e1df96b630fbec55480676e9babb94a47d9fc732ab26c80546fe'
+  '3530a738479900a77d932fed67371064739633af09256fb5d4e9b0d474f120f3'
+  'f65210996434abc8fb93d0818d54cdd25721a66a268a7c34bba9f07e10ade2f6'
+  '516eef278b816053fb2337dfb48c1d43b827524cefb53a8d52819990a5d9280e'
+  'a4320c3d4df4316bb6b4179d8ff796f480cbf7f7c5304572d452237b00b41a32'
 )
 
 _kill_legacy_zmconfigd() {
@@ -59,6 +61,11 @@ _kill_legacy_zmconfigd() {
 _package_common() {
   install -Dm755 "${srcdir}/configd" \
     "${pkgdir}/opt/zextras/bin/configd"
+
+  # The only writer of the root-owned Postfix configuration (CO-4621). The package
+  # payload is root:root: configd (zextras) must not be able to replace it.
+  install -Dm755 "${srcdir}/carbonio-postfix-conf" \
+    "${pkgdir}/opt/zextras/libexec/carbonio-postfix-conf"
 
   # Polkit policy — allow zextras to manage carbonio systemd units
   install -Dm644 "${srcdir}/${pkgname}.rules" \
@@ -86,6 +93,10 @@ _package_systemd() {
   install -Dm644 "${srcdir}/${pkgname}.service" \
     "${pkgdir}/usr/lib/systemd/system/carbonio-configd.service"
 
+  # Oneshot root helper started by configd (polkit allows "start" only).
+  install -Dm644 "${srcdir}/carbonio-postfix-conf.service" \
+    "${pkgdir}/usr/lib/systemd/system/carbonio-postfix-conf.service"
+
   # Opt-in drop-in for the unsupported "systemd host, carbonio targets disabled"
   # layout (docs/systemd.md). Shipped under /usr/share, never enabled here.
   install -Dm644 "${srcdir}/legacy-mode.conf" \
@@ -96,6 +107,8 @@ build() {
   cd "${repodir}"
   CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
     -o "${srcdir}/configd" ./cmd/configd/
+  CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
+    -o "${srcdir}/carbonio-postfix-conf" ./cmd/carbonio-postfix-conf/
 
   # The completion scripts come from the command tree itself. Run them with the
   # build host's toolchain target, not the (possibly cross-compiled) package one.

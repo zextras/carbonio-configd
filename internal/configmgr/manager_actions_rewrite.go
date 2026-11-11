@@ -6,6 +6,7 @@ package configmgr
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -21,6 +22,8 @@ import (
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/plan"
+	"github.com/zextras/carbonio-configd/internal/postfixconf"
+	pfclient "github.com/zextras/carbonio-configd/internal/postfixconf/client"
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
@@ -107,6 +110,11 @@ func (cm *ConfigManager) doRewrites(ctx context.Context, entries []plan.Rewrite)
 
 	semaphore := make(chan struct{}, maxConcurrent)
 
+	// The root-owned Postfix files of one cycle (master.cf, tag_as_*.re) are
+	// rendered by the workers and installed by one helper run afterwards.
+	batch := &postfixRewriteBatch{}
+	ctx = context.WithValue(ctx, postfixBatchKey{}, batch)
+
 	var (
 		wg   sync.WaitGroup
 		mu   sync.Mutex
@@ -150,6 +158,11 @@ func (cm *ConfigManager) doRewrites(ctx context.Context, entries []plan.Rewrite)
 	}
 
 	wg.Wait()
+
+	for _, failure := range cm.flushPostfixBatch(ctx, batch) {
+		delete(done, failure.source)
+		errs = append(errs, failure.err)
+	}
 
 	logger.DebugContext(ctx, "All configuration file rewrites completed",
 		"duration_seconds", time.Since(startTime).Seconds())
@@ -300,6 +313,10 @@ func (cm *ConfigManager) processRewrite(ctx context.Context, filePath string, re
 	srcPath := cm.mainConfig.TemplatePath(filePath)
 	destPath := cm.mainConfig.BaseDir + "/" + rewriteEntry.Value
 
+	if cm.postfixClient().IsConfPath(destPath) {
+		return cm.processPostfixConfRewrite(ctx, filePath, srcPath, destPath)
+	}
+
 	tmpFile, err := cm.env.FS.CreateTemp(filepath.Dir(destPath), ".zmconfigd-rewrite-*.tmp")
 	if err != nil {
 		logger.ErrorContext(ctx, "Failed to create temporary file for rewrite", "error", err)
@@ -336,6 +353,133 @@ func (cm *ConfigManager) processRewrite(ctx context.Context, filePath string, re
 		"dest_path", destPath, "mode", modeStr, "lines_processed", lineCount)
 
 	return nil
+}
+
+// postfixClient returns the client of the root helper that owns
+// common/conf, built on first use.
+func (cm *ConfigManager) postfixClient() *pfclient.Client {
+	cm.postfixOnce.Do(func() {
+		cm.postfixConf = pfclient.NewClient(cm.mainConfig.BaseDir, cm.env, cm.systemdMode)
+	})
+
+	return cm.postfixConf
+}
+
+// processPostfixConfRewrite renders a template whose target lies under the
+// root-owned common/conf (master.cf, tag_as_*.re). configd cannot write there:
+// the rendered content is staged and installed by carbonio-postfix-conf, which
+// validates it and sets the owner and mode itself (the REWRITE mode is moot).
+func (cm *ConfigManager) processPostfixConfRewrite(ctx context.Context, filePath, srcPath, destPath string) error {
+	name := filepath.Base(destPath)
+	if filepath.Dir(destPath) != filepath.Join(cm.mainConfig.BaseDir, "common", "conf") ||
+		!postfixconf.IsInstallable(name) {
+		return fmt.Errorf("rewrite target %s: carbonio-postfix-conf does not install %q", destPath, name)
+	}
+
+	var rendered bytes.Buffer
+
+	lineCount, err := cm.rewriteTransform(ctx, srcPath, &rendered)
+	if err != nil {
+		logger.ErrorContext(ctx, "Failed to transform source file", "source_path", srcPath, "error", err)
+
+		return fmt.Errorf("transform source file %s: %w", srcPath, err)
+	}
+
+	if batch, ok := ctx.Value(postfixBatchKey{}).(*postfixRewriteBatch); ok {
+		batch.add(name, filePath, rendered.Bytes())
+
+		logger.DebugContext(ctx, "File rendered for carbonio-postfix-conf",
+			"dest_path", destPath, "lines_processed", lineCount)
+
+		return nil
+	}
+
+	change := postfixconf.Change{Files: map[string][]byte{name: rendered.Bytes()}}
+	if err := cm.postfixClient().Apply(ctx, change); err != nil {
+		logger.ErrorContext(ctx, "Failed to install rewrite through carbonio-postfix-conf",
+			"dest_path", destPath, "error", err)
+
+		return fmt.Errorf("commit rewrite to %s: %w", destPath, err)
+	}
+
+	logger.DebugContext(ctx, "File rewrite completed through carbonio-postfix-conf",
+		"dest_path", destPath, "lines_processed", lineCount)
+
+	return nil
+}
+
+type postfixBatchKey struct{}
+
+// postfixRewriteBatch collects the rendered root-owned files of one doRewrites
+// run.
+type postfixRewriteBatch struct {
+	mu      sync.Mutex
+	files   map[string][]byte
+	sources map[string]string // file name -> plan source, to report failures
+}
+
+func (b *postfixRewriteBatch) add(name, source string, data []byte) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.files == nil {
+		b.files = map[string][]byte{}
+		b.sources = map[string]string{}
+	}
+
+	b.files[name] = data
+	b.sources[name] = source
+}
+
+type batchFailure struct {
+	source string
+	err    error
+}
+
+// flushPostfixBatch installs the collected files with one helper run. When the
+// helper rejects the set as invalid it retries file by file, so one bad file
+// does not hold back the others; any other failure (trigger, permissions) fails
+// all of them.
+func (cm *ConfigManager) flushPostfixBatch(ctx context.Context, b *postfixRewriteBatch) []batchFailure {
+	if len(b.files) == 0 {
+		return nil
+	}
+
+	client := cm.postfixClient()
+
+	err := client.Apply(ctx, postfixconf.Change{Files: b.files})
+	if err == nil {
+		return nil
+	}
+
+	logger.ErrorContext(ctx, "Failed to install rewrites through carbonio-postfix-conf", "error", err)
+
+	if !errors.Is(err, postfixconf.ErrValidation) || len(b.files) == 1 {
+		failures := make([]batchFailure, 0, len(b.files))
+		for name := range b.files {
+			failures = append(failures, batchFailure{b.sources[name], fmt.Errorf("commit rewrite of %s: %w", name, err)})
+		}
+
+		return failures
+	}
+
+	var failures []batchFailure
+
+	for _, name := range postfixconf.InstallableFiles {
+		data, ok := b.files[name]
+		if !ok {
+			continue
+		}
+
+		if err := client.Apply(ctx, postfixconf.Change{Files: map[string][]byte{name: data}}); err != nil {
+			logger.ErrorContext(ctx, "Failed to install rewrite through carbonio-postfix-conf",
+				"file", name, "error", err)
+
+			failures = append(failures, batchFailure{b.sources[name], fmt.Errorf("commit rewrite of %s: %w", name, err)})
+		}
+	}
+
+	return failures
 }
 
 // resolveValueSpec parses a value specification and resolves it to a concrete value.

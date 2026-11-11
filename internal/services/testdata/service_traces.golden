@@ -1853,8 +1853,9 @@ fs.open /opt/zextras/log/milter.out flag=0x441 perm=0640
 exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -client -Xmx256m -Dhttps.protocols=TLSv1.2,TLSv1.3 -Djdk.tls.client.protocols=TLSv1.2,TLSv1.3 -Djava.net.preferIPv4Stack=true -Dzimbra.home=/opt/zextras -Djava.library.path=/opt/zextras/lib -classpath /opt/zextras/mailbox/jars/*:/opt/zextras/conf -Dlog4j.configurationFile=file:/opt/zextras/conf/milter.log4j.properties -Dzimbra.config=/opt/zextras/conf/localconfig.xml com.zimbra.cs.milter.MilterServer
 exec /opt/zextras/libexec/configrewrite antispam antivirus opendkim mta sasl
 exec /usr/bin/sudo -n /opt/zextras/common/sbin/postfix status
-exec /usr/bin/sudo -n /usr/bin/touch /opt/zextras/common/conf/main.cf
-exec /usr/bin/sudo -n /opt/zextras/common/sbin/postconf -e mail_owner=postfix setgid_group=postdrop
+fs.mkdir /opt/zextras/data/postfix/conf-staging mode=0700
+fs.write-atomic /opt/zextras/data/postfix/conf-staging/postconf.set mode=0600
+exec /usr/bin/sudo -n /opt/zextras/libexec/carbonio-postfix-conf apply
 fs.mkdir /opt/zextras/conf mode=0755
 fs.write-atomic /opt/zextras/conf/ldap-vmm.cf mode=0640
 fs.write-atomic /opt/zextras/conf/ldap-vmd.cf mode=0640
@@ -1972,8 +1973,9 @@ exec /usr/bin/sudo -n /opt/zextras/common/sbin/postfix reload
 
 ## mta | legacy start-systemd cold
 exec /usr/bin/sudo -n /opt/zextras/common/sbin/postfix status
-exec /usr/bin/sudo -n /usr/bin/touch /opt/zextras/common/conf/main.cf
-exec /usr/bin/sudo -n /opt/zextras/common/sbin/postconf -e mail_owner=postfix setgid_group=postdrop
+fs.mkdir /opt/zextras/data/postfix/conf-staging mode=0700
+fs.write-atomic /opt/zextras/data/postfix/conf-staging/postconf.set mode=0600
+exec /usr/bin/sudo -n /opt/zextras/libexec/carbonio-postfix-conf apply
 fs.mkdir /opt/zextras/conf mode=0755
 fs.write-atomic /opt/zextras/conf/ldap-vmm.cf mode=0640
 fs.write-atomic /opt/zextras/conf/ldap-vmd.cf mode=0640

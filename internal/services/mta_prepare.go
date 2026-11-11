@@ -14,6 +14,8 @@ import (
 
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/postfixconf"
+	pfclient "github.com/zextras/carbonio-configd/internal/postfixconf/client"
 )
 
 // startTLSYes is the Postfix boolean literal for "yes", used in LDAP table rendering.
@@ -32,8 +34,8 @@ const startTLSYes = "yes"
 //     already running" and the caller sees a failed start for a healthy
 //     daemon.
 //  2. Hook prepareMainCf: postfix refuses to start without main.cf. When absent,
-//     create an empty file and seed mail_owner / setgid_group from
-//     localconfig via postconf -e.
+//     seed mail_owner / setgid_group from localconfig through the root helper
+//     carbonio-postfix-conf (common/conf is root-owned), which creates it.
 //  3. Hook prepareLDAPTables: write the 8 ldap-*.cf files under /opt/zextras/conf
 //     that postfix's main.cf references (ldap:/opt/zextras/conf/ldap-vmm.cf
 //     etc.). This replaces legacy mtainit.sh, and like the legacy wrapper it
@@ -85,7 +87,8 @@ var postfixAccountNameRe = regexp.MustCompile(`^[a-z_][a-z0-9_-]*$`)
 var errInvalidPostfixAccount = errors.New("invalid postfix owner/group name")
 
 // bootstrapPostfixMainCf ensures /opt/zextras/common/conf/main.cf exists
-// with mail_owner and setgid_group set. Skips silently when the file is
+// with mail_owner and setgid_group set. The directory is root-owned (CO-4621),
+// so the seed is applied by the root helper carbonio-postfix-conf. Skips silently when the file is
 // already present — configrewrite owns the rest of the file's contents.
 func (c *Controller) bootstrapPostfixMainCf(ctx context.Context, lc map[string]string) error {
 	if _, err := c.env.FS.Stat(c.p.mainCf); err == nil {
@@ -103,12 +106,6 @@ func (c *Controller) bootstrapPostfixMainCf(ctx context.Context, lc map[string]s
 			errInvalidPostfixAccount, owner, group)
 	}
 
-	// sudo touch — main.cf lives under /opt/zextras/common which is
-	// root-owned; zextras cannot create files there directly.
-	if err := c.sudoRun(ctx, "/usr/bin/touch", c.p.mainCf); err != nil {
-		return fmt.Errorf("touch %s: %w", c.p.mainCf, err)
-	}
-
 	if owner == "" || group == "" {
 		logger.WarnContext(ctx,
 			"postfix_mail_owner/postfix_setgid_group missing from localconfig; skipping postconf seed",
@@ -117,11 +114,16 @@ func (c *Controller) bootstrapPostfixMainCf(ctx context.Context, lc map[string]s
 		return nil
 	}
 
-	if err := c.sudoRun(ctx, c.p.postconfBin, "-e",
-		"mail_owner="+owner,
-		"setgid_group="+group,
-	); err != nil {
-		return fmt.Errorf("postconf -e mail_owner/setgid_group: %w", err)
+	// common/conf is root-owned and zextras has no sudo right for touch or
+	// postconf: the seed goes through the root helper carbonio-postfix-conf,
+	// which creates the missing main.cf and runs postconf -e.
+	change := postfixconf.Change{Set: []postfixconf.KV{
+		{Key: "mail_owner", Value: owner},
+		{Key: "setgid_group", Value: group},
+	}}
+
+	if err := pfclient.NewClient(c.p.base, c.env, c.IsSystemdMode).Apply(ctx, change); err != nil {
+		return fmt.Errorf("seed %s with mail_owner/setgid_group: %w", c.p.mainCf, err)
 	}
 
 	return nil

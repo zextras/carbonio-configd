@@ -26,6 +26,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/metrics"
 	"github.com/zextras/carbonio-configd/internal/mtaops"
 	"github.com/zextras/carbonio-configd/internal/plan"
+	pfclient "github.com/zextras/carbonio-configd/internal/postfixconf/client"
 	"github.com/zextras/carbonio-configd/internal/redact"
 	"github.com/zextras/carbonio-configd/internal/restart"
 	"github.com/zextras/carbonio-configd/internal/services"
@@ -102,6 +103,11 @@ type ConfigManager struct {
 	deferred []plan.Restart
 	env      sys.System // host boundary: filesystem, process execution, clock
 
+	// postfixConf stages changes of the root-owned common/conf and runs the
+	// carbonio-postfix-conf helper; built lazily by postfixClient.
+	postfixConf *pfclient.Client
+	postfixOnce sync.Once
+
 	// loadLocalConfig loads the effective localconfig: the LC.java defaults
 	// under localconfig.xml under the CONFIGD_LC_* environment overlay,
 	// interpolated once (legacy `zmlocalconfig -s -x` plus the overlay). The
@@ -130,7 +136,7 @@ func NewConfigManager(ctx context.Context, mainCfg *config.Config,
 		loadLocalConfig: localconfig.LoadEffective,
 	}
 	cm.Transformer = transformer.NewTransformer(cm)
-	cm.mtaExecutor = mtaops.NewExecutor(mainCfg.BaseDir, ldapClient, env)
+	cm.mtaExecutor = mtaops.NewExecutor(mainCfg.BaseDir, ldapClient, env, mtaops.WithSystemdMode(cm.systemdMode))
 	cm.mtaResolver = mtaops.NewResolver(mainCfg.BaseDir, env)
 	cm.initNativeLdapClient(ctx)
 	cm.metrics = metrics.New()
