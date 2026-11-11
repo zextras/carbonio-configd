@@ -27,6 +27,7 @@ func (h fakeHost) InstalledRoles() []string { return h.roles }
 func (fakeHost) IPMode() string             { return "ipv4" }
 func (fakeHost) Timezone() string           { return "" }
 func (fakeHost) Networks() []string         { return []string{"10.1.0.0/16"} }
+func (fakeHost) MemoryMB() int              { return 8192 }
 
 var singleNode = fakeHost{fqdn: "mail.example.com", roles: []string{RoleDirectoryServer, RoleMTA, RoleAppserver, RoleProxy}}
 
@@ -172,9 +173,9 @@ func TestApplyLegacy(t *testing.T) {
 	assert.Equal(t, SourceUnset, r.Source("store.smtp_host"), "an empty value leaves the default")
 	assert.Equal(t, []LegacyDrop{{"EXPANDMENU", reasonObsolete}, {"LDAPROOTPASSSET", reasonDerived}}, drops)
 
-	_, err = NewResolved(readFiles(nil)).ApplyLegacy([]byte("LDAPREPLICATIONTYPE=mmr\nFOO=1\nbare\n"))
+	_, err = NewResolved(readFiles(nil)).ApplyLegacy([]byte("LDAPREPLICATIONTYPE=multi\nFOO=1\nbare\nZIMBRA_REQ_SECURITY=yes\n"))
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "line 1: LDAPREPLICATIONTYPE=mmr: "+reasonReplication)
+	assert.Contains(t, err.Error(), `line 1: LDAPREPLICATIONTYPE: ldap.replication_type: "multi" is not one of master, replica, mmr`)
 	assert.Contains(t, err.Error(), "line 2: unknown key FOO")
 	assert.Contains(t, err.Error(), "line 3: expected KEY=VALUE")
 }
@@ -301,6 +302,9 @@ func TestWizard_AsksUnsetKeysAndFollowsAnswers(t *testing.T) {
 
 	input := strings.Join([]string{
 		"mx.example.org", // hostname
+		"",               // ldap host: keep, follows the hostname
+		"",               // ldap port
+		"",               // directory server role: master
 		"",               // ldap root password: generate
 		"",               // ldap admin password: generate
 		"",               // create domain: keep
@@ -345,8 +349,9 @@ func TestWizard_AsksUnsetKeysAndFollowsAnswers(t *testing.T) {
 }
 
 func TestWizard_DeclineAndEndOfInput(t *testing.T) {
-	// hostname, public hostname, 2 LDAP passwords, domain x2, admin x2.
-	answerAll := strings.Repeat("\n", 8) + "secret1\nsecret1\n" + strings.Repeat("\n", 4)
+	// hostname, public hostname, LDAP host, port and role, 2 LDAP
+	// passwords, domain x2, admin x2.
+	answerAll := strings.Repeat("\n", 11) + "secret1\nsecret1\n" + strings.Repeat("\n", 4)
 
 	r := NewResolved(readFiles(nil))
 	require.NoError(t, r.ApplyDefaults(singleNode))

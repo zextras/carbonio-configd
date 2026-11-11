@@ -55,15 +55,18 @@ type question struct {
 	when func(c *Config) bool
 }
 
-var notRole = func(r string) func(*Config) bool { return func(c *Config) bool { return !c.HasRole(r) } }
-
 var questions = []question{
 	{keyHostHostname, "Hostname of this node", nil},
 	{keyHostPublicHostname, "Public hostname users connect to", nil},
-	{keyLdapHost, "LDAP master host", notRole(RoleDirectoryServer)},
-	{keyLdapPort, "LDAP master port", notRole(RoleDirectoryServer)},
+	{keyLdapHost, "LDAP master host", nil},
+	{keyLdapPort, "LDAP master port", nil},
+	{keyLdapReplicationType, "Directory server role (master, replica, mmr)", role(RoleDirectoryServer)},
+	{keyLdapServerID, "Multi-master server ID", func(c *Config) bool { return c.LDAP.ReplicationType == ReplicationMMR }},
 	{keyLdapRootPassword, "LDAP root password", role(RoleDirectoryServer)},
 	{keyLdapAdminPassword, "LDAP admin (uid=zimbra) password", nil},
+	{keyLdapReplicationPassword, "LDAP replication password", func(c *Config) bool {
+		return c.HasRole(RoleDirectoryServer) && !c.IsLDAPMaster()
+	}},
 	{keyLdapPostfixPassword, "LDAP postfix password", func(c *Config) bool {
 		return c.HasRole(RoleMTA) && !c.HasRole(RoleDirectoryServer)
 	}},
@@ -86,6 +89,10 @@ var questions = []question{
 
 // explicit reports whether src is a layer the operator chose.
 func explicit(src Source) bool { return src >= SourceLegacy }
+
+// recomputed reports whether Refresh recomputes a key of source src: the
+// built-in defaults, never the values read from an existing install.
+func recomputed(src Source) bool { return src != SourceUnset && src < SourceExisting }
 
 // Run asks the questions, then shows the summary until the operator
 // accepts it (or declines: ErrAborted).
@@ -318,7 +325,7 @@ func (r *Resolved) snapshot(f *Field) func() {
 // the answers given so far (domain.name follows host.hostname).
 func (r *Resolved) Refresh(host Host) error {
 	for _, f := range Fields {
-		if src := r.sources[f.Path]; src != SourceUnset && !explicit(src) {
+		if recomputed(r.sources[f.Path]) {
 			f.value(&r.Config).SetZero()
 			delete(r.sources, f.Path)
 		}

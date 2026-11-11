@@ -28,6 +28,7 @@ const (
 	SourceDefault
 	SourceDetected
 	SourceGenerated
+	SourceExisting
 	SourceLegacy
 	SourceFile
 	SourceEnv
@@ -35,7 +36,9 @@ const (
 	SourceWizard
 )
 
-var sourceNames = [...]string{"unset", "default", "detected", "generated", "legacy", "file", "env", "flag", "wizard"}
+var sourceNames = [...]string{
+	"unset", "default", "detected", "generated", "existing", "legacy", "file", "env", "flag", "wizard",
+}
 
 func (s Source) String() string { return sourceNames[s] }
 
@@ -45,8 +48,9 @@ type Field struct {
 	Path string
 	// Env is the environment variable that sets the key.
 	Env string
-	// Legacy is the setup.pl config key, or "".
-	Legacy string
+	// Legacy are the setup.pl config keys that set the field (none: no
+	// legacy key).
+	Legacy []string
 	// Secret keys are never printed or saved and may be read from a file.
 	Secret bool
 	// Enum lists the allowed values, or nil.
@@ -96,7 +100,7 @@ func collectFields(t reflect.Type, prefix string, index []int) []*Field {
 		f := &Field{
 			Path:   path,
 			Env:    EnvPrefix + strings.ToUpper(strings.ReplaceAll(path, ".", "_")),
-			Legacy: sf.Tag.Get("legacy"),
+			Legacy: splitTag(sf.Tag.Get("legacy")),
 			Secret: sf.Tag.Get("secret") == "true",
 			Check:  sf.Tag.Get("check"),
 			index:  idx,
@@ -111,6 +115,14 @@ func collectFields(t reflect.Type, prefix string, index []int) []*Field {
 	}
 
 	return out
+}
+
+func splitTag(tag string) []string {
+	if tag == "" {
+		return nil
+	}
+
+	return strings.Split(tag, ",")
 }
 
 // TypeName describes the value the field takes.

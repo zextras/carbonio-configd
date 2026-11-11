@@ -23,6 +23,8 @@ type Host interface {
 	Timezone() string
 	// Networks are the networks of the non-loopback interfaces, in CIDR form.
 	Networks() []string
+	// MemoryMB is the total memory of the node (0 if unknown).
+	MemoryMB() int
 }
 
 // defaultTimezone is the setup.pl fallback when the system zone is unknown.
@@ -51,13 +53,19 @@ func (r *Resolved) ApplyDefaults(host Host) error {
 		{keyHostPublicHostname, SourceDefault, func() (string, error) { return c.Host.Hostname, nil }},
 		{keyHostIPMode, SourceDetected, constant(host.IPMode())},
 		{keyHostTimezone, SourceDetected, func() (string, error) { return orDefault(host.Timezone(), defaultTimezone), nil }},
+		{keyHostSSLDigest, SourceDefault, constant("sha256")},
+		{keyHostRequireInterprocessSecurity, SourceDefault, constant("false")},
 		{keyLdapHost, SourceDefault, func() (string, error) { return ifRole(c, RoleDirectoryServer, c.Host.Hostname), nil }},
 		{keyLdapPort, SourceDefault, constant("389")},
+		{keyLdapBaseDn, SourceDefault, constant("cn=zimbra")},
+		{keyLdapReplicationType, SourceDefault, func() (string, error) { return defaultReplicationType(c), nil }},
+		{keyLdapServerID, SourceDefault, func() (string, error) { return ifRole(c, RoleDirectoryServer, "2"), nil }},
 		{keyLdapRootPassword, SourceGenerated, r.generateOnMaster()},
 		{keyLdapAdminPassword, SourceGenerated, r.generateOnMaster()},
 		{keyLdapPostfixPassword, SourceGenerated, r.generateOnMaster()},
 		{keyLdapAmavisPassword, SourceGenerated, r.generateOnMaster()},
 		{keyLdapNginxPassword, SourceGenerated, r.generateOnMaster()},
+		{keyLdapReplicationPassword, SourceGenerated, r.generateOnMaster()},
 		{keyDomainCreate, SourceDefault, hasRole(c, RoleDirectoryServer)},
 		{keyDomainName, SourceDefault, func() (string, error) { return parentDomain(c.Host.Hostname), nil }},
 		{keyAdminCreate, SourceDefault, hasRole(c, RoleAppserver)},
@@ -81,6 +89,15 @@ func (r *Resolved) ApplyDefaults(host Host) error {
 		{keyStoreMailProxy, SourceDefault, constant("true")},
 		{keyStoreWebProxy, SourceDefault, constant("true")},
 		{keyStoreSpamTraining, SourceDefault, constant("true")},
+		{keyStoreKeyboardShortcuts, SourceDefault, constant("true")},
+		{keyStoreMailboxdMemoryMb, SourceDetected, func() (string, error) {
+			if !c.HasRole(RoleAppserver) || host.MemoryMB() == 0 {
+				return "", nil
+			}
+
+			return strconv.Itoa(MailboxdMemoryMB(host.MemoryMB())), nil
+		}},
+		{keyStoreMysqlMemoryPercent, SourceDefault, func() (string, error) { return ifRole(c, RoleAppserver, "30"), nil }},
 		{keyStoreSpamAccount, SourceGenerated, r.systemAccount("spam")},
 		{keyStoreHamAccount, SourceGenerated, r.systemAccount("ham")},
 		{keyStoreVirusQuarantineAccount, SourceGenerated, r.systemAccount("virus-quarantine")},
@@ -138,6 +155,29 @@ func (r *Resolved) ApplyDefaults(host Host) error {
 	return nil
 }
 
+// defaultReplicationType is setup.pl changeLdapHost: a directory server is
+// the master of itself, a replica of any other ldap.host.
+func defaultReplicationType(c *Config) string {
+	switch {
+	case !c.HasRole(RoleDirectoryServer):
+		return ""
+	case c.LDAP.Host == c.Host.Hostname:
+		return ReplicationMaster
+	default:
+		return ReplicationReplica
+	}
+}
+
+// MailboxdMemoryMB is the setup.pl heap of mailboxd: a quarter of the
+// memory, a fifth above 16 GB.
+func MailboxdMemoryMB(totalMB int) int {
+	if totalMB > 16*1024 {
+		return totalMB / 5
+	}
+
+	return totalMB / 4
+}
+
 // defaultStep computes the default of the key at path, recorded as src. An
 // empty value leaves the key unset.
 type defaultStep struct {
@@ -171,11 +211,12 @@ func ifRole(c *Config, role, v string) string {
 	return ""
 }
 
-// generateOnMaster generates a password on the LDAP master; elsewhere the
-// password must be given, as it belongs to the master.
+// generateOnMaster generates a password on the LDAP master; elsewhere
+// (replicas included) the password must be given, as it belongs to the
+// master.
 func (r *Resolved) generateOnMaster() func() (string, error) {
 	return func() (string, error) {
-		if !r.Config.HasRole(RoleDirectoryServer) {
+		if !r.Config.IsLDAPMaster() {
 			return "", nil
 		}
 

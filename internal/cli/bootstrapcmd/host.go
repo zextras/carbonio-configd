@@ -8,6 +8,7 @@ import (
 	"context"
 	"net"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/zextras/carbonio-configd/internal/bootstrap"
@@ -76,6 +77,27 @@ func (h *systemHost) Timezone() string {
 	}
 
 	return ""
+}
+
+// MemoryMB reads MemTotal from /proc/meminfo.
+func (h *systemHost) MemoryMB() int {
+	data, err := h.env.FS.ReadFile("/proc/meminfo")
+	if err != nil {
+		return 0
+	}
+
+	for line := range strings.SplitSeq(string(data), "\n") {
+		if rest, ok := strings.CutPrefix(line, "MemTotal:"); ok {
+			kb, err := strconv.Atoi(strings.TrimSuffix(strings.TrimSpace(rest), " kB"))
+			if err != nil {
+				return 0
+			}
+
+			return kb / 1024
+		}
+	}
+
+	return 0
 }
 
 func (h *systemHost) Networks() []string {

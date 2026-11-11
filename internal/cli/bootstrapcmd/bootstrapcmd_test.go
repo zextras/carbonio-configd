@@ -27,6 +27,7 @@ func (host) InstalledRoles() []string {
 func (host) IPMode() string     { return "ipv4" }
 func (host) Timezone() string   { return "Europe/Rome" }
 func (host) Networks() []string { return nil }
+func (host) MemoryMB() int      { return 4096 }
 
 func runCmd(t *testing.T, opts *Options, deps Deps, stdin string) (int, string, string) {
 	t.Helper()
@@ -73,9 +74,9 @@ func TestRun_WizardGate(t *testing.T) {
 
 	t.Run("a missing key starts the wizard, which can save", func(t *testing.T) {
 		saved := filepath.Join(t.TempDir(), "bootstrap.yaml")
-		// 8 pre-filled questions, the admin password twice, the SMTP host (no
+		// 11 pre-filled questions, the admin password twice, the SMTP host (no
 		// MTA on the node: no default), start services, accept, save.
-		answers := strings.Repeat("\n", 8) + "secret1\nsecret1\nsmtp.example.com\n\ny\n" + saved + "\n"
+		answers := strings.Repeat("\n", 11) + "secret1\nsecret1\nsmtp.example.com\n\ny\n" + saved + "\n"
 
 		status, out, errb := runCmd(t, &Options{Wizard: WizardMissing}, Deps{Terminal: true}, answers)
 		require.Equal(t, 0, status, errb+out)

@@ -25,6 +25,9 @@ var requiredWhen = map[string]func(c *Config) bool{
 	keyLdapHost:                    always,
 	keyLdapAdminPassword:           always,
 	keyLdapRootPassword:            role(RoleDirectoryServer),
+	keyLdapReplicationPassword:     role(RoleDirectoryServer),
+	keyLdapReplicationType:         role(RoleDirectoryServer),
+	keyLdapServerID:                func(c *Config) bool { return c.LDAP.ReplicationType == ReplicationMMR },
 	keyLdapPostfixPassword:         anyRole(RoleDirectoryServer, RoleMTA),
 	keyLdapAmavisPassword:          anyRole(RoleDirectoryServer, RoleMTA),
 	keyLdapNginxPassword:           anyRole(RoleDirectoryServer, RoleProxy),
@@ -98,6 +101,7 @@ func Validate(c *Config) error {
 	}
 
 	errs = append(errs, checkPortClashes(c)...)
+	errs = append(errs, checkReplication(c)...)
 
 	return errors.Join(errs...)
 }
@@ -199,4 +203,29 @@ func checkPortClashes(c *Config) []error {
 	}
 
 	return errs
+}
+
+// checkReplication rejects a replica or multi-master peer that names itself
+// as the node it replicates from, and a master that names another node.
+func checkReplication(c *Config) []error {
+	if !c.HasRole(RoleDirectoryServer) || c.LDAP.Host == "" {
+		return nil
+	}
+
+	self := c.LDAP.Host == c.Host.Hostname
+
+	switch c.LDAP.ReplicationType {
+	case ReplicationReplica, ReplicationMMR:
+		if self && !c.LDAP.ForceReplication {
+			return []error{fmt.Errorf("ldap.replication_type %s needs ldap.host to be another directory server, not %s",
+				c.LDAP.ReplicationType, c.Host.Hostname)}
+		}
+	case ReplicationMaster:
+		if !self {
+			return []error{fmt.Errorf("ldap.replication_type master needs ldap.host to be this node (%s), not %s",
+				c.Host.Hostname, c.LDAP.Host)}
+		}
+	}
+
+	return nil
 }

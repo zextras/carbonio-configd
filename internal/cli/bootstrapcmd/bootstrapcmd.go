@@ -62,6 +62,9 @@ type Deps struct {
 	Terminal bool
 	// ReadSecret reads a line without echo (nil: plain line).
 	ReadSecret func() (string, error)
+	// Existing are the values of an existing install (key path to value),
+	// ranked below every operator layer.
+	Existing map[string]string
 }
 
 // Run executes the command and returns the exit status: 0 when the
@@ -89,18 +92,8 @@ func realDeps(ctx context.Context, env sys.System, stdin io.Reader, stdout io.Wr
 }
 
 func run(ctx context.Context, env sys.System, stdin io.Reader, stdout, stderr io.Writer, opts *Options, deps Deps) int {
-	r, err := resolve(ctx, env, stdin, stdout, stderr, opts, deps)
-	if err != nil {
-		_, _ = fmt.Fprintln(stderr, "Error: cannot build the bootstrap configuration:")
-		printErrors(stderr, err)
-
-		return 1
-	}
-
-	if err := bootstrap.Validate(&r.Config); err != nil {
-		_, _ = fmt.Fprintln(stderr, "Error: the bootstrap configuration is not valid:")
-		printErrors(stderr, err)
-
+	r, ok := resolveValid(ctx, env, stdin, stdout, stderr, opts, deps)
+	if !ok {
 		return 1
 	}
 
@@ -128,6 +121,29 @@ func run(ctx context.Context, env sys.System, stdin io.Reader, stdout, stderr io
 	return 0
 }
 
+// resolveValid resolves and validates the configuration, printing the
+// errors to stderr.
+func resolveValid(ctx context.Context, env sys.System, stdin io.Reader, stdout, stderr io.Writer,
+	opts *Options, deps Deps,
+) (*bootstrap.Resolved, bool) {
+	r, err := resolve(ctx, env, stdin, stdout, stderr, opts, deps)
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, "Error: cannot build the bootstrap configuration:")
+		printErrors(stderr, err)
+
+		return nil, false
+	}
+
+	if err := bootstrap.Validate(&r.Config); err != nil {
+		_, _ = fmt.Fprintln(stderr, "Error: the bootstrap configuration is not valid:")
+		printErrors(stderr, err)
+
+		return nil, false
+	}
+
+	return r, true
+}
+
 // resolve builds the configuration from every layer, running the wizard
 // when it applies.
 func resolve(ctx context.Context, env sys.System, stdin io.Reader, stdout, stderr io.Writer,
@@ -138,6 +154,10 @@ func resolve(ctx context.Context, env sys.System, stdin io.Reader, stdout, stder
 	}
 
 	r := bootstrap.NewResolved(env.FS.ReadFile)
+
+	if err := r.ApplyExisting(deps.Existing); err != nil {
+		return nil, err
+	}
 
 	if err := applyFiles(env, r, stderr, opts); err != nil {
 		return nil, err

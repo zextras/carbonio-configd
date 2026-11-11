@@ -268,6 +268,28 @@ func secretFileVar(byEnv map[string]*Field, name string) *Field {
 	return nil
 }
 
+// ApplyExisting applies the values read from an existing install (key path
+// to value, in the --set syntax). They rank above the defaults and below
+// every operator layer.
+func (r *Resolved) ApplyExisting(values map[string]string) error {
+	paths := make([]string, 0, len(values))
+	for p := range values {
+		paths = append(paths, p)
+	}
+
+	slices.Sort(paths)
+
+	var errs []error
+
+	for _, p := range paths {
+		if err := r.setKey(p, values[p], SourceExisting); err != nil {
+			errs = append(errs, fmt.Errorf("existing install: %w", err))
+		}
+	}
+
+	return errors.Join(errs...)
+}
+
 // ApplySets applies "path=value" assignments (the --set flags).
 func (r *Resolved) ApplySets(sets []string) error {
 	var errs []error
