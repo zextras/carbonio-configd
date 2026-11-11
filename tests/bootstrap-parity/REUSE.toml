@@ -1,0 +1,8 @@
+version = 1
+
+# Reference snapshots and logs produced by run-legacy.sh (generated data, no
+# header possible without changing what diff.sh compares).
+[[annotations]]
+path = ["golden/**"]
+SPDX-FileCopyrightText = "2026 Zextras <https://www.zextras.com>"
+SPDX-License-Identifier = "AGPL-3.0-only"
