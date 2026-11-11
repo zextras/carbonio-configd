@@ -812,7 +812,7 @@ func (c *Client) GetServerConfig(hostname string) (map[string]string, error) {
 
 	inherited, global, err := c.serverInheritance()
 	if err != nil {
-		return nil, fmt.Errorf("server %s %w", hostname, err)
+		return nil, fmt.Errorf("server %s: %w", hostname, err)
 	}
 
 	applyServerInherited(server, global, inherited)
@@ -820,18 +820,18 @@ func (c *Client) GetServerConfig(hostname string) (map[string]string, error) {
 	return server, nil
 }
 
-func (c *Client) serverInheritance() ([]string, map[string]string, error) {
+func (c *Client) serverInheritance() (inherited []string, global map[string]string, err error) {
 	dir := c.attrsDir
 	if dir == "" {
 		dir = defaultAttrsDir()
 	}
 
-	inherited, err := c.attrsCache.serverInheritedAttrs(c.fs, dir)
+	inherited, err = c.attrsCache.serverInheritedAttrs(c.fs, dir)
 	if err != nil {
 		return nil, nil, fmt.Errorf("inherited attributes: %w", err)
 	}
 
-	global, err := c.GetGlobalConfig()
+	global, err = c.GetGlobalConfig()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -884,7 +884,7 @@ func (c *Client) GetAllServersWithAttributes() (map[string]map[string]string, er
 
 	inherited, global, err := c.serverInheritance()
 	if err != nil {
-		return nil, fmt.Errorf("servers %w", err)
+		return nil, fmt.Errorf("servers: %w", err)
 	}
 
 	for _, server := range servers {
