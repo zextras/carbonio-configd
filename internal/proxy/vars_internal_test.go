@@ -8,8 +8,8 @@ package proxy
 import (
 	"bytes"
 	"context"
-	"log/slog"
 	"fmt"
+	"log/slog"
 	"strings"
 	"testing"
 

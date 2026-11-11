@@ -38,6 +38,8 @@ func exitWith(code int) error {
 // real ones; a test binds buffers, so no command reaches for os.Stdout,
 // os.Stderr or os.Args itself and every exit status and message is observable.
 type stdio struct {
+	// In is the standard input (nil: none).
+	In io.Reader
 	// Out and Err are the standard output and error.
 	Out, Err io.Writer
 	// Args is the command line, os.Args-shaped (the program name first).

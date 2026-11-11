@@ -12,6 +12,7 @@ tour. The pages below are the reference.
 | Page | Read it to |
 |---|---|
 | [cli.md](cli.md) | find a command, flag, exit code or service verb; map a legacy `zm*` tool to its `configd` command; see the service names and aliases |
+| [bootstrap.md](bootstrap.md) | write a node's bootstrap configuration (YAML, `CARBONIO_BOOTSTRAP_*`, wizard) or migrate a legacy `setup.pl` config file |
 | [configuration.md](configuration.md) | know which localconfig keys and environment variables the daemon honors, and how polling and reload work |
 | [systemd.md](systemd.md) | understand packaging per distribution, the systemd unit, readiness (`READY=1`), synchronous `REWRITE`, the polkit rule and the container image |
 | [architecture.md](architecture.md) | follow the startup sequence, main loop, network protocol, cycle model (load, snapshot, plan, execute), observability, shadow mode and the package map |

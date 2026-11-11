@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: 2026 Zextras <https://www.zextras.com>
+#
+# SPDX-License-Identifier: AGPL-3.0-only
+#
+# Paths (shell globs, relative to the snapshot root, matched with bash [[ == ]])
+# whose CONTENT is volatile (keys, certificates, timestamps, random data).
+# They still appear in the file list with owner/mode; the hash is replaced by
+# "<volatile>".
+/opt/zextras/conf/ca/*
+/opt/zextras/conf/*.key
+/opt/zextras/conf/*.crt
+/opt/zextras/conf/*.csr
+/opt/zextras/conf/*.pem
+/opt/zextras/conf/*.crb
+/opt/zextras/conf/*.p12
+/opt/zextras/conf/*.jks
+/opt/zextras/conf/keystore
+/opt/zextras/conf/*.ts
+/opt/zextras/conf/*.stamp
+/opt/zextras/conf/.bootstrap.lock
+/opt/zextras/conf/localconfig.xml
+/opt/zextras/conf/*.db
+/opt/zextras/conf/*.lock
+/opt/zextras/conf/*.keystore
+/opt/zextras/conf/*.truststore
+/opt/zextras/conf/carbonio.ldif

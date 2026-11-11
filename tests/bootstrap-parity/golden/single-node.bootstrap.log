@@ -1,0 +1,78 @@
+−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−
+| Starting Carbonio Bootstrap... |
+−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−
+--------------------------------------------------------------------------------
+The system is going to start configuring all the packages.
+
+If you are installing Carbonio CE please refer to every single package license 
+and to the Github repo for more informations on open source licenses: 
+https://github.com/Zextras
+
+If you are also installing Carbonio please refer to every single package 
+license, to the Github repo for more informations on open source licenses: 
+https://github.com/Zextras and to the Zextras EULA for the proprietary 
+software: https://zextras.com/licenses
+--------------------------------------------------------------------------------
+
+Applying systemd sysusers configurations...
+Applying systemd tmpfiles configurations...
+tmpfiles configurations applied.
+Operations logged to /tmp/zmsetup.20261111-033843.log
+
+Bootstrap mode: new install
+Installing LDAP configuration database...done.
+Setting defaults...done.
+Checking for port conflicts
+Saving config in /opt/zextras/config.136...done.
+Operations logged to /tmp/zmsetup.20261111-033843.log
+Setting local config values...done.
+Setting up CA...done.
+Deploying CA to /opt/zextras/conf/ca ...done.
+Creating SSL carbonio-appserver certificate...done.
+Creating new carbonio-directory-server SSL certificate...done.
+Creating new carbonio-mta SSL certificate...done.
+Creating new carbonio-proxy SSL certificate...done.
+Installing mailboxd SSL certificates...done.
+Installing MTA SSL certificates...done.
+Installing LDAP SSL certificate...done.
+Installing Proxy SSL certificate...done.
+Initializing ldap...done.
+Setting replication password...done.
+Setting Postfix password...done.
+Setting amavis password...done.
+Setting nginx password...done.
+Creating server entry for mail.parity.test...done.
+Setting IP Mode...done.
+Saving CA in ldap...done.
+Saving SSL Certificate in ldap...done.
+Generating dhparam key...done.
+Setting service ports on mail.parity.test...done.
+Checking current setting of ReverseProxyAvailableLookupTargets
+Querying LDAP for other mailstores
+Searching LDAP for reverseProxyLookupTargets...done.
+Adding mail.parity.test to ReverseProxyAvailableLookupTargets
+Updating LDAP Schema version to '1789555845'...done.
+Setting TimeZone Preference...done.
+Disabling strict server name enforcement on mail.parity.test...done.
+Setting Public Service Hostname mail.parity.test...done.
+Initializing mta config...done.
+Setting services on mail.parity.test...done.
+Adding mail.parity.test to MailHostPool in default COS...done.
+Creating domain parity.test...done.
+Setting default domain name...done.
+Setting value of postfix myorigin...done.
+Creating domain parity.test...already exists.
+Creating admin account zextras@parity.test...done.
+Creating root alias...done.
+Creating postmaster alias...done.
+Setting infrastructure notification sender and recipients accounts...done.
+Initializing store sql database...done.
+Setting up syslog.conf...done.
+WARNING: galsync account creation for default domain skipped because Application Server was not configured to start.
+Setting up zextras crontab...done.
+
+
+Moving /tmp/zmsetup.20261111-033843.log to /opt/zextras/log
+
+
+Moving /tmp/zmsetup.20261111-033843.log to /opt/zextras/log

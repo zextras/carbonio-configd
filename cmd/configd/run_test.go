@@ -26,7 +26,7 @@ func runConfigd(t *testing.T, args ...string) (status int, stdout, stderr string
 
 	var out, errb bytes.Buffer
 
-	status = run(append([]string{"configd"}, args...), systest.New().System(), &out, &errb)
+	status = run(append([]string{"configd"}, args...), systest.New().System(), nil, &out, &errb)
 
 	return status, out.String(), errb.String()
 }
@@ -151,7 +151,7 @@ func TestRun_WarnsWhenThePerlEnvironmentCannotBeSet(t *testing.T) {
 
 	var out, errb bytes.Buffer
 
-	status := run([]string{"configd", "release"}, fakes.System(), &out, &errb)
+	status := run([]string{"configd", "release"}, fakes.System(), nil, &out, &errb)
 
 	assert.Equal(t, 0, status, "the command still runs")
 	assert.Equal(t, "Carbonio Release \n", out.String())

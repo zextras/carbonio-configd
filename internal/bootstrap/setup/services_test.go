@@ -1,0 +1,559 @@
+// SPDX-FileCopyrightText: 2026 Zextras <https://www.zextras.com>
+//
+// SPDX-License-Identifier: AGPL-3.0-only
+
+package setup
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/zextras/carbonio-configd/internal/bootstrap"
+	"github.com/zextras/carbonio-configd/internal/sys"
+	"github.com/zextras/carbonio-configd/internal/sys/systest"
+)
+
+const svcTestAdminPass = "S3cret-Admin-Pass"
+
+type svcFakeDir struct {
+	existing []string // substrings of filters that match
+	global   map[string]string
+	mtas     int
+}
+
+func (d *svcFakeDir) Exists(filter string) (bool, error) {
+	for _, s := range d.existing {
+		if strings.Contains(filter, s) {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+func (d *svcFakeDir) Global() (map[string]string, error) { return d.global, nil }
+func (d *svcFakeDir) MTAServers() (int, error)           { return d.mtas, nil }
+func (d *svcFakeDir) Close() error                       { return nil }
+
+func svcWithDir(t *testing.T, d *svcFakeDir) {
+	t.Helper()
+
+	old := svcOpenDir
+	svcOpenDir = func(*Env) (svcDir, error) { return d, nil }
+
+	t.Cleanup(func() { svcOpenDir = old })
+}
+
+func svcEnv(t *testing.T, packages ...string) (*Env, *systest.Fakes) {
+	t.Helper()
+
+	e, fakes, _ := testEnv(t)
+	e.Cfg = &bootstrap.Config{}
+	e.Facts.Enabled = map[string]bool{}
+
+	for _, p := range packages {
+		e.Facts.Enabled[p] = true
+	}
+
+	return e, fakes
+}
+
+// svcStdin returns the stdin of the call (the zmprov batch).
+func svcStdin(t *testing.T, c *sys.Cmd) string {
+	t.Helper()
+
+	require.NotNil(t, c.Stdin)
+
+	var b strings.Builder
+
+	buf := make([]byte, 4096)
+
+	for {
+		n, err := c.Stdin.Read(buf)
+		b.Write(buf[:n])
+
+		if err != nil {
+			break
+		}
+	}
+
+	return b.String()
+}
+
+func svcProvCall(t *testing.T, fakes *systest.Fakes) (*sys.Cmd, string) {
+	t.Helper()
+
+	for _, c := range fakes.Exec.Calls() {
+		if strings.Contains(c.String(), "zmprov") {
+			return c, svcStdin(t, c)
+		}
+	}
+
+	require.Fail(t, "no zmprov call")
+
+	return nil, ""
+}
+
+func TestSvcCheckPortConflicts_ReportsEnabledPackagesOnly(t *testing.T) {
+	e, fakes, out := testEnv(t)
+	e.Facts.Enabled = map[string]bool{PkgMTA: true}
+	e.Facts.NewInstall = true
+
+	fakes.FS.Put("/proc/net/tcp", []byte(
+		"  sl  local_address rem_address   st\n"+
+			"   0: 00000000:0019 00000000:0000 0A 0\n"+ // 25 listen, mta
+			"   1: 00000000:0050 00000000:0000 0A 0\n"+ // 80 listen, appserver not enabled
+			"   2: 0100007F:01BB 0100007F:9999 01 0\n"), 0o644) // 443 established
+	fakes.FS.Put("/proc/net/tcp6", []byte("  sl\n   0: 00000000000000000000000000000000:2742 :0 0A 0\n"), 0o644) // 10050
+
+	s := StepCheckPortConflicts()
+	require.NoError(t, s.Apply(e))
+	assert.Contains(t, out.String(), "Port conflict detected: 25 (carbonio-mta)")
+	assert.NotContains(t, out.String(), "80")
+	assert.NotContains(t, out.String(), "443")
+}
+
+func TestSvcCheckPortConflicts_LdapIgnoredOnExistingInstall(t *testing.T) {
+	e, fakes, out := testEnv(t)
+	e.Facts.Enabled = map[string]bool{svcPkgDirectory: true}
+	fakes.FS.Put("/proc/net/tcp", []byte("sl\n 0: 00000000:0185 00000000:0000 0A 0\n"), 0o644) // 389
+
+	require.NoError(t, StepCheckPortConflicts().Apply(e))
+	assert.Empty(t, out.String())
+
+	e.Facts.NewInstall = true
+	require.NoError(t, StepCheckPortConflicts().Apply(e))
+	assert.Contains(t, out.String(), "389")
+}
+
+func TestSvcCheckCoreEnabled(t *testing.T) {
+	e, _ := svcEnv(t)
+	s := StepCheckCoreEnabled()
+
+	assert.True(t, s.When(e))
+	require.ErrorIs(t, s.Apply(e), ErrCoreNotEnabled)
+
+	e.Facts.Enabled[PkgCore] = true
+	assert.False(t, s.When(e))
+}
+
+func TestSvcConfigInitMta_RunsToolWithoutSecretsAndSetsNetworks(t *testing.T) {
+	e, fakes := svcEnv(t, PkgMTA)
+	e.Paths.LocalConfig = t.TempDir() + "/localconfig.xml"
+	fakes.FS.Put("/opt/zextras/libexec/zmmtainit", []byte("#!/bin/sh"), 0o755)
+	e.Cfg.LDAP.Host = "ldap.example.com"
+	e.Cfg.LDAP.Port = 636
+	e.Cfg.LDAP.PostfixPassword = "PostfixSecret"
+	e.Cfg.Host.Hostname = "mta.example.com"
+	e.Cfg.MTA.MyNetworks = []string{"127.0.0.0/8", "10.0.0.0/24"}
+
+	s := StepConfigInitMta()
+	require.True(t, s.When(e))
+	require.NoError(t, s.Apply(e))
+
+	lines := strings.Join(fakes.Exec.Lines(), "\n")
+	assert.Contains(t, lines, "/opt/zextras/libexec/zmmtainit ldap.example.com 636")
+	assert.NotContains(t, lines, "PostfixSecret")
+
+	_, batch := svcProvCall(t, fakes)
+	assert.Contains(t, batch, `"ms" "mta.example.com" "zimbraMtaMyNetworks" "127.0.0.0/8 10.0.0.0/24"`)
+
+	v, err := e.LCValue("postfix_mail_owner")
+	require.NoError(t, err)
+	assert.Equal(t, "postfix", v)
+}
+
+func TestSvcConfigInitMta_SkippedWithoutMta(t *testing.T) {
+	e, _ := svcEnv(t, PkgAppserver)
+	assert.False(t, StepConfigInitMta().When(e))
+}
+
+func TestSvcSetTrainSACleanupHost(t *testing.T) {
+	for _, tc := range []struct {
+		mtas int
+		want string
+	}{{1, "true"}, {2, "false"}} {
+		e, _ := svcEnv(t, PkgMTA)
+		e.Facts.NewInstall = true
+		e.Paths.LocalConfig = t.TempDir() + "/localconfig.xml"
+		svcWithDir(t, &svcFakeDir{mtas: tc.mtas})
+
+		s := StepSetTrainSACleanupHost()
+		require.True(t, s.When(e))
+		require.NoError(t, s.Apply(e))
+
+		v, err := e.LCValue("zmtrainsa_cleanup_host")
+		require.NoError(t, err)
+		assert.Equal(t, tc.want, v)
+	}
+}
+
+func svcDomainCfg(e *Env) {
+	e.Cfg.Domain.Create = true
+	e.Cfg.Domain.Name = "example.com"
+	e.Cfg.Admin.Create = true
+	e.Cfg.Admin.Account = "Admin@Example.com"
+	e.Cfg.Admin.Password = svcTestAdminPass
+	e.Cfg.Store.SpamTraining = true
+	e.Cfg.Store.SpamAccount = "Spam.x@example.com"
+	e.Cfg.Store.HamAccount = "ham.x@example.com"
+	e.Cfg.Store.VirusQuarantineAccount = "virus-quarantine.x@example.com"
+	e.Facts.ServiceWebapp = true
+}
+
+func TestSvcConfigCreateDomain_PasswordsOnStdinNeverArgv(t *testing.T) {
+	e, fakes := svcEnv(t, svcPkgDirectory, PkgAppserver)
+	svcDomainCfg(e)
+	svcWithDir(t, &svcFakeDir{global: map[string]string{}})
+
+	s := StepConfigCreateDomain()
+	done, err := s.Done(e)
+	require.NoError(t, err)
+	require.False(t, done)
+	require.NoError(t, s.Apply(e))
+
+	call, batch := svcProvCall(t, fakes)
+	assert.NotContains(t, strings.Join(call.Args, " "), svcTestAdminPass)
+	assert.NotContains(t, strings.Join(fakes.Exec.Lines(), "\n"), svcTestAdminPass)
+
+	// domain created once although the admin domain is the same
+	assert.Equal(t, 1, strings.Count(batch, `"cd" "example.com"`), batch)
+	assert.Contains(t, batch, `"mcf" "zimbraDefaultDomainName" "example.com"`)
+	assert.Contains(t, batch, `"mcf" "zimbraMtaMyOrigin" "example.com"`)
+	assert.Contains(t, batch, `"ca" "admin@example.com" "`+svcTestAdminPass+`" "zimbraAdminConsoleUIComponents" "cartBlancheUI"`)
+	assert.Contains(t, batch, `"aaa" "admin@example.com" "root@example.com"`)
+	assert.Contains(t, batch, `"aaa" "admin@example.com" "postmaster@example.com"`)
+	assert.Contains(t, batch, `"mcf" "carbonioNotificationFrom" "admin@example.com" "carbonioNotificationRecipients" "admin@example.com"`)
+	assert.Contains(t, batch, `"ca" "spam.x@example.com" "`)
+	assert.Contains(t, batch, `"zimbraMailMessageLifetime" "30d"`)
+	assert.Contains(t, batch, `"mcf" "zimbraSpamIsSpamAccount" "spam.x@example.com" "zimbraSpamIsNotSpamAccount" "ham.x@example.com" "zimbraAmavisQuarantineAccount" "virus-quarantine.x@example.com"`)
+	assert.True(t, strings.HasSuffix(batch, "\nexit\n"))
+
+	// domain before the admin account
+	assert.Less(t, strings.Index(batch, `"cd" "example.com"`), strings.Index(batch, `"ca" "admin@`))
+}
+
+func TestSvcConfigCreateDomain_DoneWhenEverythingExists(t *testing.T) {
+	e, fakes := svcEnv(t, svcPkgDirectory, PkgAppserver)
+	svcDomainCfg(e)
+	svcWithDir(t, &svcFakeDir{
+		existing: []string{
+			"zimbraDomainName=example.com", "zimbraMailDeliveryAddress=admin@example.com",
+			"zimbraMailAlias=root@example.com", "zimbraMailAlias=postmaster@example.com",
+			"=spam.x@example.com", "=ham.x@example.com", "=virus-quarantine.x@example.com",
+		},
+		global: map[string]string{
+			"zimbraDefaultDomainName": "example.com", "zimbraMtaMyOrigin": "example.com",
+			"carbonioNotificationFrom": "admin@example.com", "carbonioNotificationRecipients": "admin@example.com",
+			"zimbraSpamIsSpamAccount": "spam.x@example.com", "zimbraSpamIsNotSpamAccount": "ham.x@example.com",
+			"zimbraAmavisQuarantineAccount": "virus-quarantine.x@example.com",
+		},
+	})
+
+	done, err := StepConfigCreateDomain().Done(e)
+	require.NoError(t, err)
+	assert.True(t, done)
+	assert.Empty(t, fakes.Exec.Calls())
+}
+
+func TestSvcConfigCreateDomain_ExistingAccountsAreNotRecreated(t *testing.T) {
+	e, fakes := svcEnv(t, PkgAppserver)
+	svcDomainCfg(e)
+	e.Facts.ServiceWebapp = false
+	svcWithDir(t, &svcFakeDir{
+		existing: []string{"zimbraDomainName=example.com", "zimbraMailDeliveryAddress=admin@example.com"},
+		global:   map[string]string{},
+	})
+
+	require.NoError(t, StepConfigCreateDomain().Apply(e))
+
+	_, batch := svcProvCall(t, fakes)
+	assert.NotContains(t, batch, `"cd"`)
+	assert.NotContains(t, batch, `"ca" "admin@`)
+	assert.NotContains(t, batch, `"aaa"`) // no root/postmaster on a web-only node
+	assert.NotContains(t, batch, "zimbraDefaultDomainName")
+	assert.Contains(t, batch, `"ca" "ham.x@example.com"`)
+}
+
+func TestSvcConfigCreateDomain_NotApplicableWithoutDirectoryOrStore(t *testing.T) {
+	e, _ := svcEnv(t, PkgMTA)
+	assert.False(t, StepConfigCreateDomain().When(e))
+}
+
+func TestSvcConfigInitSQL(t *testing.T) {
+	e, fakes := svcEnv(t, PkgAppserver)
+	e.Cfg.Store.MySQLMemoryPercent = 40
+	s := StepConfigInitSQL()
+
+	done, err := s.Done(e)
+	require.NoError(t, err)
+	assert.False(t, done)
+	require.NoError(t, s.Apply(e))
+	assert.Equal(t, []string{"/opt/zextras/libexec/zmmyinit --mysql_memory_percent 40"}, fakes.Exec.Lines())
+
+	fakes.FS.PutDir("/opt/zextras/db/data/zimbra", 0o755)
+
+	done, err = s.Done(e)
+	require.NoError(t, err)
+	assert.True(t, done)
+}
+
+func TestSvcConfigInitSQL_DefaultPercent(t *testing.T) {
+	e, fakes := svcEnv(t, PkgAppserver)
+	require.NoError(t, StepConfigInitSQL().Apply(e))
+	assert.Contains(t, fakes.Exec.Lines()[0], "--mysql_memory_percent 30")
+}
+
+func TestSvcSetupSyslog_MissingToolFails(t *testing.T) {
+	e, fakes := svcEnv(t)
+	s := StepSetupSyslog()
+
+	require.Error(t, s.Apply(e))
+	assert.True(t, s.Optional)
+
+	fakes.FS.Put("/opt/zextras/libexec/zmsyslogsetup", []byte("x"), 0o755)
+	require.NoError(t, s.Apply(e))
+	assert.Equal(t, []string{"/opt/zextras/libexec/zmsyslogsetup"}, fakes.Exec.Lines())
+}
+
+func TestSvcStartServers_Systemd(t *testing.T) {
+	e, fakes := svcEnv(t, PkgAppserver, PkgMTA)
+	e.Facts.Systemd = true
+	e.Cfg.StartServices = true
+
+	fakes.Exec.When(func(c *sys.Cmd) bool { return c.Path == "systemctl" && len(c.Args) > 1 && c.Args[0] == "is-enabled" },
+		func(c *sys.Cmd) (sys.Result, error) {
+			out := "disabled\n"
+			if c.Args[1] == "carbonio-appserver.target" || c.Args[1] == "carbonio-mta.target" {
+				out = "enabled\n"
+			}
+
+			return sys.Result{Stdout: []byte(out), ExitCode: 0}, nil
+		})
+	// no stray configd: pkill -0 finds nothing
+	fakes.Exec.OnPath("pkill", systest.Fail(1, ""))
+
+	require.NoError(t, svcStartServers(e))
+
+	var actions []string
+
+	for _, l := range fakes.Exec.Lines() {
+		if strings.HasPrefix(l, "systemctl ") && !strings.Contains(l, "is-enabled") {
+			actions = append(actions, l)
+		}
+	}
+
+	assert.Equal(t, []string{
+		"systemctl stop carbonio-appserver.target", "systemctl stop carbonio-mta.target",
+		"systemctl stop carbonio-configd.service",
+		"systemctl start carbonio-appserver.target", "systemctl start carbonio-mta.target",
+	}, actions)
+}
+
+func TestSvcStartServers_StrayConfigdTerminated(t *testing.T) {
+	e, fakes := svcEnv(t)
+	e.Facts.Systemd = true
+
+	probes := 0
+
+	fakes.Exec.When(func(c *sys.Cmd) bool { return c.Path == "pkill" && c.Args[0] == "-0" },
+		func(*sys.Cmd) (sys.Result, error) {
+			probes++
+			if probes == 1 {
+				return sys.Result{}, nil // running
+			}
+
+			return sys.Result{ExitCode: 1}, nil // gone after TERM
+		})
+
+	require.NoError(t, svcStopStrayConfigd(e))
+
+	var sigs []string
+
+	for _, l := range fakes.Exec.Lines() {
+		if strings.HasPrefix(l, "pkill ") {
+			sigs = append(sigs, l)
+		}
+	}
+
+	assert.Equal(t, []string{
+		"pkill -0 -u zextras -f ^/opt/zextras/bin/configd$",
+		"pkill -TERM -u zextras -f ^/opt/zextras/bin/configd$",
+		"pkill -0 -u zextras -f ^/opt/zextras/bin/configd$",
+	}, sigs)
+}
+
+func TestSvcStartServers_ZmcontrolPathAndRedoLog(t *testing.T) {
+	e, fakes := svcEnv(t, PkgAppserver)
+	e.Facts.Platform = "ubuntu"
+	e.Cfg.StartServices = true
+
+	require.NoError(t, svcStartServers(e))
+
+	lines := fakes.Exec.Lines()
+	require.Len(t, lines, 4)
+	assert.Equal(t, "chown zextras:zextras /opt/zextras/redolog/redo.log", lines[0])
+
+	for i, verb := range []string{"stop", "start", "status"} {
+		assert.Contains(t, lines[i+1], "/opt/zextras/bin/zmcontrol "+verb)
+		assert.Contains(t, lines[i+1], "runuser -u zextras")
+	}
+
+	// new install: no chown
+	e2, f2 := svcEnv(t, PkgAppserver)
+	e2.Facts.Platform = "ubuntu"
+	e2.Facts.NewInstall = true
+	require.NoError(t, svcStartServers(e2))
+	assert.Len(t, f2.Exec.Lines(), 3)
+}
+
+func TestSvcStartServers_StartFailureIsReported(t *testing.T) {
+	e, fakes := svcEnv(t)
+	fakes.Exec.When(func(c *sys.Cmd) bool { return strings.Contains(c.String(), "zmcontrol start") },
+		systest.Fail(1, "boom"))
+
+	require.Error(t, svcStartServers(e))
+	assert.True(t, StepStartServers().Optional)
+	assert.False(t, StepStartServers().When(e))
+}
+
+func TestSvcGALSync_Conditions(t *testing.T) {
+	e, _ := svcEnv(t, PkgAppserver)
+	e.Cfg.StartServices = true
+	e.Facts.NewInstall = true
+	e.Facts.ServiceWebapp = true
+
+	assert.True(t, StepConfigCreateDefaultDomainGALSyncAcct().When(e))
+	assert.False(t, StepGALSyncSkipNotice().When(e))
+
+	e.Facts.NewInstall = false
+	assert.False(t, StepConfigCreateDefaultDomainGALSyncAcct().When(e))
+	assert.True(t, StepGALSyncSkipNotice().When(e))
+
+	e.Facts.NewInstall = true
+	e.Cfg.StartServices = false
+	assert.False(t, StepConfigCreateDefaultDomainGALSyncAcct().When(e))
+	assert.True(t, StepGALSyncSkipNotice().When(e))
+}
+
+func TestSvcGALSync_Command(t *testing.T) {
+	e, fakes := svcEnv(t, PkgAppserver)
+	e.Paths.LocalConfig = t.TempDir() + "/localconfig.xml"
+	e.Cfg.Domain.Name = "example.com"
+	e.Cfg.Host.Hostname = "other.example.com"
+	require.NoError(t, e.SetLC(map[string]string{"zimbra_server_hostname": "store.example.com"}))
+	svcWithDir(t, &svcFakeDir{})
+
+	s := StepConfigCreateDefaultDomainGALSyncAcct()
+	done, err := s.Done(e)
+	require.NoError(t, err)
+	assert.False(t, done)
+	require.NoError(t, s.Apply(e))
+
+	line := fakes.Exec.Lines()[0]
+	assert.Contains(t, line, "/opt/zextras/bin/zmgsautil createAccount -a galsync.")
+	assert.Contains(t, line, "@example.com -n InternalGAL --domain example.com -s store.example.com -t zimbra -f _InternalGAL -p 1d")
+
+	svcWithDir(t, &svcFakeDir{existing: []string{"galsync.*@example.com"}})
+
+	done, err = s.Done(e)
+	require.NoError(t, err)
+	assert.True(t, done)
+}
+
+const svcTestCronBase = "# ZEXTRAS-START\n0 1 * * * base\n"
+
+func svcCronEnv(t *testing.T, current string, packages ...string) (*Env, *systest.Fakes) {
+	t.Helper()
+
+	e, fakes := svcEnv(t, packages...)
+	fakes.FS.Put("/opt/zextras/conf/crontabs/crontab", []byte(svcTestCronBase), 0o644)
+	fakes.FS.Put("/opt/zextras/conf/crontabs/crontab.ldap", []byte("0 2 * * * ldap\n"), 0o644)
+	fakes.FS.Put("/opt/zextras/conf/crontabs/crontab.store", []byte("0 3 * * * store\n"), 0o644)
+	fakes.FS.Put("/opt/zextras/conf/crontabs/crontab.mta", []byte("0 4 * * * mta"), 0o644) // no trailing newline
+	fakes.Exec.When(func(c *sys.Cmd) bool { return c.Path == "crontab" && c.Args[len(c.Args)-1] == "-l" },
+		systest.Reply(current))
+
+	return e, fakes
+}
+
+func TestSvcCrontab_ReplacesBlockKeepsUserEntries(t *testing.T) {
+	current := "MAILTO=x\n# ZEXTRAS-START\nold line\n# ZEXTRAS-END -- DO NOT EDIT\n5 5 * * * mine\n"
+	e, fakes := svcCronEnv(t, current, svcPkgDirectory, PkgMTA)
+
+	s := StepSetupCrontab()
+	done, err := s.Done(e)
+	require.NoError(t, err)
+	require.False(t, done)
+	require.NoError(t, s.Apply(e))
+
+	var install *sys.Cmd
+
+	for _, c := range fakes.Exec.Calls() {
+		if c.Path == "crontab" && c.Args[len(c.Args)-1] == "-" {
+			install = c
+		}
+	}
+
+	require.NotNil(t, install)
+	assert.Equal(t, []string{"-u", "zextras", "-"}, install.Args)
+	assert.Equal(t, svcTestCronBase+"0 2 * * * ldap\n0 4 * * * mta\n"+svcCrontabEndLine+"\nMAILTO=x\n5 5 * * * mine\n",
+		svcStdin(t, install))
+}
+
+func TestSvcCrontab_DoneWhenUnchanged(t *testing.T) {
+	want := svcTestCronBase + "0 3 * * * store\n" + svcCrontabEndLine + "\n5 5 * * * mine\n"
+	e, _ := svcCronEnv(t, want, PkgAppserver)
+
+	done, err := StepSetupCrontab().Done(e)
+	require.NoError(t, err)
+	assert.True(t, done)
+}
+
+func TestSvcCrontab_WithoutMarkersStartsFresh(t *testing.T) {
+	e, fakes := svcCronEnv(t, "5 5 * * * mine\n")
+	require.NoError(t, StepSetupCrontab().Apply(e))
+
+	for _, c := range fakes.Exec.Calls() {
+		if c.Path == "crontab" && c.Args[len(c.Args)-1] == "-" {
+			assert.Equal(t, svcTestCronBase+svcCrontabEndLine+"\n", svcStdin(t, c))
+		}
+	}
+}
+
+func TestSvcCrontab_MissingBaseFileFails(t *testing.T) {
+	e, _ := svcEnv(t)
+	require.Error(t, StepSetupCrontab().Apply(e))
+}
+
+func TestSvcSSHKeys(t *testing.T) {
+	e, fakes := svcEnv(t)
+	gen, upd := StepZmsshkeygen(), StepZmupdateauthkeys()
+
+	assert.False(t, gen.When(e))
+
+	e.Facts.NewInstall = true
+	assert.True(t, gen.When(e))
+	require.NoError(t, gen.Apply(e))
+	require.NoError(t, upd.Apply(e))
+
+	lines := fakes.Exec.Lines()
+	require.Len(t, lines, 2)
+	assert.Contains(t, lines[0], "/opt/zextras/bin/zmsshkeygen")
+	assert.Contains(t, lines[1], "/opt/zextras/bin/zmupdateauthkeys")
+	assert.Nil(t, upd.When)
+}
+
+func TestSvcRandomPassword(t *testing.T) {
+	a, err := svcRandomPassword(16, svcAlnum)
+	require.NoError(t, err)
+
+	b, err := svcRandomPassword(16, svcAlnum)
+	require.NoError(t, err)
+
+	assert.Len(t, a, 16)
+	assert.NotEqual(t, a, b)
+}

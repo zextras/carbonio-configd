@@ -1,0 +1,25 @@
+INSTALLED carbonio-core
+CONFIG SESSION START
+CONFIGURED BEGIN
+CONFIGURED configLCValues
+CONFIGURED configInitCore
+CONFIGURED configCASetup
+CONFIGURED configCreateCert
+CONFIGURED configInstallCertStore
+CONFIGURED configInstallCertMTA
+CONFIGURED configInstallCertLDAP
+CONFIGURED configInstallCertProxy
+CONFIGURED configSetupLdap
+CONFIGURED configCreateServerEntry
+CONFIGURED configSaveCA
+CONFIGURED configSaveCert
+CONFIGURED configSetServicePorts
+CONFIGURED zimbraPrefTimeZoneId
+CONFIGURED configInitMta
+CONFIGURED configSetEnabledServices
+CONFIGURED configCreateDomain
+CONFIGURED configInitSql
+CONFIGURED setupSyslog
+CONFIGURED setupCrontab
+CONFIGURED END
+CONFIG SESSION COMPLETE

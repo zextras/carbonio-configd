@@ -1,0 +1,82 @@
+# SPDX-FileCopyrightText: 2026 Zextras <https://www.zextras.com>
+#
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# Carbonio CE single-node image (Ubuntu 24.04 "noble") with systemd as PID 1.
+# All packages are installed, bootstrap is NOT run: the legacy
+# (carbonio-bootstrap / setup.pl) and the configd paths both start from this
+# exact image state.
+#
+# Run it with:  podman run -d --systemd=always --hostname <fqdn> ...
+# (see run-legacy.sh / run-configd.sh).
+ARG UBUNTU_TAG=24.04
+FROM docker.io/library/ubuntu:${UBUNTU_TAG}
+
+ARG ZEXTRAS_REPO_CHANNEL=release
+ARG ZEXTRAS_GPG_KEY=0x5dc7680bc4378c471a7fa80f52fd40243e584a21
+# Single-server CE package set (docs.zextras.com CE manual installation, minus
+# the UI/files/chats/docs apps that do not take part in bootstrap).
+ARG CARBONIO_PACKAGES="carbonio-directory-server carbonio-mta carbonio-appserver carbonio-proxy carbonio-memcached carbonio-clamav"
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    container=podman
+
+# systemd as PID 1 + the tools the bootstrap, the snapshot and the diff need.
+# libncurses6: carbonio-mariadb's mysql client links libncurses.so.6 but the package does not
+# depend on it (zmmyinit hangs on "Failed to connect to mysql" without it).
+# cron: the legacy bootstrap installs the zextras crontab; rsyslog: setupSyslog.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      systemd systemd-sysv dbus dbus-user-session \
+      ca-certificates gnupg wget curl \
+      sudo cron rsyslog iproute2 iputils-ping net-tools netcat-openbsd \
+      dnsutils procps psmisc less vim-tiny locales tzdata \
+      ldap-utils diffutils file libncurses6 \
+ && apt-get clean && rm -rf /var/lib/apt/lists/* \
+ # Drop units that make no sense (or fail) inside a container.
+ && systemctl mask \
+      systemd-udevd.service systemd-udevd-kernel.socket systemd-udevd-control.socket \
+      systemd-udev-trigger.service systemd-remount-fs.service \
+      systemd-logind.service getty.target console-getty.service \
+      sys-kernel-debug.mount sys-kernel-tracing.mount \
+      dev-hugepages.mount dev-mqueue.mount \
+ && locale-gen en_US.UTF-8
+
+# Zextras repository: the manual-installation procedure of the CE docs.
+RUN wget -qO- "https://keyserver.ubuntu.com/pks/lookup?op=get&search=${ZEXTRAS_GPG_KEY}" \
+      | gpg --dearmor > /usr/share/keyrings/zextras.gpg \
+ && chmod 644 /usr/share/keyrings/zextras.gpg \
+ && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/zextras.gpg] https://repo.zextras.io/${ZEXTRAS_REPO_CHANNEL}/ubuntu noble main" \
+      > /etc/apt/sources.list.d/zextras.list
+
+# Package installation, nothing is started, nothing is bootstrapped.
+# The maintainer scripts only `systemctl enable` the carbonio*.target units when
+# /run/systemd/system exists (i.e. on a systemd host); setup.pl then detects
+# "systemd mode" by `systemctl is-enabled carbonio-*.target`. There is no running
+# systemd at build time, so create the marker directory for the install only and
+# force systemctl to work offline (SYSTEMD_OFFLINE=1, else it tries the bus and
+# `enable` fails). /run is a fresh tmpfs at runtime.
+RUN mkdir -p /run/systemd/system \
+ && apt-get update \
+ && SYSTEMD_OFFLINE=1 apt-get install -y ${CARBONIO_PACKAGES} \
+ && rmdir /run/systemd/system \
+ && apt-get clean && rm -rf /var/lib/apt/lists/* \
+ && dpkg-query -W -f='${Package} ${Version}\n' | sort > /opt/zextras/.parity-package-versions
+
+# What the maintainer scripts enabled is recorded and then switched off again:
+# started at container boot, the enabled carbonio targets would start every
+# (unconfigured) service before the bootstrap runs, which a real host never
+# does after `apt install`. lib.sh re-enables exactly this list with the
+# running systemd (enable only, no start) right before the bootstrap.
+RUN SYSTEMD_OFFLINE=1 systemctl list-unit-files --no-legend --no-pager --state=enabled \
+      | awk '{print $1}' | grep -E '^(carbonio|service-discover)' | sort \
+      > /usr/local/share/parity-enabled-units \
+ && test -s /usr/local/share/parity-enabled-units \
+ && SYSTEMD_OFFLINE=1 xargs -a /usr/local/share/parity-enabled-units systemctl disable
+
+# The legacy bootstrap leaves /tmp/zmsetup.log, the build must not.
+RUN rm -f /tmp/zmsetup.* && rm -rf /tmp/* /var/tmp/*
+
+STOPSIGNAL SIGRTMIN+3
+VOLUME ["/run", "/run/lock", "/tmp"]
+CMD ["/sbin/init"]
