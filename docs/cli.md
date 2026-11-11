@@ -495,6 +495,18 @@ wizard. It validates the result, then prints it with the source of each key
 Exits `0` when the configuration is valid and `1` otherwise. Keys, layers,
 the wizard and legacy migration are described in [bootstrap.md](bootstrap.md).
 
+```bash
+configd bootstrap run [same flags as config] [--dry-run]
+```
+
+Configures the node, as root: the work of the legacy `setup.pl`. It resolves
+the configuration as `config` does (plus the values of an existing install),
+then runs the bootstrap steps in order, each one only when the node is not
+already in the state it produces. `--dry-run` prints which steps would apply
+and changes nothing; `--output` also saves the configuration. Exits `0` when
+every step succeeded; after a failure, running it again resumes. See
+[bootstrap.md](bootstrap.md#running).
+
 ## completion
 
 `configd completion bash|zsh|fish|powershell` prints the completion script of

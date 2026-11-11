@@ -83,7 +83,20 @@ func runSetup(e *setup.Env, stdin io.Reader, stdout, stderr io.Writer, opts *Run
 	e.Facts = facts
 	deps.Host = enabledHost{Host: deps.Host, roles: facts.EnabledRoles()}
 
-	if !facts.NewInstall {
+	// setup.pl reads LDAP with the operator's settings already loaded: a
+	// new node needs them to find its master. Resolve the operator layers
+	// alone (no wizard, no validation) for that lookup.
+	quiet := opts.Options
+	quiet.NonInteractive = true
+	quiet.Output = ""
+
+	if pre, err := resolve(e.Ctx, e.Sys, stdin, io.Discard, io.Discard, &quiet, deps); err == nil {
+		e.Cfg = &pre.Config
+	}
+
+	// Joining a master writes its connection data to localconfig: not in a
+	// dry run.
+	if !opts.DryRun || !facts.NewInstall {
 		existing, err := setup.ExistingValues(e)
 		if err != nil {
 			_, _ = fmt.Fprintf(stderr, "Error: reading the existing configuration: %v\n", err)

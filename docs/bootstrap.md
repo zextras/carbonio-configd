@@ -37,10 +37,12 @@ printed configuration shows it as a comment (`# env`, `# detected`, ...).
 
 1. **Defaults**: built-in values, some read from the node (`detected`) and
    some drawn at random (`generated`).
-2. **File**: the YAML file, or the legacy file (`legacy`).
-3. **Environment**: `CARBONIO_BOOTSTRAP_*`.
-4. **Flags**: `--set`.
-5. **Wizard**: the answers.
+2. **Existing install** (`configd bootstrap run` only): on a node already
+   bootstrapped, the values in localconfig and LDAP (`existing`).
+3. **File**: the YAML file, or the legacy file (`legacy`).
+4. **Environment**: `CARBONIO_BOOTSTRAP_*`.
+5. **Flags**: `--set`.
+6. **Wizard**: the answers.
 
 Defaults are computed after the other layers, in key order, so a default
 follows the keys set before it: `domain.name` follows `host.hostname`, and
@@ -61,6 +63,8 @@ comma-separated in the environment and in `--set`. Booleans accept
 | `host.public_hostname` | `PUBLICSERVICEHOSTNAME` | `host.hostname` | always |
 | `host.ip_mode` | `zimbraIPMode` | `ipv6` on an IPv6-only node, else `ipv4` | |
 | `host.timezone` | `zimbraPrefTimeZoneId` | `/etc/localtime`, else `America/Los_Angeles` | |
+| `host.ssl_digest` | `ssl_default_digest` | `sha256` (`ripemd160`, `sha`, `sha1`, `sha224`, `sha256`, `sha384`, `sha512`) | |
+| `host.require_interprocess_security` | `ZIMBRA_REQ_SECURITY`, `zimbra_require_interprocess_security` | `false` | |
 | `ldap.host` | `LDAPHOST` | `host.hostname` on the LDAP master | always |
 | `ldap.port` | `LDAPPORT` | `389` | |
 | `ldap.root_password` (secret) | `LDAPROOTPASS` | generated on the LDAP master | directory-server |
@@ -68,6 +72,11 @@ comma-separated in the environment and in `--set`. Booleans accept
 | `ldap.postfix_password` (secret) | `LDAPPOSTPASS` | generated on the LDAP master | directory-server, mta |
 | `ldap.amavis_password` (secret) | `LDAPAMAVISPASS` | generated on the LDAP master | directory-server, mta |
 | `ldap.nginx_password` (secret) | `ldap_nginx_password` | generated on the LDAP master | directory-server, proxy |
+| `ldap.base_dn` | `ldap_dit_base_dn_config` | `cn=zimbra` | |
+| `ldap.replication_type` | `LDAPREPLICATIONTYPE` | `master` when `ldap.host` is this node, else `replica` (`master`, `replica`, `mmr`) | directory-server |
+| `ldap.server_id` | `LDAPSERVERID` | `2` | when `mmr` |
+| `ldap.replication_password` (secret) | `LDAPREPPASS` | generated on the LDAP master | directory-server |
+| `ldap.force_replication` | `FORCEREPLICATION` | `false` | |
 | `domain.create` | `DOCREATEDOMAIN` | `true` on the LDAP master | |
 | `domain.name` | `CREATEDOMAIN` | `host.hostname` minus its first label | when `domain.create` |
 | `admin.create` | `DOCREATEADMIN` | `true` on an application server | |
@@ -86,6 +95,9 @@ comma-separated in the environment and in `--set`. Booleans accept
 | `store.mail_proxy`, `store.web_proxy` | `zimbraMailProxy`, `zimbraWebProxy` | `true` | |
 | `store.spam_training` | `DOTRAINSA` | `true` | |
 | `store.spam_account`, `store.ham_account` | `TRAINSASPAM`, `TRAINSAHAM` | `spam.<random>@<domain>`, `ham.<random>@<domain>` | appserver, with training |
+| `store.keyboard_shortcuts` | `USEKBSHORTCUTS` | `true` | |
+| `store.mailboxd_memory_mb` | `MAILBOXDMEMORY` | a quarter of the memory, a fifth above 16 GB | |
+| `store.mysql_memory_percent` | `MYSQLMEMORYPERCENT` | `30` | |
 | `store.virus_quarantine_account` | `VIRUSQUARANTINE` | `virus-quarantine.<random>@<domain>` | appserver |
 | `store.ports.{imap,imaps,pop3,pop3s,http,https}` | `IMAPPORT` ... `HTTPSPORT` | `7143 7993 7110 7995 80 443` with a proxy on the node, else `143 993 110 995 80 443` | |
 | `proxy.mode` | `PROXYMODE` | `https` (`https`, `redirect`) | |
@@ -94,8 +106,12 @@ comma-separated in the environment and in `--set`. Booleans accept
 | `proxy.ports.{imap,imaps,pop3,pop3s,http,https}` | `IMAPPROXYPORT` ... `HTTPSPROXYPORT` | `143 993 110 995 8080 8443` on a proxy, else `7143 7993 7110 7995 8080 8443` | |
 | `start_services` | `STARTSERVERS` | `true` | |
 
-Passwords are generated only on the LDAP master. Every other node must be
-given the passwords of the master.
+Passwords are generated only on the LDAP master. Every other node, replicas
+included, must be given the passwords of the master.
+
+A `replica` or `mmr` directory server replicates from `ldap.host`, which must
+then be another node (unless `ldap.force_replication`); a `master` must name
+itself.
 
 Validation also rejects names that are not fully qualified, malformed
 addresses and networks, ports outside 1-65535, and a proxy and a mailbox on
@@ -170,8 +186,6 @@ configd bootstrap config --legacy-config /opt/zextras/config.12345 --output /etc
   Each one is listed on stderr with the reason (`Note: legacy key EXPANDMENU
   not imported: obsolete`).
 - An unknown key is an error.
-- `LDAPREPLICATIONTYPE` other than `master` is an error: LDAP replication is
-  not supported by `configd bootstrap`.
 - Files saved by `setup.pl` hold no passwords, because `saveConfig` skips
   them. A hand-written file may hold some. They are used for the run but not
   written by `--output`; give them again through `*_FILE`, a `_file` key or
