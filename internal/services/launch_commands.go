@@ -104,6 +104,17 @@ func (c *Controller) reloadCommands(ctx context.Context, def *ServiceDef) error 
 
 	logger.InfoContext(ctx, "Reloading service natively (legacy mode)", "service", def.Name)
 
+	return c.reloadVerb(ctx, def)
+}
+
+// reloadVerb runs the ReloadPrepare steps, then the Reload verb. It is the
+// whole reload of the systemd ExecReload leaf, where systemd owns the
+// dependencies.
+func (c *Controller) reloadVerb(ctx context.Context, def *ServiceDef) error {
+	if err := c.runSteps(ctx, def.Commands.ReloadPrepare); err != nil {
+		return err
+	}
+
 	out, err := c.controlCommand(ctx, def, def.Commands.Reload)
 	if err != nil {
 		return fmt.Errorf("%s %s: %s: %w", def.BinaryPath,

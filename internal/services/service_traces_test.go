@@ -294,6 +294,9 @@ func traceScenarios() []traceScenario {
 	stopSystemd := func(ctx context.Context, ctl *Controller, svc string) string {
 		return result(ctl.ServiceStopSystemd(ctx, svc))
 	}
+	reloadSystemd := func(ctx context.Context, ctl *Controller, svc string) string {
+		return result(ctl.ServiceReloadSystemd(ctx, svc))
+	}
 	refresh := func(ctx context.Context, ctl *Controller, svc string) string {
 		rep, err := ctl.ServiceRefresh(ctx, svc)
 
@@ -327,6 +330,7 @@ func traceScenarios() []traceScenario {
 		{name: "systemd status active", strict: true, do: status},
 		{name: "systemd start-systemd", strict: true, do: startSystemd},
 		{name: "systemd stop-systemd", strict: true, do: stopSystemd},
+		{name: "systemd reload-systemd", strict: true, running: true, do: reloadSystemd},
 	}
 }
 

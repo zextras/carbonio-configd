@@ -393,7 +393,7 @@ func TestCommandTree_Visible(t *testing.T) {
 	assert.ElementsMatch(t, []string{"fmt", "lint", "render"}, names(find("proxy", "template")))
 	assert.ElementsMatch(t, []string{"gacf", "gcf", "gs", "mcf", "search", "wait"}, names(find("ldap")))
 
-	for _, hidden := range [][]string{{"daemon"}, {"service", "start-systemd"}, {"service", "stop-systemd"}, {"service", "restart-systemd"}} {
+	for _, hidden := range [][]string{{"daemon"}, {"service", "start-systemd"}, {"service", "stop-systemd"}, {"service", "reload-systemd"}, {"service", "restart-systemd"}} {
 		assert.True(t, find(hidden...).Hidden, hidden)
 	}
 }

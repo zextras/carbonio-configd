@@ -208,9 +208,12 @@ on stderr and exits `1`. A verb a service does not have (e.g. `refresh` on
 On an LDAP replica whose `ldap_url` is its `ldap_master_url`, every verb for
 `ldap` except `stop`/`kill` is refused (legacy `ldap.sh` guard).
 
-Three hidden verbs, `start-systemd`, `stop-systemd` and `restart-systemd`, are
-what the Carbonio systemd units run as `ExecStart`/`ExecStop`: they act
-in-process and never call `systemctl`, so a unit cannot recurse into itself.
+Four hidden verbs, `start-systemd`, `stop-systemd`, `reload-systemd` and
+`restart-systemd`, are what the Carbonio systemd units run as
+`ExecStart`/`ExecStop`/`ExecReload`: they act in-process and never call
+`systemctl`, so a unit cannot recurse into itself. `reload-systemd` exists only
+for services with a native reload (`mta`: re-render the `ldap-*.cf` tables, then
+`postfix reload`); any other service fails.
 
 How a start/stop is carried out depends on the orchestration mode: with a
 Carbonio systemd target enabled the verb goes through `systemctl` (polkit rule

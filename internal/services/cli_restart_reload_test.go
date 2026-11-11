@@ -151,13 +151,19 @@ func stubMTADeps(t *testing.T, ctl *Controller, saslEnabled, milterEnabled bool)
 	return calls
 }
 
+// mtaReloadConfig is the localconfig an MTA reload needs to re-render the
+// ldap-*.cf tables.
+func mtaReloadConfig() (map[string]string, error) {
+	return map[string]string{"ldap_url": "ldap://localhost", "ldap_port": "389"}, nil
+}
+
 // TestServiceReload_Legacy_MTA_RestartsEnabledDeps pins legacy zmmtactl
 // reload: saslauthd (and milter when enabled) are stopped and started before
 // postfix reload; a disabled milter is left alone.
 func TestServiceReload_Legacy_MTA_RestartsEnabledDeps(t *testing.T) {
 	t.Parallel()
 
-	ctl, _ := newFakeController(t)
+	ctl, _ := newFakeController(t, WithConfigLoader(mtaReloadConfig))
 
 	ctl.pinMode(false)
 
@@ -183,7 +189,7 @@ func TestServiceReload_Legacy_MTA_RestartsEnabledDeps(t *testing.T) {
 func TestServiceReload_Legacy_MTA_NativeReload(t *testing.T) {
 	t.Parallel()
 
-	ctl, f := newFakeController(t)
+	ctl, f := newFakeController(t, WithConfigLoader(mtaReloadConfig))
 
 	ctl.pinMode(false)
 

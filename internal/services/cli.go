@@ -430,6 +430,35 @@ func (c *Controller) ServiceStopSystemd(ctx context.Context, name string) error 
 	return nil
 }
 
+// ServiceReloadSystemd is the leaf reload path invoked from the
+// carbonio-*.service unit's ExecReload (via `configd service reload-systemd
+// <name>`). It runs the service's native reload in-process (ReloadPrepare
+// steps, then the Reload verb) and NEVER calls systemctl, mirroring
+// ServiceStartSystemd. Dependencies are left to systemd. A service without a
+// native reload fails: its unit must not declare this ExecReload.
+func (c *Controller) ServiceReloadSystemd(ctx context.Context, name string) error {
+	ctx = logger.ContextWithComponentOnce(ctx, serviceCliComponent)
+
+	def := c.LookupService(name)
+	if def == nil {
+		return fmt.Errorf(errUnknownService, name)
+	}
+
+	if c.idleWhenDisabled(ctx, def) {
+		return nil
+	}
+
+	if def.Commands == nil || def.Commands.Reload == nil {
+		return fmt.Errorf("reload service %s: no native reload", name)
+	}
+
+	if err := c.reloadVerb(ctx, def); err != nil {
+		return fmt.Errorf("reload service %s: %w", name, err)
+	}
+
+	return nil
+}
+
 // ServiceRestart restarts a service.
 func (c *Controller) ServiceRestart(ctx context.Context, name string) error {
 	ctx = logger.ContextWithComponentOnce(ctx, serviceCliComponent)

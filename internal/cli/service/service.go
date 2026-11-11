@@ -21,9 +21,9 @@ import (
 // Action is the "configd service" subcommand to run.
 type Action string
 
-// The service subcommands. StartSystemd and StopSystemd are the hidden
-// systemd ExecStart/ExecStop leaves: they act in-process and never call
-// systemctl.
+// The service subcommands. StartSystemd, StopSystemd and ReloadSystemd are the
+// hidden systemd ExecStart/ExecStop/ExecReload leaves: they act in-process and
+// never call systemctl.
 const (
 	ActionList         Action = "list"
 	ActionStart        Action = "start"
@@ -33,6 +33,8 @@ const (
 	ActionStatus       Action = "status"
 	ActionStartSystemd Action = "start-systemd"
 	ActionStopSystemd  Action = "stop-systemd"
+	// ActionReloadSystemd is the ExecReload leaf: native reload in-process.
+	ActionReloadSystemd Action = "reload-systemd"
 	// ActionRestartSystemd is stop-systemd then start-systemd (legacy
 	// zmstatctl restart-systemd).
 	ActionRestartSystemd Action = "restart-systemd"
@@ -96,13 +98,14 @@ func newRunner(env sys.System, opts *Options) *runner {
 		ctl:      ctl,
 		reporter: status.NewReporter(env, ctl),
 		mutations: map[Action]mutation{
-			ActionStart:        {"start", ctl.ServiceStart},
-			ActionStop:         {"stop", ctl.ServiceStop},
-			ActionKill:         {"kill", ctl.ServiceStop},
-			ActionRestart:      {"restart", ctl.ServiceRestart},
-			ActionReload:       {"reload", ctl.ServiceReload},
-			ActionStartSystemd: {"start", ctl.ServiceStartSystemd},
-			ActionStopSystemd:  {"stop", ctl.ServiceStopSystemd},
+			ActionStart:         {"start", ctl.ServiceStart},
+			ActionStop:          {"stop", ctl.ServiceStop},
+			ActionKill:          {"kill", ctl.ServiceStop},
+			ActionRestart:       {"restart", ctl.ServiceRestart},
+			ActionReload:        {"reload", ctl.ServiceReload},
+			ActionStartSystemd:  {"start", ctl.ServiceStartSystemd},
+			ActionStopSystemd:   {"stop", ctl.ServiceStopSystemd},
+			ActionReloadSystemd: {"reload", ctl.ServiceReloadSystemd},
 			ActionRestartSystemd: {"restart", func(ctx context.Context, name string) error {
 				if err := ctl.ServiceStopSystemd(ctx, name); err != nil {
 					return err

@@ -84,6 +84,9 @@ type CommandSpec struct {
 	// service is not running already (main.cf bootstrap, table rendering,
 	// aliases rebuild).
 	Prepare []Step
+	// ReloadPrepare are the steps run, in order, before every Reload verb
+	// (the MTA's ldap-*.cf rendering, which legacy postfix reload redid).
+	ReloadPrepare []Step
 	// RestartAsReload turns `restart` into a configuration rewrite followed by
 	// a reload: the service is never stopped for a restart (postfix).
 	RestartAsReload bool

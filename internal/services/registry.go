@@ -416,6 +416,7 @@ func (c *Controller) defaultRegistry() map[string]*ServiceDef {
 						IfExists: c.p.aliases, BestEffort: true,
 					}},
 				},
+				ReloadPrepare:              []Step{{Hook: c.prepareLDAPTables}},
 				RestartAsReload:            true,
 				ReloadRestartsDependencies: true,
 			},

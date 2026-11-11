@@ -23,7 +23,7 @@ func parseServiceCLI(t *testing.T, argv ...string) (*CLI, string, error) {
 func TestServiceVerbs_AcceptTrailingLegacyArgs(t *testing.T) {
 	verbs := []string{
 		"start", "stop", "kill", "restart", "reload", "status", "refresh", "rotate",
-		"start-systemd", "stop-systemd", "restart-systemd",
+		"start-systemd", "stop-systemd", "reload-systemd", "restart-systemd",
 	}
 
 	for _, verb := range verbs {

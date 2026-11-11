@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -228,6 +229,44 @@ func TestServiceStartSystemd_UnknownService(t *testing.T) {
 
 	if err := ctl.ServiceStartSystemd(context.Background(), "nonexistent-service-xyz"); err == nil {
 		t.Error("expected error for unknown service")
+	}
+}
+
+// TestServiceReloadSystemd_Errors pins the ExecReload leaf's refusals: an
+// unknown service, and a service with no native reload (a unit declaring this
+// ExecReload for it would otherwise report a reload that never happened).
+func TestServiceReloadSystemd_Errors(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	if err := ctl.ServiceReloadSystemd(context.Background(), "nonexistent-service-xyz"); err == nil {
+		t.Error("expected error for unknown service")
+	}
+
+	err := ctl.ServiceReloadSystemd(context.Background(), "memcached")
+	if err == nil || !strings.Contains(err.Error(), "no native reload") {
+		t.Errorf("memcached reload-systemd error = %v, want no native reload", err)
+	}
+}
+
+// TestServiceReloadSystemd_PrepareFailureSkipsReload verifies a failed
+// ldap-*.cf render aborts the reload: postfix must not reload against stale
+// or partial tables.
+func TestServiceReloadSystemd_PrepareFailureSkipsReload(t *testing.T) {
+	t.Parallel()
+
+	ctl, f := newFakeController(t, WithConfigLoader(func() (map[string]string, error) {
+		return map[string]string{}, nil
+	}))
+
+	err := ctl.ServiceReloadSystemd(context.Background(), "mta")
+	if err == nil || !strings.Contains(err.Error(), "render ldap-*.cf") {
+		t.Fatalf("ServiceReloadSystemd(mta) error = %v, want render ldap-*.cf failure", err)
+	}
+
+	if calls := f.Exec.Lines(); len(calls) != 0 {
+		t.Errorf("no command may run after a failed render, got %q", calls)
 	}
 }
 
