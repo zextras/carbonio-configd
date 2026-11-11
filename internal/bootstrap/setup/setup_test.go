@@ -71,7 +71,7 @@ func TestRun_ChecksBeforeApplyingAndRecordsStages(t *testing.T) {
 	}
 
 	assert.Equal(t, []string{"CONFIG SESSION START", "CONFIGURED BEGIN", "CONFIGURED configA",
-		"CONFIGURED configE", "CONFIGURED END", "CONFIG SESSION COMPLETE"}, stages)
+		"CONFIGURED configC", "CONFIGURED configE", "CONFIGURED END", "CONFIG SESSION COMPLETE"}, stages)
 
 	// The history the run wrote ends the new install.
 	var f Facts

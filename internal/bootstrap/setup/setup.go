@@ -156,7 +156,7 @@ func runStep(e *Env, s *Step, dryRun bool) (Result, error) {
 
 			e.Log.Detail("%s: already done", s.Title)
 
-			return res, nil
+			return res, recordDone(e, s, dryRun)
 		}
 	}
 
@@ -184,6 +184,17 @@ func runStep(e *Env, s *Step, dryRun bool) (Result, error) {
 	}
 
 	return res, nil
+}
+
+// recordDone records the stage of a step found already done: setup.pl
+// records a stage whenever its sub ran, also when there was nothing left to
+// do.
+func recordDone(e *Env, s *Step, dryRun bool) error {
+	if dryRun || s.Name == "" || e.Facts.Configured[s.Name] {
+		return nil
+	}
+
+	return e.history().configured(s.Name)
 }
 
 func failed(e *Env, s *Step, res Result, err error) (Result, error) {

@@ -73,6 +73,8 @@ is_volatile() {
     find "${root}" -mindepth 0 -printf '%p\t%y\t%m\t%u:%g\t%l\n' | sort
   done
 } | while IFS=$'\t' read -r path type mode owner link; do
+  # configd's localconfig write lock: an implementation artefact, not state.
+  [[ ${path} == "${ZX}/conf/localconfig.xml.lock" ]] && continue
   case "${type}" in
     f)
       if is_volatile "${path}"; then
