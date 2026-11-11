@@ -193,3 +193,62 @@ func TestIsConfPath(t *testing.T) {
 		}
 	}
 }
+
+// A stale entry that cannot be removed must not hide the real error, and a
+// staging directory that cannot be read is skipped.
+func TestClearStagingFailuresAreNonFatal(t *testing.T) {
+	t.Parallel()
+
+	f := systest.New()
+	f.Proc.UserID = 0
+	f.FS.PutDir(staging, 0o700)
+	f.FS.Put(staging+"/stale", []byte("x"), 0o600)
+	f.FS.Fail = func(op, p string) error {
+		if op == "RemoveAll" && strings.HasSuffix(p, "/stale") {
+			return errors.New("busy")
+		}
+
+		return nil
+	}
+
+	if err := NewClient(base, f.System(), nil).Apply(context.Background(),
+		postfixconf.Change{Unset: []string{"relayhost"}}); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	f.FS.Fail = func(op, _ string) error {
+		if op == "ReadDir" {
+			return errors.New("unreadable")
+		}
+
+		return nil
+	}
+
+	if err := NewClient(base, f.System(), nil).Apply(context.Background(),
+		postfixconf.Change{Unset: []string{"relayhost"}}); err != nil {
+		t.Fatalf("Apply with an unreadable staging dir: %v", err)
+	}
+}
+
+func TestStagingDirCreationFailure(t *testing.T) {
+	t.Parallel()
+
+	f := systest.New()
+	f.Proc.UserID = 0
+	f.FS.Fail = func(op, _ string) error {
+		if op == "MkdirAll" {
+			return errors.New("read-only")
+		}
+
+		return nil
+	}
+
+	err := NewClient(base, f.System(), nil).Apply(context.Background(), postfixconf.Change{Unset: []string{"relayhost"}})
+	if err == nil || !strings.Contains(err.Error(), "staging dir") {
+		t.Fatalf("err = %v, want a staging-dir error", err)
+	}
+
+	if len(f.Exec.Lines()) != 0 {
+		t.Error("the helper must not run when staging failed")
+	}
+}

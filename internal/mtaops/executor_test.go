@@ -95,6 +95,23 @@ func TestExecutor_Initialization(t *testing.T) {
 	}
 }
 
+// WithSystemdMode makes the executor trigger the helper through systemd.
+func TestExecutor_WithSystemdMode(t *testing.T) {
+	t.Parallel()
+
+	fakes := systest.New()
+	fakes.Proc.UserID = 1000
+
+	ex := NewExecutor(testBaseDir, &mockLdapManager{}, fakes.System(), WithSystemdMode(func() bool { return true }))
+	if err := ex.ExecutePostconfBatch(context.Background(), []PostconfOperation{{Key: "myhostname", Value: "h"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	if got, want := fakes.Exec.Lines(), []string{"/usr/bin/systemctl start carbonio-postfix-conf.service"}; !slices.Equal(got, want) {
+		t.Errorf("commands = %q, want %q", got, want)
+	}
+}
+
 func TestExecutePostconf(t *testing.T) {
 	t.Parallel()
 

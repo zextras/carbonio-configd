@@ -314,7 +314,7 @@ func (cm *ConfigManager) processRewrite(ctx context.Context, filePath string, re
 	destPath := cm.mainConfig.BaseDir + "/" + rewriteEntry.Value
 
 	if cm.postfixClient().IsConfPath(destPath) {
-		return cm.processPostfixConfRewrite(ctx, srcPath, destPath)
+		return cm.processPostfixConfRewrite(ctx, filePath, srcPath, destPath)
 	}
 
 	tmpFile, err := cm.env.FS.CreateTemp(filepath.Dir(destPath), ".zmconfigd-rewrite-*.tmp")
@@ -369,7 +369,7 @@ func (cm *ConfigManager) postfixClient() *pfclient.Client {
 // root-owned common/conf (master.cf, tag_as_*.re). configd cannot write there:
 // the rendered content is staged and installed by carbonio-postfix-conf, which
 // validates it and sets the owner and mode itself (the REWRITE mode is moot).
-func (cm *ConfigManager) processPostfixConfRewrite(ctx context.Context, srcPath, destPath string) error {
+func (cm *ConfigManager) processPostfixConfRewrite(ctx context.Context, filePath, srcPath, destPath string) error {
 	name := filepath.Base(destPath)
 	if filepath.Dir(destPath) != filepath.Join(cm.mainConfig.BaseDir, "common", "conf") ||
 		!postfixconf.IsInstallable(name) {
@@ -386,7 +386,7 @@ func (cm *ConfigManager) processPostfixConfRewrite(ctx context.Context, srcPath,
 	}
 
 	if batch, ok := ctx.Value(postfixBatchKey{}).(*postfixRewriteBatch); ok {
-		batch.add(name, srcPath, rendered.Bytes())
+		batch.add(name, filePath, rendered.Bytes())
 
 		logger.DebugContext(ctx, "File rendered for carbonio-postfix-conf",
 			"dest_path", destPath, "lines_processed", lineCount)

@@ -124,19 +124,23 @@ func (o *Options) Commit(ctx context.Context, change *Change) error {
 		return err
 	}
 
-	names := make([]string, 0, len(change.Files))
 	for _, name := range InstallableFiles {
-		if _, ok := change.Files[name]; ok {
-			names = append(names, name)
+		data, ok := change.Files[name]
+		if !ok {
+			continue
 		}
-	}
 
-	for _, name := range names {
-		if err := o.install(conf, name, change.Files[name]); err != nil {
+		if err := o.install(conf, name, data); err != nil {
 			return err
 		}
 	}
 
+	return o.runPostconfSteps(ctx, change)
+}
+
+// runPostconfSteps runs postconf -X for the unset list, then postconf -e for the
+// assignments.
+func (o *Options) runPostconfSteps(ctx context.Context, change *Change) error {
 	if len(change.Unset) > 0 {
 		// postconf -X silently skips a parameter main.cf does not define
 		// (postconf_edit.c pcf_edit_main), so any failure is real.

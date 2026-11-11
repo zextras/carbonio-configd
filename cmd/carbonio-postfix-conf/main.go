@@ -15,6 +15,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/user"
 	"strconv"
@@ -25,20 +26,29 @@ import (
 const stagingUser = "zextras"
 
 func main() {
-	os.Exit(run())
+	os.Exit(run(context.Background(), os.Args[1:], os.Geteuid(), os.Stderr, user.Lookup, postfixconf.DefaultOptions))
 }
 
-func run() int {
+// run is main with its inputs injected: the arguments, the effective uid, the
+// error stream, the user lookup and the Options builder.
+func run(
+	ctx context.Context,
+	args []string,
+	euid int,
+	stderr io.Writer,
+	lookup func(name string) (*user.User, error),
+	newOptions func(stagingUID uint32) postfixconf.Options,
+) int {
 	// Only apply reads a staging directory, so only apply needs the zextras
 	// uid; set and unset must work without that user. Without it apply accepts
 	// root-owned staging only.
 	var uid uint32
 
-	if len(os.Args) > 1 && os.Args[1] == "apply" {
-		if u, err := user.Lookup(stagingUser); err == nil {
+	if len(args) > 0 && args[0] == "apply" {
+		if u, err := lookup(stagingUser); err == nil {
 			n, perr := strconv.ParseUint(u.Uid, 10, 32)
 			if perr != nil {
-				fmt.Fprintf(os.Stderr, "carbonio-postfix-conf: bad uid %q of %s\n", u.Uid, stagingUser)
+				_, _ = fmt.Fprintf(stderr, "carbonio-postfix-conf: bad uid %q of %s\n", u.Uid, stagingUser)
 
 				return postfixconf.ExitFailure
 			}
@@ -47,7 +57,7 @@ func run() int {
 		}
 	}
 
-	opts := postfixconf.DefaultOptions(uid)
+	opts := newOptions(uid)
 
-	return postfixconf.RunCLI(context.Background(), os.Args[1:], os.Geteuid(), &opts, os.Stderr)
+	return postfixconf.RunCLI(ctx, args, euid, &opts, stderr)
 }

@@ -13,6 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/plan"
+	"github.com/zextras/carbonio-configd/internal/postfixconf"
 	"github.com/zextras/carbonio-configd/internal/state"
 	"github.com/zextras/carbonio-configd/internal/sys/systest"
 	"github.com/zextras/carbonio-configd/internal/transformer"
@@ -80,4 +82,129 @@ func TestProcessRewrite_CommonConfRejectsUnknownTarget(t *testing.T) {
 		config.RewriteEntry{Value: "common/conf/main.cf"})
 	require.Error(t, err)
 	assert.Empty(t, fakes.Exec.Calls())
+}
+
+const (
+	batchBase   = "/opt/zextras"
+	batchHelper = batchBase + "/libexec/carbonio-postfix-conf"
+	batchStage  = batchBase + "/data/postfix/conf-staging/"
+)
+
+var batchFiles = []string{"master.cf", "tag_as_foreign.re", "tag_as_originating.re"}
+
+// newBatchCM returns a manager running as root (the helper is exec'd directly)
+// with the three common/conf templates in the fake filesystem.
+func newBatchCM(t *testing.T, masterContent string) (*ConfigManager, *systest.Fakes, []plan.Rewrite) {
+	t.Helper()
+
+	fakes := systest.New()
+	fakes.Proc.UserID = 0
+
+	var entries []plan.Rewrite
+
+	for _, name := range batchFiles {
+		content := "/pattern/ OK\n"
+		if name == "master.cf" {
+			content = masterContent
+		}
+
+		fakes.FS.Put(batchBase+"/common/conf/"+name+".in", []byte(content), 0o644)
+
+		entries = append(entries, plan.Rewrite{Source: "common/conf/" + name + ".in", Target: "common/conf/" + name})
+	}
+
+	cm := &ConfigManager{
+		env:        fakes.System(),
+		mainConfig: &config.Config{BaseDir: batchBase},
+		State:      state.NewState(),
+	}
+	cm.Transformer = transformer.NewTransformer(cm)
+
+	return cm, fakes, entries
+}
+
+const validMaster = "smtp inet n - n - - smtpd\n"
+
+// The three root-owned files of one rewrite pass are staged together and
+// installed by a single helper run.
+func TestDoRewrites_CommonConfBatchIsOneHelperRun(t *testing.T) {
+	t.Parallel()
+
+	cm, fakes, entries := newBatchCM(t, validMaster)
+
+	pending, err := cm.doRewrites(context.Background(), entries)
+	require.NoError(t, err)
+	assert.Empty(t, pending)
+	assert.Equal(t, []string{batchHelper + " apply"}, fakes.Exec.Lines(), "one helper run for the whole batch")
+
+	for _, name := range batchFiles {
+		_, ok := fakes.FS.Data(batchStage + name)
+		assert.True(t, ok, "%s must be staged", name)
+	}
+}
+
+// A file the helper's validator rejects fails alone: the others are installed
+// by their own run and only the invalid one stays pending.
+func TestDoRewrites_CommonConfValidationFailureIsolatesTheFile(t *testing.T) {
+	t.Parallel()
+
+	cm, fakes, entries := newBatchCM(t, "smtp inet n - n - - /tmp/evil\n")
+
+	pending, err := cm.doRewrites(context.Background(), entries)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, postfixconf.ErrValidation)
+
+	require.Len(t, pending, 1)
+	assert.Equal(t, "common/conf/master.cf.in", pending[0].Source)
+	assert.Len(t, fakes.Exec.Lines(), 2, "the two valid files are installed by one run each")
+}
+
+// A helper that cannot be run fails every file of the batch; they all stay
+// pending and nothing is retried file by file.
+func TestDoRewrites_CommonConfTriggerFailureKeepsAllPending(t *testing.T) {
+	t.Parallel()
+
+	cm, fakes, entries := newBatchCM(t, validMaster)
+	fakes.Exec.OnPath(batchHelper, systest.Fail(1, "boom"))
+
+	pending, err := cm.doRewrites(context.Background(), entries)
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, postfixconf.ErrValidation)
+	assert.Len(t, pending, len(batchFiles))
+	assert.Len(t, fakes.Exec.Lines(), 1, "a trigger failure is not retried per file")
+}
+
+// A single invalid file is not retried a second time.
+func TestDoRewrites_CommonConfSingleInvalidFile(t *testing.T) {
+	t.Parallel()
+
+	cm, fakes, entries := newBatchCM(t, "smtp inet n - n - - /tmp/evil\n")
+
+	pending, err := cm.doRewrites(context.Background(), entries[:1])
+	require.Error(t, err)
+	assert.Len(t, pending, 1)
+	assert.Empty(t, fakes.Exec.Lines())
+}
+
+func TestProcessRewrite_CommonConfRenderFailure(t *testing.T) {
+	t.Parallel()
+
+	cm, fakes, _ := newBatchCM(t, validMaster)
+
+	err := cm.processRewrite(context.Background(), "common/conf/missing.in",
+		config.RewriteEntry{Value: "common/conf/master.cf"})
+	require.Error(t, err)
+	assert.Empty(t, fakes.Exec.Lines())
+}
+
+func TestProcessRewrite_CommonConfTriggerFailure(t *testing.T) {
+	t.Parallel()
+
+	cm, fakes, _ := newBatchCM(t, validMaster)
+	fakes.Exec.OnPath(batchHelper, systest.Fail(1, "boom"))
+
+	err := cm.processRewrite(context.Background(), "common/conf/master.cf.in",
+		config.RewriteEntry{Value: "common/conf/master.cf"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "commit rewrite")
 }

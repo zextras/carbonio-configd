@@ -177,47 +177,53 @@ func validateEntry(text string) error {
 // brace forms and user= attributes.
 func validateArgs(service, command string, args []string) error {
 	for i := 0; i < len(args); i++ {
-		tok := args[i]
-		wrapped := false
-
-		switch {
-		case tok == "{" && i+1 < len(args) && strings.HasPrefix(args[i+1], "-o"):
-			wrapped = true
-			i++
-			tok = args[i]
-		case strings.HasPrefix(tok, "{-o"):
-			wrapped = true
-			tok = tok[1:]
+		next, err := validateArg(service, command, args, i)
+		if err != nil {
+			return err
 		}
 
-		switch {
-		case strings.HasPrefix(tok, "-o"):
-			next, err := validateOverrideArg(args, i, tok[2:], wrapped)
-			if err != nil {
-				return err
-			}
-
-			i = next
-		case wrapped:
-			return validationf("service %s: malformed { -o ... } group", service)
-		case strings.HasPrefix(tok, "-"):
-			// Any other cluster or attached argument that contains o or D is
-			// ambiguous (-vo name=value, -vD, -nfoo): refuse.
-			if strings.ContainsAny(tok[1:], "oD") {
-				return validationf("service %s: option %q is not allowed", service, optionDisplay(tok))
-			}
-		default:
-			if strings.ContainsAny(stripMacros(command, tok), "{}") {
-				return validationf("service %s: '{' or '}' outside a -o override", service)
-			}
-
-			if runsAsRoot(tok) {
-				return validationf("service %s must not run as root", service)
-			}
-		}
+		i = next
 	}
 
 	return nil
+}
+
+// validateArg checks the argument at args[i] and returns the index of the last
+// token it consumed.
+func validateArg(service, command string, args []string, i int) (int, error) {
+	tok := args[i]
+	wrapped := false
+
+	switch {
+	case tok == "{" && i+1 < len(args) && strings.HasPrefix(args[i+1], "-o"):
+		wrapped = true
+		i++
+		tok = args[i]
+	case strings.HasPrefix(tok, "{-o"):
+		wrapped = true
+		tok = tok[1:]
+	}
+
+	switch {
+	case strings.HasPrefix(tok, "-o"):
+		return validateOverrideArg(args, i, tok[2:], wrapped)
+	case strings.HasPrefix(tok, "-"):
+		// Any other cluster or attached argument that contains o or D is
+		// ambiguous (-vo name=value, -vD, -nfoo): refuse.
+		if strings.ContainsAny(tok[1:], "oD") {
+			return i, validationf("service %s: option %q is not allowed", service, optionDisplay(tok))
+		}
+	default:
+		if strings.ContainsAny(stripMacros(command, tok), "{}") {
+			return i, validationf("service %s: '{' or '}' outside a -o override", service)
+		}
+
+		if runsAsRoot(tok) {
+			return i, validationf("service %s must not run as root", service)
+		}
+	}
+
+	return i, nil
 }
 
 // pipeMacroRe is a pipe(8)/spawn(8) argv macro such as ${recipient}, which the
