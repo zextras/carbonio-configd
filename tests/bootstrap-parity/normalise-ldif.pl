@@ -24,7 +24,7 @@ my %DROP = map { lc($_) => 1 } qw(
 );
 
 # Attribute names whose value is a secret or key material.
-my $SECRET_ATTR = qr/(?:(?:password|passwd|pass|pw)$|^olcrootpw$|privatekey|publickey|certificate
+my $SECRET_ATTR = qr/(?:(?:password|passwd|pass|pw)$|^olcrootpw$|privatekey|publickey|certificate|certauthority|dhparam|sslcert
   |^zimbraauthtokenkey$|^zimbracsrftokenkey$|secret|^zimbradkimselector$|^zimbradkimprivatekey$)/xi;
 
 local $/ = undef;
@@ -85,6 +85,7 @@ for my $e (@entries) {
             $val =~ s/^\d{14}(?:\.\d+)?Z$/<time>/;
             $val = scrub($val);
         }
+        $val =~ s/\n/\\n/g;    # multi-line values (PEM) stay one sortable line
         push @lines, "$name: $val";
     }
     push @out, [ scrub($dn), join("\n", sort @lines) ];

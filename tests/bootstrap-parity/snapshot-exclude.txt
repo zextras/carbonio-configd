@@ -23,6 +23,4 @@
 /opt/zextras/conf/*.lock
 /opt/zextras/conf/*.keystore
 /opt/zextras/conf/*.truststore
-/opt/zextras/conf/nginx/*
-/opt/zextras/conf/opendkim/*
-/opt/zextras/conf/spamassassin/*
+/opt/zextras/conf/carbonio.ldif

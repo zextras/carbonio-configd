@@ -63,6 +63,17 @@ RUN mkdir -p /run/systemd/system \
  && apt-get clean && rm -rf /var/lib/apt/lists/* \
  && dpkg-query -W -f='${Package} ${Version}\n' | sort > /opt/zextras/.parity-package-versions
 
+# What the maintainer scripts enabled is recorded and then switched off again:
+# started at container boot, the enabled carbonio targets would start every
+# (unconfigured) service before the bootstrap runs, which a real host never
+# does after `apt install`. lib.sh re-enables exactly this list with the
+# running systemd (enable only, no start) right before the bootstrap.
+RUN SYSTEMD_OFFLINE=1 systemctl list-unit-files --no-legend --no-pager --state=enabled \
+      | awk '{print $1}' | grep -E '^(carbonio|service-discover)' | sort \
+      > /usr/local/share/parity-enabled-units \
+ && test -s /usr/local/share/parity-enabled-units \
+ && SYSTEMD_OFFLINE=1 xargs -a /usr/local/share/parity-enabled-units systemctl disable
+
 # The legacy bootstrap leaves /tmp/zmsetup.log, the build must not.
 RUN rm -f /tmp/zmsetup.* && rm -rf /tmp/* /var/tmp/*
 

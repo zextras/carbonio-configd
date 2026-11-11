@@ -1,0 +1,102 @@
+## enabled unit files
+apt-daily-upgrade.timer enabled
+apt-daily.timer enabled
+carbonio-altermime-config.service enabled
+carbonio-altermime-config.timer enabled
+carbonio-antivirus.service enabled
+carbonio-appserver-db.service enabled
+carbonio-appserver.service enabled
+carbonio-appserver.target enabled
+carbonio-clamav-sidecar.service enabled
+carbonio-clamav-signature-provider-sidecar.service enabled
+carbonio-configd.service enabled
+carbonio-directory-server.target enabled
+carbonio-freshclam.service enabled
+carbonio-mailbox-admin-sidecar.service enabled
+carbonio-mailbox-internal-api-sidecar.service enabled
+carbonio-mailbox-nslookup-sidecar.service enabled
+carbonio-mailbox-sidecar.service enabled
+carbonio-mailthreat-update.service enabled
+carbonio-mailthreat-update.timer enabled
+carbonio-mailthreat.service enabled
+carbonio-memcached-sidecar.service enabled
+carbonio-memcached.service enabled
+carbonio-milter.service enabled
+carbonio-mta-sidecar.service enabled
+carbonio-mta.target enabled
+carbonio-nginx.service enabled
+carbonio-opendkim.service enabled
+carbonio-openldap.service enabled
+carbonio-postfix.service enabled
+carbonio-prometheus-consul-exporter.service enabled
+carbonio-prometheus-mysqld-exporter.service enabled
+carbonio-prometheus-nginx-exporter.service enabled
+carbonio-prometheus-node-exporter.service enabled
+carbonio-prometheus-openldap-exporter.service enabled
+carbonio-proxy-sidecar.service enabled
+carbonio-proxy.target enabled
+carbonio-saslauthd.service enabled
+carbonio-stats.service enabled
+carbonio.target enabled
+cron.service enabled
+dmesg.service enabled
+dpkg-db-backup.timer enabled
+e2scrub_all.timer enabled
+e2scrub_reap.service enabled
+fstrim.timer enabled
+getty@.service enabled
+motd-news.timer enabled
+remote-fs.target enabled
+rsyslog.service enabled
+service-discover.service enabled
+service-discover.target enabled
+systemd-pstore.service enabled
+systemd-resolved.service enabled
+## active units
+apt-daily-upgrade.timer
+apt-daily.timer
+basic.target
+carbonio-appserver-db.service
+carbonio-openldap.service
+cron.service
+cryptsetup.target
+dbus.service
+dbus.socket
+dpkg-db-backup.timer
+e2scrub_all.timer
+graphical.target
+integritysetup.target
+ldconfig.service
+local-fs-pre.target
+local-fs.target
+motd-news.timer
+multi-user.target
+network-online.target
+nss-lookup.target
+paths.target
+remote-fs.target
+rsyslog.service
+slices.target
+sockets.target
+swap.target
+sysinit.target
+syslog.socket
+systemd-initctl.socket
+systemd-journal-catalog-update.service
+systemd-journal-flush.service
+systemd-journald-dev-log.socket
+systemd-journald.service
+systemd-journald.socket
+systemd-resolved.service
+systemd-sysext.socket
+systemd-sysusers.service
+systemd-tmpfiles-clean.timer
+systemd-tmpfiles-setup-dev-early.service
+systemd-tmpfiles-setup-dev.service
+systemd-tmpfiles-setup.service
+systemd-update-done.service
+systemd-update-utmp.service
+systemd-user-sessions.service
+timers.target
+veritysetup.target
+## failed units

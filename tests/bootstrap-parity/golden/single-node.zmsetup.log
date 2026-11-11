@@ -1,0 +1,597 @@
+Operations logged to /tmp/zmsetup.20261111-033843.log
+
+Bootstrap mode: new install
+Installing LDAP configuration database...
+done.
+*** Running as zextras user: /opt/zextras/libexec/zmldapschema 2>/dev/null
+Looking for LDAP installation...succeeded
+Installing core schema...
+Installing cosine schema...
+Installing inetOrgPerson schema...
+Installing zimbra schema...
+Installing amavis schema...
+Installing dyngroup schema...
+Installing OpenDKIM schema...
+Getting installed packages
+checking isEnabled carbonio-core
+carbonio-core not in enabled cache
+enabled packages 
+New install enabling all installed packages
+Enabling carbonio-core
+Enabling carbonio-clamav
+Enabling carbonio-directory-server
+Enabling carbonio-mta
+Enabling carbonio-appserver
+Enabling carbonio-memcached
+Enabling carbonio-proxy
+Determining installed web applications
+checking isEnabled carbonio-appserver
+carbonio-appserver is enabled
+Web application service is enabled.
+Setting defaults...
+Setting local config zimbra_java_home to /opt/zextras/common/lib/jvm/java
+*** Running as zextras user: /opt/zextras/bin/zmlocalconfig -f -e zimbra_java_home='/opt/zextras/common/lib/jvm/java' 2> /dev/null
+checking isEnabled carbonio-appserver
+carbonio-appserver is enabled
+checking isEnabled carbonio-directory-server
+carbonio-directory-server is enabled
+checking isEnabled carbonio-directory-server
+carbonio-directory-server is enabled
+Local timezone detected as UTC
+Default Olson timezone name UTC
+checking isEnabled carbonio-mta
+carbonio-mta is enabled
+done.
+checking isEnabled carbonio-directory-server
+carbonio-directory-server is enabled
+checking isEnabled carbonio-appserver
+carbonio-appserver is enabled
+checking isEnabled carbonio-mta
+carbonio-mta is enabled
+checking isEnabled carbonio-proxy
+carbonio-proxy is enabled
+checking isEnabled carbonio-mta
+carbonio-mta is enabled
+antivirus not in enabled cache
+checking isEnabled carbonio-clamav
+carbonio-clamav is enabled
+checking isEnabled carbonio-proxy
+carbonio-proxy is enabled
+Checking for port conflicts
+Saving config in /opt/zextras/config.136...
+done.
+Operations logged to /tmp/zmsetup.20261111-033843.log
+checking isEnabled carbonio-appserver
+carbonio-appserver is enabled
+Determining installed web applications
+checking isEnabled carbonio-appserver
+carbonio-appserver is enabled
+Web application service is enabled.
+checking isEnabled carbonio-appserver
+carbonio-appserver is enabled
+Setting local config mailboxd_keystore to /opt/zextras/mailboxd/etc/keystore
+*** Running as zextras user: /opt/zextras/bin/zmlocalconfig -f -e mailboxd_keystore='/opt/zextras/mailboxd/etc/keystore' 2> /dev/null
+Setting local config mailboxd_server to jetty
+*** Running as zextras user: /opt/zextras/bin/zmlocalconfig -f -e mailboxd_server='jetty' 2> /dev/null
+Setting local config values...
+Setting local config zimbra_server_hostname to mail.parity.test
+*** Running as zextras user: /opt/zextras/bin/zmlocalconfig -f -e zimbra_server_hostname='mail.parity.test' 2> /dev/null
+Setting local config zimbra_require_interprocess_security to 0
+*** Running as zextras user: /opt/zextras/bin/zmlocalconfig -f -e zimbra_require_interprocess_security='0' 2> /dev/null
+Setting local config ldap_master_url to ldap://mail.parity.test:389
+*** Running as zextras user: /opt/zextras/bin/zmlocalconfig -f -e ldap_master_url='ldap://mail.parity.test:389' 2> /dev/null
+Setting local config ldap_url to ldap://mail.parity.test:389
+*** Running as zextras user: /opt/zextras/bin/zmlocalconfig -f -e ldap_url='ldap://mail.parity.test:389' 2> /dev/null
+Setting local config ldap_starttls_supported to 0
+*** Running as zextras user: /opt/zextras/bin/zmlocalconfig -f -e ldap_starttls_supported='0' 2> /dev/null
+checking isEnabled carbonio-appserver
+carbonio-appserver is enabled
+Setting local config zimbra_zmprov_default_to_ldap to false
+*** Running as zextras user: /opt/zextras/bin/zmlocalconfig -f -e zimbra_zmprov_default_to_ldap='false' 2> /dev/null
+Setting local config ldap_port to 389
+*** Running as zextras user: /opt/zextras/bin/zmlocalconfig -f -e ldap_port='389' 2> /dev/null
+Setting local config ldap_host to mail.parity.test
+*** Running as zextras user: /opt/zextras/bin/zmlocalconfig -f -e ldap_host='mail.parity.test' 2> /dev/null
+Setting local config zimbra_uid to 991
+*** Running as zextras user: /opt/zextras/bin/zmlocalconfig -f -e zimbra_uid='991' 2> /dev/null
+Setting local config zimbra_gid to 991
+*** Running as zextras user: /opt/zextras/bin/zmlocalconfig -f -e zimbra_gid='991' 2> /dev/null
+Setting local config zimbra_user to zextras
+*** Running as zextras user: /opt/zextras/bin/zmlocalconfig -f -e zimbra_user='zextras' 2> /dev/null
+Setting local config av_notify_user to zextras@parity.test
+*** Running as zextras user: /opt/zextras/bin/zmlocalconfig -f -e av_notify_user='zextras@parity.test' 2> /dev/null
+Setting local config av_notify_domain to parity.test
+*** Running as zextras user: /opt/zextras/bin/zmlocalconfig -f -e av_notify_domain='parity.test' 2> /dev/null
+Setting local config ssl_allow_untrusted_certs to true
+*** Running as zextras user: /opt/zextras/bin/zmlocalconfig -f -e ssl_allow_untrusted_certs='true' 2> /dev/null
+Setting local config ssl_allow_mismatched_certs to true
+*** Running as zextras user: /opt/zextras/bin/zmlocalconfig -f -e ssl_allow_mismatched_certs='true' 2> /dev/null
+Setting local config ssl_default_digest to sha256
+*** Running as zextras user: /opt/zextras/bin/zmlocalconfig -f -e ssl_default_digest='sha256' 2> /dev/null
+Setting local config mailboxd_java_heap_size to 3942
+*** Running as zextras user: /opt/zextras/bin/zmlocalconfig -f -e mailboxd_java_heap_size='3942' 2> /dev/null
+Setting local config mailboxd_directory to /opt/zextras/mailboxd
+*** Running as zextras user: /opt/zextras/bin/zmlocalconfig -f -e mailboxd_directory='/opt/zextras/mailboxd' 2> /dev/null
+Skipping update of unchanged value for mailboxd_keystore=/opt/zextras/mailboxd/etc/keystore.
+Skipping update of unchanged value for mailboxd_server=jetty.
+Setting local config mailboxd_truststore to /opt/zextras/common/lib/jvm/java/lib/security/cacerts
+*** Running as zextras user: /opt/zextras/bin/zmlocalconfig -f -e mailboxd_truststore='/opt/zextras/common/lib/jvm/java/lib/security/cacerts' 2> /dev/null
+Setting local config mailboxd_truststore_password to changeit
+*** Running as zextras user: /opt/zextras/bin/zmlocalconfig -f -e mailboxd_truststore_password='changeit' 2> /dev/null
+Setting local config mailboxd_keystore_password to <test-secret>
+*** Running as zextras user: /opt/zextras/bin/zmlocalconfig -f -e mailboxd_keystore_password='<test-secret>' 2> /dev/null
+Setting local config zimbra_ldap_userdn to uid=zimbra,cn=admins,cn=zimbra
+*** Running as zextras user: /opt/zextras/bin/zmlocalconfig -f -e zimbra_ldap_userdn='uid=zimbra,cn=admins,cn=zimbra' 2> /dev/null
+done.
+Setting up CA...
+*** Running as zextras user: /opt/zextras/bin/zmcertmgr createca -new
+** Creating directory '/opt/zextras/conf/ca'
+** Creating directory '/opt/zextras/ssl/carbonio'
+** Creating directory '/opt/zextras/ssl/carbonio/ca'
+** Creating directory '/opt/zextras/ssl/carbonio/commercial'
+** Creating directory '/opt/zextras/ssl/carbonio/server'
+** Creating directory '/opt/zextras/ssl/carbonio/ca/newcerts'
+** Touching file '/opt/zextras/ssl/.rnd'
+** Touching file '/opt/zextras/ssl/carbonio/ca/index.txt'
+** Creating /opt/zextras/ssl/carbonio/ca/zmssl.cnf
+** Retrieving CA private key from LDAP... failed
+** Creating CA with new private key /opt/zextras/ssl/carbonio/ca/ca.key
+.+.......+..+......+.......+...........+.+......+..+.+.....+....+.....+.......+......+.....+...+.+......+..+...+....+.....+.........+....+..+....+.........+.....+.+............+..+...+...+......+...+.+......+......+..+......+....+..+++++++++++++++++++++++++++++++++++++++*...+.+.....+.......+........+.+.....+.+.................+......+..........+..+............+...+....+.........+...............+......+...+..+.+..+..................+....+...+.....+......+.+...+..+.+.....+.......+........+.............+..+.......+...+...+.....+.+...+..+.........+++++++++++++++++++++++++++++++++++++++*.+.............+..+....+...+......+.....+.+.....+....+.....+.+.....+.+...+......+.....+.+..+...+....+.........+.....+....++++++
+........+...+.....+.........+...+...+...+....+...+............+..+...+.+.....+.+.....+.+++++++++++++++++++++++++++++++++++++++*..........+...+...+..+...+++++++++++++++++++++++++++++++++++++++*.+...+.....+.+.........+.................+....+.....+.+.....+..........+.....+....+...+..+.........+.+...+...+.....+....+...+..+.........+.......+...+.................+..........+.....+.......+.....+.+...........+...+...+...+.+........+.+.........+...+..+.......+......+.........+...+.................+.+...+..+.......+..+.+..+.+..+.........+.........+.+........+.+..+.........+.+...+...........+...+............+.........+.+...+...+...+.....+....+..+.............+............+........+.+.....+......+.........+......+.............+.....................+..+...+............+.......+......+.....+.+...+.....+...+....+.....+.+..+......+.........+...+.......+...+.........+......+............+......+.................++++++
+-----
+done.
+Deploying CA to /opt/zextras/conf/ca ...
+*** Running as zextras user: /opt/zextras/bin/zmcertmgr deployca -localonly
+** Importing cert '/opt/zextras/ssl/carbonio/ca/ca.pem' as 'my_ca' into cacerts '/opt/zextras/common/lib/jvm/java/lib/security/cacerts'
+** NOTE: restart mailboxd to use the imported certificate.
+** Copying CA to /opt/zextras/conf/ca
+** Copying '/opt/zextras/ssl/carbonio/ca/ca.key' to '/opt/zextras/conf/ca/ca.key'
+** Copying '/opt/zextras/ssl/carbonio/ca/ca.pem' to '/opt/zextras/conf/ca/ca.pem'
+** Creating CA hash symlink '2ea1a26b.0' -> 'ca.pem'
+done.
+Creating SSL carbonio-appserver certificate...
+*** Running as zextras user: /opt/zextras/bin/zmcertmgr createcrt -new
+** Backup /opt/zextras/ssl/carbonio to /opt/zextras/ssl/carbonio.20261111033859
+** Creating /opt/zextras/conf/zmssl.cnf
+** Generating a server CSR of type 'self' for download
+** Using CA cert in '/opt/zextras/ssl/carbonio/ca/ca.pem'
+** Using CA private key in '/opt/zextras/ssl/carbonio/ca/ca.key'
+** Retrieving Commercial CA cert from LDAP... failed
+** Creating server cert request /opt/zextras/ssl/carbonio/server/server.csr with keysize=2048 digest=sha256
+** Saving config key 'zimbraSSLPrivateKey' via zmprov modifyServer mail.parity.test...failed (rc=1)
+** Signing cert request /opt/zextras/ssl/carbonio/server/server.csr
+done.
+Creating new carbonio-directory-server SSL certificate...
+*** Running as zextras user: /opt/zextras/bin/zmcertmgr createcrt -new
+** Backup /opt/zextras/ssl/carbonio to /opt/zextras/ssl/carbonio.20261111033901
+** Recreating /opt/zextras/conf/zmssl.cnf
+** Generating a server CSR of type 'self' for download
+** Using CA cert in '/opt/zextras/ssl/carbonio/ca/ca.pem'
+** Using CA private key in '/opt/zextras/ssl/carbonio/ca/ca.key'
+** Retrieving Commercial CA cert from LDAP... failed
+** Creating server cert request /opt/zextras/ssl/carbonio/server/server.csr with keysize=2048 digest=sha256
+** Saving config key 'zimbraSSLPrivateKey' via zmprov modifyServer mail.parity.test...failed (rc=1)
+** Signing cert request /opt/zextras/ssl/carbonio/server/server.csr
+done.
+Creating new carbonio-mta SSL certificate...
+*** Running as zextras user: /opt/zextras/bin/zmcertmgr createcrt -new
+** Backup /opt/zextras/ssl/carbonio to /opt/zextras/ssl/carbonio.20261111033904
+** Recreating /opt/zextras/conf/zmssl.cnf
+** Generating a server CSR of type 'self' for download
+** Using CA cert in '/opt/zextras/ssl/carbonio/ca/ca.pem'
+** Using CA private key in '/opt/zextras/ssl/carbonio/ca/ca.key'
+** Retrieving Commercial CA cert from LDAP... failed
+** Creating server cert request /opt/zextras/ssl/carbonio/server/server.csr with keysize=2048 digest=sha256
+** Saving config key 'zimbraSSLPrivateKey' via zmprov modifyServer mail.parity.test...failed (rc=1)
+** Signing cert request /opt/zextras/ssl/carbonio/server/server.csr
+done.
+Creating new carbonio-proxy SSL certificate...
+*** Running as zextras user: /opt/zextras/bin/zmcertmgr createcrt -new
+** Backup /opt/zextras/ssl/carbonio to /opt/zextras/ssl/carbonio.20261111033906
+** Recreating /opt/zextras/conf/zmssl.cnf
+** Generating a server CSR of type 'self' for download
+** Using CA cert in '/opt/zextras/ssl/carbonio/ca/ca.pem'
+** Using CA private key in '/opt/zextras/ssl/carbonio/ca/ca.key'
+** Retrieving Commercial CA cert from LDAP... failed
+** Creating server cert request /opt/zextras/ssl/carbonio/server/server.csr with keysize=2048 digest=sha256
+** Saving config key 'zimbraSSLPrivateKey' via zmprov modifyServer mail.parity.test...failed (rc=1)
+** Signing cert request /opt/zextras/ssl/carbonio/server/server.csr
+done.
+/opt/zextras/mailboxd/etc/keystore didn't exist.
+-new was ne "".
+Installing mailboxd SSL certificates...
+*** Running as zextras user: /opt/zextras/bin/zmcertmgr deploycrt self
+** Installing ldap certificate '/opt/zextras/conf/slapd.crt' and key '/opt/zextras/conf/slapd.key'
+** Copying '/opt/zextras/ssl/carbonio/server/server.crt' to '/opt/zextras/conf/slapd.crt'
+** Copying '/opt/zextras/ssl/carbonio/server/server.key' to '/opt/zextras/conf/slapd.key'
+** Creating file '/opt/zextras/ssl/carbonio/jetty.pkcs12'
+** Creating keystore '/opt/zextras/mailboxd/etc/keystore'
+** Installing mta certificate '/opt/zextras/conf/smtpd.crt' and key '/opt/zextras/conf/smtpd.key'
+** Copying '/opt/zextras/ssl/carbonio/server/server.crt' to '/opt/zextras/conf/smtpd.crt'
+** Copying '/opt/zextras/ssl/carbonio/server/server.key' to '/opt/zextras/conf/smtpd.key'
+** Installing proxy certificate '/opt/zextras/conf/nginx.crt' and key '/opt/zextras/conf/nginx.key'
+** Copying '/opt/zextras/ssl/carbonio/server/server.crt' to '/opt/zextras/conf/nginx.crt'
+** Copying '/opt/zextras/ssl/carbonio/server/server.key' to '/opt/zextras/conf/nginx.key'
+** NOTE: restart services to use the new certificates.
+** Cleaning up 3 files from '/opt/zextras/conf/ca'
+** Removing /opt/zextras/conf/ca/ca.pem
+** Removing /opt/zextras/conf/ca/2ea1a26b.0
+** Removing /opt/zextras/conf/ca/ca.key
+** Copying CA to /opt/zextras/conf/ca
+** Copying '/opt/zextras/ssl/carbonio/ca/ca.key' to '/opt/zextras/conf/ca/ca.key'
+** Copying '/opt/zextras/ssl/carbonio/ca/ca.pem' to '/opt/zextras/conf/ca/ca.pem'
+** Creating CA hash symlink '2ea1a26b.0' -> 'ca.pem'
+done.
+Installing MTA SSL certificates...
+*** Running as zextras user: /opt/zextras/bin/zmcertmgr deploycrt self
+** Installing ldap certificate '/opt/zextras/conf/slapd.crt' and key '/opt/zextras/conf/slapd.key'
+** Copying '/opt/zextras/ssl/carbonio/server/server.crt' to '/opt/zextras/conf/slapd.crt'
+** Copying '/opt/zextras/ssl/carbonio/server/server.key' to '/opt/zextras/conf/slapd.key'
+** Creating file '/opt/zextras/ssl/carbonio/jetty.pkcs12'
+** Creating keystore '/opt/zextras/mailboxd/etc/keystore'
+** Installing mta certificate '/opt/zextras/conf/smtpd.crt' and key '/opt/zextras/conf/smtpd.key'
+** Copying '/opt/zextras/ssl/carbonio/server/server.crt' to '/opt/zextras/conf/smtpd.crt'
+** Copying '/opt/zextras/ssl/carbonio/server/server.key' to '/opt/zextras/conf/smtpd.key'
+** Installing proxy certificate '/opt/zextras/conf/nginx.crt' and key '/opt/zextras/conf/nginx.key'
+** Copying '/opt/zextras/ssl/carbonio/server/server.crt' to '/opt/zextras/conf/nginx.crt'
+** Copying '/opt/zextras/ssl/carbonio/server/server.key' to '/opt/zextras/conf/nginx.key'
+** NOTE: restart services to use the new certificates.
+** Cleaning up 3 files from '/opt/zextras/conf/ca'
+** Removing /opt/zextras/conf/ca/ca.pem
+** Removing /opt/zextras/conf/ca/2ea1a26b.0
+** Removing /opt/zextras/conf/ca/ca.key
+** Copying CA to /opt/zextras/conf/ca
+** Copying '/opt/zextras/ssl/carbonio/ca/ca.key' to '/opt/zextras/conf/ca/ca.key'
+** Copying '/opt/zextras/ssl/carbonio/ca/ca.pem' to '/opt/zextras/conf/ca/ca.pem'
+** Creating CA hash symlink '2ea1a26b.0' -> 'ca.pem'
+done.
+Installing LDAP SSL certificate...
+*** Running as zextras user: /opt/zextras/bin/zmcertmgr deploycrt self
+** Installing ldap certificate '/opt/zextras/conf/slapd.crt' and key '/opt/zextras/conf/slapd.key'
+** Copying '/opt/zextras/ssl/carbonio/server/server.crt' to '/opt/zextras/conf/slapd.crt'
+** Copying '/opt/zextras/ssl/carbonio/server/server.key' to '/opt/zextras/conf/slapd.key'
+** Creating file '/opt/zextras/ssl/carbonio/jetty.pkcs12'
+** Creating keystore '/opt/zextras/mailboxd/etc/keystore'
+** Installing mta certificate '/opt/zextras/conf/smtpd.crt' and key '/opt/zextras/conf/smtpd.key'
+** Copying '/opt/zextras/ssl/carbonio/server/server.crt' to '/opt/zextras/conf/smtpd.crt'
+** Copying '/opt/zextras/ssl/carbonio/server/server.key' to '/opt/zextras/conf/smtpd.key'
+** Installing proxy certificate '/opt/zextras/conf/nginx.crt' and key '/opt/zextras/conf/nginx.key'
+** Copying '/opt/zextras/ssl/carbonio/server/server.crt' to '/opt/zextras/conf/nginx.crt'
+** Copying '/opt/zextras/ssl/carbonio/server/server.key' to '/opt/zextras/conf/nginx.key'
+** NOTE: restart services to use the new certificates.
+** Cleaning up 3 files from '/opt/zextras/conf/ca'
+** Removing /opt/zextras/conf/ca/ca.pem
+** Removing /opt/zextras/conf/ca/2ea1a26b.0
+** Removing /opt/zextras/conf/ca/ca.key
+** Copying CA to /opt/zextras/conf/ca
+** Copying '/opt/zextras/ssl/carbonio/ca/ca.key' to '/opt/zextras/conf/ca/ca.key'
+** Copying '/opt/zextras/ssl/carbonio/ca/ca.pem' to '/opt/zextras/conf/ca/ca.pem'
+** Creating CA hash symlink '2ea1a26b.0' -> 'ca.pem'
+done.
+Installing Proxy SSL certificate...
+*** Running as zextras user: /opt/zextras/bin/zmcertmgr deploycrt self
+** Installing ldap certificate '/opt/zextras/conf/slapd.crt' and key '/opt/zextras/conf/slapd.key'
+** Copying '/opt/zextras/ssl/carbonio/server/server.crt' to '/opt/zextras/conf/slapd.crt'
+** Copying '/opt/zextras/ssl/carbonio/server/server.key' to '/opt/zextras/conf/slapd.key'
+** Creating file '/opt/zextras/ssl/carbonio/jetty.pkcs12'
+** Creating keystore '/opt/zextras/mailboxd/etc/keystore'
+** Installing mta certificate '/opt/zextras/conf/smtpd.crt' and key '/opt/zextras/conf/smtpd.key'
+** Copying '/opt/zextras/ssl/carbonio/server/server.crt' to '/opt/zextras/conf/smtpd.crt'
+** Copying '/opt/zextras/ssl/carbonio/server/server.key' to '/opt/zextras/conf/smtpd.key'
+** Installing proxy certificate '/opt/zextras/conf/nginx.crt' and key '/opt/zextras/conf/nginx.key'
+** Copying '/opt/zextras/ssl/carbonio/server/server.crt' to '/opt/zextras/conf/nginx.crt'
+** Copying '/opt/zextras/ssl/carbonio/server/server.key' to '/opt/zextras/conf/nginx.key'
+** NOTE: restart services to use the new certificates.
+** Cleaning up 3 files from '/opt/zextras/conf/ca'
+** Removing /opt/zextras/conf/ca/ca.pem
+** Removing /opt/zextras/conf/ca/2ea1a26b.0
+** Removing /opt/zextras/conf/ca/ca.key
+** Copying CA to /opt/zextras/conf/ca
+** Copying '/opt/zextras/ssl/carbonio/ca/ca.key' to '/opt/zextras/conf/ca/ca.key'
+** Copying '/opt/zextras/ssl/carbonio/ca/ca.pem' to '/opt/zextras/conf/ca/ca.pem'
+** Creating CA hash symlink '2ea1a26b.0' -> 'ca.pem'
+done.
+checking isEnabled carbonio-directory-server
+carbonio-directory-server is enabled
+checking isEnabled carbonio-directory-server
+carbonio-directory-server is enabled
+Initializing ldap...
+done.
+Setting replication password...
+*** Running as zextras user: /opt/zextras/bin/zmldappasswd
+Updating local config and LDAP
+done.
+Setting Postfix password...
+*** Running as zextras user: /opt/zextras/bin/zmldappasswd
+Updating local config and LDAP
+done.
+Setting amavis password...
+*** Running as zextras user: /opt/zextras/bin/zmldappasswd
+Updating local config and LDAP
+done.
+Setting nginx password...
+*** Running as zextras user: /opt/zextras/bin/zmldappasswd
+Updating local config and LDAP
+done.
+Creating server entry for mail.parity.test...
+ERROR: account.NO_SUCH_SERVER (no such server: mail.parity.test)
+*** Running as zextras user: /opt/zextras/bin/zmprov -r -m -l cs mail.parity.test
+4f73b627-95c0-4429-8ca3-d9219778fd4c
+done.
+Setting IP Mode...
+Updating cached config attribute for Server mail.parity.test: zimbraIPMode=ipv4
+*** Running as zextras user: /opt/zextras/bin/zmprov -r -m -l ms mail.parity.test  zimbraIPMode 'ipv4'
+done.
+*** Running as zextras user: /opt/zextras/libexec/zmiptool >/dev/null 2>/dev/null
+Saving CA in ldap...
+*** Running as zextras user: /opt/zextras/bin/zmcertmgr deployca
+** Saving config key 'zimbraCertAuthorityCertSelfSigned' via zmprov modifyConfig...ok
+** Saving config key 'zimbraCertAuthorityKeySelfSigned' via zmprov modifyConfig...ok
+** Importing cert '/opt/zextras/ssl/carbonio/ca/ca.pem' as 'my_ca' into cacerts '/opt/zextras/common/lib/jvm/java/lib/security/cacerts'
+** NOTE: restart mailboxd to use the imported certificate.
+** Cleaning up 3 files from '/opt/zextras/conf/ca'
+** Removing /opt/zextras/conf/ca/ca.pem
+** Removing /opt/zextras/conf/ca/2ea1a26b.0
+** Removing /opt/zextras/conf/ca/ca.key
+** Copying CA to /opt/zextras/conf/ca
+** Copying '/opt/zextras/ssl/carbonio/ca/ca.key' to '/opt/zextras/conf/ca/ca.key'
+** Copying '/opt/zextras/ssl/carbonio/ca/ca.pem' to '/opt/zextras/conf/ca/ca.pem'
+** Creating CA hash symlink '2ea1a26b.0' -> 'ca.pem'
+done.
+Saving SSL Certificate in ldap...
+*** Running as zextras user: /opt/zextras/bin/zmcertmgr savecrt self
+** Saving config key 'zimbraSSLCertificate' via zmprov modifyServer mail.parity.test...ok
+** Saving config key 'zimbraSSLPrivateKey' via zmprov modifyServer mail.parity.test...ok
+done.
+Generating dhparam key...
+*** Running as zextras user: /opt/zextras/common/bin/openssl dhparam -out /opt/zextras/conf/dhparam.pem.crb 2048 > /dev/null 2>&1
+entering function: gcf zimbraSSLDHParam=/opt/zextras/conf/dhparam.pem.crb
+Updating cached global config attribute zimbraSSLDHParam=/opt/zextras/conf/dhparam.pem.crb
+*** Running as zextras user: /opt/zextras/bin/zmprov -r -m -l mcf  zimbraSSLDHParam '/opt/zextras/conf/dhparam.pem.crb'
+done.
+checking isEnabled carbonio-appserver
+carbonio-appserver is enabled
+Setting service ports on mail.parity.test...
+Updating cached config attribute for Server mail.parity.test: zimbraImapBindPort=7143
+Updating cached config attribute for Server mail.parity.test: zimbraImapSSLBindPort=7993
+Updating cached config attribute for Server mail.parity.test: zimbraImapProxyBindPort=143
+Updating cached config attribute for Server mail.parity.test: zimbraImapSSLProxyBindPort=993
+*** Running as zextras user: /opt/zextras/bin/zmprov -r -m -l ms mail.parity.test  zimbraImapBindPort '7143' zimbraImapSSLBindPort '7993' zimbraImapProxyBindPort '143' zimbraImapSSLProxyBindPort '993'
+Updating cached config attribute for Server mail.parity.test: zimbraPop3BindPort=7110
+Updating cached config attribute for Server mail.parity.test: zimbraPop3SSLBindPort=7995
+Updating cached config attribute for Server mail.parity.test: zimbraPop3ProxyBindPort=110
+Updating cached config attribute for Server mail.parity.test: zimbraPop3SSLProxyBindPort=995
+*** Running as zextras user: /opt/zextras/bin/zmprov -r -m -l ms mail.parity.test  zimbraPop3BindPort '7110' zimbraPop3SSLBindPort '7995' zimbraPop3ProxyBindPort '110' zimbraPop3SSLProxyBindPort '995'
+Updating cached config attribute for Server mail.parity.test: zimbraMailPort=8080
+Updating cached config attribute for Server mail.parity.test: zimbraMailSSLPort=8443
+Updating cached config attribute for Server mail.parity.test: zimbraMailProxyPort=80
+Updating cached config attribute for Server mail.parity.test: zimbraMailSSLProxyPort=443
+Updating cached config attribute for Server mail.parity.test: zimbraMailMode=https
+*** Running as zextras user: /opt/zextras/bin/zmprov -r -m -l ms mail.parity.test  zimbraMailPort '8080' zimbraMailSSLPort '8443' zimbraMailProxyPort '80' zimbraMailSSLProxyPort '443' zimbraMailMode 'https'
+Setting local config zimbra_mail_service_port to 8080
+*** Running as zextras user: /opt/zextras/bin/zmlocalconfig -f -e zimbra_mail_service_port='8080' 2> /dev/null
+done.
+checking isEnabled carbonio-proxy
+carbonio-proxy is enabled
+Checking current setting of ReverseProxyAvailableLookupTargets
+Returning retrieved global config attribute zimbraReverseProxyAvailableLookupTargets=
+Querying LDAP for other mailstores
+ldap bind done for uid=zimbra,cn=admins,cn=zimbra
+Searching LDAP for reverseProxyLookupTargets...
+done.
+Adding mail.parity.test to ReverseProxyAvailableLookupTargets
+entering function: gcf +zimbraReverseProxyAvailableLookupTargets=mail.parity.test
+Updating cached global config attribute +zimbraReverseProxyAvailableLookupTargets=mail.parity.test
+*** Running as zextras user: /opt/zextras/bin/zmprov -r -m -l mcf  +zimbraReverseProxyAvailableLookupTargets 'mail.parity.test'
+entering function: gcf +zimbraReverseProxyUpstreamEwsServers=mail.parity.test
+Updating cached global config attribute +zimbraReverseProxyUpstreamEwsServers=mail.parity.test
+*** Running as zextras user: /opt/zextras/bin/zmprov -r -m -l mcf  +zimbraReverseProxyUpstreamEwsServers 'mail.parity.test'
+Updating cached config attribute for Server mail.parity.test: zimbraReverseProxyLookupTarget=TRUE
+*** Running as zextras user: /opt/zextras/bin/zmprov -r -m -l ms mail.parity.test  zimbraReverseProxyLookupTarget 'TRUE'
+Updating cached config attribute for Server mail.parity.test: zimbraMtaAuthTarget=TRUE
+*** Running as zextras user: /opt/zextras/bin/zmprov -r -m -l ms mail.parity.test  zimbraMtaAuthTarget 'TRUE'
+*** Running as zextras user: /opt/zextras/libexec/zmproxyconfig -u -m -e -o -i 7143:143:7993:993 -p 7110:110:7995:995 -H mail.parity.test
+*** Running as zextras user: /opt/zextras/libexec/zmproxyconfig -u -w -e -o -x https -a 8080:80:8443:443 -H mail.parity.test
+checking isEnabled carbonio-directory-server
+carbonio-directory-server is enabled
+Updating LDAP Schema version to '1789555845'...
+entering function: gcf zimbraLDAPSchemaVersion=1789555845
+Updating cached global config attribute zimbraLDAPSchemaVersion=1789555845
+*** Running as zextras user: /opt/zextras/bin/zmprov -r -m -l mcf  zimbraLDAPSchemaVersion '1789555845'
+done.
+checking isEnabled carbonio-directory-server
+carbonio-directory-server is enabled
+Setting TimeZone Preference...
+Updating cached config attribute for COS default: zimbraPrefTimeZoneId=Europe/Rome
+*** Running as zextras user: /opt/zextras/bin/zmprov -r -m -l mc default  zimbraPrefTimeZoneId 'Europe/Rome'
+done.
+entering function: gcf zimbraSkinLogoURL=https://www.zextras.com
+Updating cached global config attribute zimbraSkinLogoURL=https://www.zextras.com
+*** Running as zextras user: /opt/zextras/bin/zmprov -r -m -l mcf  zimbraSkinLogoURL 'https://www.zextras.com'
+checking isEnabled carbonio-proxy
+carbonio-proxy is enabled
+Disabling strict server name enforcement on mail.parity.test...
+*** Running as zextras user: /opt/zextras/bin/zmprov -r -m -l ms mail.parity.test zimbraReverseProxyStrictServerNameEnabled FALSE
+done.
+*** Running as zextras user: /opt/zextras/libexec/zmproxyconfig -u -m -e -o -i 7143:143:7993:993 -p 7110:110:7995:995 -H mail.parity.test
+*** Running as zextras user: /opt/zextras/libexec/zmproxyconfig -u -w -e -o  -x https -a 8080:80:8443:443 -H mail.parity.test
+checking isEnabled carbonio-appserver
+carbonio-appserver is enabled
+checking isEnabled carbonio-memcached
+carbonio-memcached is enabled
+Setting Public Service Hostname mail.parity.test...
+*** Running as zextras user: /opt/zextras/bin/zmprov -r -m -l mcf zimbraPublicServiceHostname mail.parity.test
+done.
+ldap bind done for uid=zimbra,cn=admins,cn=zimbra
+Searching LDAP for domains with deprecated zimbraVirtualIPAddress...
+Returning cached global config attribute: zimbraReverseProxySNIEnabled=TRUE
+checking isEnabled carbonio-mta
+carbonio-mta is enabled
+Initializing mta config...
+Setting local config postfix_mail_owner to postfix
+*** Running as zextras user: /opt/zextras/bin/zmlocalconfig -f -e postfix_mail_owner='postfix' 2> /dev/null
+Setting local config postfix_setgid_group to postdrop
+*** Running as zextras user: /opt/zextras/bin/zmlocalconfig -f -e postfix_setgid_group='postdrop' 2> /dev/null
+*** Running as zextras user: /opt/zextras/libexec/zmmtainit
+done.
+Updating cached config attribute for Server mail.parity.test: zimbraMtaMyNetworks=127.0.0.0/8
+*** Running as zextras user: /opt/zextras/bin/zmprov -r -m -l ms mail.parity.test  zimbraMtaMyNetworks '127.0.0.0/8'
+Setting services on mail.parity.test...
+Updating cached config attribute for Server mail.parity.test: zimbraServiceInstalled=amavis
+Updating cached config attribute for Server mail.parity.test: zimbraServiceInstalled=antivirus
+Updating cached config attribute for Server mail.parity.test: zimbraServiceInstalled=antispam
+Updating cached config attribute for Server mail.parity.test: zimbraServiceInstalled=opendkim
+Updating cached config attribute for Server mail.parity.test: zimbraServiceInstalled=mailbox
+Updating cached config attribute for Server mail.parity.test: zimbraServiceInstalled=memcached
+Updating cached config attribute for Server mail.parity.test: zimbraServiceInstalled=proxy
+Updating cached config attribute for Server mail.parity.test: zimbraServiceInstalled=stats
+Updating cached config attribute for Server mail.parity.test: zimbraServiceInstalled=service-discover
+Updating cached config attribute for Server mail.parity.test: zimbraServiceInstalled=mta
+Updating cached config attribute for Server mail.parity.test: zimbraServiceInstalled=directory-server
+*** Running as zextras user: /opt/zextras/bin/zmprov -r -m -l ms mail.parity.test  zimbraServiceInstalled 'amavis' zimbraServiceInstalled 'antivirus' zimbraServiceInstalled 'antispam' zimbraServiceInstalled 'opendkim' zimbraServiceInstalled 'mailbox' zimbraServiceInstalled 'memcached' zimbraServiceInstalled 'proxy' zimbraServiceInstalled 'stats' zimbraServiceInstalled 'service-discover' zimbraServiceInstalled 'mta' zimbraServiceInstalled 'directory-server'
+Updating cached config attribute for Server mail.parity.test: zimbraServiceEnabled=amavis
+Updating cached config attribute for Server mail.parity.test: zimbraServiceEnabled=opendkim
+Updating cached config attribute for Server mail.parity.test: zimbraServiceEnabled=stats
+Updating cached config attribute for Server mail.parity.test: zimbraServiceEnabled=mta
+Updating cached config attribute for Server mail.parity.test: zimbraServiceEnabled=directory-server
+Updating cached config attribute for Server mail.parity.test: zimbraServiceEnabled=antivirus
+Updating cached config attribute for Server mail.parity.test: zimbraServiceEnabled=proxy
+Updating cached config attribute for Server mail.parity.test: zimbraServiceEnabled=memcached
+Updating cached config attribute for Server mail.parity.test: zimbraServiceEnabled=service
+Updating cached config attribute for Server mail.parity.test: zimbraServiceEnabled=mailbox
+*** Running as zextras user: /opt/zextras/bin/zmprov -r -m -l ms mail.parity.test  zimbraServiceEnabled 'amavis' zimbraServiceEnabled 'opendkim' zimbraServiceEnabled 'stats' zimbraServiceEnabled 'mta' zimbraServiceEnabled 'directory-server' zimbraServiceEnabled 'antivirus' zimbraServiceEnabled 'proxy' zimbraServiceEnabled 'memcached' zimbraServiceEnabled 'service' zimbraServiceEnabled 'mailbox'
+done.
+*** Running as zextras user: /opt/zextras/libexec/zmiptool >/dev/null 2>/dev/null
+checking isEnabled carbonio-appserver
+carbonio-appserver is enabled
+Adding mail.parity.test to MailHostPool in default COS...
+Returning retrieved server config attribute for mail.parity.test: zimbraId=4f73b627-95c0-4429-8ca3-d9219778fd4c
+Returning retrieved cos config attribute for default: zimbraMailHostPool=
+Updating cached config attribute for COS default: zimbraMailHostPool=4f73b627-95c0-4429-8ca3-d9219778fd4c
+*** Running as zextras user: /opt/zextras/bin/zmprov -r -m -l mc default  zimbraMailHostPool '4f73b627-95c0-4429-8ca3-d9219778fd4c'
+done.
+checking isEnabled carbonio-mta
+carbonio-mta is enabled
+Running /opt/zextras/bin/zmprov -r -m -l gas mta
+Setting local config zmtrainsa_cleanup_host to true
+*** Running as zextras user: /opt/zextras/bin/zmlocalconfig -f -e zmtrainsa_cleanup_host='true' 2> /dev/null
+checking isEnabled carbonio-directory-server
+carbonio-directory-server is enabled
+Creating domain parity.test...
+*** Running as zextras user: /opt/zextras/bin/zmprov -r -m -l cd parity.test
+47f9787c-6d73-425b-9b36-198127016878
+done.
+Setting default domain name...
+entering function: gcf zimbraDefaultDomainName=parity.test
+Updating cached global config attribute zimbraDefaultDomainName=parity.test
+*** Running as zextras user: /opt/zextras/bin/zmprov -r -m -l mcf  zimbraDefaultDomainName 'parity.test'
+done.
+Setting value of postfix myorigin...
+entering function: gcf zimbraMtaMyOrigin=parity.test
+Updating cached global config attribute zimbraMtaMyOrigin=parity.test
+*** Running as zextras user: /opt/zextras/bin/zmprov -r -m -l mcf  zimbraMtaMyOrigin 'parity.test'
+done.
+checking isEnabled carbonio-appserver
+carbonio-appserver is enabled
+Creating domain parity.test...
+Returning retrieved domain config attribute for parity.test: zimbraId=47f9787c-6d73-425b-9b36-198127016878
+already exists.
+Creating admin account zextras@parity.test...
+ERROR: account.NO_SUCH_ACCOUNT (no such account: zextras@parity.test)
+*** Running as zextras user: /opt/zextras/bin/zmprov
+77f7f0e8-ea50-4bd1-b66f-cee9069187dd
+done.
+Creating root alias...
+*** Running as zextras user: /opt/zextras/bin/zmprov -r -m -l aaa zextras@parity.test root@parity.test
+done.
+Creating postmaster alias...
+*** Running as zextras user: /opt/zextras/bin/zmprov -r -m -l aaa zextras@parity.test postmaster@parity.test
+done.
+Setting infrastructure notification sender and recipients accounts...
+entering function: gcf carbonioNotificationFrom=zextras@parity.test
+Updating cached global config attribute carbonioNotificationFrom=zextras@parity.test
+entering function: gcf carbonioNotificationRecipients=zextras@parity.test
+Updating cached global config attribute carbonioNotificationRecipients=zextras@parity.test
+*** Running as zextras user: /opt/zextras/bin/zmprov -r -m -l mcf  carbonioNotificationFrom 'zextras@parity.test' carbonioNotificationRecipients 'zextras@parity.test'
+done.
+checking isEnabled carbonio-appserver
+carbonio-appserver is enabled
+Initializing store sql database...
+*** Running as root user: /opt/zextras/libexec/zmmyinit
+* Creating required directories
+* Generating mysql config /opt/zextras/conf/my.cnf
+* Creating database in /opt/zextras/db/data
+* Starting mysql server
+* Failed to connect to mysql...retrying
+* Loading schema /opt/zextras/db/db.sql
+* Loading version from /opt/zextras/db/versions-init.sql
+* Setting random passwd for mysql root user in zimbra localconfig
+* Setting random passwd for mysql zextras user in zimbra localconfig
+* Changing mysql root user password
+* Changing mysql zextras user password
+* Changed zextras mysql user password
+done.
+checking isEnabled carbonio-directory-server
+carbonio-directory-server is enabled
+Setting up syslog.conf...
+*** Running as root user: /opt/zextras/libexec/zmsyslogsetup
+updateRsyslogd: Updating /etc/rsyslog.d/50-default.conf...done.
+done.
+checking isEnabled carbonio-appserver
+carbonio-appserver is enabled
+WARNING: galsync account creation for default domain skipped because Application Server was not configured to start.
+Setting up zextras crontab...
+crontab: Taking a copy of zextras user crontab file.
+crontab: Looking for ZEXTRAS-START in existing crontab entry.
+crontab: ZEXTRAS-START not found truncating zextras crontab and starting fresh.
+crontab: Looking for ZEXTRAS-END in existing crontab entry.
+crontab: ZEXTRAS-END not found truncating zextras crontab and starting fresh.
+crontab: Adding carbonio-core specific crontab entries
+checking isEnabled carbonio-directory-server
+carbonio-directory-server is enabled
+crontab: Adding carbonio-directory-server specific crontab entries
+checking isEnabled carbonio-appserver
+carbonio-appserver is enabled
+crontab: Adding carbonio-appserver specific crontab entries
+checking isEnabled carbonio-mta
+carbonio-mta is enabled
+crontab: Adding carbonio-mta specific crontab entries
+crontab: installing new crontab
+done.
+*** Running as zextras user: /opt/zextras/bin/zmsshkeygen
+Generating public/private rsa key pair.
+Your identification has been saved in /opt/zextras/.ssh/zimbra_identity
+Your public key has been saved in /opt/zextras/.ssh/zimbra_identity.pub
+The key fingerprint is:
+SHA256:zybAJfSh2TICRz3xBRjsNKT30DTLRA6oQW2gowZatcA mail.parity.test
+The key's randomart image is:
++---[RSA 2048]----+
+| o=++=*=B..      |
+| .E=++B& =       |
+|+ .++oOoX        |
+|+o.  +.B         |
+|o.    o S        |
+|.      . o       |
+|        . +      |
+|         o       |
+|                 |
++----[SHA256]-----+
+Key has comment 'mail.parity.test'
+Your identification has been saved with the new passphrase.
+*** Running as zextras user: /opt/zextras/bin/zmupdateauthkeys
+Updating keys for mail.parity.test
+Fetching key for mail.parity.test
+Updating keys for mail.parity.test
+Updating /opt/zextras/.ssh/authorized_keys
+checking isEnabled carbonio-directory-server
+carbonio-directory-server is enabled
+checking isEnabled carbonio-appserver
+carbonio-appserver is enabled
+checking isEnabled carbonio-mta
+carbonio-mta is enabled
+
+
+Moving /tmp/zmsetup.20261111-033843.log to /opt/zextras/log
+
+
+Moving /tmp/zmsetup.20261111-033843.log to /opt/zextras/log
