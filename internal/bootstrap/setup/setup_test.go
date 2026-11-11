@@ -93,7 +93,10 @@ func TestRun_StopsAtFailureAndDryRunChangesNothing(t *testing.T) {
 	assert.False(t, ran)
 
 	e2, fakes2, _ := testEnv(t)
+	steps[0].Done = func(*Env) (bool, error) { return false, errors.New("LDAP not configured") }
 	results, err := Run(e2, steps, true)
+	require.NoError(t, err)
+	assert.Equal(t, WouldApply, results[0].Outcome)
 	require.NoError(t, err)
 	assert.Equal(t, WouldApply, results[1].Outcome)
 	assert.False(t, ran)

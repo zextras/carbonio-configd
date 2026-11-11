@@ -138,7 +138,16 @@ func runStep(e *Env, s *Step, dryRun bool) (Result, error) {
 
 	if s.Done != nil {
 		done, err := s.Done(e)
-		if err != nil {
+
+		switch {
+		case err != nil && dryRun:
+			// An earlier step, not run, would provide what the check needs
+			// (LDAP, localconfig): report the step as pending.
+			res.Outcome = WouldApply
+			res.Err = fmt.Errorf("cannot check yet: %w", err)
+
+			return res, nil
+		case err != nil:
 			return failed(e, s, res, fmt.Errorf("checking: %w", err))
 		}
 
