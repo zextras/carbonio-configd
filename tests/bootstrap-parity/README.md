@@ -13,11 +13,13 @@ by `configd bootstrap run`, starting from the **same image** and the **same
 
 ```
 Containerfile        Ubuntu 24.04 + systemd (PID 1) + Carbonio CE packages, NOT bootstrapped
-config/*.config      setup.pl -c files (KEY="VALUE"), used verbatim by both paths (single-node, store-node)
-build.sh             build the image
+config/*.config      setup.pl -c files (KEY="VALUE"), used verbatim by both paths:
+                     single-node, single-node-start (STARTSERVERS=yes), store-node, replica-node
+build.sh             build the image (--store: appserver-only, --ldap: directory-server-only image of node 2)
 run-legacy.sh        fresh container -> carbonio-bootstrap -c -> snapshot   (-> out/legacy)
 run-configd.sh BIN   fresh container -> configd bootstrap run -> snapshot   (-> out/configd)
-run-2node.sh MODE    2-node variant (legacy | configd BIN): node 1 = single-node, node 2 = second store
+run-2node.sh MODE    2-node scenarios (legacy | configd BIN), --scenario store|replica: node 1 = single-node,
+                     node 2 = second store / LDAP replica
 snapshot.sh          runs inside the container, writes the normalised state
 normalise-ldif.pl    LDIF normaliser used by snapshot.sh
 snapshot-exclude.txt files under /opt/zextras/conf whose content is volatile (keys, certs, ...)
@@ -121,6 +123,10 @@ real minimal Ubuntu install):
 | `systemd-units.txt` | enabled unit files; active / failed `.service/.timer/.socket/.target` |
 | `install-history.txt` | `/opt/zextras/.install_history` without the epoch column (stage order) |
 | `listeners.txt` | listening TCP ports |
+| `ldap-replication.txt` | olcSyncrepl / olcMirrorMode / syncprov counts, accesslog DB present, entry counts below `cn=zimbra` (slapcat and through slapd) |
+| `ldap-entries.txt` | sorted DNs below `cn=zimbra` as served by slapd (what a replica must hold); absent when slapd is not serving |
+| `services.txt` | `carbonio*`/`service-discover*` units with `active/inactive` + sub state; any transitional state (activating, auto-restart, failed: the `*-sidecar` units wait for a service-discover that is not set up in the container) is collapsed to `transitional` |
+| `galsync.txt` | DNs of `galsync.*` accounts in LDAP (random part → `<random>`) |
 
 LDIF normalisation (`normalise-ldif.pl`): drops `entryCSN entryUUID createTimestamp modifyTimestamp
 modifiersName creatorsName contextCSN structuralObjectClass zimbraCreateTimestamp …`; every UUID
@@ -180,9 +186,7 @@ started (`STARTSERVERS="no"`).
    `STARTSERVERS="no"`; `mailboxd_keystore_password` is written in clear text to the zmsetup log.
 8. Unrelated to the harness: the legacy bootstrap needs no DNS with `-c` (see above).
 
-## 2-node variant
-
-## 2-node variant
+## 2-node variant (second store)
 
 Implemented and exercised for the legacy path: node 1 is the single-node scenario (LDAP master, MTA, proxy,
 store), node 2 (`mail2.parity.test`) is a second store (`carbonio-appserver`, `carbonio-memcached`) joining the
@@ -203,8 +207,57 @@ other through `/etc/hosts` (no DNS). Node 1 is bootstrapped first, then node 2; 
 
 No golden is stored for the 2-node case (single-node is the required one); create it the same way:
 `cp -r out/2node-legacy golden/2node` and compare with `./diff.sh golden/2node/node1 out/2node-configd/node1`
-(and `node2`). A **replica LDAP** node (`LDAPREPLICATIONTYPE=replica`, needs `zmldapenablereplica` on the master
-first) is not covered; it would be a third container with `carbonio-directory-server` installed.
+(and `node2`).
 
 Gotcha found while implementing: a duplicated own line in `/etc/hosts` makes slapd bind the same address twice
 (`Address already in use`); `prepare_container` therefore writes exactly one line for the node itself.
+
+## Scenario: LDAP replica (`--scenario replica`)
+
+Node 1 is the single-node master (`config/single-node.config`), node 2 (`mail2.parity.test`) has only
+`carbonio-core` + `carbonio-directory-server` (image `localhost/carbonio-parity:noble-ldap`, `./build.sh --ldap`,
+~4 min) and `config/replica-node.config`: `LDAPHOST=mail.parity.test`, `LDAPREPLICATIONTYPE=replica`, and
+the passwords of the master (`LDAPREPPASS`, `LDAPROOTPASS`, `LDAPADMINPASS`, ...).
+
+```
+./build.sh --ldap
+./run-2node.sh legacy --scenario replica                      # out/replica-legacy/{node1,node2,node2-synced}
+./run-2node.sh configd ../../bin/configd --scenario replica   # out/replica-configd/...
+for n in node1 node2 node2-synced; do ./diff.sh out/replica-legacy/$n out/replica-configd/$n; done
+```
+
+Sequence (identical for both modes): bootstrap node 1; `zmldapenablereplica` on node 1 (the master side,
+creates the accesslog DB and the syncprov overlays; `setup.pl` checks for it, so it has to precede node 2);
+bootstrap node 2; snapshot both (`node1`, `node2`); make sure slapd of node 2 runs (the legacy bootstrap
+leaves it **stopped**), wait until `ldapsearch -b cn=zimbra dn` on node 2 returns the same DN list as on
+node 1 (`DIR.sync`), snapshot node 2 again as `node2-synced`.
+Replication evidence in the snapshots: `ldap-config.ldif` (`olcSyncrepl` with `credentials=<secret>`,
+`olcUpdateRef`, `olcOverlay={0}syncprov`; on the master also the `cn=accesslog` DB and the accesslog overlay),
+`ldap-replication.txt` (counts) and `ldap-entries.txt` (DNs served by slapd).
+
+`replica-node.config` follows `infra-carbonio-ce-images/configs/directory-server.config`:
+`mailboxd_keystore="/opt/zextras/conf/keystore"` is **required**: with the default
+`/opt/zextras/mailboxd/etc/keystore` the legacy `zmcertmgr deploycrt` fails on a directory-server-only node
+(`FileNotFoundException: /opt/zextras/mailboxd/etc/keystore`, the directory comes with `carbonio-appserver`),
+`setup.pl` exits 1 at "Installing LDAP SSL certificate...failed".
+
+## Scenario: single node with `STARTSERVERS="yes"`
+
+`config/single-node-start.config` is `single-node.config` with `STARTSERVERS="yes"`: the bootstrap starts all
+carbonio targets and then creates the galsync account (needs the mailbox up).
+
+```
+./run-legacy.sh --config config/single-node-start.config --out out/start-legacy
+./run-configd.sh ../../bin/configd --config config/single-node-start.config --out out/start-configd
+./diff.sh out/start-legacy out/start-configd
+```
+
+Snapshot additions for this scenario: `services.txt` (state of every `carbonio*` unit), `systemd-units.txt`
+(active units), `listeners.txt` (7025, 7071, 8080, 8443, 25, 143, ... prove that mailbox, nginx and postfix run),
+`galsync.txt` (`uid=galsync.<random>,ou=people,dc=parity,dc=test`), `ldap-main.ldif` (galsync account,
+`zimbraGalAccountId` of the domain, `InternalGAL` data source, sharelocator).
+**Do not run two start scenarios in parallel:** each node runs MariaDB (30 % of `SYSTEMMEMORY`) plus a 3.9 GB JVM;
+in a test with two at once on a 30 GB host `carbonio-appserver` was killed with SIGKILL (status 9/KILL, cause
+not verified, memory pressure is the likely one) in the configd run, and the bootstrap then failed to create the galsync account (`zmgsautil` could not authenticate).
+Volatile things normalised away: `zimbraAuthTokens`, the random name of the galsync account,
+the order of `conf/stats.conf` (written in hash order by zmconfigd), the UUID in the DN of the sharelocator.

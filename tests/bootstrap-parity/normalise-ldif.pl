@@ -20,7 +20,7 @@ use warnings;
 my %DROP = map { lc($_) => 1 } qw(
   entryCSN entryUUID createTimestamp modifyTimestamp modifiersName creatorsName
   contextCSN structuralObjectClass hasSubordinates numSubordinates
-  zimbraCreateTimestamp zimbraLastLogonTimestamp
+  zimbraCreateTimestamp zimbraLastLogonTimestamp zimbraAuthTokens
 );
 
 # Attribute names whose value is a secret or key material.
@@ -54,17 +54,25 @@ for my $block (split /\n\n+/, $input) {
     push @entries, [ $dn, \@attrs ];
 }
 
+# galsync.<random password>@domain is generated at bootstrap (zmgsautil createAccount).
+sub galnorm {
+    my ($v) = @_;
+    $v =~ s/galsync\.[a-z0-9]+/galsync.<random>/g;
+    return $v;
+}
+
 # Pass 1: UUID -> owning DN (zimbraId / olc ids).
 my %owner;
 for my $e (@entries) {
     my ($dn, $attrs) = @$e;
     for my $a (@$attrs) {
-        $owner{ lc $a->[1] } = $dn if lc($a->[0]) eq 'zimbraid';
+        $owner{ lc $a->[1] } = galnorm($dn) if lc($a->[0]) eq 'zimbraid';
     }
 }
 my $UUID = qr/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/;
 sub scrub {
     my ($v) = @_;
+    $v = galnorm($v);
     $v =~ s/($UUID)/exists $owner{lc $1} ? '<id:' . $owner{lc $1} . '>' : '<uuid>'/ge;
     return $v;
 }

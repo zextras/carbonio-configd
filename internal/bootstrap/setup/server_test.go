@@ -400,6 +400,10 @@ func TestSrvKeyboardAndTimezoneConditions(t *testing.T) {
 	e.Facts.NewInstall = true
 	assert.False(t, StepConfigSetKeyboardShortcutsPref().When(e))
 
+	// A replica records the stage without writing the master's COS.
 	e.Cfg.LDAP.Host = "other.example.com"
-	assert.False(t, StepConfigSetTimeZonePref().When(e))
+	assert.True(t, StepConfigSetTimeZonePref().When(e))
+	done, err := StepConfigSetTimeZonePref().Done(e)
+	require.NoError(t, err)
+	assert.True(t, done)
 }

@@ -1,0 +1,7 @@
+olcSyncrepl values: 0
+olcMirrorMode values: 0
+syncprov overlays: 0
+accesslog database: absent
+entries below cn=zimbra (slapcat): 35
+entries below cn=zimbra (slapd): 28
+slapd: serving

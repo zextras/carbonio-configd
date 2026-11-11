@@ -229,6 +229,9 @@ Differences from `setup.pl`:
 - No `/opt/zextras/config.<pid>` file is written; use `--output`.
 - A replica or multi-master directory server is set up from the
   configuration (`ldap.replication_type`), not only from the interactive
-  menu.
+  menu. Its server entry is created before replication is enabled: from a
+  `-c` file `setup.pl` created it after, so enabling the directory-server
+  service on the new replica failed (`NO_SUCH_SERVER`), and it left the
+  replica's slapd stopped. `configd bootstrap run` leaves it running.
 - With the mail proxy off, the POP3S proxy port, not the mailbox one, moves
   to 995.

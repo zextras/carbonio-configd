@@ -592,12 +592,15 @@ func StepConfigSetTimeZonePref() Step {
 	return Step{
 		Name:  "zimbraPrefTimeZoneId",
 		Title: "Setting TimeZone Preference",
-		When: func(e *Env) bool {
-			return e.Facts.IsEnabled(srvPkgDirectory) && e.Cfg.LDAP.Host == e.Cfg.Host.Hostname &&
-				e.Cfg.Host.Timezone != ""
-		},
+		When:     func(e *Env) bool { return e.Facts.IsEnabled(srvPkgDirectory) },
 		Optional: true,
+		// setup.pl records the stage on every directory server, and writes
+		// the COS only on the master.
 		Done: func(e *Env) (bool, error) {
+			if e.Cfg.LDAP.Host != e.Cfg.Host.Hostname || e.Cfg.Host.Timezone == "" {
+				return true, nil
+			}
+
 			return srvCOSMatches(e, "default", map[string]string{"zimbraPrefTimeZoneId": e.Cfg.Host.Timezone})
 		},
 		Apply: func(e *Env) error {

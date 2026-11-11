@@ -109,15 +109,16 @@ func srvMailboxdLC(e *Env) map[string]string {
 		return map[string]string{srvLCKeystore: dir + "/etc/keystore", "mailboxd_server": "jetty"}
 	}
 
-	return map[string]string{srvLCKeystore: e.Paths.Path("conf", "keystore")}
+	// setup.pl wrote the key empty: zmcertmgr then builds no keystore.
+	return map[string]string{srvLCKeystore: e.Paths.Path("conf", "keystore"), "mailboxd_server": ""}
 }
 
 // StepConfigLCMailboxd ports the head of setup.pl configLCValues (4392-4399),
 // which sets mailboxd_keystore and mailboxd_server on every run of an
 // appserver node, even when the configLCValues stage is already CONFIGURED.
 //
-// When: isEnabled(carbonio-appserver). Deviation: mailboxd_server is only
-// written when the jetty directory exists (setup.pl wrote an empty value).
+// When: isEnabled(carbonio-appserver). mailboxd_server is "jetty" when the
+// jetty directory exists, else empty, as setup.pl wrote it.
 func StepConfigLCMailboxd() Step {
 	return Step{
 		Title: "Setting mailboxd local config values",
