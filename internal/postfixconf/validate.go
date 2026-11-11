@@ -8,9 +8,9 @@
 // Postfix master runs as root and trusts main.cf and master.cf there, so the
 // directory is root-owned and the unprivileged configd (user zextras) never
 // writes it. It stages the wanted change in a zextras-owned directory and
-// triggers the root helper carbonio-postfix-conf, which validates the staged
+// triggers the root helper postfix-conf, which validates the staged
 // change and installs it. This package holds both halves: the validator and
-// the root-side apply logic (used by cmd/carbonio-postfix-conf), and the
+// the root-side apply logic (used by cmd/postfix-conf), and the
 // Client configd uses to stage and trigger.
 package postfixconf
 
@@ -25,7 +25,7 @@ import (
 // Fixed locations and names shared by configd and the helper.
 const (
 	// HelperPath is the root-owned helper binary.
-	HelperPath = "/opt/zextras/libexec/carbonio-postfix-conf"
+	HelperPath = "/opt/zextras/libexec/postfix-conf"
 	// UnitName is the systemd oneshot unit that runs "HelperPath apply".
 	UnitName = "carbonio-postfix-conf.service"
 	// StagingDir is the zextras-owned (0700) directory configd stages into.
@@ -36,7 +36,7 @@ const (
 	PostconfPath = "/opt/zextras/common/sbin/postconf"
 	// LockDir is the root-only runtime directory of the helper (the systemd
 	// unit's RuntimeDirectory); LockPath serializes helper runs.
-	LockDir  = "/run/carbonio-postfix-conf"
+	LockDir  = "/run/postfix-conf"
 	LockPath = LockDir + "/lock"
 
 	// MaxFileSize caps every staged file.

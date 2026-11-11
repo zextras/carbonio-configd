@@ -19,13 +19,13 @@ const (
 	ExitValidation = 2
 )
 
-const usage = "usage: carbonio-postfix-conf set KEY=VALUE... | unset KEY... | apply"
+const usage = "usage: postfix-conf set KEY=VALUE... | unset KEY... | apply"
 
 // RunCLI is the helper command line. euid is the caller's effective uid; the
 // helper refuses anything but root. It returns the process exit code.
 func RunCLI(ctx context.Context, args []string, euid int, o *Options, stderr io.Writer) int {
 	if euid != 0 {
-		fprintln(stderr, "carbonio-postfix-conf: must run as root")
+		fprintln(stderr, "postfix-conf: must run as root")
 
 		return ExitFailure
 	}
@@ -59,7 +59,7 @@ func RunCLI(ctx context.Context, args []string, euid int, o *Options, stderr io.
 		return ExitOK
 	}
 
-	fprintln(stderr, "carbonio-postfix-conf: "+err.Error())
+	fprintln(stderr, "postfix-conf: "+err.Error())
 
 	if errors.Is(err, ErrValidation) {
 		return ExitValidation

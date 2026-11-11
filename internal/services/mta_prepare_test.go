@@ -255,7 +255,7 @@ func TestBootstrapPostfixMainCf_NewFile(t *testing.T) {
 
 	// No sudo touch, no sudo postconf: the seed is staged and the root helper
 	// runs (sudo -n helper apply for this non-root, non-systemd fake).
-	want := []string{sudoBin + " -n " + ctl.p.libexec + "/carbonio-postfix-conf apply"}
+	want := []string{sudoBin + " -n " + ctl.p.libexec + "/postfix-conf apply"}
 	if got := f.Exec.Lines(); !slices.Equal(got, want) {
 		t.Errorf("commands = %q, want %q", got, want)
 	}
@@ -276,7 +276,7 @@ func TestBootstrapPostfixMainCf_HelperFails(t *testing.T) {
 		"postfix_mail_owner":   "postfix",
 		"postfix_setgid_group": "postdrop",
 	})
-	if err == nil || !strings.Contains(err.Error(), "carbonio-postfix-conf") {
+	if err == nil || !strings.Contains(err.Error(), "postfix-conf") {
 		t.Fatalf("err = %v, want a failure naming the helper", err)
 	}
 

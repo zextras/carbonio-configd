@@ -17,7 +17,7 @@ import (
 
 const (
 	base    = "/opt/zextras"
-	helper  = base + "/libexec/carbonio-postfix-conf"
+	helper  = base + "/libexec/postfix-conf"
 	staging = base + "/data/postfix/conf-staging"
 )
 

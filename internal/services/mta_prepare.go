@@ -35,7 +35,7 @@ const startTLSYes = "yes"
 //     daemon.
 //  2. Hook prepareMainCf: postfix refuses to start without main.cf. When absent,
 //     seed mail_owner / setgid_group from localconfig through the root helper
-//     carbonio-postfix-conf (common/conf is root-owned), which creates it.
+//     postfix-conf (common/conf is root-owned), which creates it.
 //  3. Hook prepareLDAPTables: write the 8 ldap-*.cf files under /opt/zextras/conf
 //     that postfix's main.cf references (ldap:/opt/zextras/conf/ldap-vmm.cf
 //     etc.). This replaces legacy mtainit.sh, and like the legacy wrapper it
@@ -88,7 +88,7 @@ var errInvalidPostfixAccount = errors.New("invalid postfix owner/group name")
 
 // bootstrapPostfixMainCf ensures /opt/zextras/common/conf/main.cf exists
 // with mail_owner and setgid_group set. The directory is root-owned (CO-4621),
-// so the seed is applied by the root helper carbonio-postfix-conf. Skips silently when the file is
+// so the seed is applied by the root helper postfix-conf. Skips silently when the file is
 // already present — configrewrite owns the rest of the file's contents.
 func (c *Controller) bootstrapPostfixMainCf(ctx context.Context, lc map[string]string) error {
 	if _, err := c.env.FS.Stat(c.p.mainCf); err == nil {
@@ -115,7 +115,7 @@ func (c *Controller) bootstrapPostfixMainCf(ctx context.Context, lc map[string]s
 	}
 
 	// common/conf is root-owned and zextras has no sudo right for touch or
-	// postconf: the seed goes through the root helper carbonio-postfix-conf,
+	// postconf: the seed goes through the root helper postfix-conf,
 	// which creates the missing main.cf and runs postconf -e.
 	change := postfixconf.Change{Set: []postfixconf.KV{
 		{Key: "mail_owner", Value: owner},

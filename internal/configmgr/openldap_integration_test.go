@@ -377,12 +377,12 @@ func stagedPostconfSet(h *olHarness) string {
 	return string(data)
 }
 
-// helperRuns lists the exec lines that triggered carbonio-postfix-conf.
+// helperRuns lists the exec lines that triggered postfix-conf.
 func helperRuns(h *olHarness) []string {
 	var out []string
 
 	for _, l := range h.fakes.Rec.Of("exec") {
-		if strings.Contains(l, "carbonio-postfix-conf") {
+		if strings.Contains(l, "postfix-conf") {
 			out = append(out, strings.TrimPrefix(l, "exec "))
 		}
 	}

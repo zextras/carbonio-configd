@@ -42,7 +42,7 @@ type executor struct {
 type Option func(*executor)
 
 // WithSystemdMode tells the executor how to find out whether configd runs in
-// systemd mode, which selects how the root helper carbonio-postfix-conf is
+// systemd mode, which selects how the root helper postfix-conf is
 // triggered (see postfixconf/client). Without it the executor is not in
 // systemd mode.
 func WithSystemdMode(systemd func() bool) Option {
@@ -54,7 +54,7 @@ func WithSystemdMode(systemd func() bool) Option {
 // NewExecutor creates a new MTA operations executor. All host access (postconf,
 // mapped-file reads and writes, umask) goes through env. Postfix configuration
 // is never written here: postconf -e/-X changes are staged and applied by the
-// root helper carbonio-postfix-conf.
+// root helper postfix-conf.
 func NewExecutor(baseDir string, ldapManager ldap.AttributeModifier, env sys.System, opts ...Option) Executor {
 	e := &executor{
 		baseDir:      baseDir,
@@ -111,7 +111,7 @@ func (e *executor) ExecutePostconf(ctx context.Context, op PostconfOperation) er
 }
 
 // ExecutePostconfBatch applies multiple postconf -e operations in a single helper run
-// (staged, then applied as root by carbonio-postfix-conf).
+// (staged, then applied as root by postfix-conf).
 // Values containing newlines (e.g. multi-value LDAP attributes) are normalized in
 // place: split on newlines, trimmed, and rejoined with ", " so they stay part of
 // the same batch invocation instead of postconf's multi-line syntax.
@@ -155,7 +155,7 @@ func (e *executor) ExecutePostconfBatch(ctx context.Context, ops []PostconfOpera
 		}
 
 		if !postfixconf.IsAllowedKey(op.Key) {
-			logger.WarnContext(ctx, "Not changing a Postfix parameter that carbonio-postfix-conf does not allow",
+			logger.WarnContext(ctx, "Not changing a Postfix parameter that postfix-conf does not allow",
 				"key", op.Key)
 
 			continue
@@ -211,7 +211,7 @@ func (e *executor) ExecutePostconfdBatch(ctx context.Context, ops []PostconfdOpe
 
 	for _, op := range ops {
 		if !postfixconf.IsAllowedKey(op.Key) {
-			logger.WarnContext(ctx, "Not removing a Postfix parameter that carbonio-postfix-conf does not allow",
+			logger.WarnContext(ctx, "Not removing a Postfix parameter that postfix-conf does not allow",
 				"key", op.Key)
 
 			continue

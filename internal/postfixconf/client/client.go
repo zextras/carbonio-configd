@@ -46,7 +46,7 @@ func (c *Client) stagingDir() string {
 }
 
 func (c *Client) helper() string {
-	return filepath.Join(c.baseDir, "libexec", "carbonio-postfix-conf")
+	return filepath.Join(c.baseDir, "libexec", "postfix-conf")
 }
 
 // IsConfPath reports whether path (absolute, or relative to the base

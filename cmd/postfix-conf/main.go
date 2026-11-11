@@ -2,12 +2,12 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Command carbonio-postfix-conf is the only writer of the root-owned Postfix
+// Command postfix-conf is the only writer of the root-owned Postfix
 // configuration under /opt/zextras/common/conf (CO-4621). It must run as root:
 //
-//	carbonio-postfix-conf set KEY=VALUE...   validate, then postconf -e
-//	carbonio-postfix-conf unset KEY...       validate, then postconf -X
-//	carbonio-postfix-conf apply              consume configd's staging directory
+//	postfix-conf set KEY=VALUE...   validate, then postconf -e
+//	postfix-conf unset KEY...       validate, then postconf -X
+//	postfix-conf apply              consume configd's staging directory
 //
 // Exit status: 0 success, 2 validation error (nothing applied), 1 other failure.
 package main
@@ -48,7 +48,7 @@ func run(
 		if u, err := lookup(stagingUser); err == nil {
 			n, perr := strconv.ParseUint(u.Uid, 10, 32)
 			if perr != nil {
-				_, _ = fmt.Fprintf(stderr, "carbonio-postfix-conf: bad uid %q of %s\n", u.Uid, stagingUser)
+				_, _ = fmt.Fprintf(stderr, "postfix-conf: bad uid %q of %s\n", u.Uid, stagingUser)
 
 				return postfixconf.ExitFailure
 			}

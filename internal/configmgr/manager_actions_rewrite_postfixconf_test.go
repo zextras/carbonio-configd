@@ -55,7 +55,7 @@ func TestProcessRewrite_CommonConfGoesThroughHelper(t *testing.T) {
 			staged, ok := fakes.FS.Data(base + "/data/postfix/conf-staging/" + target)
 			require.True(t, ok, "rendered content must be staged")
 			assert.Equal(t, content, string(staged))
-			assert.Equal(t, []string{"exec " + base + "/libexec/carbonio-postfix-conf apply"},
+			assert.Equal(t, []string{"exec " + base + "/libexec/postfix-conf apply"},
 				subsequence(fakes.Rec.Strings(), "exec "))
 
 			for _, op := range fakes.Rec.Strings() {
@@ -86,7 +86,7 @@ func TestProcessRewrite_CommonConfRejectsUnknownTarget(t *testing.T) {
 
 const (
 	batchBase   = "/opt/zextras"
-	batchHelper = batchBase + "/libexec/carbonio-postfix-conf"
+	batchHelper = batchBase + "/libexec/postfix-conf"
 	batchStage  = batchBase + "/data/postfix/conf-staging/"
 )
 

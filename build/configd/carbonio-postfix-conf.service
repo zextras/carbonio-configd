@@ -26,14 +26,14 @@ StartLimitIntervalSec=0
 [Service]
 Type=oneshot
 User=root
-ExecStart=/opt/zextras/libexec/carbonio-postfix-conf apply
+ExecStart=/opt/zextras/libexec/postfix-conf apply
 TimeoutStartSec=60
 UMask=0022
 WorkingDirectory=/
-# /run/carbonio-postfix-conf holds the lock shared with the direct (sudo, uid 0)
+# /run/postfix-conf holds the lock shared with the direct (sudo, uid 0)
 # invocations; it must survive between runs or two helpers could lock different
 # inodes.
-RuntimeDirectory=carbonio-postfix-conf
+RuntimeDirectory=postfix-conf
 RuntimeDirectoryMode=0700
 RuntimeDirectoryPreserve=yes
 
@@ -69,4 +69,4 @@ SystemCallErrorNumber=EPERM
 # Logging: the helper's validation errors land in the journal.
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=carbonio-postfix-conf
+SyslogIdentifier=postfix-conf

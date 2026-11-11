@@ -1855,7 +1855,7 @@ exec /opt/zextras/libexec/configrewrite antispam antivirus opendkim mta sasl
 exec /usr/bin/sudo -n /opt/zextras/common/sbin/postfix status
 fs.mkdir /opt/zextras/data/postfix/conf-staging mode=0700
 fs.write-atomic /opt/zextras/data/postfix/conf-staging/postconf.set mode=0600
-exec /usr/bin/sudo -n /opt/zextras/libexec/carbonio-postfix-conf apply
+exec /usr/bin/sudo -n /opt/zextras/libexec/postfix-conf apply
 fs.mkdir /opt/zextras/conf mode=0755
 fs.write-atomic /opt/zextras/conf/ldap-vmm.cf mode=0640
 fs.write-atomic /opt/zextras/conf/ldap-vmd.cf mode=0640
@@ -1975,7 +1975,7 @@ exec /usr/bin/sudo -n /opt/zextras/common/sbin/postfix reload
 exec /usr/bin/sudo -n /opt/zextras/common/sbin/postfix status
 fs.mkdir /opt/zextras/data/postfix/conf-staging mode=0700
 fs.write-atomic /opt/zextras/data/postfix/conf-staging/postconf.set mode=0600
-exec /usr/bin/sudo -n /opt/zextras/libexec/carbonio-postfix-conf apply
+exec /usr/bin/sudo -n /opt/zextras/libexec/postfix-conf apply
 fs.mkdir /opt/zextras/conf mode=0755
 fs.write-atomic /opt/zextras/conf/ldap-vmm.cf mode=0640
 fs.write-atomic /opt/zextras/conf/ldap-vmd.cf mode=0640

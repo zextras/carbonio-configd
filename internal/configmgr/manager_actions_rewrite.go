@@ -367,13 +367,13 @@ func (cm *ConfigManager) postfixClient() *pfclient.Client {
 
 // processPostfixConfRewrite renders a template whose target lies under the
 // root-owned common/conf (master.cf, tag_as_*.re). configd cannot write there:
-// the rendered content is staged and installed by carbonio-postfix-conf, which
+// the rendered content is staged and installed by postfix-conf, which
 // validates it and sets the owner and mode itself (the REWRITE mode is moot).
 func (cm *ConfigManager) processPostfixConfRewrite(ctx context.Context, filePath, srcPath, destPath string) error {
 	name := filepath.Base(destPath)
 	if filepath.Dir(destPath) != filepath.Join(cm.mainConfig.BaseDir, "common", "conf") ||
 		!postfixconf.IsInstallable(name) {
-		return fmt.Errorf("rewrite target %s: carbonio-postfix-conf does not install %q", destPath, name)
+		return fmt.Errorf("rewrite target %s: postfix-conf does not install %q", destPath, name)
 	}
 
 	var rendered bytes.Buffer
@@ -388,7 +388,7 @@ func (cm *ConfigManager) processPostfixConfRewrite(ctx context.Context, filePath
 	if batch, ok := ctx.Value(postfixBatchKey{}).(*postfixRewriteBatch); ok {
 		batch.add(name, filePath, rendered.Bytes())
 
-		logger.DebugContext(ctx, "File rendered for carbonio-postfix-conf",
+		logger.DebugContext(ctx, "File rendered for postfix-conf",
 			"dest_path", destPath, "lines_processed", lineCount)
 
 		return nil
@@ -396,13 +396,13 @@ func (cm *ConfigManager) processPostfixConfRewrite(ctx context.Context, filePath
 
 	change := postfixconf.Change{Files: map[string][]byte{name: rendered.Bytes()}}
 	if err := cm.postfixClient().Apply(ctx, change); err != nil {
-		logger.ErrorContext(ctx, "Failed to install rewrite through carbonio-postfix-conf",
+		logger.ErrorContext(ctx, "Failed to install rewrite through postfix-conf",
 			"dest_path", destPath, "error", err)
 
 		return fmt.Errorf("commit rewrite to %s: %w", destPath, err)
 	}
 
-	logger.DebugContext(ctx, "File rewrite completed through carbonio-postfix-conf",
+	logger.DebugContext(ctx, "File rewrite completed through postfix-conf",
 		"dest_path", destPath, "lines_processed", lineCount)
 
 	return nil
@@ -452,7 +452,7 @@ func (cm *ConfigManager) flushPostfixBatch(ctx context.Context, b *postfixRewrit
 		return nil
 	}
 
-	logger.ErrorContext(ctx, "Failed to install rewrites through carbonio-postfix-conf", "error", err)
+	logger.ErrorContext(ctx, "Failed to install rewrites through postfix-conf", "error", err)
 
 	if !errors.Is(err, postfixconf.ErrValidation) || len(b.files) == 1 {
 		failures := make([]batchFailure, 0, len(b.files))
@@ -472,7 +472,7 @@ func (cm *ConfigManager) flushPostfixBatch(ctx context.Context, b *postfixRewrit
 		}
 
 		if err := client.Apply(ctx, postfixconf.Change{Files: map[string][]byte{name: data}}); err != nil {
-			logger.ErrorContext(ctx, "Failed to install rewrite through carbonio-postfix-conf",
+			logger.ErrorContext(ctx, "Failed to install rewrite through postfix-conf",
 				"file", name, "error", err)
 
 			failures = append(failures, batchFailure{b.sources[name], fmt.Errorf("commit rewrite of %s: %w", name, err)})
