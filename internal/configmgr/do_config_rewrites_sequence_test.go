@@ -117,9 +117,9 @@ func TestDoConfigRewrites_SideEffectSequence(t *testing.T) {
 	// root-owned): each step stages its change and runs the root helper (sudo
 	// -n here: the fake is neither root nor in systemd mode). The two steps run
 	// concurrently, their stage+trigger sequences are serialized.
-	helper := "exec /usr/bin/sudo -n " + base + "/libexec/carbonio-postfix-conf apply"
+	helper := "exec /usr/bin/sudo -n " + base + "/libexec/postfix-conf apply"
 	assert.Empty(t, subsequence(ops[1:], "postconf -"), "configd must not run postconf itself")
-	assert.Equal(t, []string{helper, helper}, subsequence(ops[1:], "carbonio-postfix-conf"), "helper triggers")
+	assert.Equal(t, []string{helper, helper}, subsequence(ops[1:], "postfix-conf"), "helper triggers")
 	assert.Len(t, subsequence(ops[1:], "write-atomic "+base+"/data/postfix/conf-staging/postconf.set"), 1, "set staged")
 	assert.Len(t, subsequence(ops[1:], "write-atomic "+base+"/data/postfix/conf-staging/postconf.unset"), 1, "unset staged")
 	assert.Equal(t, []string{"ldap zimbraMtaMyNetworks=127.0.0.0/8"}, subsequence(ops[1:], "ldap "), "ldap step")

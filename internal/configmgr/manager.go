@@ -104,7 +104,7 @@ type ConfigManager struct {
 	env      sys.System // host boundary: filesystem, process execution, clock
 
 	// postfixConf stages changes of the root-owned common/conf and runs the
-	// carbonio-postfix-conf helper; built lazily by postfixClient.
+	// postfix-conf helper; built lazily by postfixClient.
 	postfixConf *pfclient.Client
 	postfixOnce sync.Once
 

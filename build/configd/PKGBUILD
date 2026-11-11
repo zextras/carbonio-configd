@@ -36,13 +36,15 @@ source=(
   "${pkgname}.service"
   "legacy-mode.conf"
   "carbonio-postfix-conf.service"
+  "${pkgname}-tmpfile.conf"
 )
 sha256sums=(
   '4ded5cc77624f3343b99eb68577b7628e59f8d68f434a443f56ee647cd375ef1'
   '3530a738479900a77d932fed67371064739633af09256fb5d4e9b0d474f120f3'
   'f65210996434abc8fb93d0818d54cdd25721a66a268a7c34bba9f07e10ade2f6'
-  '516eef278b816053fb2337dfb48c1d43b827524cefb53a8d52819990a5d9280e'
-  'a4320c3d4df4316bb6b4179d8ff796f480cbf7f7c5304572d452237b00b41a32'
+  'f199f6936a565bc4a33e0ea7fe478b435a90f6b1a621d6e16149522207eb9d1c'
+  'de341509427d747bbcd735dd5dcf4fbc8a0eeb2c51b9ab61ae9e500632f07eb2'
+  'e334342a9f44caf2c6a5fca4eb9ae44cf12f4cb6634004b7f59b54693408225b'
 )
 
 _kill_legacy_zmconfigd() {
@@ -64,8 +66,12 @@ _package_common() {
 
   # The only writer of the root-owned Postfix configuration (CO-4621). The package
   # payload is root:root: configd (zextras) must not be able to replace it.
-  install -Dm755 "${srcdir}/carbonio-postfix-conf" \
-    "${pkgdir}/opt/zextras/libexec/carbonio-postfix-conf"
+  install -Dm755 "${srcdir}/postfix-conf" \
+    "${pkgdir}/opt/zextras/libexec/postfix-conf"
+
+  # Its staging directory, on every distro (legacy and systemd).
+  install -Dm644 "${srcdir}/${pkgname}-tmpfile.conf" \
+    "${pkgdir}/usr/lib/tmpfiles.d/${pkgname}.conf"
 
   # Polkit policy — allow zextras to manage carbonio systemd units
   install -Dm644 "${srcdir}/${pkgname}.rules" \
@@ -108,7 +114,7 @@ build() {
   CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
     -o "${srcdir}/configd" ./cmd/configd/
   CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
-    -o "${srcdir}/carbonio-postfix-conf" ./cmd/carbonio-postfix-conf/
+    -o "${srcdir}/postfix-conf" ./cmd/postfix-conf/
 
   # The completion scripts come from the command tree itself. Run them with the
   # build host's toolchain target, not the (possibly cross-compiled) package one.
@@ -141,6 +147,14 @@ package__ubuntu_noble() {
   _package_systemd
 }
 
+_create_staging() {
+  # Needs the zextras user; on a fresh install it does not exist yet and
+  # carbonio-core's postinst applies this file with the other carbonio-*.conf.
+  if id zextras &>/dev/null; then
+    systemd-tmpfiles --create /usr/lib/tmpfiles.d/carbonio-configd.conf &>/dev/null || :
+  fi
+}
+
 _enable_start() {
   # Fresh install: configd is configured before carbonio-core (dependency
   # order), so the zextras user and systemd-envscript may not exist yet.
@@ -154,6 +168,7 @@ _enable_start() {
 }
 
 postinst__rocky_9() {
+  _create_staging
   if [ -d /run/systemd/system ]; then
     systemctl daemon-reload &>/dev/null || :
     _kill_legacy_zmconfigd
@@ -168,6 +183,7 @@ postinst__rocky_9() {
 }
 
 postinst__ubuntu_noble() {
+  _create_staging
   if [ -d /run/systemd/system ]; then
     systemctl daemon-reload &>/dev/null || :
     _kill_legacy_zmconfigd
@@ -182,10 +198,12 @@ postinst__ubuntu_noble() {
 }
 
 postinst__rocky_8() {
+  _create_staging
   _kill_legacy_zmconfigd
 }
 
 postinst__ubuntu_jammy() {
+  _create_staging
   _kill_legacy_zmconfigd
 }
 

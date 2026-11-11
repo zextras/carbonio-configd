@@ -42,7 +42,7 @@ func newFakeExecutor(ldapMgr ldap.AttributeModifier) (*executor, *systest.Fakes)
 
 const (
 	postconfBin = testBaseDir + "/common/sbin/postconf"
-	helperBin   = testBaseDir + "/libexec/carbonio-postfix-conf"
+	helperBin   = testBaseDir + "/libexec/postfix-conf"
 	stagingDir  = testBaseDir + "/data/postfix/conf-staging"
 )
 
@@ -227,7 +227,7 @@ func TestExecutePostconfdBatch_GenericFailure(t *testing.T) {
 	}
 
 	if !strings.Contains(err.Error(), "postconf -X batch failed: ") ||
-		!strings.Contains(err.Error(), "carbonio-postfix-conf") {
+		!strings.Contains(err.Error(), "postfix-conf") {
 		t.Errorf("error text changed: %v", err)
 	}
 

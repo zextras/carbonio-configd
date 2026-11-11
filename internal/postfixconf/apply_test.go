@@ -358,7 +358,7 @@ func TestLockDirIsCreated(t *testing.T) {
 	t.Parallel()
 
 	e := newEnv(t)
-	e.opts.LockPath = filepath.Join(t.TempDir(), "run", "carbonio-postfix-conf", "lock")
+	e.opts.LockPath = filepath.Join(t.TempDir(), "run", "postfix-conf", "lock")
 
 	if err := e.opts.Apply(context.Background()); err != nil {
 		t.Fatalf("Apply: %v", err)

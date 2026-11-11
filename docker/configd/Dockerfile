@@ -12,7 +12,7 @@
 # Postfix configuration (CO-4621): /opt/zextras/common/conf is root-owned and configd
 # never writes it. A change (postconf -e/-X, master.cf and tag_as_*.re renders) is
 # staged in /opt/zextras/data/postfix/conf-staging (0700, owned by uid 999, created
-# here) and applied by the root helper /opt/zextras/libexec/carbonio-postfix-conf
+# here) and applied by the root helper /opt/zextras/libexec/postfix-conf
 # (root:root 0755, shipped here). configd runs the helper directly when it is uid 0
 # and through `sudo -n` otherwise. This image has no sudo and no systemd and runs
 # as uid 999, so as shipped a Postfix configuration change FAILS with an error that
@@ -20,7 +20,7 @@
 # To let configd manage Postfix configuration from this image, run the container as
 # root (--user 0 / runAsUser: 0). A failed run discards the staged change, so a
 # separate process cannot pick it up later. The helper creates its lock directory
-# /run/carbonio-postfix-conf itself (/run is created here).
+# /run/postfix-conf itself (/run is created here).
 #
 # Build from the repository root:
 #   docker build -f docker/configd/Dockerfile .
@@ -42,7 +42,7 @@ COPY internal ./internal
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -trimpath -ldflags="-s -w" -o /out/configd ./cmd/configd \
  && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -trimpath -ldflags="-s -w" -o /out/carbonio-postfix-conf ./cmd/carbonio-postfix-conf
+    go build -trimpath -ldflags="-s -w" -o /out/postfix-conf ./cmd/postfix-conf
 
 # Templates, extracted from the Carbonio debs of the same release: carbonio-core
 # (zmconfigd.cf and the conf/*.in templates) and carbonio-common-appserver-conf
@@ -108,7 +108,7 @@ LABEL org.opencontainers.image.licenses="AGPL-3.0-only" \
 COPY --from=installer /staging/ /
 COPY --from=builder /out/configd /opt/zextras/bin/configd
 # The root helper: root-owned, so the uid 999 daemon cannot replace it.
-COPY --from=builder --chown=0:0 --chmod=0755 /out/carbonio-postfix-conf /opt/zextras/libexec/carbonio-postfix-conf
+COPY --from=builder --chown=0:0 --chmod=0755 /out/postfix-conf /opt/zextras/libexec/postfix-conf
 
 ENV CARBONIO_BASE_DIR=/opt/zextras \
     CONFIGD_LC_zmconfigd_template_dir=/opt/zextras/share/configd

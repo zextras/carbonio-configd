@@ -28,8 +28,8 @@ import (
 var ErrPathEscapesBaseDir = errors.New("path escapes base directory")
 
 // ErrRootOwnedTarget is returned when a REWRITE target lies under the
-// root-owned common/conf, which only the carbonio-postfix-conf helper writes.
-var ErrRootOwnedTarget = errors.New("target is under root-owned common/conf (written only by carbonio-postfix-conf)")
+// root-owned common/conf, which only the postfix-conf helper writes.
+var ErrRootOwnedTarget = errors.New("target is under root-owned common/conf (written only by postfix-conf)")
 
 // Rewriter handles template file generation from .in files using REWRITE directives.
 type Rewriter struct {
@@ -135,7 +135,7 @@ func parseRewriteMode(mode string) (os.FileMode, error) {
 
 // checkRewritePaths refuses a source or target that escapes BaseDir (every
 // legacy configd.cf REWRITE path is relative to it) and any target under the
-// root-owned common/conf, which only carbonio-postfix-conf may write.
+// root-owned common/conf, which only postfix-conf may write.
 func checkRewritePaths(source, target string) error {
 	if !filepath.IsLocal(source) || !filepath.IsLocal(target) {
 		return fmt.Errorf("%w: source=%q target=%q", ErrPathEscapesBaseDir, source, target)

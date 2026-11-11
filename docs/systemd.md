@@ -8,7 +8,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 Source: `build/configd/` (`PKGBUILD`, `carbonio-configd.service`,
 `carbonio-configd.rules`, `carbonio-postfix-conf.service`, completions), `build/yap.json`, `Jenkinsfile`,
-`docker/configd/Dockerfile`, `cmd/carbonio-postfix-conf`, `internal/postfixconf`, `cmd/configd/mainloop.go`, `cmd/configd/signals.go`.
+`docker/configd/Dockerfile`, `cmd/postfix-conf`, `internal/postfixconf`, `cmd/configd/mainloop.go`, `cmd/configd/signals.go`.
 
 - [Package and distributions](#package-and-distributions)
 - [The systemd unit](#the-systemd-unit)
@@ -21,7 +21,7 @@ Source: `build/configd/` (`PKGBUILD`, `carbonio-configd.service`,
 ## Package and distributions
 
 `carbonio-configd` ships one static binary (`/opt/zextras/bin/configd`, built
-with `CGO_ENABLED=0`), the root helper `/opt/zextras/libexec/carbonio-postfix-conf`
+with `CGO_ENABLED=0`), the root helper `/opt/zextras/libexec/postfix-conf`
 (and, on systemd distributions, its `carbonio-postfix-conf.service`), the polkit rule
 (`/usr/share/polkit-1/rules.d/50-carbonio-configd.rules`) and bash completions
 for `configd` and for the legacy wrapper names. Packages are built with
@@ -80,28 +80,28 @@ copy was a zextras-to-root path (CO-4621). `/opt/zextras/common/conf` is `0755
 root:root` and `main.cf`, `master.cf`, `tag_as_*.re` and their templates are `0644
 root:root`: configd never writes there (`postconf -e/-X` included). It changes
 Postfix configuration only through the root helper
-`/opt/zextras/libexec/carbonio-postfix-conf` (static Go binary of this package,
+`/opt/zextras/libexec/postfix-conf` (static Go binary of this package,
 `root:root 0755`):
 
 1. configd validates the change, then writes it to the staging directory
    `/opt/zextras/data/postfix/conf-staging` (`0700 zextras:zextras`, created by
-   carbonio-core): `postconf.set` (`KEY=VALUE` lines), `postconf.unset` (`KEY`
+   this package's tmpfiles.d `carbonio-configd.conf`): `postconf.set` (`KEY=VALUE` lines), `postconf.unset` (`KEY`
    lines), and whole `master.cf`, `tag_as_foreign.re`, `tag_as_originating.re`.
    Every `postconf -e/-X` batch, the master.cf/tag_as_*.re renders of one rewrite
    pass (together) and the MTA `main.cf` seed (`mail_owner`, `setgid_group`) is
    one stage-and-trigger run; runs are serialized by a mutex.
 2. configd triggers the helper, chosen like this:
    - systemd mode: `systemctl start carbonio-postfix-conf.service` (a hardened
-     `Type=oneshot`, `User=root` unit running `carbonio-postfix-conf apply`; the
+     `Type=oneshot`, `User=root` unit running `postfix-conf apply`; the
      polkit rule allows `start` and nothing else for it);
-   - configd running as uid 0 (containers): `carbonio-postfix-conf apply` directly;
-   - legacy mode: `sudo -n /opt/zextras/libexec/carbonio-postfix-conf apply`
+   - configd running as uid 0 (containers): `postfix-conf apply` directly;
+   - legacy mode: `sudo -n /opt/zextras/libexec/postfix-conf apply`
      (the sudoers of carbonio-core allows the helper, not `postconf`).
 
    If the trigger fails, configd reports an error that names the helper and never
    falls back to writing `common/conf` itself; the staged files are discarded and
    the change is retried by the next cycle.
-3. `apply` takes `flock` on `/run/carbonio-postfix-conf/lock` (the unit's
+3. `apply` takes `flock` on `/run/postfix-conf/lock` (the unit's
    `RuntimeDirectory`; the helper creates the root-only directory when it runs
    elsewhere), opens every staged
    entry with `openat` + `O_NOFOLLOW|O_NONBLOCK` and requires a regular file owned by
@@ -135,7 +135,7 @@ Validation:
   `-o name=value` (also `-o{...}` and `{ -o ... }`) is checked: no `debugger_command`,
   TLS config, account, virtual uid, directory, path or environment parameters.
 
-The helper also works by hand, as root: `carbonio-postfix-conf set KEY=VALUE...` and
+The helper also works by hand, as root: `postfix-conf set KEY=VALUE...` and
 `unset KEY...` validate the same way and run `postconf -e`/`-X`.
 
 **Containers.** The `carbonio-configd` image (`docker/configd`, `FROM scratch`, uid
