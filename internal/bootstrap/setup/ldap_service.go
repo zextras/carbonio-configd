@@ -128,13 +128,6 @@ func (e *Env) LDAPConfigured() bool {
 	return err == nil
 }
 
-// StartLDAP is setup.pl startLdap: it starts the local slapd when it is not
-// running and, with systemd, waits until it answers.
-func (e *Env) StartLDAP() error { return ldapNativeKit().start(e) }
-
-// StopLDAP is setup.pl stopLdap (a stop failure is logged, not returned).
-func (e *Env) StopLDAP() { ldapNativeKit().ldapStop(e) }
-
 // ldapExists reports whether path exists.
 func ldapExists(e *Env, path string) bool {
 	_, err := e.Sys.FS.Stat(path)

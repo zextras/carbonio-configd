@@ -39,9 +39,6 @@ func NewResolved(readFile ReadFileFunc) *Resolved {
 // Source returns the layer that set the key at path.
 func (r *Resolved) Source(path string) Source { return r.sources[path] }
 
-// SecretFile returns the file the secret at path was read from, or "".
-func (r *Resolved) SecretFile(path string) string { return r.secretFiles[path] }
-
 // Set parses raw into the field and records src as its source.
 func (r *Resolved) Set(f *Field, raw string, src Source) error {
 	if err := f.Set(&r.Config, raw); err != nil {

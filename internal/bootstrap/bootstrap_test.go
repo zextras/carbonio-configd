@@ -112,10 +112,10 @@ func TestSecretFiles(t *testing.T) {
 
 	assert.Equal(t, "fromfile", r.Config.LDAP.RootPassword, "one trailing newline is dropped")
 	assert.Equal(t, "adminfile", r.Config.Admin.Password)
-	assert.Equal(t, "/s/admin", r.SecretFile("admin.password"))
+	assert.Equal(t, "/s/admin", r.secretFiles["admin.password"])
 
 	require.NoError(t, r.ApplySets([]string{"ldap.root_password=direct"}))
-	assert.Empty(t, r.SecretFile("ldap.root_password"), "a later direct value forgets the file")
+	assert.Empty(t, r.secretFiles["ldap.root_password"], "a later direct value forgets the file")
 }
 
 func TestApplyEnv_Errors(t *testing.T) {

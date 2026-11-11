@@ -167,19 +167,6 @@ func (e *Env) SetLC(pairs map[string]string) error {
 	return localconfig.SetKeys(e.Paths.LocalConfig, keys)
 }
 
-// UnsetLC removes keys from localconfig.xml (absent keys are ignored).
-func (e *Env) UnsetLC(keys ...string) error {
-	e.lc = nil
-
-	err := localconfig.RemoveKeys(e.Paths.LocalConfig, keys)
-
-	if _, ok := errors.AsType[*localconfig.KeyNotSetError](err); ok {
-		return nil
-	}
-
-	return err
-}
-
 // LDAP opens a client to the LDAP master with the credentials of the
 // effective localconfig. The caller closes it.
 func (e *Env) LDAP() (*ldap.Client, error) {
