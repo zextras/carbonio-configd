@@ -810,24 +810,33 @@ func (c *Client) GetServerConfig(hostname string) (map[string]string, error) {
 		return nil, err
 	}
 
-	dir := c.attrsDir
-	if dir == "" {
-		dir = defaultAttrsDir()
-	}
-
-	inherited, err := c.attrsCache.serverInheritedAttrs(c.fs, dir)
+	inherited, global, err := c.serverInheritance()
 	if err != nil {
-		return nil, fmt.Errorf("server %s inherited attributes: %w", hostname, err)
-	}
-
-	global, err := c.GetGlobalConfig()
-	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("server %s: %w", hostname, err)
 	}
 
 	applyServerInherited(server, global, inherited)
 
 	return server, nil
+}
+
+func (c *Client) serverInheritance() (inherited []string, global map[string]string, err error) {
+	dir := c.attrsDir
+	if dir == "" {
+		dir = defaultAttrsDir()
+	}
+
+	inherited, err = c.attrsCache.serverInheritedAttrs(c.fs, dir)
+	if err != nil {
+		return nil, nil, fmt.Errorf("inherited attributes: %w", err)
+	}
+
+	global, err = c.GetGlobalConfig()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return inherited, global, nil
 }
 
 // applyServerInherited copies each inherited attribute present in global into
@@ -867,7 +876,22 @@ func (c *Client) GetAllServers() ([]string, error) {
 // Returns a map of hostname to attributes, useful for zmprov gas -v equivalent.
 func (c *Client) GetAllServersWithAttributes() (map[string]map[string]string, error) {
 	dn := fmt.Sprintf("cn=servers,%s", c.baseDN)
-	return c.getEntitiesWithAttributes(dn, "(objectClass=zimbraServer)", ldap.ScopeSingleLevel, "cn", "servers")
+
+	servers, err := c.getEntitiesWithAttributes(dn, "(objectClass=zimbraServer)", ldap.ScopeSingleLevel, "cn", "servers")
+	if err != nil || len(servers) == 0 {
+		return servers, err
+	}
+
+	inherited, global, err := c.serverInheritance()
+	if err != nil {
+		return nil, fmt.Errorf("servers: %w", err)
+	}
+
+	for _, server := range servers {
+		applyServerInherited(server, global, inherited)
+	}
+
+	return servers, nil
 }
 
 // GetAllDomains retrieves all domains from LDAP.

@@ -117,7 +117,8 @@ func TestQueryDomains_Error(t *testing.T) {
 }
 
 func TestQueryServers(t *testing.T) {
-	result := &ldap.SearchResult{Entries: []*ldap.Entry{
+	c := newServersGetterTestClient(
+		entryWithAttrs("cn=config,cn=zimbra", map[string][]string{"cn": {"config"}}),
 		entryWithAttrs("cn=proxy1,cn=servers,cn=zimbra", map[string][]string{
 			"cn":                     {"proxy1"},
 			"zimbraId":               {"id-1"},
@@ -135,8 +136,7 @@ func TestQueryServers(t *testing.T) {
 			AttrZimbraServiceEnabled: {"proxy"},
 			// Missing zimbraId/zimbraServiceHostname: must be skipped.
 		}),
-	}}
-	c, _ := newGetterTestClient(result, nil)
+	)
 
 	servers, err := c.QueryServers(context.Background(), "proxy")
 	require.NoError(t, err)
