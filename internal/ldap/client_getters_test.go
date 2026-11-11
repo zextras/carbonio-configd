@@ -201,20 +201,85 @@ func TestGetAllServers_SearchError(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to get all servers")
 }
 
+func newServersGetterTestClient(global *ldap.Entry, servers ...*ldap.Entry) *Client {
+	c := &Client{baseDN: defaultBaseDN, fs: sys.RealFS{}, attrsDir: filepath.Join("testdata", "attrs")}
+	c.searchFn = func(baseDN, _ string, _ []string, _ int) (*ldap.SearchResult, error) {
+		if baseDN == "cn=config,cn=zimbra" {
+			return &ldap.SearchResult{Entries: []*ldap.Entry{global}}, nil
+		}
+
+		return &ldap.SearchResult{Entries: servers}, nil
+	}
+
+	return c
+}
+
 func TestGetAllServersWithAttributes(t *testing.T) {
-	result := &ldap.SearchResult{Entries: []*ldap.Entry{
+	t.Parallel()
+
+	c := newServersGetterTestClient(
+		entryWithAttrs("cn=config,cn=zimbra", map[string][]string{"cn": {"config"}}),
 		entryWithAttrs("cn=a,cn=servers,cn=zimbra", map[string][]string{
 			"cn":                   {"a.example.com"},
 			"zimbraServiceEnabled": {"mta"},
 		}),
 		entryWithAttrs("cn=nokey,cn=servers,cn=zimbra", map[string][]string{"description": {"no cn"}}),
-	}}
-	c, _ := newGetterTestClient(result, nil)
+	)
 
 	servers, err := c.GetAllServersWithAttributes()
 	require.NoError(t, err)
 	require.Len(t, servers, 1)
 	assert.Equal(t, "mta", servers["a.example.com"]["zimbraServiceEnabled"])
+}
+
+func TestGetAllServersWithAttributes_InheritsGlobal(t *testing.T) {
+	t.Parallel()
+
+	c := newServersGetterTestClient(
+		entryWithAttrs("cn=config,cn=zimbra", map[string][]string{
+			"zimbraMilterServerEnabled": {"TRUE"},
+			"zimbraMilterBindPort":      {"7026"},
+			"zimbraMilterBindAddress":   {"127.0.0.1"},
+			"zimbraServiceEnabled":      {"mta"},
+		}),
+		entryWithAttrs("cn=a,cn=servers,cn=zimbra", map[string][]string{
+			"cn":                   {"a.example.com"},
+			"zimbraServiceEnabled": {"mailbox"},
+		}),
+		entryWithAttrs("cn=b,cn=servers,cn=zimbra", map[string][]string{
+			"cn":                   {"b.example.com"},
+			"zimbraMilterBindPort": {"9999"},
+		}),
+	)
+
+	servers, err := c.GetAllServersWithAttributes()
+	require.NoError(t, err)
+	require.Len(t, servers, 2)
+
+	assert.Equal(t, "TRUE", servers["a.example.com"]["zimbraMilterServerEnabled"], "missing serverInherited attr inherited")
+	assert.Equal(t, "7026", servers["a.example.com"]["zimbraMilterBindPort"], "missing serverInherited attr inherited")
+	assert.Equal(t, "mailbox", servers["a.example.com"]["zimbraServiceEnabled"], "server value kept")
+	assert.NotContains(t, servers["a.example.com"], "zimbraMilterBindAddress", "not flagged serverInherited")
+	assert.Equal(t, "9999", servers["b.example.com"]["zimbraMilterBindPort"], "server value wins")
+	assert.Equal(t, "TRUE", servers["b.example.com"]["zimbraMilterServerEnabled"], "missing serverInherited attr inherited")
+	assert.NotContains(t, servers["b.example.com"], "zimbraServiceEnabled", "not flagged serverInherited")
+}
+
+func TestGetAllServersWithAttributes_SchemaUnreadable(t *testing.T) {
+	t.Parallel()
+
+	c := newServersGetterTestClient(
+		entryWithAttrs("cn=config,cn=zimbra", map[string][]string{"cn": {"config"}}),
+		entryWithAttrs("cn=a,cn=servers,cn=zimbra", map[string][]string{"cn": {"a.example.com"}}),
+	)
+	f := systest.New()
+	f.FS.PutDir("/schema", 0o755)
+	c.fs = f.FS
+	c.attrsDir = "/schema"
+
+	_, err := c.GetAllServersWithAttributes()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "inherited attributes")
 }
 
 func TestGetAllServersWithAttributes_SearchError(t *testing.T) {
