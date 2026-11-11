@@ -6,7 +6,7 @@ module github.com/zextras/carbonio-configd
 
 go 1.27.0
 
-toolchain go1.27.3
+toolchain go1.27.4
 
 require (
 	github.com/docker/go-units v0.5.0
