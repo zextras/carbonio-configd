@@ -67,6 +67,9 @@ func TestCommands_RefuseANonZextrasCaller(t *testing.T) {
 		{"service stop-systemd", func(env sys.System) error {
 			return (&ServiceStopSystemdCmd{Name: "mta"}).Run(env, discardStdio())
 		}},
+		{"service reload-systemd", func(env sys.System) error {
+			return (&ServiceReloadSystemdCmd{Name: "mta"}).Run(env, discardStdio())
+		}},
 		{"proxy gen", func(env sys.System) error { return (&ProxyGenCmd{}).Run(env, discardStdio()) }},
 		{"proxy rewrite", func(env sys.System) error { return (&ProxyRewriteCmd{}).Run(env, discardStdio()) }},
 		{"proxy enable", func(env sys.System) error { return (&ProxyEnableCmd{Protocol: "imap"}).Run(env, discardStdio()) }},
