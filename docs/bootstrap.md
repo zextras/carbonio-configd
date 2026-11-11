@@ -6,10 +6,10 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 # Bootstrap configuration
 
-`configd bootstrap` will replace `carbonio-bootstrap` (`setup.pl` in
-carbonio-core). Only the input side exists so far:
-`configd bootstrap config` builds the node configuration, validates it, and
-prints it or saves it. It does not change the node yet.
+`configd bootstrap` replaces `carbonio-bootstrap` (`setup.pl` in
+carbonio-core). `configd bootstrap config` builds the node configuration,
+validates it, and prints it or saves it; `configd bootstrap run` builds it
+the same way and configures the node (see [Running](#running)).
 
 ```bash
 configd bootstrap config                                    # wizard on a terminal, otherwise print
@@ -190,3 +190,45 @@ configd bootstrap config --legacy-config /opt/zextras/config.12345 --output /etc
   them. A hand-written file may hold some. They are used for the run but not
   written by `--output`; give them again through `*_FILE`, a `_file` key or
   the wizard.
+
+## Running
+
+`configd bootstrap run` (as root) takes the flags of `config`, plus
+`--dry-run`. It reads the node first: whether this is a new install
+(`.install_history`, as `setup.pl`), the installed and enabled packages, and
+on an existing install the values in localconfig and LDAP. A new node whose
+`ldap.host` is another, reachable node also reads the master's values. Then
+it runs the steps of `setup.pl` in its order:
+
+1. LDAP configuration and schema, the CA of an existing install, port
+   conflicts, `zmldapupdateldif`.
+2. localconfig values, CA and certificates, server entry, LDAP setup
+   (master, `replica` or `mmr`), service ports and store, timezone and proxy
+   preferences, MTA, enabled services, host pool.
+3. Default domain and accounts, SQL, syslog, service start (systemd targets,
+   or `zmcontrol`), GAL sync account, crontab, ssh keys.
+
+Each step first checks whether the node already holds what it produces and
+skips it then, so after a failure running the command again resumes. Steps
+that `setup.pl` let fail with a warning still only warn. Each finished step
+is recorded in `.install_history` as `setup.pl` did (`CONFIGURED <stage>`).
+The run logs to `/opt/zextras/log/bootstrap.<date>.log` (mode `0600`).
+
+`--dry-run` prints each step with `skipped`, `done` or `would apply` and
+writes nothing. On an existing install it may start the local LDAP server to
+read the node.
+
+Passwords are never passed on a command line or written to the log:
+`zmprov` reads its commands on stdin, localconfig is written directly, and
+the LDAP passwords are set natively (no `zmldappasswd`).
+
+Differences from `setup.pl`:
+
+- A failure of `zmmtainit`, `zmmyinit` or the dhparam key ends the run
+  (`setup.pl` went on, or exited `0`).
+- No `/opt/zextras/config.<pid>` file is written; use `--output`.
+- A replica or multi-master directory server is set up from the
+  configuration (`ldap.replication_type`), not only from the interactive
+  menu.
+- With the mail proxy off, the POP3S proxy port, not the mailbox one, moves
+  to 995.
