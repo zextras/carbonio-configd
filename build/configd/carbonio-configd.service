@@ -62,7 +62,9 @@ OOMScoreAdjust=-500
 
 # ── Security: Filesystem ──────────────────────────────────────────────
 ProtectSystem=strict
-ReadWritePaths=-/opt/zextras/conf -/opt/zextras/log -/opt/zextras/data -/opt/zextras/common/conf -/run/carbonio
+# common/conf (Postfix configuration) is root-owned and not writable here: changes go
+# through the staging dir under data/ and the carbonio-postfix-conf.service helper.
+ReadWritePaths=-/opt/zextras/conf -/opt/zextras/log -/opt/zextras/data -/run/carbonio
 ProtectHome=yes
 PrivateTmp=yes
 UMask=0027
@@ -80,7 +82,9 @@ ProcSubset=pid
 
 # ── Security: Privilege restrictions ──────────────────────────────────
 # sudo is only used by legacy (non-systemd) and CustomStart paths, which the
-# daemon never takes in systemd mode (systemctl via polkit instead).
+# daemon never takes in systemd mode (systemctl via polkit instead). Postfix
+# configuration changes also go through systemctl: it stages them and starts
+# carbonio-postfix-conf.service, which applies them as root.
 NoNewPrivileges=yes
 RestrictRealtime=yes
 RestrictSUIDSGID=yes

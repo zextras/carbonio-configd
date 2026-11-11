@@ -7,6 +7,7 @@ package template
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/sys"
@@ -835,5 +836,25 @@ func TestRewriteReader_ScannerError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "failed to read input") {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestRewriteConfig_RefusesRootOwnedCommonConf(t *testing.T) {
+	t.Parallel()
+
+	fakes := systest.New()
+	fakes.FS.Put("/opt/zextras/common/conf/master.cf.in", []byte("x\n"), 0o644)
+
+	rewriter := NewRewriter("/opt/zextras", newMockLookup(), fakes.System())
+
+	for _, target := range []string{"common/conf/master.cf", "common/lib/../conf/x"} {
+		err := rewriter.RewriteConfig(context.Background(), "common/conf/master.cf.in", target, "0644")
+		if !errors.Is(err, ErrRootOwnedTarget) {
+			t.Errorf("target %q: err = %v, want ErrRootOwnedTarget", target, err)
+		}
+	}
+
+	if _, ok := fakes.FS.Data("/opt/zextras/common/conf/master.cf"); ok {
+		t.Error("nothing may be written under common/conf")
 	}
 }

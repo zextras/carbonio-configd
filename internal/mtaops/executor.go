@@ -16,6 +16,8 @@ import (
 
 	"github.com/zextras/carbonio-configd/internal/ldap"
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/postfixconf"
+	pfclient "github.com/zextras/carbonio-configd/internal/postfixconf/client"
 	"github.com/zextras/carbonio-configd/internal/redact"
 	"github.com/zextras/carbonio-configd/internal/state"
 	"github.com/zextras/carbonio-configd/internal/sys"
@@ -33,18 +35,41 @@ type executor struct {
 	ldapManager  ldap.AttributeModifier
 	mappedFiles  map[string]string // key -> file path mapping
 	env          sys.System
+	postfixConf  *pfclient.Client // the only writer of common/conf (CO-4621)
+}
+
+// Option customizes NewExecutor.
+type Option func(*executor)
+
+// WithSystemdMode tells the executor how to find out whether configd runs in
+// systemd mode, which selects how the root helper carbonio-postfix-conf is
+// triggered (see postfixconf/client). Without it the executor is not in
+// systemd mode.
+func WithSystemdMode(systemd func() bool) Option {
+	return func(e *executor) {
+		e.postfixConf = pfclient.NewClient(e.baseDir, e.env, systemd)
+	}
 }
 
 // NewExecutor creates a new MTA operations executor. All host access (postconf,
-// mapped-file reads and writes, umask) goes through env.
-func NewExecutor(baseDir string, ldapManager ldap.AttributeModifier, env sys.System) Executor {
-	return &executor{
+// mapped-file reads and writes, umask) goes through env. Postfix configuration
+// is never written here: postconf -e/-X changes are staged and applied by the
+// root helper carbonio-postfix-conf.
+func NewExecutor(baseDir string, ldapManager ldap.AttributeModifier, env sys.System, opts ...Option) Executor {
+	e := &executor{
 		baseDir:      baseDir,
 		postconfPath: filepath.Join(baseDir, "common", "sbin", "postconf"),
 		ldapManager:  ldapManager,
 		mappedFiles:  mappedFilePaths(baseDir),
 		env:          env,
+		postfixConf:  pfclient.NewClient(baseDir, env, nil),
 	}
+
+	for _, opt := range opts {
+		opt(e)
+	}
+
+	return e
 }
 
 // mappedFilePaths resolves state.MAPPEDFILES (the canonical key -> relative
@@ -85,8 +110,8 @@ func (e *executor) ExecutePostconf(ctx context.Context, op PostconfOperation) er
 	return e.ExecutePostconfBatch(ctx, []PostconfOperation{op})
 }
 
-// ExecutePostconfBatch executes multiple postconf -e operations in a single call.
-// This is much more efficient than calling postconf individually for each setting.
+// ExecutePostconfBatch applies multiple postconf -e operations in a single helper run
+// (staged, then applied as root by carbonio-postfix-conf).
 // Values containing newlines (e.g. multi-value LDAP attributes) are normalized in
 // place: split on newlines, trimmed, and rejoined with ", " so they stay part of
 // the same batch invocation instead of postconf's multi-line syntax.
@@ -119,9 +144,7 @@ func (e *executor) ExecutePostconfBatch(ctx context.Context, ops []PostconfOpera
 			"value", redact.ForLog(ops[i].Key, ops[i].Value))
 	}
 
-	// Build arguments: postconf -e "key1=value1" "key2=value2" ...
-	args := make([]string, 0, len(ops)+1)
-	args = append(args, "-e")
+	change := postfixconf.Change{Set: make([]postfixconf.KV, 0, len(ops))}
 
 	for _, op := range ops {
 		if !postconfKeyRe.MatchString(op.Key) {
@@ -131,25 +154,28 @@ func (e *executor) ExecutePostconfBatch(ctx context.Context, ops []PostconfOpera
 			continue
 		}
 
-		arg := fmt.Sprintf("%s=%s", op.Key, op.Value)
-		args = append(args, arg)
+		if !postfixconf.IsAllowedKey(op.Key) {
+			logger.WarnContext(ctx, "Not changing a Postfix parameter that carbonio-postfix-conf does not allow",
+				"key", op.Key)
+
+			continue
+		}
+
+		change.Set = append(change.Set, postfixconf.KV{Key: op.Key, Value: op.Value})
 
 		logger.DebugContext(ctx, "Queued postconf operation",
 			"key", op.Key,
 			"value", redact.ForLog(op.Key, op.Value))
 	}
 
-	if len(args) == 1 {
+	if len(change.Set) == 0 {
 		return nil
 	}
 
-	output, err := sys.CombinedOutput(ctx, e.env.Exec, e.postconfPath, args...)
-	if err != nil {
-		logger.ErrorContext(ctx, "Postconf batch failed",
-			"error", err,
-			"output", string(output))
+	if err := e.postfixConf.Apply(ctx, change); err != nil {
+		logger.ErrorContext(ctx, "Postconf batch failed", "error", err)
 
-		return fmt.Errorf("postconf batch failed: %w, output: %s", err, string(output))
+		return fmt.Errorf("postconf batch failed: %w", err)
 	}
 
 	logger.DebugContext(ctx, "Postconf batch completed",
@@ -181,43 +207,34 @@ func (e *executor) ExecutePostconfdBatch(ctx context.Context, ops []PostconfdOpe
 	logger.DebugContext(ctx, "Executing postconf -X batch",
 		"operation_count", len(ops))
 
-	// Build arguments: postconf -X key1 key2 key3 ...
-	args := make([]string, 0, len(ops)+1)
-	args = append(args, "-X")
+	change := postfixconf.Change{Unset: make([]string, 0, len(ops))}
 
 	for _, op := range ops {
-		args = append(args, op.Key)
+		if !postfixconf.IsAllowedKey(op.Key) {
+			logger.WarnContext(ctx, "Not removing a Postfix parameter that carbonio-postfix-conf does not allow",
+				"key", op.Key)
+
+			continue
+		}
+
+		change.Unset = append(change.Unset, op.Key)
 		logger.DebugContext(ctx, "Queued postconf -X",
 			"key", op.Key)
 	}
 
-	output, err := sys.CombinedOutput(ctx, e.env.Exec, e.postconfPath, args...)
-	if err != nil {
-		// postconf -X warns (and exits non-zero) when a key doesn't exist; that's
-		// expected and safe to ignore. Any other failure (missing binary, permission
-		// denied, crash, ...) must surface to the caller.
-		if strings.Contains(strings.ToLower(string(output)), "unknown parameter") {
-			logger.DebugContext(ctx, "Postconf -X batch reported unknown parameter (acceptable)",
-				"error", err,
-				"output", string(output))
+	if len(change.Unset) == 0 {
+		return nil
+	}
 
-			return nil
-		}
+	// The helper tolerates keys main.cf does not define.
+	if err := e.postfixConf.Apply(ctx, change); err != nil {
+		logger.ErrorContext(ctx, "Postconf -X batch failed", "error", err)
 
-		logger.ErrorContext(ctx, "Postconf -X batch failed",
-			"error", err,
-			"output", string(output))
-
-		return fmt.Errorf("postconf -X batch failed: %w, output: %s", err, string(output))
+		return fmt.Errorf("postconf -X batch failed: %w", err)
 	}
 
 	logger.DebugContext(ctx, "Postconf -X batch completed",
 		"operations_deleted", len(ops))
-
-	if len(output) > 0 {
-		logger.DebugContext(ctx, "Postconf -X output",
-			"output", string(output))
-	}
 
 	return nil
 }

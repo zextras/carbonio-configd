@@ -206,9 +206,8 @@ func TestBootstrapPostfixMainCf_MissingOwner(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	want := []string{sudoBin + " -n /usr/bin/touch " + ctl.p.mainCf}
-	if got := f.Exec.Lines(); !slices.Equal(got, want) {
-		t.Errorf("commands = %q, want only the touch (postconf seed skipped): %q", got, want)
+	if got := f.Exec.Lines(); len(got) != 0 {
+		t.Errorf("commands = %q, want none (no touch, no seed without owner/group)", got)
 	}
 }
 
@@ -254,16 +253,20 @@ func TestBootstrapPostfixMainCf_NewFile(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	want := []string{
-		sudoBin + " -n /usr/bin/touch " + ctl.p.mainCf,
-		sudoBin + " -n " + ctl.p.postconfBin + " -e mail_owner=postfix setgid_group=postdrop",
-	}
+	// No sudo touch, no sudo postconf: the seed is staged and the root helper
+	// runs (sudo -n helper apply for this non-root, non-systemd fake).
+	want := []string{sudoBin + " -n " + ctl.p.libexec + "/carbonio-postfix-conf apply"}
 	if got := f.Exec.Lines(); !slices.Equal(got, want) {
 		t.Errorf("commands = %q, want %q", got, want)
 	}
+
+	staged, ok := f.FS.Data(ctl.p.data + "/postfix/conf-staging/postconf.set")
+	if !ok || string(staged) != "mail_owner=postfix\nsetgid_group=postdrop\n" {
+		t.Errorf("staged postconf.set = %q (exists %v)", staged, ok)
+	}
 }
 
-func TestBootstrapPostfixMainCf_TouchFails(t *testing.T) {
+func TestBootstrapPostfixMainCf_HelperFails(t *testing.T) {
 	t.Parallel()
 
 	ctl, f := newFakeController(t)
@@ -273,12 +276,12 @@ func TestBootstrapPostfixMainCf_TouchFails(t *testing.T) {
 		"postfix_mail_owner":   "postfix",
 		"postfix_setgid_group": "postdrop",
 	})
-	if err == nil || !strings.Contains(err.Error(), "touch "+ctl.p.mainCf) {
-		t.Fatalf("err = %v, want touch failure", err)
+	if err == nil || !strings.Contains(err.Error(), "carbonio-postfix-conf") {
+		t.Fatalf("err = %v, want a failure naming the helper", err)
 	}
 
 	if got := f.Exec.Lines(); len(got) != 1 {
-		t.Errorf("postconf must not run after a failed touch, got %q", got)
+		t.Errorf("only the helper trigger may run, got %q", got)
 	}
 }
 

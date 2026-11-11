@@ -357,8 +357,10 @@ func (h *olHarness) checkFirstCycle(t *testing.T) {
 	require.True(t, ok, "rewrite output missing; FS: %v", h.fakes.FS.Paths())
 	assert.Equal(t, "size=10240000\nmilter=FALSE\n", string(out))
 
-	// postconf ran through the fake exec, never a real binary.
-	assert.Contains(t, postconfLines(h), olBaseDir+"/common/sbin/postconf -e message_size_limit=10240000")
+	// The root-owned main.cf is changed by the helper, never by configd: the
+	// assignment is staged and the helper is triggered through the fake exec.
+	assert.Contains(t, stagedPostconfSet(h), "message_size_limit=10240000\n")
+	assert.NotEmpty(t, helperRuns(h))
 
 	// The LDAP directives reached cn=config of the container.
 	assert.Equal(t, "64", h.configAttr("cn=config", "olcLogLevel"))
@@ -368,11 +370,19 @@ func (h *olHarness) checkFirstCycle(t *testing.T) {
 	assert.Empty(t, pl.Restarts)
 }
 
-func postconfLines(h *olHarness) []string {
+// stagedPostconfSet is the postconf.set configd staged for the root helper.
+func stagedPostconfSet(h *olHarness) string {
+	data, _ := h.fakes.FS.Data(olBaseDir + "/data/postfix/conf-staging/postconf.set")
+
+	return string(data)
+}
+
+// helperRuns lists the exec lines that triggered carbonio-postfix-conf.
+func helperRuns(h *olHarness) []string {
 	var out []string
 
 	for _, l := range h.fakes.Rec.Of("exec") {
-		if strings.Contains(l, "postconf") {
+		if strings.Contains(l, "carbonio-postfix-conf") {
 			out = append(out, strings.TrimPrefix(l, "exec "))
 		}
 	}
@@ -404,7 +414,8 @@ func (h *olHarness) checkModifyPlan(t *testing.T) {
 	}, varChanges(pl, "ldap"))
 
 	// The new value reaches postconf, the template and cn=config.
-	assert.Contains(t, postconfLines(h), olBaseDir+"/common/sbin/postconf -e message_size_limit=20480000")
+	assert.Contains(t, stagedPostconfSet(h), "message_size_limit=20480000\n")
+	assert.NotEmpty(t, helperRuns(h))
 
 	out, ok := h.fakes.FS.Data(olBaseDir + "/conf/mta.conf")
 	require.True(t, ok)
@@ -428,5 +439,5 @@ func (h *olHarness) checkNoChange(t *testing.T) {
 	pl := mustCycle(t, h.cm)
 
 	assert.True(t, pl.IsEmpty(), "an unchanged directory plans nothing: %+v", pl)
-	assert.Empty(t, postconfLines(h))
+	assert.Empty(t, helperRuns(h))
 }

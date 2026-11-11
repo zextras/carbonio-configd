@@ -35,11 +35,28 @@ const testBaseDir = "/opt/zextras"
 // newFakeExecutor builds an executor over fresh fakes.
 func newFakeExecutor(ldapMgr ldap.AttributeModifier) (*executor, *systest.Fakes) {
 	fakes := systest.New()
+	fakes.Proc.UserID = 0 // root: the helper is exec'd directly, without sudo
 
 	return NewExecutor(testBaseDir, ldapMgr, fakes.System()).(*executor), fakes
 }
 
-const postconfBin = testBaseDir + "/common/sbin/postconf"
+const (
+	postconfBin = testBaseDir + "/common/sbin/postconf"
+	helperBin   = testBaseDir + "/libexec/carbonio-postfix-conf"
+	stagingDir  = testBaseDir + "/data/postfix/conf-staging"
+)
+
+// staged returns the content of a file staged for the root helper.
+func staged(t *testing.T, fakes *systest.Fakes, name string) string {
+	t.Helper()
+
+	data, ok := fakes.FS.Data(stagingDir + "/" + name)
+	if !ok {
+		t.Fatalf("%s was not staged", name)
+	}
+
+	return string(data)
+}
 
 func TestExecutor_Initialization(t *testing.T) {
 	t.Parallel()
@@ -93,9 +110,12 @@ func TestExecutePostconf(t *testing.T) {
 		t.Errorf("ExecutePostconf failed: %v", err)
 	}
 
-	want := []string{"exec " + postconfBin + " -e myhostname=mail.example.com"}
-	if got := fakes.Rec.Strings(); !slices.Equal(got, want) {
-		t.Errorf("recorded ops = %q, want %q", got, want)
+	if got := staged(t, fakes, "postconf.set"); got != "myhostname=mail.example.com\n" {
+		t.Errorf("staged postconf.set = %q", got)
+	}
+
+	if got, want := fakes.Exec.Lines(), []string{helperBin + " apply"}; !slices.Equal(got, want) {
+		t.Errorf("commands = %q, want %q (postconf is never run unprivileged)", got, want)
 	}
 }
 
@@ -107,7 +127,7 @@ func TestExecutePostconfBatch_MultilineValues(t *testing.T) {
 	// Test multi-line value normalization
 	ops := []PostconfOperation{
 		{
-			Key:   "smtpd_restriction_classes",
+			Key:   "smtpd_recipient_restrictions",
 			Value: "restriction_class1\nrestriction_class2\nrestriction_class3",
 		},
 	}
@@ -118,9 +138,9 @@ func TestExecutePostconfBatch_MultilineValues(t *testing.T) {
 	}
 
 	// Should have comma-separated format
-	args := strings.Join(fakes.Exec.Calls()[0].Args, " ")
-	if !strings.Contains(args, "restriction_class1, restriction_class2, restriction_class3") {
-		t.Errorf("Multi-line value not normalized correctly: %s", args)
+	got := staged(t, fakes, "postconf.set")
+	if !strings.Contains(got, "restriction_class1, restriction_class2, restriction_class3") {
+		t.Errorf("Multi-line value not normalized correctly: %s", got)
 	}
 }
 
@@ -150,7 +170,7 @@ func TestExecutePostconfd(t *testing.T) {
 	executor, fakes := newFakeExecutor(&mockLdapManager{})
 
 	op := PostconfdOperation{
-		Key: "deprecated_param",
+		Key: "smtpd_banner",
 	}
 
 	err := executor.ExecutePostconfd(context.Background(), op)
@@ -158,41 +178,26 @@ func TestExecutePostconfd(t *testing.T) {
 		t.Errorf("ExecutePostconfd failed: %v", err)
 	}
 
-	want := []string{"exec " + postconfBin + " -X deprecated_param"}
-	if got := fakes.Rec.Strings(); !slices.Equal(got, want) {
-		t.Errorf("recorded ops = %q, want %q", got, want)
+	if got := staged(t, fakes, "postconf.unset"); got != "smtpd_banner\n" {
+		t.Errorf("staged postconf.unset = %q", got)
+	}
+
+	if got, want := fakes.Exec.Lines(), []string{helperBin + " apply"}; !slices.Equal(got, want) {
+		t.Errorf("commands = %q, want %q", got, want)
 	}
 }
 
-func TestExecutePostconfdBatch_NonExistentKey(t *testing.T) {
-	t.Parallel()
-
-	executor, fakes := newFakeExecutor(&mockLdapManager{})
-	// postconf -X fails (key doesn't exist)
-	fakes.Exec.OnPath(postconfBin, systest.Fail(1, "postconf: warning: unknown parameter: deprecated_param\n"))
-
-	ops := []PostconfdOperation{
-		{Key: "deprecated_param"},
-	}
-
-	// postconf -X's "unknown parameter" warning is expected and must not error.
-	err := executor.ExecutePostconfdBatch(context.Background(), ops)
-	if err != nil {
-		t.Errorf("ExecutePostconfdBatch should not error on non-existent keys: %v", err)
-	}
-}
-
-// TestExecutePostconfdBatch_GenericFailure verifies that a postconf -X failure
-// unrelated to an unknown parameter (e.g. permission denied, crash) is reported
-// to the caller instead of being silently swallowed.
+// TestExecutePostconfdBatch_GenericFailure verifies that a helper failure
+// (validation, permission denied, crash) is reported to the caller and leaves
+// nothing staged.
 func TestExecutePostconfdBatch_GenericFailure(t *testing.T) {
 	t.Parallel()
 
 	executor, fakes := newFakeExecutor(&mockLdapManager{})
-	fakes.Exec.OnPath(postconfBin, systest.Fail(1, "postconf: fatal: permission denied\n"))
+	fakes.Exec.OnPath(helperBin, systest.Fail(1, "postconf: fatal: permission denied\n"))
 
 	ops := []PostconfdOperation{
-		{Key: "some_param"},
+		{Key: "smtpd_banner"},
 	}
 
 	err := executor.ExecutePostconfdBatch(context.Background(), ops)
@@ -204,8 +209,13 @@ func TestExecutePostconfdBatch_GenericFailure(t *testing.T) {
 		t.Errorf("error should include the postconf output snippet, got: %v", err)
 	}
 
-	if !strings.Contains(err.Error(), "postconf -X batch failed: exit status 1, output: ") {
+	if !strings.Contains(err.Error(), "postconf -X batch failed: ") ||
+		!strings.Contains(err.Error(), "carbonio-postfix-conf") {
 		t.Errorf("error text changed: %v", err)
+	}
+
+	if _, ok := fakes.FS.Data(stagingDir + "/postconf.unset"); ok {
+		t.Error("a failed apply must not leave staged files behind")
 	}
 }
 
@@ -452,7 +462,7 @@ func TestExecutePostconfdBatch_SuccessWithOutput(t *testing.T) {
 	fakes.Exec.OnPath(postconfBin, systest.Reply("postconf: deprecated: some_param\n"))
 
 	ops := []PostconfdOperation{
-		{Key: "some_param"},
+		{Key: "smtpd_banner"},
 	}
 
 	err := executor.ExecutePostconfdBatch(context.Background(), ops)
@@ -469,7 +479,7 @@ func TestExecutePostconfdBatch_StartFailure(t *testing.T) {
 	executor, fakes := newFakeExecutor(&mockLdapManager{})
 	fakes.Exec.FailStart(func(*sys.Cmd) bool { return true }, os.ErrNotExist)
 
-	err := executor.ExecutePostconfdBatch(context.Background(), []PostconfdOperation{{Key: "some_param"}})
+	err := executor.ExecutePostconfdBatch(context.Background(), []PostconfdOperation{{Key: "smtpd_banner"}})
 	if !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("ExecutePostconfdBatch error = %v, want wrapped %v", err, os.ErrNotExist)
 	}
@@ -533,6 +543,35 @@ func TestHandleEmptyMapfileData_RemoveError(t *testing.T) {
 	}
 }
 
+func TestExecutePostconfBatch_SkipsNonAllowlistedKeys(t *testing.T) {
+	t.Parallel()
+
+	ex, fakes := newFakeExecutor(&mockLdapManager{})
+
+	ops := []PostconfOperation{
+		{Key: "debugger_command", Value: "/tmp/x"},
+		{Key: "daemon_directory", Value: "/tmp"},
+		{Key: "myhostname", Value: "h"},
+	}
+
+	if err := ex.ExecutePostconfBatch(context.Background(), ops); err != nil {
+		t.Fatalf("ExecutePostconfBatch: %v", err)
+	}
+
+	if got, want := staged(t, fakes, "postconf.set"), "myhostname=h\n"; got != want {
+		t.Errorf("staged postconf.set = %q, want %q", got, want)
+	}
+
+	if err := ex.ExecutePostconfdBatch(context.Background(),
+		[]PostconfdOperation{{Key: "tls_config_file"}, {Key: "relayhost"}}); err != nil {
+		t.Fatalf("ExecutePostconfdBatch: %v", err)
+	}
+
+	if got, want := staged(t, fakes, "postconf.unset"), "relayhost\n"; got != want {
+		t.Errorf("staged postconf.unset = %q, want %q", got, want)
+	}
+}
+
 func TestExecutePostconfBatch_SkipsInvalidKeys(t *testing.T) {
 	t.Parallel()
 
@@ -550,13 +589,12 @@ func TestExecutePostconfBatch_SkipsInvalidKeys(t *testing.T) {
 		t.Fatalf("ExecutePostconfBatch: %v", err)
 	}
 
-	got := fakes.Exec.Calls()
-	if len(got) != 1 {
-		t.Fatalf("postconf ran %d times, want 1", len(got))
+	if n := len(fakes.Exec.Calls()); n != 1 {
+		t.Fatalf("helper ran %d times, want 1", n)
 	}
 
-	if want := []string{"-e", "lmtp_tls_CAfile=/ca", "myhostname=h"}; !slices.Equal(got[0].Args, want) {
-		t.Errorf("postconf args = %q, want %q", got[0].Args, want)
+	if got, want := staged(t, fakes, "postconf.set"), "lmtp_tls_CAfile=/ca\nmyhostname=h\n"; got != want {
+		t.Errorf("staged postconf.set = %q, want %q", got, want)
 	}
 }
 

@@ -9,6 +9,19 @@
 #   COPY --from=<registry>/carbonio-configd:main /opt/zextras/ /opt/zextras/
 # into an image whose configd needs a co-located binary (postconf, configd ldap).
 #
+# Postfix configuration (CO-4621): /opt/zextras/common/conf is root-owned and configd
+# never writes it. A change (postconf -e/-X, master.cf and tag_as_*.re renders) is
+# staged in /opt/zextras/data/postfix/conf-staging (0700, owned by uid 999, created
+# here) and applied by the root helper /opt/zextras/libexec/carbonio-postfix-conf
+# (root:root 0755, shipped here). configd runs the helper directly when it is uid 0
+# and through `sudo -n` otherwise. This image has no sudo and no systemd and runs
+# as uid 999, so as shipped a Postfix configuration change FAILS with an error that
+# names the helper: it never silently skips and never writes common/conf itself.
+# To let configd manage Postfix configuration from this image, run the container as
+# root (--user 0 / runAsUser: 0). A failed run discards the staged change, so a
+# separate process cannot pick it up later. The helper creates its lock directory
+# /run/carbonio-postfix-conf itself (/run is created here).
+#
 # Build from the repository root:
 #   docker build -f docker/configd/Dockerfile .
 
@@ -27,7 +40,9 @@ COPY cmd ./cmd
 COPY internal ./internal
 
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -trimpath -ldflags="-s -w" -o /out/configd ./cmd/configd
+    go build -trimpath -ldflags="-s -w" -o /out/configd ./cmd/configd \
+ && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -trimpath -ldflags="-s -w" -o /out/carbonio-postfix-conf ./cmd/carbonio-postfix-conf
 
 # Templates, extracted from the Carbonio debs of the same release: carbonio-core
 # (zmconfigd.cf and the conf/*.in templates) and carbonio-common-appserver-conf
@@ -69,6 +84,8 @@ RUN apt-get update \
 # The layout configd reads with CONFIGD_LC_zmconfigd_template_dir=/opt/zextras/share/configd.
 RUN mkdir -p /staging/opt/zextras/share/configd/conf/zmconfigd /staging/etc \
  && install -d -m 1777 /staging/tmp \
+ && install -d -m 0755 /staging/run \
+ && install -d -m 0700 -o 999 -g 999 /staging/opt/zextras/data/postfix/conf-staging \
  && cd /core/opt/zextras/conf \
  && cp zmconfigd.cf *.in /staging/opt/zextras/share/configd/conf/ \
  && cp zmconfigd/*.cf /staging/opt/zextras/share/configd/conf/zmconfigd/ \
@@ -85,10 +102,13 @@ FROM scratch
 LABEL org.opencontainers.image.licenses="AGPL-3.0-only" \
       org.opencontainers.image.documentation="https://github.com/zextras/carbonio-configd/tree/main/docs"
 
-# passwd, group, the templates and /tmp (rewrites render into a temporary file
-# before they replace the target), with their modes.
+# passwd, group, the templates, /tmp (rewrites render into a temporary file
+# before they replace the target) and the Postfix staging directory, with their
+# modes and owners.
 COPY --from=installer /staging/ /
 COPY --from=builder /out/configd /opt/zextras/bin/configd
+# The root helper: root-owned, so the uid 999 daemon cannot replace it.
+COPY --from=builder --chown=0:0 --chmod=0755 /out/carbonio-postfix-conf /opt/zextras/libexec/carbonio-postfix-conf
 
 ENV CARBONIO_BASE_DIR=/opt/zextras \
     CONFIGD_LC_zmconfigd_template_dir=/opt/zextras/share/configd

@@ -72,7 +72,7 @@ disappears, so growing it is a decision taken here.
 
 | Where | Function | Why it is not data |
 |---|---|---|
-| mta `Prepare` | `prepareMainCf` | Seeds `main.cf` from localconfig: the owner and group are validated (`postfixAccountNameRe`) before anything runs, and the `postconf -e` arguments are computed from them. |
+| mta `Prepare` | `prepareMainCf` | Seeds `main.cf` from localconfig: the owner and group are validated (`postfixAccountNameRe`) before anything runs, and are applied (creating `main.cf`) through the root helper `carbonio-postfix-conf`: `common/conf` is root-owned and there is no sudo grant for `touch` or `postconf` ([systemd.md](systemd.md#postfix-configuration-is-root-owned)). |
 | mta `Prepare` | `prepareLDAPTables` | Renders the eight `ldap-*.cf` tables from localconfig (URL, port, bind password, STARTTLS rule), writes them atomically at 0640 and chgrps them to the postfix group when it resolves. |
 | mailbox `PostStart` | `MailboxAdvancedStatusHook` | Polls the Carbonio Advanced modules through the admin API until they are ready (legacy `advanced_status 2`), best effort. |
 | appserver-db `PreStop` | `appserverDBFlushHook` | Flushes InnoDB before the stop, in both orchestration modes, by polling the database for its dirty pages. |

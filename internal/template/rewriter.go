@@ -27,6 +27,10 @@ import (
 // local path relative to the rewriter base directory.
 var ErrPathEscapesBaseDir = errors.New("path escapes base directory")
 
+// ErrRootOwnedTarget is returned when a REWRITE target lies under the
+// root-owned common/conf, which only the carbonio-postfix-conf helper writes.
+var ErrRootOwnedTarget = errors.New("target is under root-owned common/conf (written only by carbonio-postfix-conf)")
+
 // Rewriter handles template file generation from .in files using REWRITE directives.
 type Rewriter struct {
 	BaseDir      string
@@ -145,6 +149,10 @@ func (r *Rewriter) RewriteConfig(ctx context.Context, source, target, mode strin
 	// anything that would escape it.
 	if !filepath.IsLocal(source) || !filepath.IsLocal(target) {
 		return fmt.Errorf("%w: source=%q target=%q", ErrPathEscapesBaseDir, source, target)
+	}
+
+	if t := filepath.Clean(target); t == "common/conf" || strings.HasPrefix(t, "common/conf/") {
+		return fmt.Errorf("%w: target=%q", ErrRootOwnedTarget, target)
 	}
 
 	sourcePath := filepath.Join(r.BaseDir, source)
