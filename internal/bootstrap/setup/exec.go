@@ -6,6 +6,7 @@ package setup
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -107,6 +108,18 @@ func (e *Env) output(c *Cmd, capture bool) ([]byte, error) {
 	}
 
 	res, err := e.Sys.Exec.Run(e.Ctx, cmd)
+
+	// The real Exec reports a non-zero exit as *sys.ExitError next to the
+	// Result: that is a command that ran and said no (a CmdError, which
+	// callers inspect), not a failure to run it.
+	if exitErr, ok := errors.AsType[*sys.ExitError](err); ok {
+		err = nil
+
+		if res.ExitCode == 0 {
+			res.ExitCode = exitErr.Code
+		}
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", c.Path, err)
 	}
