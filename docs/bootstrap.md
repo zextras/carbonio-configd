@@ -455,19 +455,22 @@ Differences from `setup.pl`:
   `zmupdateauthkeys` leaves when the file did not exist; a file that has one
   keeps it.
 
-## Commands for setup.pl
+## Commands for setup.pl and the scripts they replace
 
-While carbonio-core still runs `setup.pl`, it calls these commands of the
-same binary (`/opt/zextras/libexec/setup`) instead of the scripts and JVM
-tools. They do exactly what the three steps above do, without a bootstrap
+The binary (`/opt/zextras/libexec/setup`) also has commands that are the
+only implementation of some former scripts: carbonio-core installs the old
+names as wrappers that execute them (`zmsshkeygen` is `exec
+/opt/zextras/libexec/setup ssh-keygen "$@"`), so `setup.pl`, the operators
+and `zmrc` run the same code as the bootstrap steps. They need no bootstrap
 configuration: the host name, the `zextras` ids, the LDAP and the admin
-credentials come from localconfig. They must run as root (otherwise they
-print an error and exit `1`), print what the legacy tools printed to stdout
-and the details to stderr, and exit `1` on failure with `Error: <reason>` on
-stderr; a wrong command line exits `2`.
+credentials come from localconfig. They take the scripts' arguments, print
+what the scripts printed to stdout and the details to stderr, and exit `1`
+on failure with `Error: <reason>` on stderr; a wrong command line exits `2`.
 
-| Command | Replaces | |
-| --- | --- | --- |
-| `setup gal-sync-account --domain D --server S` | `zmgsautil createAccount -a galsync.<random>@D -n InternalGAL --domain D -s S -t zimbra -f _InternalGAL -p 1d` | Creates the account and prints `<name>` and `<id>` separated by a tab. It fails when the account cannot be created; it does not check for an existing one. |
-| `setup ssh-keygen` | `zmsshkeygen` | Generates the key pair and stores the public key in the server entry. |
-| `setup update-authkeys` | `zmupdateauthkeys` | Rewrites `authorized_keys`. There is no `-a` (remote) mode. |
+| Command | Replaces | Runs as | |
+| --- | --- | --- | --- |
+| `setup gal-sync-account --domain D --server S` | `zmgsautil createAccount -a galsync.<random>@D -n InternalGAL --domain D -s S -t zimbra -f _InternalGAL -p 1d` (setup.pl) | root, zextras | Creates the account and prints `<name>` and `<id>` separated by a tab. It fails when the account cannot be created; it does not check for an existing one. |
+| `setup ssh-keygen [rsa]` | `zmsshkeygen` | root, zextras | Generates the key pair and stores the public key in the server entry. Another key type prints `Bad keytype`. |
+| `setup update-authkeys [-a]` | `zmupdateauthkeys` | root, zextras | Rewrites `authorized_keys`; `-a` first asks every server, through `zmrc`, to update its own (a server that does not answer is logged). |
+| `setup syslog` | `zmsyslogsetup` | root | Sets up rsyslog as the "Set up syslog.conf" step does. |
+| `setup dhparam` | `openssl dhparam` in setup.pl | root | Installs `conf/dhparam.pem.crb` (ffdhe2048) unless present and sets `zimbraSSLDHParam`. |

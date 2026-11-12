@@ -180,6 +180,36 @@ func UpdateAuthKeys(e *Env) error {
 	return sshWriteOwned(e, path, []byte(strings.Join(lines, "\n")+"\n"), sshAuthMode, uid, gid)
 }
 
+// UpdateAuthKeysEverywhere is zmupdateauthkeys -a: it first asks every
+// server, through zmrc, to run zmupdateauthkeys itself, then updates this
+// node. A server that cannot be reached is logged, as the script went on.
+func UpdateAuthKeysEverywhere(e *Env) error {
+	d, err := svcOpenDir(e)
+	if err != nil {
+		return err
+	}
+
+	keys, err := d.ServerAttribute(sshKeyAttr)
+	_ = d.Close()
+
+	if err != nil {
+		return fmt.Errorf("listing the servers: %w", err)
+	}
+
+	zmrc := e.Paths.Path("libexec", "zmrc")
+
+	for _, host := range slices.Sorted(maps.Keys(keys)) {
+		e.Log.Detail("Updating authkeys on remote server %s", host)
+
+		if err := e.Run(&Cmd{Path: zmrc, Args: []string{host},
+			Stdin: strings.NewReader("HOST:" + host + " zmupdateauthkeys\n")}); err != nil {
+			e.Log.Detail("Updating authkeys on remote server %s failed: %v", host, err)
+		}
+	}
+
+	return UpdateAuthKeys(e)
+}
+
 // sshSplitKeys returns the lines of an authorized_keys file the way the
 // script's `$(cat file)` and `read -r` saw them: no trailing blank lines,
 // each line without its surrounding white space.

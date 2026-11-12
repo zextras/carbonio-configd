@@ -600,6 +600,11 @@ func certDHParamPEM() ([]byte, error) {
 	return pem.EncodeToMemory(&pem.Block{Type: "DH PARAMETERS", Bytes: der}), nil
 }
 
+// InstallDHParam writes conf/dhparam.pem.crb (ffdhe2048) unless present and
+// records it in zimbraSSLDHParam: the step's work, shared with the setup.pl
+// command.
+func InstallDHParam(e *Env) error { return certApplyDHParam(e) }
+
 func certApplyDHParam(e *Env) error {
 	dest := certFile(e, "conf", certDHParamFile)
 

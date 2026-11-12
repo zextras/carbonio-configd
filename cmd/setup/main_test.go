@@ -71,7 +71,7 @@ func TestSetupPlCommandsAreListedAndValidated(t *testing.T) {
 	status, out, _ := exec(t, "-h")
 	require.Equal(t, 0, status)
 
-	for _, c := range []string{"gal-sync-account", "ssh-keygen", "update-authkeys"} {
+	for _, c := range []string{"gal-sync-account", "ssh-keygen", "update-authkeys", "syslog", "dhparam"} {
 		assert.Contains(t, out, c)
 	}
 
@@ -89,11 +89,24 @@ func TestSetupPlCommandsAreListedAndValidated(t *testing.T) {
 		{[]string{"gal-sync-account", "--domain", "example.com", "--server", " "}, "must not be empty"},
 		{[]string{"gal-sync-account", "--domain", "", "--server", "s"}, "must not be empty"},
 		{[]string{"gal-sync-account", "--domain", "d", "--server", "s", "extra"}, "unknown command"},
-		{[]string{"ssh-keygen", "extra"}, "unknown command"},
-		{[]string{"update-authkeys", "-a"}, "unknown shorthand flag"},
 	} {
 		status, _, errb := exec(t, tc.args...)
 		assert.Equal(t, exitUsage, status, tc.args)
+		assert.Contains(t, errb, tc.want, tc.args)
+	}
+
+	// The commands that replace scripts take the scripts' arguments.
+	for _, tc := range []struct {
+		args   []string
+		status int
+		want   string
+	}{
+		{[]string{"ssh-keygen", "dsa"}, 1, "Bad keytype: dsa"},
+		{[]string{"update-authkeys", "-x"}, exitUsage, "Usage: update-authkeys [-a]"},
+		{[]string{"dhparam", "2048"}, exitUsage, "Usage: dhparam"},
+	} {
+		status, _, errb := exec(t, tc.args...)
+		assert.Equal(t, tc.status, status, tc.args)
 		assert.Contains(t, errb, tc.want, tc.args)
 	}
 }
@@ -107,6 +120,9 @@ func TestSetupPlCommandsRefuseNonRoot(t *testing.T) {
 		{"gal-sync-account", "--domain", "example.com", "--server", "store.example.com"},
 		{"ssh-keygen"},
 		{"update-authkeys"},
+		{"syslog"},
+		{"update-authkeys", "-a"},
+		{"dhparam"},
 	} {
 		status, out, errb := exec(t, args...)
 
@@ -149,4 +165,12 @@ func TestAbsPath(t *testing.T) {
 	assert.Empty(t, absPath(""))
 	assert.Equal(t, "/etc/x.yaml", absPath("/etc/x.yaml"))
 	assert.True(t, strings.HasPrefix(absPath("rel.yaml"), "/"))
+}
+
+func TestSyslogCommandTakesNoArguments(t *testing.T) {
+	status, out, errb := exec(t, "syslog", "extra")
+
+	assert.Equal(t, 2, status)
+	assert.Empty(t, out)
+	assert.Contains(t, errb, "Usage: syslog")
 }

@@ -9,8 +9,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/user"
+	"strconv"
+	"strings"
 
 	"github.com/zextras/carbonio-configd/internal/bootstrap/setup"
+	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
@@ -21,7 +25,26 @@ var (
 	createGalSyncAccount = setup.CreateGalSyncAccount
 	generateSSHKey       = setup.GenerateSSHKey
 	updateAuthKeys       = setup.UpdateAuthKeys
+	setupSyslog          = setup.ConfigureSyslog
+	zextrasUID           = lookupZextrasUID
+	updateAuthKeysAll    = setup.UpdateAuthKeysEverywhere
+	installDHParam       = setup.InstallDHParam
 )
+
+// lookupZextrasUID is the uid of zextras, -1 when there is no such user.
+func lookupZextrasUID() int {
+	u, err := user.Lookup(config.ZextrasUser)
+	if err != nil {
+		return -1
+	}
+
+	uid, err := strconv.Atoi(u.Uid)
+	if err != nil {
+		return -1
+	}
+
+	return uid
+}
 
 // RunGalSyncAccount executes "carbonio-bootstrap gal-sync-account": it
 // creates galsync.<random>@domain on server and prints "<name>\t<id>" as
@@ -39,25 +62,74 @@ func RunGalSyncAccount(ctx context.Context, env sys.System, stdout, stderr io.Wr
 	})
 }
 
-// RunSSHKeygen executes "carbonio-bootstrap ssh-keygen" (zmsshkeygen).
-func RunSSHKeygen(ctx context.Context, env sys.System, stdout, stderr io.Writer) int {
+// RunSSHKeygen executes "carbonio-bootstrap ssh-keygen [rsa]" (zmsshkeygen,
+// whose only key type is rsa).
+func RunSSHKeygen(ctx context.Context, env sys.System, stdout, stderr io.Writer, args []string) int {
+	if len(args) > 1 || len(args) == 1 && args[0] != "rsa" {
+		_, _ = fmt.Fprintf(stderr, "Bad keytype: %s\n", strings.Join(args, " "))
+
+		return 1
+	}
+
 	return runTool(ctx, env, stdout, stderr, "ssh-keygen", generateSSHKey)
 }
 
-// RunUpdateAuthKeys executes "carbonio-bootstrap update-authkeys"
-// (zmupdateauthkeys without -a).
-func RunUpdateAuthKeys(ctx context.Context, env sys.System, stdout, stderr io.Writer) int {
-	return runTool(ctx, env, stdout, stderr, "update-authkeys", updateAuthKeys)
+// RunUpdateAuthKeys executes "carbonio-bootstrap update-authkeys [-a]"
+// (zmupdateauthkeys): -a first has every server update its own keys.
+func RunUpdateAuthKeys(ctx context.Context, env sys.System, stdout, stderr io.Writer, args []string) int {
+	switch {
+	case len(args) == 0:
+		return runTool(ctx, env, stdout, stderr, "update-authkeys", updateAuthKeys)
+	case len(args) == 1 && args[0] == "-a":
+		return runTool(ctx, env, stdout, stderr, "update-authkeys", updateAuthKeysAll)
+	default:
+		_, _ = fmt.Fprintf(stderr, "Usage: update-authkeys [-a]\n")
+
+		return 2
+	}
 }
 
-// runTool runs fn as root against the node, with no bootstrap configuration:
-// fn reads what it needs from localconfig. Progress goes to stdout, the
-// details to stderr; a failure is printed and the status is 1.
+// RunDHParam executes "carbonio-bootstrap dhparam": conf/dhparam.pem.crb
+// with the RFC 7919 ffdhe2048 group, recorded in zimbraSSLDHParam.
+func RunDHParam(ctx context.Context, env sys.System, stdout, stderr io.Writer, args []string) int {
+	if len(args) != 0 {
+		_, _ = fmt.Fprintf(stderr, "Usage: dhparam\n")
+
+		return 2
+	}
+
+	return runTool(ctx, env, stdout, stderr, "dhparam", installDHParam)
+}
+
+// RunSyslog executes "setup syslog" (zmsyslogsetup): it sets rsyslog up for
+// Carbonio and prints what it changed, as the script did. The script took no
+// arguments (and ignored any); they are rejected here. It rewrites /etc, so
+// unlike the other tools it is for root only.
+func RunSyslog(ctx context.Context, env sys.System, stdout, stderr io.Writer, args []string) int {
+	if len(args) != 0 {
+		_, _ = fmt.Fprintf(stderr, "Usage: syslog\n")
+
+		return 2
+	}
+
+	if geteuid() != 0 {
+		_, _ = fmt.Fprintf(stderr, "Error: carbonio-bootstrap syslog must run as root\n")
+
+		return 1
+	}
+
+	return runTool(ctx, env, stdout, stderr, "syslog", setupSyslog)
+}
+
+// runTool runs fn as root or zextras (the scripts it replaces ran as
+// zextras, zmrc runs them remotely) against the node, with no bootstrap
+// configuration: fn reads what it needs from localconfig. Progress goes to
+// stdout, the details to stderr; a failure is printed and the status is 1.
 func runTool(ctx context.Context, env sys.System, stdout, stderr io.Writer, name string,
 	fn func(*setup.Env) error,
 ) int {
-	if geteuid() != 0 {
-		_, _ = fmt.Fprintf(stderr, "Error: carbonio-bootstrap %s must run as root\n", name)
+	if uid := geteuid(); uid != 0 && uid != zextrasUID() {
+		_, _ = fmt.Fprintf(stderr, "Error: carbonio-bootstrap %s must run as root or %s\n", name, config.ZextrasUser)
 
 		return 1
 	}

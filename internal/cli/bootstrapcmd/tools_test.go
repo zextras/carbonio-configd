@@ -8,12 +8,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/zextras/carbonio-configd/internal/bootstrap/setup"
+	"github.com/zextras/carbonio-configd/internal/sys"
 	"github.com/zextras/carbonio-configd/internal/sys/systest"
 	"github.com/zextras/carbonio-configd/internal/zxadmin"
 )
@@ -34,11 +36,25 @@ func newToolHarness(t *testing.T, root bool) *toolHarness {
 
 	h := &toolHarness{root: root}
 
-	oldEUID, oldGAL, oldKey, oldAuth := geteuid, createGalSyncAccount, generateSSHKey, updateAuthKeys
+	oldEUID, oldGAL, oldKey, oldAuth, oldSyslog := geteuid, createGalSyncAccount, generateSSHKey, updateAuthKeys, setupSyslog
+	oldUID, oldAuthAll, oldDH := zextrasUID, updateAuthKeysAll, installDHParam
 
 	t.Cleanup(func() {
-		geteuid, createGalSyncAccount, generateSSHKey, updateAuthKeys = oldEUID, oldGAL, oldKey, oldAuth
+		geteuid, createGalSyncAccount, generateSSHKey, updateAuthKeys, setupSyslog = oldEUID, oldGAL, oldKey, oldAuth, oldSyslog
+		zextrasUID, updateAuthKeysAll, installDHParam = oldUID, oldAuthAll, oldDH
 	})
+
+	zextrasUID = func() int { return 999 }
+	updateAuthKeysAll = func(e *setup.Env) error {
+		h.calls, h.env = append(h.calls, "authkeys -a"), e
+
+		return h.err
+	}
+	installDHParam = func(e *setup.Env) error {
+		h.calls, h.env = append(h.calls, "dhparam"), e
+
+		return h.err
+	}
 
 	geteuid = func() int {
 		if h.root {
@@ -59,6 +75,16 @@ func newToolHarness(t *testing.T, root bool) *toolHarness {
 	}
 	updateAuthKeys = func(e *setup.Env) error {
 		h.calls, h.env = append(h.calls, "authkeys"), e
+
+		return h.err
+	}
+
+	setupSyslog = func(e *setup.Env) error {
+		h.calls, h.env = append(h.calls, "syslog"), e
+
+		if h.err == nil {
+			e.Log.Info("updateSyslog: Updating /etc/rsyslog.conf...done.")
+		}
 
 		return h.err
 	}
@@ -86,7 +112,16 @@ func toolRuns() map[string]toolRun {
 
 			var out, errb bytes.Buffer
 
-			s := RunSSHKeygen(context.Background(), sysenv().System(), &out, &errb)
+			s := RunSSHKeygen(context.Background(), sysenv().System(), &out, &errb, nil)
+
+			return s, out.String(), errb.String()
+		},
+		"syslog": func(t *testing.T) (int, string, string) {
+			t.Helper()
+
+			var out, errb bytes.Buffer
+
+			s := RunSyslog(context.Background(), sysenv().System(), &out, &errb, nil)
 
 			return s, out.String(), errb.String()
 		},
@@ -95,7 +130,7 @@ func toolRuns() map[string]toolRun {
 
 			var out, errb bytes.Buffer
 
-			s := RunUpdateAuthKeys(context.Background(), sysenv().System(), &out, &errb)
+			s := RunUpdateAuthKeys(context.Background(), sysenv().System(), &out, &errb, nil)
 
 			return s, out.String(), errb.String()
 		},
@@ -170,4 +205,79 @@ func TestTools_EnvIsTheNodeWithoutAConfiguration(t *testing.T) {
 	assert.Nil(t, h.env.Cfg)
 	assert.NotNil(t, h.env.Log)
 	assert.NotNil(t, h.env.Ctx)
+}
+
+func TestRunSyslog_PrintsWhatItDidLikeZmsyslogsetup(t *testing.T) {
+	h := newToolHarness(t, true)
+
+	status, out, errb := toolRuns()["syslog"](t)
+
+	require.Equal(t, 0, status, errb)
+	assert.Equal(t, "updateSyslog: Updating /etc/rsyslog.conf...done.\n", out)
+	assert.Equal(t, []string{"syslog"}, h.calls)
+}
+
+func TestRunSyslog_TakesNoArguments(t *testing.T) {
+	h := newToolHarness(t, true)
+
+	var out, errb bytes.Buffer
+
+	status := RunSyslog(context.Background(), systest.New().System(), &out, &errb, []string{"-x"})
+
+	assert.Equal(t, 2, status)
+	assert.Equal(t, "Usage: syslog\n", errb.String())
+	assert.Empty(t, h.calls)
+}
+
+func TestRunSyslog_IsForRootOnly(t *testing.T) {
+	h := newToolHarness(t, false)
+
+	oldUID := zextrasUID
+	zextrasUID = func() int { return 1000 }
+
+	t.Cleanup(func() { zextrasUID = oldUID })
+
+	status, _, errb := toolRuns()["syslog"](t)
+
+	assert.Equal(t, 1, status)
+	assert.Contains(t, errb, "must run as root")
+	assert.Empty(t, h.calls, "zextras is refused")
+}
+
+// The commands that replace zmsshkeygen, zmupdateauthkeys and setup.pl's
+// dhparam take the scripts' arguments, and zextras may run them as it ran
+// the scripts (zmrc runs zmupdateauthkeys remotely as zextras).
+func TestScriptCommands_ArgumentsAndUsers(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		run    func(context.Context, sys.System, io.Writer, io.Writer, []string) int
+		args   []string
+		euid   int
+		status int
+		calls  []string
+		errb   string
+	}{
+		{"keygen rsa", RunSSHKeygen, []string{"rsa"}, 999, 0, []string{"keygen"}, ""},
+		{"keygen bad type", RunSSHKeygen, []string{"dsa"}, 0, 1, nil, "Bad keytype: dsa\n"},
+		{"authkeys", RunUpdateAuthKeys, nil, 999, 0, []string{"authkeys"}, ""},
+		{"authkeys everywhere", RunUpdateAuthKeys, []string{"-a"}, 0, 0, []string{"authkeys -a"}, ""},
+		{"authkeys bad option", RunUpdateAuthKeys, []string{"-x"}, 0, 2, nil, "Usage: update-authkeys [-a]\n"},
+		{"dhparam", RunDHParam, nil, 0, 0, []string{"dhparam"}, ""},
+		{"dhparam argument", RunDHParam, []string{"2048"}, 0, 2, nil, "Usage: dhparam\n"},
+		{"another user", RunUpdateAuthKeys, nil, 1000, 1, nil,
+			"Error: carbonio-bootstrap update-authkeys must run as root or zextras\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newToolHarness(t, true)
+			geteuid = func() int { return tc.euid }
+
+			var out, errb bytes.Buffer
+
+			status := tc.run(context.Background(), systest.New().System(), &out, &errb, tc.args)
+
+			assert.Equal(t, tc.status, status)
+			assert.Equal(t, tc.calls, h.calls)
+			assert.Equal(t, tc.errb, errb.String())
+		})
+	}
 }
