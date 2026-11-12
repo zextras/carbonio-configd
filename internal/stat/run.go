@@ -150,6 +150,10 @@ func (e *Env) serve(ctx context.Context, sp *spec, o *options) int {
 
 	defer e.removePid(pid)
 
+	// Before the log and the collector open, so no signal meets Go's default.
+	sigs, stop := e.signals()
+	defer stop()
+
 	c, err := sp.build(e, o)
 	if err != nil {
 		_, _ = fmt.Fprintln(e.Stderr, err)
@@ -174,7 +178,7 @@ func (e *Env) serve(ctx context.Context, sp *spec, o *options) int {
 
 	r := &runner{env: e, sp: sp, c: c, lf: lf, csv: csv, date: date, interval: o.interval, console: o.console}
 
-	return r.loop(ctx)
+	return r.loop(ctx, sigs)
 }
 
 // runner is a collector running.
@@ -204,11 +208,8 @@ func (e *Env) signals() (sigs <-chan os.Signal, stop func()) {
 
 // loop waits for a round second, then samples every interval (aligned to the
 // first sample, so the interval does not drift with the work).
-func (r *runner) loop(ctx context.Context) int {
-	sigs, stop := r.env.signals()
-	defer stop()
-
-	if !r.env.waitUntilNiceRoundSecond(ctx, r.interval) {
+func (r *runner) loop(ctx context.Context, sigs <-chan os.Signal) int {
+	if wait := r.env.niceRoundWait(r.interval); wait > 0 && !r.sleep(ctx, sigs, wait) {
 		return exitOK
 	}
 

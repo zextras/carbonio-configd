@@ -55,13 +55,13 @@ func (s *SystemSyslog) writer(facility syslog.Priority) *syslog.Writer {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if w, ok := s.writers[facility]; ok {
+	if w := s.writers[facility]; w != nil {
 		return w
 	}
 
 	w, err := syslog.New(facility|syslog.LOG_INFO, syslogIdent)
 	if err != nil {
-		w = nil
+		return nil // not cached: the next send retries
 	}
 
 	s.writers[facility] = w

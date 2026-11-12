@@ -219,6 +219,29 @@ func TestRotateWhereTheDayDirectoryIsAFile(t *testing.T) {
 	defer l.close()
 
 	require.ErrorContains(t, l.rotate("2026-01-01"), "unable to create log rotation directory")
+
+	// The failed rotation does not turn the log into the console.
+	require.NoError(t, l.write([]string{"after"}))
+	assert.Equal(t, logHeading+"\n"+logHeading+"\nafter\n", readFile(t, path))
+	assert.Empty(t, te.stdout.String())
+}
+
+func TestRotateWithoutLogFileStartsANewOne(t *testing.T) {
+	t.Parallel()
+
+	te := newTestEnv(t, files{})
+	path := filepath.Join(te.Dir, "x.csv")
+
+	l, err := openLog(te.Env, path, logHeading, today)
+	require.NoError(t, err)
+
+	defer l.close()
+
+	require.NoError(t, os.Remove(path))
+	require.NoError(t, l.rotate("2026-01-01"))
+	require.NoError(t, l.write([]string{"after"}))
+
+	assert.Equal(t, logHeading+"\nafter\n", readFile(t, path))
 }
 
 func TestLineDate(t *testing.T) {

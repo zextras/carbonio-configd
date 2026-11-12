@@ -100,6 +100,25 @@ func TestFDControl(t *testing.T) {
 	}
 }
 
+func TestFDControlIgnoresNonPositivePid(t *testing.T) {
+	t.Parallel()
+
+	for _, content := range []string{"-5\n", "0\n", "junk\n"} {
+		te := newTestEnv(t, files{})
+		pidFile := filepath.Join(te.PidDir, "fd.pid")
+		require.NoError(t, os.WriteFile(pidFile, []byte(content), 0o644))
+
+		for _, cmd := range []string{"stop", "rotate"} {
+			code, done := fdControl(te.Env, []string{cmd})
+			assert.True(t, done)
+			assert.Zero(t, code)
+		}
+
+		assert.Empty(t, te.fakes.Proc.Signals(), content)
+		assert.False(t, fileExists(pidFile), content)
+	}
+}
+
 func TestFDControlLeavesOtherArgumentsAlone(t *testing.T) {
 	t.Parallel()
 

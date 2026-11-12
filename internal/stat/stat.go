@@ -5,7 +5,6 @@
 package stat
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -68,10 +67,10 @@ func (e *Env) defaultInterval(disk bool) time.Duration {
 	return time.Duration(n) * time.Second
 }
 
-// waitUntilNiceRoundSecond sleeps until the second of the day is a multiple of
-// the interval (a day for an interval of 0 or a multiple of a day); it returns
-// at once on such a second. It reports false when ctx is done first.
-func (e *Env) waitUntilNiceRoundSecond(ctx context.Context, interval time.Duration) bool {
+// niceRoundWait is how long to wait until the second of the day is a multiple
+// of the interval (a day for an interval of 0 or a multiple of a day); zero on
+// such a second.
+func (e *Env) niceRoundWait(interval time.Duration) time.Duration {
 	secs := int64(interval/time.Second) % secondsPerDay
 	if secs == 0 {
 		secs = secondsPerDay
@@ -82,12 +81,10 @@ func (e *Env) waitUntilNiceRoundSecond(ctx context.Context, interval time.Durati
 
 	rem := sod % secs
 	if rem == 0 {
-		return true
+		return 0
 	}
 
-	wait := time.Duration(secs-rem)*time.Second - time.Duration(now.Nanosecond())
-
-	return e.Sys.Clock.Sleep(ctx, wait) == nil
+	return time.Duration(secs-rem)*time.Second - time.Duration(now.Nanosecond())
 }
 
 // alive is Perl's kill(0, pid) hardened against pid reuse: the process must
