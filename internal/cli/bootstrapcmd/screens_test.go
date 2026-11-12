@@ -67,7 +67,7 @@ func TestRunSetup_ApplyScreenRunsTheStepsAndReportsEvents(t *testing.T) {
 	var out, errb strings.Builder
 
 	status := runSetup(e, strings.NewReader(""), &out, &errb, screenOpts(),
-		Deps{Host: host{}, Terminal: true, Screens: fake.screens(), Session: session}, runTestSteps(&applied))
+		&Deps{Host: host{}, Terminal: true, Screens: fake.screens(), Session: session}, runTestSteps(&applied))
 
 	require.Equal(t, 0, status, errb.String())
 	assert.Equal(t, []string{"first", "second"}, applied)
@@ -99,7 +99,7 @@ func TestRunSetup_ApplyScreenFailureIsReported(t *testing.T) {
 	var out, errb strings.Builder
 
 	status := runSetup(e, strings.NewReader(""), &out, &errb, screenOpts(),
-		Deps{Host: host{}, Terminal: true, Screens: fake.screens(), Session: session}, runTestSteps(&applied))
+		&Deps{Host: host{}, Terminal: true, Screens: fake.screens(), Session: session}, runTestSteps(&applied))
 
 	assert.Equal(t, 1, status)
 	assert.Contains(t, errb.String(), "boom")
@@ -124,7 +124,7 @@ func TestRunSetup_PlainFlagsKeepThePlainOutput(t *testing.T) {
 			var out, errb strings.Builder
 
 			status := runSetup(e, strings.NewReader(""), &out, &errb, opts,
-				Deps{Host: host{}, Terminal: true, Screens: fake.screens(), Session: &Session{}}, runTestSteps(&applied))
+				&Deps{Host: host{}, Terminal: true, Screens: fake.screens(), Session: &Session{}}, runTestSteps(&applied))
 
 			require.Equal(t, 0, status, errb.String())
 			assert.Empty(t, fake.applied)
@@ -175,7 +175,7 @@ func TestRunConfigure_SaveCallbackAndNotice(t *testing.T) {
 		var out, errb strings.Builder
 
 		deps := Deps{Host: host{}, Terminal: true, Screens: fake.screens(), Session: session}
-		st := run(context.Background(), f.System(), strings.NewReader(""), &out, &errb, opts, deps)
+		st := run(context.Background(), f.System(), strings.NewReader(""), &out, &errb, opts, &deps)
 
 		return st, out.String(), errb.String()
 	}()

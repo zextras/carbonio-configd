@@ -11,34 +11,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestStepGALSyncSkipNotice_ExplainsWhyTheAccountIsSkipped(t *testing.T) {
+func TestStepGALSyncSkipNotice_WarnsWhenTheServersAreNotStarted(t *testing.T) {
 	s := StepGALSyncSkipNotice()
 
-	for name, tc := range map[string]struct {
-		start, newInstall, webapp bool
-		want                      string
-	}{
-		"servers not started": {false, true, true, "galsync account creation for default domain skipped"},
-		"new but not service": {true, true, false, "not a service node"},
-		"existing install":    {true, false, true, "existing install detected"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			e, _, out := srvTestEnv(t, &srvFakeDir{})
-			srvEnabled(e, PkgCore, PkgAppserver)
-			e.Cfg.StartServices = tc.start
-			e.Facts.NewInstall, e.Facts.ServiceWebapp = tc.newInstall, tc.webapp
-
-			require.True(t, s.When(e))
-			require.NoError(t, s.Apply(e))
-			assert.Contains(t, out.String(), tc.want)
-		})
-	}
-
-	e, _, _ := srvTestEnv(t, &srvFakeDir{})
+	e, _, out := srvTestEnv(t, &srvFakeDir{})
 	srvEnabled(e, PkgCore, PkgAppserver)
-	e.Cfg.StartServices = true
+	e.Cfg.StartServices = false
 	e.Facts.NewInstall, e.Facts.ServiceWebapp = true, true
-	assert.False(t, s.When(e), "the account is created: nothing to explain")
+
+	require.True(t, s.When(e))
+	require.NoError(t, s.Apply(e))
+	assert.Contains(t, out.String(), "Warning: skipped: services not started")
+	assert.Equal(t, []string{"skipped: services not started"}, e.Log.takeWarnings())
+
+	e.Cfg.StartServices = true
+	assert.False(t, s.When(e), "the account is created or not worth a notice")
 
 	e.Cfg.StartServices = false
 	srvEnabled(e, PkgCore)

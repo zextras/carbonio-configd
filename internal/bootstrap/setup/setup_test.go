@@ -61,7 +61,8 @@ func TestRun_ChecksBeforeApplyingAndRecordsStages(t *testing.T) {
 	}
 
 	assert.Equal(t, []Outcome{Applied, Skipped, AlreadyDone, Warned, Applied}, got)
-	assert.Contains(t, out.String(), "Warning: D: boom")
+	assert.EqualError(t, results[3].Err, "boom", "the failure of an optional step is its result")
+	assert.NotContains(t, out.String(), "boom", "and it is the reporter's to show, not a log line")
 
 	hist, _ := fakes.FS.Data(e.Paths.History)
 	var stages []string

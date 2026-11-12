@@ -31,7 +31,7 @@ func covRun(t *testing.T, f *systest.Fakes, opts *Options, deps Deps, stdin stri
 
 	var out, errb strings.Builder
 
-	status := run(context.Background(), f.System(), strings.NewReader(stdin), &out, &errb, opts, deps)
+	status := run(context.Background(), f.System(), strings.NewReader(stdin), &out, &errb, opts, &deps)
 
 	return status, out.String(), errb.String()
 }

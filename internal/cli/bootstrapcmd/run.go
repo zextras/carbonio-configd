@@ -9,9 +9,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/zextras/carbonio-configd/internal/bootstrap"
+	"github.com/zextras/carbonio-configd/internal/bootstrap/brand"
 	"github.com/zextras/carbonio-configd/internal/bootstrap/setup"
 	"github.com/zextras/carbonio-configd/internal/bootstrap/tui"
 	"github.com/zextras/carbonio-configd/internal/services"
@@ -61,6 +63,7 @@ func RunSetup(ctx context.Context, env sys.System, stdin io.Reader, stdout, stde
 	}
 
 	deps.Session = session
+	deps.Drops = &LegacyDrops{}
 
 	if !opts.DryRun {
 		f, err := setup.OpenLogFile(paths.Path("log"), env.Clock.Now())
@@ -73,10 +76,10 @@ func RunSetup(ctx context.Context, env sys.System, stdin io.Reader, stdout, stde
 
 		logFile = f
 
+		deps.LogPath = f.Name()
+
 		if screens {
 			session.LogPath = f.Name()
-		} else {
-			_, _ = fmt.Fprintf(stdout, "Logging to %s\n", f.Name())
 		}
 	}
 
@@ -88,36 +91,22 @@ func RunSetup(ctx context.Context, env sys.System, stdin io.Reader, stdout, stde
 		Paths: paths,
 	}
 
-	return runSetup(e, stdin, stdout, stderr, opts, deps, setup.Steps())
+	return runSetup(e, stdin, stdout, stderr, opts, &deps, setup.Steps())
 }
 
 func runSetup(e *setup.Env, stdin io.Reader, stdout, stderr io.Writer, opts *RunOptions,
-	deps Deps, steps []setup.Step,
+	deps *Deps, steps []setup.Step,
 ) int {
-	if !loadConfig(e, stdin, stdout, stderr, opts, &deps) {
+	if !loadConfig(e, stdin, stdout, stderr, opts, deps) {
 		return 1
 	}
 
-	var err error
-
-	if deps.Session != nil && useScreens(&opts.Options, &deps) {
-		err = applyScreen(e, stdin, stdout, &deps, steps)
-	} else {
-		var results []setup.Result
-
-		results, err = setup.Run(e, steps, opts.DryRun)
-		if opts.DryRun {
-			printPlan(stdout, results)
-		}
-
-		if err == nil && !opts.DryRun {
-			e.Log.Info("Configuration complete.")
-		}
+	if deps.Session == nil || !useScreens(&opts.Options, deps) {
+		return runPlain(e, stdout, stderr, opts, deps, steps)
 	}
 
-	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "Error: %v\nFix the cause and run carbonio-bootstrap again: "+
-			"the steps already done are skipped.\n", err)
+	if err := applyScreen(e, stdin, stdout, deps, steps); err != nil {
+		printFailure(stderr, err)
 
 		return 1
 	}
@@ -125,19 +114,119 @@ func runSetup(e *setup.Env, stdin io.Reader, stdout, stderr io.Writer, opts *Run
 	return 0
 }
 
-// applyScreen runs the steps while the apply page shows their progress.
-func applyScreen(e *setup.Env, stdin io.Reader, stdout io.Writer, deps *Deps, steps []setup.Step) error {
-	s := deps.Session
+func printFailure(stderr io.Writer, err error) {
+	_, _ = fmt.Fprintf(stderr, "Error: %v\n%s\n", err, resumeHint)
+}
 
-	// The plan is what a dry run says; its log lines are not the run's.
+const resumeHint = "Fix the cause and run carbonio-bootstrap again: the steps already done are skipped."
+
+// runPlain runs the steps with the line output: a header, a line per step
+// and a summary; a dry run prints the plan.
+func runPlain(e *setup.Env, stdout, stderr io.Writer, opts *RunOptions, deps *Deps, steps []setup.Step) int {
+	if opts.DryRun {
+		results, err := setup.Run(e, steps, true)
+		printPlan(stdout, results)
+
+		if err != nil {
+			printFailure(stderr, err)
+
+			return 1
+		}
+
+		return 0
+	}
+
+	rep := setup.NewReporter(&setup.ReportOptions{
+		Out: stdout, Err: stderr, Plan: planOf(planResults(e, steps)),
+		Color: deps.Display.Color, Live: deps.Display.Live, Width: deps.Display.Width,
+		Dark: brand.DarkBackground(os.Environ()),
+	})
+	rep.Header(headerOf(e, opts, deps))
+
+	e.Log.OnNote(rep.Note)
+	e.Observe = rep.Observe
+
+	_, err := setup.Run(e, steps, false)
+	rep.Summary(&setup.Summary{Err: err, Next: setup.NextSteps(e)})
+
+	if err != nil {
+		return 1
+	}
+
+	e.Log.Detail("Configuration complete.")
+
+	return 0
+}
+
+// planResults says, with a dry run, which steps apply to the node and which
+// are already done; the dry run's log lines are not the run's.
+func planResults(e *setup.Env, steps []setup.Step) []setup.Result {
 	live := e.Log
 	e.Log = setup.NewLog(io.Discard, nil)
 	results, _ := setup.Run(e, steps, true)
 	e.Log = live
 
-	var plan []tui.PlanStep
+	return results
+}
+
+// planOf lists the steps that apply to the node.
+func planOf(results []setup.Result) []setup.PlanStep {
+	var plan []setup.PlanStep
 
 	for i, res := range results {
+		if res.Outcome != setup.Skipped {
+			plan = append(plan, setup.PlanStep{Index: i, Title: res.Step.Title})
+		}
+	}
+
+	return plan
+}
+
+// installKind names what the node is, for the header and the screens.
+func installKind(f *setup.Facts) string {
+	if f.NewInstall {
+		return "new install"
+	}
+
+	return "existing install"
+}
+
+func headerOf(e *setup.Env, opts *RunOptions, deps *Deps) *setup.Header {
+	h := &setup.Header{Hostname: e.Cfg.Host.Hostname, Install: installKind(e.Facts), LogPath: deps.LogPath}
+
+	if v, err := e.Sys.FS.ReadFile(e.Paths.Path(".version")); err == nil {
+		h.Version = strings.TrimSpace(string(v))
+	}
+
+	switch {
+	case opts.LegacyPath != "":
+		h.Config, h.ConfigKind = opts.LegacyPath, "legacy"
+	case opts.ConfigPath != "":
+		h.Config, h.ConfigKind = opts.ConfigPath, "yaml"
+	}
+
+	if deps.Drops == nil {
+		return h
+	}
+
+	h.Dropped = len(deps.Drops.List)
+
+	if opts.Verbose {
+		for _, d := range deps.Drops.List {
+			h.DropLines = append(h.DropLines, d.Key+": "+d.Reason)
+		}
+	}
+
+	return h
+}
+
+// applyScreen runs the steps while the apply page shows their progress.
+func applyScreen(e *setup.Env, stdin io.Reader, stdout io.Writer, deps *Deps, steps []setup.Step) error {
+	s := deps.Session
+
+	var plan []tui.PlanStep
+
+	for i, res := range planResults(e, steps) {
 		if res.Outcome != setup.Skipped {
 			plan = append(plan, tui.PlanStep{Index: i, Title: res.Step.Title, Done: res.Outcome == setup.AlreadyDone})
 		}
@@ -163,7 +252,7 @@ func applyScreen(e *setup.Env, stdin io.Reader, stdout io.Writer, deps *Deps, st
 				return err
 			}
 
-			e.Log.Info("Configuration complete.")
+			e.Log.Detail("Configuration complete.")
 
 			return nil
 		},
@@ -189,10 +278,7 @@ func loadConfig(e *setup.Env, stdin io.Reader, stdout, stderr io.Writer, opts *R
 	e.Facts = facts
 
 	if deps.Session != nil {
-		deps.Session.Install = "existing install"
-		if facts.NewInstall {
-			deps.Session.Install = "new install"
-		}
+		deps.Session.Install = installKind(facts)
 	}
 
 	deps.Host = enabledHost{Host: deps.Host, roles: facts.EnabledRoles()}
@@ -204,7 +290,10 @@ func loadConfig(e *setup.Env, stdin io.Reader, stdout, stderr io.Writer, opts *R
 	quiet.NonInteractive = true
 	quiet.Output = ""
 
-	if pre, err := resolve(e.Ctx, e.Sys, stdin, io.Discard, io.Discard, &quiet, *deps); err == nil {
+	preDeps := *deps
+	preDeps.Drops = nil
+
+	if pre, err := resolve(e.Ctx, e.Sys, stdin, io.Discard, io.Discard, &quiet, &preDeps); err == nil {
 		e.Cfg = &pre.Config
 	}
 
@@ -221,12 +310,16 @@ func loadConfig(e *setup.Env, stdin io.Reader, stdout, stderr io.Writer, opts *R
 		deps.Existing = existing
 	}
 
-	r, ok := resolveValid(e.Ctx, e.Sys, stdin, stdout, stderr, &opts.Options, *deps)
+	r, ok := resolveValid(e.Ctx, e.Sys, stdin, stdout, stderr, &opts.Options, deps)
 	if !ok {
 		return false
 	}
 
 	e.Cfg = &r.Config
+
+	if deps.Drops != nil {
+		logDrops(e.Log, deps.Drops.List)
+	}
 
 	if opts.Output != "" {
 		if err := save(e.Sys, r, opts.Output); err != nil {
@@ -253,4 +346,11 @@ func printPlan(w io.Writer, results []setup.Result) {
 	}
 
 	_ = tw.Flush()
+}
+
+// logDrops records the legacy keys not imported in the log file.
+func logDrops(l *setup.Log, drops []bootstrap.LegacyDrop) {
+	for _, d := range drops {
+		l.Detail("legacy key %s not imported: %s", d.Key, d.Reason)
+	}
 }

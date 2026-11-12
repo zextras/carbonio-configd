@@ -129,7 +129,7 @@ func certStageDone(e *Env, stage string) bool { return e.Facts != nil && e.Facts
 // is optional.
 func StepAddCACert() Step {
 	return Step{
-		Title:    "Adding the CA to the trust store",
+		Title:    "Add the CA to the trust store",
 		Optional: true,
 		When: func(e *Env) bool {
 			return !e.Facts.NewInstall && certIsFile(e, certFile(e, "conf", "ca", certCAFile))
@@ -149,7 +149,7 @@ func StepAddCACert() Step {
 func StepConfigCASetup() Step {
 	return Step{
 		Name:  certStageCASetup,
-		Title: "Setting up CA",
+		Title: "Set up the CA",
 		Done: func(e *Env) (bool, error) {
 			return certStageDone(e, certStageCASetup) && certIsDir(e, certFile(e, "ssl", "carbonio", "ca")), nil
 		},
@@ -231,7 +231,7 @@ func certCAExpired(e *Env, caPEM string) bool {
 func StepConfigSaveCA() Step {
 	return Step{
 		Name:  certStageSaveCA,
-		Title: "Saving CA in ldap",
+		Title: "Save the CA in LDAP",
 		Done:  func(e *Env) (bool, error) { return certStageDone(e, certStageSaveCA), nil },
 		Apply: func(e *Env) error { return certZmcertmgr(e, "deployca") },
 	}
@@ -285,7 +285,7 @@ func certMailboxdKeystore(e *Env) string {
 func StepConfigCreateCert() Step {
 	return Step{
 		Name:  certStageCreateCert,
-		Title: "Creating SSL certificates",
+		Title: "Create SSL certificates",
 		Done: func(e *Env) (bool, error) {
 			return certStageDone(e, certStageCreateCert) && certIsDir(e, certFile(e, "ssl", "carbonio", "server")), nil
 		},
@@ -379,8 +379,8 @@ func certDetectType(e *Env) error {
 		return selfErr
 	}
 
-	e.Log.Warn("No valid SSL certificates were found.")
-	e.Log.Warn("New self-signed certificates will be generated and installed.")
+	e.Log.Info("No valid SSL certificates were found.")
+	e.Log.Info("New self-signed certificates will be generated and installed.")
 
 	e.Flags.NeedNewCert = true
 	e.Flags.CertType = certTypeSelf
@@ -421,7 +421,7 @@ func certPrepareMailboxd(e *Env) error {
 func StepConfigSaveCert() Step {
 	return Step{
 		Name:  certStageSaveCert,
-		Title: "Saving SSL certificate in ldap",
+		Title: "Save the SSL certificate in LDAP",
 		When: func(e *Env) bool {
 			return certIsFile(e, certFile(e, "ssl", "carbonio", "server", "server.crt"))
 		},
@@ -488,7 +488,7 @@ func certAnyFile(e *Env, names ...string) bool {
 // configInstallCert (setup.pl 5028-5051): deploy the mailboxd keystore.
 func StepConfigInstallCertStore() Step {
 	c := certInstall{
-		stage: certStageInstallStor, pkg: PkgAppserver, title: "Installing mailboxd SSL certificates",
+		stage: certStageInstallStor, pkg: PkgAppserver, title: "Install mailboxd SSL certificates",
 		have: func(e *Env) bool { return certIsFile(e, certMailboxdKeystore(e)) },
 	}
 
@@ -499,7 +499,7 @@ func StepConfigInstallCertStore() Step {
 // (setup.pl 5053-5075).
 func StepConfigInstallCertMTA() Step {
 	c := certInstall{
-		stage: certStageInstallMTA, pkg: PkgMTA, title: "Installing MTA SSL certificates",
+		stage: certStageInstallMTA, pkg: PkgMTA, title: "Install MTA SSL certificates",
 		have: func(e *Env) bool { return certAnyFile(e, "smtpd.key", "smtpd.crt") },
 	}
 
@@ -511,7 +511,7 @@ func StepConfigInstallCertMTA() Step {
 // configured local LDAP server.
 func StepConfigInstallCertLDAP() Step {
 	c := certInstall{
-		stage: certStageInstallLDAP, pkg: certPkgDirectory, title: "Installing LDAP SSL certificate",
+		stage: certStageInstallLDAP, pkg: certPkgDirectory, title: "Install LDAP SSL certificate",
 		have:        func(e *Env) bool { return certAnyFile(e, "slapd.key", "slapd.crt") },
 		restartLDAP: true,
 	}
@@ -523,7 +523,7 @@ func StepConfigInstallCertLDAP() Step {
 // configInstallCert (setup.pl 5102-5123).
 func StepConfigInstallCertProxy() Step {
 	c := certInstall{
-		stage: certStageInstallPrxy, pkg: certPkgProxy, title: "Installing Proxy SSL certificate",
+		stage: certStageInstallPrxy, pkg: certPkgProxy, title: "Install proxy SSL certificate",
 		have: func(e *Env) bool { return certAnyFile(e, "nginx.key", "nginx.crt") },
 	}
 
@@ -537,7 +537,7 @@ func StepConfigInstallCertProxy() Step {
 // interrupted run leaves no truncated key.
 func StepGenerateDHParam() Step {
 	return Step{
-		Title: "Generating dhparam key",
+		Title: "Generate dhparam key",
 		When:  func(e *Env) bool { return e.Facts.NewInstall },
 		Done: func(e *Env) (bool, error) {
 			if !certIsFile(e, certFile(e, "conf", certDHParamFile)) {

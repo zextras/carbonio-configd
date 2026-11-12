@@ -87,8 +87,8 @@ func TestRunDryRunPrintsTheNotice(t *testing.T) {
 
 	require.Equal(t, 0, status, errb)
 	assert.Contains(t, out, "Starting Carbonio Bootstrap...")
-	assert.Contains(t, out, "Preparing system users and directories")
-	assert.Regexp(t, `Preparing system users and directories\s+would apply`, out)
+	assert.Contains(t, out, "Prepare system users and directories")
+	assert.Regexp(t, `Prepare system users and directories\s+would apply`, out)
 
 	status, out, _ = exec(t, "--dry-run", "--non-interactive")
 	assert.Equal(t, 0, status, "no command is run")

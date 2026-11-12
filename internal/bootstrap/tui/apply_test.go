@@ -79,6 +79,7 @@ func TestApply_ProgressAndMarkers(t *testing.T) {
 
 	out := screen(m)
 	assert.Contains(t, out, "CARBONIO BOOTSTRAP")
+	assert.Contains(t, out, "by Zextras")
 	assert.Contains(t, out, "review & apply")
 	assert.Contains(t, out, "1 / 4")
 	assert.Contains(t, out, "↷ Step number 1")
@@ -321,4 +322,15 @@ func TestPreflight(t *testing.T) {
 	assert.Contains(t, got[1].Text, "needed ports free")
 
 	assert.Equal(t, []int{25, 389}, neededPorts(&bootstrap.Config{Roles: []string{"mta", "directory-server"}, LDAP: bootstrap.LDAPConfig{Port: 389}}))
+}
+
+func TestApply_StepThatWarnedShowsAsWarning(t *testing.T) {
+	m := newApply(t, 4, nil)
+	m.Init()
+
+	e := ev(setup.EventFinish, 2, setup.Applied, nil)
+	e.Warnings = []string{"skipped: appserver not started"}
+	feed(m, ev(setup.EventStart, 2, 0, nil), e)
+
+	assert.Contains(t, screen(m), "! Step number 2")
 }

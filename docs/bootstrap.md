@@ -35,6 +35,7 @@ CARBONIO_BOOTSTRAP_ADMIN_PASSWORD_FILE=/run/secrets/admin carbonio-bootstrap con
 | `--non-interactive` | never run the wizard; a missing key is an error |
 | `--wizard missing\|all` | which questions the wizard asks (default `missing`) |
 | `--plain` | line-based wizard and output instead of the full-screen interface |
+| `--verbose` | list every legacy key that is not imported (otherwise only their number) |
 | `--output FILE` | save the configuration there (mode `0600`, no passwords) instead of printing it |
 
 Exit status: `0` when the configuration is valid, `1` otherwise. Every
@@ -255,11 +256,14 @@ carbonio-bootstrap config --legacy-config /opt/zextras/config.12345 --output /et
 - Keys with a YAML equivalent are imported (see the table). An empty value,
   and `PUBLICSERVICEHOSTNAME=UNSET`, leave the key to its default.
 - Keys that are computed, fixed, obsolete or read from LDAP are not imported.
-  Each one is listed on stderr with the reason (`Note: legacy key EXPANDMENU
-  not imported: obsolete`).
+  `config` prints their number on stderr (`Note: 27 legacy keys not imported
+  (--verbose lists them)`); with `--verbose` each one is listed with the
+  reason (`Note: legacy key EXPANDMENU not imported: obsolete`). `run` shows
+  the number on its `Config:` line and always writes the list to the log
+  file; `--verbose` also prints it under that line.
 - A key neither mapped nor listed above (for example the extra keys some
   container images add) is ignored and listed on stderr as
-  `unknown key, ignored`, as `setup.pl` ignored it.
+  `unknown key, ignored`, as `setup.pl` ignored it (counted with the others).
 - Files saved by `setup.pl` hold no passwords, because `saveConfig` skips
   them. A hand-written file may hold some. They are used for the run but not
   written by `--output`; give them again through `*_FILE`, a `_file` key or
@@ -287,7 +291,7 @@ licence notice, wrapped at 80 columns between two rules (also with
 `--dry-run`; `config` does not print it). On a terminal with the full-screen
 interface the notice is the first page instead.
 
-The first step, "Preparing system users and directories", is the one the old
+The first step, "Prepare system users and directories", is the one the old
 shell script did before `setup.pl`: it runs `systemd-sysusers` for each
 `/usr/lib/sysusers.d/carbonio-*.conf`, then gives `/opt/zextras/conf` to
 `root:root`, runs `systemd-tmpfiles --create` for each
@@ -313,10 +317,56 @@ already done, a spinner on the running one, `·` pending, `⋮ N more` when the
 list does not fit, and `✗` on the one that failed, with its error and the
 reminder that running the command again resumes. At the bottom, the last log
 lines, already redacted; `l` opens the whole log. `Ctrl+C` stops after the
-current step: it never kills one in the middle. Without a terminal, with
-`--plain` or with `--non-interactive`, each step prints a line as before.
+current step: it never kills one in the middle. The colours are those of the
+Carbonio Design System (brand blue `#2b73d2` for the title, accents and the
+progress bar; green, amber and red for done, warning and failure; grey for
+the rest), with darker shades of green and amber on a light terminal.
 
-`--dry-run` prints each step with `skipped`, `done` or `would apply` and
+### Plain output
+
+Without a terminal, with `--plain` or with `--non-interactive` (so with
+`-c FILE`), `run` prints the notice, then a header, one line per step and a
+summary. A step that does not apply to the node is not listed and not
+counted; one already done is listed as `skip`. A step's own messages follow
+its line, indented. The details of the commands go to the log file only.
+
+```text
+Carbonio Bootstrap 26.12.0 · mail.example.com · new install
+Config:  /opt/product.config (legacy) · 27 keys not imported, see log
+Log:     /opt/zextras/log/bootstrap.20261112-005601.log
+
+[ 1/46] Prepare system users and directories   ok      0.4s
+[ 4/46] Check port conflicts                   skip    already done
+[10/46] Create SSL certificates                ok      3.1s
+        · carbonio-appserver certificate created
+[20/46] Generate dhparam key                   ok      1:05
+[44/46] Create GAL sync account                warn    skipped: services not started
+
+Done in 3:12 · 41 applied · 4 already done · 1 warning
+Warnings:
+  · Create GAL sync account: skipped: services not started
+Services not started (start_services: no). Start them with: systemctl start carbonio-directory-server.target carbonio-appserver.target
+Admin console: https://mail.example.com:6071   Webmail: https://mail.example.com
+```
+
+Durations under a minute are `0.4s` or `12s`, then `m:ss`. On failure the
+step shows `FAIL` with its error, and stderr gets `Failed at step n/N:
+<title>`, the error, and the reminder that running the command again resumes
+(exit status `1`). The services line shows the command that starts them
+(`systemctl start` the role targets on a systemd node, else
+`su - zextras -c 'zmcontrol start'`); the URLs are shown for a node that
+runs the proxy web service.
+
+On a terminal that is not `dumb`, the running step has a live line (a
+spinner and the elapsed time) that its final line replaces, and the statuses
+are coloured (`ok` green, `skip` grey, `warn` amber, `FAIL` red); `NO_COLOR`
+turns the colours off. Piped output has no colour and no carriage returns:
+one line per step, clean in a CI log.
+
+The step titles are in one style: an imperative verb, sentence case, upper
+case acronyms, no final punctuation.
+
+`--dry-run` prints each step with `skipped`, `done` or `would apply` (a table, not the plain output above) and
 writes nothing. On an existing install it may start the local LDAP server to
 read the node.
 

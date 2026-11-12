@@ -26,7 +26,7 @@ const (
 // .install_history stage.
 func StepPrepareHost() Step {
 	return Step{
-		Title: "Preparing system users and directories",
+		Title: "Prepare system users and directories",
 		Apply: prepareHost,
 	}
 }

@@ -38,7 +38,7 @@ type flags struct {
 	sets                   []string
 	nonInteractive, plain  bool
 	wizard                 string
-	dryRun                 bool
+	dryRun, verbose        bool
 }
 
 func main() {
@@ -149,6 +149,7 @@ func addFlags(cmd *cobra.Command, f *flags, run bool) {
 	fs.BoolVar(&f.nonInteractive, "non-interactive", false, "Never run the wizard; fail on missing keys")
 	fs.BoolVar(&f.plain, "plain", false, "Line-based wizard and output instead of the full-screen interface")
 	fs.StringVar(&f.wizard, "wizard", bootstrapcmd.WizardMissing, "Wizard questions to ask: missing|all")
+	fs.BoolVar(&f.verbose, "verbose", false, "List every legacy key that is not imported")
 	fs.StringVar(&f.output, "output", "", "Save the configuration to this file (mode 0600, no passwords)")
 
 	if run {
@@ -192,6 +193,7 @@ func (f *flags) options() *bootstrapcmd.Options {
 		Sets:           f.sets,
 		NonInteractive: f.nonInteractive,
 		Plain:          f.plain,
+		Verbose:        f.verbose,
 		Wizard:         f.wizard,
 		Output:         absPath(f.output),
 		Environ:        os.Environ(),

@@ -109,7 +109,7 @@ func TestPrepareHost_ChownErrors(t *testing.T) {
 
 func TestStepPrepareHost_FirstStepAlwaysApplies(t *testing.T) {
 	first := Steps()[0]
-	assert.Equal(t, "Preparing system users and directories", first.Title)
+	assert.Equal(t, "Prepare system users and directories", first.Title)
 	assert.Empty(t, first.Name)
 	assert.Nil(t, first.Done)
 	assert.Nil(t, first.When)

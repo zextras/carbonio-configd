@@ -226,6 +226,9 @@ func (m *ApplyModel) onEvent(ev setup.Event) {
 	switch ev.Outcome {
 	case setup.Applied:
 		r.state = stateDone
+		if len(ev.Warnings) > 0 {
+			r.state, r.err = stateWarned, ev.Warnings[0]
+		}
 	case setup.AlreadyDone:
 		r.state = stateAlready
 	case setup.Warned:

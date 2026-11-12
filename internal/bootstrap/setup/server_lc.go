@@ -121,7 +121,7 @@ func srvMailboxdLC(e *Env) map[string]string {
 // jetty directory exists, else empty, as setup.pl wrote it.
 func StepConfigLCMailboxd() Step {
 	return Step{
-		Title: "Setting mailboxd local config values",
+		Title: "Set mailboxd local config values",
 		When:  func(e *Env) bool { return e.Facts.IsEnabled(PkgAppserver) },
 		Done: func(e *Env) (bool, error) {
 			return srvLCMatches(e, srvMailboxdLC(e)), nil
@@ -284,7 +284,7 @@ func srvBaseDN(c *bootstrap.Config) string { return cmp.Or(c.LDAP.BaseDN, srvDef
 func StepConfigLCValues() Step {
 	return Step{
 		Name:  "configLCValues",
-		Title: "Setting local config values",
+		Title: "Set local config values",
 		Done: func(e *Env) (bool, error) {
 			want := srvLCValues(e)
 

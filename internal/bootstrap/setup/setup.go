@@ -79,7 +79,7 @@ type Step struct {
 }
 
 // Outcome is what happened to one step.
-type Outcome int
+type Outcome uint8
 
 // The outcomes of a step.
 const (
@@ -100,6 +100,8 @@ type Result struct {
 	Step    *Step
 	Outcome Outcome
 	Err     error
+	// Warnings are what the step reported through Log.Warn while it ran.
+	Warnings []string
 }
 
 // ErrStepFailed wraps the failure that ended a run.
@@ -110,7 +112,7 @@ var ErrStepFailed = errors.New("bootstrap step failed")
 var ErrStopped = errors.New("bootstrap stopped by the operator")
 
 // EventKind tells what an Event reports.
-type EventKind int
+type EventKind uint8
 
 // The events of a run.
 const (
@@ -122,15 +124,18 @@ const (
 
 // Event reports the progress of a real run (not a dry run) to an Observer.
 type Event struct {
-	Kind EventKind
 	// Index is the position of the step in the list given to Run.
 	Index int
 	Step  *Step
-	// Outcome and Err are set on EventFinish.
-	Outcome Outcome
-	Err     error
+	// Err is set on EventFinish.
+	Err error
 	// Elapsed is how long the step took (EventFinish).
 	Elapsed time.Duration
+	// Warnings are the warnings the step reported (EventFinish).
+	Warnings []string
+	Kind     EventKind
+	// Outcome is set on EventFinish.
+	Outcome Outcome
 }
 
 // Observer receives the events of a run, from the goroutine that runs it.
@@ -188,7 +193,8 @@ func observedStep(e *Env, i int, s *Step, dryRun bool) (Result, error) {
 
 	elapsed := e.Sys.Clock.Now().Sub(start)
 
-	ev := Event{Kind: EventFinish, Index: i, Step: s, Outcome: res.Outcome, Err: res.Err, Elapsed: elapsed}
+	ev := Event{Kind: EventFinish, Index: i, Step: s, Outcome: res.Outcome, Err: res.Err, Elapsed: elapsed,
+		Warnings: res.Warnings}
 	if ev.Err == nil {
 		ev.Err = err
 	}
@@ -237,14 +243,19 @@ func runStep(e *Env, i int, s *Step, dryRun bool) (Result, error) {
 
 	e.emit(Event{Kind: EventStart, Index: i, Step: s})
 
-	end := e.Log.Begin(s.Title)
+	e.Log.Detail("%s: running", s.Title)
+	e.Log.takeWarnings()
 
 	err := s.Apply(e)
-	end(err)
+	res.Warnings = e.Log.takeWarnings()
 
 	if err != nil {
+		e.Log.Detail("%s: failed: %v", s.Title, err)
+
 		return failed(e, s, res, err)
 	}
+
+	e.Log.Detail("%s: done", s.Title)
 
 	res.Outcome = Applied
 
@@ -276,7 +287,7 @@ func failed(e *Env, s *Step, res Result, err error) (Result, error) {
 	if s.Optional {
 		res.Outcome = Warned
 
-		e.Log.Warn("%s: %v", s.Title, err)
+		e.Log.Detail("%s: warning: %v", s.Title, err)
 
 		return res, nil
 	}

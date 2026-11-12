@@ -48,6 +48,13 @@ func (p Paths) Path(elem ...string) string {
 	return filepath.Join(append([]string{p.Base}, elem...)...)
 }
 
+// Note is a message a step printed for the operator.
+type Note struct {
+	// Warn is set for a warning, clear for plain progress.
+	Warn bool
+	Text string
+}
+
 // Log writes progress to the operator and details to the log file. Every
 // line goes through redact.Text, so a secret that reaches a message by
 // mistake is still masked.
@@ -56,6 +63,10 @@ type Log struct {
 	out  io.Writer
 	file io.Writer
 	now  func() time.Time
+	// notes, if set, receives the messages instead of out.
+	notes func(Note)
+	// warnings are the warnings of the step in progress.
+	warnings []string
 }
 
 // NewLog returns a log that prints progress to out and writes everything,
@@ -63,6 +74,10 @@ type Log struct {
 func NewLog(out, file io.Writer) *Log {
 	return &Log{out: out, file: file, now: time.Now}
 }
+
+// OnNote sends the messages to f, a message at a time, instead of the output
+// writer; the log file gets them all the same.
+func (l *Log) OnNote(f func(Note)) { l.notes = f }
 
 // OpenLogFile creates the log file of a run in dir, mode 0600 from the
 // start: bootstrap.<YYYYMMDD-HHMMSS>.log.
@@ -86,37 +101,64 @@ func (l *Log) write(toOut bool, format string, args ...any) {
 		_, _ = fmt.Fprint(l.out, msg)
 	}
 
-	if l.file != nil {
-		for line := range strings.SplitSeq(strings.TrimRight(msg, "\n"), "\n") {
-			_, _ = fmt.Fprintf(l.file, "%s %s\n", l.now().Format(time.RFC3339), line)
-		}
+	l.toFile(msg)
+}
+
+func (l *Log) toFile(msg string) {
+	if l.file == nil {
+		return
 	}
+
+	for line := range strings.SplitSeq(strings.TrimRight(msg, "\n"), "\n") {
+		_, _ = fmt.Fprintf(l.file, "%s %s\n", l.now().Format(time.RFC3339), line)
+	}
+}
+
+// note delivers a message to the operator: to the note handler when there is
+// one, else as a line of the output writer.
+func (l *Log) note(warn bool, format string, args ...any) {
+	text, _ := redact.Text(fmt.Sprintf(format, args...))
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if warn {
+		l.warnings = append(l.warnings, text)
+		l.toFile("Warning: " + text)
+	} else {
+		l.toFile(text)
+	}
+
+	switch {
+	case l.notes != nil:
+		l.notes(Note{Warn: warn, Text: text})
+	case l.out != nil && warn:
+		_, _ = fmt.Fprintf(l.out, "Warning: %s\n", text)
+	case l.out != nil:
+		_, _ = fmt.Fprintf(l.out, "%s\n", text)
+	}
+}
+
+// takeWarnings returns the warnings since the last call.
+func (l *Log) takeWarnings() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	w := l.warnings
+	l.warnings = nil
+
+	return w
 }
 
 // Info prints a line to the operator and the log file.
-func (l *Log) Info(format string, args ...any) { l.write(true, format+"\n", args...) }
+func (l *Log) Info(format string, args ...any) { l.note(false, format, args...) }
 
-// Warn prints a warning to the operator and the log file.
-func (l *Log) Warn(format string, args ...any) { l.write(true, "Warning: "+format+"\n", args...) }
+// Warn prints a warning to the operator and the log file; the step in
+// progress ends with a warning.
+func (l *Log) Warn(format string, args ...any) { l.note(true, format, args...) }
 
 // Detail writes a line to the log file only.
 func (l *Log) Detail(format string, args ...any) { l.write(false, format+"\n", args...) }
-
-// Begin prints "title..." and returns the function that ends the line with
-// "done." or "failed.".
-func (l *Log) Begin(title string) func(error) {
-	l.write(true, "%s...", title)
-
-	return func(err error) {
-		if err != nil {
-			l.write(true, "failed.\n")
-
-			return
-		}
-
-		l.write(true, "done.\n")
-	}
-}
 
 // Writer returns a writer that copies command output into the log file.
 func (l *Log) Writer() io.Writer { return logWriter{l} }
