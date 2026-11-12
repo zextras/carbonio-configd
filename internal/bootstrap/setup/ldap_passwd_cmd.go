@@ -155,6 +155,9 @@ func RunLDAPPasswd(e *Env, args []string, stdin io.Reader, stdout, stderr io.Wri
 	return runLDAPPasswd(e, ldapNativeKit(), args, stdin, stdout, stderr)
 }
 
+// ldapPasswdErrFmt is how a failure is reported on stderr.
+const ldapPasswdErrFmt = "Error: %v\n"
+
 func runLDAPPasswd(e *Env, k *ldapKit, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	o, ok := parseLDAPPasswdArgs(args, stderr)
 	if !ok {
@@ -171,7 +174,7 @@ func runLDAPPasswd(e *Env, k *ldapKit, args []string, stdin io.Reader, stdout, s
 
 	isMaster, err := ldapIsMaster(e)
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "Error: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, ldapPasswdErrFmt, err)
 
 		return 1
 	}
@@ -182,7 +185,7 @@ func runLDAPPasswd(e *Env, k *ldapKit, args []string, stdin io.Reader, stdout, s
 
 	if !o.hasPassword {
 		if o.password, err = ldapPasswdFromStdin(stdin); err != nil {
-			_, _ = fmt.Fprintf(stderr, "Error: %v\n", err)
+			_, _ = fmt.Fprintf(stderr, ldapPasswdErrFmt, err)
 
 			return 1
 		}
@@ -197,7 +200,7 @@ func runLDAPPasswd(e *Env, k *ldapKit, args []string, stdin io.Reader, stdout, s
 	_, _ = fmt.Fprintln(stdout, "Updating local config and LDAP")
 
 	if err := ldapChangePassword(e, k, o.account, o.password, o.confirm); err != nil {
-		_, _ = fmt.Fprintf(stderr, "Error: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, ldapPasswdErrFmt, err)
 
 		return 1
 	}
