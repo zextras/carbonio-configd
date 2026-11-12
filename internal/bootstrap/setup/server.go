@@ -353,6 +353,12 @@ func StepConfigSetServicePorts() Step {
 	}
 }
 
+// The default COS preferences the bootstrap sets (also their stage names).
+const (
+	srvAttrKeyboardShortcuts = "zimbraPrefUseKeyboardShortcuts"
+	srvAttrTimeZone          = "zimbraPrefTimeZoneId"
+)
+
 // StepConfigSetKeyboardShortcutsPref ports setup.pl
 // configSetKeyboardShortcutsPref (5251-5260): zimbraPrefUseKeyboardShortcuts
 // on the default COS.
@@ -363,15 +369,15 @@ func StepConfigSetKeyboardShortcutsPref() Step {
 	value := func(e *Env) string { return srvBoolUpper(e.Cfg.Store.KeyboardShortcuts) }
 
 	return Step{
-		Name:     "zimbraPrefUseKeyboardShortcuts",
+		Name:     srvAttrKeyboardShortcuts,
 		Title:    "Set keyboard shortcut preferences",
 		When:     func(e *Env) bool { return e.Facts.IsEnabled(PkgAppserver) && !e.Facts.NewInstall },
 		Optional: true,
 		Done: func(e *Env) (bool, error) {
-			return srvCOSMatches(e, "default", map[string]string{"zimbraPrefUseKeyboardShortcuts": value(e)})
+			return srvCOSMatches(e, "default", map[string]string{srvAttrKeyboardShortcuts: value(e)})
 		},
 		Apply: func(e *Env) error {
-			return e.Prov("mc", "default", "zimbraPrefUseKeyboardShortcuts", value(e))
+			return e.Prov("mc", "default", srvAttrKeyboardShortcuts, value(e))
 		},
 	}
 }
@@ -618,7 +624,7 @@ func StepConfigSetStoreProxy() Step {
 // LDAPHOST eq HOSTNAME (and a time zone is configured). Optional.
 func StepConfigSetTimeZonePref() Step {
 	return Step{
-		Name:     "zimbraPrefTimeZoneId",
+		Name:     srvAttrTimeZone,
 		Title:    "Set time zone preference",
 		When:     func(e *Env) bool { return e.Facts.IsEnabled(srvPkgDirectory) },
 		Optional: true,
@@ -629,10 +635,10 @@ func StepConfigSetTimeZonePref() Step {
 				return true, nil
 			}
 
-			return srvCOSMatches(e, "default", map[string]string{"zimbraPrefTimeZoneId": e.Cfg.Host.Timezone})
+			return srvCOSMatches(e, "default", map[string]string{srvAttrTimeZone: e.Cfg.Host.Timezone})
 		},
 		Apply: func(e *Env) error {
-			return e.Prov("mc", "default", "zimbraPrefTimeZoneId", e.Cfg.Host.Timezone)
+			return e.Prov("mc", "default", srvAttrTimeZone, e.Cfg.Host.Timezone)
 		},
 	}
 }
