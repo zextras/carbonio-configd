@@ -40,8 +40,8 @@ golden/single-node/  reference snapshot of the legacy path (local data, not comm
 cd tests/bootstrap-parity
 ./build.sh                         # ~3 min, image localhost/carbonio-parity:noble
 ./run-legacy.sh                    # ~4 min -> out/legacy/ (+ out/legacy.bootstrap.log, out/legacy.timing)
-make -C ../.. build                # the linux/amd64 carbonio-bootstrap binary
-./run-configd.sh ../../bin/carbonio-bootstrap # -> out/configd/
+make -C ../.. build                # the linux/amd64 bin/setup (carbonio-bootstrap)
+./run-configd.sh ../../bin/setup # -> out/configd/
 ./diff.sh                          # golden/single-node vs out/configd; exit 1 on any difference
 ./diff.sh out/legacy out/configd   # compare two fresh runs instead
 ```
@@ -196,7 +196,7 @@ LDAP of node 1 (`config/store-node.config`, `LDAPHOST=mail.parity.test`).
 ./build.sh                    # node 1 image
 ./build.sh --store            # node 2 image: localhost/carbonio-parity:noble-store (~2 min)
 ./run-2node.sh legacy         # out/2node-legacy/{node1,node2}, out/2node-legacy.node{1,2}.bootstrap.log
-./run-2node.sh configd ../../bin/carbonio-bootstrap
+./run-2node.sh configd ../../bin/setup
 ```
 
 Both containers join the podman network `parity-net` (10.89.77.0/24, fixed IPs .10 and .11), and resolve each
@@ -222,7 +222,7 @@ the passwords of the master (`LDAPREPPASS`, `LDAPROOTPASS`, `LDAPADMINPASS`, ...
 ```
 ./build.sh --ldap
 ./run-2node.sh legacy --scenario replica                      # out/replica-legacy/{node1,node2,node2-synced}
-./run-2node.sh configd ../../bin/carbonio-bootstrap --scenario replica   # out/replica-configd/...
+./run-2node.sh configd ../../bin/setup --scenario replica   # out/replica-configd/...
 for n in node1 node2 node2-synced; do ./diff.sh out/replica-legacy/$n out/replica-configd/$n; done
 ```
 
@@ -248,7 +248,7 @@ carbonio targets and then creates the galsync account (needs the mailbox up).
 
 ```
 ./run-legacy.sh --config config/single-node-start.config --out out/start-legacy
-./run-configd.sh ../../bin/carbonio-bootstrap --config config/single-node-start.config --out out/start-configd
+./run-configd.sh ../../bin/setup --config config/single-node-start.config --out out/start-configd
 ./diff.sh out/start-legacy out/start-configd
 ```
 

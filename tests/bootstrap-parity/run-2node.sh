@@ -72,7 +72,7 @@ bootstrap() { # NAME CONFIG_IN_CONTAINER
   if [[ ${MODE} == legacy ]]; then
     podman exec "$1" /usr/bin/carbonio-bootstrap -c /opt/product.config
   else
-    podman exec "$1" /usr/bin/carbonio-bootstrap run \
+    podman exec "$1" /opt/zextras/libexec/setup run \
       --legacy-config /opt/product.config --non-interactive
   fi
 }
@@ -84,8 +84,8 @@ prepare_container "${N1}" "${FQDN1}" "${PARITY_DIR}/config/single-node.config" "
 prepare_container "${N2}" "${FQDN2}" "${NODE2_CONFIG}" "${PEER2}"
 if [[ ${MODE} == configd ]]; then
   for n in "${N1}" "${N2}"; do
-    podman cp "${BIN}" "${n}:/usr/bin/carbonio-bootstrap"
-    podman exec "${n}" chmod 0755 /usr/bin/carbonio-bootstrap
+    podman cp "${BIN}" "${n}:/opt/zextras/libexec/setup"
+    podman exec "${n}" chmod 0755 /opt/zextras/libexec/setup
   done
 fi
 

@@ -33,14 +33,14 @@ done
 t0=$(date +%s)
 start_container "${NAME}"
 prepare_container "${NAME}"
-podman cp "${BIN}" "${NAME}:/usr/bin/carbonio-bootstrap"
-podman exec "${NAME}" chmod 0755 /usr/bin/carbonio-bootstrap
+podman cp "${BIN}" "${NAME}:/opt/zextras/libexec/setup"
+podman exec "${NAME}" chmod 0755 /opt/zextras/libexec/setup
 t1=$(date +%s)
 log "container ready in $((t1 - t0))s; running carbonio-bootstrap run"
 
 mkdir -p "${OUT}"
 rc=0
-podman exec "${NAME}" /usr/bin/carbonio-bootstrap run \
+podman exec "${NAME}" /opt/zextras/libexec/setup run \
   --legacy-config /opt/product.config --non-interactive \
   >"${OUT}.bootstrap.log" 2>&1 || rc=$?
 t2=$(date +%s)
