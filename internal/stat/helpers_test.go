@@ -6,6 +6,7 @@ package stat
 
 import (
 	"bytes"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -82,3 +83,29 @@ func (te *testEnv) sample(t *testing.T, c Collector, n int) []string {
 
 // opts30 are the options of a collector run with -i 30.
 func opts30() *options { return &options{interval: 30 * time.Second} }
+
+// statLine is a /proc/<pid>/stat line: field 3 is the parent, 13 and 14 the
+// user and system ticks, 19 the threads and 23 the resident pages.
+func statLine(pid int, comm string, ppid, utime, stime, threads, rssPages int) string {
+	return fmt.Sprintf("%d (%s) S %d 0 0 0 0 0 0 0 0 0 %d %d 0 0 20 0 %d 0 0 0 %d 0\n",
+		pid, comm, ppid, utime, stime, threads, rssPages)
+}
+
+// procEntry adds the files of one process to the tree.
+func (f files) procEntry(pid int, name string, ppid int, stat, io string) {
+	p := fmt.Sprintf("proc/%d/", pid)
+	f[p+"status"] = fmt.Sprintf("Name:\t%s\nPPid:\t%d\n", name, ppid)
+	f[p+"stat"] = stat
+
+	if io != "" {
+		f[p+"io"] = io
+	}
+}
+
+func osWriteFile(path, data string) error { return os.WriteFile(path, []byte(data), 0o644) }
+
+// recSyslog records what is sent to syslog as "<level> <message>".
+type recSyslog struct{ log, stats []string }
+
+func (r *recSyslog) Log(level, msg string)   { r.log = append(r.log, level+" "+msg) }
+func (r *recSyslog) Stats(level, msg string) { r.stats = append(r.stats, level+" "+msg) }

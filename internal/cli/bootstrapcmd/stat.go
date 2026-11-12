@@ -118,7 +118,8 @@ func statfs(path string) (stat.Statfs, error) {
 		size = st.Bsize
 	}
 
-	return stat.Statfs{Blocks: st.Blocks, Bfree: st.Bfree, Bavail: st.Bavail, Bsize: uint64(size)}, nil //nolint:gosec // a block size
+	//nolint:gosec // a block size is positive
+	return stat.Statfs{Blocks: st.Blocks, Bfree: st.Bfree, Bavail: st.Bavail, Bsize: uint64(size)}, nil
 }
 
 // enabledServices is zimbraServiceEnabled of a server, from LDAP.

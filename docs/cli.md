@@ -246,7 +246,7 @@ Registry names (what `service list` shows, start order top to bottom):
 | `saslauthd` | saslauthd | `carbonio-saslauthd` |
 | `milter` | milter JVM; only started when enabled in `mta_milter_options` | `carbonio-milter` |
 | `mta` | Postfix (depends on `saslauthd` and `milter`) | `carbonio-postfix` |
-| `stats` | the zmstat collectors | `carbonio-stats` |
+| `stats` | the zmstat collectors (`setup zmstat <name>`) | `carbonio-stats` |
 
 Accepted aliases (resolved before lookup; they never appear in listings):
 

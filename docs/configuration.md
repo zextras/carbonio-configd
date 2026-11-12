@@ -114,7 +114,7 @@ What a cycle does (load, snapshot, plan, execute, apply restarts) is in
 | `CONFIGD_LOG_LEVEL` | daemon and commands | `debug`, `info` (default), `warn`, `error`. `service`, `control`, `status` and `release` log nothing but errors (to `/dev/null`) unless this is set; then they log to stderr |
 | `CONFIGD_LOG_FORMAT` | daemon and commands | `text` (default) or `json` |
 | `zimbra_server_hostname` | daemon | overrides the server hostname |
-| `PERL5LIB`, `PERLLIB` | child processes | set by the daemon when `PERL5LIB` is unset so amavisd and the zmstat collectors find the bundled Perl modules |
+| `PERL5LIB`, `PERLLIB` | child processes | set by the daemon when `PERL5LIB` is unset so amavisd finds the bundled Perl modules |
 | `NOTIFY_SOCKET`, `WATCHDOG_USEC` | daemon | set by systemd; enable `sd_notify` and watchdog pings |
 
 ## Containers and Kubernetes

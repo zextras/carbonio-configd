@@ -138,10 +138,8 @@ func fdValidate(env *Env, o *options) error {
 	}
 
 	log := realPath(o.logPath)
-	zpaths := []string{"/tmp", "/var/log"}
-
-	for _, d := range []string{"log", "data/tmp", procStat} {
-		zpaths = append(zpaths, filepath.Join(env.Base, d))
+	zpaths := []string{
+		"/tmp", "/var/log", filepath.Join(env.Base, "log"), filepath.Join(env.Base, "data", "tmp"), env.Dir,
 	}
 
 	for _, p := range zpaths {
