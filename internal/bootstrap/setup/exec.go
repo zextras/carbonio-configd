@@ -62,7 +62,11 @@ func (e *Env) Root(name string, args ...string) error {
 }
 
 func (e *Env) output(c *Cmd, capture bool) ([]byte, error) {
-	cmd := &sys.Cmd{Path: c.Path, Args: c.Args, Stdin: c.Stdin, Env: c.Env}
+	// Setsid: no step command gets the controlling terminal. A child that
+	// opens /dev/tty (zmprov's JLine runs stty on it) would otherwise be
+	// stopped by SIGTTOU from its background process group, hanging the run
+	// whenever bootstrap is started from a terminal.
+	cmd := &sys.Cmd{Path: c.Path, Args: c.Args, Stdin: c.Stdin, Env: c.Env, Setsid: true}
 
 	if c.AsZextras {
 		env, err := e.zextrasEnv()
@@ -71,10 +75,11 @@ func (e *Env) output(c *Cmd, capture bool) ([]byte, error) {
 		}
 
 		cmd = &sys.Cmd{
-			Path:  "runuser",
-			Args:  append([]string{"-u", config.ZextrasUser, "--", "sh", "-c", zextrasShim, c.Path}, c.Args...),
-			Stdin: c.Stdin,
-			Env:   append(env, c.Env...),
+			Path:   "runuser",
+			Args:   append([]string{"-u", config.ZextrasUser, "--", "sh", "-c", zextrasShim, c.Path}, c.Args...),
+			Stdin:  c.Stdin,
+			Env:    append(env, c.Env...),
+			Setsid: true,
 		}
 	}
 
