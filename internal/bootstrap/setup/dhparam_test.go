@@ -200,15 +200,6 @@ func TestParseDHParamArgs(t *testing.T) {
 	}
 }
 
-func TestDHMatchOption_AmbiguousAbbreviation(t *testing.T) {
-	_, msg := dhMatchOption("d", []string{"debug", "dump"})
-	assert.Equal(t, "Option d is ambiguous (debug, dump)", msg)
-
-	got, msg := dhMatchOption("de", []string{"debug", "dump"})
-	assert.Equal(t, "debug", got)
-	assert.Empty(t, msg)
-}
-
 // dhTestRun is one run of zmdhparam against fakes.
 type dhTestRun struct {
 	code   int

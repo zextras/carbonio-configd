@@ -31,6 +31,9 @@ const (
 	ipV6Addresses = "-Djava.net.preferIPv6Addresses=true"
 )
 
+// ipLoopback6 is the IPv6 loopback address.
+const ipLoopback6 = "::1"
+
 // ipJava is what an IP mode does to a Java option.
 type ipJava int
 
@@ -62,10 +65,10 @@ var ipModes = map[string]ipMode{
 		records: []ipRecord{ipRecordA}, v4Stack: ipEnsure, v6Addresses: ipRemove, bindAddress: "127.0.0.1",
 	},
 	"both": {
-		records: []ipRecord{ipRecordA, ipRecordAAAA}, v4Stack: ipRemove, v6Addresses: ipRemove, bindAddress: "::1",
+		records: []ipRecord{ipRecordA, ipRecordAAAA}, v4Stack: ipRemove, v6Addresses: ipRemove, bindAddress: ipLoopback6,
 	},
 	"ipv6": {
-		records: []ipRecord{ipRecordAAAA}, v4Stack: ipRemove, v6Addresses: ipEnsure, bindAddress: "::1",
+		records: []ipRecord{ipRecordAAAA}, v4Stack: ipRemove, v6Addresses: ipEnsure, bindAddress: ipLoopback6,
 	},
 }
 
@@ -93,7 +96,7 @@ func ipJavaOptions(opts string, m ipMode) string {
 // ipIsLoopback is the test of zmiptool for a MySQL address it may change: none
 // or one of the loopback addresses.
 func ipIsLoopback(addr string) bool {
-	return addr == "" || strings.Contains(addr, "localhost") || strings.Contains(addr, "::1") ||
+	return addr == "" || strings.Contains(addr, "localhost") || strings.Contains(addr, ipLoopback6) ||
 		strings.Contains(addr, "127.0.0.1")
 }
 

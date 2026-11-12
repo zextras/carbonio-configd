@@ -20,6 +20,13 @@ const (
 	ldapExitRefused = 1
 	ldapExitDied    = 255
 
+	// ldapAccesslogSuffix is the suffix of the accesslog database.
+	ldapAccesslogSuffix = "cn=accesslog"
+	ldapAttrObjectClass = "objectClass"
+	ldapClassOverlay    = "olcOverlayConfig"
+	ldapAttrOverlay     = "olcOverlay"
+	// ldapOLCTrue is a true value of the slapd configuration.
+	ldapOLCTrue = "TRUE"
 	// ldapAttrNone asks a search for no attribute, only the entries.
 	ldapAttrNone = "1.1"
 	// ldapAttrSyncrepl holds the replication agreements of a database.
@@ -152,7 +159,7 @@ func ldapLocalConn(e *Env, k *ldapKit, rootPassword string) (ldapConn, error) {
 
 // ldapAccesslogExists reports whether the accesslog database is there.
 func ldapAccesslogExists(conn ldapConn) (bool, error) {
-	entries, err := conn.Search("cn=accesslog", "(objectClass=*)", false, []string{ldapAttrNone})
+	entries, err := conn.Search(ldapAccesslogSuffix, "(objectClass=*)", false, []string{ldapAttrNone})
 
 	return len(entries) > 0, ldapSearchError(err)
 }
@@ -209,45 +216,45 @@ func ldapAccesslogEntries(e *Env) []ldapLDIFEntry {
 
 	return []ldapLDIFEntry{
 		{DN: ldapDNMdbDB, Attrs: []ldapLDIFAttr{
-			a("objectClass", "olcDatabaseConfig", "olcMdbConfig"),
+			a(ldapAttrObjectClass, "olcDatabaseConfig", "olcMdbConfig"),
 			a("olcDatabase", "{2}mdb"),
 			a("olcDbDirectory", filepath.Join(ldapAccesslogDir(e), "db")),
-			a("olcSuffix", "cn=accesslog"),
-			a("olcAccess", `{0}to dn.subtree="cn=accesslog"  by dn.exact="uid=zimbra,cn=admins,cn=zimbra" read `+
+			a("olcSuffix", ldapAccesslogSuffix),
+			a("olcAccess", `{0}to dn.subtree=ldapAccesslogSuffix  by dn.exact="uid=zimbra,cn=admins,cn=zimbra" read `+
 				` by dn.exact="cn=config" read  by dn.exact="uid=zmreplica,cn=admins,cn=zimbra" read`),
-			a("olcLastMod", "TRUE"),
+			a("olcLastMod", ldapOLCTrue),
 			a("olcMaxDerefDepth", "15"),
 			a("olcReadOnly", "FALSE"),
 			a("olcRootDN", "cn=config"),
 			a("olcSizeLimit", "unlimited"),
 			a("olcTimeLimit", "unlimited"),
-			a("olcMonitoring", "TRUE"),
+			a("olcMonitoring", ldapOLCTrue),
 			a("olcDbCheckpoint", "0 0"),
 			a("olcDbEnvFlags", "writemap", "nometasync"),
-			a("olcDbNoSync", "TRUE"),
+			a("olcDbNoSync", ldapOLCTrue),
 			a("olcDbIndex", "entryCSN eq", "objectClass eq", "reqEnd eq", "reqResult eq", "reqStart eq"),
 			a("olcDbMode", "0600"),
 			a("olcDbSearchStack", "16"),
 			a("olcDbMaxsize", "85899345920"),
 		}},
 		{DN: "olcOverlay=syncprov," + ldapDNMdbDB, Attrs: []ldapLDIFAttr{
-			a("objectClass", "olcOverlayConfig", "olcSyncProvConfig"),
-			a("olcOverlay", "syncprov"),
-			a("olcSpNoPresent", "TRUE"),
-			a("olcSpReloadHint", "TRUE"),
+			a(ldapAttrObjectClass, ldapClassOverlay, "olcSyncProvConfig"),
+			a(ldapAttrOverlay, "syncprov"),
+			a("olcSpNoPresent", ldapOLCTrue),
+			a("olcSpReloadHint", ldapOLCTrue),
 		}},
 		{DN: "olcOverlay={0}syncprov,olcDatabase={3}mdb,cn=config", Attrs: []ldapLDIFAttr{
-			a("objectClass", "olcOverlayConfig", "olcSyncProvConfig"),
-			a("olcOverlay", "{0}syncprov"),
+			a(ldapAttrObjectClass, ldapClassOverlay, "olcSyncProvConfig"),
+			a(ldapAttrOverlay, "{0}syncprov"),
 			a("olcSpCheckpoint", "20 10"),
 			a("olcSpSessionlog", "10000000"),
 		}},
 		{DN: "olcOverlay={1}accesslog,olcDatabase={3}mdb,cn=config", Attrs: []ldapLDIFAttr{
-			a("objectClass", "olcOverlayConfig", "olcAccessLogConfig"),
-			a("olcOverlay", "{1}accesslog"),
-			a("olcAccessLogDB", "cn=accesslog"),
+			a(ldapAttrObjectClass, ldapClassOverlay, "olcAccessLogConfig"),
+			a(ldapAttrOverlay, "{1}accesslog"),
+			a("olcAccessLogDB", ldapAccesslogSuffix),
 			a("olcAccessLogOps", "writes"),
-			a("olcAccessLogSuccess", "TRUE"),
+			a("olcAccessLogSuccess", ldapOLCTrue),
 			a("olcAccessLogPurge", "01+00:00  00+04:00"),
 		}},
 	}

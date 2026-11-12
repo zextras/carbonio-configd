@@ -25,6 +25,12 @@ const (
 	ldapReplicaRID = "100"
 )
 
+// The ends of the lines the script printed for a step.
+const (
+	ldapMsgSucceeded = "succeeded\n"
+	ldapMsgDone      = "done\n"
+)
+
 // ldapReplica is a run of zmldapenablereplica (libexec/ldapenablereplica.pl).
 type ldapReplica struct {
 	e    *Env
@@ -79,7 +85,7 @@ func (r *ldapReplica) enableProvider() error {
 		return err
 	}
 
-	ldapPrintf(r.out, "succeeded\n")
+	ldapPrintf(r.out, ldapMsgSucceeded)
 
 	return nil
 }
@@ -162,7 +168,7 @@ func (r *ldapReplica) verifyMaster() error {
 		return ldapDie("ERROR: Unable to verify ldap connection on %s - exiting", r.lmr)
 	}
 
-	ldapPrintf(r.out, "succeeded\n")
+	ldapPrintf(r.out, ldapMsgSucceeded)
 
 	return nil
 }
@@ -177,7 +183,7 @@ func (r *ldapReplica) updateLdapHost() {
 
 	ldapPrintf(r.out, "Setting ldap_url on %s...", r.host)
 	r.setURL(fmt.Sprintf("%s://%s:%s %s", proto, r.host, r.lc["ldap_port"], r.lmr))
-	ldapPrintf(r.out, "done\n")
+	ldapPrintf(r.out, ldapMsgDone)
 }
 
 func (r *ldapReplica) setURL(url string) {
@@ -190,7 +196,7 @@ func (r *ldapReplica) setURL(url string) {
 func (r *ldapReplica) resetLdapURL() {
 	ldapPrintf(r.out, "Resetting ldap_url on %s...", r.lmr)
 	r.setURL(r.lmr)
-	ldapPrintf(r.out, "done\n")
+	ldapPrintf(r.out, ldapMsgDone)
 }
 
 // startLdap starts slapd unless it runs; when it cannot, ldap_url is reset.
@@ -205,7 +211,7 @@ func (r *ldapReplica) startLdap() error {
 		return ldapRefused()
 	}
 
-	ldapPrintf(r.out, "done\n")
+	ldapPrintf(r.out, ldapMsgDone)
 
 	return nil
 }
@@ -242,7 +248,7 @@ func (r *ldapReplica) createLdapConfig(conn ldapConn) error {
 		return ldapRefused()
 	}
 
-	ldapPrintf(r.out, "succeeded\n")
+	ldapPrintf(r.out, ldapMsgSucceeded)
 
 	return nil
 }
@@ -255,7 +261,7 @@ func (r *ldapReplica) enableLdapService() error {
 		return err
 	}
 
-	ldapPrintf(r.out, "succeeded\n")
+	ldapPrintf(r.out, ldapMsgSucceeded)
 
 	return nil
 }

@@ -13,10 +13,13 @@ import (
 	"strings"
 )
 
-// optKind says what a Getopt::Long option takes.
 // optHelp is the name of the help option of the ported scripts.
 const optHelp = "help"
 
+// optPrefix starts the option errors, worded as Getopt::Long does.
+const optPrefix = "Option "
+
+// optKind says what a Getopt::Long option takes.
 type optKind int
 
 const (
@@ -26,6 +29,9 @@ const (
 	optString
 	// optInt takes a mandatory integer ("sid=i").
 	optInt
+	// optOptInt takes an optional integer ("new:i"): a bare option takes the
+	// next argument only when it is a number.
+	optOptInt
 )
 
 // optSpec is one option of a Getopt::Long specification such as "s|sid=i":
@@ -38,9 +44,11 @@ type optSpec struct {
 // optResult is what parseGetoptLong read.
 type optResult struct {
 	// given holds the options that were present, by primary name.
-	given   map[string]bool
-	strs    map[string]string
-	ints    map[string]int
+	given map[string]bool
+	strs  map[string]string
+	ints  map[string]int
+	// bare holds the options of optOptInt that came without a number.
+	bare    map[string]bool
 	rest    []string
 	allGood bool
 }
@@ -58,7 +66,7 @@ func (r *optResult) has(name string) bool { return r.given[name] }
 // options are still read, as it does.
 func parseGetoptLong(args []string, specs []optSpec, stderr io.Writer) *optResult {
 	r := &optResult{
-		given: map[string]bool{}, strs: map[string]string{}, ints: map[string]int{}, allGood: true,
+		given: map[string]bool{}, bare: map[string]bool{}, strs: map[string]string{}, ints: map[string]int{}, allGood: true,
 	}
 
 	for i := 0; i < len(args); {
@@ -100,7 +108,7 @@ func (r *optResult) option(arg string, args []string, next int, specs []optSpec)
 
 	if spec.kind == optFlag {
 		if hasValue {
-			return next, "Option " + primary + " does not take an argument"
+			return next, optPrefix + primary + " does not take an argument"
 		}
 
 		r.given[primary] = true
@@ -108,23 +116,38 @@ func (r *optResult) option(arg string, args []string, next int, specs []optSpec)
 		return next, ""
 	}
 
-	if !hasValue {
+	return r.value(spec, value, hasValue, args, next)
+}
+
+// value reads the value of an option that takes one: the text after "=", else
+// the next argument (for an optional integer, only when it is a number).
+func (r *optResult) value(spec optSpec, value string, hasValue bool, args []string, next int) (after int, msg string) {
+	primary := spec.names[0]
+
+	if spec.kind == optOptInt && (!hasValue || value == "") {
+		if !hasValue && next < len(args) && optIntRE.MatchString(args[next]) {
+			value, next = args[next], next+1
+		}
+	} else if !hasValue {
 		if next >= len(args) {
-			return next, "Option " + primary + " requires an argument"
+			return next, optPrefix + primary + " requires an argument"
 		}
 
 		value, next = args[next], next+1
 	}
 
-	if spec.kind == optInt {
+	switch {
+	case spec.kind == optString:
+		r.strs[primary] = value
+	case value == "":
+		r.bare[primary] = true
+	default:
 		n, err := strconv.Atoi(value)
 		if err != nil || !optIntRE.MatchString(value) {
 			return next, fmt.Sprintf("Value %q invalid for option %s (number expected)", value, primary)
 		}
 
 		r.ints[primary] = n
-	} else {
-		r.strs[primary] = value
 	}
 
 	r.given[primary] = true
@@ -163,7 +186,7 @@ func optMatch(name string, specs []optSpec) (match optSpec, complaint string) {
 		names[i] = s.names[0]
 	}
 
-	return optSpec{}, "Option " + name + " is ambiguous (" + strings.Join(names, ", ") + ")"
+	return optSpec{}, optPrefix + name + " is ambiguous (" + strings.Join(names, ", ") + ")"
 }
 
 func optAbbreviates(name string, s optSpec) bool {

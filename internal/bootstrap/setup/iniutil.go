@@ -147,12 +147,12 @@ func iniDebugLine(dbg io.Writer, raw string, line *iniLine, m []string) {
 	}
 
 	dp("==== content", raw, true)
-	dp("section", line.section, line.hasSection)
+	dp(iniOptSection, line.section, line.hasSection)
 
 	for _, g := range []struct {
 		name string
 		idx  int
-	}{{"keyPre", 1}, {"key", 2}, {"keyPost", 3}, {"equals", 4}, {"valuePre", 5}, {"value", 6}, {"valuePost", 7}} {
+	}{{"keyPre", 1}, {iniOptKey, 2}, {"keyPost", 3}, {"equals", 4}, {"valuePre", 5}, {iniOptValue, 6}, {"valuePost", 7}} {
 		v, ok := group(g.idx)
 		dp(g.name, v, ok)
 	}
@@ -313,7 +313,7 @@ func iniApply(fsys sys.FS, file string, ed *iniEdit, out, dbg io.Writer) (status
 		return 0, nil
 	}
 
-	backup := file + ".bak"
+	backup := file + iniBackupSuffix
 	if ed.HasBackup {
 		backup = file + ed.Backup
 	}
@@ -368,9 +368,19 @@ var iniOptions = []optSpec{
 	{names: []string{"debug"}}, {names: []string{optHelp}},
 	{names: []string{"get"}}, {names: []string{"isset"}}, {names: []string{"list"}}, {names: []string{"set"}},
 	{names: []string{"setmin"}}, {names: []string{"setmax"}}, {names: []string{"unset"}},
-	{names: []string{"backup"}, kind: optString}, {names: []string{"section"}, kind: optString},
-	{names: []string{"key"}, kind: optString}, {names: []string{"value"}, kind: optString},
+	{names: []string{iniOptBackup}, kind: optString}, {names: []string{iniOptSection}, kind: optString},
+	{names: []string{iniOptKey}, kind: optString}, {names: []string{iniOptValue}, kind: optString},
 }
+
+// The options of zminiutil that carry a value, and the suffix of the backup
+// when none is given.
+const (
+	iniOptSection   = "section"
+	iniOptKey       = "key"
+	iniOptValue     = "value"
+	iniOptBackup    = "backup"
+	iniBackupSuffix = ".bak"
+)
 
 // iniOperations are the operations by option name, in the order the script
 // counts them.
@@ -399,10 +409,10 @@ func iniCheck(o *optResult) (ed *iniEdit, msg string) {
 		}
 	}
 
-	ed.Section, ed.HasSection = o.strs["section"], o.has("section")
-	ed.Key = o.strs["key"]
-	ed.Value, ed.HasValue = o.strs["value"], o.has("value")
-	ed.Backup, ed.HasBackup = o.strs["backup"], o.has("backup")
+	ed.Section, ed.HasSection = o.strs[iniOptSection], o.has(iniOptSection)
+	ed.Key = o.strs[iniOptKey]
+	ed.Value, ed.HasValue = o.strs[iniOptValue], o.has(iniOptValue)
+	ed.Backup, ed.HasBackup = o.strs[iniOptBackup], o.has(iniOptBackup)
 
 	if msg = iniCheckAction(o, ed, ops); msg != "" {
 		return nil, msg
@@ -422,7 +432,7 @@ func iniCheckAction(o *optResult, ed *iniEdit, ops int) string {
 		return "one of " + iniOpNames + " must be specified"
 	case ops > 1:
 		return "only one of " + iniOpNames + " must be specified"
-	case !o.has("key") && ed.Op != iniList:
+	case !o.has(iniOptKey) && ed.Op != iniList:
 		return "--key not specified"
 	case !ed.HasSection && ed.Op != iniList:
 		return "--section not specified"

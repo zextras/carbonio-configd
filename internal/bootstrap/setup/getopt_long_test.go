@@ -71,3 +71,38 @@ func TestParseGetoptLong(t *testing.T) {
 		assert.Equal(t, c.rest, r.rest, name)
 	}
 }
+
+// The optional integer of "new:i" and "debug:1" (dhparam): the next argument
+// is its value only when it is a number.
+func TestParseGetoptLong_OptionalInteger(t *testing.T) {
+	specs := []optSpec{{names: []string{"new"}, kind: optOptInt}, {names: []string{"in"}, kind: optString}}
+
+	cases := map[string]struct {
+		args  []string
+		given bool
+		bare  bool
+		n     int
+		rest  []string
+		err   string
+	}{
+		"bare":                {args: []string{"-new"}, given: true, bare: true},
+		"number follows":      {args: []string{"-new", "4096"}, given: true, n: 4096},
+		"text follows":        {args: []string{"-new", "x"}, given: true, bare: true, rest: []string{"x"}},
+		"equals":              {args: []string{"-new=2048"}, given: true, n: 2048},
+		"equals empty":        {args: []string{"-new="}, given: true, bare: true},
+		"negative":            {args: []string{"-new", "-1"}, given: true, n: -1},
+		"equals not a number": {args: []string{"-new=big"}, err: "Value \"big\" invalid for option new (number expected)\n"},
+	}
+
+	for name, c := range cases {
+		var errb bytes.Buffer
+
+		r := parseGetoptLong(c.args, specs, &errb)
+
+		assert.Equal(t, c.given, r.has("new"), name)
+		assert.Equal(t, c.bare, r.bare["new"], name)
+		assert.Equal(t, c.n, r.ints["new"], name)
+		assert.Equal(t, c.rest, r.rest, name)
+		assert.Equal(t, c.err, errb.String(), name)
+	}
+}
