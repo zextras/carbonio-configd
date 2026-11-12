@@ -7,8 +7,8 @@ SPDX-License-Identifier: AGPL-3.0-only
 # Bootstrap configuration
 
 `carbonio-bootstrap` configures a Carbonio node. It is a binary of its own
-(`/usr/bin/carbonio-bootstrap`, from the carbonio-configd package) that
-replaces the shell script of carbonio-core and its `setup.pl`; it is not part
+(`/opt/zextras/libexec/setup`, from the carbonio-configd package, run by
+carbonio-core's `/usr/bin/carbonio-bootstrap`) that replaces `setup.pl`; it is not part
 of `configd`, so the terminal interface is not linked into the daemon.
 `carbonio-bootstrap config` builds the node configuration, validates it, and
 prints it or saves it; `carbonio-bootstrap run` builds it the same way and

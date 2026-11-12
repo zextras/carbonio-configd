@@ -70,20 +70,20 @@ _package_common() {
     "${pkgdir}/opt/zextras/libexec/postfix-conf"
 
   # The bootstrap of a node: a binary of its own, so the terminal interface
-  # is not linked into configd. It replaces the shell script of carbonio-core.
-  # Not installed yet: carbonio-core still ships /usr/bin/carbonio-bootstrap,
-  # and both packages would own the file. Enable together with the
-  # carbonio-core change that drops it.
-  # install -Dm755 "${srcdir}/carbonio-bootstrap" \
-  #   "${pkgdir}/usr/bin/carbonio-bootstrap"
-  # install -Dm644 "${srcdir}/carbonio-bootstrap.bash" \
-  #   "${pkgdir}/usr/share/bash-completion/completions/carbonio-bootstrap"
-  # install -Dm644 "${srcdir}/carbonio-bootstrap.bash" \
-  #   "${pkgdir}/opt/zextras/common/share/bash-completion/completions/carbonio-bootstrap"
-  # install -Dm644 "${srcdir}/carbonio-bootstrap.zsh" \
-  #   "${pkgdir}/usr/share/zsh/site-functions/_carbonio-bootstrap"
-  # install -Dm644 "${srcdir}/carbonio-bootstrap.fish" \
-  #   "${pkgdir}/usr/share/fish/vendor_completions.d/carbonio-bootstrap.fish"
+  # is not linked into configd. Installed as libexec/setup, where zmsetup.pl
+  # and setup.pl lived; the user entry point stays carbonio-core's
+  # /usr/bin/carbonio-bootstrap, which runs it. The completions are for that
+  # command name.
+  install -Dm755 "${srcdir}/carbonio-bootstrap" \
+    "${pkgdir}/opt/zextras/libexec/setup"
+  install -Dm644 "${srcdir}/carbonio-bootstrap.bash" \
+    "${pkgdir}/usr/share/bash-completion/completions/carbonio-bootstrap"
+  install -Dm644 "${srcdir}/carbonio-bootstrap.bash" \
+    "${pkgdir}/opt/zextras/common/share/bash-completion/completions/carbonio-bootstrap"
+  install -Dm644 "${srcdir}/carbonio-bootstrap.zsh" \
+    "${pkgdir}/usr/share/zsh/site-functions/_carbonio-bootstrap"
+  install -Dm644 "${srcdir}/carbonio-bootstrap.fish" \
+    "${pkgdir}/usr/share/fish/vendor_completions.d/carbonio-bootstrap.fish"
 
   # Its staging directory, on every distro (legacy and systemd).
   install -Dm644 "${srcdir}/${pkgname}-tmpfile.conf" \
