@@ -279,7 +279,7 @@ func TestStatsCustomStart_WithFakeCollector(t *testing.T) {
 	}
 	tmp := t.TempDir()
 
-	fakebin := filepath.Join(tmp, "zmstat-proc")
+	fakebin := filepath.Join(tmp, "setup")
 	writeExecutable(t, fakebin, []byte("#!/bin/sh\nexit 0\n"))
 
 	logDir := filepath.Join(tmp, "log")
@@ -307,7 +307,7 @@ func TestStatsCustomStart_LogOpenFails(t *testing.T) {
 	}
 	tmp := t.TempDir()
 
-	fakebin := filepath.Join(tmp, "zmstat-proc")
+	fakebin := filepath.Join(tmp, "setup")
 	writeExecutable(t, fakebin, []byte("#!/bin/sh\nexit 0\n"))
 
 	ctl.p.libexec = tmp
@@ -353,14 +353,7 @@ func TestStatsCustomStart_ConditionalCollectors(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	collectors := []string{
-		"zmstat-proc", "zmstat-cpu", "zmstat-vm", "zmstat-io",
-		"zmstat-df", "zmstat-fd", "zmstat-allprocs", "zmstat-mysql",
-	}
-	for _, c := range collectors {
-		bin := filepath.Join(tmp, c)
-		writeExecutable(t, bin, []byte("#!/bin/sh\nsleep 0\nexit 0\n"))
-	}
+	writeExecutable(t, filepath.Join(tmp, "setup"), []byte("#!/bin/sh\nsleep 0\nexit 0\n"))
 
 	ctl.p.libexec = tmp
 

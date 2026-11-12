@@ -97,15 +97,21 @@ type CommandSpec struct {
 }
 
 // CollectorSpec supervises a set of helper processes that each write a pidfile
-// (the zmstat-* collectors of stats): started one by one from the libexec
-// directory with a <name>.out log, stopped through the pidfiles of the
+// (the collectors of stats, "setup stat <name>"): started one by one from the
+// libexec directory with a <LogPrefix><name>.out log, stopped through the pidfiles of the
 // controller's stats pid directory — killing each process group, with sudo for
 // root-owned collectors — then by identity (ServiceDef.ProcessName) for
 // survivors, and rotated by sending SIGHUP (they reopen their logs) to every
 // pidfile's process.
 type CollectorSpec struct {
-	// Always are the collectors every host runs, as command lines ("zmstat-io
-	// -x"): the executable and its arguments.
+	// Binary is the executable under libexec that runs every collector, and
+	// Args the arguments before the collector (its command line), LogPrefix
+	// what precedes the collector name in its log file name.
+	Binary    string
+	Args      []string
+	LogPrefix string
+	// Always are the collectors every host runs, as the name and its options
+	// ("io -x").
 	Always []string
 	// Optional are the collectors enabled by a localconfig key set to TRUE.
 	Optional []OptionalCollector
@@ -113,6 +119,7 @@ type CollectorSpec struct {
 
 // OptionalCollector is a collector run only when localconfig key LCKey is TRUE.
 type OptionalCollector struct {
+	// Cmd is the collector and its options, as in CollectorSpec.Always.
 	Cmd   string
 	LCKey string
 }

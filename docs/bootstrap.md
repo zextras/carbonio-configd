@@ -543,6 +543,7 @@ statuses of their scripts instead.
 | `setup dhparam get\|set [options]` | `zmdhparam` | root, zextras | Reads or stores the DH parameters of `zimbraSSLDHParam`; see [`setup dhparam get` and `set`](#setup-dhparam-get-and-set). |
 | `setup ldap-passwd [options] [password]` | `zmldappasswd` | root, zextras | Changes an LDAP password in localconfig, the directory and `conf/carbonio.ldif`; the password is read from stdin when it is not an argument. See [`setup ldap-passwd`](#setup-ldap-passwd). |
 | `setup proxyconfig [options]` | `zmproxyconfig` (Perl) | root, zextras | Every option, default, check, message, help text and exit status of the script (`-h -o -m -w -d -e -f -r -s -t -c -C -n -u -U -i -p -a -x -H`; options parse like Perl's `Getopt::Std`). `1`: refused options or checks (usage on stdout), `2`: an attribute change failed, `255`: unusable options or LDAP. Nothing is printed on success; `-e` and `-f` warn about domains with `zimbraVirtualIPAddress` on stderr. |
+| `setup stat <name> [options]` | `zmstat-<name>` (Perl), `<name>` one of `proc cpu vm io df fd allprocs mysql nginx mtaqueue ldap` | zextras (root too for `fd`) | One statistics collector in the foreground; configd's `stats` service starts one per collector. Same options, files and formats as the script; see [`setup stat`](#setup-stat). |
 | `setup ldap-schema` | `zmldapschema` | root, zextras | Installs the slapd schemas into `data/ldap/config/cn=config/cn=schema`; see [LDAP and ini tools](#ldap-and-ini-tools). |
 | `setup ldap-update-ldif` | `zmldapupdateldif` | root | Adds the missing base entries and applies `lib/conf/*.ldif` on an LDAP master. |
 | `setup ldap-enable-replica` | `zmldapenablereplica` | root | The provider overlays on the master, the consumer configuration on a replica. |
@@ -807,3 +808,65 @@ Differences from the script:
   attribute is written to LDAP directly, and the message says so.
 - `-help` and `-man` print the synopsis (and the notes), not the whole Perl
   pod.
+
+### `setup stat`
+
+carbonio-core installs `libexec/zmstat-proc`, `-cpu`, `-vm`, `-io`, `-df`,
+`-fd`, `-allprocs`, `-mysql`, `-nginx`, `-mtaqueue` and `-ldap` as `exec
+/opt/zextras/libexec/setup stat <name> "$@"`. Each collector keeps the
+command line (`-i/--interval`, `-l/--log`, `-c/--console`, and for mtaqueue
+`--max-qsize`, `--backoff-interval`, `--max-interval`; `zmstat-io -x` is the
+extended io collector), the usage text, the pid file (`/run/carbonio/stats`),
+the CSV in `zmstat/` (name, heading, column order, number formatting,
+`MM/DD/YYYY HH:MM:SS` timestamps), the rotation (SIGHUP, and at midnight to
+`<dir>/YYYY-MM-DD/<name>.gz`) and the syslog lines of `Zextras::Mon::Stat.pm`,
+so `zmstat-chart`, the chart tool and log rotation keep working. The interval
+comes from `zmstat_interval` (`zmstat_disk_interval` for df). The `stats`
+service runs the collectors itself (`zmstat_mysql_enabled`,
+`zmstat_nginx_enabled` and `zmstat_mtaqueue_enabled` are still the keys of the
+optional ones; `ldap` has no key and is run by hand).
+
+The numbers come from `/proc` and `/sys` instead of `vmstat`, `iostat`, `ps`
+and `df`. Only `mysql` (`bin/mysql`, with the password in `MYSQL_PWD`, not on
+the command line) and `mtaqueue` (`postqueue -p`, and `postfix-prometheus` in
+the background on every sample) still run another program.
+
+Differences from the scripts:
+
+- Samples are aligned to the first round second (`t0 + k*interval`); the
+  scripts slept an interval after each sample and drifted. A sample that
+  fails is logged on stderr and skipped. An interval below 1 is the default.
+- A log whose last line has no timestamp is not treated as stale. A pid file
+  of a live process that is not a zmstat process is replaced. The pid file is
+  removed on a clean stop. The syslog marker of long messages is an upper-case
+  random UUID.
+- `io`: computed from `/sys/block/*/stat` and `/proc/uptime`; the devices are
+  those with I/O when the collector starts, sorted by name; one that
+  disappears reads zero. The heading follows sysstat 12.5 or later (with
+  `kB_dscd`), the `-x` columns sysstat 12.7.4.
+- `vm`: the procps 3.3 columns without `gu`; the first reading only sets the
+  reference.
+- `proc`: `ps` is replaced by `/proc` (the user is the Uid of the process);
+  the postfix master pattern bug of the script is not copied; when the
+  enabled services cannot be read from LDAP the default process list is
+  used; the memory columns use 4 kB pages, as the script did.
+- `allprocs`, `nginx`: names with spaces are parsed correctly and the
+  processes are sorted by name; no row is written on the first tick, and
+  `nginx` writes none while there is no pid file (the script waited 15 s).
+- `df`: from the mount table and `statfs`, one row per device, the shortest
+  mount point wins; squashfs, udev, devtmpfs, overlay and efivarfs and
+  mounts that are not backed by a `/` device are skipped.
+- `fd`: one pid file (`fd.pid`); the sudo wrapper and `fd-real.pid` are gone,
+  so the sudoers entry for `zmstat-fd` is no longer needed. The script ran
+  its sampling loop as root through sudo, but both of its columns are
+  readable as `zextras`: `fd_count` is the first number of
+  `/proc/sys/fs/file-nr` and `mailboxd_fd_count` the entries of
+  `/proc/<pid>/fd` of mailboxd, which runs as `zextras` (the `pgrep -o -f`
+  that finds it only reads command lines). configd runs as `zextras`
+  (`User=zextras`) and starts the collector as itself, so the columns are the
+  ones the script wrote; only a process of another user would be out of
+  reach, and the script did not count any. `setup stat fd` still accepts root
+  (an operator running `zmstat-fd` by hand); it hands the log to `zextras`
+  with mode 0640. `rotate` only signals the running collector; `-c` skips the
+  check of the log path.
+- `ldap`: go-ldap over `ldapi` instead of `ldapsearch`; no debug output.

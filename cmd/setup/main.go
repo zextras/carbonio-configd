@@ -11,6 +11,9 @@
 //	carbonio-bootstrap gal-sync-account | ssh-keygen | update-authkeys
 //	                           what the legacy setup.pl calls instead of zmgsautil,
 //	                           zmsshkeygen and zmupdateauthkeys
+//	carbonio-bootstrap stat <name> [options]
+//	                           the zmstat-* statistics collectors (proc, cpu, vm, io, df,
+//	                           fd, allprocs, mysql, nginx, mtaqueue, ldap), natively
 //
 // It is a binary of its own, apart from configd, so the full-screen terminal
 // interface is not linked into the daemon.
@@ -74,7 +77,8 @@ func run(args []string, env sys.System, stdin io.Reader, stdout, stderr io.Write
 // toolCommands are the commands that replace scripts and parse their own
 // arguments (proxyconfig has a -c and a -d of its own).
 var toolCommands = []string{"ssh-keygen", "update-authkeys", "syslog", "dhparam", "proxyconfig", "ldap-passwd",
-	"ldap-schema", "ldap-update-ldif", "ldap-enable-replica", "ldap-enable-mmr", "iptool", "iniutil", "certmgr"}
+	"ldap-schema", "ldap-update-ldif", "ldap-enable-replica", "ldap-enable-mmr", "iptool", "iniutil", "certmgr",
+	"stat"}
 
 // legacyArgs maps the options of the former shell script: "-c FILE" is
 // "--legacy-config FILE --non-interactive", and "-d" (debug) is accepted and
@@ -185,7 +189,11 @@ func newRootCmd(env sys.System, stdin io.Reader, stdout, stderr io.Writer, statu
 			"Apply zimbraIPMode to the Java options and the MySQL bind address (zmiptool)",
 			bootstrapcmd.RunIPTool, tio),
 		newToolCmd("iniutil [options] inifile", "Read or edit one ini file (zminiutil)",
-			bootstrapcmd.RunIniUtil, tio))
+			bootstrapcmd.RunIniUtil, tio),
+		newToolCmd("stat <name> [options]",
+			"Run a statistics collector: the zmstat-<name> scripts (proc, cpu, vm, io, df, fd, allprocs, "+
+				"mysql, nginx, mtaqueue, ldap), as the zextras user",
+			bootstrapcmd.RunStat, tio))
 
 	return root
 }

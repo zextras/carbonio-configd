@@ -97,10 +97,7 @@ func TestStatsCustomStart_SomeCollectorsPresent(t *testing.T) {
 		return map[string]string{}, nil
 	}
 
-	for _, name := range []string{"zmstat-proc", "zmstat-cpu"} {
-		bin := filepath.Join(tmp, name)
-		writeExecutable(t, bin, []byte("#!/bin/sh\nexit 0\n"))
-	}
+	writeExecutable(t, filepath.Join(tmp, "setup"), []byte("#!/bin/sh\nexit 0\n"))
 
 	ctl.p.libexec = tmp
 
@@ -132,14 +129,7 @@ func TestStatsCustomStart_ConditionalMysqlCollectorEnabled(t *testing.T) {
 		}, nil
 	}
 
-	collectors := []string{
-		"zmstat-proc", "zmstat-cpu", "zmstat-vm", "zmstat-io",
-		"zmstat-df", "zmstat-fd", "zmstat-allprocs", "zmstat-mysql",
-	}
-	for _, name := range collectors {
-		bin := filepath.Join(tmp, name)
-		writeExecutable(t, bin, []byte("#!/bin/sh\nexit 0\n"))
-	}
+	writeExecutable(t, filepath.Join(tmp, "setup"), []byte("#!/bin/sh\nexit 0\n"))
 
 	ctl.p.libexec = tmp
 

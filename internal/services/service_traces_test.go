@@ -125,12 +125,7 @@ func (h *traceHost) install() {
 	f.FS.Put(ctl.p.configrewrite, []byte("#!/bin/sh"), 0o755)
 	f.FS.Put(ctl.p.altermime, []byte("#!/bin/sh"), 0o755)
 
-	for _, collector := range []string{
-		zmstatProc, zmstatCPU, zmstatVM, zmstatIO, zmstatDF, zmstatFD, zmstatAllprocs,
-		"zmstat-mysql", "zmstat-nginx", "zmstat-mtaqueue",
-	} {
-		f.FS.Put(ctl.p.libexec+"/"+collector, []byte("x"), 0o755)
-	}
+	f.FS.Put(ctl.p.libexec+"/setup", []byte("x"), 0o755)
 
 	f.Proc.SetGID("postfix", 1001)
 
@@ -207,11 +202,10 @@ func (h *traceHost) run(name string, pid *int) {
 	if name == svcStats {
 		h.f.FS.PutDir(h.ctl.p.statsPidDir, 0o755)
 
-		for _, collector := range []string{zmstatCPU, zmstatVM} {
+		for _, collector := range []string{"cpu", "vm"} {
 			*pid++
-			script := h.ctl.p.libexec + "/" + collector
-			h.f.Proc.Add(sys.ProcEntry{PID: *pid, Argv: []string{"/usr/bin/perl", "-w", script}})
-			h.f.FS.Put(h.ctl.p.statsPidDir+"/"+collector+".pid", []byte(strconv.Itoa(*pid)), 0o644)
+			h.f.Proc.Add(sys.ProcEntry{PID: *pid, Argv: []string{h.ctl.p.libexec + "/setup", "stat", collector}})
+			h.f.FS.Put(h.ctl.p.statsPidDir+"/zmstat-"+collector+".pid", []byte(strconv.Itoa(*pid)), 0o644)
 		}
 
 		return

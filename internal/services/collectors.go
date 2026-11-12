@@ -19,28 +19,31 @@ import (
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
-const zmstatEnabledTrue = "TRUE"
+const statEnabledTrue = "TRUE"
 
 // statsCollectors is the CollectorSpec of stats, mirroring legacy statctl.pl:
-// the base collectors every host runs (zmstat-io twice: extended and plain)
-// plus the ones whose localconfig key is TRUE. Each collector writes its own
-// PID file under the stats run directory.
+// the base collectors every host runs (io twice: extended and plain) plus the
+// ones whose localconfig key is TRUE, each as "setup stat <name>". Each
+// collector writes its own PID file under the stats run directory.
 func statsCollectors() *CollectorSpec {
 	return &CollectorSpec{
+		Binary:    collectorBinary,
+		Args:      []string{collectorCommand},
+		LogPrefix: collectorLogPrefix,
 		Always: []string{
-			zmstatProc,
-			zmstatCPU,
-			zmstatVM,
-			zmstatIO + " -x",
-			zmstatDF,
-			zmstatIO,
-			zmstatFD,
-			zmstatAllprocs,
+			"proc",
+			"cpu",
+			"vm",
+			"io -x",
+			"df",
+			"io",
+			"fd",
+			"allprocs",
 		},
 		Optional: []OptionalCollector{
-			{Cmd: "zmstat-mysql", LCKey: "zmstat_mysql_enabled"},
-			{Cmd: "zmstat-nginx", LCKey: "zmstat_nginx_enabled"},
-			{Cmd: "zmstat-mtaqueue", LCKey: "zmstat_mtaqueue_enabled"},
+			{Cmd: "mysql", LCKey: "zmstat_mysql_enabled"},
+			{Cmd: "nginx", LCKey: "zmstat_nginx_enabled"},
+			{Cmd: "mtaqueue", LCKey: "zmstat_mtaqueue_enabled"},
 		},
 	}
 }
@@ -57,19 +60,21 @@ func (c *Controller) startCollectors(ctx context.Context, def *ServiceDef) error
 	collectors := slices.Clone(def.Collectors.Always)
 
 	for _, opt := range def.Collectors.Optional {
-		if lc[opt.LCKey] == zmstatEnabledTrue {
+		if lc[opt.LCKey] == statEnabledTrue {
 			collectors = append(collectors, opt.Cmd)
 		}
 	}
 
 	var started int
 
+	spec := def.Collectors
+	binaryPath := filepath.Join(c.p.libexec, spec.Binary)
+
 	for _, collectorCmd := range collectors {
 		parts := strings.Fields(collectorCmd)
-		binary := parts[0]
-		args := parts[1:]
+		binary := spec.LogPrefix + parts[0]
+		args := append(slices.Clone(spec.Args), parts...)
 
-		binaryPath := filepath.Join(c.p.libexec, binary)
 		if _, statErr := c.env.FS.Stat(binaryPath); statErr != nil {
 			logger.WarnContext(ctx, "Skipping missing stats collector",
 				"collector", binary, "path", binaryPath)
@@ -141,8 +146,10 @@ func (c *Controller) stopCollectors(ctx context.Context, def *ServiceDef) error 
 		}
 	}
 
-	// Final pass: send SIGTERM to any zmstat-* survivors found in /proc.
+	// Final pass: send SIGTERM to any collector survivors found in /proc,
+	// including the Perl ones of a release before the upgrade.
 	_ = c.killProcess(ctx, def.ProcessName)
+	_ = c.killProcess(ctx, c.p.statsGlob)
 
 	logger.InfoContext(ctx, "Stopped stats collectors", "killed", killed)
 
@@ -150,9 +157,10 @@ func (c *Controller) stopCollectors(ctx context.Context, def *ServiceDef) error 
 }
 
 // killStatsPidFile reads the PID from pidPath, kills its process group (so
-// grandchildren like iostat/vmstat spawned by the zmstat-* perl workers die
-// with the parent), escalates to SIGKILL after a grace period, and escalates
-// via sudo when the PID is root-owned (sudo-spawned zmstat-fd). Removes the
+// grandchildren such as postqueue and the mysql client, or the iostat/vmstat of
+// the perl workers of an earlier release, die with the parent), escalates to
+// SIGKILL after a grace period, and escalates via sudo when the PID is
+// root-owned (the sudo-spawned zmstat-fd of an earlier release). Removes the
 // pid file regardless. Returns true when the leader is confirmed gone.
 //
 // The group kill is signaled only for a positive PID that is a live process of
@@ -176,7 +184,7 @@ func (c *Controller) killStatsPidFile(ctx context.Context, pidPath, processName 
 		return false
 	}
 
-	if !c.pidBelongsTo(ctx, pid, processName) {
+	if !c.pidBelongsTo(ctx, pid, processName) && !c.pidBelongsTo(ctx, pid, c.p.statsGlob) {
 		logger.InfoContext(ctx, "Stats PID file does not name a running collector, treating it as stale",
 			"path", pidPath, "pid", pid)
 		_ = c.env.FS.Remove(pidPath)
