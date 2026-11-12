@@ -209,6 +209,13 @@ func ldapEnableAccesslog(e *Env, conn ldapConn) error {
 	return nil
 }
 
+// ldapAccesslogACL is the olcAccess of the accesslog database, as the scripts
+// wrote it (the blanks included).
+func ldapAccesslogACL() string {
+	return `{0}to dn.subtree="` + ldapAccesslogSuffix + `"  by dn.exact="uid=zimbra,cn=admins,cn=zimbra" read ` +
+		` by dn.exact="cn=config" read  by dn.exact="uid=zmreplica,cn=admins,cn=zimbra" read`
+}
+
 // ldapAccesslogEntries are the entries of the accesslog database and of the
 // overlays that feed it.
 func ldapAccesslogEntries(e *Env) []ldapLDIFEntry {
@@ -220,8 +227,7 @@ func ldapAccesslogEntries(e *Env) []ldapLDIFEntry {
 			a("olcDatabase", "{2}mdb"),
 			a("olcDbDirectory", filepath.Join(ldapAccesslogDir(e), "db")),
 			a("olcSuffix", ldapAccesslogSuffix),
-			a("olcAccess", `{0}to dn.subtree=ldapAccesslogSuffix  by dn.exact="uid=zimbra,cn=admins,cn=zimbra" read `+
-				` by dn.exact="cn=config" read  by dn.exact="uid=zmreplica,cn=admins,cn=zimbra" read`),
+			a("olcAccess", ldapAccesslogACL()),
 			a("olcLastMod", ldapOLCTrue),
 			a("olcMaxDerefDepth", "15"),
 			a("olcReadOnly", "FALSE"),

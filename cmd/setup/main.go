@@ -162,8 +162,9 @@ func newRootCmd(env sys.System, stdin io.Reader, stdout, stderr io.Writer, statu
 		newToolCmd("update-authkeys [-a]",
 			"Update ~zextras/.ssh/authorized_keys from the servers' keys; -a first on every server (zmupdateauthkeys)",
 			bootstrapcmd.RunUpdateAuthKeys, tio),
-		newStdinToolCmd("dhparam [get|set ...]",
-			"Install the RFC 7919 ffdhe2048 dhparam and record it in zimbraSSLDHParam; get and set are zmdhparam",
+		newStdinToolCmd("dhparam [install|get|set ...]",
+			"install (or no argument, for setup.pl): the RFC 7919 ffdhe2048 dhparam recorded in zimbraSSLDHParam; "+
+				"get and set are zmdhparam",
 			bootstrapcmd.RunDHParam, tio),
 		newStdinToolCmd("ldap-passwd [-h] [-r|-a|-b|-n|-p|[-c] -l] [password]",
 			"Change an LDAP password in localconfig, the directory and carbonio.ldif (zmldappasswd); "+

@@ -528,7 +528,7 @@ names as wrappers that execute them (`zmsshkeygen` is `exec
 and `zmrc` run the same code as the bootstrap steps. They need no bootstrap
 configuration: the host name, the `zextras` ids, the LDAP and the admin
 credentials come from localconfig. They take the scripts' arguments, print
-what the scripts printed to stdout and the details to stderr, and exit `1`
+what the scripts printed to stdout (internal details are not printed), and exit `1`
 on failure with `Error: <reason>` on stderr; a wrong command line exits `2`.
 `proxyconfig`, `ldap-passwd` and `dhparam get|set` keep the output and exit
 statuses of their scripts instead.
@@ -539,8 +539,8 @@ statuses of their scripts instead.
 | `setup ssh-keygen [rsa]` | `zmsshkeygen` | root, zextras | Generates the key pair and stores the public key in the server entry. Another key type prints `Bad keytype`. |
 | `setup update-authkeys [-a]` | `zmupdateauthkeys` | root, zextras | Rewrites `authorized_keys`; `-a` first asks every server, through `zmrc`, to update its own (a server that does not answer is logged). |
 | `setup syslog` | `zmsyslogsetup` | root | Sets up rsyslog as the "Set up syslog.conf" step does. |
-| `setup dhparam` | `openssl dhparam` in setup.pl | root, zextras | Installs `conf/dhparam.pem.crb` (ffdhe2048) unless present and sets `zimbraSSLDHParam`. |
-| `setup dhparam get\|set [options]` | `zmdhparam` | root, zextras | Reads or stores the DH parameters of `zimbraSSLDHParam`; see [`setup dhparam get` and `set`](#setup-dhparam-get-and-set). |
+| `setup dhparam install` | `openssl dhparam` in setup.pl | root, zextras | Installs `conf/dhparam.pem.crb` (ffdhe2048) unless present and sets `zimbraSSLDHParam`. Plain `setup dhparam` does the same, kept for setup.pl; use `install`. |
+| `setup dhparam [get\|set options]` | `zmdhparam` | root, zextras | Reads or stores the DH parameters of `zimbraSSLDHParam`; see [`setup dhparam get` and `set`](#setup-dhparam-get-and-set). |
 | `setup ldap-passwd [options] [password]` | `zmldappasswd` | root, zextras | Changes an LDAP password in localconfig, the directory and `conf/carbonio.ldif`; the password is read from stdin when it is not an argument. See [`setup ldap-passwd`](#setup-ldap-passwd). |
 | `setup proxyconfig [options]` | `zmproxyconfig` (Perl) | root, zextras | Every option, default, check, message, help text and exit status of the script (`-h -o -m -w -d -e -f -r -s -t -c -C -n -u -U -i -p -a -x -H`; options parse like Perl's `Getopt::Std`). `1`: refused options or checks (usage on stdout), `2`: an attribute change failed, `255`: unusable options or LDAP. Nothing is printed on success; `-e` and `-f` warn about domains with `zimbraVirtualIPAddress` on stderr. |
 | `setup stat <name> [options]` | `zmstat-<name>` (Perl), `<name>` one of `proc cpu vm io df fd allprocs mysql nginx mtaqueue ldap` | zextras (root too for `fd`) | One statistics collector in the foreground; configd's `stats` service starts one per collector. Same options, files and formats as the script; see [`setup stat`](#setup-stat). |
@@ -669,7 +669,29 @@ Differences from the script:
   of a failed `new` is not printed.
 - `viewcrt` runs `viewstagedcrt` (the script listed it without a method).
 - `checkcrtexpiration` prints `EXPIRED!` where the script printed `0`, and the
-  OK lines only when the standard input is a terminal, as in the script.
+  OK lines only when the standard input is a terminal, as in the script. A
+  file that cannot be read or whose first certificate Go cannot parse is
+  reported as `<name>: '<file>' CANNOT BE CHECKED: <reason>` (status `1`),
+  not as `EXPIRED!`.
+- Root, which the script refused, never follows a symbolic link in the trees
+  zextras controls (`ssl/carbonio/**`, `conf/ca`, the service copies): opening
+  a link for writing, or reading the source of a copy that is one, fails with
+  `Is a symbolic link: refusing to follow it as root`. A file the run creates
+  gets its mode and owner through the open file, before any data is written;
+  directories and hash links are given to zextras without following links.
+  A certificate or CA file named on the command line may be a link (a Let's
+  Encrypt `live/` file), and when the process is zextras links are followed as
+  usual.
+- A certificate after the first one of a bundle that Go cannot parse (OpenSSL
+  accepts some it rejects) is skipped, as `openssl verify -CAfile` does; the
+  first one, the leaf, must parse.
+- `getcrt` stops with `ERROR: getcrt: cannot read '<attribute>' from LDAP,
+  keeping the local files` when LDAP cannot be read, and so do the commands
+  that call it (`deploycrt` without files, `createcrt`). The script took the
+  failed read for an empty value and removed the key and certificate; a value
+  that LDAP does return empty still removes the file.
+- The error of a failed `zmrc` (`-allservers`) includes what it wrote on
+  stderr, after its output.
 - `zmssl.cnf` is still rendered from `conf/zmssl.cnf.in` for the tools that
   read it, but the CA's alternative names follow the current settings; the
   servers come from LDAP directly (`zmprov gas` and `mcf`/`ms` are not run)
@@ -760,14 +782,22 @@ Differences from the script:
 - The messages of the LDIF update (`Failed to backup ...`, `Failed to
   move ...`) do not exist: the file is replaced atomically, so there is no
   backup to restore.
+- localconfig is written once the directory is reached, and for `-r` once
+  `olcRootPW` took the change, so a failure leaves the root password that
+  the directory still has. Only the `credentials=` parameter of `olcSyncrepl`
+  changes; `starttls=critical` and the rest stay.
 - localconfig is written by the process itself, not with `zmlocalconfig -f -e
   key='value'`, whose quoting broke a password that contains `'`.
 
 ### `setup dhparam get` and `set`
 
 carbonio-core installs `bin/zmdhparam` as `exec /opt/zextras/libexec/setup
-dhparam "$@"`. `setup dhparam` without arguments stays the step of setup.pl
-described above; with a first argument `get` or `set` it is `zmdhparam`:
+dhparam "$@"`. `setup dhparam install` is the step of setup.pl described
+above; plain `setup dhparam` still does the same, kept for the setup.pl of
+carbonio-core (use `install`). `get`, `set` and any other first argument are
+`zmdhparam`, which prints the usage and exits `1` for an unknown one. `-out
+FILE` truncates and writes the file where it is (`open(">")`), keeping its
+mode, owner and symlinks, so `-out /dev/stdout` works:
 
 | Command | Does |
 | --- | --- |

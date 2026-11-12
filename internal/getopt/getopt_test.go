@@ -44,6 +44,8 @@ func TestParse(t *testing.T) {
 		"unknown":            {args: []string{"--zap"}, stderr: "Unknown option: zap\n"},
 		"ambiguous":          {args: []string{"--se"}, stderr: "Option se is ambiguous (set, setmin, section)\n"},
 		"missing value":      {args: []string{"--section"}, stderr: "Option section requires an argument\n"},
+		"empty value":        {args: []string{"--section="}, stderr: "Option section requires an argument\n"},
+		"empty number":       {args: []string{"--num="}, stderr: "Option n requires an argument\n"},
 		"flag with value":    {args: []string{"--help=1"}, stderr: "Option h does not take an argument\n"},
 		"not a number":       {args: []string{"-n", "x"}, stderr: "Value \"x\" invalid for option n (number expected)\n"},
 	}

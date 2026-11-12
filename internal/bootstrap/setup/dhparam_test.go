@@ -9,6 +9,7 @@ import (
 	"encoding/asn1"
 	"encoding/pem"
 	"errors"
+	"io/fs"
 	"math/big"
 	"strconv"
 	"strings"
@@ -262,6 +263,25 @@ func TestRunDHParam_Get(t *testing.T) {
 
 		r = dhExec(t, e, "", "get", "-out", "/tmp/dh.pem")
 		assert.Equal(t, "zmdhparam: (over)writing params to '/tmp/dh.pem'\n", r.stdout)
+	})
+
+	t.Run("-out writes in place and keeps the mode and owner of the file", func(t *testing.T) {
+		e, fakes, _ := testEnv(t)
+		dhGlobalConfig(t, string(ffdhe2048), nil)
+		fakes.FS.Put("/tmp/dh.pem", []byte(strings.Repeat("old", 5000)), 0o600)
+		require.NoError(t, fakes.FS.Chown("/tmp/dh.pem", 123, 456))
+
+		r := dhExec(t, e, "", "get", "-out", "/tmp/dh.pem")
+		assert.Equal(t, 0, r.code)
+
+		data, _ := fakes.FS.Data("/tmp/dh.pem")
+		assert.Equal(t, string(ffdhe2048), string(data), "truncated, not appended")
+
+		mode, _ := fakes.FS.Mode("/tmp/dh.pem")
+		assert.Equal(t, fs.FileMode(0o600), mode.Perm())
+
+		uid, gid, _ := fakes.FS.Owner("/tmp/dh.pem")
+		assert.Equal(t, [2]int{123, 456}, [2]int{uid, gid})
 	})
 
 	t.Run("-out - is stdout", func(t *testing.T) {

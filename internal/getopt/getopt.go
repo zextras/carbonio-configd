@@ -134,21 +134,36 @@ func (r *Result) option(arg string, args []string, next int, specs []Spec) (afte
 	return r.value(spec, value, hasValue, args, next)
 }
 
-// value reads the value of an option that takes one: the text after "=", else
+// operand is the value of an option that takes one: the text after "=", else
 // the next argument (for an optional integer, only when it is a number).
+// "--opt=" gives a mandatory option no value at all.
+func operand(spec Spec, value string, hasValue bool, args []string, next int) (val string, after int, msg string) {
+	optional := spec.Kind == OptInt
+	argMissing := prefix + spec.Names[0] + " requires an argument"
+
+	switch {
+	case optional && (hasValue || next >= len(args) || !optIntRE.MatchString(args[next])):
+		return value, next, ""
+	case optional:
+		return args[next], next + 1, ""
+	case hasValue && value == "":
+		return "", next, argMissing
+	case hasValue:
+		return value, next, ""
+	case next >= len(args):
+		return "", next, argMissing
+	}
+
+	return args[next], next + 1, ""
+}
+
+// value reads the value of an option that takes one and records it.
 func (r *Result) value(spec Spec, value string, hasValue bool, args []string, next int) (after int, msg string) {
 	primary := spec.Names[0]
 
-	if spec.Kind == OptInt && (!hasValue || value == "") {
-		if !hasValue && next < len(args) && optIntRE.MatchString(args[next]) {
-			value, next = args[next], next+1
-		}
-	} else if !hasValue {
-		if next >= len(args) {
-			return next, prefix + primary + " requires an argument"
-		}
-
-		value, next = args[next], next+1
+	value, next, msg = operand(spec, value, hasValue, args, next)
+	if msg != "" {
+		return next, msg
 	}
 
 	switch {

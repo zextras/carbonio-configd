@@ -172,6 +172,38 @@ func TestRunLDAPPasswd_RootGoesOverTheSocket(t *testing.T) {
 	assert.Equal(t, "NewRoot", lc["ldap_root_password"])
 }
 
+// localconfig keeps the root password the directory still has when the
+// directory cannot be reached or refuses the change.
+func TestRunLDAPPasswd_RootFailureLeavesLocalConfigAlone(t *testing.T) {
+	t.Run("no connection", func(t *testing.T) {
+		e, _, f := ldapPasswdTestEnv(t, "true")
+		k := f.kit()
+		k.dial = func(*Env, ldapDial) (ldapConn, error) { return nil, errors.New("refused") }
+
+		var out, errb bytes.Buffer
+
+		assert.Equal(t, 1, runLDAPPasswd(e, k, []string{"-r", "NewRoot"}, strings.NewReader(""), &out, &errb))
+
+		lc, err := e.LC()
+		require.NoError(t, err)
+		assert.Equal(t, "oldroot", lc["ldap_root_password"])
+	})
+
+	t.Run("olcRootPW refused", func(t *testing.T) {
+		e, _, f := ldapPasswdTestEnv(t, "true")
+		f.bindOK = func(_, pw string) bool { return pw == "oldroot" }
+		f.replaceErr = errors.New("insufficient access")
+
+		r := ldapPasswdExec(t, e, f, "", "-r", "NewRoot")
+
+		assert.Equal(t, 1, r.code)
+
+		lc, err := e.LC()
+		require.NoError(t, err)
+		assert.Equal(t, "oldroot", lc["ldap_root_password"])
+	})
+}
+
 // The password of a command line without one is the first line of stdin.
 func TestRunLDAPPasswd_PasswordFromStdin(t *testing.T) {
 	for _, tc := range []struct{ name, stdin, want string }{
@@ -285,6 +317,24 @@ func TestRunLDAPPasswd_ReplicaFollowsTheMaster(t *testing.T) {
 
 	ldifAfter, _ := fakes.FS.Data("/opt/zextras/conf/carbonio.ldif")
 	assert.Equal(t, string(ldifBefore), string(ldifAfter), "carbonio.ldif is the master's business")
+}
+
+// Only the credentials of the syncrepl line change: starttls=critical and the
+// other parameters stay.
+func TestRunLDAPPasswd_SyncreplKeepsTheOtherParameters(t *testing.T) {
+	e, _, f := ldapPasswdTestEnv(t, "false")
+	f.bindOK = func(dn, pw string) bool { return dn == ldapConfigDN && pw == "oldroot" }
+	f.search = []ldapEntry{{DN: ldapDNMdbDB, Attrs: map[string][]string{
+		"olcSyncrepl": {"{0}rid=100 provider=ldap://m bindmethod=simple binddn=\"uid=zmreplica,cn=admins,cn=zimbra\" " +
+			"credentials=OLDPW starttls=critical filter=(objectclass=*) type=refreshAndPersist"},
+	}}}
+
+	r := ldapPasswdExec(t, e, f, "", "-c", "-l", "Repl-New")
+
+	assert.Equal(t, 0, r.code, r.stderr)
+	assert.Equal(t, []string{ldapDNMdbDB + "|olcSyncrepl|{0}rid=100 provider=ldap://m bindmethod=simple " +
+		"binddn=\"uid=zmreplica,cn=admins,cn=zimbra\" credentials=Repl-New starttls=critical " +
+		"filter=(objectclass=*) type=refreshAndPersist"}, f.replace)
 }
 
 // Without -c, -l is the master's change: it sets the password in the

@@ -71,6 +71,28 @@ func TestLdapEnableReplica_Master(t *testing.T) {
 	}
 }
 
+// The ACL of the accesslog database is the literal of ldapenable-mmr.pl and
+// ldapenablereplica.pl, blanks included.
+func TestLdapEnableReplica_AccesslogACLIsTheLegacyLiteral(t *testing.T) {
+	e, _, f := ldapToolEnv(t)
+	require.NoError(t, e.SetLC(map[string]string{ldapLCMasterURL: "ldap://" + ldapTestHost + ":389"}))
+
+	var out, errb bytes.Buffer
+
+	require.Equal(t, 0, RunLDAPEnableReplica(e, nil, &out, &errb))
+
+	var acl []string
+
+	for _, a := range f.attrs[ldapDNMdbDB] {
+		if a.Name == "olcAccess" {
+			acl = a.Values
+		}
+	}
+
+	assert.Equal(t, []string{`{0}to dn.subtree="cn=accesslog"  by dn.exact="uid=zimbra,cn=admins,cn=zimbra" read  ` +
+		`by dn.exact="cn=config" read  by dn.exact="uid=zmreplica,cn=admins,cn=zimbra" read`}, acl)
+}
+
 func TestLdapEnableReplica_MasterFailures(t *testing.T) {
 	e, _, f := ldapToolEnv(t)
 	require.NoError(t, e.SetLC(map[string]string{ldapLCMasterURL: "ldap://" + ldapTestHost + ":389"}))

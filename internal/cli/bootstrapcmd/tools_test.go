@@ -349,10 +349,25 @@ func TestRunProxyConfig_RefusesOtherUsers(t *testing.T) {
 	assert.Empty(t, h.calls)
 }
 
-// "setup dhparam" without arguments is the step of setup.pl; with arguments it is
-// zmdhparam, which keeps its output and exit status, and stdin reaches it.
-func TestRunDHParam_StepWithoutArgumentsScriptWithThem(t *testing.T) {
-	t.Run("no arguments", func(t *testing.T) {
+// "setup dhparam install" is the step of setup.pl, and so is "setup dhparam"
+// alone (kept for the setup.pl of carbonio-core); every other command line is zmdhparam, which keeps its output and exit status, and
+// stdin reaches it.
+func TestRunDHParam_StepWithInstallScriptWithTheRest(t *testing.T) {
+	t.Run("install", func(t *testing.T) {
+		h := newToolHarness(t, true)
+
+		var out, errb bytes.Buffer
+
+		status := RunDHParam(context.Background(), systest.New().System(), strings.NewReader("in"), &out, &errb,
+			[]string{"install"})
+
+		assert.Equal(t, 0, status)
+		assert.Equal(t, []string{"dhparam"}, h.calls)
+		assert.Empty(t, out.String())
+		assert.Empty(t, errb.String())
+	})
+
+	t.Run("no arguments installs too", func(t *testing.T) {
 		h := newToolHarness(t, true)
 
 		var out, errb bytes.Buffer
@@ -467,4 +482,24 @@ func TestRunCertMgr_RefusesOtherUsers(t *testing.T) {
 	assert.Equal(t, 1, status)
 	assert.Equal(t, "Error: carbonio-bootstrap certmgr must run as root or zextras\n", errb.String())
 	assert.Empty(t, h.calls)
+}
+
+// A tool prints its progress on stdout and nothing of its internals on stderr:
+// the scripts it replaces had no such lines.
+func TestRunTool_DetailsStayOffStderr(t *testing.T) {
+	newToolHarness(t, true)
+
+	var out, errb bytes.Buffer
+
+	status := runTool(context.Background(), systest.New().System(), &out, &errb, "x", func(e *setup.Env) error {
+		e.Log.Info("progress")
+		e.Log.Detail("internal command line")
+
+		return nil
+	})
+
+	assert.Equal(t, 0, status)
+	assert.Contains(t, out.String(), "progress")
+	assert.NotContains(t, out.String(), "internal command line")
+	assert.Empty(t, errb.String())
 }

@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"os"
 	"slices"
 	"strings"
 )
@@ -388,11 +389,29 @@ func (r *dhRun) emit(data []byte, announce bool) error {
 		r.say("%swriting params to '%s'", over, o.Out)
 	}
 
-	if err := r.e.Sys.FS.WriteFileAtomic(o.Out, data, 0o644); err != nil {
+	if err := dhWriteInPlace(r.e, o.Out, data); err != nil {
 		return fmt.Errorf("create '%s' failed: %w", o.Out, err)
 	}
 
 	return nil
+}
+
+// dhWriteInPlace writes data to name as open(">") did: the file is truncated
+// and written where it is, so /dev/stdout, a symlink or a file of another owner
+// stays what it is.
+func dhWriteInPlace(e *Env, name string, data []byte) error {
+	f, err := e.Sys.FS.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+
+		return err
+	}
+
+	return f.Close()
 }
 
 func dhExists(e *Env, name string) bool {
