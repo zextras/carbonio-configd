@@ -89,8 +89,19 @@ func certIsDir(e *Env, name string) bool {
 	return err == nil && fi.IsDir()
 }
 
+// certZmcertmgr runs zmcertmgr as zextras. It narrates every file it copies
+// and every lookup it tries, so its output reaches the log only when it fails
+// or the run is verbose.
 func certZmcertmgr(e *Env, args ...string) error {
-	return e.Zextras(e.Paths.Path("bin", "zmcertmgr"), args...)
+	err := e.Run(&Cmd{AsZextras: true, Path: e.Paths.Path("bin", "zmcertmgr"), Args: args, Brief: true})
+
+	if err == nil && e.Verbose && len(args) > 0 && (args[0] == "createca" || args[0] == "createcrt") {
+		e.Log.Detail("Note: the \"failed\" lookups above (CA key or commercial CA in LDAP, saving " +
+			"zimbraSSLPrivateKey before the server entry exists) are expected when nothing is stored yet; " +
+			"zmcertmgr goes on and a later step saves the certificate in LDAP.")
+	}
+
+	return err
 }
 
 // certType is the certificate type in effect ("self" until a step finds a

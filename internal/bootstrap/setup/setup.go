@@ -41,6 +41,8 @@ type Env struct {
 
 	// Paths of the node; Default paths outside tests.
 	Paths Paths
+	// Verbose logs the full output of the commands run Brief.
+	Verbose bool
 
 	// perlLib caches the zextras PERL5LIB.
 	perlLib string
@@ -246,16 +248,18 @@ func runStep(e *Env, i int, s *Step, dryRun bool) (Result, error) {
 	e.Log.Detail("%s: running", s.Title)
 	e.Log.takeWarnings()
 
+	start := e.Sys.Clock.Now()
 	err := s.Apply(e)
+	took := logDuration(e.Sys.Clock.Now().Sub(start))
 	res.Warnings = e.Log.takeWarnings()
 
 	if err != nil {
-		e.Log.Detail("%s: failed: %v", s.Title, err)
+		e.Log.Detail("%s: failed after %s: %v", s.Title, took, err)
 
 		return failed(e, s, res, err)
 	}
 
-	e.Log.Detail("%s: done", s.Title)
+	e.Log.Detail("%s: done in %s", s.Title, took)
 
 	res.Outcome = Applied
 
@@ -266,6 +270,11 @@ func runStep(e *Env, i int, s *Step, dryRun bool) (Result, error) {
 	}
 
 	return res, nil
+}
+
+// logDuration formats a step time for the log: tenths of a second.
+func logDuration(d time.Duration) string {
+	return d.Round(100 * time.Millisecond).String()
 }
 
 // recordDone records the stage of a step found already done: setup.pl

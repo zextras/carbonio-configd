@@ -89,6 +89,8 @@ func RunSetup(ctx context.Context, env sys.System, stdin io.Reader, stdout, stde
 		Log:   setup.NewLog(logOut, logFile),
 		Ctl:   services.NewController(env),
 		Paths: paths,
+
+		Verbose: opts.Verbose,
 	}
 
 	return runSetup(e, stdin, stdout, stderr, opts, &deps, setup.Steps())
@@ -97,7 +99,11 @@ func RunSetup(ctx context.Context, env sys.System, stdin io.Reader, stdout, stde
 func runSetup(e *setup.Env, stdin io.Reader, stdout, stderr io.Writer, opts *RunOptions,
 	deps *Deps, steps []setup.Step,
 ) int {
+	logStart(e, opts, deps)
+
 	if !loadConfig(e, stdin, stdout, stderr, opts, deps) {
+		e.Log.Detail("Result: stopped before any step (configuration not loaded)")
+
 		return 1
 	}
 
@@ -146,14 +152,14 @@ func runPlain(e *setup.Env, stdout, stderr io.Writer, opts *RunOptions, deps *De
 	e.Log.OnNote(rep.Note)
 	e.Observe = rep.Observe
 
-	_, err := setup.Run(e, steps, false)
+	start := e.Sys.Clock.Now()
+	results, err := setup.Run(e, steps, false)
+	setup.LogSummary(e, results, err, e.Sys.Clock.Now().Sub(start))
 	rep.Summary(&setup.Summary{Err: err, Next: setup.NextSteps(e)})
 
 	if err != nil {
 		return 1
 	}
-
-	e.Log.Detail("Configuration complete.")
 
 	return 0
 }
@@ -248,13 +254,11 @@ func applyScreen(e *setup.Env, stdin io.Reader, stdout io.Writer, deps *Deps, st
 		Run: func(obs setup.Observer, stop func() bool) error {
 			e.Observe, e.Stop = obs, stop
 
-			if _, err := setup.Run(e, steps, false); err != nil {
-				return err
-			}
+			start := e.Sys.Clock.Now()
+			results, err := setup.Run(e, steps, false)
+			setup.LogSummary(e, results, err, e.Sys.Clock.Now().Sub(start))
 
-			e.Log.Detail("Configuration complete.")
-
-			return nil
+			return err
 		},
 	}
 
@@ -316,6 +320,8 @@ func loadConfig(e *setup.Env, stdin io.Reader, stdout, stderr io.Writer, opts *R
 	}
 
 	e.Cfg = &r.Config
+
+	logConfig(e, r)
 
 	if deps.Drops != nil {
 		logDrops(e.Log, deps.Drops.List)

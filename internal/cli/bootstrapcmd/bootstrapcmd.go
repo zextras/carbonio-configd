@@ -53,7 +53,8 @@ type Options struct {
 	Output string
 	// Plain keeps the line wizard and the line output on a terminal.
 	Plain bool
-	// Verbose lists every legacy key that is not imported.
+	// Verbose lists every legacy key that is not imported, and logs the full
+	// output of the chatty tools (zmcertmgr).
 	Verbose bool
 	// Environ is the process environment ("NAME=value").
 	Environ []string
