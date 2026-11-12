@@ -11,6 +11,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	"github.com/zextras/carbonio-configd/internal/bootstrap/brand"
 )
 
 const hintFullLog = "full log"
@@ -46,7 +48,8 @@ func (m *ApplyModel) render() string {
 }
 
 func (m *ApplyModel) header() string {
-	left := m.th.title.Render("CARBONIO BOOTSTRAP") + "  " + m.th.crumb.Render("review & apply")
+	left := m.th.title.Render("CARBONIO BOOTSTRAP") + " " + m.th.muted.Render(brand.Wordmark) + "  " +
+		m.th.crumb.Render("review & apply")
 	right := m.th.muted.Render(joinNonEmpty(" · ", m.opts.Hostname, m.opts.Info.OS, m.opts.Info.Install))
 	gap := max(1, m.w-lipgloss.Width(left)-lipgloss.Width(right)-2)
 

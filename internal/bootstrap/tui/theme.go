@@ -5,9 +5,9 @@
 package tui
 
 import (
-	"image/color"
-
 	"charm.land/lipgloss/v2"
+
+	"github.com/zextras/carbonio-configd/internal/bootstrap/brand"
 )
 
 // theme holds the styles of both screens.
@@ -21,24 +21,20 @@ type theme struct {
 // styles keep only weight and reverse video, so the screen reads in a
 // monochrome terminal (NO_COLOR).
 func newTheme(isDark, noColor bool) theme {
-	pick := func(light, dark string) color.Color {
-		return lipgloss.LightDark(isDark)(lipgloss.Color(light), lipgloss.Color(dark))
-	}
-
-	fg := func(light, dark string) lipgloss.Style {
+	fg := func(s brand.Shade) lipgloss.Style {
 		if noColor {
 			return lipgloss.NewStyle()
 		}
 
-		return lipgloss.NewStyle().Foreground(pick(light, dark))
+		return lipgloss.NewStyle().Foreground(s.Color(isDark))
 	}
 
 	t := theme{
-		muted:  fg("#6b7280", "#8b93a1"),
-		accent: fg("#0369a1", "#7dd3fc"),
-		ok:     fg("#15803d", "#86efac"),
-		warn:   fg("#b45309", "#fcd34d"),
-		bad:    fg("#b91c1c", "#fca5a5"),
+		muted:  fg(brand.Secondary),
+		accent: fg(brand.Primary),
+		ok:     fg(brand.Success),
+		warn:   fg(brand.Warning),
+		bad:    fg(brand.Error),
 	}
 	t.title = t.accent.Bold(true)
 	t.crumb = t.muted
