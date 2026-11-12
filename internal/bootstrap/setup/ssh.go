@@ -49,7 +49,7 @@ func StepZmsshkeygen() Step {
 		Title:    "Generate zextras SSH key",
 		Optional: true,
 		When:     func(e *Env) bool { return e.Facts.NewInstall },
-		Apply:    sshKeygen,
+		Apply:    GenerateSSHKey,
 	}
 }
 
@@ -63,11 +63,14 @@ func StepZmupdateauthkeys() Step {
 	return Step{
 		Title:    "Update authorized SSH keys",
 		Optional: true,
-		Apply:    sshUpdateAuthKeys,
+		Apply:    UpdateAuthKeys,
 	}
 }
 
-func sshKeygen(e *Env) error {
+// GenerateSSHKey is the work of zmsshkeygen (see StepZmsshkeygen): the host
+// name, zextras ids and LDAP access come from the node's localconfig, so the
+// setup.pl command shares it with the step.
+func GenerateSSHKey(e *Env) error {
 	host, err := e.LCValue(svcLocalConfigHost)
 	if err != nil {
 		return err
@@ -131,7 +134,9 @@ func sshPublishKey(e *Env, host, pubLine string) error {
 	return nil
 }
 
-func sshUpdateAuthKeys(e *Env) error {
+// UpdateAuthKeys is the work of zmupdateauthkeys (see StepZmupdateauthkeys),
+// shared with the setup.pl command.
+func UpdateAuthKeys(e *Env) error {
 	path := e.Paths.Path(".ssh", sshAuthFile)
 
 	current, err := e.Sys.FS.ReadFile(path)

@@ -126,7 +126,7 @@ func TestSSHKeygen_ReplacesTheOldKeyEveryRun(t *testing.T) {
 	fakes.FS.Put(sshTestKeyPath, []byte("old private key"), 0o644)
 	fakes.FS.Put(sshTestKeyPath+".pub", []byte("ssh-rsa AAAAold "+sshTestHost+"\n"), 0o600)
 
-	require.NoError(t, sshKeygen(e))
+	require.NoError(t, GenerateSSHKey(e))
 
 	first := assertSSHFile(t, fakes, sshTestKeyPath, 0o600)
 	assert.NotContains(t, string(first), "old private key")
@@ -134,7 +134,7 @@ func TestSSHKeygen_ReplacesTheOldKeyEveryRun(t *testing.T) {
 	pub1 := assertSSHFile(t, fakes, sshTestKeyPath+".pub", 0o644)
 	assert.NotContains(t, string(pub1), "AAAAold")
 
-	require.NoError(t, sshKeygen(e))
+	require.NoError(t, GenerateSSHKey(e))
 
 	second := assertSSHFile(t, fakes, sshTestKeyPath, 0o600)
 	assert.NotEqual(t, first, second, "a re-run generates a new key")
@@ -148,7 +148,7 @@ func TestSSHKeygen_Failures(t *testing.T) {
 		svcWithDir(t, &svcFakeDir{})
 		require.NoError(t, e.SetLC(map[string]string{"zimbra_uid": "-1"}))
 
-		err := sshKeygen(e)
+		err := GenerateSSHKey(e)
 		require.ErrorContains(t, err, "zimbra_uid")
 		assert.False(t, fakes.FS.Exists(sshTestKeyPath), "no key is written with unknown ownership")
 	})
@@ -157,7 +157,7 @@ func TestSSHKeygen_Failures(t *testing.T) {
 		e, fakes, _ := sshEnv(t)
 		svcWithDir(t, &svcFakeDir{setErr: errors.New("noSuchObject")})
 
-		err := sshKeygen(e)
+		err := GenerateSSHKey(e)
 		require.ErrorContains(t, err, "zimbraSshPublicKey")
 		assert.ErrorContains(t, err, sshTestHost)
 		assert.ErrorContains(t, err, "noSuchObject")
@@ -170,7 +170,7 @@ func TestSSHKeygen_Failures(t *testing.T) {
 		e.Paths.LocalConfig = t.TempDir() + "/none.xml"
 		e.lc = map[string]string{"zimbra_uid": "999", "zimbra_gid": "998"}
 
-		require.ErrorContains(t, sshKeygen(e), "zimbra_server_hostname")
+		require.ErrorContains(t, GenerateSSHKey(e), "zimbra_server_hostname")
 	})
 
 	t.Run("filesystem refuses", func(t *testing.T) {
@@ -178,7 +178,7 @@ func TestSSHKeygen_Failures(t *testing.T) {
 		svcWithDir(t, &svcFakeDir{})
 		sshFail(fakes, "WriteFileAtomic", "disk full")
 
-		require.ErrorContains(t, sshKeygen(e), "disk full")
+		require.ErrorContains(t, GenerateSSHKey(e), "disk full")
 	})
 }
 
@@ -235,13 +235,13 @@ func TestSSHAuthKeys_SecondRunChangesNothing(t *testing.T) {
 		"host-a.example.com": sshTestKeyA, "host-b.example.com": sshTestKeyB, "host-c.example.com": sshTestKeyC,
 	}})
 
-	require.NoError(t, sshUpdateAuthKeys(e))
+	require.NoError(t, UpdateAuthKeys(e))
 
 	first := string(assertSSHFile(t, fakes, sshTestAuthPath, 0o644))
 	assert.Equal(t, sshTestCmd+sshTestKeyA+"\n"+sshTestCmd+sshTestKeyB+"\n"+sshTestCmd+sshTestKeyC+"\n", first,
 		"no file yet: no leading blank line, one trailing newline")
 
-	require.NoError(t, sshUpdateAuthKeys(e))
+	require.NoError(t, UpdateAuthKeys(e))
 	assert.Equal(t, first, string(assertSSHFile(t, fakes, sshTestAuthPath, 0o644)))
 }
 
@@ -250,7 +250,7 @@ func TestSSHAuthKeys_NoKeysAtAllKeepsTheFile(t *testing.T) {
 	svcWithDir(t, &svcFakeDir{keys: map[string]string{"host-a.example.com": ""}})
 	fakes.FS.Put(sshTestAuthPath, []byte("ssh-rsa AAAAother manual-entry\n\n"), 0o600)
 
-	require.NoError(t, sshUpdateAuthKeys(e))
+	require.NoError(t, UpdateAuthKeys(e))
 
 	assert.Equal(t, "ssh-rsa AAAAother manual-entry\n", string(assertSSHFile(t, fakes, sshTestAuthPath, 0o644)))
 	assert.Contains(t, logs.String(), "Key for host-a.example.com NOT FOUND")
@@ -269,7 +269,7 @@ func TestSSHAuthKeys_Failures(t *testing.T) {
 		svcWithDir(t, &svcFakeDir{})
 		require.NoError(t, e.SetLC(map[string]string{"zimbra_gid": "-1"}))
 
-		require.ErrorContains(t, sshUpdateAuthKeys(e), "zimbra_gid")
+		require.ErrorContains(t, UpdateAuthKeys(e), "zimbra_gid")
 	})
 
 	t.Run("LDAP unreadable leaves the file alone", func(t *testing.T) {
@@ -283,7 +283,7 @@ func TestSSHAuthKeys_Failures(t *testing.T) {
 
 		fakes.FS.Put(sshTestAuthPath, []byte("keep\n"), 0o644)
 
-		require.ErrorContains(t, sshUpdateAuthKeys(e), "ldap down")
+		require.ErrorContains(t, UpdateAuthKeys(e), "ldap down")
 
 		data, _ := fakes.FS.Data(sshTestAuthPath)
 		assert.Equal(t, "keep\n", string(data))
@@ -294,7 +294,7 @@ func TestSSHAuthKeys_Failures(t *testing.T) {
 		svcWithDir(t, &svcFakeDir{})
 		sshFail(fakes, "ReadFile", "EIO")
 
-		require.ErrorContains(t, sshUpdateAuthKeys(e), "EIO")
+		require.ErrorContains(t, UpdateAuthKeys(e), "EIO")
 	})
 
 	t.Run("write fails", func(t *testing.T) {
@@ -302,7 +302,7 @@ func TestSSHAuthKeys_Failures(t *testing.T) {
 		svcWithDir(t, &svcFakeDir{})
 		sshFail(fakes, "WriteFileAtomic", "read-only filesystem")
 
-		require.ErrorContains(t, sshUpdateAuthKeys(e), "read-only filesystem")
+		require.ErrorContains(t, UpdateAuthKeys(e), "read-only filesystem")
 	})
 }
 
@@ -372,7 +372,7 @@ func TestSSHKeygen_DirectoryAndOwnershipFailuresStopBeforeTheKeyIsWritten(t *tes
 			svcWithDir(t, dir)
 			sshFail(fakes, op, "operation not permitted")
 
-			require.ErrorContains(t, sshKeygen(e), "operation not permitted")
+			require.ErrorContains(t, GenerateSSHKey(e), "operation not permitted")
 			assert.False(t, fakes.FS.Exists(sshTestKeyPath))
 			assert.Empty(t, dir.set, "the key is not published")
 		})
@@ -387,5 +387,5 @@ func TestSSHKeygen_LDAPUnavailable(t *testing.T) {
 
 	t.Cleanup(func() { svcOpenDir = old })
 
-	require.ErrorContains(t, sshKeygen(e), "ldap down")
+	require.ErrorContains(t, GenerateSSHKey(e), "ldap down")
 }

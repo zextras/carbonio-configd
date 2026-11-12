@@ -440,3 +440,20 @@ Differences from `setup.pl`:
 - `authorized_keys` is written without the empty first line that
   `zmupdateauthkeys` leaves when the file did not exist; a file that has one
   keeps it.
+
+## Commands for setup.pl
+
+While carbonio-core still runs `setup.pl`, it calls these commands of the
+same binary (`/opt/zextras/libexec/setup`) instead of the scripts and JVM
+tools. They do exactly what the three steps above do, without a bootstrap
+configuration: the host name, the `zextras` ids, the LDAP and the admin
+credentials come from localconfig. They must run as root (otherwise they
+print an error and exit `1`), print what the legacy tools printed to stdout
+and the details to stderr, and exit `1` on failure with `Error: <reason>` on
+stderr; a wrong command line exits `2`.
+
+| Command | Replaces | |
+| --- | --- | --- |
+| `setup gal-sync-account --domain D --server S` | `zmgsautil createAccount -a galsync.<random>@D -n InternalGAL --domain D -s S -t zimbra -f _InternalGAL -p 1d` | Creates the account and prints `<name>` and `<id>` separated by a tab. It fails when the account cannot be created; it does not check for an existing one. |
+| `setup ssh-keygen` | `zmsshkeygen` | Generates the key pair and stores the public key in the server entry. |
+| `setup update-authkeys` | `zmupdateauthkeys` | Rewrites `authorized_keys`. There is no `-a` (remote) mode. |

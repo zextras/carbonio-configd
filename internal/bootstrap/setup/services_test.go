@@ -559,6 +559,24 @@ func TestSvcGALSync_AdminAPIUnavailable(t *testing.T) {
 	require.ErrorContains(t, StepConfigCreateDefaultDomainGALSyncAcct().Apply(e), "no localconfig")
 }
 
+// The setup.pl command has no bootstrap configuration: domain and server are
+// the caller's, and Cfg is never read.
+func TestCreateGalSyncAccount_NeedsNoConfiguration(t *testing.T) {
+	e, _ := svcEnv(t, PkgAppserver)
+	e.Cfg = nil
+
+	gal := &svcFakeGAL{acct: zxadmin.GalSyncAccount{Name: "galsync.q@d.example", ID: "id-1"}}
+	svcWithGAL(t, gal)
+
+	acct, err := CreateGalSyncAccount(e, "d.example", "mbox.d.example")
+	require.NoError(t, err)
+	assert.Equal(t, gal.acct, acct)
+	require.Len(t, gal.got, 1)
+	assert.Regexp(t, `^galsync\.[a-z0-9]{10}@d\.example$`, gal.got[0].Account)
+	assert.Equal(t, "d.example", gal.got[0].Domain)
+	assert.Equal(t, "mbox.d.example", gal.got[0].Server)
+}
+
 func TestSvcAdminURL(t *testing.T) {
 	assert.Equal(t, "https://localhost:7071", svcAdminURL(map[string]string{}))
 	assert.Equal(t, "https://mbox.example.com:9071", svcAdminURL(map[string]string{

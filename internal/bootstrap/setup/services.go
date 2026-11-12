@@ -775,32 +775,40 @@ func StepConfigCreateDefaultDomainGALSyncAcct() Step {
 				return err
 			}
 
-			suffix, err := svcRandomPassword(svcGALSuffix, svcLowerNum)
-			if err != nil {
-				return err
-			}
+			_, err = CreateGalSyncAccount(e, e.Cfg.Domain.Name, svcOr(server, e.Cfg.Host.Hostname))
 
-			domain := e.Cfg.Domain.Name
-
-			admin, err := svcOpenGAL(e)
-			if err != nil {
-				return err
-			}
-
-			acct, err := admin.CreateGalSyncAccount(e.Ctx, &zxadmin.GalSyncAccountRequest{
-				Account: "galsync." + suffix + "@" + domain, Name: svcGALDataSource, Domain: domain,
-				Type: "zimbra", Folder: "_InternalGAL", Server: svcOr(server, e.Cfg.Host.Hostname),
-				PollingInterval: "1d",
-			})
-			if err != nil {
-				return fmt.Errorf("creating the GAL sync account: %w", err)
-			}
-
-			e.Log.Detail("Created GAL sync account %s (%s)", acct.Name, acct.ID)
-
-			return nil
+			return err
 		},
 	}
+}
+
+// CreateGalSyncAccount creates galsync.<random>@domain on the mailbox server
+// (the work of "zmgsautil createAccount -n InternalGAL -t zimbra -f
+// _InternalGAL -p 1d") and returns the account. It needs only the node's
+// localconfig, not a bootstrap configuration, so the setup.pl commands share
+// it with the step.
+func CreateGalSyncAccount(e *Env, domain, server string) (zxadmin.GalSyncAccount, error) {
+	suffix, err := svcRandomPassword(svcGALSuffix, svcLowerNum)
+	if err != nil {
+		return zxadmin.GalSyncAccount{}, err
+	}
+
+	admin, err := svcOpenGAL(e)
+	if err != nil {
+		return zxadmin.GalSyncAccount{}, err
+	}
+
+	acct, err := admin.CreateGalSyncAccount(e.Ctx, &zxadmin.GalSyncAccountRequest{
+		Account: "galsync." + suffix + "@" + domain, Name: svcGALDataSource, Domain: domain,
+		Type: "zimbra", Folder: "_InternalGAL", Server: server, PollingInterval: "1d",
+	})
+	if err != nil {
+		return zxadmin.GalSyncAccount{}, fmt.Errorf("creating the GAL sync account: %w", err)
+	}
+
+	e.Log.Detail("Created GAL sync account %s (%s)", acct.Name, acct.ID)
+
+	return acct, nil
 }
 
 // svcGALAdmin is the admin API call the GAL sync step makes (an interface so
