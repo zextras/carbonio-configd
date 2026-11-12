@@ -32,6 +32,12 @@ var (
 	runProxyConfig       = setup.RunProxyConfig
 	runDHParam           = setup.RunDHParam
 	runLDAPPasswd        = setup.RunLDAPPasswd
+	runLDAPSchema        = setup.RunLDAPSchema
+	runLDAPUpdateLDIF    = setup.RunLDAPUpdateLDIF
+	runLDAPEnableReplica = setup.RunLDAPEnableReplica
+	runLDAPEnableMMR     = setup.RunLDAPEnableMMR
+	runIPTool            = setup.RunIPTool
+	runIniUtil           = setup.RunIniUtil
 )
 
 // lookupZextrasUID is the uid of zextras, -1 when there is no such user.
@@ -191,4 +197,80 @@ func RunProxyConfig(ctx context.Context, env sys.System, stdout, stderr io.Write
 	}
 
 	return runProxyConfig(e, args, stdout, stderr)
+}
+
+// RunLDAPSchema executes "setup ldap-schema": zmldapschema, which installs the
+// slapd schemas (see setup.RunLDAPSchema). The script ran as zextras; it runs
+// as root or zextras here.
+func RunLDAPSchema(ctx context.Context, env sys.System, stdout, stderr io.Writer, args []string) int {
+	e, ok := toolEnv(ctx, env, stdout, stderr, "ldap-schema")
+	if !ok {
+		return 1
+	}
+
+	return runLDAPSchema(e, args, stdout, stderr)
+}
+
+// RunLDAPUpdateLDIF executes "setup ldap-update-ldif": zmldapupdateldif (see
+// setup.RunLDAPUpdateLDIF). Like the script it is for root only.
+func RunLDAPUpdateLDIF(ctx context.Context, env sys.System, stdout, stderr io.Writer, args []string) int {
+	e, ok := rootToolEnv(ctx, env, stdout, stderr, "ldap-update-ldif")
+	if !ok {
+		return 1
+	}
+
+	return runLDAPUpdateLDIF(e, args, stdout, stderr)
+}
+
+// RunLDAPEnableReplica executes "setup ldap-enable-replica":
+// zmldapenablereplica (see setup.RunLDAPEnableReplica). Like the script it is
+// for root only.
+func RunLDAPEnableReplica(ctx context.Context, env sys.System, stdout, stderr io.Writer, args []string) int {
+	e, ok := rootToolEnv(ctx, env, stdout, stderr, "ldap-enable-replica")
+	if !ok {
+		return 1
+	}
+
+	return runLDAPEnableReplica(e, args, stdout, stderr)
+}
+
+// RunLDAPEnableMMR executes "setup ldap-enable-mmr": zmldapenable-mmr (see
+// setup.RunLDAPEnableMMR). The script ran as zextras; it runs as root or
+// zextras here.
+func RunLDAPEnableMMR(ctx context.Context, env sys.System, stdout, stderr io.Writer, args []string) int {
+	e, ok := toolEnv(ctx, env, stdout, stderr, "ldap-enable-mmr")
+	if !ok {
+		return 1
+	}
+
+	return runLDAPEnableMMR(e, args, stdout, stderr)
+}
+
+// RunIPTool executes "setup iptool": zmiptool (see setup.RunIPTool). The
+// script ran as zextras; it runs as root or zextras here.
+func RunIPTool(ctx context.Context, env sys.System, stdout, stderr io.Writer, args []string) int {
+	e, ok := toolEnv(ctx, env, stdout, stderr, "iptool")
+	if !ok {
+		return 1
+	}
+
+	return runIPTool(e, args, stdout, stderr)
+}
+
+// RunIniUtil executes "setup iniutil": zminiutil (see setup.RunIniUtil). The
+// script checked no user, and neither does this.
+func RunIniUtil(_ context.Context, env sys.System, stdout, stderr io.Writer, args []string) int {
+	return runIniUtil(env.FS, args, stdout, stderr)
+}
+
+// rootToolEnv is toolEnv for a script that refused any user but root, with the
+// message it printed.
+func rootToolEnv(ctx context.Context, env sys.System, stdout, stderr io.Writer, name string) (*setup.Env, bool) {
+	if geteuid() != 0 {
+		_, _ = fmt.Fprintln(stderr, "Error: must be run as root user")
+
+		return nil, false
+	}
+
+	return toolEnv(ctx, env, stdout, stderr, name)
 }

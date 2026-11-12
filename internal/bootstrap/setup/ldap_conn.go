@@ -58,6 +58,8 @@ type ldapConn interface {
 	Add(dn string, attrs []ldapLDIFAttr) error
 	// Replace replaces the values of attr on dn.
 	Replace(dn, attr string, values []string) error
+	// Modify applies mods to dn in one modify request.
+	Modify(dn string, mods []ldapMod) error
 	// SetPassword is the LDAP password modify extended operation, as the
 	// directory manager (no old password).
 	SetPassword(userDN, newPassword string) error
@@ -66,10 +68,60 @@ type ldapConn interface {
 	Close()
 }
 
+// ldapModOp is the operation of one change of a modify request.
+type ldapModOp int
+
+const (
+	// ldapModAdd adds values to an attribute.
+	ldapModAdd ldapModOp = iota
+	// ldapModReplace replaces all the values of an attribute.
+	ldapModReplace
+)
+
+// ldapMod is one change of a modify request.
+type ldapMod struct {
+	Op     ldapModOp
+	Attr   string
+	Values []string
+}
+
 // ldapDial describes one connection request.
 type ldapDial struct {
 	URLs []string
 	TLS  ldapTLS
+}
+
+// ldapIsNoSuchObject reports whether err is LDAP result 32.
+func ldapIsNoSuchObject(err error) bool {
+	return goldap.IsErrorWithCode(err, goldap.LDAPResultNoSuchObject)
+}
+
+// ldapErrText is what Net::LDAP's $mesg->error says of an LDAP failure: the
+// diagnostic message of the server, else the name of the result code.
+func ldapErrText(err error) string {
+	if le, ok := errors.AsType[*goldap.Error](err); ok {
+		if le.Err != nil && le.Err.Error() != "" {
+			return le.Err.Error()
+		}
+
+		if name, found := goldap.LDAPResultCodeMap[le.ResultCode]; found {
+			return name
+		}
+	}
+
+	return err.Error()
+}
+
+// ldapAttr returns the values of attribute name of en, whatever the case the
+// server spelled it in.
+func (en *ldapEntry) ldapAttr(name string) []string {
+	for k, v := range en.Attrs {
+		if strings.EqualFold(k, name) {
+			return v
+		}
+	}
+
+	return nil
 }
 
 // ldapIsAlreadyExists reports whether err is LDAP result 68.
@@ -157,6 +209,20 @@ func (n *ldapNativeConn) Add(dn string, attrs []ldapLDIFAttr) error {
 func (n *ldapNativeConn) Replace(dn, attr string, values []string) error {
 	req := goldap.NewModifyRequest(dn, nil)
 	req.Replace(attr, values)
+
+	return n.c.Modify(req)
+}
+
+func (n *ldapNativeConn) Modify(dn string, mods []ldapMod) error {
+	req := goldap.NewModifyRequest(dn, nil)
+
+	for _, m := range mods {
+		if m.Op == ldapModAdd {
+			req.Add(m.Attr, m.Values)
+		} else {
+			req.Replace(m.Attr, m.Values)
+		}
+	}
 
 	return n.c.Modify(req)
 }

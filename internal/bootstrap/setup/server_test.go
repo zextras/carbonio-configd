@@ -71,6 +71,8 @@ func srvTestEnv(t *testing.T, dir *srvFakeDir) (*Env, *systest.Fakes, *bytes.Buf
 	e.Paths.LocalConfig = filepath.Join(t.TempDir(), "localconfig.xml")
 	require.NoError(t, os.WriteFile(e.Paths.LocalConfig, []byte("<?xml version=\"1.0\"?><localconfig></localconfig>"), 0o600))
 
+	e.kit = (&ldapFake{}).kit()
+
 	old := srvOpenDir
 	srvOpenDir = func(*Env) (srvDirectory, error) { return dir, nil }
 
@@ -162,8 +164,11 @@ func TestSrvServiceLists(t *testing.T) {
 
 func TestSrvServiceLists_DoesNotIntroduceServiceDiscoverAndDropsIdleProxy(t *testing.T) {
 	dir := &srvFakeDir{servers: map[string]srvEntry{"mail.example.com": {}}}
-	e, fakes, _ := srvTestEnv(t, dir)
+	e, _, _ := srvTestEnv(t, dir)
 	srvEnabled(e, PkgCore, "carbonio-proxy")
+
+	lf := &ldapFake{}
+	e.kit = lf.kit()
 
 	require.NoError(t, StepConfigSetEnabledServices().Apply(e))
 
@@ -171,8 +176,8 @@ func TestSrvServiceLists_DoesNotIntroduceServiceDiscoverAndDropsIdleProxy(t *tes
 	assert.NotContains(t, enabled, "service-discover")
 	assert.NotContains(t, enabled, "proxy")
 
-	// zmiptool runs after the batch.
-	assert.Contains(t, fakes.Exec.Lines()[len(fakes.Exec.Lines())-1], "zmiptool")
+	// zmiptool runs after the batch, in-process: it binds to the directory.
+	assert.Equal(t, []string{"bind uid=zimbra,cn=admins,cn=zimbra"}, lf.events)
 }
 
 func TestSrvProxyPrefs_DisablesIdleProxyAndSkipsPublicHostnameWhenSet(t *testing.T) {

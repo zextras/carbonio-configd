@@ -7,7 +7,9 @@ package setup
 import (
 	"errors"
 	"fmt"
+	"io"
 	"maps"
+	"net"
 	"slices"
 	"strconv"
 	"strings"
@@ -141,9 +143,12 @@ func srvPairs(kv []string) map[string]string {
 
 func srvItoa(n int) string { return strconv.Itoa(n) }
 
-// srvZmiptool runs libexec/zmiptool as zextras; setup.pl ignored its result.
+// srvZmiptool runs zmiptool in-process; setup.pl ignored its result.
 func srvZmiptool(e *Env) {
-	if err := e.Zextras(e.Paths.Path("libexec", "zmiptool")); err != nil {
+	err := ldapToolOutput(e, func(out io.Writer) error {
+		return ipTool(e, e.ldapKit(), ipToolOptions{}, net.DefaultResolver.LookupIP, out, out)
+	})
+	if err != nil {
 		e.Log.Detail("zmiptool: %v", err)
 	}
 }
