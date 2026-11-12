@@ -79,12 +79,17 @@ func (e *Env) output(c *Cmd, capture bool) ([]byte, error) {
 			return nil, err
 		}
 
+		shim := append([]string{"-c", zextrasShim, c.Path}, c.Args...)
 		cmd = &sys.Cmd{
 			Path:   "runuser",
-			Args:   append([]string{"-u", config.ZextrasUser, "--", "sh", "-c", zextrasShim, c.Path}, c.Args...),
+			Args:   append([]string{"-u", config.ZextrasUser, "--", "sh"}, shim...),
 			Stdin:  c.Stdin,
 			Env:    append(env, c.Env...),
 			Setsid: true,
+		}
+
+		if e.IsZextras {
+			cmd.Path, cmd.Args = "sh", shim
 		}
 	}
 

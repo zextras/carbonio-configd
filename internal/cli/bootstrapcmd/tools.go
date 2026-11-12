@@ -146,13 +146,17 @@ func runTool(ctx context.Context, env sys.System, stdout, stderr io.Writer, name
 // toolEnv is the Env of a tool, false after printing why it must not run: the
 // caller is neither root nor zextras.
 func toolEnv(ctx context.Context, env sys.System, stdout, stderr io.Writer, name string) (*setup.Env, bool) {
-	if uid := geteuid(); uid != 0 && uid != zextrasUID() {
+	uid := geteuid()
+	if uid != 0 && uid != zextrasUID() {
 		_, _ = fmt.Fprintf(stderr, "Error: carbonio-bootstrap %s must run as root or %s\n", name, config.ZextrasUser)
 
 		return nil, false
 	}
 
-	return &setup.Env{Ctx: ctx, Sys: env, Log: setup.NewLog(stdout, stderr), Paths: setup.DefaultPaths()}, true
+	return &setup.Env{
+		Ctx: ctx, Sys: env, Log: setup.NewLog(stdout, stderr), Paths: setup.DefaultPaths(),
+		IsZextras: uid != 0,
+	}, true
 }
 
 // RunProxyConfig executes "setup proxyconfig": the port of libexec/zmproxyconfig,

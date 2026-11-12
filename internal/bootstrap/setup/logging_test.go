@@ -160,3 +160,23 @@ func TestRun_OptionalStepFailureIsLoggedOnceAsAWarning(t *testing.T) {
 		"Create domain and accounts: warning after 0s: DOMAIN_EXISTS",
 	}, logLines(&file))
 }
+
+// The commands behind the scripts' wrappers may already run as zextras
+// (setup.pl runs zmproxyconfig as zextras): runuser needs root there, so a
+// zextras command runs directly, still through the environment shim.
+func TestRun_AsZextrasWhenAlreadyZextrasSkipsRunuser(t *testing.T) {
+	e, fakes, _ := testEnv(t)
+	e.IsZextras = true
+
+	require.NoError(t, e.Zextras("/opt/zextras/bin/zmprov", "-l"))
+
+	calls := fakes.Exec.Calls()
+	require.Len(t, calls, 1)
+	assert.Equal(t, "sh", calls[0].Path)
+	assert.Equal(t, []string{"/opt/zextras/bin/zmprov", "-l"}, calls[0].Args[2:])
+
+	e.IsZextras = false
+
+	require.NoError(t, e.Zextras("/opt/zextras/bin/zmprov", "-l"))
+	assert.Equal(t, "runuser", fakes.Exec.Calls()[1].Path)
+}

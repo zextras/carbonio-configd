@@ -43,6 +43,10 @@ type Env struct {
 	Paths Paths
 	// Verbose logs the full output of the commands run Brief.
 	Verbose bool
+	// IsZextras is set when the process already runs as zextras (the
+	// commands the legacy scripts' wrappers call): AsZextras commands then
+	// run directly, as runuser needs root.
+	IsZextras bool
 
 	// perlLib caches the zextras PERL5LIB.
 	perlLib string
