@@ -77,7 +77,8 @@ func run(args []string, env sys.System, stdin io.Reader, stdout, stderr io.Write
 // toolCommands are the commands that replace scripts and parse their own
 // arguments (proxyconfig has a -c and a -d of its own).
 var toolCommands = []string{"ssh-keygen", "update-authkeys", "syslog", "dhparam", "proxyconfig", "ldap-passwd",
-	"ldap-schema", "ldap-update-ldif", "ldap-enable-replica", "ldap-enable-mmr", "iptool", "iniutil", "stat"}
+	"ldap-schema", "ldap-update-ldif", "ldap-enable-replica", "ldap-enable-mmr", "iptool", "iniutil", "certmgr",
+	"stat"}
 
 // legacyArgs maps the options of the former shell script: "-c FILE" is
 // "--legacy-config FILE --non-interactive", and "-d" (debug) is accepted and
@@ -170,6 +171,9 @@ func newRootCmd(env sys.System, stdin io.Reader, stdout, stderr io.Writer, statu
 			bootstrapcmd.RunLDAPPasswd, tio),
 		newToolCmd("syslog", "Set up rsyslog for Carbonio logging, local or remote (zmsyslogsetup)",
 			bootstrapcmd.RunSyslog, tio),
+		newToolCmd("certmgr <command> [options]",
+			"Create, verify, deploy and view the SSL certificates and the CA of the node (zmcertmgr)",
+			bootstrapcmd.RunCertMgr, tio),
 		newToolCmd("proxyconfig", "Configure the reverse proxy attributes, the options of libexec/zmproxyconfig",
 			bootstrapcmd.RunProxyConfig, tio),
 		newToolCmd("ldap-schema", "Install the slapd schemas (zmldapschema)",

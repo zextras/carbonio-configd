@@ -72,7 +72,8 @@ func TestSetupPlCommandsAreListedAndValidated(t *testing.T) {
 	require.Equal(t, 0, status)
 
 	for _, c := range []string{"gal-sync-account", "ssh-keygen", "update-authkeys", "syslog", "dhparam", "proxyconfig", "ldap-passwd",
-		"ldap-schema", "ldap-update-ldif", "ldap-enable-replica", "ldap-enable-mmr", "iptool", "iniutil", "stat"} {
+		"ldap-schema", "ldap-update-ldif", "ldap-enable-replica", "ldap-enable-mmr", "iptool", "iniutil", "certmgr",
+		"stat"} {
 		assert.Contains(t, out, c)
 	}
 
@@ -129,6 +130,7 @@ func TestSetupPlCommandsRefuseNonRoot(t *testing.T) {
 		{"ldap-schema"},
 		{"ldap-enable-mmr", "-m", "ldap://h:389/"},
 		{"iptool", "-d"},
+		{"certmgr", "verifycrt", "self"},
 	} {
 		status, out, errb := exec(t, args...)
 
@@ -201,6 +203,8 @@ func TestProxyConfigCommandPassesTheScriptOptionsThrough(t *testing.T) {
 func TestLegacyArgs_ToolCommandsKeepTheirOptions(t *testing.T) {
 	assert.Equal(t, []string{"proxyconfig", "-w", "-d", "-o", "-c", "-H", "h"},
 		legacyArgs([]string{"proxyconfig", "-w", "-d", "-o", "-c", "-H", "h"}))
+	assert.Equal(t, []string{"certmgr", "createcrt", "-new", "-days", "30"},
+		legacyArgs([]string{"certmgr", "createcrt", "-new", "-days", "30"}))
 	assert.Equal(t, []string{"ldap-passwd", "-c", "-l", "-d"}, legacyArgs([]string{"ldap-passwd", "-c", "-l", "-d"}),
 		"-c is the replica option of zmldappasswd")
 	assert.Equal(t, []string{"iptool", "-d", "-m", "ipv6"}, legacyArgs([]string{"iptool", "-d", "-m", "ipv6"}),

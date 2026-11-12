@@ -5,6 +5,7 @@
 package setup
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"strings"
@@ -89,19 +90,47 @@ func certIsDir(e *Env, name string) bool {
 	return err == nil && fi.IsDir()
 }
 
-// certZmcertmgr runs zmcertmgr as zextras. It narrates every file it copies
-// and every lookup it tries, so its output reaches the log only when it fails
-// or the run is verbose.
+// certZmcertmgr runs `zmcertmgr args` in process (RunCertMgr, the code of
+// `setup certmgr`; no script and no openssl or keytool process runs). It
+// narrates every file it copies and every lookup it tries, so its output
+// reaches the log only when it fails or the run is verbose.
 func certZmcertmgr(e *Env, args ...string) error {
-	err := e.Run(&Cmd{AsZextras: true, Path: e.Paths.Path("bin", "zmcertmgr"), Args: args, Brief: true})
+	status, out := certRunMgr(e, args)
+	shown := "zmcertmgr " + shownArgs(args)
 
-	if err == nil && e.Verbose && len(args) > 0 && (args[0] == "createca" || args[0] == "createcrt") {
-		e.Log.Detail("Note: the \"failed\" lookups above (CA key or commercial CA in LDAP, saving " +
-			"zimbraSSLPrivateKey before the server entry exists) are expected when nothing is stored yet; " +
-			"zmcertmgr goes on and a later step saves the certificate in LDAP.")
+	e.Log.Detail("*** Running in process: %s", shown)
+
+	if status != 0 {
+		e.Log.Detail("%s", strings.TrimRight(out, "\n"))
+
+		return &CmdError{Cmd: shown, Code: status, Output: out}
 	}
 
-	return err
+	if e.Verbose {
+		e.Log.Detail("%s", strings.TrimRight(out, "\n"))
+
+		if len(args) > 0 && (args[0] == certCmdCreateCA || args[0] == certCmdCreateCRT) {
+			e.Log.Detail("Note: the \"failed\" lookups above (CA key or commercial CA in LDAP, saving " +
+				"zimbraSSLPrivateKey before the server entry exists) are expected when nothing is stored yet; " +
+				"zmcertmgr goes on and a later step saves the certificate in LDAP.")
+		}
+	}
+
+	return nil
+}
+
+// certRunMgr runs zmcertmgr and returns its exit status and its output (both
+// streams, as the log had them).
+func certRunMgr(e *Env, args []string) (status int, output string) {
+	if e.certRun != nil {
+		return e.certRun(args)
+	}
+
+	var buf bytes.Buffer
+
+	status = RunCertMgr(e, args, &buf, &buf)
+
+	return status, buf.String()
 }
 
 // certType is the certificate type in effect ("self" until a step finds a
@@ -153,9 +182,9 @@ func StepAddCACert() Step {
 
 // StepConfigCASetup ports configCASetup (setup.pl 4487-4540).
 //
-// Deviations: an expired CA ("error 10") is looked for on both streams of
-// openssl verify (setup.pl piped only stdout, where OpenSSL 1.1+ prints
-// nothing); the configured ssl_default_digest is written to localconfig here
+// Deviations: the expiry of the CA is read from its certificate (setup.pl
+// piped only stdout of openssl verify, where OpenSSL 1.1+ prints nothing);
+// zmcertmgr is called in process (RunCertMgr); the configured ssl_default_digest is written to localconfig here
 // too, because zmcertmgr reads it from there (setup.pl wrote it in configLC).
 func StepConfigCASetup() Step {
 	return Step{
@@ -204,7 +233,7 @@ func certApplyCASetup(e *Env) error {
 		e.Flags.NeedNewCert = true
 	}
 
-	if err := certZmcertmgr(e, certArgs("createca", newCA)...); err != nil {
+	if err := certZmcertmgr(e, certArgs(certCmdCreateCA, newCA)...); err != nil {
 		return fmt.Errorf("creating the CA: %w", err)
 	}
 
@@ -215,26 +244,17 @@ func certApplyCASetup(e *Env) error {
 	return nil
 }
 
-// certCAExpired reports whether openssl verify rejects the CA as expired
-// ("error 10").
+// certCAExpired reports whether the CA is expired (the "error 10" of openssl
+// verify of the CA against itself).
 func certCAExpired(e *Env, caPEM string) bool {
-	err := e.Run(&Cmd{
-		Path: e.Paths.Path("common", "bin", "openssl"),
-		Args: []string{"verify", "-purpose", "sslserver", "-CAfile", caPEM, caPEM},
-	})
-
-	cmdErr, ok := errors.AsType[*CmdError](err)
-	if !ok {
+	data, err := e.Sys.FS.ReadFile(caPEM)
+	if err != nil {
 		return false
 	}
 
-	for line := range strings.SplitSeq(cmdErr.Output, "\n") {
-		if strings.HasPrefix(line, "error 10") {
-			return true
-		}
-	}
+	certs, err := certParseCerts(data)
 
-	return false
+	return err == nil && len(certs) > 0 && certs[0].NotAfter.Before(e.Sys.Clock.Now())
 }
 
 // StepConfigSaveCA ports configSaveCA (setup.pl 4854-4870): store the CA in
@@ -328,7 +348,7 @@ func certApplyCreateCert(e *Env) error {
 			continue
 		}
 
-		if err := certZmcertmgr(e, certArgs("createcrt", opt)...); err != nil {
+		if err := certZmcertmgr(e, certArgs(certCmdCreateCRT, opt)...); err != nil {
 			return fmt.Errorf("creating the %s certificate: %w", t.title, err)
 		}
 
@@ -399,13 +419,17 @@ func certDetectType(e *Env) error {
 	return nil
 }
 
+// certVerifyCrt is `zmcertmgr verifycrt <kind>`, quietly: an error that is a
+// *CmdError says the certificate does not verify.
 func certVerifyCrt(e *Env, kind string) error {
-	return e.Run(&Cmd{
-		AsZextras: true,
-		Path:      e.Paths.Path("bin", "zmcertmgr"),
-		Args:      []string{"verifycrt", kind},
-		Quiet:     true,
-	})
+	args := []string{certCmdVerifyCRT, kind}
+
+	status, _ := certRunMgr(e, args)
+	if status != 0 {
+		return &CmdError{Cmd: "zmcertmgr verifycrt " + kind, Code: status, quiet: true}
+	}
+
+	return nil
 }
 
 // certPrepareMailboxd creates the mailboxd directory the keystore lives in

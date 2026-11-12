@@ -550,6 +550,7 @@ statuses of their scripts instead.
 | `setup ldap-enable-mmr [-r RID] [-s SID] -m MMRURI` | `zmldapenable-mmr` | root, zextras | Adds a multi-master agreement with another master. |
 | `setup iptool [-d [-m ipmode]]` | `zmiptool` | root, zextras | Applies `zimbraIPMode` to the Java options and the MySQL bind address. |
 | `setup iniutil [options] inifile` | `zminiutil` | any user | Reads or edits one ini file (`--list --get --isset --set --setmin --setmax --unset`). |
+| `setup certmgr <command> [options]` | `zmcertmgr` (certmgr.pl) | root, zextras | Every command, option, message and exit status of the script, without openssl; `keytool` is still run for `cacerts` and to read the mailboxd keystore: `createca createcrt deployca createcsr deploycrt getcrt savecrt viewcsr viewstagedcrt viewcrt verifycrt verifycrtchain verifycrtkey viewdeployedcrt checkcrtexpiration addcacert migrate`. See [`setup certmgr`](#setup-certmgr). |
 
 ### LDAP and ini tools
 
@@ -607,6 +608,75 @@ Differences from the scripts:
 - `ldap-schema` stops at the first file it cannot write and leaves no `*.orig`
   files (it removes old ones), because the `sed -i.orig` renames are done in
   memory.
+
+### `setup certmgr`
+
+The certificate steps of the bootstrap ("Set up the CA", "Deploy the
+certificates") call the same function as the command (`setup.RunCertMgr`),
+in process, where they ran `zmcertmgr` and `openssl verify`. carbonio-core
+installs `bin/zmcertmgr` as `exec /opt/zextras/libexec/setup certmgr "$@"`.
+`setup.pl`, `setservername.pl`, `checkexpiredcerts.pl`, the mailbox
+(`GetCSR`, `InstallCert`, `VerifyCert`) and `zmrc` (`-allservers`) keep calling
+`zmcertmgr`.
+
+Same as the script: the command line (command first, then the type, options
+abbreviable and mixed with arguments), the usage and `-man` texts, the files
+and their owners (`ssl/carbonio/{ca,server,commercial}`, `conf/ca`, the service
+copies, the backup `ssl/carbonio.<timestamp>`), the CA database
+(`ca.srl`, `index.txt`, `newcerts/`), the LDAP attributes
+(`zimbraSSLCertificate`, `zimbraSSLPrivateKey`, `zimbraCertAuthority*`,
+`zimbraReverseProxyUpstream*`), the output and the exit statuses: `0` ok, `1`
+failed (`ERROR: ...`, or a wrong command line: the message and the usage on stdout, as
+`pod2usage` prints them), `255` a die (`zmcertmgr: ERROR
+<command>(<args>) failed:`). Root is accepted as well as zextras.
+
+The command lines it runs (`keytool`, `zmrc`) are not printed, as the script
+printed none; `-debug` shows them on stderr.
+
+Differences from the script:
+
+- openssl and the Java keystore class are not run: certificates, requests and
+  the CA signing (`openssl ca`) are made in Go. The text of
+  `openssl` failures is approximated: `Can't read file '<f>'`,
+  `openssl req|x509 on '<f>' failed(1)`, `error N at D depth lookup: <text>`
+  for the verify codes 2, 9, 10, 18, 19, 20 and 26, and
+  `Unable to validate certificate chain: <subject>`. Subjects and issuers are
+  printed in the OpenSSL 3 one-line form (`C=US, O=X`, as `openssl x509 -subject` prints them).
+- Digests: `sha1`, `sha256`, `sha384` and `sha512` sign. `sha`, `sha224` and
+  `ripemd160` pass the check of `-digest` and then fail with
+  `unsupported digest '<d>' (supported: ...)`. An invalid
+  `ssl_default_digest` is an error. Certificates signed with SHA-1 may not
+  verify in Go.
+- `cacerts` is changed with `keytool`, as the script does (`-delete -alias A`,
+  then `-import -alias A -noprompt -file F`, run as zextras, the alias
+  `my_ca` for `deployca` and `zcs-user-<name>` for `addcacert`), so the
+  PKCS#12 file the product ships keeps its format, aliases and attributes. The
+  store password (`mailboxd_truststore_password`, `mailboxd_keystore_password`)
+  is passed to `keytool` in the environment (`-storepass:env
+  ZMCERTMGR_STOREPASS`), never on its command line; the script put it on the
+  command line.
+- The keystore of mailboxd is created natively, as the Java class
+  `MyPKCS12Import` of the script does: a JKS file written in place (an existing
+  JKS keeps its other aliases); no `ssl/carbonio/jetty.pkcs12` is left. A
+  mailboxd keystore of another type (PKCS#12) is refused with
+  `Keystore was tampered with, or password was incorrect`, where Java's JKS
+  reader would load it. The certificate of the keystore is read back with
+  `keytool -export`, so any type works there.
+- `ca.key` is `0600` (the script left it `0640`); the backup copy keeps modes
+  and owners but not the timestamps.
+- The `no write permission` check and the `.rnd` touch are not done; `-debug`
+  prints a reduced set of lines; the second `Deploy(ARRAY(...)) failed` line
+  of a failed `new` is not printed.
+- `viewcrt` runs `viewstagedcrt` (the script listed it without a method).
+- `checkcrtexpiration` prints `EXPIRED!` where the script printed `0`, and the
+  OK lines only when the standard input is a terminal, as in the script.
+- `zmssl.cnf` is still rendered from `conf/zmssl.cnf.in` for the tools that
+  read it, but the CA's alternative names follow the current settings; the
+  servers come from LDAP directly (`zmprov gas` and `mcf`/`ms` are not run)
+  though the messages still say "via zmprov".
+- `deploycrt self` with files is refused by the command line check
+  (`certfile argument is not allowed for type 'self'`); `comm` takes both
+  files or none (status `1`, with the usage).
 
 ### `setup proxyconfig`
 

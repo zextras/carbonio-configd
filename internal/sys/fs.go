@@ -56,6 +56,8 @@ type FS interface {
 	MkdirAll(path string, perm fs.FileMode) error
 	Chmod(name string, mode fs.FileMode) error
 	Chown(name string, uid, gid int) error
+	// Lchown changes the owner of a symbolic link itself, not its target.
+	Lchown(name string, uid, gid int) error
 	Symlink(oldname, newname string) error
 
 	// AvailBytes reports the bytes available to unprivileged users on the
@@ -138,6 +140,9 @@ func (RealFS) Chmod(name string, mode fs.FileMode) error { return os.Chmod(name,
 
 // Chown implements FS.
 func (RealFS) Chown(name string, uid, gid int) error { return os.Chown(name, uid, gid) }
+
+// Lchown implements FS.
+func (RealFS) Lchown(name string, uid, gid int) error { return os.Lchown(name, uid, gid) }
 
 // Symlink implements FS.
 func (RealFS) Symlink(oldname, newname string) error { return os.Symlink(oldname, newname) }
