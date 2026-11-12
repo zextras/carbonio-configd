@@ -566,7 +566,14 @@ func StepGenerateDHParam() Step {
 				return false, fmt.Errorf("reading the global config: %w", err)
 			}
 
-			return gc[certDHParamAttr] == certFile(e, "conf", certDHParamFile), nil
+			// zimbraSSLDHParam is binary: "mcf zimbraSSLDHParam <path>"
+			// stores the file's content, not its path.
+			data, err := e.Sys.FS.ReadFile(certFile(e, "conf", certDHParamFile))
+			if err != nil {
+				return false, fmt.Errorf("reading the dhparam key: %w", err)
+			}
+
+			return gc[certDHParamAttr] != "" && gc[certDHParamAttr] == string(data), nil
 		},
 		Apply: certApplyDHParam,
 	}

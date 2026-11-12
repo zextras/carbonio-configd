@@ -465,7 +465,11 @@ func TestCertDHParam(t *testing.T) {
 
 		attr = dest
 		done, _ = step.Done(e)
-		assert.True(t, done)
+		assert.False(t, done, "the attribute is binary: it holds the file, never its path")
+
+		attr = "dh"
+		done, _ = step.Done(e)
+		assert.True(t, done, "the attribute holds the installed file")
 
 		certGlobalConfig = func(*Env) (map[string]string, error) { return nil, errors.New("ldap down") }
 		_, err = step.Done(e)
