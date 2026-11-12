@@ -359,7 +359,7 @@ func TestRunLDAPPasswd_Failures(t *testing.T) {
 
 	t.Run("unreadable localconfig", func(t *testing.T) {
 		e, _, f := ldapPasswdTestEnv(t, "true")
-		e.Paths.LocalConfig = "/nonexistent/localconfig.xml"
+		e.Paths.LocalConfig = t.TempDir() // a directory: unreadable for root too
 		e.lc = nil
 
 		r := ldapPasswdExec(t, e, f, "", "-p", "pw")
