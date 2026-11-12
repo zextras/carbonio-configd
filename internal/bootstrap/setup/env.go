@@ -25,6 +25,9 @@ type Paths struct {
 	LocalConfig string
 	// History is .install_history.
 	History string
+	// LicenseNotice is the licence notice carbonio-core installs (.mini_alue_ce);
+	// it may be absent.
+	LicenseNotice string
 }
 
 // DefaultPaths are the paths of a Carbonio node.
@@ -35,6 +38,8 @@ func DefaultPaths() Paths {
 		Base:        base,
 		LocalConfig: filepath.Join(base, "conf", "localconfig.xml"),
 		History:     filepath.Join(base, ".install_history"),
+
+		LicenseNotice: filepath.Join(base, ".mini_alue_ce"),
 	}
 }
 

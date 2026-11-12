@@ -8,6 +8,8 @@ package setup
 // program, then applyConfig (L5829-6019).
 func Steps() []Step {
 	return []Step{
+		StepPrepareHost(),
+
 		// main
 		StepInstallLdapConfig(),
 		StepInstallLdapSchema(),

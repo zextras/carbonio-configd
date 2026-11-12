@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/zextras/carbonio-configd/internal/bootstrap"
 	"github.com/zextras/carbonio-configd/internal/services"
@@ -32,6 +33,11 @@ type Env struct {
 	Ctl *services.Controller
 	// Flags carry what one step learns for the later ones.
 	Flags Flags
+	// Observe, if set, is told when each step of a run starts and ends.
+	Observe Observer
+	// Stop, if set, is polled between steps: once it reports true the run
+	// ends with ErrStopped, never in the middle of a step.
+	Stop func() bool
 
 	// Paths of the node; Default paths outside tests.
 	Paths Paths
@@ -82,9 +88,10 @@ const (
 	Applied
 	WouldApply // dry run
 	Warned     // optional step failed
+	Failed     // the step failed and ended the run
 )
 
-var outcomeNames = [...]string{"skipped", "done", "applied", "would apply", "warning"}
+var outcomeNames = [...]string{"skipped", "done", "applied", "would apply", "warning", "failed"}
 
 func (o Outcome) String() string { return outcomeNames[o] }
 
@@ -98,6 +105,43 @@ type Result struct {
 // ErrStepFailed wraps the failure that ended a run.
 var ErrStepFailed = errors.New("bootstrap step failed")
 
+// ErrStopped ends a run the operator asked to stop: the current step has
+// finished, the later ones did not start.
+var ErrStopped = errors.New("bootstrap stopped by the operator")
+
+// EventKind tells what an Event reports.
+type EventKind int
+
+// The events of a run.
+const (
+	// EventStart: a step is about to change the node.
+	EventStart EventKind = iota
+	// EventFinish: a step ended; Outcome and Err say how.
+	EventFinish
+)
+
+// Event reports the progress of a real run (not a dry run) to an Observer.
+type Event struct {
+	Kind EventKind
+	// Index is the position of the step in the list given to Run.
+	Index int
+	Step  *Step
+	// Outcome and Err are set on EventFinish.
+	Outcome Outcome
+	Err     error
+	// Elapsed is how long the step took (EventFinish).
+	Elapsed time.Duration
+}
+
+// Observer receives the events of a run, from the goroutine that runs it.
+type Observer func(Event)
+
+func (e *Env) emit(ev Event) {
+	if e.Observe != nil {
+		e.Observe(ev)
+	}
+}
+
 // Run runs steps in order. In a dry run it only reports which steps would
 // apply. It stops at the first failure of a non-optional step.
 func Run(e *Env, steps []Step, dryRun bool) ([]Result, error) {
@@ -110,9 +154,13 @@ func Run(e *Env, steps []Step, dryRun bool) ([]Result, error) {
 	}
 
 	for i := range steps {
+		if e.Stop != nil && e.Stop() {
+			return results, ErrStopped
+		}
+
 		s := &steps[i]
 
-		res, err := runStep(e, s, dryRun)
+		res, err := observedStep(e, i, s, dryRun)
 		results = append(results, res)
 
 		if err != nil {
@@ -129,7 +177,28 @@ func Run(e *Env, steps []Step, dryRun bool) ([]Result, error) {
 	return results, nil
 }
 
-func runStep(e *Env, s *Step, dryRun bool) (Result, error) {
+// observedStep runs one step and reports its end to the observer.
+func observedStep(e *Env, i int, s *Step, dryRun bool) (Result, error) {
+	start := e.Sys.Clock.Now()
+
+	res, err := runStep(e, i, s, dryRun)
+	if dryRun {
+		return res, err
+	}
+
+	elapsed := e.Sys.Clock.Now().Sub(start)
+
+	ev := Event{Kind: EventFinish, Index: i, Step: s, Outcome: res.Outcome, Err: res.Err, Elapsed: elapsed}
+	if ev.Err == nil {
+		ev.Err = err
+	}
+
+	e.emit(ev)
+
+	return res, err
+}
+
+func runStep(e *Env, i int, s *Step, dryRun bool) (Result, error) {
 	res := Result{Step: s}
 
 	if s.When != nil && !s.When(e) {
@@ -166,6 +235,8 @@ func runStep(e *Env, s *Step, dryRun bool) (Result, error) {
 		return res, nil
 	}
 
+	e.emit(Event{Kind: EventStart, Index: i, Step: s})
+
 	end := e.Log.Begin(s.Title)
 
 	err := s.Apply(e)
@@ -199,6 +270,8 @@ func recordDone(e *Env, s *Step, dryRun bool) error {
 
 func failed(e *Env, s *Step, res Result, err error) (Result, error) {
 	res.Err = err
+
+	res.Outcome = Failed
 
 	if s.Optional {
 		res.Outcome = Warned
