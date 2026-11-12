@@ -49,7 +49,7 @@ func ldapNativeKit() *ldapKit {
 			return nil
 		}
 
-		if err := e.Ctl.ServiceStart(e.Ctx, ldapService); err != nil {
+		if err := ldapControl(e, "start"); err != nil {
 			return fmt.Errorf("starting ldap: %w", err)
 		}
 
@@ -63,7 +63,7 @@ func ldapNativeKit() *ldapKit {
 	}
 
 	k.stop = func(e *Env) error {
-		if err := e.Ctl.ServiceStop(e.Ctx, ldapService); err != nil {
+		if err := ldapControl(e, "stop"); err != nil {
 			return fmt.Errorf("stopping ldap: %w", err)
 		}
 
@@ -71,6 +71,22 @@ func ldapNativeKit() *ldapKit {
 	}
 
 	return k
+}
+
+// ldapControl starts or stops slapd like setup.pl startLdap/stopLdap: through
+// systemd when the node runs the carbonio units, else "ldap start|stop" as
+// zextras. Spawned by this root process, slapd would run as root, and the
+// zextras-owned controls (zmcontrol, zmconfigdctl) could not stop it later.
+func ldapControl(e *Env, verb string) error {
+	if e.Facts.Systemd {
+		if verb == "start" {
+			return e.Ctl.ServiceStart(e.Ctx, ldapService)
+		}
+
+		return e.Ctl.ServiceStop(e.Ctx, ldapService)
+	}
+
+	return e.Zextras(e.Paths.Path("bin", ldapService), verb)
 }
 
 // waitFor is setup.pl waitForLdap: it polls the ldapi socket, binding as the

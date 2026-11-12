@@ -52,11 +52,11 @@ const (
 // certRestartLDAP restarts the local LDAP server so it reads the new
 // certificate (setup.pl stopLdap + startLdap). Tests replace it.
 var certRestartLDAP = func(e *Env) error {
-	if err := e.Ctl.ServiceStop(e.Ctx, "ldap"); err != nil {
+	if err := ldapControl(e, "stop"); err != nil {
 		return fmt.Errorf("stopping ldap: %w", err)
 	}
 
-	if err := e.Ctl.ServiceStart(e.Ctx, "ldap"); err != nil {
+	if err := ldapControl(e, "start"); err != nil {
 		return fmt.Errorf("starting ldap: %w", err)
 	}
 
