@@ -5,6 +5,7 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -64,6 +65,55 @@ func TestUsageErrors(t *testing.T) {
 
 	status, _, _ = exec(t, "nonsense")
 	assert.Equal(t, exitUsage, status)
+}
+
+func TestSetupPlCommandsAreListedAndValidated(t *testing.T) {
+	status, out, _ := exec(t, "-h")
+	require.Equal(t, 0, status)
+
+	for _, c := range []string{"gal-sync-account", "ssh-keygen", "update-authkeys"} {
+		assert.Contains(t, out, c)
+	}
+
+	status, out, _ = exec(t, "gal-sync-account", "--help")
+	require.Equal(t, 0, status)
+	assert.Contains(t, out, "--domain")
+	assert.Contains(t, out, "--server")
+
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"gal-sync-account"}, `required flag(s) "domain", "server" not set`},
+		{[]string{"gal-sync-account", "--domain", "example.com"}, `required flag(s) "server" not set`},
+		{[]string{"gal-sync-account", "--domain", "example.com", "--server", " "}, "must not be empty"},
+		{[]string{"gal-sync-account", "--domain", "", "--server", "s"}, "must not be empty"},
+		{[]string{"gal-sync-account", "--domain", "d", "--server", "s", "extra"}, "unknown command"},
+		{[]string{"ssh-keygen", "extra"}, "unknown command"},
+		{[]string{"update-authkeys", "-a"}, "unknown shorthand flag"},
+	} {
+		status, _, errb := exec(t, tc.args...)
+		assert.Equal(t, exitUsage, status, tc.args)
+		assert.Contains(t, errb, tc.want, tc.args)
+	}
+}
+
+func TestSetupPlCommandsRefuseNonRoot(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("the refusal is for non-root users")
+	}
+
+	for _, args := range [][]string{
+		{"gal-sync-account", "--domain", "example.com", "--server", "store.example.com"},
+		{"ssh-keygen"},
+		{"update-authkeys"},
+	} {
+		status, out, errb := exec(t, args...)
+
+		assert.Equal(t, 1, status, args)
+		assert.Empty(t, out, args)
+		assert.Contains(t, errb, "must run as root", args)
+	}
 }
 
 func TestConfigNonInteractiveFailsOnMissingKeys(t *testing.T) {

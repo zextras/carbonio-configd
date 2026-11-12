@@ -395,6 +395,35 @@ Passwords are never passed on a command line or written to the log:
 `zmprov` reads its commands on stdin, localconfig is written directly, and
 the LDAP passwords are set natively (no `zmldappasswd`).
 
+Three steps that `setup.pl` ran as shell scripts or JVM tools are done in
+Go, without starting a process:
+
+- "Create GAL sync account" (`zmgsautil createAccount`) authenticates to the
+  admin SOAP API with the LDAP master credentials of localconfig and sends
+  `CreateGalSyncAccountRequest` to
+  `zimbra_zmprov_default_soap_server:zimbra_admin_service_port` (as the
+  tool did), then logs the name and id of the account. The server certificate
+  is always verified, against the system roots and the Carbonio CA files; the
+  request is sent once (it is not retried) and may take up to 5 minutes.
+- "Generate zextras SSH key" (`zmsshkeygen`) writes a new 2048-bit RSA key
+  pair to `/opt/zextras/.ssh/zimbra_identity` (PEM `RSA PRIVATE KEY`, mode
+  `0600`) and `zimbra_identity.pub` (`ssh-rsa <key> <server host name>`,
+  mode `0644`), owned by `zextras`, and stores the public key in
+  `zimbraSshPublicKey` of the server entry. A key that is already there is
+  replaced.
+- "Update authorized SSH keys" (`zmupdateauthkeys`) rewrites
+  `/opt/zextras/.ssh/authorized_keys`: for each server with a
+  `zimbraSshPublicKey` the lines of that host are replaced by
+  `command="/opt/zextras/libexec/zmrcd" <key>`, in the format the script
+  wrote, so the other nodes can keep running the script. A server without a
+  key is logged as `Key for <server> NOT FOUND`. The remote mode
+  (`zmupdateauthkeys -a`) is not part of the bootstrap.
+
+The tools stay in carbonio-core; the bootstrap no longer calls them. The
+`zextras` user and group ids are read from `zimbra_uid` and `zimbra_gid` of
+localconfig (stored by the "Set local config values" step), so these steps
+fail when they are not set.
+
 Differences from `setup.pl`:
 
 - A failure of `zmmtainit`, `zmmyinit` or the dhparam key ends the run
@@ -408,3 +437,23 @@ Differences from `setup.pl`:
   replica's slapd stopped. `carbonio-bootstrap run` leaves it running.
 - With the mail proxy off, the POP3S proxy port, not the mailbox one, moves
   to 995.
+- `authorized_keys` is written without the empty first line that
+  `zmupdateauthkeys` leaves when the file did not exist; a file that has one
+  keeps it.
+
+## Commands for setup.pl
+
+While carbonio-core still runs `setup.pl`, it calls these commands of the
+same binary (`/opt/zextras/libexec/setup`) instead of the scripts and JVM
+tools. They do exactly what the three steps above do, without a bootstrap
+configuration: the host name, the `zextras` ids, the LDAP and the admin
+credentials come from localconfig. They must run as root (otherwise they
+print an error and exit `1`), print what the legacy tools printed to stdout
+and the details to stderr, and exit `1` on failure with `Error: <reason>` on
+stderr; a wrong command line exits `2`.
+
+| Command | Replaces | |
+| --- | --- | --- |
+| `setup gal-sync-account --domain D --server S` | `zmgsautil createAccount -a galsync.<random>@D -n InternalGAL --domain D -s S -t zimbra -f _InternalGAL -p 1d` | Creates the account and prints `<name>` and `<id>` separated by a tab. It fails when the account cannot be created; it does not check for an existing one. |
+| `setup ssh-keygen` | `zmsshkeygen` | Generates the key pair and stores the public key in the server entry. |
+| `setup update-authkeys` | `zmupdateauthkeys` | Rewrites `authorized_keys`. There is no `-a` (remote) mode. |

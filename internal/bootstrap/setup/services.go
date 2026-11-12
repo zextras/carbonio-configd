@@ -6,11 +6,14 @@ package setup
 
 import (
 	"bufio"
+	"cmp"
+	"context"
 	"crypto/rand"
 	"errors"
 	"fmt"
 	"io/fs"
 	"math/big"
+	"net"
 	"slices"
 	"sort"
 	"strconv"
@@ -21,6 +24,7 @@ import (
 
 	"github.com/zextras/carbonio-configd/internal/bootstrap"
 	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/zxadmin"
 )
 
 // Stage names of setup.pl (the values written to .install_history).
@@ -46,6 +50,7 @@ const (
 	svcPkgDirectory     = "carbonio-directory-server"
 	svcAttrDescription  = "description"
 	svcCrontabBin       = "crontab"
+	svcGALDataSource    = "InternalGAL"
 )
 
 // svcSystemdTargets are the role targets of Zextras::Util::Systemd, in the
@@ -73,6 +78,11 @@ type svcDir interface {
 	Global() (map[string]string, error)
 	// MTAServers is the number of servers with the mta service enabled.
 	MTAServers() (int, error)
+	// ServerAttribute is attr of every server, by server name; "" for a
+	// server that does not set it.
+	ServerAttribute(attr string) (map[string]string, error)
+	// SetServerAttribute replaces attr on the entry of server host.
+	SetServerAttribute(host, attr, value string) error
 	Close() error
 }
 
@@ -91,6 +101,8 @@ type svcLDAPClient interface {
 	Search(baseDN, filter string, attributes []string, scope int) (*ldap.SearchResult, error)
 	GetGlobalConfig() (map[string]string, error)
 	GetAllServersWithAttributes() (map[string]map[string]string, error)
+	ModifyAttribute(dn, attribute, value string) error
+	BaseDN() string
 	Close() error
 }
 
@@ -122,6 +134,31 @@ func (d svcLDAP) MTAServers() (int, error) {
 	}
 
 	return n, nil
+}
+
+func (d svcLDAP) ServerAttribute(attr string) (map[string]string, error) {
+	all, err := d.c.GetAllServersWithAttributes()
+	if err != nil {
+		return nil, err
+	}
+
+	out := make(map[string]string, len(all))
+
+	for host, attrs := range all {
+		out[host] = ""
+
+		for name, v := range attrs {
+			if strings.EqualFold(name, attr) {
+				out[host] = v
+			}
+		}
+	}
+
+	return out, nil
+}
+
+func (d svcLDAP) SetServerAttribute(host, attr, value string) error {
+	return d.c.ModifyAttribute("cn="+ldap.EscapeDN(host)+",cn=servers,"+d.c.BaseDN(), attr, value)
 }
 
 func (d svcLDAP) Close() error { return d.c.Close() }
@@ -708,10 +745,11 @@ func svcStopStrayConfigd(e *Env) error {
 // StepConfigCreateDefaultDomainGALSyncAcct ports setup.pl
 // configCreateDefaultDomainGALSyncAcct (L5726-5742), run after the servers
 // start: When start_services && newinstall && isStoreServiceNode() &&
-// isEnabled(carbonio-appserver). zmgsautil creates galsync.<random>@<domain>
-// for the default domain (domain.name). Done when such an account exists.
-// Optional ("failed." and carry on). The history stage is written on success
-// only, as setup.pl did.
+// isEnabled(carbonio-appserver). It creates galsync.<random>@<domain> for the
+// default domain (domain.name) as zmgsautil createAccount does, but through
+// the admin SOAP API (zxadmin.CreateGalSyncAccount), not by starting the
+// tool's JVM. Done when such an account exists. Optional ("failed." and carry
+// on). The history stage is written on success only, as setup.pl did.
 func StepConfigCreateDefaultDomainGALSyncAcct() Step {
 	return Step{
 		Name:     svcStageGALSync,
@@ -737,18 +775,65 @@ func StepConfigCreateDefaultDomainGALSyncAcct() Step {
 				return err
 			}
 
-			suffix, err := svcRandomPassword(svcGALSuffix, svcLowerNum)
-			if err != nil {
-				return err
-			}
+			_, err = CreateGalSyncAccount(e, e.Cfg.Domain.Name, svcOr(server, e.Cfg.Host.Hostname))
 
-			domain := e.Cfg.Domain.Name
-
-			return e.Zextras(e.Paths.Path("bin", "zmgsautil"), "createAccount",
-				"-a", "galsync."+suffix+"@"+domain, "-n", "InternalGAL", "--domain", domain,
-				"-s", svcOr(server, e.Cfg.Host.Hostname), "-t", "zimbra", "-f", "_InternalGAL", "-p", "1d")
+			return err
 		},
 	}
+}
+
+// CreateGalSyncAccount creates galsync.<random>@domain on the mailbox server
+// (the work of "zmgsautil createAccount -n InternalGAL -t zimbra -f
+// _InternalGAL -p 1d") and returns the account. It needs only the node's
+// localconfig, not a bootstrap configuration, so the setup.pl commands share
+// it with the step.
+func CreateGalSyncAccount(e *Env, domain, server string) (zxadmin.GalSyncAccount, error) {
+	suffix, err := svcRandomPassword(svcGALSuffix, svcLowerNum)
+	if err != nil {
+		return zxadmin.GalSyncAccount{}, err
+	}
+
+	admin, err := svcOpenGAL(e)
+	if err != nil {
+		return zxadmin.GalSyncAccount{}, err
+	}
+
+	acct, err := admin.CreateGalSyncAccount(e.Ctx, &zxadmin.GalSyncAccountRequest{
+		Account: "galsync." + suffix + "@" + domain, Name: svcGALDataSource, Domain: domain,
+		Type: "zimbra", Folder: "_InternalGAL", Server: server, PollingInterval: "1d",
+	})
+	if err != nil {
+		return zxadmin.GalSyncAccount{}, fmt.Errorf("creating the GAL sync account: %w", err)
+	}
+
+	e.Log.Detail("Created GAL sync account %s (%s)", acct.Name, acct.ID)
+
+	return acct, nil
+}
+
+// svcGALAdmin is the admin API call the GAL sync step makes (an interface so
+// tests need no mailbox).
+type svcGALAdmin interface {
+	CreateGalSyncAccount(ctx context.Context, r *zxadmin.GalSyncAccountRequest) (zxadmin.GalSyncAccount, error)
+}
+
+// svcOpenGAL opens the admin API of the node (replaced by tests).
+var svcOpenGAL = func(e *Env) (svcGALAdmin, error) {
+	lc, err := e.LC()
+	if err != nil {
+		return nil, err
+	}
+
+	return zxadmin.NewWithBaseURL(svcAdminURL(lc), lc), nil
+}
+
+// svcAdminURL is the admin URL of the server zmgsautil talked to:
+// zimbra_zmprov_default_soap_server on zimbra_admin_service_port.
+func svcAdminURL(lc map[string]string) string {
+	host := cmp.Or(lc["zimbra_zmprov_default_soap_server"], "localhost")
+	port := cmp.Or(lc["zimbra_admin_service_port"], strconv.Itoa(zxadmin.AdminPort))
+
+	return "https://" + net.JoinHostPort(host, port)
 }
 
 // StepGALSyncSkipNotice warns, as setup.pl did (L5996-6010), when the default
@@ -879,27 +964,4 @@ func svcStripBlock(s string) string {
 	}
 
 	return b.String()
-}
-
-// StepZmsshkeygen ports setup.pl applyConfig L6011-6013: zmsshkeygen as
-// zextras on a new install. It regenerates the key on a re-run of an
-// unfinished new install (cheap, so no Done). Optional: setup.pl ignored the
-// status.
-func StepZmsshkeygen() Step {
-	return Step{
-		Title:    "Generate zextras SSH key",
-		Optional: true,
-		When:     func(e *Env) bool { return e.Facts.NewInstall },
-		Apply:    func(e *Env) error { return e.Zextras(e.Paths.Path("bin", "zmsshkeygen")) },
-	}
-}
-
-// StepZmupdateauthkeys ports setup.pl applyConfig L6014-6018: zmupdateauthkeys
-// as zextras on every run. Optional: setup.pl ignored the status.
-func StepZmupdateauthkeys() Step {
-	return Step{
-		Title:    "Update authorized SSH keys",
-		Optional: true,
-		Apply:    func(e *Env) error { return e.Zextras(e.Paths.Path("bin", "zmupdateauthkeys")) },
-	}
 }

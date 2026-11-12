@@ -8,6 +8,9 @@
 //
 //	carbonio-bootstrap [run]   configure this node
 //	carbonio-bootstrap config  resolve, validate and print or save the configuration
+//	carbonio-bootstrap gal-sync-account | ssh-keygen | update-authkeys
+//	                           what the legacy setup.pl calls instead of zmgsautil,
+//	                           zmsshkeygen and zmupdateauthkeys
 //
 // It is a binary of its own, apart from configd, so the full-screen terminal
 // interface is not linked into the daemon.
@@ -15,12 +18,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -135,9 +140,61 @@ func newRootCmd(env sys.System, stdin io.Reader, stdout, stderr io.Writer, statu
 	}
 
 	addFlags(runCmd, &sf, true)
-	root.AddCommand(config, runCmd)
+	root.AddCommand(config, runCmd, newGalSyncCmd(env, stdout, stderr, status),
+		newToolCmd("ssh-keygen", "Generate the zextras SSH key and store its public key (zmsshkeygen)",
+			bootstrapcmd.RunSSHKeygen, env, stdout, stderr, status),
+		newToolCmd("update-authkeys", "Update ~zextras/.ssh/authorized_keys from the servers' keys (zmupdateauthkeys)",
+			bootstrapcmd.RunUpdateAuthKeys, env, stdout, stderr, status))
 
 	return root
+}
+
+// newGalSyncCmd is "gal-sync-account": zmgsautil createAccount for the
+// InternalGAL of a domain, as setup.pl calls it.
+func newGalSyncCmd(env sys.System, stdout, stderr io.Writer, status *int) *cobra.Command {
+	var domain, server string
+
+	cmd := &cobra.Command{
+		Use:   "gal-sync-account --domain DOMAIN --server SERVER",
+		Short: "Create the GAL sync account of a domain (zmgsautil createAccount)",
+		Long: "Create galsync.<random>@DOMAIN with the InternalGAL data source on SERVER and print " +
+			"\"<name>\\t<id>\". Must run as root.",
+		Args: cobra.NoArgs,
+		RunE: func(*cobra.Command, []string) error {
+			if strings.TrimSpace(domain) == "" || strings.TrimSpace(server) == "" {
+				return errors.New("--domain and --server must not be empty")
+			}
+
+			*status = bootstrapcmd.RunGalSyncAccount(context.Background(), env, stdout, stderr, domain, server)
+
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&domain, "domain", "", "Domain whose GAL the account synchronises")
+	cmd.Flags().StringVar(&server, "server", "", "Mailbox server that hosts the account")
+	_ = cmd.MarkFlagRequired("domain")
+	_ = cmd.MarkFlagRequired("server")
+
+	return cmd
+}
+
+// newToolCmd is a command without options that runs fn as root.
+func newToolCmd(use, short string,
+	fn func(context.Context, sys.System, io.Writer, io.Writer) int,
+	env sys.System, stdout, stderr io.Writer, status *int,
+) *cobra.Command {
+	return &cobra.Command{
+		Use:   use,
+		Short: short,
+		Long:  short + ". Must run as root.",
+		Args:  cobra.NoArgs,
+		RunE: func(*cobra.Command, []string) error {
+			*status = fn(context.Background(), env, stdout, stderr)
+
+			return nil
+		},
+	}
 }
 
 func addFlags(cmd *cobra.Command, f *flags, run bool) {
