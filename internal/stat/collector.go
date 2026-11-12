@@ -2,13 +2,13 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Package zmstat is the native port of the zmstat-* statistics collectors
+// Package stat is the native port of the zmstat-* statistics collectors
 // (libexec/stat-*.pl and Zextras::Mon::Stat of carbonio-core). Each collector
 // appends one CSV line per interval to /opt/zextras/zmstat/<name>.csv with the
 // heading, timestamp, column order, number format and rotation of the Perl
 // scripts, so zmstat-chart and the log shippers keep working. The numbers come
 // from /proc and /sys instead of vmstat, iostat, ps, df and pgrep.
-package zmstat
+package stat
 
 import (
 	"context"
@@ -70,7 +70,7 @@ const (
 	colSystem    = "system"
 	procLDAP     = "ldap"
 	procMySQL    = "mysql"
-	procZmstat   = "zmstat"
+	procStat     = "zmstat"
 	defaultUser  = "zextras"
 )
 

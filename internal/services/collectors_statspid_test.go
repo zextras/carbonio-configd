@@ -6,6 +6,7 @@ package services
 
 import (
 	"context"
+	"strings"
 	"syscall"
 	"testing"
 
@@ -67,4 +68,73 @@ func TestKillStatsPidFile_KillsCollectorGroup(t *testing.T) {
 	assert.Equal(t, syscall.SIGTERM, f.Proc.Signals()[0].Sig)
 	assert.True(t, f.Proc.Signals()[0].Group, "the group is signaled, not just the leader")
 	assert.False(t, f.FS.Exists(statsPidFile))
+}
+
+// TestStartCollectors_RunsSetupStat: every collector is "setup zmstat <name>
+// [options]" with its log in zmstat-<name>.out, the optional ones only when
+// their localconfig key is TRUE (statctl.pl, zmstatctl start).
+func TestStartCollectors_RunsSetupStat(t *testing.T) {
+	t.Parallel()
+
+	ctl, f := newFakeController(t, WithConfigLoader(func() (map[string]string, error) {
+		return map[string]string{"zmstat_mysql_enabled": "TRUE", "zmstat_nginx_enabled": "FALSE"}, nil
+	}))
+	f.FS.Put(ctl.p.libexec+"/setup", []byte("x"), 0o755)
+	f.FS.PutDir(ctl.p.log, 0o755)
+
+	require.NoError(t, ctl.startCollectors(context.Background(), ctl.registry[svcStats]))
+
+	var started []string
+
+	for _, c := range f.Exec.Calls() {
+		assert.Equal(t, ctl.p.libexec+"/setup", c.Path)
+		started = append(started, strings.Join(c.Args, " "))
+	}
+
+	assert.Equal(t, []string{
+		"zmstat proc", "zmstat cpu", "zmstat vm", "zmstat io -x", "zmstat df", "zmstat io",
+		"zmstat fd", "zmstat allprocs", "zmstat mysql",
+	}, started)
+	assert.True(t, f.FS.Exists(ctl.p.log+"/zmstat-io.out"))
+	assert.True(t, f.FS.Exists(ctl.p.log+"/zmstat-mysql.out"))
+}
+
+// TestStartCollectors_NoSetupBinary: without libexec/setup nothing starts.
+func TestStartCollectors_NoSetupBinary(t *testing.T) {
+	t.Parallel()
+
+	ctl, f := newFakeController(t)
+	f.FS.PutDir(ctl.p.log, 0o755)
+
+	require.ErrorContains(t, ctl.startCollectors(context.Background(), ctl.registry[svcStats]),
+		"no stats collectors started")
+	assert.Empty(t, f.Exec.Calls())
+}
+
+// TestKillStatsPidFile_KillsSetupCollectorGroup: a collector of this release
+// ("setup zmstat <name>") is recognised and its group terminated.
+func TestKillStatsPidFile_KillsSetupCollectorGroup(t *testing.T) {
+	t.Parallel()
+
+	ctl, f := newFakeController(t)
+	f.FS.Put(statsPidFile, []byte("4242\n"), 0o644)
+	f.Proc.Add(sys.ProcEntry{PID: 4242, Argv: []string{ctl.p.libexec + "/setup", "zmstat", "proc"}})
+
+	require.True(t, ctl.killStatsPidFile(context.Background(), statsPidFile, ctl.registry[svcStats].ProcessName))
+	require.NotEmpty(t, f.Proc.Signals())
+	assert.True(t, f.Proc.Signals()[0].Group)
+	assert.False(t, f.FS.Exists(statsPidFile))
+}
+
+// TestKillStatsPidFile_OtherSetupCommandIsNotACollector: "setup proxyconfig"
+// is not a zmstat collector, so a recycled pid of it is left alone.
+func TestKillStatsPidFile_OtherSetupCommandIsNotACollector(t *testing.T) {
+	t.Parallel()
+
+	ctl, f := newFakeController(t)
+	f.FS.Put(statsPidFile, []byte("4242\n"), 0o644)
+	f.Proc.Add(sys.ProcEntry{PID: 4242, Argv: []string{ctl.p.libexec + "/setup", "proxyconfig"}})
+
+	ctl.killStatsPidFile(context.Background(), statsPidFile, ctl.registry[svcStats].ProcessName)
+	assert.Empty(t, f.Proc.Signals())
 }

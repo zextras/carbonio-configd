@@ -110,13 +110,10 @@ const (
 	socketFamilyUnixgram = "unixgram"
 )
 
-// zmstat tool names (statistics collectors).
+// The statistics collectors run as "<libexec>/setup zmstat <name> [options]"
+// and log to <log>/zmstat-<name>.out.
 const (
-	zmstatProc     = "zmstat-proc"
-	zmstatCPU      = "zmstat-cpu"
-	zmstatVM       = "zmstat-vm"
-	zmstatDF       = "zmstat-df"
-	zmstatIO       = "zmstat-io"
-	zmstatFD       = "zmstat-fd"
-	zmstatAllprocs = "zmstat-allprocs"
+	collectorBinary    = "setup"
+	collectorCommand   = "zmstat"
+	collectorLogPrefix = "zmstat-"
 )

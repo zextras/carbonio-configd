@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-only
 
-package zmstat
+package stat
 
 import (
 	"context"
@@ -29,7 +29,7 @@ and a new file is created.
 const postfixUser = "postfix"
 
 // defaultProcs are monitored when the enabled services cannot be read.
-var defaultProcs = []string{"mailbox", procMySQL, procLDAP, "postfix", "amavis", "clam", procZmstat}
+var defaultProcs = []string{"mailbox", procMySQL, procLDAP, "postfix", "amavis", "clam", procStat}
 
 // procMatchers are the command line filters of the monitored process groups
 // (the %ps_subs of stat-proc.pl): the user that owns them, the expressions the
@@ -50,7 +50,7 @@ var procMatchers = map[string]struct {
 	"postfix": {postfix: true},
 	"amavis":  {all: []*regexp.Regexp{regexp.MustCompile(`amavisd`)}},
 	"clam":    {all: []*regexp.Regexp{regexp.MustCompile(`(freshclam|clamd)`)}},
-	procZmstat: {all: []*regexp.Regexp{
+	procStat: {all: []*regexp.Regexp{
 		regexp.MustCompile(`(zmstat-|setup zmstat |iostat|vmstat|vm_stat|postqueue)`),
 	}},
 }
@@ -162,7 +162,7 @@ func (e *Env) enabledProcs() []string {
 		procs = append(procs, "amavis", "clam")
 	}
 
-	return append(procs, procZmstat)
+	return append(procs, procStat)
 }
 
 // Heading implements Collector.

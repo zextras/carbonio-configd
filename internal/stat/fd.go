@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-only
 
-package zmstat
+package stat
 
 import (
 	"errors"
@@ -140,7 +140,7 @@ func fdValidate(env *Env, o *options) error {
 	log := realPath(o.logPath)
 	zpaths := []string{"/tmp", "/var/log"}
 
-	for _, d := range []string{"log", "data/tmp", procZmstat} {
+	for _, d := range []string{"log", "data/tmp", procStat} {
 		zpaths = append(zpaths, filepath.Join(env.Base, d))
 	}
 

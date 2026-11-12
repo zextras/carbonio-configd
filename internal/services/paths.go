@@ -28,10 +28,13 @@ type paths struct {
 	run string
 	// statsPidDir holds the per-collector pidfiles of the stats service.
 	statsPidDir string
-	// statsGlob is the identity of every zmstat-* collector: the script path
-	// under libexec startCollectors launches (perl scripts, so it is an argv
-	// token of `perl -w <script>`). A glob over the whole path, so
-	// `tail -f .../log/zmstat-proc.out` is not mistaken for a collector.
+	// statsProc is the identity of every collector: libexec/setup with the
+	// argument zmstat, so `tail -f .../log/zmstat-proc.out` or another setup
+	// command is not mistaken for one.
+	statsProc string
+	// statsGlob is the identity of the collectors of earlier releases, the
+	// zmstat-* Perl scripts under libexec; they are still stopped after an
+	// upgrade.
 	statsGlob string
 
 	cacheFile      string
@@ -90,6 +93,7 @@ func newPaths(base, run string) paths {
 	}
 
 	p.statsPidDir = run + "/stats"
+	p.statsProc = p.libexec + "/" + collectorBinary + " " + collectorCommand
 	p.statsGlob = p.libexec + "/zmstat-*"
 
 	p.cacheFile = p.log + "/.zmcontrol.cache"

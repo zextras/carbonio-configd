@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-only
 
-package zmstat
+package stat
 
 import (
 	"fmt"
@@ -248,14 +248,28 @@ func rate(prev, cur, itv uint64) float64 {
 	return sValue(prev, cur, itv)
 }
 
-// opStats are the six columns of one operation kind (reads, writes or
-// discards) of "iostat -x": rate, kB rate, merge rate, merged share, await
-// and request size.
-func opStats(prevIOs, curIOs, prevMerges, curMerges, prevSec, curSec uint64,
-	prevTicks, curTicks uint32, itv uint64,
-) []string {
-	dIOs := curIOs - prevIOs
-	dMerges := curMerges - prevMerges
+// opCounters are the counters of one operation kind (reads, writes or
+// discards) of a device.
+type opCounters struct {
+	ios, merges, sectors uint64
+	ticks                uint32
+}
+
+func (s *diskStats) reads() opCounters {
+	return opCounters{s.rdIOs, s.rdMerges, s.rdSectors, s.rdTicks}
+}
+func (s *diskStats) writes() opCounters {
+	return opCounters{s.wrIOs, s.wrMerges, s.wrSectors, s.wrTicks}
+}
+func (s *diskStats) discards() opCounters {
+	return opCounters{s.dcIOs, s.dcMerges, s.dcSectors, s.dcTicks}
+}
+
+// opStats are the six columns of one operation kind of "iostat -x": rate, kB
+// rate, merge rate, merged share, await and request size.
+func opStats(prev, cur opCounters, itv uint64) []string {
+	dIOs := cur.ios - prev.ios
+	dMerges := cur.merges - prev.merges
 
 	var pc, await, arq float64
 
@@ -263,30 +277,27 @@ func opStats(prevIOs, curIOs, prevMerges, curMerges, prevSec, curSec uint64,
 		pc = float64(dMerges) / float64(dMerges+dIOs) * 100
 	}
 
-	if curIOs > prevIOs {
-		await = float64(curTicks-prevTicks) / float64(dIOs)
-		arq = float64(curSec-prevSec) / float64(dIOs)
+	if cur.ios > prev.ios {
+		await = float64(cur.ticks-prev.ticks) / float64(dIOs)
+		arq = float64(cur.sectors-prev.sectors) / float64(dIOs)
 	}
 
 	secRate := 0.0
-	if curSec >= prevSec {
-		secRate = sValue(prevSec, curSec, itv)
+	if cur.sectors >= prev.sectors {
+		secRate = sValue(prev.sectors, cur.sectors, itv)
 	}
 
 	return []string{
-		f2(rate(prevIOs, curIOs, itv)), f2(secRate / 2), f2(rate(prevMerges, curMerges, itv)),
+		f2(rate(prev.ios, cur.ios, itv)), f2(secRate / 2), f2(rate(prev.merges, cur.merges, itv)),
 		f2(pc), f2(await), f2(arq / 2),
 	}
 }
 
 // extStats are the columns of "iostat -d -k -x" of a device (write_ext_stat).
 func extStats(cur, old *diskStats, itv uint64) []string {
-	out := opStats(old.rdIOs, cur.rdIOs, old.rdMerges, cur.rdMerges, old.rdSectors, cur.rdSectors,
-		old.rdTicks, cur.rdTicks, itv)
-	out = append(out, opStats(old.wrIOs, cur.wrIOs, old.wrMerges, cur.wrMerges, old.wrSectors, cur.wrSectors,
-		old.wrTicks, cur.wrTicks, itv)...)
-	out = append(out, opStats(old.dcIOs, cur.dcIOs, old.dcMerges, cur.dcMerges, old.dcSectors, cur.dcSectors,
-		old.dcTicks, cur.dcTicks, itv)...)
+	out := opStats(old.reads(), cur.reads(), itv)
+	out = append(out, opStats(old.writes(), cur.writes(), itv)...)
+	out = append(out, opStats(old.discards(), cur.discards(), itv)...)
 
 	var fAwait, aqu, util float64
 

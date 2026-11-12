@@ -255,7 +255,7 @@ func (c *Controller) defaultRegistry() map[string]*ServiceDef {
 			Name:         svcStats,
 			DisplayName:  svcStats,
 			SystemdUnits: []string{"carbonio-stats.service"},
-			ProcessName:  c.p.statsGlob,
+			ProcessName:  c.p.statsProc,
 			Collectors:   statsCollectors(),
 		},
 		svcOpendkim: {
