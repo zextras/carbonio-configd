@@ -439,18 +439,32 @@ var pcPortAttrs = []string{
 	pcAttrAdminPort, pcAttrAdminProxyPort,
 }
 
-var (
-	pcModes      = []string{pcModeHTTP, pcModeHTTPS, pcModeBoth, "mixed", "redirect"}
-	pcReferModes = []string{"always", "wronghost", "reverse-proxied"}
-)
+// pcEnums are the enumerated attributes zmproxyconfig sets, with the values of
+// the "value" in attrs.xml. The proxy mail mode has no http and mixed: a run
+// that sends one (the default of -w -d without -x, or -x http) is refused by
+// zmprov, as it was for the script.
+var pcEnums = map[string][]string{
+	pcAttrMailMode:      {pcModeHTTP, pcModeHTTPS, pcModeBoth, "mixed", "redirect"},
+	pcAttrProxyMailMode: {pcModeHTTPS, "redirect", pcModeBoth},
+	pcAttrReferMode:     {"always", "wronghost", "reverse-proxied"},
+}
 
 // pcValidate is the value check of zmprov (checkValue) for the attributes of a
-// command.
+// command; an enum fails like LdapAttributeInfo.checkValue.
 func pcValidate(c pcCmd) error {
 	for _, kv := range c {
-		if !pcValidValue(kv.attr, kv.val) {
-			return fmt.Errorf("service.INVALID_REQUEST (invalid request: invalid value for %s: %s)",
-				strings.TrimLeft(kv.attr, "+-"), kv.val)
+		attr := strings.TrimLeft(kv.attr, "+-")
+
+		if enum, ok := pcEnums[attr]; ok {
+			if !slices.Contains(enum, kv.val) {
+				return fmt.Errorf("account.INVALID_ATTR_VALUE (%s must be one of: %s)", attr, strings.Join(enum, ","))
+			}
+
+			continue
+		}
+
+		if !pcValidValue(attr, kv.val) {
+			return fmt.Errorf("service.INVALID_REQUEST (invalid request: invalid value for %s: %s)", attr, kv.val)
 		}
 	}
 
@@ -458,17 +472,11 @@ func pcValidate(c pcCmd) error {
 }
 
 func pcValidValue(attr, val string) bool {
-	attr = strings.TrimLeft(attr, "+-")
-
 	switch {
 	case attr == pcAttrServiceEnabled:
 		return true
 	case slices.Contains(pcPortAttrs, attr):
 		return pcIsPort(val)
-	case attr == pcAttrMailMode || attr == pcAttrProxyMailMode:
-		return slices.Contains(pcModes, val)
-	case attr == pcAttrReferMode:
-		return slices.Contains(pcReferModes, val)
 	case strings.HasSuffix(attr, "Enabled") || attr == pcAttrLookupTarget:
 		return val == srvTrueUpper || val == srvFalseUpper
 	default:

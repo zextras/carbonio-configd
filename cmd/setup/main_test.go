@@ -190,3 +190,12 @@ func TestProxyConfigCommandPassesTheScriptOptionsThrough(t *testing.T) {
 	assert.Equal(t, 1, status)
 	assert.Contains(t, errb, "must run as root")
 }
+
+// -d and -c are options of zmproxyconfig; the bootstrap's legacy mapping must
+// not eat them.
+func TestLegacyArgs_ToolCommandsKeepTheirOptions(t *testing.T) {
+	assert.Equal(t, []string{"proxyconfig", "-w", "-d", "-o", "-c", "-H", "h"},
+		legacyArgs([]string{"proxyconfig", "-w", "-d", "-o", "-c", "-H", "h"}))
+	assert.Equal(t, []string{"--legacy-config", "f", "--non-interactive"}, legacyArgs([]string{"-d", "-c", "f"}),
+		"the bootstrap's own mapping stays")
+}

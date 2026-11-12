@@ -260,12 +260,12 @@ func TestProxyConfig_AttributesPerMode(t *testing.T) {
 		},
 		{
 			// 799-808: without SSL to the upstream the store is http and the proxy takes -x.
-			name: "enable web, no upstream SSL, mixed proxy",
+			name: "enable web, no upstream SSL, redirect proxy",
 			sc:   pcScenario{server: bothOnServer, installed: pcBoth},
-			args: "-u -w -e -o -x mixed -H " + pcTestHost,
+			args: "-u -w -e -o -x redirect -H " + pcTestHost,
 			want: pcMerge(pcWebPorts("8080:80:8443:443"), map[string]string{
 				"zimbraMailReferMode": "reverse-proxied", "zimbraMailMode": "http",
-				"zimbraReverseProxyMailMode": "mixed", "zimbraReverseProxyLookupTarget": "TRUE",
+				"zimbraReverseProxyMailMode": "redirect", "zimbraReverseProxyLookupTarget": "TRUE",
 				"zimbraReverseProxyHttpEnabled": "TRUE", "zimbraReverseProxySSLToUpstreamEnabled": "FALSE",
 			}),
 		},
@@ -447,7 +447,7 @@ func TestProxyConfig_TheBootstrapCallsAreOneModify(t *testing.T) {
 	}
 	web := &ProxyConfigOptions{
 		Enable: true, Web: true, Override: true, Host: pcTestHost, NoUpstreamSSL: true,
-		Mode: "http", WebPorts: "8080:80:8443:443",
+		Mode: "https", WebPorts: "8080:80:8443:443",
 	}
 
 	require.Zero(t, proxyConfig(e, pio, mail, web), errw.String())
@@ -503,7 +503,8 @@ func TestProxyConfig_InvalidValuesFailTheirCommandOnly(t *testing.T) {
 	r = pcRun(t, pcScenario{server: pcEnt("zimbraServiceEnabled", "proxy"), installed: pcProxyOnly},
 		"-u -w -e -o -x bogus -H "+pcTestHost)
 	assert.Equal(t, 2, r.code, "-x is checked as zimbraReverseProxyMailMode")
-	assert.Contains(t, r.err, "invalid value for zimbraReverseProxyMailMode: bogus")
+	assert.Contains(t, r.err,
+		"ERROR: account.INVALID_ATTR_VALUE (zimbraReverseProxyMailMode must be one of: https,redirect,both)")
 }
 
 func TestProxyConfig_RefusalsAndExitStatus(t *testing.T) {
@@ -726,4 +727,47 @@ func TestProxyConfigUsage_NamesTheProgramAndEndsWithTwoBlankLines(t *testing.T) 
 	assert.Contains(t, u, "\t-U: enable SSL connection from proxy to mail store.\n")
 	assert.Contains(t, u, "-a default on disable: 80:0:443:0\n")
 	assert.True(t, strings.HasSuffix(u, "is enabled: https\n\n\n"))
+}
+
+// zimbraReverseProxyMailMode is https, redirect or both. zmprov refuses the
+// whole "ms" that carries another value (http and mixed included), so the
+// script exited 2 with the ports of that command unchanged; the other commands
+// of the run (the upstream SSL switch here) still applied.
+func TestProxyConfig_ProxyMailModeOutsideTheEnumFailsItsCommand(t *testing.T) {
+	for _, mode := range []string{"http", "mixed", "bogus"} {
+		sc := pcScenario{server: pcEnt("zimbraServiceEnabled", "mailbox", "zimbraServiceEnabled", "proxy"), installed: pcBoth}
+
+		r := pcRun(t, sc, "-u -w -e -o -x "+mode+" -a 8080:80:8443:443 -H "+pcTestHost)
+
+		assert.Equal(t, 2, r.code, mode)
+		assert.Equal(t, "ERROR: account.INVALID_ATTR_VALUE (zimbraReverseProxyMailMode must be one of: https,redirect,both)\n",
+			r.err, mode)
+		assert.Equal(t, map[string]string{"zimbraReverseProxySSLToUpstreamEnabled": "FALSE"}, r.replaced(t),
+			"no port of the refused command is written: %s", mode)
+	}
+
+	// -x both is accepted (it is in the enum); with -U the script refuses it before any zmprov call.
+	r := pcRun(t, pcScenario{server: pcEnt("zimbraServiceEnabled", "proxy"), installed: pcProxyOnly},
+		"-u -w -e -o -x both -a 8080:80:8443:443 -H "+pcTestHost)
+	assert.Zero(t, r.code, r.err)
+	assert.Equal(t, "both", r.replaced(t)["zimbraReverseProxyMailMode"])
+}
+
+// Perl line 36: the proxy mail mode starts as http, so -w -d on a proxy
+// without -x sends http, which zmprov refuses: the ports stay, the admin
+// console command applies.
+func TestProxyConfig_DisableWebOnProxyWithoutModeIsRefusedByTheEnum(t *testing.T) {
+	r := pcRun(t, pcScenario{server: pcEnt("zimbraServiceEnabled", "proxy"), installed: pcProxyOnly},
+		"-w -d -o -H "+pcTestHost)
+
+	assert.Equal(t, 2, r.code)
+	assert.Contains(t, r.err, "zimbraReverseProxyMailMode must be one of")
+	assert.Equal(t, pcAdmin("FALSE", "7071", "9071"), r.replaced(t))
+
+	// With -x https it applies; the plain mail disable never had a mode.
+	r = pcRun(t, pcScenario{server: pcEnt("zimbraServiceEnabled", "proxy"), installed: pcProxyOnly},
+		"-m -d -o -H "+pcTestHost)
+	assert.Zero(t, r.code, r.err)
+	assert.Equal(t, pcMerge(pcMailPorts("143:7143:993:7993", "110:7110:995:7995"),
+		map[string]string{"zimbraReverseProxyMailEnabled": "FALSE"}), r.replaced(t))
 }

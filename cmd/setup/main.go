@@ -71,10 +71,19 @@ func run(args []string, env sys.System, stdin io.Reader, stdout, stderr io.Write
 	return status
 }
 
+// toolCommands are the commands that replace scripts and parse their own
+// arguments (proxyconfig has a -c and a -d of its own).
+var toolCommands = []string{"ssh-keygen", "update-authkeys", "syslog", "dhparam", "proxyconfig"}
+
 // legacyArgs maps the options of the former shell script: "-c FILE" is
 // "--legacy-config FILE --non-interactive", and "-d" (debug) is accepted and
-// ignored, the run always logs to /opt/zextras/log/bootstrap.*.log.
+// ignored, the run always logs to /opt/zextras/log/bootstrap.*.log. The
+// arguments of a tool command are left as they are.
 func legacyArgs(args []string) []string {
+	if len(args) > 0 && slices.Contains(toolCommands, args[0]) {
+		return args
+	}
+
 	out := make([]string, 0, len(args)+1)
 
 	for i := 0; i < len(args); i++ {
