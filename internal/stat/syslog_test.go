@@ -5,9 +5,13 @@
 package stat
 
 import (
+	"errors"
+	"log/syslog"
+	"net"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -52,4 +56,83 @@ func TestEmitExactlyOneChunkIsNotSplit(t *testing.T) {
 	emit(func(m string) { sent = append(sent, m) }, 1, "info", strings.Repeat("x", 800))
 
 	assert.Equal(t, []string{"1:info: " + strings.Repeat("x", 800)}, sent)
+}
+
+// listenSyslog is a UDP syslog collector; dial connects a writer to it.
+func listenSyslog(t *testing.T) (dial func(syslog.Priority, string) (*syslog.Writer, error), recv func() string) {
+	t.Helper()
+
+	conn, err := net.ListenPacket("udp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	dial = func(p syslog.Priority, tag string) (*syslog.Writer, error) {
+		return syslog.Dial("udp", conn.LocalAddr().String(), p, tag)
+	}
+	recv = func() string {
+		require.NoError(t, conn.SetReadDeadline(time.Now().Add(5*time.Second)))
+
+		buf := make([]byte, 2048)
+		n, _, err := conn.ReadFrom(buf)
+		require.NoError(t, err)
+
+		return string(buf[:n])
+	}
+
+	return dial, recv
+}
+
+// A syslog that cannot be reached is silent, and is tried again on the next
+// message rather than being given up for the life of the process.
+//
+//nolint:paralleltest // swaps the package-level dialer
+func TestSystemSyslogRetriesAfterAFailedConnection(t *testing.T) {
+	dial, recv := listenSyslog(t)
+	orig := dialSyslog
+
+	t.Cleanup(func() { dialSyslog = orig })
+
+	calls := 0
+	dialSyslog = func(p syslog.Priority, tag string) (*syslog.Writer, error) {
+		calls++
+		if calls == 1 {
+			return nil, errors.New("no syslog socket")
+		}
+
+		return dial(p, tag)
+	}
+
+	s := NewSystemSyslog(9)
+	s.Log("info", "lost")
+	s.Log("info", "delivered")
+
+	assert.Equal(t, 2, calls)
+	assert.Contains(t, recv(), "9:info: delivered")
+}
+
+// One connection per facility serves every later message.
+//
+//nolint:paralleltest // swaps the package-level dialer
+func TestSystemSyslogReusesTheConnectionOfAFacility(t *testing.T) {
+	dial, recv := listenSyslog(t)
+	orig := dialSyslog
+
+	t.Cleanup(func() { dialSyslog = orig })
+
+	calls := 0
+	dialSyslog = func(p syslog.Priority, tag string) (*syslog.Writer, error) {
+		calls++
+
+		return dial(p, tag)
+	}
+
+	s := NewSystemSyslog(3)
+	s.Log("err", "one")
+	s.Log("debug", "two")
+	s.Stats("crit", "three")
+
+	assert.Contains(t, recv(), "3:err: one")
+	assert.Contains(t, recv(), "3:debug: two")
+	assert.Contains(t, recv(), "3:crit: three")
+	assert.Equal(t, 2, calls, "local0 and local1 are opened once each")
 }

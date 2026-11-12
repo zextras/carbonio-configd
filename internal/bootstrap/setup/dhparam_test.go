@@ -492,3 +492,32 @@ func TestRunDHParam_DebugGoesToStderr(t *testing.T) {
 	assert.Equal(t, "DEBUG: using the RFC 7919 group of 2048 bits\n", r.stderr)
 	assert.NotContains(t, r.stdout, "DEBUG")
 }
+
+// A -out file that cannot be opened or written is an error naming the file.
+func TestRunDHParam_OutThatCannotBeWritten(t *testing.T) {
+	for want, fault := range map[string]faultFS{
+		"disk full": {write: errors.New("disk full")},
+		"read-only": {},
+	} {
+		t.Run(want, func(t *testing.T) {
+			e, fakes, _ := testEnv(t)
+			fault.FS = e.Sys.FS
+			e.Sys.FS = fault
+
+			if want == "read-only" {
+				fakes.FS.Fail = func(op, name string) error {
+					if op == "OpenFile" && name == "/tmp/new.pem" {
+						return errors.New("read-only")
+					}
+
+					return nil
+				}
+			}
+
+			r := dhExec(t, e, "", "set", "-new", "2048", "-out", "/tmp/new.pem")
+
+			assert.Equal(t, 1, r.code)
+			assert.Contains(t, r.stderr, "create '/tmp/new.pem' failed: "+want)
+		})
+	}
+}

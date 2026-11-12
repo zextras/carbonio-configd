@@ -7,6 +7,7 @@ package setup
 import (
 	"bytes"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"testing/iotest"
@@ -417,4 +418,50 @@ func TestRunLDAPPasswd_Failures(t *testing.T) {
 		assert.Equal(t, 1, r.code)
 		assert.True(t, strings.HasPrefix(r.stderr, "Error: "), r.stderr)
 	})
+}
+
+// breakLocalConfigOnDial makes localconfig unwritable once the directory has
+// been reached, so the password is accepted by LDAP but cannot be recorded.
+func breakLocalConfigOnDial(t *testing.T, e *Env, f *ldapFake) *ldapKit {
+	t.Helper()
+
+	k := f.kit()
+	dial := k.dial
+	k.dial = func(env *Env, d ldapDial) (ldapConn, error) {
+		require.NoError(t, os.Remove(e.Paths.LocalConfig))
+		require.NoError(t, os.Mkdir(e.Paths.LocalConfig, 0o755))
+
+		return dial(env, d)
+	}
+
+	return k
+}
+
+func TestRunLDAPPasswd_LocalConfigThatCannotBeWritten(t *testing.T) {
+	for _, args := range [][]string{{"-p", "pw"}, {"-r", "pw"}} {
+		e, _, f := ldapPasswdTestEnv(t, "true")
+		k := breakLocalConfigOnDial(t, e, f)
+
+		var out, errb bytes.Buffer
+
+		assert.Equal(t, 1, runLDAPPasswd(e, k, args, strings.NewReader(""), &out, &errb), args)
+		assert.Contains(t, errb.String(), "Error: setting ", args)
+	}
+}
+
+// Root is changed through cn=config bound with the current root password: a
+// directory that refuses that password leaves everything as it was.
+func TestRunLDAPPasswd_RootWhoseCurrentPasswordIsRefused(t *testing.T) {
+	e, _, f := ldapPasswdTestEnv(t, "true")
+	f.bindOK = func(string, string) bool { return false }
+
+	r := ldapPasswdExec(t, e, f, "", "-r", "NewRoot")
+
+	assert.Equal(t, 1, r.code)
+	assert.Contains(t, r.stderr, "binding as cn=config with the current root password")
+	assert.Empty(t, f.replace)
+
+	lc, err := e.LC()
+	require.NoError(t, err)
+	assert.Equal(t, "oldroot", lc["ldap_root_password"])
 }

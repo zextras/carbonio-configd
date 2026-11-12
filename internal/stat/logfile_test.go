@@ -259,3 +259,39 @@ func TestLineDate(t *testing.T) {
 		assert.Equal(t, want, got, line)
 	}
 }
+
+func TestWriteAfterTheLogIsClosedIsAnError(t *testing.T) {
+	t.Parallel()
+
+	te := newTestEnv(t, files{})
+
+	l, err := openLog(te.Env, filepath.Join(te.Dir, "x.csv"), logHeading, today)
+	require.NoError(t, err)
+
+	l.close()
+
+	require.ErrorIs(t, l.write([]string{"late"}), errLogClosed)
+}
+
+// When the move fails and the log cannot be reopened either, both reasons are
+// reported and the log stays closed.
+func TestRotateReportsBothTheMoveAndTheReopenFailure(t *testing.T) {
+	t.Parallel()
+
+	te := newTestEnv(t, files{})
+	dir := filepath.Join(te.Dir, "logs")
+
+	l, err := openLog(te.Env, filepath.Join(dir, "x.csv"), logHeading, today)
+	require.NoError(t, err)
+
+	defer l.close()
+
+	require.NoError(t, os.Rename(dir, dir+".old"))
+	require.NoError(t, os.WriteFile(dir, nil, 0o644))
+
+	err = l.rotate("2026-01-01")
+
+	require.ErrorContains(t, err, "unable to create log rotation directory")
+	require.ErrorContains(t, err, "unable to open log file")
+	require.ErrorIs(t, l.write([]string{"x"}), errLogClosed)
+}

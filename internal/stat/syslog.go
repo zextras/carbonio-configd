@@ -20,6 +20,9 @@ const (
 	syslogChunk = 800
 )
 
+// dialSyslog opens the connection of a facility; a seam for the tests.
+var dialSyslog = syslog.New
+
 // SystemSyslog is Zextras::Mon::Logger over the local syslog socket: Log is
 // facility local0, Stats is local1. A syslog that cannot be reached is not an
 // error (the Perl opens it with nofatal).
@@ -59,7 +62,7 @@ func (s *SystemSyslog) writer(facility syslog.Priority) *syslog.Writer {
 		return w
 	}
 
-	w, err := syslog.New(facility|syslog.LOG_INFO, syslogIdent)
+	w, err := dialSyslog(facility|syslog.LOG_INFO, syslogIdent)
 	if err != nil {
 		return nil // not cached: the next send retries
 	}

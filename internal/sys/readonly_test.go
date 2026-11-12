@@ -133,3 +133,44 @@ func TestReadOnly_ReadsPassThrough(t *testing.T) {
 
 	assert.Equal(t, fakes.Clock.Now(), ro.Clock.Now())
 }
+
+// A read-only open that fails reports the host's error unchanged.
+func TestReadOnly_OpenFileReportsTheHostError(t *testing.T) {
+	t.Parallel()
+
+	fakes := systest.New()
+	ro := sys.ReadOnly(fakes.System())
+
+	_, err := ro.FS.OpenFile("/etc/missing.conf", os.O_RDONLY, 0)
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+// The data path of a file opened for reading is the host's.
+func TestReadOnly_OpenedFileReadsAndWritesPassThrough(t *testing.T) {
+	t.Parallel()
+
+	fakes := systest.New()
+	fakes.FS.Put("/etc/live.conf", []byte("live"), 0o644)
+
+	ro := sys.ReadOnly(fakes.System())
+
+	f, err := ro.FS.Open("/etc/live.conf")
+	require.NoError(t, err)
+
+	assert.Equal(t, "/etc/live.conf", f.Name())
+
+	buf := make([]byte, 4)
+	n, err := f.Read(buf)
+	require.NoError(t, err)
+	assert.Equal(t, "live", string(buf[:n]))
+
+	// The file was opened read-only, so the host refuses these itself.
+	_, err = f.Write([]byte("x"))
+	require.Error(t, err)
+	_, err = f.WriteString("x")
+	require.Error(t, err)
+	require.NoError(t, f.Close())
+
+	data, _ := fakes.FS.Data("/etc/live.conf")
+	assert.Equal(t, "live", string(data))
+}
