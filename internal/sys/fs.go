@@ -24,6 +24,11 @@ type File interface {
 	io.Closer
 	// Name returns the path the file was opened or created with.
 	Name() string
+	// Chown changes the owner of the open file itself (fchown): it cannot
+	// be redirected by a path that is swapped for a symlink after the open.
+	Chown(uid, gid int) error
+	// Chmod changes the mode of the open file itself (fchmod).
+	Chmod(mode fs.FileMode) error
 }
 
 // FS is the filesystem boundary. Paths are absolute (or relative to the

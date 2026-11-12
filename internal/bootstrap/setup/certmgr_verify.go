@@ -8,6 +8,7 @@ import (
 	"crypto"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -372,13 +373,17 @@ func (m *certMgr) checkcrtexpiration(args []string) (bool, error) {
 }
 
 // expiryLine prints the state of one certificate; it returns false when the
-// certificate is expired or expires within the days.
+// certificate is expired, expires within the days or cannot be checked.
 func (m *certMgr) expiryLine(tag string, tagLen int, crtf string) bool {
-	end, expired, soon := m.expiry(crtf)
+	end, expired, soon, err := m.expiry(crtf)
 
 	var msg string
 
 	switch {
+	case err != nil:
+		m.say("%-*s '%s' CANNOT BE CHECKED: %v\n", tagLen, tag, crtf, err)
+
+		return false
 	case expired:
 		msg = "EXPIRED!"
 	case soon:
@@ -394,22 +399,33 @@ func (m *certMgr) expiryLine(tag string, tagLen int, crtf string) bool {
 	return !expired && !soon
 }
 
+// errNoCertificate is a file that has no certificate in it.
+var errNoCertificate = errors.New("no certificate found")
+
 // expiry is `openssl x509 -enddate` and `-checkend 0` / `-checkend <days>`:
 // the end date line and whether the first certificate of the file has expired
-// or expires within the days. A file that is not a certificate counts as
-// expired, as openssl x509 -checkend fails on it.
-func (m *certMgr) expiry(crtf string) (end string, expired, soon bool) {
+// or expires within the days. A file that cannot be read or has no
+// certificate Go can parse is an error, not an expired certificate: nothing
+// is known about its end.
+func (m *certMgr) expiry(crtf string) (end string, expired, soon bool, err error) {
 	data, err := m.slurp(crtf)
 	if err != nil {
-		return "", true, false
+		return "", false, false, err
 	}
 
 	certs, err := certParseCerts(data)
-	if err != nil || len(certs) == 0 {
-		return "", true, false
+	if err != nil {
+		return "", false, false, err
 	}
 
-	return expiryOf(certs[0], m.e.Sys.Clock.Now(), m.e.Sys.Clock.Now().UTC().AddDate(0, 0, m.days))
+	if len(certs) == 0 {
+		return "", false, false, errNoCertificate
+	}
+
+	now := m.e.Sys.Clock.Now()
+	end, expired, soon = expiryOf(certs[0], now, now.UTC().AddDate(0, 0, m.days))
+
+	return end, expired, soon, nil
 }
 
 func expiryOf(c *x509.Certificate, now, deadline time.Time) (end string, expired, soon bool) {

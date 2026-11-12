@@ -76,7 +76,42 @@ var _ FS = readOnlyFS{}
 func (r readOnlyFS) ReadFile(name string) ([]byte, error) { return r.FS.ReadFile(name) }
 
 // Open implements FS.
-func (r readOnlyFS) Open(name string) (File, error) { return r.FS.Open(name) }
+func (r readOnlyFS) Open(name string) (File, error) { return wrapReadOnlyFile(r.FS.Open(name)) }
+
+// readOnlyFile is a file opened for reading: its owner and mode cannot be
+// changed through the descriptor either.
+type readOnlyFile struct{ f File }
+
+var _ File = readOnlyFile{}
+
+func wrapReadOnlyFile(f File, err error) (File, error) {
+	if err != nil {
+		return nil, err
+	}
+
+	return readOnlyFile{f: f}, nil
+}
+
+// Read implements File.
+func (r readOnlyFile) Read(p []byte) (int, error) { return r.f.Read(p) }
+
+// Write implements File.
+func (r readOnlyFile) Write(p []byte) (int, error) { return r.f.Write(p) }
+
+// WriteString implements File.
+func (r readOnlyFile) WriteString(s string) (int, error) { return r.f.WriteString(s) }
+
+// Close implements File.
+func (r readOnlyFile) Close() error { return r.f.Close() }
+
+// Name implements File.
+func (r readOnlyFile) Name() string { return r.f.Name() }
+
+// Chown implements File.
+func (r readOnlyFile) Chown(_, _ int) error { return refused("chown", r.f.Name()) }
+
+// Chmod implements File.
+func (r readOnlyFile) Chmod(_ fs.FileMode) error { return refused("chmod", r.f.Name()) }
 
 // Stat implements FS.
 func (r readOnlyFS) Stat(name string) (fs.FileInfo, error) { return r.FS.Stat(name) }
@@ -105,7 +140,7 @@ func (r readOnlyFS) OpenFile(name string, flag int, perm fs.FileMode) (File, err
 		return nil, refused("open for write", name)
 	}
 
-	return r.FS.OpenFile(name, flag, perm)
+	return wrapReadOnlyFile(r.FS.OpenFile(name, flag, perm))
 }
 
 // CreateTemp implements FS.

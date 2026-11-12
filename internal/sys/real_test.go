@@ -532,3 +532,34 @@ func TestRealClock_NowTimerTickerAfter(t *testing.T) {
 		t.Fatal("ticker did not tick")
 	}
 }
+
+// O_NOFOLLOW makes an open of a link fail; the owner and mode of an open file
+// are changed through its descriptor.
+func TestRealFS_NoFollowAndDescriptorOwnership(t *testing.T) {
+	t.Parallel()
+
+	var rfs sys.RealFS
+
+	root := t.TempDir()
+	target := filepath.Join(root, "t")
+	link := filepath.Join(root, "l")
+	require.NoError(t, os.WriteFile(target, []byte("x"), 0o600))
+	require.NoError(t, rfs.Symlink(target, link))
+
+	_, err := rfs.OpenFile(link, os.O_WRONLY|os.O_TRUNC|syscall.O_NOFOLLOW, 0)
+	require.ErrorIs(t, err, syscall.ELOOP)
+
+	data, err := rfs.ReadFile(target)
+	require.NoError(t, err)
+	assert.Equal(t, "x", string(data), "the target of the link is untouched")
+
+	f, err := rfs.OpenFile(target, os.O_WRONLY|syscall.O_NOFOLLOW, 0)
+	require.NoError(t, err)
+	require.NoError(t, f.Chmod(0o640))
+	require.NoError(t, f.Chown(os.Getuid(), os.Getgid()))
+	require.NoError(t, f.Close())
+
+	fi, err := rfs.Stat(target)
+	require.NoError(t, err)
+	assert.Equal(t, fs.FileMode(0o640), fi.Mode().Perm())
+}

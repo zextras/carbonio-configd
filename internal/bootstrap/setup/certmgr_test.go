@@ -176,7 +176,7 @@ func newCMTest(t *testing.T, lc map[string]string) *cmTest {
 			h.remote = append(h.remote, c.Args[len(c.Args)-1]+": "+strings.TrimSpace(string(in)))
 
 			if h.remoteFail != "" && strings.Contains(string(in), h.remoteFail) {
-				return sys.Result{ExitCode: 3, Stdout: []byte("no route\n")}, &sys.ExitError{Code: 3}
+				return sys.Result{ExitCode: 3, Stderr: []byte("ssh: no route to host\n")}, &sys.ExitError{Code: 3}
 			}
 
 			return sys.Result{}, nil

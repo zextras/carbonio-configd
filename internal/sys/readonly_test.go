@@ -75,6 +75,28 @@ func TestReadOnly_ExecErrorDoesNotLeakArguments(t *testing.T) {
 	assert.Contains(t, err.Error(), "/usr/bin/ldapmodify")
 }
 
+// A file opened for reading cannot be used to change its owner or mode.
+func TestReadOnly_OpenFileRefusesOwnershipChanges(t *testing.T) {
+	t.Parallel()
+
+	fakes := systest.New()
+	fakes.FS.Put("/etc/live.conf", []byte("live"), 0o644)
+
+	ro := sys.ReadOnly(fakes.System())
+
+	f, err := ro.FS.Open("/etc/live.conf")
+	require.NoError(t, err)
+
+	require.ErrorIs(t, f.Chown(1, 1), sys.ErrReadOnly)
+	require.ErrorIs(t, f.Chmod(0o600), sys.ErrReadOnly)
+	require.NoError(t, f.Close())
+
+	assert.Empty(t, fakes.Rec.Ops(), "nothing may reach the host")
+
+	mode, _ := fakes.FS.Mode("/etc/live.conf")
+	assert.Equal(t, os.FileMode(0o644), mode.Perm())
+}
+
 func TestReadOnly_ReadsPassThrough(t *testing.T) {
 	t.Parallel()
 

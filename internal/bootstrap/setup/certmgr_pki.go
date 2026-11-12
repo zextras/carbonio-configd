@@ -533,9 +533,15 @@ func certPEMBlock(typ string, der []byte) []byte {
 }
 
 // certParseCerts reads every certificate of PEM data; other blocks are
-// skipped.
+// skipped. Go parses more strictly than OpenSSL, which takes a bundle with a
+// certificate it dislikes (a cross-signed root with an odd extension) all the
+// same, so a certificate after the first that does not parse is skipped; the
+// first one, the leaf, is an error.
 func certParseCerts(data []byte) ([]*x509.Certificate, error) {
-	var certs []*x509.Certificate
+	var (
+		certs []*x509.Certificate
+		seen  bool
+	)
 
 	for rest := data; ; {
 		var blk *pem.Block
@@ -550,11 +556,15 @@ func certParseCerts(data []byte) ([]*x509.Certificate, error) {
 		}
 
 		c, err := x509.ParseCertificate(blk.Bytes)
-		if err != nil {
+
+		switch {
+		case err == nil:
+			certs = append(certs, c)
+		case !seen:
 			return nil, err
 		}
 
-		certs = append(certs, c)
+		seen = true
 	}
 
 	return certs, nil

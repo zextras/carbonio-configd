@@ -219,12 +219,16 @@ func (m *certMgr) remote(server, command string) bool {
 	}
 
 	status := 1
+	text := string(out)
 
 	if ce, ok := errors.AsType[*CmdError](err); ok {
 		status = ce.Code
+		text += ce.Output // what zmrc says on stderr: why it failed
+	} else {
+		text += err.Error() + "\n"
 	}
 
-	m.say("ERROR: zmrc: %s failed(%d):\n%s", command, status, out)
+	m.say("ERROR: zmrc: %s failed(%d):\n%s", command, status, text)
 
 	return false
 }

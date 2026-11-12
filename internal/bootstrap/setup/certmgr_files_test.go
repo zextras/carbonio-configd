@@ -156,12 +156,21 @@ func TestRunCertMgr_CheckCRTExpiration(t *testing.T) {
 	assert.Equal(t, 1, status)
 	assert.Equal(t, "proxy: notAfter=Dec 31 00:00:00 2030 GMT '/opt/zextras/conf/nginx.crt' EXPIRED!\n", out)
 
-	// Not a certificate: openssl x509 -checkend fails.
+	// Not a certificate: nothing is known about its end, which is not the
+	// same as it being over.
 	h.fakes.FS.Put("/opt/zextras/conf/nginx.crt", []byte("junk\n"), 0o644)
 
 	status, out, _ = h.run("checkcrtexpiration", "proxy")
 	assert.Equal(t, 1, status)
-	assert.Equal(t, "proxy:  '/opt/zextras/conf/nginx.crt' EXPIRED!\n", out)
+	assert.Equal(t, "proxy: '/opt/zextras/conf/nginx.crt' CANNOT BE CHECKED: no certificate found\n", out)
+
+	// A certificate block that does not parse says why, and is not EXPIRED!.
+	h.fakes.FS.Put("/opt/zextras/conf/nginx.crt", certPEMBlock(certPEMCert, []byte("not der")), 0o644)
+
+	status, out, _ = h.run("checkcrtexpiration", "proxy")
+	assert.Equal(t, 1, status)
+	assert.Contains(t, out, "proxy: '/opt/zextras/conf/nginx.crt' CANNOT BE CHECKED: x509: ")
+	assert.NotContains(t, out, "EXPIRED!")
 }
 
 func TestRunCertMgr_AddCACert(t *testing.T) {
@@ -439,7 +448,7 @@ func TestRunCertMgr_RemoteServerFailuresDoNotStopTheOthers(t *testing.T) {
 	status, out, _ := h.run("deploycrt", "self", "-allservers")
 
 	assert.Equal(t, 1, status)
-	assert.Contains(t, out, "ERROR: zmrc: zmcertmgr getcrt self -allservers failed(3):\nno route\n")
+	assert.Contains(t, out, "ERROR: zmrc: zmcertmgr getcrt self -allservers failed(3):\nssh: no route to host\n")
 	assert.Len(t, h.remote, 2, "each server was tried once and its deploy skipped")
 }
 

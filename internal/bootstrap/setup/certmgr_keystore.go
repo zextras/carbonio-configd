@@ -20,11 +20,8 @@ import (
 // certX509 is the certificate type of a Java keystore entry.
 const certX509 = "X509"
 
-// The messages keytool gives for the failures zmcertmgr reports.
-const (
-	certKeytoolTampered = "keytool error: java.io.IOException: Keystore was tampered with, or password was incorrect"
-	certKeytoolAliasNo  = "keytool error: java.lang.Exception: Alias <%s> does not exist"
-)
+// The message keytool gives for the failure zmcertmgr reports.
+const certKeytoolTampered = "keytool error: java.io.IOException: Keystore was tampered with, or password was incorrect"
 
 // certJKS reads a Java keystore; a missing file is an empty store.
 func (m *certMgr) certJKS(file string, pass []byte) (keystore.KeyStore, error) {

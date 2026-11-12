@@ -303,8 +303,15 @@ func (m *certMgr) reuseSelfCert() (done, ok bool) {
 		return false, false
 	}
 
-	if _, err := m.getcrt(certTypeSelf); err != nil {
+	got, err := m.getcrt(certTypeSelf)
+	if err != nil {
 		return true, false
+	}
+
+	if !got {
+		// LDAP could not be read: the local files are kept and, as the
+		// script did, a new certificate is made.
+		return false, false
 	}
 
 	if m.hasData(crtf) && m.verifycrt(certTypeSelf, "", "", "") {
@@ -486,7 +493,7 @@ func (m *certMgr) prepareCert(typ, crtf, caPEM string, given bool) (out string, 
 			return crtf, false, nil
 		}
 	} else {
-		if _, err := m.getcrt(typ); err != nil {
+		if got, err := m.getcrt(typ); err != nil || !got {
 			return crtf, false, err
 		}
 
@@ -504,14 +511,14 @@ func (m *certMgr) prepareCert(typ, crtf, caPEM string, given bool) (out string, 
 // to the certificate and adds it to the truststore.
 func (m *certMgr) completeComm(files certTyped, crtf, caPEM string, given bool) (out string, ok bool, err error) {
 	if given && crtf != files.crt {
-		if !m.copyFile(crtf, files.crt, certModeFile) {
+		if !m.copyGiven(crtf, files.crt, certModeFile) {
 			return crtf, false, nil
 		}
 
 		crtf = files.crt
 	}
 
-	if given && caPEM != files.ca && !m.copyFile(caPEM, files.ca, certModeFile) {
+	if given && caPEM != files.ca && !m.copyGiven(caPEM, files.ca, certModeFile) {
 		return crtf, false, nil
 	}
 
@@ -621,8 +628,17 @@ func (m *certMgr) getcrt(typ string) (bool, error) {
 
 	files := m.p.typed(typ)
 	data := map[string]string{}
-	data[files.crt], _ = m.getConfKey(certAttrSSLCert, m.scope())
-	data[files.key], _ = m.getConfKey(certAttrSSLKey, m.scope())
+
+	// An unreadable directory is not an empty value: the files that are
+	// there stay, whatever the directory would have said.
+	for _, kv := range []struct{ file, attr string }{{files.crt, certAttrSSLCert}, {files.key, certAttrSSLKey}} {
+		val, ok := m.getConfKey(kv.attr, m.scope())
+		if !ok {
+			return m.fail("getcrt: cannot read '%s' from LDAP, keeping the local files\n", kv.attr), nil
+		}
+
+		data[kv.file] = val
+	}
 
 	if typ == certTypeComm && data[files.crt] != "" {
 		certs := certConcat(data[files.crt])
