@@ -584,8 +584,11 @@ func StepSetupSyslog() Step {
 }
 
 // StepStartServers ports the "Starting servers" block of setup.pl applyConfig
-// (L5972-5995), When start_services. Optional: setup.pl ignored the exit
-// status of every command here.
+// (L5972-5995), When start_services. Deviation: setup.pl ignored the exit
+// status of "zmcontrol start" and went on, so the GAL sync account step ran
+// against a mailbox that was down and the run still said "Configuration
+// complete". A service that does not start now fails the run, naming the
+// service; a re-run starts the servers again and goes on.
 //
 // On Ubuntu, on an existing install with the application server, redo.log is
 // chowned to zextras first. With systemd targets enabled the enabled role
@@ -595,10 +598,9 @@ func StepSetupSyslog() Step {
 // control itself is not called in process: it requires to run as zextras.
 func StepStartServers() Step {
 	return Step{
-		Title:    "Start servers",
-		Optional: true,
-		When:     func(e *Env) bool { return e.Cfg.StartServices },
-		Apply:    svcStartServers,
+		Title: "Start servers",
+		When:  func(e *Env) bool { return e.Cfg.StartServices },
+		Apply: svcStartServers,
 	}
 }
 

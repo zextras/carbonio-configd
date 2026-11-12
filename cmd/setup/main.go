@@ -149,7 +149,7 @@ func addFlags(cmd *cobra.Command, f *flags, run bool) {
 	fs.BoolVar(&f.nonInteractive, "non-interactive", false, "Never run the wizard; fail on missing keys")
 	fs.BoolVar(&f.plain, "plain", false, "Line-based wizard and output instead of the full-screen interface")
 	fs.StringVar(&f.wizard, "wizard", bootstrapcmd.WizardMissing, "Wizard questions to ask: missing|all")
-	fs.BoolVar(&f.verbose, "verbose", false, "List every legacy key that is not imported")
+	fs.BoolVar(&f.verbose, "verbose", false, "List every legacy key that is not imported; log the full zmcertmgr output")
 	fs.StringVar(&f.output, "output", "", "Save the configuration to this file (mode 0600, no passwords)")
 
 	if run {

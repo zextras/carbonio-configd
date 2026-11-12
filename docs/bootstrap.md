@@ -35,7 +35,7 @@ CARBONIO_BOOTSTRAP_ADMIN_PASSWORD_FILE=/run/secrets/admin carbonio-bootstrap con
 | `--non-interactive` | never run the wizard; a missing key is an error |
 | `--wizard missing\|all` | which questions the wizard asks (default `missing`) |
 | `--plain` | line-based wizard and output instead of the full-screen interface |
-| `--verbose` | list every legacy key that is not imported (otherwise only their number) |
+| `--verbose` | list every legacy key that is not imported (otherwise only their number), and log the full output of `zmcertmgr` |
 | `--output FILE` | save the configuration there (mode `0600`, no passwords) instead of printing it |
 
 Exit status: `0` when the configuration is valid, `1` otherwise. Every
@@ -110,11 +110,11 @@ comma-separated in the environment and in `--set`. Booleans accept
 | `store.mailboxd_memory_mb` | `MAILBOXDMEMORY` | a quarter of the memory, a fifth above 16 GB | |
 | `store.mysql_memory_percent` | `MYSQLMEMORYPERCENT` | `30` | |
 | `store.virus_quarantine_account` | `VIRUSQUARANTINE` | `virus-quarantine.<random>@<domain>` | appserver |
-| `store.ports.{imap,imaps,pop3,pop3s,http,https}` | `IMAPPORT` ... `HTTPSPORT` | `7143 7993 7110 7995 80 443` with a proxy on the node, else `143 993 110 995 80 443` | |
+| `store.ports.{imap,imaps,pop3,pop3s,http,https}` | `IMAPPORT` ... `HTTPSPORT` | `7143 7993 7110 7995 8080 8443` (mailboxd runs as zextras and cannot bind ports below 1024) | |
 | `proxy.mode` | `PROXYMODE` | `https` (`https`, `redirect`) | |
 | `proxy.mail_enabled`, `proxy.web_enabled` | `MAILPROXY`, `HTTPPROXY` | `true` on a proxy | |
 | `proxy.strict_server_name` | `STRICTSERVERNAMEENABLED` (only `yes` is true, as in `setup.pl`) | `false` | |
-| `proxy.ports.{imap,imaps,pop3,pop3s,http,https}` | `IMAPPROXYPORT` ... `HTTPSPROXYPORT` | `143 993 110 995 8080 8443` on a proxy, else `7143 7993 7110 7995 8080 8443` | |
+| `proxy.ports.{imap,imaps,pop3,pop3s,http,https}` | `IMAPPROXYPORT` ... `HTTPSPROXYPORT` | `143 993 110 995 80 443` (the proxy, on this node or another) | |
 | `start_services` | `STARTSERVERS` | `true` | |
 
 Passwords are generated only on the LDAP master. Every other node, replicas
@@ -304,9 +304,30 @@ tools' output goes to the log only. Like the rest of `run`, it needs root.
 
 Each step first checks whether the node already holds what it produces and
 skips it then, so after a failure running the command again resumes. Steps
-that `setup.pl` let fail with a warning still only warn. Each finished step
-is recorded in `.install_history` as `setup.pl` did (`CONFIGURED <stage>`).
-The run logs to `/opt/zextras/log/bootstrap.<date>.log` (mode `0600`).
+that `setup.pl` let fail with a warning still only warn, except "Start
+servers": a service that does not start fails the run (setup.pl went on and
+the GAL sync account step then failed against a stopped mailbox). Each
+finished step is recorded in `.install_history` as `setup.pl` did
+(`CONFIGURED <stage>`).
+
+The run logs to `/opt/zextras/log/bootstrap.<date>.log` (mode `0600`):
+
+- a header: the `carbonio-bootstrap` build, the Carbonio version, the inputs
+  (legacy file, YAML file, environment keys, `--set` values, wizard), the
+  node (hostname, new or existing install, platform, systemd or zmcontrol),
+  the enabled roles, and the resolved configuration with each key's source
+  and the passwords masked;
+- for each step `<title>: running`, the commands run (`*** Running as
+  <user>: <argv>`, secrets masked, arguments with spaces or newlines quoted)
+  with their output a line at a time, then `<title>: done in 1.2s` (or
+  `failed after ...`, `warning: ...`, `already done`);
+- at the end every warning with its step, `Summary: N applied, N already
+  done, N with warnings, in 54s`, and the result (`Configuration complete.`,
+  `Result: failed: ...` or `Result: stopped by the operator`).
+
+`zmcertmgr`, which narrates every file it copies and every LDAP lookup it
+tries, has its output logged only when it fails; `--verbose` logs it all,
+with a note on the lookups that are expected to fail on a first install.
 
 On a terminal, the apply screen shows the run. On the left, the preflight
 checks (root, the hostname resolves, the domain MX, the needed ports are

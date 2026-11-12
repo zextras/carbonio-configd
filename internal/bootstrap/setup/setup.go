@@ -41,6 +41,8 @@ type Env struct {
 
 	// Paths of the node; Default paths outside tests.
 	Paths Paths
+	// Verbose logs the full output of the commands run Brief.
+	Verbose bool
 
 	// perlLib caches the zextras PERL5LIB.
 	perlLib string
@@ -223,7 +225,7 @@ func runStep(e *Env, i int, s *Step, dryRun bool) (Result, error) {
 
 			return res, nil
 		case err != nil:
-			return failed(e, s, res, fmt.Errorf("checking: %w", err))
+			return failed(e, s, res, fmt.Errorf("checking: %w", err), "")
 		}
 
 		if done {
@@ -246,16 +248,16 @@ func runStep(e *Env, i int, s *Step, dryRun bool) (Result, error) {
 	e.Log.Detail("%s: running", s.Title)
 	e.Log.takeWarnings()
 
+	start := e.Sys.Clock.Now()
 	err := s.Apply(e)
+	took := logDuration(e.Sys.Clock.Now().Sub(start))
 	res.Warnings = e.Log.takeWarnings()
 
 	if err != nil {
-		e.Log.Detail("%s: failed: %v", s.Title, err)
-
-		return failed(e, s, res, err)
+		return failed(e, s, res, err, " after "+took)
 	}
 
-	e.Log.Detail("%s: done", s.Title)
+	e.Log.Detail("%s: done in %s", s.Title, took)
 
 	res.Outcome = Applied
 
@@ -266,6 +268,11 @@ func runStep(e *Env, i int, s *Step, dryRun bool) (Result, error) {
 	}
 
 	return res, nil
+}
+
+// logDuration formats a step time for the log: tenths of a second.
+func logDuration(d time.Duration) string {
+	return d.Round(100 * time.Millisecond).String()
 }
 
 // recordDone records the stage of a step found already done: setup.pl
@@ -279,7 +286,10 @@ func recordDone(e *Env, s *Step, dryRun bool) error {
 	return e.history().configured(s.Name)
 }
 
-func failed(e *Env, s *Step, res Result, err error) (Result, error) {
+// failed records and logs a step's error: a warning for an Optional step, a
+// failure stopping the run otherwise. after is " after <duration>" for an
+// error of Apply, empty for one of the check.
+func failed(e *Env, s *Step, res Result, err error, after string) (Result, error) {
 	res.Err = err
 
 	res.Outcome = Failed
@@ -287,10 +297,12 @@ func failed(e *Env, s *Step, res Result, err error) (Result, error) {
 	if s.Optional {
 		res.Outcome = Warned
 
-		e.Log.Detail("%s: warning: %v", s.Title, err)
+		e.Log.Detail("%s: warning%s: %v", s.Title, after, err)
 
 		return res, nil
 	}
+
+	e.Log.Detail("%s: failed%s: %v", s.Title, after, err)
 
 	return res, fmt.Errorf("%w: %s: %w", ErrStepFailed, s.Title, err)
 }

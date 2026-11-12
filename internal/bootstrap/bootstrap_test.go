@@ -84,7 +84,9 @@ func TestDefaults_FollowRolesAndHostname(t *testing.T) {
 	require.NoError(t, mta.ApplyDefaults(fakeHost{fqdn: "mta.example.com", roles: []string{RoleMTA}}))
 	assert.Empty(t, mta.Config.LDAP.AdminPassword, "only the LDAP master generates passwords")
 	assert.Empty(t, mta.Config.LDAP.Host)
-	assert.Equal(t, 143, mta.Config.Store.Ports.IMAP)
+	assert.Equal(t, 7143, mta.Config.Store.Ports.IMAP, "mailboxd (zextras) never defaults to a port below 1024")
+	assert.Equal(t, 8080, mta.Config.Store.Ports.HTTP)
+	assert.Equal(t, 80, mta.Config.Proxy.Ports.HTTP, "the proxy, on another node, takes the standard ports")
 }
 
 func TestApplyYAML_Errors(t *testing.T) {

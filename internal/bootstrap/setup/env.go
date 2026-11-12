@@ -5,6 +5,7 @@
 package setup
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -160,17 +161,49 @@ func (l *Log) Warn(format string, args ...any) { l.note(true, format, args...) }
 // Detail writes a line to the log file only.
 func (l *Log) Detail(format string, args ...any) { l.write(false, format+"\n", args...) }
 
-// Writer returns a writer that copies command output into the log file.
-func (l *Log) Writer() io.Writer { return logWriter{l} }
+// Writer returns a writer that copies the output of one command into the
+// log file a line at a time: a tool that prints progress a character per
+// write (openssl's dots) still makes one line, not one per write. Flush
+// writes the last, unterminated line once the command ends.
+func (l *Log) Writer() *LineWriter { return &LineWriter{l: l} }
 
-type logWriter struct{ l *Log }
+// LineWriter is the log writer of one command.
+type LineWriter struct {
+	l       *Log
+	partial []byte
+}
 
-func (w logWriter) Write(p []byte) (int, error) {
-	if s := strings.TrimRight(string(p), "\n"); s != "" {
-		w.l.write(false, "%s\n", s)
+func (w *LineWriter) Write(p []byte) (int, error) {
+	w.partial = append(w.partial, p...)
+
+	for {
+		i := bytes.IndexByte(w.partial, '\n')
+		if i < 0 {
+			break
+		}
+
+		w.line(w.partial[:i])
+		w.partial = w.partial[i+1:]
 	}
 
 	return len(p), nil
+}
+
+// Flush writes what is left after the last newline. A nil LineWriter (the
+// output is not logged) has nothing to flush.
+func (w *LineWriter) Flush() {
+	if w == nil {
+		return
+	}
+
+	w.line(w.partial)
+	w.partial = nil
+}
+
+func (w *LineWriter) line(b []byte) {
+	if s := strings.TrimRight(string(b), "\r"); strings.TrimSpace(s) != "" {
+		w.l.write(false, "%s\n", s)
+	}
 }
 
 // history appends to .install_history in the setup.pl format, which the

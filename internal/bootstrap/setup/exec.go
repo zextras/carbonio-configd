@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	"github.com/zextras/carbonio-configd/internal/config"
@@ -29,6 +30,9 @@ type Cmd struct {
 	Env []string
 	// Quiet keeps the output out of the log file (it may hold secrets).
 	Quiet bool
+	// Brief keeps the output out of the log file unless the command fails
+	// or the run is verbose: for tools that narrate every file they touch.
+	Brief bool
 }
 
 // zextrasUmask is the umask of the zextras login shell (zextras.bashrc).
@@ -84,7 +88,7 @@ func (e *Env) output(c *Cmd, capture bool) ([]byte, error) {
 		}
 	}
 
-	shown := strings.Join(redact.Args(append([]string{c.Path}, c.Args...)), " ")
+	shown := shownArgs(append([]string{c.Path}, c.Args...))
 	who := "root"
 
 	if c.AsZextras {
@@ -95,10 +99,10 @@ func (e *Env) output(c *Cmd, capture bool) ([]byte, error) {
 
 	var stdout, tail bytes.Buffer
 
-	logOut := io.Writer(&tail)
-	if !c.Quiet {
-		logOut = io.MultiWriter(&tail, e.Log.Writer())
-	}
+	brief := c.Brief && !e.Verbose
+	logOut, lw := e.cmdLog(&tail, c.Quiet || brief)
+
+	defer lw.Flush()
 
 	cmd.Stderr = logOut
 	cmd.Stdout = logOut
@@ -125,10 +129,41 @@ func (e *Env) output(c *Cmd, capture bool) ([]byte, error) {
 	}
 
 	if res.ExitCode != 0 {
+		if brief && !c.Quiet {
+			e.Log.Detail("%s", strings.TrimRight(tail.String(), "\n"))
+		}
+
 		return stdout.Bytes(), &CmdError{Cmd: shown, Code: res.ExitCode, Output: tail.String(), quiet: c.Quiet}
 	}
 
 	return stdout.Bytes(), nil
+}
+
+// cmdLog is where a command's output goes: always tail (for the error), and
+// the log file a line at a time unless hidden (then lw is nil). lw.Flush
+// ends the last line.
+func (e *Env) cmdLog(tail io.Writer, hidden bool) (out io.Writer, lw *LineWriter) {
+	if hidden {
+		return tail, nil
+	}
+
+	lw = e.Log.Writer()
+
+	return io.MultiWriter(tail, lw), lw
+}
+
+// shownArgs is argv as logged: secrets masked, and an argument with spaces
+// or control characters quoted so the command stays on one line.
+func shownArgs(argv []string) string {
+	out := redact.Args(argv)
+
+	for i, a := range out {
+		if a == "" || strings.ContainsAny(a, " \t\n\r\"'") {
+			out[i] = strconv.Quote(a)
+		}
+	}
+
+	return strings.Join(out, " ")
 }
 
 // CmdError is a command that exited non-zero.
