@@ -41,7 +41,6 @@ type CLI struct {
 	Plan        PlanCmd
 	Shadow      ShadowCmd
 	Release     ReleaseCmd
-	Bootstrap   BootstrapCmd
 	Daemon      DaemonCmd
 }
 
@@ -96,7 +95,6 @@ func newRootCmd(name string, cli *CLI, env sys.System, std *stdio) (*cobra.Comma
 		a.planCmd(),
 		a.shadowCmd(),
 		a.releaseCmd(),
-		a.bootstrapCmd(),
 		a.daemonCmd(),
 	)
 

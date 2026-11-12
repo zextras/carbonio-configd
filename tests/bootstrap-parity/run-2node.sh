@@ -15,7 +15,7 @@
 #                       the master's. Needs ./build.sh --ldap;  default DIR out/replica-<mode>
 #
 #   ./run-2node.sh legacy                       [--scenario S] [--out DIR] [--keep]
-#   ./run-2node.sh configd /path/to/configd     [--scenario S] [--out DIR] [--keep]
+#   ./run-2node.sh configd /path/to/carbonio-bootstrap     [--scenario S] [--out DIR] [--keep]
 #
 # Needs ./build.sh and the image of the scenario.
 # Output: DIR/node1 (taken after node 2 joined), DIR/node2, DIR.timing; replica scenario
@@ -28,7 +28,7 @@ MODE="${1:?usage: run-2node.sh legacy|configd [BIN] [options]}"
 shift
 BIN=""
 if [[ ${MODE} == configd ]]; then
-  BIN="${1:?usage: run-2node.sh configd /path/to/configd [options]}"
+  BIN="${1:?usage: run-2node.sh configd /path/to/carbonio-bootstrap [options]}"
   shift
   [[ -x ${BIN} ]] || die "not an executable file: ${BIN}"
 elif [[ ${MODE} != legacy ]]; then
@@ -72,7 +72,7 @@ bootstrap() { # NAME CONFIG_IN_CONTAINER
   if [[ ${MODE} == legacy ]]; then
     podman exec "$1" /usr/bin/carbonio-bootstrap -c /opt/product.config
   else
-    podman exec "$1" /opt/zextras/bin/configd bootstrap run \
+    podman exec "$1" /usr/bin/carbonio-bootstrap run \
       --legacy-config /opt/product.config --non-interactive
   fi
 }
@@ -84,8 +84,8 @@ prepare_container "${N1}" "${FQDN1}" "${PARITY_DIR}/config/single-node.config" "
 prepare_container "${N2}" "${FQDN2}" "${NODE2_CONFIG}" "${PEER2}"
 if [[ ${MODE} == configd ]]; then
   for n in "${N1}" "${N2}"; do
-    podman cp "${BIN}" "${n}:/opt/zextras/bin/configd"
-    podman exec "${n}" chmod 0755 /opt/zextras/bin/configd
+    podman cp "${BIN}" "${n}:/usr/bin/carbonio-bootstrap"
+    podman exec "${n}" chmod 0755 /usr/bin/carbonio-bootstrap
   done
 fi
 
