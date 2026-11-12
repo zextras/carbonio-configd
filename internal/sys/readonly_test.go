@@ -46,6 +46,7 @@ func TestReadOnly_RefusesEveryMutationBeforeItReachesTheHost(t *testing.T) {
 		"mkdir":       ro.FS.MkdirAll("/etc/d", 0o755),
 		"chmod":       ro.FS.Chmod("/etc/live.conf", 0o600),
 		"chown":       ro.FS.Chown("/etc/live.conf", 1, 1),
+		"lchown":      ro.FS.Lchown("/etc/link", 1, 1),
 		"symlink":     ro.FS.Symlink("/etc/live.conf", "/etc/link"),
 		"signal":      ro.Proc.Signal(42, syscall.SIGHUP),
 		"signal grp":  ro.Proc.SignalGroup(42, syscall.SIGHUP),

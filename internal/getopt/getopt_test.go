@@ -106,3 +106,37 @@ func TestParse_OptionalInteger(t *testing.T) {
 		assert.Equal(t, c.err, errb.String(), name)
 	}
 }
+
+// "name!" answers to no<name> and no-<name>, and "name=s@" collects every value.
+func TestParse_NegatableFlagsAndLists(t *testing.T) {
+	specs := []Spec{
+		{Names: []string{"verbose"}, Kind: NegFlag},
+		{Names: []string{"deploy"}, Kind: StringList},
+		{Names: []string{"debug"}, Kind: Flag},
+	}
+
+	var stderr bytes.Buffer
+
+	r := Parse([]string{"-noverbose", "--deploy", "a", "-deploy=b,c", "x"}, specs, &stderr)
+	assert.True(t, r.AllGood)
+	assert.True(t, r.Has("verbose"))
+	assert.True(t, r.Negated["verbose"])
+	assert.Equal(t, []string{"a", "b,c"}, r.Lists["deploy"])
+	assert.Equal(t, []string{"x"}, r.Rest)
+
+	r = Parse([]string{"--no-verbose", "--verbose"}, specs, &stderr)
+	assert.False(t, r.Negated["verbose"], "the last one wins")
+
+	r = Parse([]string{"-NOV"}, specs, &stderr)
+	assert.True(t, r.Negated["verbose"], "abbreviations of the negated name work")
+
+	assert.Empty(t, stderr.String())
+
+	stderr.Reset()
+
+	// "no" is the start of nothing but the negated spelling; "d" is ambiguous.
+	r = Parse([]string{"-d", "-verbose=1", "-deploy"}, specs, &stderr)
+	assert.False(t, r.AllGood)
+	assert.Equal(t, "Option d is ambiguous (deploy, debug)\nOption verbose does not take an argument\n"+
+		"Option deploy requires an argument\n", stderr.String())
+}

@@ -662,6 +662,33 @@ func (f *FS) Chown(name string, uid, gid int) error {
 	return nil
 }
 
+// Lchown implements sys.FS: the owner of the link itself.
+func (f *FS) Lchown(name string, uid, gid int) error {
+	f.rec.Recordf("fs.lchown", "%s %d:%d", name, uid, gid)
+
+	if err := f.check("Lchown", name); err != nil {
+		return err
+	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	n, ok := f.nodes[clean(name)]
+	if !ok {
+		return pathErr("lchown", name, fs.ErrNotExist)
+	}
+
+	if uid >= 0 {
+		n.uid = uid
+	}
+
+	if gid >= 0 {
+		n.gid = gid
+	}
+
+	return nil
+}
+
 // Owner returns the uid/gid recorded by Chown.
 func (f *FS) Owner(name string) (uid, gid int, ok bool) {
 	f.mu.Lock()

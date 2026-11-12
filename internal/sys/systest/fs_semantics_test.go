@@ -687,3 +687,20 @@ func TestFS_AvailBytes(t *testing.T) {
 	n, _ = f.FS.AvailBytes("/")
 	assert.Equal(t, uint64(42), n)
 }
+
+// Lchown changes the link, not what it points to.
+func TestFS_LchownOwnsTheLinkOnly(t *testing.T) {
+	t.Parallel()
+
+	f := systest.New()
+	f.FS.Put("/t", nil, 0o600)
+	require.NoError(t, f.FS.Symlink("t", "/l"))
+
+	require.NoError(t, f.FS.Lchown("/l", 10, 20))
+	assert.Equal(t, []string{"/l 10:20"}, f.Rec.Of("fs.lchown"))
+
+	uid, _, _ := f.FS.Owner("/t")
+	assert.Zero(t, uid, "the target is untouched")
+
+	require.ErrorIs(t, f.FS.Lchown("/missing", 1, 1), fs.ErrNotExist)
+}

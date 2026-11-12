@@ -35,6 +35,12 @@ const (
 	// OptInt takes an optional integer ("new:i"): a bare option takes the
 	// next argument only when it is a number.
 	OptInt
+	// NegFlag takes nothing and may be negated ("verbose!"): "-noverbose" and
+	// "-no-verbose" are given with Negated set.
+	NegFlag
+	// StringList takes a mandatory string each time it is given, and
+	// collects them ("deploy=s@").
+	StringList
 )
 
 // Spec is one option of a Getopt::Long specification such as "s|sid=i":
@@ -50,6 +56,10 @@ type Result struct {
 	Given map[string]bool
 	Strs  map[string]string
 	Ints  map[string]int
+	// Lists holds the values of the options of StringList, in order.
+	Lists map[string][]string
+	// Negated holds the options of NegFlag that were given negated.
+	Negated map[string]bool
 	// bare holds the options of OptInt that came without a number.
 	Bare    map[string]bool
 	Rest    []string
@@ -69,7 +79,8 @@ func (r *Result) Has(name string) bool { return r.Given[name] }
 // options are still read, as it does.
 func Parse(args []string, specs []Spec, stderr io.Writer) *Result {
 	r := &Result{
-		Given: map[string]bool{}, Bare: map[string]bool{}, Strs: map[string]string{}, Ints: map[string]int{}, AllGood: true,
+		Given: map[string]bool{}, Bare: map[string]bool{}, Strs: map[string]string{}, Ints: map[string]int{},
+		Lists: map[string][]string{}, Negated: map[string]bool{}, AllGood: true,
 	}
 
 	for i := 0; i < len(args); {
@@ -102,19 +113,20 @@ func Parse(args []string, specs []Spec, stderr io.Writer) *Result {
 func (r *Result) option(arg string, args []string, next int, specs []Spec) (after int, msg string) {
 	name, value, hasValue := strings.Cut(strings.TrimPrefix(strings.TrimPrefix(arg, "-"), "-"), "=")
 
-	spec, msg := optMatch(name, specs)
+	spec, neg, msg := optMatch(name, specs)
 	if msg != "" {
 		return next, msg
 	}
 
 	primary := spec.Names[0]
 
-	if spec.Kind == Flag {
+	if spec.Kind == Flag || spec.Kind == NegFlag {
 		if hasValue {
 			return next, prefix + primary + " does not take an argument"
 		}
 
 		r.Given[primary] = true
+		r.Negated[primary] = neg
 
 		return next, ""
 	}
@@ -142,6 +154,8 @@ func (r *Result) value(spec Spec, value string, hasValue bool, args []string, ne
 	switch {
 	case spec.Kind == String:
 		r.Strs[primary] = value
+	case spec.Kind == StringList:
+		r.Lists[primary] = append(r.Lists[primary], value)
 	case value == "":
 		r.Bare[primary] = true
 	default:
@@ -158,46 +172,81 @@ func (r *Result) value(spec Spec, value string, hasValue bool, args []string, ne
 	return next, ""
 }
 
+// candidate is an option a name may stand for; neg marks its negated spelling.
+type candidate struct {
+	spec Spec
+	neg  bool
+}
+
 // optMatch is the option that name stands for: an exact name, else the only
-// option one of whose names it abbreviates; otherwise the complaint.
-func optMatch(name string, specs []Spec) (match Spec, complaint string) {
+// option one of whose names it abbreviates; otherwise the complaint. neg is
+// set when the name is the negated spelling of a NegFlag.
+func optMatch(name string, specs []Spec) (match Spec, neg bool, complaint string) {
 	name = strings.ToLower(name)
 
-	var found []Spec
-
-	for _, s := range specs {
-		if slices.Contains(s.Names, name) {
-			return s, ""
-		}
-	}
-
-	for _, s := range specs {
-		if name != "" && optAbbreviates(name, s) {
-			found = append(found, s)
-		}
+	exact, found := candidates(name, specs)
+	if exact != nil {
+		return exact.spec, exact.neg, ""
 	}
 
 	switch len(found) {
 	case 0:
-		return Spec{}, "Unknown option: " + name
+		return Spec{}, false, "Unknown option: " + name
 	case 1:
-		return found[0], ""
+		return found[0].spec, found[0].neg, ""
 	}
 
 	names := make([]string, len(found))
-	for i, s := range found {
-		names[i] = s.Names[0]
-	}
 
-	return Spec{}, prefix + name + " is ambiguous (" + strings.Join(names, ", ") + ")"
-}
-
-func optAbbreviates(name string, s Spec) bool {
-	for _, n := range s.Names {
-		if strings.HasPrefix(n, name) {
-			return true
+	for i, c := range found {
+		names[i] = c.spec.Names[0]
+		if c.neg {
+			names[i] = "no" + names[i]
 		}
 	}
 
-	return false
+	return Spec{}, false, prefix + name + " is ambiguous (" + strings.Join(names, ", ") + ")"
+}
+
+// candidates are the options name spells exactly (the first one) or
+// abbreviates, each once.
+func candidates(name string, specs []Spec) (exact *candidate, found []candidate) {
+	for _, s := range specs {
+		for _, sp := range spellings(s) {
+			c := candidate{s, sp.neg}
+
+			switch {
+			case sp.name == name:
+				return &c, nil
+			case name != "" && strings.HasPrefix(sp.name, name):
+				found = append(found, c)
+			}
+		}
+	}
+
+	return nil, slices.CompactFunc(found, func(a, b candidate) bool {
+		return a.spec.Names[0] == b.spec.Names[0] && a.neg == b.neg
+	})
+}
+
+// spelling is a name an option answers to; neg marks a negated one.
+type spelling struct {
+	name string
+	neg  bool
+}
+
+// spellings are the names of an option: those it has and, for a NegFlag, the
+// "no" and "no-" forms of each.
+func spellings(s Spec) []spelling {
+	var out []spelling
+
+	for _, n := range s.Names {
+		out = append(out, spelling{n, false})
+
+		if s.Kind == NegFlag {
+			out = append(out, spelling{"no" + n, true}, spelling{"no-" + n, true})
+		}
+	}
+
+	return out
 }
