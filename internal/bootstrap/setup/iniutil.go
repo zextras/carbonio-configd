@@ -67,7 +67,7 @@ type iniLine struct {
 var (
 	iniSectionRE = regexp.MustCompile(`^\s*\[(\s*\w*\s*)\]\s*(?:#.*)?\n?$`)
 	iniEmptyRE   = regexp.MustCompile(`^\s*(?:#.*)?\n?$`)
-	iniKeyRE     = regexp.MustCompile(`^(\s*)([^=\s]*)(\s*)(=?)(\s*)([^\s]*)(\s*(?:#.*)?)\n?$`)
+	iniKeyRE     = regexp.MustCompile(`^(\s*)([^=\s]*)(\s*)(=?)(\s*)(\S*)(\s*(?:#.*)?)\n?$`)
 )
 
 // iniParse reads the lines of an ini file (iniutil.pl parseFile). dbg, when not
@@ -195,22 +195,43 @@ func iniRender(lines []iniLine, ed *iniEdit) string {
 			continue
 		}
 
-		if l.hasKey && l.key == ed.Key && l.hasSection && l.section == ed.Section {
-			if ed.Op == iniUnset {
-				continue
-			}
-
-			if iniReplaces(ed, l.value) {
-				out.WriteString(assignment + "\n")
-
-				continue
-			}
+		switch iniKeyLine(l, ed) {
+		case iniReplace:
+			out.WriteString(assignment + "\n")
+		case iniKeep:
+			out.WriteString(l.content)
+		case iniDrop:
+			continue
 		}
-
-		out.WriteString(l.content)
 	}
 
 	return out.String()
+}
+
+// iniFate is what an edit does to a line.
+type iniFate int
+
+const (
+	iniKeep iniFate = iota
+	iniDrop
+	iniReplace
+)
+
+// iniKeyLine tells what the edit does to the line: only a line of the key in
+// the section is dropped (unset) or replaced.
+func iniKeyLine(l *iniLine, ed *iniEdit) iniFate {
+	if !l.hasKey || l.key != ed.Key || !l.hasSection || l.section != ed.Section {
+		return iniKeep
+	}
+
+	switch {
+	case ed.Op == iniUnset:
+		return iniDrop
+	case iniReplaces(ed, l.value):
+		return iniReplace
+	}
+
+	return iniKeep
 }
 
 // iniReplaces tells whether the line holding current is replaced by the new
@@ -344,7 +365,7 @@ Eg:
 
 // iniOptions are the options of zminiutil: the operations, then the rest.
 var iniOptions = []optSpec{
-	{names: []string{"debug"}}, {names: []string{"help"}},
+	{names: []string{"debug"}}, {names: []string{optHelp}},
 	{names: []string{"get"}}, {names: []string{"isset"}}, {names: []string{"list"}}, {names: []string{"set"}},
 	{names: []string{"setmin"}}, {names: []string{"setmax"}}, {names: []string{"unset"}},
 	{names: []string{"backup"}, kind: optString}, {names: []string{"section"}, kind: optString},
@@ -382,32 +403,54 @@ func iniCheck(o *optResult) (ed *iniEdit, msg string) {
 	ed.Key = o.strs["key"]
 	ed.Value, ed.HasValue = o.strs["value"], o.has("value")
 	ed.Backup, ed.HasBackup = o.strs["backup"], o.has("backup")
-	setting := ed.Op == iniSet || ed.Op == iniSetMin || ed.Op == iniSetMax
 
-	switch {
-	case ops < 1:
-		return nil, "one of " + iniOpNames + " must be specified"
-	case ops > 1:
-		return nil, "only one of " + iniOpNames + " must be specified"
-	case !o.has("key") && ed.Op != iniList:
-		return nil, "--key not specified"
-	case !ed.HasSection && ed.Op != iniList:
-		return nil, "--section not specified"
-	case ed.HasValue && !setting:
-		return nil, "--value can only be specified with [set|setmin|setmax]"
-	case !ed.HasValue && (ed.Op == iniSetMin || ed.Op == iniSetMax):
-		return nil, "--value must be specified with [setmin|setmax]"
-	// The script's test lists set twice and not unset: unset takes the
-	// default ".bak" backup.
-	case !ed.HasBackup && setting:
-		return nil, "--backup must be specified with [set|setmin|setmax|unset]"
-	case len(o.rest) != 1:
-		return nil, "one inifile must be specified"
-	case (ed.Op == iniSetMin || ed.Op == iniSetMax) && !iniIntRE.MatchString(ed.Value):
-		return nil, "--value must be a number"
+	if msg = iniCheckAction(o, ed, ops); msg != "" {
+		return nil, msg
+	}
+
+	if msg = iniCheckValue(o, ed); msg != "" {
+		return nil, msg
 	}
 
 	return ed, ""
+}
+
+// iniCheckAction checks the action asked for and its section and key.
+func iniCheckAction(o *optResult, ed *iniEdit, ops int) string {
+	switch {
+	case ops < 1:
+		return "one of " + iniOpNames + " must be specified"
+	case ops > 1:
+		return "only one of " + iniOpNames + " must be specified"
+	case !o.has("key") && ed.Op != iniList:
+		return "--key not specified"
+	case !ed.HasSection && ed.Op != iniList:
+		return "--section not specified"
+	}
+
+	return ""
+}
+
+// iniCheckValue checks the value, the backup and the file argument.
+func iniCheckValue(o *optResult, ed *iniEdit) string {
+	setting := ed.Op == iniSet || ed.Op == iniSetMin || ed.Op == iniSetMax
+
+	switch {
+	case ed.HasValue && !setting:
+		return "--value can only be specified with [set|setmin|setmax]"
+	case !ed.HasValue && (ed.Op == iniSetMin || ed.Op == iniSetMax):
+		return "--value must be specified with [setmin|setmax]"
+	// The script's test lists set twice and not unset: unset takes the
+	// default ".bak" backup.
+	case !ed.HasBackup && setting:
+		return "--backup must be specified with [set|setmin|setmax|unset]"
+	case len(o.rest) != 1:
+		return "one inifile must be specified"
+	case (ed.Op == iniSetMin || ed.Op == iniSetMax) && !iniIntRE.MatchString(ed.Value):
+		return "--value must be a number"
+	}
+
+	return ""
 }
 
 // RunIniUtil is zminiutil (libexec/iniutil.pl): it reads or edits one ini file
@@ -424,7 +467,7 @@ func RunIniUtil(fsys sys.FS, args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	if o.has("help") {
+	if o.has(optHelp) {
 		_, _ = io.WriteString(stdout, iniUsage)
 
 		return 0

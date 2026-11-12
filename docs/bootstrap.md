@@ -279,7 +279,7 @@ on an existing install the values in localconfig and LDAP. A new node whose
 it runs the steps of `setup.pl` in its order:
 
 1. LDAP configuration and schema, the CA of an existing install, port
-   conflicts, `zmldapupdateldif`.
+   conflicts, the LDIF update (`setup ldap-update-ldif`, in process).
 2. localconfig values, CA and certificates, server entry, LDAP setup
    (master, `replica` or `mmr`), service ports and store, timezone and proxy
    preferences, MTA, enabled services, host pool.
@@ -543,6 +543,69 @@ statuses of their scripts instead.
 | `setup dhparam get\|set [options]` | `zmdhparam` | root, zextras | Reads or stores the DH parameters of `zimbraSSLDHParam`; see [`setup dhparam get` and `set`](#setup-dhparam-get-and-set). |
 | `setup ldap-passwd [options] [password]` | `zmldappasswd` | root, zextras | Changes an LDAP password in localconfig, the directory and `conf/carbonio.ldif`; the password is read from stdin when it is not an argument. See [`setup ldap-passwd`](#setup-ldap-passwd). |
 | `setup proxyconfig [options]` | `zmproxyconfig` (Perl) | root, zextras | Every option, default, check, message, help text and exit status of the script (`-h -o -m -w -d -e -f -r -s -t -c -C -n -u -U -i -p -a -x -H`; options parse like Perl's `Getopt::Std`). `1`: refused options or checks (usage on stdout), `2`: an attribute change failed, `255`: unusable options or LDAP. Nothing is printed on success; `-e` and `-f` warn about domains with `zimbraVirtualIPAddress` on stderr. |
+| `setup ldap-schema` | `zmldapschema` | root, zextras | Installs the slapd schemas into `data/ldap/config/cn=config/cn=schema`; see [LDAP and ini tools](#ldap-and-ini-tools). |
+| `setup ldap-update-ldif` | `zmldapupdateldif` | root | Adds the missing base entries and applies `lib/conf/*.ldif` on an LDAP master. |
+| `setup ldap-enable-replica` | `zmldapenablereplica` | root | The provider overlays on the master, the consumer configuration on a replica. |
+| `setup ldap-enable-mmr [-r RID] [-s SID] -m MMRURI` | `zmldapenable-mmr` | root, zextras | Adds a multi-master agreement with another master. |
+| `setup iptool [-d [-m ipmode]]` | `zmiptool` | root, zextras | Applies `zimbraIPMode` to the Java options and the MySQL bind address. |
+| `setup iniutil [options] inifile` | `zminiutil` | any user | Reads or edits one ini file (`--list --get --isset --set --setmin --setmax --unset`). |
+
+### LDAP and ini tools
+
+carbonio-core installs `libexec/zmldapschema`, `zmldapupdateldif`,
+`zmldapenablereplica`, `zmldapenable-mmr`, `zmiptool` and `zminiutil` as
+`exec /opt/zextras/libexec/setup <command> "$@"`. The bootstrap steps (the
+schema install, `zmldapupdateldif`, `zmldapenablereplica`/`zmldapenable-mmr`
+of the LDAP setup and `zmiptool`) call the same functions in process instead
+of running the scripts. The options are parsed as Perl's `Getopt::Long`
+does (abbreviations, `-x` or `--x`, `--x=value`).
+
+| Command | Options | Exit status |
+| --- | --- | --- |
+| `ldap-schema` | none (arguments are ignored) | `0`; `1` when openldap is not installed (`ERROR: openldap does not appear to be installed - exiting` on stdout) or a file cannot be written |
+| `ldap-update-ldif` | none | `0` (also when `ldap_is_master` is not true: nothing is done); `255` on a failed connection or bind (raw message on stderr) |
+| `ldap-enable-replica` | `-h`, `--help` | `0`; `1` for the usage (stderr), a refusal (accesslog or syncprov already enabled, slapd does not start, syncrepl refused) or a root-only breach; `255` on connection or bind failures |
+| `ldap-enable-mmr` | `-m/--mmr URI` (required, `ldap(s)://...` ending in `/`), `-s/--sid N`, `-r/--rid N` (100), `-h` | `0`; `1` for the usage, a missing, repeated or conflicting server id or rid; `255` on LDAP failures |
+| `iptool` | `-d/--dryrun`, `-m/--mode ipv4\|both\|ipv6` (only with `-d`), `-h` | `0`; `1` for the usage, an unknown server or mode; `255` on LDAP failures |
+| `iniutil` | `--list --get --isset --set --setmin --setmax --unset --section --key --value --backup --debug --help`, then the file | as the script: `get`/`isset` `1` when the key is missing, usage errors print `Error: ...` on stdout and exit `1`, a failed file operation exits with its errno |
+
+Messages (the `Verifying ldap on ...`, `Enabling sync provider on master...`,
+`Error: A replication agreement for rid N already exists.` and so on) are the
+scripts' own. `ldap-update-ldif` and `ldap-enable-replica` accept root only
+(`Error: must be run as root user`, exit `1`, as the scripts' own check);
+`ldap-schema`, `ldap-enable-mmr` and `iptool` accept root or zextras.
+`ldappromote-replica-mmr`, `ldapmmrtool` and `ldapreplicatool` (installed as
+`zmldappromote-replica-mmr`, `zmldapmmrtool`, `zmldapreplicatool`) are
+administrator tools the bootstrap never calls; they are not ported.
+
+Differences from the scripts:
+
+- `ldap-schema`, `ldap-enable-mmr` and `iptool` also accept root (the
+  scripts were zextras only); they chown what they create to zextras.
+- A Perl `die` printed the message and exited `255`; the same messages are
+  printed without a prefix and exit `255` here (`Bind: <error>`,
+  `Add Failed: <error>`, `Server ID: ...`, `Syncrepl: ...`, `Mirror mode:
+  ...`). Results the scripts never looked at are now checked: the accesslog
+  and `syncprov` adds of `ldap-enable-replica` (a typo, `$mesg =>`, dropped
+  them), the adds, the server id and the syncrepl modify of `ldap-enable-mmr`,
+  and the `ms +zimbraServiceEnabled ldap` of the last step of
+  `ldap-enable-replica`, which failed silently.
+- `iptool` reads the effective localconfig (the script used `zmlocalconfig`
+  for the expanded values and the raw text of the Java options; those are
+  still read raw, so `${...}` is not written back expanded). A failure to
+  write localconfig is returned at the end instead of being ignored. The DNS
+  checks use the Go resolver, which also reads `/etc/hosts`. The `zminiutil`
+  calls are done in process, with the backups `.pre` and `.pre-bind`, and
+  the antispam `my.cnf` is only edited when it exists.
+- `iniutil` keeps the owner and mode of the file (bootstrap runs as root on
+  zextras-owned files) and replaces it atomically.
+- `ldap-update-ldif` reads `lib/conf/*.ldif` in name order; an LDIF that does
+  not parse prints `Error msg: ...` and `Error lines:` as the script did. A
+  slapd that cannot be started is logged and the run goes on, as in the
+  script; a failed bind or connection ends it.
+- `ldap-schema` stops at the first file it cannot write and leaves no `*.orig`
+  files (it removes old ones), because the `sed -i.orig` renames are done in
+  memory.
 
 ### `setup proxyconfig`
 

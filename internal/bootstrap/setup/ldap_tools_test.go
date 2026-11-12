@@ -166,7 +166,7 @@ func ldapUpdateEnv(t *testing.T) (*Env, *systest.Fakes, *ldapFake) {
 	return e, fakes, f
 }
 
-var ldapTemplateDNs = []string{
+var ldapTemplateDNS = []string{
 	"uid=zimbra,cn=admins,cn=zimbra", "uid=zmreplica,cn=admins,cn=zimbra", "cn=zimbra_globalconfig,cn=zimbra",
 	"cn=zimbra_defaultcos,cn=zimbra", "cn=zimbra_defaultexternalcos,cn=zimbra", "cn=mimehandlers,cn=zimbra",
 }
@@ -185,7 +185,7 @@ func TestLdapUpdateLDIF_AddsTheEntriesTheDirectoryLacks(t *testing.T) {
 
 	require.NoError(t, ldapUpdateLDIF(e, f.kit(), &out))
 
-	assert.Equal(t, ldapTemplateDNs, f.adds)
+	assert.Equal(t, ldapTemplateDNS, f.adds)
 	assert.Empty(t, out.String(), "the script is silent")
 	assert.Equal(t, []string{"start", "bind cn=config"}, f.events)
 	assert.Equal(t, []ldapDial{{URLs: []string{ldapToolLMR}, TLS: ldapTLSInsecure}}, f.dials,

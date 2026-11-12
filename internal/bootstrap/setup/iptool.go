@@ -220,7 +220,7 @@ func ipServerMode(conn ldapConn, host string, out io.Writer) (string, error) {
 func ipServerHas(conn ldapConn, host, service string) (bool, error) {
 	filter := "(&(objectClass=zimbraServer)(cn=" + goldap.EscapeFilter(host) + ")(zimbraServiceEnabled=" + service + "))"
 
-	entries, err := conn.Search("", filter, true, []string{"1.1"})
+	entries, err := conn.Search("", filter, true, []string{ldapAttrNone})
 	if err != nil {
 		return false, ldapDie("%s", ldapErrText(err))
 	}
@@ -332,7 +332,7 @@ func (t *ipToolRun) bindAddress(key, mycnf, addr string, onlyIfFile bool) {
 
 // ipToolOptionSpecs are the options of zmiptool.
 var ipToolOptionSpecs = []optSpec{
-	{names: []string{"h", "help"}},
+	{names: []string{"h", optHelp}},
 	{names: []string{"d", "dryrun"}},
 	{names: []string{"m", "mode"}, kind: optString},
 }

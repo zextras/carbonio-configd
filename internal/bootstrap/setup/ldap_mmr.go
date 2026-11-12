@@ -12,6 +12,7 @@ import (
 	"strings"
 )
 
+//nolint:lll // the text of the script
 const ldapEnableMMRUsage = `  zmldapenable-mmr [-r RID] [-s SID] -m MMRURI
 
   Where:
@@ -114,7 +115,7 @@ var ldapRIDRE = regexp.MustCompile(`^[^ ]*`)
 // ldapMMRCheckRID refuses a replication id that an agreement of the main
 // database has.
 func ldapMMRCheckRID(conn ldapConn, rid int, out io.Writer) error {
-	agreements, err := conn.Search(ldapMMRDB, "(olcSyncrepl=*)", true, []string{"olcSyncrepl"})
+	agreements, err := conn.Search(ldapMMRDB, "(olcSyncrepl=*)", true, []string{ldapAttrSyncrepl})
 	if err != nil {
 		return ldapSearchError(err)
 	}
@@ -123,7 +124,7 @@ func ldapMMRCheckRID(conn ldapConn, rid int, out io.Writer) error {
 		return nil
 	}
 
-	for _, v := range agreements[0].ldapAttr("olcSyncrepl") {
+	for _, v := range agreements[0].ldapAttr(ldapAttrSyncrepl) {
 		_, after, found := strings.Cut(v, "rid=")
 		if !found {
 			continue
@@ -145,7 +146,7 @@ func ldapMMRCheckRID(conn ldapConn, rid int, out io.Writer) error {
 func ldapMMRAgreement(e *Env, conn ldapConn, o ldapMMROptions, lc map[string]string) error {
 	value := ldapSyncrepl(e, strconv.Itoa(o.RID), o.URI, lc["ldap_replication_password"], ldapSyncreplTLS(o.URI, lc))
 
-	err := conn.Modify(ldapMMRDB, []ldapMod{{Op: ldapModAdd, Attr: "olcSyncrepl", Values: []string{value}}})
+	err := conn.Modify(ldapMMRDB, []ldapMod{{Op: ldapModAdd, Attr: ldapAttrSyncrepl, Values: []string{value}}})
 	if err != nil {
 		return ldapDie("Syncrepl: %s", ldapErrText(err))
 	}
@@ -181,7 +182,7 @@ func RunLDAPEnableMMR(e *Env, args []string, stdout, stderr io.Writer) int {
 	}
 
 	o := parseGetoptLong(args, []optSpec{
-		{names: []string{"h", "help"}},
+		{names: []string{"h", optHelp}},
 		{names: []string{"s", "sid"}, kind: optInt},
 		{names: []string{"m", "mmr"}, kind: optString},
 		{names: []string{"r", "rid"}, kind: optInt},

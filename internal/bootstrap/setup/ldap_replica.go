@@ -170,7 +170,7 @@ func (r *ldapReplica) verifyMaster() error {
 // updateLdapHost sets ldap_url to this node first and the master second. The
 // script ignored a failure of zmlocalconfig; it is logged here.
 func (r *ldapReplica) updateLdapHost() {
-	proto := "ldap"
+	proto := ldapSchemeLDAP
 	if r.lc["ldap_port"] == "636" {
 		proto = "ldaps"
 	}
@@ -187,7 +187,7 @@ func (r *ldapReplica) setURL(url string) {
 }
 
 // resetLdapUrl gives ldap_url the master only.
-func (r *ldapReplica) resetLdapUrl() {
+func (r *ldapReplica) resetLdapURL() {
 	ldapPrintf(r.out, "Resetting ldap_url on %s...", r.lmr)
 	r.setURL(r.lmr)
 	ldapPrintf(r.out, "done\n")
@@ -200,7 +200,7 @@ func (r *ldapReplica) startLdap() error {
 	if err := r.k.start(r.e); err != nil {
 		r.e.Log.Detail("%v", err)
 		ldapPrintf(r.out, "Error: Unable to start ldap, exiting.\n")
-		r.resetLdapUrl()
+		r.resetLdapURL()
 
 		return ldapRefused()
 	}
@@ -219,13 +219,13 @@ func (r *ldapReplica) createLdapConfig(conn ldapConn) error {
 		ldapSyncreplTLS(r.lmr, r.lc))
 
 	err := conn.Modify(ldapDNMdbDB, []ldapMod{
-		{Op: ldapModAdd, Attr: "olcSyncrepl", Values: []string{value}},
+		{Op: ldapModAdd, Attr: ldapAttrSyncrepl, Values: []string{value}},
 		{Op: ldapModAdd, Attr: "olcUpdateRef", Values: []string{r.lmr}},
 	})
 	if err != nil {
 		ldapPrintf(r.out, "FAILED\nERROR: Unable to add syncrepl configuration to %s - exiting\nERROR: %s\n",
 			r.host, ldapErrText(err))
-		r.resetLdapUrl()
+		r.resetLdapURL()
 
 		return ldapRefused()
 	}
@@ -237,7 +237,7 @@ func (r *ldapReplica) createLdapConfig(conn ldapConn) error {
 	if err != nil {
 		ldapPrintf(r.out, "FAILEDERROR: Unable to add syncprov overlay to %s - exiting\nERROR: %s\n",
 			r.host, ldapErrText(err))
-		r.resetLdapUrl()
+		r.resetLdapURL()
 
 		return ldapRefused()
 	}
@@ -269,7 +269,7 @@ func RunLDAPEnableReplica(e *Env, args []string, stdout, stderr io.Writer) int {
 		return ldapExitRefused
 	}
 
-	o := parseGetoptLong(args, []optSpec{{names: []string{"h", "help"}}}, stderr)
+	o := parseGetoptLong(args, []optSpec{{names: []string{"h", optHelp}}}, stderr)
 	if !o.allGood {
 		_, _ = fmt.Fprintln(stderr)
 	}

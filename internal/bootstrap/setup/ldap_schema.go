@@ -23,12 +23,15 @@ type ldapSchemaFile struct {
 	schema string
 }
 
+// ldapSchemaZimbra is the name of the Carbonio schema, in the script and in its dn.
+const ldapSchemaZimbra = "zimbra"
+
 // ldapSchemaFiles are the schemas in the order the script installed them.
 var ldapSchemaFiles = []ldapSchemaFile{
 	{"core", "schema/core.ldif", "core.ldif", 0, "core"},
 	{"cosine", "schema/cosine.ldif", "cosine.ldif", 1, "cosine"},
 	{"inetOrgPerson", "schema/inetorgperson.ldif", "inetorgperson.ldif", 2, "inetorgperson"},
-	{"zimbra", "zimbra/schema/carbonio.ldif", "carbonio.ldif", 4, "zimbra"},
+	{ldapSchemaZimbra, "zimbra/schema/carbonio.ldif", "carbonio.ldif", 4, ldapSchemaZimbra},
 	{"amavis", "zimbra/schema/amavisd.ldif", "amavisd.ldif", 5, "amavisd"},
 	{"dyngroup", "schema/dyngroup.ldif", "dyngroup.ldif", 3, "dyngroup"},
 	{"OpenDKIM", "zimbra/schema/opendkim.ldif", "opendkim.ldif", 6, "opendkim"},

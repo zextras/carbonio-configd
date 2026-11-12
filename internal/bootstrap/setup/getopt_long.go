@@ -8,11 +8,15 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
 
 // optKind says what a Getopt::Long option takes.
+// optHelp is the name of the help option of the ported scripts.
+const optHelp = "help"
+
 type optKind int
 
 const (
@@ -130,16 +134,14 @@ func (r *optResult) option(arg string, args []string, next int, specs []optSpec)
 
 // optMatch is the option that name stands for: an exact name, else the only
 // option one of whose names it abbreviates; otherwise the complaint.
-func optMatch(name string, specs []optSpec) (optSpec, string) {
+func optMatch(name string, specs []optSpec) (match optSpec, complaint string) {
 	name = strings.ToLower(name)
 
 	var found []optSpec
 
 	for _, s := range specs {
-		for _, n := range s.names {
-			if n == name {
-				return s, ""
-			}
+		if slices.Contains(s.names, name) {
+			return s, ""
 		}
 	}
 

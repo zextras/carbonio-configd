@@ -19,6 +19,13 @@ import (
 const (
 	ldapExitRefused = 1
 	ldapExitDied    = 255
+
+	// ldapAttrNone asks a search for no attribute, only the entries.
+	ldapAttrNone = "1.1"
+	// ldapAttrSyncrepl holds the replication agreements of a database.
+	ldapAttrSyncrepl = "olcSyncrepl"
+	// ldapSchemeLDAP is the scheme of a plain LDAP URL.
+	ldapSchemeLDAP = "ldap"
 )
 
 // ldapToolError is how an LDAP tool ends other than by succeeding: Code is
@@ -145,7 +152,7 @@ func ldapLocalConn(e *Env, k *ldapKit, rootPassword string) (ldapConn, error) {
 
 // ldapAccesslogExists reports whether the accesslog database is there.
 func ldapAccesslogExists(conn ldapConn) (bool, error) {
-	entries, err := conn.Search("cn=accesslog", "(objectClass=*)", false, []string{"1.1"})
+	entries, err := conn.Search("cn=accesslog", "(objectClass=*)", false, []string{ldapAttrNone})
 
 	return len(entries) > 0, ldapSearchError(err)
 }
@@ -153,7 +160,7 @@ func ldapAccesslogExists(conn ldapConn) (bool, error) {
 // ldapSyncProvEnabled reports whether the main database has the syncprov
 // overlay.
 func ldapSyncProvEnabled(conn ldapConn) (bool, error) {
-	entries, err := conn.Search(ldapDNMdbDB, "(olcOverlay=syncprov)", true, []string{"1.1"})
+	entries, err := conn.Search(ldapDNMdbDB, "(olcOverlay=syncprov)", true, []string{ldapAttrNone})
 
 	return len(entries) > 0, ldapSearchError(err)
 }
