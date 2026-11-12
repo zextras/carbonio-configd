@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/zextras/carbonio-configd/internal/getopt"
 )
 
 const (
@@ -275,12 +277,12 @@ func RunLDAPEnableReplica(e *Env, args []string, stdout, stderr io.Writer) int {
 		return ldapExitRefused
 	}
 
-	o := parseGetoptLong(args, []optSpec{{names: []string{"h", optHelp}}}, stderr)
-	if !o.allGood {
+	o := getopt.Parse(args, []getopt.Spec{{Names: []string{"h", getopt.Help}}}, stderr)
+	if !o.AllGood {
 		_, _ = fmt.Fprintln(stderr)
 	}
 
-	if !o.allGood || o.has("h") {
+	if !o.AllGood || o.Has("h") {
 		_, _ = io.WriteString(stderr, ldapEnableReplicaUsage)
 
 		return ldapExitRefused

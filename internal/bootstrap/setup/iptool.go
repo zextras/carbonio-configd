@@ -15,6 +15,7 @@ import (
 
 	goldap "github.com/go-ldap/ldap/v3"
 
+	"github.com/zextras/carbonio-configd/internal/getopt"
 	"github.com/zextras/carbonio-configd/internal/localconfig"
 )
 
@@ -334,36 +335,36 @@ func (t *ipToolRun) bindAddress(key, mycnf, addr string, onlyIfFile bool) {
 }
 
 // ipToolOptionSpecs are the options of zmiptool.
-var ipToolOptionSpecs = []optSpec{
-	{names: []string{"h", optHelp}},
-	{names: []string{"d", "dryrun"}},
-	{names: []string{"m", "mode"}, kind: optString},
+var ipToolOptionSpecs = []getopt.Spec{
+	{Names: []string{"h", getopt.Help}},
+	{Names: []string{"d", "dryrun"}},
+	{Names: []string{"m", "mode"}, Kind: getopt.String},
 }
 
 // RunIPTool is zmiptool: -h/--help, -d/--dryrun and, with -d, -m/--mode
 // (ipv4, both or ipv6). It returns the exit status of the script; a refused
 // command line prints the usage on stderr and exits 1.
 func RunIPTool(e *Env, args []string, stdout, stderr io.Writer) int {
-	o := parseGetoptLong(args, ipToolOptionSpecs, stderr)
-	if !o.allGood {
+	o := getopt.Parse(args, ipToolOptionSpecs, stderr)
+	if !o.AllGood {
 		_, _ = fmt.Fprintln(stderr)
 	}
 
 	// Perl's truth: a mode of "" or "0" is no mode.
-	mode := o.strs["m"]
+	mode := o.Strs["m"]
 	if mode == "0" {
 		mode = ""
 	}
 
 	_, known := ipModes[mode]
 
-	if !o.allGood || o.has("h") || (mode != "" && (!o.has("d") || !known)) {
+	if !o.AllGood || o.Has("h") || (mode != "" && (!o.Has("d") || !known)) {
 		_, _ = io.WriteString(stderr, ipToolUsage)
 
 		return ldapExitRefused
 	}
 
-	opts := ipToolOptions{DryRun: o.has("d"), Mode: mode}
+	opts := ipToolOptions{DryRun: o.Has("d"), Mode: mode}
 
 	return ldapToolStatus(ipTool(e, ldapToolKit(e), opts, net.DefaultResolver.LookupIP, stdout, stderr), stderr)
 }

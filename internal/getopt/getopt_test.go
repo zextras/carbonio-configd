@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-only
 
-package setup
+package getopt
 
 import (
 	"bytes"
@@ -13,13 +13,13 @@ import (
 
 // The behaviour of Getopt::Long's defaults (bundling off, abbreviations and
 // ignore_case on, permute) that the ported scripts rely on.
-func TestParseGetoptLong(t *testing.T) {
-	specs := []optSpec{
-		{names: []string{"h", "help"}},
-		{names: []string{"set"}, kind: optFlag},
-		{names: []string{"setmin"}, kind: optFlag},
-		{names: []string{"section"}, kind: optString},
-		{names: []string{"n", "num"}, kind: optInt},
+func TestParse(t *testing.T) {
+	specs := []Spec{
+		{Names: []string{"h", "help"}},
+		{Names: []string{"set"}, Kind: Flag},
+		{Names: []string{"setmin"}, Kind: Flag},
+		{Names: []string{"section"}, Kind: String},
+		{Names: []string{"n", "num"}, Kind: Int},
 	}
 
 	cases := map[string]struct {
@@ -51,31 +51,31 @@ func TestParseGetoptLong(t *testing.T) {
 	for name, c := range cases {
 		var errb bytes.Buffer
 
-		r := parseGetoptLong(c.args, specs, &errb)
+		r := Parse(c.args, specs, &errb)
 
-		assert.Equal(t, c.good, r.allGood, name)
+		assert.Equal(t, c.good, r.AllGood, name)
 		assert.Equal(t, c.stderr, errb.String(), name)
 
 		for _, g := range c.given {
-			assert.True(t, r.has(g), "%s: %s", name, g)
+			assert.True(t, r.Has(g), "%s: %s", name, g)
 		}
 
 		for k, v := range c.strs {
-			assert.Equal(t, v, r.strs[k], name)
+			assert.Equal(t, v, r.Strs[k], name)
 		}
 
 		for k, v := range c.ints {
-			assert.Equal(t, v, r.ints[k], name)
+			assert.Equal(t, v, r.Ints[k], name)
 		}
 
-		assert.Equal(t, c.rest, r.rest, name)
+		assert.Equal(t, c.rest, r.Rest, name)
 	}
 }
 
 // The optional integer of "new:i" and "debug:1" (dhparam): the next argument
 // is its value only when it is a number.
-func TestParseGetoptLong_OptionalInteger(t *testing.T) {
-	specs := []optSpec{{names: []string{"new"}, kind: optOptInt}, {names: []string{"in"}, kind: optString}}
+func TestParse_OptionalInteger(t *testing.T) {
+	specs := []Spec{{Names: []string{"new"}, Kind: OptInt}, {Names: []string{"in"}, Kind: String}}
 
 	cases := map[string]struct {
 		args  []string
@@ -97,12 +97,12 @@ func TestParseGetoptLong_OptionalInteger(t *testing.T) {
 	for name, c := range cases {
 		var errb bytes.Buffer
 
-		r := parseGetoptLong(c.args, specs, &errb)
+		r := Parse(c.args, specs, &errb)
 
-		assert.Equal(t, c.given, r.has("new"), name)
-		assert.Equal(t, c.bare, r.bare["new"], name)
-		assert.Equal(t, c.n, r.ints["new"], name)
-		assert.Equal(t, c.rest, r.rest, name)
+		assert.Equal(t, c.given, r.Has("new"), name)
+		assert.Equal(t, c.bare, r.Bare["new"], name)
+		assert.Equal(t, c.n, r.Ints["new"], name)
+		assert.Equal(t, c.rest, r.Rest, name)
 		assert.Equal(t, c.err, errb.String(), name)
 	}
 }

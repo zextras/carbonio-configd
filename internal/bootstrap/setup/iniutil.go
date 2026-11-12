@@ -16,6 +16,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/zextras/carbonio-configd/internal/getopt"
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
@@ -364,12 +365,12 @@ Eg:
 `
 
 // iniOptions are the options of zminiutil: the operations, then the rest.
-var iniOptions = []optSpec{
-	{names: []string{"debug"}}, {names: []string{optHelp}},
-	{names: []string{"get"}}, {names: []string{"isset"}}, {names: []string{"list"}}, {names: []string{"set"}},
-	{names: []string{"setmin"}}, {names: []string{"setmax"}}, {names: []string{"unset"}},
-	{names: []string{iniOptBackup}, kind: optString}, {names: []string{iniOptSection}, kind: optString},
-	{names: []string{iniOptKey}, kind: optString}, {names: []string{iniOptValue}, kind: optString},
+var iniOptions = []getopt.Spec{
+	{Names: []string{"debug"}}, {Names: []string{getopt.Help}},
+	{Names: []string{"get"}}, {Names: []string{"isset"}}, {Names: []string{"list"}}, {Names: []string{"set"}},
+	{Names: []string{"setmin"}}, {Names: []string{"setmax"}}, {Names: []string{"unset"}},
+	{Names: []string{iniOptBackup}, Kind: getopt.String}, {Names: []string{iniOptSection}, Kind: getopt.String},
+	{Names: []string{iniOptKey}, Kind: getopt.String}, {Names: []string{iniOptValue}, Kind: getopt.String},
 }
 
 // The options of zminiutil that carry a value, and the suffix of the backup
@@ -397,22 +398,22 @@ const iniOpNames = "[list|isset|get|set|setmin|setmax|unset]"
 // iniCheck is the validation of libexec/iniutil.pl: the command it asks for
 // and the file, or the message the script printed with "Error: " before exiting
 // with status 1.
-func iniCheck(o *optResult) (ed *iniEdit, msg string) {
+func iniCheck(o *getopt.Result) (ed *iniEdit, msg string) {
 	ed = &iniEdit{}
 
 	ops := 0
 
 	for _, c := range iniOperations {
-		if o.has(c.name) {
+		if o.Has(c.name) {
 			ed.Op = c.op
 			ops++
 		}
 	}
 
-	ed.Section, ed.HasSection = o.strs[iniOptSection], o.has(iniOptSection)
-	ed.Key = o.strs[iniOptKey]
-	ed.Value, ed.HasValue = o.strs[iniOptValue], o.has(iniOptValue)
-	ed.Backup, ed.HasBackup = o.strs[iniOptBackup], o.has(iniOptBackup)
+	ed.Section, ed.HasSection = o.Strs[iniOptSection], o.Has(iniOptSection)
+	ed.Key = o.Strs[iniOptKey]
+	ed.Value, ed.HasValue = o.Strs[iniOptValue], o.Has(iniOptValue)
+	ed.Backup, ed.HasBackup = o.Strs[iniOptBackup], o.Has(iniOptBackup)
 
 	if msg = iniCheckAction(o, ed, ops); msg != "" {
 		return nil, msg
@@ -426,13 +427,13 @@ func iniCheck(o *optResult) (ed *iniEdit, msg string) {
 }
 
 // iniCheckAction checks the action asked for and its section and key.
-func iniCheckAction(o *optResult, ed *iniEdit, ops int) string {
+func iniCheckAction(o *getopt.Result, ed *iniEdit, ops int) string {
 	switch {
 	case ops < 1:
 		return "one of " + iniOpNames + " must be specified"
 	case ops > 1:
 		return "only one of " + iniOpNames + " must be specified"
-	case !o.has(iniOptKey) && ed.Op != iniList:
+	case !o.Has(iniOptKey) && ed.Op != iniList:
 		return "--key not specified"
 	case !ed.HasSection && ed.Op != iniList:
 		return "--section not specified"
@@ -442,7 +443,7 @@ func iniCheckAction(o *optResult, ed *iniEdit, ops int) string {
 }
 
 // iniCheckValue checks the value, the backup and the file argument.
-func iniCheckValue(o *optResult, ed *iniEdit) string {
+func iniCheckValue(o *getopt.Result, ed *iniEdit) string {
 	setting := ed.Op == iniSet || ed.Op == iniSetMin || ed.Op == iniSetMax
 
 	switch {
@@ -454,7 +455,7 @@ func iniCheckValue(o *optResult, ed *iniEdit) string {
 	// default ".bak" backup.
 	case !ed.HasBackup && setting:
 		return "--backup must be specified with [set|setmin|setmax|unset]"
-	case len(o.rest) != 1:
+	case len(o.Rest) != 1:
 		return "one inifile must be specified"
 	case (ed.Op == iniSetMin || ed.Op == iniSetMax) && !iniIntRE.MatchString(ed.Value):
 		return "--value must be a number"
@@ -469,15 +470,15 @@ func iniCheckValue(o *optResult, ed *iniEdit) string {
 // are on stdout, a failure to read or write the file on stderr with the errno
 // as status.
 func RunIniUtil(fsys sys.FS, args []string, stdout, stderr io.Writer) int {
-	o := parseGetoptLong(args, iniOptions, stderr)
+	o := getopt.Parse(args, iniOptions, stderr)
 
-	if !o.allGood {
+	if !o.AllGood {
 		_, _ = fmt.Fprintln(stdout, "Error: Unknown option!")
 
 		return 1
 	}
 
-	if o.has(optHelp) {
+	if o.Has(getopt.Help) {
 		_, _ = io.WriteString(stdout, iniUsage)
 
 		return 0
@@ -491,11 +492,11 @@ func RunIniUtil(fsys sys.FS, args []string, stdout, stderr io.Writer) int {
 	}
 
 	var dbg io.Writer
-	if o.has("debug") {
+	if o.Has("debug") {
 		dbg = stdout
 	}
 
-	status, err := iniApply(fsys, o.rest[0], ed, stdout, dbg)
+	status, err := iniApply(fsys, o.Rest[0], ed, stdout, dbg)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, err)
 

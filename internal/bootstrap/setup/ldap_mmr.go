@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/zextras/carbonio-configd/internal/getopt"
 )
 
 //nolint:lll // the text of the script
@@ -181,22 +183,22 @@ func RunLDAPEnableMMR(e *Env, args []string, stdout, stderr io.Writer) int {
 		return ldapExitRefused
 	}
 
-	o := parseGetoptLong(args, []optSpec{
-		{names: []string{"h", optHelp}},
-		{names: []string{"s", "sid"}, kind: optInt},
-		{names: []string{"m", "mmr"}, kind: optString},
-		{names: []string{"r", "rid"}, kind: optInt},
+	o := getopt.Parse(args, []getopt.Spec{
+		{Names: []string{"h", getopt.Help}},
+		{Names: []string{"s", "sid"}, Kind: getopt.Int},
+		{Names: []string{"m", "mmr"}, Kind: getopt.String},
+		{Names: []string{"r", "rid"}, Kind: getopt.Int},
 	}, stderr)
-	if !o.allGood {
+	if !o.AllGood {
 		_, _ = fmt.Fprintln(stderr)
 	}
 
-	opts := ldapMMROptions{SID: o.ints["s"], RID: 100, URI: o.strs["m"]}
-	if o.has("r") {
-		opts.RID = o.ints["r"]
+	opts := ldapMMROptions{SID: o.Ints["s"], RID: 100, URI: o.Strs["m"]}
+	if o.Has("r") {
+		opts.RID = o.Ints["r"]
 	}
 
-	if !o.allGood || o.has("h") || !ldapMMRURIRE.MatchString(opts.URI) || !strings.HasSuffix(opts.URI, "/") {
+	if !o.AllGood || o.Has("h") || !ldapMMRURIRE.MatchString(opts.URI) || !strings.HasSuffix(opts.URI, "/") {
 		_, _ = io.WriteString(stderr, ldapEnableMMRUsage)
 
 		return ldapExitRefused
