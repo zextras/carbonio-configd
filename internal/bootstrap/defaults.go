@@ -31,11 +31,13 @@ type Host interface {
 const defaultTimezone = "America/Los_Angeles"
 
 // Store and proxy ports: the proxy takes the standard ports when installed
-// on the node, and the mailbox moves to the 7xxx ones.
+// on the node, and the mailbox moves to the 7xxx and 8080/8443 ones (the
+// zmproxyconfig -a default on enable, 8080:80:8443:443). mailboxd runs as
+// zextras and cannot bind ports below 1024 under a local proxy.
 var (
-	storePortsBehindProxy = [6]int{7143, 7993, 7110, 7995, 80, 443}
+	storePortsBehindProxy = [6]int{7143, 7993, 7110, 7995, 8080, 8443}
 	storePortsDirect      = [6]int{143, 993, 110, 995, 80, 443}
-	proxyPortsLocal       = [6]int{143, 993, 110, 995, 8080, 8443}
+	proxyPortsLocal       = [6]int{143, 993, 110, 995, 80, 443}
 	proxyPortsRemote      = [6]int{7143, 7993, 7110, 7995, 8080, 8443}
 	portKeys              = [6]string{"imap", "imaps", "pop3", "pop3s", "http", "https"}
 )

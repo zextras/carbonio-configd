@@ -72,6 +72,10 @@ func TestDefaults_FollowRolesAndHostname(t *testing.T) {
 	assert.Equal(t, []string{"127.0.0.0/8", "[::1]/128", "10.1.0.0/16"}, c.MTA.MyNetworks)
 	assert.Equal(t, 7143, c.Store.Ports.IMAP, "the proxy on the node takes the standard ports")
 	assert.Equal(t, 143, c.Proxy.Ports.IMAP)
+	// mailboxd (zextras) cannot bind 80/443: behind the local proxy it takes
+	// 8080/8443, as zmproxyconfig's own -a default and the shipped config.
+	assert.Equal(t, [4]int{8080, 8443, 80, 443},
+		[4]int{c.Store.Ports.HTTP, c.Store.Ports.HTTPS, c.Proxy.Ports.HTTP, c.Proxy.Ports.HTTPS})
 	assert.Equal(t, defaultTimezone, c.Host.Timezone)
 	assert.NotEmpty(t, c.LDAP.RootPassword, "the LDAP master generates its passwords")
 	assert.NotEqual(t, c.LDAP.RootPassword, c.LDAP.AdminPassword, "each password is drawn separately")
@@ -212,7 +216,7 @@ func TestValidate(t *testing.T) {
 		{"bad address", []string{"admin.account=nobody"}, "is not an email address"},
 		{"bad network", []string{"mta.my_networks=10.0.0.0/33"}, "is not an address or a network"},
 		{"port range", []string{"ldap.port=70000"}, "70000 is not a port"},
-		{"port clash", []string{"proxy.ports.http=80"}, "store.ports.http and proxy.ports.http both use port 80"},
+		{"port clash", []string{"proxy.ports.http=8080"}, "store.ports.http and proxy.ports.http both use port 8080"},
 		{"no roles", []string{"roles="}, "roles is required"},
 	}
 

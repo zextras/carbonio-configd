@@ -572,11 +572,11 @@ func TestReviewDoneInConfigureMode(t *testing.T) {
 func TestReviewListsValidationProblems(t *testing.T) {
 	// A proxy and a mailbox on the same ports: valid keys, invalid together.
 	m := newModel(t, allRoles(), func(r *bootstrap.Resolved) {
-		setEnv("CARBONIO_BOOTSTRAP_ADMIN_PASSWORD=longenough", "CARBONIO_BOOTSTRAP_PROXY_PORTS_HTTPS=443")(r)
+		setEnv("CARBONIO_BOOTSTRAP_ADMIN_PASSWORD=longenough", "CARBONIO_BOOTSTRAP_PROXY_PORTS_HTTPS=8443")(r)
 	})
 	press(m, "r")
 	require.Equal(t, pageReview, m.page)
-	assert.Contains(t, screen(m), "both use port 443")
+	assert.Contains(t, screen(m), "both use port 8443")
 
 	press(m, "a")
 	assert.False(t, m.done)
