@@ -625,8 +625,12 @@ copies, the backup `ssl/carbonio.<timestamp>`), the CA database
 (`ca.srl`, `index.txt`, `newcerts/`), the LDAP attributes
 (`zimbraSSLCertificate`, `zimbraSSLPrivateKey`, `zimbraCertAuthority*`,
 `zimbraReverseProxyUpstream*`), the output and the exit statuses: `0` ok, `1`
-failed (`ERROR: ...`), `2` wrong command line, `255` a die (`zmcertmgr: ERROR
+failed (`ERROR: ...`, or a wrong command line: the message and the usage on stdout, as
+`pod2usage` prints them), `255` a die (`zmcertmgr: ERROR
 <command>(<args>) failed:`). Root is accepted as well as zextras.
+
+The command lines it runs (`keytool`, `zmrc`) are not printed, as the script
+printed none; `-debug` shows them on stderr.
 
 Differences from the script:
 
@@ -636,7 +640,7 @@ Differences from the script:
   `openssl req|x509 on '<f>' failed(1)`, `error N at D depth lookup: <text>`
   for the verify codes 2, 9, 10, 18, 19, 20 and 26, and
   `Unable to validate certificate chain: <subject>`. Subjects and issuers are
-  printed in the OpenSSL 3 one-line form (`C = US, O = X`).
+  printed in the OpenSSL 3 one-line form (`C=US, O=X`, as `openssl x509 -subject` prints them).
 - Digests: `sha1`, `sha256`, `sha384` and `sha512` sign. `sha`, `sha224` and
   `ripemd160` pass the check of `-digest` and then fail with
   `unsupported digest '<d>' (supported: ...)`. An invalid
@@ -671,7 +675,7 @@ Differences from the script:
   though the messages still say "via zmprov".
 - `deploycrt self` with files is refused by the command line check
   (`certfile argument is not allowed for type 'self'`); `comm` takes both
-  files or none (status `2`).
+  files or none (status `1`, with the usage).
 
 ### `setup proxyconfig`
 

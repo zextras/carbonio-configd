@@ -6,6 +6,7 @@ package setup
 
 import (
 	"crypto/x509"
+	"fmt"
 	"math/big"
 	"strings"
 	"testing"
@@ -73,15 +74,15 @@ func TestRunCertMgr_UsageAndExitCodes(t *testing.T) {
 		notInOut   string
 		notInError string
 	}{
-		// certmgr.pl 70-120: -help prints the synopsis and the options.
+		// 2470-2483: pod2usage with a message exits 1 and prints on stdout; -help prints the synopsis and the options.
 		{"help", []string{"-help"}, 0, "zmcertmgr <command> [options] [-help|-man] [-debug [#]]", "", "", ""},
 		{"man", []string{"-man"}, 0, "NAME\n    zmcertmgr", "", "", ""},
 		// Getopt::Long refuses an unknown option: the synopsis goes to stdout, status 1.
 		{"unknown option", []string{"createca", "-bogus"}, 1, "createca  [-new [-newkey]]", "Unknown option: bogus", "", ""},
-		{"no command", nil, 2, "", "zmcertmgr: a command must be specified", "", ""},
-		{"unknown command", []string{"nocmd"}, 2, "", "zmcertmgr: unexpected argument(s): nocmd", "", ""},
-		{"extra argument", []string{"createcrt", "extra"}, 2, "", "unexpected argument(s): extra", "", ""},
-		{"type missing", []string{"deploycrt"}, 2, "", "deploycrt: type 'self' or 'comm' must be specified", "", ""},
+		{"no command", nil, 1, "zmcertmgr: a command must be specified\nUsage:\n    zmcertmgr <command>", "", "", ""},
+		{"unknown command", []string{"nocmd"}, 1, "zmcertmgr: unexpected argument(s): nocmd\nUsage:\n", "", "", ""},
+		{"extra argument", []string{"createcrt", "extra"}, 1, "unexpected argument(s): extra\nUsage:\n", "", "", ""},
+		{"type missing", []string{"deploycrt"}, 1, "deploycrt: type 'self' or 'comm' must be specified\nUsage:\n", "", "", ""},
 		{"viewcrt is viewstagedcrt", []string{"viewcrt", "self", "/none"}, 1, "ERROR: Can't read file '/none'\n", "", "", ""},
 		// 2149, 2240, 2263: the settings are validated as the object is made.
 		{"bad digest", []string{"createca", "-digest", "md5"}, 1, "ERROR: unknown digest method 'md5'\n", "", "", ""},
@@ -97,7 +98,7 @@ func TestRunCertMgr_UsageAndExitCodes(t *testing.T) {
 		{"self with files", []string{"deploycrt", "self", "/x.crt", "/ca.crt"}, 255, "",
 			"zmcertmgr: ERROR deploycrt(self /x.crt /ca.crt) failed:\n certfile argument is not allowed for type 'self'\n", "", ""},
 		// The command line takes both files or none.
-		{"comm with one file", []string{"deploycrt", "comm", "/x.crt"}, 2, "", "unexpected argument(s): /x.crt", "", ""},
+		{"comm with one file", []string{"deploycrt", "comm", "/x.crt"}, 1, "unexpected argument(s): /x.crt\nUsage:\n", "", "", ""},
 	}
 
 	for _, tc := range tests {
@@ -132,6 +133,11 @@ func TestRunCertMgr_CAFilesAreOwnedByZextras(t *testing.T) {
 
 	assert.Equal(t, uint32(0o600), h.mode(cmCAKey))
 	assert.Equal(t, uint32(0o640), h.mode(cmSrl))
+
+	// The hash link of the deployed CA belongs to zextras itself, not only the
+	// file it points to (the script ran as zextras).
+	h.ok("deployca")
+	assert.Contains(t, h.fakes.Rec.Of("fs.lchown"), fmt.Sprintf("/opt/zextras/conf/ca/3cafeb07.0 %d:%d", cmZextrasUID, cmZextrasGID))
 }
 
 func TestRunCertMgr_ZextrasProcessLeavesOwnersAlone(t *testing.T) {
@@ -519,7 +525,7 @@ func TestRunCertMgr_VerifyCRT(t *testing.T) {
 		_ = crtf
 		status, out, _ := h.run("verifycrtchain", caf, cmSelfCrt)
 		assert.Equal(t, 1, status)
-		assert.Contains(t, out, "ERROR: Unable to validate certificate chain: OU = Zextras Carbonio, CN = mail.example.com\n"+
+		assert.Contains(t, out, "ERROR: Unable to validate certificate chain: OU=Zextras Carbonio, CN=mail.example.com\n"+
 			"error 20 at 0 depth lookup: unable to get local issuer certificate\n"+
 			"error "+cmSelfCrt+": verification failed\n")
 	})

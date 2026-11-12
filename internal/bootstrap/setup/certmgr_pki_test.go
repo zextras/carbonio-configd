@@ -213,13 +213,13 @@ func TestCertSubjectDisplay(t *testing.T) {
 	for _, tc := range []struct {
 		name, subj, oneline, slash string
 	}{
-		{"quoted", "/O=a,b/CN=h", `O = "a,b", CN = h`, "/O=a,b/CN=h"},
-		{"leading and trailing space", `/O=\ x\ /CN=h`, `O = \ x\ , CN = h`, "/O= x /CN=h"},
-		{"leading hash", `/O=#x/CN=h`, `O = \#x, CN = h`, "/O=#x/CN=h"},
-		{"quote and backslash", `/O=a\"b\\c/CN=h`, `O = a\"b\\c, CN = h`, `/O=a"b\c/CN=h`},
-		{"non ascii", "/O=Zürich/CN=h", `O = Z\C3\BCrich, CN = h`, `/O=Z\xC3\xBCrich/CN=h`},
-		{"joined rdn", "/O=A+OU=B/CN=h", "O = A + OU = B, CN = h", "/O=A/OU=B/CN=h"},
-		{"email is ia5", "/emailAddress=a@b.c/CN=h", "emailAddress = a@b.c, CN = h", "/emailAddress=a@b.c/CN=h"},
+		{"quoted", "/O=a,b/CN=h", `O="a,b", CN=h`, "/O=a,b/CN=h"},
+		{"leading and trailing space", `/O=\ x\ /CN=h`, `O=\ x\ , CN=h`, "/O= x /CN=h"},
+		{"leading hash", `/O=#x/CN=h`, `O=\#x, CN=h`, "/O=#x/CN=h"},
+		{"quote and backslash", `/O=a\"b\\c/CN=h`, `O=a\"b\\c, CN=h`, `/O=a"b\c/CN=h`},
+		{"non ascii", "/O=Zürich/CN=h", `O=Z\C3\BCrich, CN=h`, `/O=Z\xC3\xBCrich/CN=h`},
+		{"joined rdn", "/O=A+OU=B/CN=h", "O=A + OU=B, CN=h", "/O=A/OU=B/CN=h"},
+		{"email is ia5", "/emailAddress=a@b.c/CN=h", "emailAddress=a@b.c, CN=h", "/emailAddress=a@b.c/CN=h"},
 	} {
 		dn, err := certParseSubject(tc.subj)
 		require.NoError(t, err, tc.name)

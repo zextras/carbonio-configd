@@ -19,8 +19,8 @@ import (
 const (
 	cmViewSelf = "notBefore=Jan  1 00:00:00 2026 GMT\n" +
 		"notAfter=Dec 31 00:00:00 2030 GMT\n" +
-		"subject=OU = Zextras Carbonio, CN = mail.example.com\n" +
-		"issuer=O = CA, OU = Zextras Carbonio, CN = mail.example.com\n" +
+		"subject=OU=Zextras Carbonio, CN=mail.example.com\n" +
+		"issuer=O=CA, OU=Zextras Carbonio, CN=mail.example.com\n" +
 		"SubjectAltName=mail.example.com\n"
 	cmMtaCrt = "/opt/zextras/conf/smtpd.crt"
 )
@@ -34,7 +34,7 @@ func TestRunCertMgr_ViewStagedCRTAndCSR(t *testing.T) {
 	assert.Equal(t, "- "+cmSelfCrt+"\n"+cmViewSelf, h.ok("viewstagedcrt", "self"))
 	assert.Equal(t, "- "+cmMtaCrt+"\n"+cmViewSelf, h.ok("viewstagedcrt", "self", cmMtaCrt), "a file of the command line")
 	assert.Equal(t, "- "+cmSelfCrt+"\n"+cmViewSelf, h.ok("viewcrt", "self"), "viewcrt is viewstagedcrt")
-	assert.Equal(t, "- "+cmSelfCSR+"\nsubject=OU = Zextras Carbonio, CN = mail.example.com\n"+
+	assert.Equal(t, "- "+cmSelfCSR+"\nsubject=OU=Zextras Carbonio, CN=mail.example.com\n"+
 		"SubjectAltName=mail.example.com\n", h.ok("viewcsr", "self"))
 
 	h.ok("createcrt", "-new", "-subjectAltNames", "b.example.com,10.1.2.3")
@@ -465,4 +465,40 @@ func TestRunCertMgr_LocalFailuresAreReported(t *testing.T) {
 		assert.Equal(t, 1, status)
 		assert.Contains(t, out, "ERROR: openssl req failed(1):\n")
 	})
+}
+
+// The script prints no command lines; with -debug they are shown (on stderr).
+func TestRunCertMgr_CommandLinesShowOnlyWithDebug(t *testing.T) {
+	h := newCMTest(t, nil)
+	h.bootstrap()
+	h.e.Log = NewLog(nil, nil)
+
+	_, out, errs := h.run("addcacert", cmCACrt)
+	assert.NotContains(t, out+errs, "Running as")
+	assert.NotContains(t, out+errs, "keytool")
+
+	_, _, errs = h.run("addcacert", cmCACrt, "-debug")
+	assert.Contains(t, errs, "*** Running as zextras: ")
+	assert.Contains(t, errs, "keytool -delete -alias zcs-user-ca")
+	assert.NotContains(t, errs, cmPassword, "the password is not shown")
+}
+
+// The usage is what pod2usage prints: the synopsis indented by 4, the lines
+// of the verbatim blocks by 6 (2470-2483).
+func TestRunCertMgr_UsageIsIndentedAsPod2usageDoes(t *testing.T) {
+	h := newCMTest(t, nil)
+
+	status, out, _ := h.run("-help")
+	assert.Equal(t, 0, status)
+	assert.True(t, strings.HasPrefix(out, "Usage:\n    zmcertmgr <command> [options] [-help|-man] [-debug [#]]\n\n"+
+		"      -help     displays a usage synopsis with information about options\n"+
+		"      -man      displays the complete documentation\n\n"+
+		"    Where valid command/option combinations are:\n\n"+
+		"      createca  [-new [-newkey]] [-keysize keysize]"), out)
+	assert.Contains(t, out, "\nOptions:\n  Shared Options:\n    -allservers\n        The effect of this option")
+
+	status, out, _ = h.run("-bogus")
+	assert.Equal(t, 1, status, "an option Getopt::Long refuses: the synopsis only")
+	assert.True(t, strings.HasPrefix(out, "Usage:\n    zmcertmgr <command>"), out)
+	assert.NotContains(t, out, "Options:")
 }

@@ -99,36 +99,55 @@ var certCmdFuncs = map[string]certCmdFunc{
 	certCmdViewStaged:  (*certMgr).viewstagedcrt,
 }
 
+// certUsage is what the script does with a command line that asks for help or
+// is refused (pod2usage), before anything runs; done is false when the
+// command is to run.
+func certUsage(p *certParse, stdout io.Writer) (status int, done bool) {
+	switch {
+	case p.opts.Help:
+		_, _ = io.WriteString(stdout, certSynopsis+certOptionsText)
+
+		return 0, true
+	case p.opts.Man:
+		_, _ = io.WriteString(stdout, certManText)
+
+		return 0, true
+	case !p.optsOK:
+		_, _ = io.WriteString(stdout, certSynopsis)
+
+		return 1, true
+	case len(p.errs) > 0:
+		// pod2usage(-verbose => 1, -message => ...): the exit status is 1 and
+		// the message and the usage go to stdout.
+		for _, msg := range p.errs {
+			_, _ = fmt.Fprintf(stdout, "%s: %s\n", certProg, msg)
+		}
+
+		_, _ = io.WriteString(stdout, certSynopsis+certOptionsText)
+
+		return 1, true
+	}
+
+	return 0, false
+}
+
 // RunCertMgr is zmcertmgr: the certificate manager of the node. args are what
 // follows the command name. It returns the exit status of the script: 0 when
-// the command did its work, 1 when it did not, 2 for a bad command line and
+// the command did its work, 1 when it did not or for a bad command line, and
 // 255 for a die; the messages go to stdout and stderr where the script put
 // them.
 func RunCertMgr(e *Env, args []string, stdout, stderr io.Writer) int {
 	p := certParseArgs(args, stderr)
 	o := p.opts
 
-	switch {
-	case o.Help:
-		_, _ = io.WriteString(stdout, certSynopsis+certOptionsText)
+	if status, done := certUsage(p, stdout); done {
+		return status
+	}
 
-		return 0
-	case o.Man:
-		_, _ = io.WriteString(stdout, certManText)
-
-		return 0
-	case !p.optsOK:
-		_, _ = io.WriteString(stdout, certSynopsis)
-
-		return 1
-	case len(p.errs) > 0:
-		for _, msg := range p.errs {
-			_, _ = fmt.Fprintf(stderr, "%s: %s\n", certProg, msg)
-		}
-
-		_, _ = io.WriteString(stderr, certSynopsis+certOptionsText)
-
-		return 2
+	if o.Debug > 0 && e.Log != nil && e.Log.file == nil {
+		// -debug: the command lines run (the log of an Env without a log
+		// file) go to stderr.
+		e.Log.file = stderr
 	}
 
 	m := &certMgr{e: e, o: o, out: stdout, errw: stderr, keyGen: certNewRSAKey}

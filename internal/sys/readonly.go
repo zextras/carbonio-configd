@@ -139,6 +139,9 @@ func (readOnlyFS) Chmod(name string, _ fs.FileMode) error { return refused("chmo
 // Chown implements FS.
 func (readOnlyFS) Chown(name string, _, _ int) error { return refused("chown", name) }
 
+// Lchown implements FS.
+func (readOnlyFS) Lchown(name string, _, _ int) error { return refused("lchown", name) }
+
 // Symlink implements FS.
 func (readOnlyFS) Symlink(_, newname string) error { return refused("symlink", newname) }
 

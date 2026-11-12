@@ -538,11 +538,29 @@ func (m *certMgr) symlinkHash(file, hash string) bool {
 	link := hash + "." + strconv.Itoa(ext)
 	m.say("** Creating CA hash symlink '%s' -> '%s'\n", link, name)
 
-	if err := m.e.Sys.FS.Symlink(name, dir+link); err != nil {
+	if err := m.symlink(name, dir+link); err != nil {
 		return m.fail("create symlink '%s' -> '%s' failed\n", link, name)
 	}
 
 	return true
+}
+
+// symlink creates a link that, like everything the script makes, belongs to
+// zextras (the link itself: lchown).
+func (m *certMgr) symlink(target, link string) error {
+	if err := m.e.Sys.FS.Symlink(target, link); err != nil {
+		return err
+	}
+
+	if m.e.IsZextras {
+		return nil
+	}
+
+	if err := m.loadIDs(); err != nil {
+		return err
+	}
+
+	return m.e.Sys.FS.Lchown(link, m.zuid, m.zgid)
 }
 
 // installCA is installCA: the deployed CA directory is emptied and gets the
@@ -771,7 +789,7 @@ func (m *certMgr) copyEntry(from, to string, isDir bool) error {
 			return err
 		}
 
-		return m.e.Sys.FS.Symlink(target, to)
+		return m.symlink(target, to)
 	}
 
 	data, err := m.slurp(from)

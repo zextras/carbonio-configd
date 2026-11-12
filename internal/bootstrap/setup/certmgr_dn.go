@@ -338,15 +338,15 @@ func (a *certATV) shortName() string {
 	return a.Type.String()
 }
 
-// oneline is the name as `openssl x509 -subject` shows it (XN_FLAG_ONELINE):
-// "C = US, O = Example", values escaped as RFC 2253 with quotes.
+// oneline is the name as `openssl x509 -subject` of OpenSSL 3 shows it:
+// "C=US, O=Example", values escaped as RFC 2253 with quotes.
 func (dn certDN) oneline() string {
 	rdns := make([]string, len(dn))
 
 	for i, rdn := range dn {
 		attrs := make([]string, len(rdn))
 		for j, a := range rdn {
-			attrs[j] = a.shortName() + " = " + a.display()
+			attrs[j] = a.shortName() + "=" + a.display()
 		}
 
 		rdns[i] = strings.Join(attrs, " + ")

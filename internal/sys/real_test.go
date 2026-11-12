@@ -154,6 +154,8 @@ func TestRealFS_SymlinkReadlinkLstat(t *testing.T) {
 	require.NoError(t, os.WriteFile(target, []byte("x"), 0o600))
 	require.NoError(t, rfs.Symlink(target, link))
 	require.ErrorIs(t, rfs.Symlink(target, link), fs.ErrExist)
+	require.NoError(t, rfs.Lchown(link, os.Getuid(), os.Getgid()))
+	require.ErrorIs(t, rfs.Lchown(filepath.Join(root, "none"), os.Getuid(), os.Getgid()), fs.ErrNotExist)
 
 	got, err := rfs.Readlink(link)
 	require.NoError(t, err)

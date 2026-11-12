@@ -450,6 +450,10 @@ func TestRunCertMgr_PassesTheCommandLineAndTheScriptsStatus(t *testing.T) {
 		assert.Equal(t, "zmcertmgr err\n", errb.String())
 		assert.Equal(t, []string{"deploycrt", "comm", "-deploy", "mta,proxy", "/tmp/c.crt", "/tmp/ca.crt"}, h.args)
 		assert.Equal(t, !root, h.env.IsZextras, "a zextras caller runs the tools without runuser")
+
+		// The script prints no command lines: the Env logs to no file.
+		h.env.Log.Detail("*** Running as zextras: probe")
+		assert.Equal(t, "zmcertmgr err\n", errb.String())
 	}
 }
 

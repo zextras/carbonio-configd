@@ -198,6 +198,9 @@ func RunCertMgr(ctx context.Context, env sys.System, stdout, stderr io.Writer, a
 		return 1
 	}
 
+	// The script prints no command lines: the log has no file (-debug adds one).
+	e.Log = setup.NewLog(stdout, nil)
+
 	return runCertMgr(e, args, stdout, stderr)
 }
 
