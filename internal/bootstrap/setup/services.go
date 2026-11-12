@@ -600,7 +600,7 @@ func StepStartServers() Step {
 	return Step{
 		Title: "Start servers",
 		When:  func(e *Env) bool { return e.Cfg.StartServices },
-		Apply:    svcStartServers,
+		Apply: svcStartServers,
 	}
 }
 

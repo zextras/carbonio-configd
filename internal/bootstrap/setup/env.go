@@ -189,8 +189,13 @@ func (w *LineWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// Flush writes what is left after the last newline.
+// Flush writes what is left after the last newline. A nil LineWriter (the
+// output is not logged) has nothing to flush.
 func (w *LineWriter) Flush() {
+	if w == nil {
+		return
+	}
+
 	w.line(w.partial)
 	w.partial = nil
 }

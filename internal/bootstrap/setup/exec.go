@@ -100,9 +100,9 @@ func (e *Env) output(c *Cmd, capture bool) ([]byte, error) {
 	var stdout, tail bytes.Buffer
 
 	brief := c.Brief && !e.Verbose
-	logOut, flush := e.cmdLog(&tail, c.Quiet || brief)
+	logOut, lw := e.cmdLog(&tail, c.Quiet || brief)
 
-	defer flush()
+	defer lw.Flush()
 
 	cmd.Stderr = logOut
 	cmd.Stdout = logOut
@@ -140,15 +140,16 @@ func (e *Env) output(c *Cmd, capture bool) ([]byte, error) {
 }
 
 // cmdLog is where a command's output goes: always tail (for the error), and
-// the log file a line at a time unless hidden. flush ends the last line.
-func (e *Env) cmdLog(tail io.Writer, hidden bool) (out io.Writer, flush func()) {
+// the log file a line at a time unless hidden (then lw is nil). lw.Flush
+// ends the last line.
+func (e *Env) cmdLog(tail io.Writer, hidden bool) (out io.Writer, lw *LineWriter) {
 	if hidden {
-		return tail, func() {}
+		return tail, nil
 	}
 
-	lw := e.Log.Writer()
+	lw = e.Log.Writer()
 
-	return io.MultiWriter(tail, lw), lw.Flush
+	return io.MultiWriter(tail, lw), lw
 }
 
 // shownArgs is argv as logged: secrets masked, and an argument with spaces
