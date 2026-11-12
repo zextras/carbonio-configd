@@ -15,18 +15,22 @@ section="mail"
 priority="optional"
 options=('!strip')
 depends__apt=(
+  "bash-completion"
   "libsystemd0"
   "polkitd"
 )
 depends__ubuntu_noble=(
+  "bash-completion"
   "libsystemd0"
   "polkitd"
 )
 depends__yum=(
+  "bash-completion"
   "systemd-libs"
   "polkit"
 )
 depends__rocky_9=(
+  "bash-completion"
   "systemd-libs"
   "polkit"
 )
