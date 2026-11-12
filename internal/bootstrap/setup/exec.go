@@ -71,26 +71,9 @@ func (e *Env) output(c *Cmd, capture bool) ([]byte, error) {
 	// opens /dev/tty (zmprov's JLine runs stty on it) would otherwise be
 	// stopped by SIGTTOU from its background process group, hanging the run
 	// whenever bootstrap is started from a terminal.
-	cmd := &sys.Cmd{Path: c.Path, Args: c.Args, Stdin: c.Stdin, Env: c.Env, Setsid: true}
-
-	if c.AsZextras {
-		env, err := e.zextrasEnv()
-		if err != nil {
-			return nil, err
-		}
-
-		shim := append([]string{"-c", zextrasShim, c.Path}, c.Args...)
-		cmd = &sys.Cmd{
-			Path:   "runuser",
-			Args:   append([]string{"-u", config.ZextrasUser, "--", "sh"}, shim...),
-			Stdin:  c.Stdin,
-			Env:    append(env, c.Env...),
-			Setsid: true,
-		}
-
-		if e.IsZextras {
-			cmd.Path, cmd.Args = "sh", shim
-		}
+	cmd, err := e.sysCmd(c)
+	if err != nil {
+		return nil, err
 	}
 
 	shown := shownArgs(append([]string{c.Path}, c.Args...))
@@ -142,6 +125,36 @@ func (e *Env) output(c *Cmd, capture bool) ([]byte, error) {
 	}
 
 	return stdout.Bytes(), nil
+}
+
+// sysCmd is the process that runs c. Setsid: no step command gets the
+// controlling terminal. An AsZextras command goes through the environment
+// shim, under runuser unless the process already runs as zextras (runuser
+// needs root).
+func (e *Env) sysCmd(c *Cmd) (*sys.Cmd, error) {
+	if !c.AsZextras {
+		return &sys.Cmd{Path: c.Path, Args: c.Args, Stdin: c.Stdin, Env: c.Env, Setsid: true}, nil
+	}
+
+	env, err := e.zextrasEnv()
+	if err != nil {
+		return nil, err
+	}
+
+	shim := append([]string{"-c", zextrasShim, c.Path}, c.Args...)
+	cmd := &sys.Cmd{
+		Path:   "runuser",
+		Args:   append([]string{"-u", config.ZextrasUser, "--", "sh"}, shim...),
+		Stdin:  c.Stdin,
+		Env:    append(env, c.Env...),
+		Setsid: true,
+	}
+
+	if e.IsZextras {
+		cmd.Path, cmd.Args = "sh", shim
+	}
+
+	return cmd, nil
 }
 
 // cmdLog is where a command's output goes: always tail (for the error), and
