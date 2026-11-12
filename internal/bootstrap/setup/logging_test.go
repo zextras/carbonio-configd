@@ -16,6 +16,7 @@ import (
 
 	"github.com/zextras/carbonio-configd/internal/redact"
 	"github.com/zextras/carbonio-configd/internal/sys"
+	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
 
 // logLines returns the log file lines without their timestamp.
@@ -121,4 +122,21 @@ func TestLogSummary(t *testing.T) {
 			tc.want,
 		}, logLines(&file))
 	}
+}
+
+func TestCertZmcertmgr_VerboseExplainsTheExpectedLookupFailures(t *testing.T) {
+	e, fakes, _ := testEnv(t)
+
+	var file bytes.Buffer
+
+	e.Log = NewLog(nil, &file)
+	fakes.Exec.OnPath("runuser", systest.Reply("** Retrieving CA private key from LDAP... failed\n"))
+
+	require.NoError(t, certZmcertmgr(e, "createca", "-new"))
+	assert.NotContains(t, file.String(), "Retrieving", "zmcertmgr's narration is not logged on success")
+
+	e.Verbose = true
+	require.NoError(t, certZmcertmgr(e, "createca", "-new"))
+	assert.Contains(t, file.String(), "Retrieving CA private key from LDAP... failed")
+	assert.Contains(t, file.String(), "are expected when nothing is stored yet")
 }
