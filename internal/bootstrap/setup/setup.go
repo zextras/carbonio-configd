@@ -48,6 +48,9 @@ type Env struct {
 	// run directly, as runuser needs root.
 	IsZextras bool
 
+	// provOpen replaces provOpenLDAP for this Env (tests): a per-Env seam,
+	// so parallel tests do not race on a package variable.
+	provOpen func(*Env) (provDirectory, error)
 	// perlLib caches the zextras PERL5LIB.
 	perlLib string
 	// lc caches the effective localconfig until the next write.

@@ -38,7 +38,7 @@ func provRecordZmprov(fakes *systest.Fakes) *provZmprovRuns {
 
 		_, _ = b.ReadFrom(c.Stdin)
 		runs.stdin = append(runs.stdin, b.String())
-		runs.ldapBefore = append(runs.ldapBefore, len(provTestLDAP.calls))
+		runs.ldapBefore = append(runs.ldapBefore, len(provTestLDAP().calls))
 
 		if runs.failMessage != "" {
 			_, _ = c.Stderr.Write([]byte(runs.failMessage))
@@ -73,11 +73,11 @@ func TestRunProv_ModifyOnlyBatchRunsNoProcessAndKeepsTheOrder(t *testing.T) {
 	require.NoError(t, e.RunProv(&p))
 
 	assert.Empty(t, fakes.Exec.Calls(), "no zmprov process")
-	assert.Equal(t, 1, provTestLDAP.opened)
-	assert.Equal(t, 1, provTestLDAP.closed)
+	assert.Equal(t, 1, provTestLDAP().opened)
+	assert.Equal(t, 1, provTestLDAP().closed)
 
 	var dns []string
-	for _, c := range provTestLDAP.calls {
+	for _, c := range provTestLDAP().calls {
 		dns = append(dns, c.DN)
 	}
 
@@ -85,16 +85,16 @@ func TestRunProv_ModifyOnlyBatchRunsNoProcessAndKeepsTheOrder(t *testing.T) {
 		provGlobalDN, provGlobalDN, provGlobalDN,
 		provServerDN(provTestHost), provServerDN(provTestHost), "cn=default,cn=cos,cn=zimbra",
 	}, dns)
-	assert.Equal(t, []string{"/logo.png"}, provTestLDAP.values(provGlobalDN, "zimbraSkinLogoURL"))
+	assert.Equal(t, []string{"/logo.png"}, provTestLDAP().values(provGlobalDN, "zimbraSkinLogoURL"))
 	assert.Equal(t, []string{"a.example.com", "b.example.com"},
-		provTestLDAP.values(provGlobalDN, "zimbraReverseProxyUpstreamEwsServers"))
-	assert.Equal(t, []string{"mailbox"}, provTestLDAP.values(provServerDN(provTestHost), "zimbraServiceEnabled"))
-	assert.Equal(t, []string{"Europe/Rome"}, provTestLDAP.values("cn=default,cn=cos,cn=zimbra", "zimbraPrefTimeZoneId"))
+		provTestLDAP().values(provGlobalDN, "zimbraReverseProxyUpstreamEwsServers"))
+	assert.Equal(t, []string{"mailbox"}, provTestLDAP().values(provServerDN(provTestHost), "zimbraServiceEnabled"))
+	assert.Equal(t, []string{"Europe/Rome"}, provTestLDAP().values("cn=default,cn=cos,cn=zimbra", "zimbraPrefTimeZoneId"))
 }
 
 func TestRunProv_AddOfAPresentValueAndRemoveOfAnAbsentOneSucceed(t *testing.T) {
 	e, _, _ := testEnv(t)
-	provTestLDAP.set(provGlobalDN, "zimbraReverseProxyUpstreamEwsServers", "a.example.com")
+	provTestLDAP().set(provGlobalDN, "zimbraReverseProxyUpstreamEwsServers", "a.example.com")
 
 	var p Prov
 
@@ -103,7 +103,7 @@ func TestRunProv_AddOfAPresentValueAndRemoveOfAnAbsentOneSucceed(t *testing.T) {
 	p.Add("mcf", "-zimbraReverseProxyAvailableLookupTargets", "")
 
 	require.NoError(t, e.RunProv(&p))
-	assert.Equal(t, []string{"a.example.com"}, provTestLDAP.values(provGlobalDN, "zimbraReverseProxyUpstreamEwsServers"))
+	assert.Equal(t, []string{"a.example.com"}, provTestLDAP().values(provGlobalDN, "zimbraReverseProxyUpstreamEwsServers"))
 }
 
 func TestProvParse_MapsArgumentsToModifications(t *testing.T) {
@@ -211,8 +211,8 @@ func TestRunProv_LeavesToZmprovWhatItCannotDoLikeZmprov(t *testing.T) {
 			require.NoError(t, e.Prov(args...))
 
 			assert.Equal(t, []string{provLine(args) + "\nexit\n"}, runs.stdin)
-			assert.Zero(t, provTestLDAP.opened, "no LDAP connection")
-			assert.Empty(t, provTestLDAP.calls)
+			assert.Zero(t, provTestLDAP().opened, "no LDAP connection")
+			assert.Empty(t, provTestLDAP().calls)
 		})
 	}
 }
@@ -224,7 +224,7 @@ func TestRunProv_BinaryAttributeStoresTheContentOfTheFile(t *testing.T) {
 	require.NoError(t, e.Prov("mcf", "zimbraSSLDHParam", "/opt/zextras/conf/dhparam.pem.crb"))
 
 	assert.Equal(t, []string{"-----BEGIN DH PARAMETERS-----\nAAAA\n"},
-		provTestLDAP.values(provGlobalDN, "zimbraSSLDHParam"))
+		provTestLDAP().values(provGlobalDN, "zimbraSSLDHParam"))
 	assert.Empty(t, fakes.Exec.Calls())
 }
 
@@ -253,8 +253,8 @@ func TestRunProv_MixedBatchRunsInOrderAndOnlyCreationsGoToZmprov(t *testing.T) {
 			"\"aaa\" \"admin@example.com\" \"root@example.com\"\nexit\n",
 	}, runs.stdin, "one process for each run of creations, in order")
 	assert.Equal(t, []int{1, 2}, runs.ldapBefore, "LDAP changes run between them")
-	assert.Len(t, provTestLDAP.calls, 3)
-	assert.Equal(t, []string{"both"}, provTestLDAP.values(provServerDN("h2.example.com"), "zimbraIPMode"))
+	assert.Len(t, provTestLDAP().calls, 3)
+	assert.Equal(t, []string{"both"}, provTestLDAP().values(provServerDN("h2.example.com"), "zimbraIPMode"))
 
 	log := file.String()
 	assert.Contains(t, log, "zmprov batch: ldap: ms h1.example.com | zmprov: cs h2.example.com | "+
@@ -269,7 +269,7 @@ func TestRunProv_MixedBatchRunsInOrderAndOnlyCreationsGoToZmprov(t *testing.T) {
 func TestRunProv_ErrorsAreReportedAfterEveryCommandRan(t *testing.T) {
 	t.Run("an LDAP failure does not stop the batch", func(t *testing.T) {
 		e, _, _ := testEnv(t)
-		provTestLDAP.failDN[provGlobalDN] = errors.New("LDAP Result Code 50 Insufficient Access Rights")
+		provTestLDAP().failDN[provGlobalDN] = errors.New("LDAP Result Code 50 Insufficient Access Rights")
 
 		var p Prov
 
@@ -280,8 +280,8 @@ func TestRunProv_ErrorsAreReportedAfterEveryCommandRan(t *testing.T) {
 		require.ErrorIs(t, err, ErrProv)
 		assert.Contains(t, err.Error(), "ldap: mcf zimbraSkinLogoURL")
 		assert.Contains(t, err.Error(), "Insufficient Access Rights")
-		assert.Equal(t, []string{"ipv6"}, provTestLDAP.values(provServerDN(provTestHost), "zimbraIPMode"))
-		assert.Equal(t, 1, provTestLDAP.closed)
+		assert.Equal(t, []string{"ipv6"}, provTestLDAP().values(provServerDN(provTestHost), "zimbraIPMode"))
+		assert.Equal(t, 1, provTestLDAP().closed)
 	})
 
 	t.Run("a zmprov failure is reported with the LDAP changes applied", func(t *testing.T) {
@@ -298,7 +298,7 @@ func TestRunProv_ErrorsAreReportedAfterEveryCommandRan(t *testing.T) {
 		err := e.RunProv(&p)
 		require.ErrorIs(t, err, ErrProv)
 		assert.Contains(t, err.Error(), "NO_SUCH_DOMAIN")
-		assert.Equal(t, []string{"/logo.png"}, provTestLDAP.values(provGlobalDN, "zimbraSkinLogoURL"))
+		assert.Equal(t, []string{"/logo.png"}, provTestLDAP().values(provGlobalDN, "zimbraSkinLogoURL"))
 	})
 
 	t.Run("zmprov exits with an error and says nothing", func(t *testing.T) {
@@ -322,7 +322,7 @@ func TestRunProv_ErrorsAreReportedAfterEveryCommandRan(t *testing.T) {
 	t.Run("no LDAP connection", func(t *testing.T) {
 		e, fakes, _ := testEnv(t)
 		runs := provRecordZmprov(fakes)
-		provTestLDAP.openErr = errors.New("connection refused")
+		provTestLDAP().openErr = errors.New("connection refused")
 
 		var p Prov
 
@@ -342,7 +342,7 @@ func TestRunProv_EmptyBatchDoesNothing(t *testing.T) {
 
 	require.NoError(t, e.RunProv(&Prov{}))
 	assert.Empty(t, fakes.Exec.Calls())
-	assert.Zero(t, provTestLDAP.opened)
+	assert.Zero(t, provTestLDAP().opened)
 }
 
 func TestProvAttr_ValidMirrorsZmprovCheckValue(t *testing.T) {

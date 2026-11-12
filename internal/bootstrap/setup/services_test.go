@@ -201,7 +201,7 @@ func TestSvcConfigInitMta_RunsToolWithoutSecretsAndSetsNetworks(t *testing.T) {
 	assert.NotContains(t, lines, "PostfixSecret")
 
 	assert.Equal(t, []string{"127.0.0.0/8 10.0.0.0/24"},
-		provTestLDAP.values(provServerDN("mta.example.com"), "zimbraMtaMyNetworks"))
+		provTestLDAP().values(provServerDN("mta.example.com"), "zimbraMtaMyNetworks"))
 
 	v, err := e.LCValue("postfix_mail_owner")
 	require.NoError(t, err)
@@ -264,18 +264,18 @@ func TestSvcConfigCreateDomain_PasswordsOnStdinNeverArgv(t *testing.T) {
 	// domain created once although the admin domain is the same
 	assert.Equal(t, 1, strings.Count(batch, `"cd" "example.com"`), batch)
 	assert.NotContains(t, batch, `"mcf"`, "the global config changes are written to LDAP")
-	assert.Equal(t, []string{"example.com"}, provTestLDAP.values(provGlobalDN, "zimbraDefaultDomainName"))
-	assert.Equal(t, []string{"example.com"}, provTestLDAP.values(provGlobalDN, "zimbraMtaMyOrigin"))
+	assert.Equal(t, []string{"example.com"}, provTestLDAP().values(provGlobalDN, "zimbraDefaultDomainName"))
+	assert.Equal(t, []string{"example.com"}, provTestLDAP().values(provGlobalDN, "zimbraMtaMyOrigin"))
 	assert.Contains(t, batch, `"ca" "admin@example.com" "`+svcTestAdminPass+`" "zimbraAdminConsoleUIComponents" "cartBlancheUI"`)
 	assert.Contains(t, batch, `"aaa" "admin@example.com" "root@example.com"`)
 	assert.Contains(t, batch, `"aaa" "admin@example.com" "postmaster@example.com"`)
-	assert.Equal(t, []string{"admin@example.com"}, provTestLDAP.values(provGlobalDN, "carbonioNotificationFrom"))
-	assert.Equal(t, []string{"admin@example.com"}, provTestLDAP.values(provGlobalDN, "carbonioNotificationRecipients"))
+	assert.Equal(t, []string{"admin@example.com"}, provTestLDAP().values(provGlobalDN, "carbonioNotificationFrom"))
+	assert.Equal(t, []string{"admin@example.com"}, provTestLDAP().values(provGlobalDN, "carbonioNotificationRecipients"))
 	assert.Contains(t, batch, `"ca" "spam.x@example.com" "`)
 	assert.Contains(t, batch, `"zimbraMailMessageLifetime" "30d"`)
-	assert.Equal(t, []string{"spam.x@example.com"}, provTestLDAP.values(provGlobalDN, "zimbraSpamIsSpamAccount"))
-	assert.Equal(t, []string{"ham.x@example.com"}, provTestLDAP.values(provGlobalDN, "zimbraSpamIsNotSpamAccount"))
-	assert.Equal(t, []string{"virus-quarantine.x@example.com"}, provTestLDAP.values(provGlobalDN, "zimbraAmavisQuarantineAccount"))
+	assert.Equal(t, []string{"spam.x@example.com"}, provTestLDAP().values(provGlobalDN, "zimbraSpamIsSpamAccount"))
+	assert.Equal(t, []string{"ham.x@example.com"}, provTestLDAP().values(provGlobalDN, "zimbraSpamIsNotSpamAccount"))
+	assert.Equal(t, []string{"virus-quarantine.x@example.com"}, provTestLDAP().values(provGlobalDN, "zimbraAmavisQuarantineAccount"))
 	assert.Len(t, zmprovCalls(fakes), 1, "the creations share one zmprov process")
 	assert.True(t, strings.HasSuffix(batch, "\nexit\n"))
 
@@ -321,7 +321,7 @@ func TestSvcConfigCreateDomain_ExistingAccountsAreNotRecreated(t *testing.T) {
 	assert.NotContains(t, batch, `"cd"`)
 	assert.NotContains(t, batch, `"ca" "admin@`)
 	assert.NotContains(t, batch, `"aaa"`) // no root/postmaster on a web-only node
-	assert.Empty(t, provTestLDAP.values(provGlobalDN, "zimbraDefaultDomainName"), "the domain exists already")
+	assert.Empty(t, provTestLDAP().values(provGlobalDN, "zimbraDefaultDomainName"), "the domain exists already")
 	assert.Contains(t, batch, `"ca" "ham.x@example.com"`)
 }
 

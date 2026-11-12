@@ -52,7 +52,7 @@ func TestSvcInitMta_ToolRunsWithTheMasterAndLocalConfigGetsOwnerDefaults(t *test
 	lines := ldapAllLines(fakes)
 	assert.Contains(t, lines, "zmmtainit ldap.example.com 636")
 	assert.Equal(t, []string{"127.0.0.0/8 10.0.0.0/8"},
-		provTestLDAP.values(provServerDN("mail.example.com"), "zimbraMtaMyNetworks"))
+		provTestLDAP().values(provServerDN("mail.example.com"), "zimbraMtaMyNetworks"))
 }
 
 func TestSvcInitMta_KeepsConfiguredOwnerAndSkipsMissingToolAndNetworks(t *testing.T) {

@@ -70,6 +70,16 @@ type provDirectory interface {
 	Close() error
 }
 
+// provDirectory opens the directory for RunProv: the Env's own opener when
+// set (tests), else provOpenLDAP.
+func (e *Env) provDirectory() (provDirectory, error) {
+	if e.provOpen != nil {
+		return e.provOpen(e)
+	}
+
+	return provOpenLDAP(e)
+}
+
 // provOpenLDAP opens the directory for the commands that RunProv does not
 // give to zmprov; tests replace it.
 var provOpenLDAP = func(e *Env) (provDirectory, error) {
@@ -176,7 +186,7 @@ func (e *Env) RunProv(p *Prov) error {
 		if dir == nil {
 			var err error
 
-			if dir, err = provOpenLDAP(e); err != nil {
+			if dir, err = e.provDirectory(); err != nil {
 				msgs = append(msgs, fmt.Sprintf("ERROR: opening LDAP: %v", err))
 
 				continue

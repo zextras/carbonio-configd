@@ -139,11 +139,11 @@ func TestStepConfigSetStoreDefaults_NewInstallDoneNeedsTheHostRegistered(t *test
 
 	// another host holds the lookup list: this one must be added to it
 	dir.global = srvEntry{"zimbrareverseproxyavailablelookuptargets": {"other.example.com"}}
-	provTestLDAP.set(provGlobalDN, "zimbraReverseProxyAvailableLookupTargets", "other.example.com")
+	provTestLDAP().set(provGlobalDN, "zimbraReverseProxyAvailableLookupTargets", "other.example.com")
 	require.NoError(t, s.Apply(e))
 	assert.Equal(t, []string{"other.example.com", "mail.example.com"},
-		provTestLDAP.values(provGlobalDN, "zimbraReverseProxyAvailableLookupTargets"))
-	assert.Equal(t, []string{"mail.example.com"}, provTestLDAP.values(provGlobalDN, "zimbraReverseProxyUpstreamEwsServers"))
+		provTestLDAP().values(provGlobalDN, "zimbraReverseProxyAvailableLookupTargets"))
+	assert.Equal(t, []string{"mail.example.com"}, provTestLDAP().values(provGlobalDN, "zimbraReverseProxyUpstreamEwsServers"))
 	assert.Empty(t, fakes.Exec.Calls(), "the attributes are written to LDAP, no zmprov")
 }
 
@@ -157,9 +157,9 @@ func TestStepConfigSetStoreDefaults_NoHostAddWhenAnotherStoreIsAlreadyATarget(t 
 	e.Facts.ServiceWebapp, e.Facts.NewInstall = true, true
 
 	require.NoError(t, StepConfigSetStoreDefaults().Apply(e))
-	assert.Empty(t, provTestLDAP.values(provGlobalDN, "zimbraReverseProxyAvailableLookupTargets"),
+	assert.Empty(t, provTestLDAP().values(provGlobalDN, "zimbraReverseProxyAvailableLookupTargets"),
 		"an existing lookup target already serves the proxy")
-	assert.Equal(t, []string{"mail.example.com"}, provTestLDAP.values(provGlobalDN, "zimbraReverseProxyUpstreamEwsServers"))
+	assert.Equal(t, []string{"mail.example.com"}, provTestLDAP().values(provGlobalDN, "zimbraReverseProxyUpstreamEwsServers"))
 }
 
 func TestStepConfigSetEnabledServices_Done(t *testing.T) {

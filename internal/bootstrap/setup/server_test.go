@@ -153,9 +153,9 @@ func TestSrvServiceLists(t *testing.T) {
 
 	require.NoError(t, StepConfigSetEnabledServices().Apply(e))
 
-	enabled := provTestLDAP.values(provServerDN("mail.example.com"), "zimbraServiceEnabled")
+	enabled := provTestLDAP().values(provServerDN("mail.example.com"), "zimbraServiceEnabled")
 	assert.Subset(t, enabled, []string{"stats", "service", "mailbox", "amavis", "antispam", "proxy", "service-discover", "antivirus"})
-	assert.Contains(t, provTestLDAP.values(provServerDN("mail.example.com"), "zimbraServiceInstalled"), "service-discover")
+	assert.Contains(t, provTestLDAP().values(provServerDN("mail.example.com"), "zimbraServiceInstalled"), "service-discover")
 	assert.NotContains(t, enabled, "opendkim")
 	assert.NotContains(t, enabled, "cbpolicyd")
 }
@@ -167,7 +167,7 @@ func TestSrvServiceLists_DoesNotIntroduceServiceDiscoverAndDropsIdleProxy(t *tes
 
 	require.NoError(t, StepConfigSetEnabledServices().Apply(e))
 
-	enabled := provTestLDAP.values(provServerDN("mail.example.com"), "zimbraServiceEnabled")
+	enabled := provTestLDAP().values(provServerDN("mail.example.com"), "zimbraServiceEnabled")
 	assert.NotContains(t, enabled, "service-discover")
 	assert.NotContains(t, enabled, "proxy")
 
@@ -184,8 +184,8 @@ func TestSrvProxyPrefs_DisablesIdleProxyAndSkipsPublicHostnameWhenSet(t *testing
 
 	require.NoError(t, StepConfigSetProxyPrefs().Apply(e))
 	assert.Equal(t, []string{"TRUE"},
-		provTestLDAP.values(provServerDN("mail.example.com"), "zimbraReverseProxyStrictServerNameEnabled"))
-	assert.Empty(t, provTestLDAP.values(provGlobalDN, "zimbraPublicServiceHostname"))
+		provTestLDAP().values(provServerDN("mail.example.com"), "zimbraReverseProxyStrictServerNameEnabled"))
+	assert.Empty(t, provTestLDAP().values(provGlobalDN, "zimbraPublicServiceHostname"))
 	assert.False(t, e.Facts.Enabled["carbonio-proxy"])
 
 	for _, c := range fakes.Exec.Calls() {
@@ -215,7 +215,7 @@ func TestSrvProxyPrefs_ProxyAttributes(t *testing.T) {
 			"zimbraReverseProxyMailEnabled": "FALSE", "zimbraReverseProxyMailMode": "redirect",
 			"zimbraReverseProxyHttpEnabled": "TRUE", "zimbraReverseProxySSLToUpstreamEnabled": "TRUE",
 		}), pcFlatten(w.writes[0].replace))
-	assert.Equal(t, []string{"public.example.com"}, provTestLDAP.values(provGlobalDN, "zimbraPublicServiceHostname"))
+	assert.Equal(t, []string{"public.example.com"}, provTestLDAP().values(provGlobalDN, "zimbraPublicServiceHostname"))
 	assert.True(t, e.Facts.Enabled["carbonio-proxy"])
 }
 
@@ -240,12 +240,12 @@ func TestSrvStoreDefaults_JoinsLookupTargetsOnlyWhenNoneExist(t *testing.T) {
 
 			require.NoError(t, StepConfigSetStoreDefaults().Apply(e))
 			assert.Equal(t, tc.wantALT,
-				len(provTestLDAP.values(provGlobalDN, "zimbraReverseProxyAvailableLookupTargets")) > 0)
-			assert.Equal(t, []string{"mail.example.com"}, provTestLDAP.values(provGlobalDN, "zimbraReverseProxyUpstreamEwsServers"))
+				len(provTestLDAP().values(provGlobalDN, "zimbraReverseProxyAvailableLookupTargets")) > 0)
+			assert.Equal(t, []string{"mail.example.com"}, provTestLDAP().values(provGlobalDN, "zimbraReverseProxyUpstreamEwsServers"))
 
 			srv := provServerDN("mail.example.com")
-			assert.Equal(t, []string{"TRUE"}, provTestLDAP.values(srv, "zimbraReverseProxyLookupTarget"))
-			assert.Equal(t, []string{"TRUE"}, provTestLDAP.values(srv, "zimbraMtaAuthTarget"))
+			assert.Equal(t, []string{"TRUE"}, provTestLDAP().values(srv, "zimbraReverseProxyLookupTarget"))
+			assert.Equal(t, []string{"TRUE"}, provTestLDAP().values(srv, "zimbraMtaAuthTarget"))
 		})
 	}
 }
@@ -320,7 +320,7 @@ func TestSrvCreateServerEntry_OrderByReplica(t *testing.T) {
 	s := StepConfigCreateServerEntry()
 	require.NoError(t, s.Apply(e))
 	assert.Equal(t, "\"cs\" \"mail.example.com\"\nexit\n", *stdin, "only the creation goes to zmprov")
-	assert.Equal(t, []string{"ipv4"}, provTestLDAP.values(provServerDN("mail.example.com"), "zimbraIPMode"))
+	assert.Equal(t, []string{"ipv4"}, provTestLDAP().values(provServerDN("mail.example.com"), "zimbraIPMode"))
 
 	dir.servers["mail.example.com"] = srvEntry{"zimbraipmode": {"ipv4"}}
 	done, err := s.Done(e)

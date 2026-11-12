@@ -403,7 +403,7 @@ func TestCertDHParam(t *testing.T) {
 		assertFFDHE2048PEM(t, data)
 
 		// zmprov stores the content of the file named by the binary attribute.
-		assert.Equal(t, []string{string(data)}, provTestLDAP.values("cn=config,cn=zimbra", certDHParamAttr))
+		assert.Equal(t, []string{string(data)}, provTestLDAP().values("cn=config,cn=zimbra", certDHParamAttr))
 	})
 
 	t.Run("keeps an existing file", func(t *testing.T) {

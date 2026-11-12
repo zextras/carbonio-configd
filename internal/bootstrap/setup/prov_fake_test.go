@@ -7,6 +7,7 @@ package setup
 import (
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -31,11 +32,15 @@ type provFakeLDAP struct {
 	closed  int
 }
 
-// provTestLDAP is the fake of the running test; testEnv installs it.
-var provTestLDAP *provFakeLDAP
+// provTestFake is the fake of the latest testEnv. Parallel tests store it
+// too, so it is atomic; only sequential tests read it (provTestLDAP).
+var provTestFake atomic.Pointer[provFakeLDAP]
 
-// installProvFake makes RunProv use a new fake directory for the test.
-func installProvFake(t *testing.T) *provFakeLDAP {
+// provTestLDAP is the fake of the running (sequential) test.
+func provTestLDAP() *provFakeLDAP { return provTestFake.Load() }
+
+// installProvFake makes RunProv on e use a new fake directory.
+func installProvFake(t *testing.T, e *Env) *provFakeLDAP {
 	t.Helper()
 
 	f := &provFakeLDAP{
@@ -44,9 +49,8 @@ func installProvFake(t *testing.T) *provFakeLDAP {
 		failDN:  map[string]error{},
 	}
 
-	old, oldFake := provOpenLDAP, provTestLDAP
-	provTestLDAP = f
-	provOpenLDAP = func(*Env) (provDirectory, error) {
+	oldFake := provTestFake.Swap(f)
+	e.provOpen = func(*Env) (provDirectory, error) {
 		f.opened++
 
 		if f.openErr != nil {
@@ -56,7 +60,7 @@ func installProvFake(t *testing.T) *provFakeLDAP {
 		return f, nil
 	}
 
-	t.Cleanup(func() { provOpenLDAP, provTestLDAP = old, oldFake })
+	t.Cleanup(func() { provTestFake.Store(oldFake) })
 
 	return f
 }

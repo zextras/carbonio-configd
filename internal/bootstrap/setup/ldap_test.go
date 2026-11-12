@@ -692,7 +692,7 @@ func TestLdapStepConfigSetupLdap_ReplicaFailureDisablesDirectoryServer(t *testin
 	assert.Equal(t, []provCall{{
 		DN: "cn=ldap1.example.com,cn=servers,cn=zimbra", Del: map[string][]string{"zimbraServiceEnabled": {"directory-server"}},
 		Add: map[string][]string{}, Replace: map[string][]string{},
-	}}, provTestLDAP.calls)
+	}}, provTestLDAP().calls)
 }
 
 func TestLdapStepConfigSetupLdap_ExistingMasterRunsUpdateLdifAsRoot(t *testing.T) {
@@ -826,7 +826,7 @@ func TestLdapStepConfigLDAPSchemaVersion(t *testing.T) {
 
 	require.NoError(t, s.Apply(e))
 
-	assert.Equal(t, []string{"42"}, provTestLDAP.values("cn=config,cn=zimbra", ldapSchemaAttr))
+	assert.Equal(t, []string{"42"}, provTestLDAP().values("cn=config,cn=zimbra", ldapSchemaAttr))
 }
 
 func TestLdapStepConfigLDAPSchemaVersion_NoFile(t *testing.T) {
