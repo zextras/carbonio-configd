@@ -286,6 +286,15 @@ it runs the steps of `setup.pl` in its order:
 3. Default domain and accounts, SQL, syslog, service start (systemd targets,
    or `zmcontrol`), GAL sync account, crontab, ssh keys.
 
+The syslog step runs in process (`setup syslog`, which is also what
+`libexec/zmsyslogsetup` calls): it adds the local0, auth and mail rules to
+`/etc/rsyslog.conf` (Ubuntu with `/etc/rsyslog.d`: to `60-carbonio.conf`, and
+the catch-all rules of `50-default.conf` lose those facilities), forwards to
+`zimbraLogHostname` over UDP when that is another host, creates
+`/var/log/carbonio.log`, sets the owner in `/etc/logrotate.d/carbonio` and
+restarts rsyslog only if a file changed. Only rsyslog is handled; syslog-ng and
+`/etc/syslog.conf` are not.
+
 Before the steps, `run` prints "Starting Carbonio Bootstrap..." and the
 licence notice, wrapped at 80 columns between two rules (also with
 `--dry-run`; `config` does not print it). On a terminal with the full-screen

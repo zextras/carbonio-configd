@@ -336,18 +336,6 @@ func TestSvcConfigInitSQL_DefaultPercent(t *testing.T) {
 	assert.Contains(t, fakes.Exec.Lines()[0], "--mysql_memory_percent 30")
 }
 
-func TestSvcSetupSyslog_MissingToolFails(t *testing.T) {
-	e, fakes := svcEnv(t)
-	s := StepSetupSyslog()
-
-	require.Error(t, s.Apply(e))
-	assert.True(t, s.Optional)
-
-	fakes.FS.Put("/opt/zextras/libexec/zmsyslogsetup", []byte("x"), 0o755)
-	require.NoError(t, s.Apply(e))
-	assert.Equal(t, []string{"/opt/zextras/libexec/zmsyslogsetup"}, fakes.Exec.Lines())
-}
-
 func TestSvcStartServers_Systemd(t *testing.T) {
 	e, fakes := svcEnv(t, PkgAppserver, PkgMTA)
 	e.Facts.Systemd = true
