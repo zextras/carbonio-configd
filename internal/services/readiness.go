@@ -31,11 +31,13 @@ const (
 	mailboxDialInterval = 5 * time.Second
 	mailboxDialTimeout  = 2 * time.Second
 
-	// configdReadyAttempts x configdReadyInterval: the daemon answers STATUS
-	// only after its first (synchronous) rewrite pass, so wait as long as the
-	// unit's TimeoutStartSec (300s).
-	configdReadyAttempts = 100
-	configdReadyInterval = 3 * time.Second
+	// The daemon answers STATUS only after its first (synchronous) rewrite
+	// pass, which takes well under a second; poll often so start returns as
+	// soon as it is ready, for as long as the unit's TimeoutStartSec (300s).
+	// (Legacy zmconfigdctl slept 3s between probes, so the very first probe,
+	// sent before the daemon was up, always cost a full 3s.)
+	configdReadyTimeout  = 300 * time.Second
+	configdReadyInterval = 100 * time.Millisecond
 	configdProbeTimeout  = 3 * time.Second
 
 	defaultConfigdPort = 7171
@@ -134,12 +136,15 @@ func (c *Controller) configdStatus(ctx context.Context) (string, error) {
 }
 
 // waitForConfigd polls the configd daemon's STATUS until it answers
-// "SUCCESS ACTIVE", like legacy zmconfigdctl start (zmconfigd_request STATUS,
-// 10 x 3s). It is the default Controller.configdReady.
+// "SUCCESS ACTIVE", like legacy zmconfigdctl start (zmconfigd_request STATUS),
+// every configdReadyInterval for up to configdReadyTimeout. It is the default
+// Controller.configdReady.
 func (c *Controller) waitForConfigd(ctx context.Context) error {
 	var last error
 
-	for i := range configdReadyAttempts {
+	deadline := c.env.Clock.Now().Add(configdReadyTimeout)
+
+	for {
 		reply, err := c.configdStatus(ctx)
 
 		switch {
@@ -151,15 +156,18 @@ func (c *Controller) waitForConfigd(ctx context.Context) error {
 			last = fmt.Errorf("unexpected STATUS reply %q", reply)
 		}
 
-		if i < configdReadyAttempts-1 && !c.pause(ctx, configdReadyInterval) {
+		if !c.env.Clock.Now().Before(deadline) {
+			break
+		}
+
+		if !c.pause(ctx, configdReadyInterval) {
 			return fmt.Errorf("waiting for configd: %w", ctx.Err())
 		}
 	}
 
 	logger.WarnContext(ctx, "configd did not become ready", "error", last)
 
-	return fmt.Errorf("configd did not become ready within %s: %w",
-		time.Duration(configdReadyAttempts)*configdReadyInterval, last)
+	return fmt.Errorf("configd did not become ready within %s: %w", configdReadyTimeout, last)
 }
 
 // awaitReady runs the readiness probe def.Ready names, after the service has

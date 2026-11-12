@@ -174,7 +174,7 @@ func configdServer(t *testing.T, reply string) (port int, requests <-chan string
 
 	t.Cleanup(func() { _ = l.Close() })
 
-	reqs := make(chan string, 4*configdReadyAttempts)
+	reqs := make(chan string, 1024)
 
 	go func() {
 		for {
@@ -275,16 +275,17 @@ func TestWaitForConfigd_NotActiveTimesOut(t *testing.T) {
 
 	port, reqs := configdServer(t, "SUCCESS STARTING")
 	ctl, f := configdController(t, port)
-	pumpClock(t, f.Clock, configdReadyInterval)
+	// Advance 3s per pause: the whole 300s window in ~100 probes.
+	pumpClock(t, f.Clock, 3*time.Second)
 
 	start := f.Clock.Now()
 	err := ctl.waitForConfigd(context.Background())
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "did not become ready")
+	assert.Contains(t, err.Error(), "did not become ready within 5m0s")
 	assert.Contains(t, err.Error(), "SUCCESS STARTING")
-	assert.GreaterOrEqual(t, f.Clock.Now().Sub(start), time.Duration(configdReadyAttempts-1)*configdReadyInterval)
-	assert.Len(t, reqs, configdReadyAttempts)
+	assert.GreaterOrEqual(t, f.Clock.Now().Sub(start), configdReadyTimeout)
+	assert.NotEmpty(t, reqs)
 }
 
 func TestWaitForConfigd_BecomesActiveAfterRetries(t *testing.T) {
@@ -319,8 +320,12 @@ func TestWaitForConfigd_BecomesActiveAfterRetries(t *testing.T) {
 	ctl, f := configdController(t, l.Addr().(*net.TCPAddr).Port)
 	pumpClock(t, f.Clock, configdReadyInterval)
 
+	start := f.Clock.Now()
+
 	require.NoError(t, ctl.waitForConfigd(context.Background()))
 	assert.Equal(t, int32(3), served.Load())
+	assert.Less(t, f.Clock.Now().Sub(start), time.Second,
+		"start returns as soon as the daemon is ready, not a full legacy 3s interval later")
 }
 
 func TestConfigdCustomStart_StartsDaemonThenWaitsReady(t *testing.T) {
