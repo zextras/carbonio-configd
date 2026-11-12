@@ -84,7 +84,7 @@ func TestRun_FileErrors(t *testing.T) {
 			want:  []string{"/typo.yaml:", "no_such_key"},
 		},
 		"invalid legacy file names the file": {
-			files: map[string]string{"/bad.conf": "this is not key=value\x00\n"},
+			files: map[string]string{"/bad.conf": "no key-value separator here\n"},
 			opts:  Options{LegacyPath: "/bad.conf"},
 			want:  []string{"/bad.conf"},
 		},

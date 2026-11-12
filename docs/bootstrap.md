@@ -257,7 +257,9 @@ carbonio-bootstrap config --legacy-config /opt/zextras/config.12345 --output /et
 - Keys that are computed, fixed, obsolete or read from LDAP are not imported.
   Each one is listed on stderr with the reason (`Note: legacy key EXPANDMENU
   not imported: obsolete`).
-- An unknown key is an error.
+- A key neither mapped nor listed above (for example the extra keys some
+  container images add) is ignored and listed on stderr as
+  `unknown key, ignored`, as `setup.pl` ignored it.
 - Files saved by `setup.pl` hold no passwords, because `saveConfig` skips
   them. A hand-written file may hold some. They are used for the run but not
   written by `--output`; give them again through `*_FILE`, a `_file` key or
