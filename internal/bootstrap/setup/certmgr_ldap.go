@@ -5,11 +5,15 @@
 package setup
 
 import (
+	"context"
 	"errors"
+	"log/slog"
 	"slices"
 	"strings"
 
 	goldap "github.com/go-ldap/ldap/v3"
+
+	"github.com/zextras/carbonio-configd/internal/logger"
 )
 
 // certDirectory is the LDAP access of zmcertmgr: the client of the node.
@@ -56,7 +60,7 @@ func (m *certMgr) directory() (certDirectory, error) {
 		return m.dir, m.dirErr
 	}
 
-	c, err := m.e.LDAP()
+	c, err := m.e.ldapClient(m.ldapContext())
 	if err != nil {
 		m.dirErr = err
 
@@ -66,6 +70,23 @@ func (m *certMgr) directory() (certDirectory, error) {
 	m.dir = c
 
 	return m.dir, nil
+}
+
+// ldapContext is the lifecycle context of the LDAP client. The script only
+// prints "failed" when LDAP is down (as it is early in setup.pl, before slapd
+// starts): the warnings of the client's failed attempts are shown with -debug
+// only.
+func (m *certMgr) ldapContext() context.Context {
+	ctx := m.e.Ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	if m.o.Debug > 0 {
+		return ctx
+	}
+
+	return logger.ContextWithLogger(ctx, slog.New(slog.DiscardHandler))
 }
 
 // serverHost is the server a scope names.
