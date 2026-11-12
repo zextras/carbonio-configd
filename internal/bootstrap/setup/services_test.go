@@ -416,7 +416,7 @@ func TestSvcStartServers_StartFailureIsReported(t *testing.T) {
 		systest.Fail(1, "boom"))
 
 	require.Error(t, svcStartServers(e))
-	assert.True(t, StepStartServers().Optional)
+	assert.False(t, StepStartServers().Optional, "a service that does not start fails the run")
 	assert.False(t, StepStartServers().When(e))
 }
 

@@ -30,16 +30,15 @@ type Host interface {
 // defaultTimezone is the setup.pl fallback when the system zone is unknown.
 const defaultTimezone = "America/Los_Angeles"
 
-// Store and proxy ports: the proxy takes the standard ports when installed
-// on the node, and the mailbox moves to the 7xxx and 8080/8443 ones (the
-// zmproxyconfig -a default on enable, 8080:80:8443:443). mailboxd runs as
-// zextras and cannot bind ports below 1024 under a local proxy.
+// Store and proxy ports: the mailbox always takes the 7xxx and 8080/8443
+// ones (the zmproxyconfig -a default on enable, 8080:80:8443:443) and the
+// proxy, on this node or another, the standard ones. mailboxd runs as
+// zextras and cannot bind ports below 1024; setup.pl's 143/80 for a node
+// without the proxy relied on the old launcher binding them as root.
 var (
-	storePortsBehindProxy = [6]int{7143, 7993, 7110, 7995, 8080, 8443}
-	storePortsDirect      = [6]int{143, 993, 110, 995, 80, 443}
-	proxyPortsLocal       = [6]int{143, 993, 110, 995, 80, 443}
-	proxyPortsRemote      = [6]int{7143, 7993, 7110, 7995, 8080, 8443}
-	portKeys              = [6]string{"imap", "imaps", "pop3", "pop3s", "http", "https"}
+	storePorts = [6]int{7143, 7993, 7110, 7995, 8080, 8443}
+	proxyPorts = [6]int{143, 993, 110, 995, 80, 443}
+	portKeys   = [6]string{"imap", "imaps", "pop3", "pop3s", "http", "https"}
 )
 
 // ApplyDefaults fills every key no layer set. Defaults are computed in
@@ -118,7 +117,7 @@ func (r *Resolved) defaultSteps(host Host) []defaultStep {
 		{keyStoreVirusQuarantineAccount, SourceGenerated, r.systemAccount("virus-quarantine")},
 	}
 
-	steps = append(steps, portSteps(c, "store.ports.", storePortsBehindProxy, storePortsDirect)...)
+	steps = append(steps, portSteps("store.ports.", storePorts)...)
 
 	steps = append(steps, []defaultStep{
 		{keyProxyMode, SourceDefault, constant("https")},
@@ -127,24 +126,17 @@ func (r *Resolved) defaultSteps(host Host) []defaultStep {
 		{keyProxyStrictServerName, SourceDefault, constant("false")},
 	}...)
 
-	steps = append(steps, portSteps(c, "proxy.ports.", proxyPortsLocal, proxyPortsRemote)...)
+	steps = append(steps, portSteps("proxy.ports.", proxyPorts)...)
 
 	return append(steps, defaultStep{keyStartServices, SourceDefault, constant("true")})
 }
 
-// portSteps defaults the six ports under prefix: onProxy when the node runs
-// the proxy, otherwise notProxy.
-func portSteps(c *Config, prefix string, onProxy, notProxy [6]int) []defaultStep {
+// portSteps defaults the six ports under prefix.
+func portSteps(prefix string, ports [6]int) []defaultStep {
 	steps := make([]defaultStep, 0, len(portKeys))
 
 	for i, k := range portKeys {
-		steps = append(steps, defaultStep{prefix + k, SourceDefault, func() (string, error) {
-			if c.HasRole(RoleProxy) {
-				return strconv.Itoa(onProxy[i]), nil
-			}
-
-			return strconv.Itoa(notProxy[i]), nil
-		}})
+		steps = append(steps, defaultStep{prefix + k, SourceDefault, constant(strconv.Itoa(ports[i]))})
 	}
 
 	return steps
