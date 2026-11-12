@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Package bootstrapcmd implements "configd bootstrap config": it resolves the
+// Package bootstrapcmd implements "carbonio-bootstrap config": it resolves the
 // bootstrap configuration from the YAML file (or a legacy setup.pl config
 // file), the CARBONIO_BOOTSTRAP_* environment, the --set flags and the
 // wizard, validates it, and prints or saves it.
@@ -21,6 +21,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/zextras/carbonio-configd/internal/bootstrap"
+	"github.com/zextras/carbonio-configd/internal/bootstrap/tui"
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
@@ -34,7 +35,7 @@ const (
 // files, so it is kept private.
 const saveMode = 0o600
 
-// Options are the parsed flags of "configd bootstrap config".
+// Options are the parsed flags of "carbonio-bootstrap config".
 type Options struct {
 	// ConfigPath is the YAML configuration file.
 	ConfigPath string
@@ -49,6 +50,8 @@ type Options struct {
 	Wizard string
 	// Output saves the configuration there instead of printing it.
 	Output string
+	// Plain keeps the line wizard and the line output on a terminal.
+	Plain bool
 	// Environ is the process environment ("NAME=value").
 	Environ []string
 }
@@ -65,6 +68,17 @@ type Deps struct {
 	// Existing are the values of an existing install (key path to value),
 	// ranked below every operator layer.
 	Existing map[string]string
+	// Screens are the full-screen pages; nil when the terminal cannot show
+	// them (the line wizard and the plain output are used).
+	Screens *Screens
+	// Session is what the screens of "run" share (nil for "config").
+	Session *Session
+}
+
+// useScreens: the full-screen pages replace the line wizard and the line
+// output unless the operator or the terminal asks for plain text.
+func useScreens(opts *Options, deps *Deps) bool {
+	return deps.Screens != nil && !opts.Plain && !opts.NonInteractive
 }
 
 // Run executes the command and returns the exit status: 0 when the
@@ -81,6 +95,11 @@ func realDeps(ctx context.Context, env sys.System, stdin io.Reader, stdout io.Wr
 
 	if inOK && outOK && term.IsTerminal(int(in.Fd())) && term.IsTerminal(int(out.Fd())) {
 		d.Terminal = true
+
+		if os.Getenv("TERM") != "dumb" {
+			d.Screens = &Screens{Configure: tui.Configure, Apply: tui.Apply}
+		}
+
 		d.ReadSecret = func() (string, error) {
 			b, err := term.ReadPassword(int(in.Fd()))
 
@@ -201,6 +220,10 @@ func applyLayers(env sys.System, r *bootstrap.Resolved, stderr io.Writer, opts *
 func runWizard(ctx context.Context, env sys.System, stdin io.Reader, stdout io.Writer,
 	r *bootstrap.Resolved, opts *Options, deps Deps,
 ) error {
+	if useScreens(opts, &deps) {
+		return runConfigure(ctx, env, stdin, stdout, r, opts, &deps)
+	}
+
 	w := &bootstrap.Wizard{
 		In:         bufio.NewReader(stdin),
 		Out:        stdout,

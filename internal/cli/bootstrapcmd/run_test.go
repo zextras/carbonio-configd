@@ -95,7 +95,7 @@ func TestRunSetup_StepFailureStopsAndExplains(t *testing.T) {
 
 	assert.Equal(t, 1, status)
 	assert.Contains(t, errb.String(), "zmprov exploded")
-	assert.Contains(t, errb.String(), "run configd bootstrap run again")
+	assert.Contains(t, errb.String(), "run carbonio-bootstrap again")
 	assert.Empty(t, applied, "the steps after the failure do not run")
 	assert.NotContains(t, out.String(), "Configuration complete")
 }
