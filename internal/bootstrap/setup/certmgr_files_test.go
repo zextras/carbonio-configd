@@ -374,10 +374,14 @@ func TestRunCertMgr_BackupOncePerRun(t *testing.T) {
 
 	out := h.ok("createcrt")
 
-	assert.Equal(t, 1, strings.Count(out, "** Backup "+cmSSL+" to "+cmSSL+".20260101010000\n"), out)
-	assert.True(t, h.fakes.FS.Exists(cmSSL+".20260101010000/ca/ca.key"))
-	assert.Equal(t, h.read(cmCAKey), h.read(cmSSL+".20260101010000/ca/ca.key"))
-	assert.Equal(t, uint32(0o600), h.mode(cmSSL+".20260101010000/ca/ca.key"), "the backup keeps the modes")
+	// The suffix is local time, as the script's localtime: derive it from the
+	// fake clock so the test does not depend on the machine's time zone.
+	backup := cmSSL + "." + h.e.Sys.Clock.Now().Local().Format("20060102150405")
+
+	assert.Equal(t, 1, strings.Count(out, "** Backup "+cmSSL+" to "+backup+"\n"), out)
+	assert.True(t, h.fakes.FS.Exists(backup+"/ca/ca.key"))
+	assert.Equal(t, h.read(cmCAKey), h.read(backup+"/ca/ca.key"))
+	assert.Equal(t, uint32(0o600), h.mode(backup+"/ca/ca.key"), "the backup keeps the modes")
 }
 
 func TestRunCertMgr_ConfigFileFromTheTemplate(t *testing.T) {
