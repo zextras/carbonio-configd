@@ -5,7 +5,6 @@
 package setup
 
 import (
-	"bytes"
 	"crypto/sha512"
 	"encoding/base64"
 	"errors"
@@ -690,18 +689,10 @@ func TestLdapStepConfigSetupLdap_ReplicaFailureDisablesDirectoryServer(t *testin
 	assert.Equal(t, []string{"stop"}, f.events)
 	assert.True(t, fakes.FS.Exists("/opt/zextras/.enable_replica"))
 
-	var batch string
-
-	for _, c := range fakes.Exec.Calls() {
-		if c.Stdin != nil {
-			var b bytes.Buffer
-
-			_, _ = b.ReadFrom(c.Stdin)
-			batch += b.String()
-		}
-	}
-
-	assert.Contains(t, batch, `"ms" "ldap1.example.com" "-zimbraServiceEnabled" "directory-server"`)
+	assert.Equal(t, []provCall{{
+		DN: "cn=ldap1.example.com,cn=servers,cn=zimbra", Del: map[string][]string{"zimbraServiceEnabled": {"directory-server"}},
+		Add: map[string][]string{}, Replace: map[string][]string{},
+	}}, provTestLDAP.calls)
 }
 
 func TestLdapStepConfigSetupLdap_ExistingMasterRunsUpdateLdifAsRoot(t *testing.T) {
@@ -835,18 +826,7 @@ func TestLdapStepConfigLDAPSchemaVersion(t *testing.T) {
 
 	require.NoError(t, s.Apply(e))
 
-	var batch string
-
-	for _, c := range fakes.Exec.Calls() {
-		if c.Stdin != nil {
-			var b bytes.Buffer
-
-			_, _ = b.ReadFrom(c.Stdin)
-			batch += b.String()
-		}
-	}
-
-	assert.Contains(t, batch, `"mcf" "zimbraLDAPSchemaVersion" "42"`)
+	assert.Equal(t, []string{"42"}, provTestLDAP.values("cn=config,cn=zimbra", ldapSchemaAttr))
 }
 
 func TestLdapStepConfigLDAPSchemaVersion_NoFile(t *testing.T) {

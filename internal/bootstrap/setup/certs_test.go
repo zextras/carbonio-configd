@@ -5,7 +5,6 @@
 package setup
 
 import (
-	"bytes"
 	"encoding/asn1"
 	"encoding/pem"
 	"errors"
@@ -390,29 +389,21 @@ func TestCertDHParam(t *testing.T) {
 	t.Run("writes the ffdhe2048 group then records", func(t *testing.T) {
 		e, fakes := certTestEnv(t)
 
-		var stdin string
-
-		fakes.Exec.When(func(c *sys.Cmd) bool { return len(c.Args) > 6 && c.Args[6] == "/opt/zextras/bin/zmprov" },
-			func(c *sys.Cmd) (sys.Result, error) {
-				b := new(bytes.Buffer)
-				_, _ = b.ReadFrom(c.Stdin)
-				stdin = b.String()
-
-				return sys.Result{}, nil
-			})
-
 		require.NoError(t, StepGenerateDHParam().Apply(e))
 
-		assert.Equal(t, "\"mcf\" \"zimbraSSLDHParam\" \""+dest+"\"\nexit\n", stdin)
 		assert.Equal(t, "chown zextras:zextras "+dest, certTestCmds(fakes)[0])
 
 		for _, c := range certTestCmds(fakes) {
 			assert.NotContains(t, c, "openssl")
+			assert.NotContains(t, c, "zmprov", "the attribute is written to LDAP")
 		}
 
 		data, err := fakes.FS.ReadFile(dest)
 		require.NoError(t, err)
 		assertFFDHE2048PEM(t, data)
+
+		// zmprov stores the content of the file named by the binary attribute.
+		assert.Equal(t, []string{string(data)}, provTestLDAP.values("cn=config,cn=zimbra", certDHParamAttr))
 	})
 
 	t.Run("keeps an existing file", func(t *testing.T) {

@@ -397,6 +397,10 @@ type svcPlanner struct {
 	global  map[string]string
 	prov    *Prov
 	domains map[string]bool
+	// globals are the global config changes; they follow the creations, so the
+	// batch runs the creations in one zmprov process and the changes to LDAP
+	// (RunProv keeps the order of a batch). None of them depends on a creation.
+	globals [][]string
 	err     error
 }
 
@@ -429,6 +433,10 @@ func svcDomainPlan(e *Env) (*Prov, error) {
 		if cfg.Store.SpamTraining {
 			pl.training(cfg)
 		}
+	}
+
+	for _, g := range pl.globals {
+		pl.prov.Add(g...)
 	}
 
 	return pl.prov, pl.err
@@ -476,7 +484,7 @@ func (pl *svcPlanner) global1(kv ...string) {
 	}
 
 	if len(args) > 0 {
-		pl.prov.Add(append([]string{"mcf"}, args...)...)
+		pl.globals = append(pl.globals, append([]string{provMCF}, args...))
 	}
 }
 

@@ -139,11 +139,12 @@ func TestStepConfigSetStoreDefaults_NewInstallDoneNeedsTheHostRegistered(t *test
 
 	// another host holds the lookup list: this one must be added to it
 	dir.global = srvEntry{"zimbrareverseproxyavailablelookuptargets": {"other.example.com"}}
-	stdin := provStdin(fakes)
+	provTestLDAP.set(provGlobalDN, "zimbraReverseProxyAvailableLookupTargets", "other.example.com")
 	require.NoError(t, s.Apply(e))
-	assert.Contains(t, *stdin, "+zimbraReverseProxyAvailableLookupTargets")
-	assert.Contains(t, *stdin, "+zimbraReverseProxyUpstreamEwsServers")
-	assert.Contains(t, *stdin, "mail.example.com")
+	assert.Equal(t, []string{"other.example.com", "mail.example.com"},
+		provTestLDAP.values(provGlobalDN, "zimbraReverseProxyAvailableLookupTargets"))
+	assert.Equal(t, []string{"mail.example.com"}, provTestLDAP.values(provGlobalDN, "zimbraReverseProxyUpstreamEwsServers"))
+	assert.Empty(t, fakes.Exec.Calls(), "the attributes are written to LDAP, no zmprov")
 }
 
 func TestStepConfigSetStoreDefaults_NoHostAddWhenAnotherStoreIsAlreadyATarget(t *testing.T) {
@@ -151,15 +152,14 @@ func TestStepConfigSetStoreDefaults_NoHostAddWhenAnotherStoreIsAlreadyATarget(t 
 		global:  srvEntry{},
 		servers: map[string]srvEntry{"other.example.com": {"zimbrareverseproxylookuptarget": {"TRUE"}}},
 	}
-	e, fakes, _ := srvTestEnv(t, dir)
+	e, _, _ := srvTestEnv(t, dir)
 	srvEnabled(e, PkgCore, PkgAppserver)
 	e.Facts.ServiceWebapp, e.Facts.NewInstall = true, true
-	stdin := provStdin(fakes)
 
 	require.NoError(t, StepConfigSetStoreDefaults().Apply(e))
-	assert.NotContains(t, *stdin, "+zimbraReverseProxyAvailableLookupTargets",
+	assert.Empty(t, provTestLDAP.values(provGlobalDN, "zimbraReverseProxyAvailableLookupTargets"),
 		"an existing lookup target already serves the proxy")
-	assert.Contains(t, *stdin, "+zimbraReverseProxyUpstreamEwsServers")
+	assert.Equal(t, []string{"mail.example.com"}, provTestLDAP.values(provGlobalDN, "zimbraReverseProxyUpstreamEwsServers"))
 }
 
 func TestStepConfigSetEnabledServices_Done(t *testing.T) {

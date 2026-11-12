@@ -32,6 +32,8 @@ func testEnv(t *testing.T) (*Env, *systest.Fakes, *bytes.Buffer) {
 	}
 	e.perlLib = "/opt/zextras/common/lib/perl5"
 
+	installProvFake(t)
+
 	return e, fakes, out
 }
 
