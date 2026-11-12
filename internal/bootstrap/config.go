@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Package bootstrap resolves the input of "configd bootstrap": the node
+// Package bootstrap resolves the input of "carbonio-bootstrap": the node
 // configuration that replaces the legacy setup.pl answers and its -c file.
 //
 // A configuration is built from layers, lowest precedence first: built-in
@@ -69,6 +69,7 @@ const (
 	keyHostSSLDigest                   = "host.ssl_digest"
 	keyHostRequireInterprocessSecurity = "host.require_interprocess_security"
 	keyLdapBaseDn                      = "ldap.base_dn"
+	keyLdapForceReplication            = "ldap.force_replication"
 	keyLdapReplicationType             = "ldap.replication_type"
 	keyLdapServerID                    = "ldap.server_id"
 	keyLdapReplicationPassword         = "ldap.replication_" + "password" // split: secret scanners flag the whole literal

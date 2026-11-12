@@ -312,3 +312,10 @@ func (r *Resolved) ApplySets(sets []string) error {
 
 	return errors.Join(errs...)
 }
+
+// Unset clears the key f, so the next Refresh gives it back its default.
+func (r *Resolved) Unset(f *Field) {
+	f.value(&r.Config).SetZero()
+	delete(r.sources, f.Path)
+	delete(r.secretFiles, f.Path)
+}
