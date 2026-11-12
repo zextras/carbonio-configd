@@ -5,6 +5,9 @@
 package setup
 
 import (
+	"bytes"
+	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -14,6 +17,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/bootstrap"
 	"github.com/zextras/carbonio-configd/internal/sys"
 	"github.com/zextras/carbonio-configd/internal/sys/systest"
+	"github.com/zextras/carbonio-configd/internal/zxadmin"
 )
 
 const svcTestAdminPass = "S3cret-Admin-Pass"
@@ -439,13 +443,45 @@ func TestSvcGALSync_Conditions(t *testing.T) {
 	assert.True(t, StepGALSyncSkipNotice().When(e))
 }
 
-func TestSvcGALSync_Command(t *testing.T) {
+// svcFakeGAL is the admin API of the GAL sync step.
+type svcFakeGAL struct {
+	got  []zxadmin.GalSyncAccountRequest
+	acct zxadmin.GalSyncAccount
+	err  error
+}
+
+func (g *svcFakeGAL) CreateGalSyncAccount(
+	_ context.Context, r *zxadmin.GalSyncAccountRequest,
+) (zxadmin.GalSyncAccount, error) {
+	g.got = append(g.got, *r)
+
+	return g.acct, g.err
+}
+
+func svcWithGAL(t *testing.T, g *svcFakeGAL) {
+	t.Helper()
+
+	old := svcOpenGAL
+	svcOpenGAL = func(*Env) (svcGALAdmin, error) { return g, nil }
+
+	t.Cleanup(func() { svcOpenGAL = old })
+}
+
+func TestSvcGALSync_CreatesTheAccountThroughTheAdminAPI(t *testing.T) {
 	e, fakes := svcEnv(t, PkgAppserver)
 	e.Paths.LocalConfig = t.TempDir() + "/localconfig.xml"
 	e.Cfg.Domain.Name = "example.com"
 	e.Cfg.Host.Hostname = "other.example.com"
+
+	var logFile bytes.Buffer
+
+	e.Log = NewLog(&bytes.Buffer{}, &logFile)
+
 	require.NoError(t, e.SetLC(map[string]string{"zimbra_server_hostname": "store.example.com"}))
 	svcWithDir(t, &svcFakeDir{})
+
+	gal := &svcFakeGAL{acct: zxadmin.GalSyncAccount{Name: "galsync.x@example.com", ID: "id-123"}}
+	svcWithGAL(t, gal)
 
 	s := StepConfigCreateDefaultDomainGALSyncAcct()
 	done, err := s.Done(e)
@@ -453,15 +489,57 @@ func TestSvcGALSync_Command(t *testing.T) {
 	assert.False(t, done)
 	require.NoError(t, s.Apply(e))
 
-	line := fakes.Exec.Lines()[0]
-	assert.Contains(t, line, "/opt/zextras/bin/zmgsautil createAccount -a galsync.")
-	assert.Contains(t, line, "@example.com -n InternalGAL --domain example.com -s store.example.com -t zimbra -f _InternalGAL -p 1d")
+	require.Len(t, gal.got, 1)
+
+	r := gal.got[0]
+	assert.Regexp(t, `^galsync\.[a-z0-9]{10}@example\.com$`, r.Account)
+	assert.Equal(t, "InternalGAL", r.Name)
+	assert.Equal(t, "example.com", r.Domain)
+	assert.Equal(t, "zimbra", r.Type)
+	assert.Equal(t, "_InternalGAL", r.Folder)
+	assert.Equal(t, "store.example.com", r.Server, "the mailbox is the localconfig server, not the configured host")
+	assert.Equal(t, "1d", r.PollingInterval)
+
+	assert.Empty(t, fakes.Exec.Lines(), "no zmgsautil, no JVM")
+	assert.Contains(t, logFile.String(), "Created GAL sync account galsync.x@example.com (id-123)")
 
 	svcWithDir(t, &svcFakeDir{existing: []string{"galsync.*@example.com"}})
 
 	done, err = s.Done(e)
 	require.NoError(t, err)
 	assert.True(t, done)
+}
+
+func TestSvcGALSync_FaultFailsTheStepWithItsReason(t *testing.T) {
+	e, _ := svcEnv(t, PkgAppserver)
+	e.Paths.LocalConfig = t.TempDir() + "/localconfig.xml"
+	e.Cfg.Domain.Name = "example.com"
+
+	svcWithGAL(t, &svcFakeGAL{err: errors.New("fault account.NO_SUCH_DOMAIN: no such domain")})
+
+	err := StepConfigCreateDefaultDomainGALSyncAcct().Apply(e)
+	require.ErrorContains(t, err, "creating the GAL sync account")
+	assert.ErrorContains(t, err, "account.NO_SUCH_DOMAIN: no such domain")
+}
+
+func TestSvcGALSync_AdminAPIUnavailable(t *testing.T) {
+	e, _ := svcEnv(t, PkgAppserver)
+	e.Paths.LocalConfig = t.TempDir() + "/localconfig.xml"
+
+	old := svcOpenGAL
+	svcOpenGAL = func(*Env) (svcGALAdmin, error) { return nil, errors.New("no localconfig") }
+
+	t.Cleanup(func() { svcOpenGAL = old })
+
+	require.ErrorContains(t, StepConfigCreateDefaultDomainGALSyncAcct().Apply(e), "no localconfig")
+}
+
+func TestSvcAdminURL(t *testing.T) {
+	assert.Equal(t, "https://localhost:7071", svcAdminURL(map[string]string{}))
+	assert.Equal(t, "https://mbox.example.com:9071", svcAdminURL(map[string]string{
+		"zimbra_zmprov_default_soap_server": "mbox.example.com", "zimbra_admin_service_port": "9071",
+	}))
+	assert.Equal(t, "https://[::1]:7071", svcAdminURL(map[string]string{"zimbra_zmprov_default_soap_server": "::1"}))
 }
 
 const svcTestCronBase = "# ZEXTRAS-START\n0 1 * * * base\n"

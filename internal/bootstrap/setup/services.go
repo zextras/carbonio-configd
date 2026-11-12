@@ -6,11 +6,14 @@ package setup
 
 import (
 	"bufio"
+	"cmp"
+	"context"
 	"crypto/rand"
 	"errors"
 	"fmt"
 	"io/fs"
 	"math/big"
+	"net"
 	"slices"
 	"sort"
 	"strconv"
@@ -21,6 +24,7 @@ import (
 
 	"github.com/zextras/carbonio-configd/internal/bootstrap"
 	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/zxadmin"
 )
 
 // Stage names of setup.pl (the values written to .install_history).
@@ -46,6 +50,7 @@ const (
 	svcPkgDirectory     = "carbonio-directory-server"
 	svcAttrDescription  = "description"
 	svcCrontabBin       = "crontab"
+	svcGALDataSource    = "InternalGAL"
 )
 
 // svcSystemdTargets are the role targets of Zextras::Util::Systemd, in the
@@ -708,10 +713,11 @@ func svcStopStrayConfigd(e *Env) error {
 // StepConfigCreateDefaultDomainGALSyncAcct ports setup.pl
 // configCreateDefaultDomainGALSyncAcct (L5726-5742), run after the servers
 // start: When start_services && newinstall && isStoreServiceNode() &&
-// isEnabled(carbonio-appserver). zmgsautil creates galsync.<random>@<domain>
-// for the default domain (domain.name). Done when such an account exists.
-// Optional ("failed." and carry on). The history stage is written on success
-// only, as setup.pl did.
+// isEnabled(carbonio-appserver). It creates galsync.<random>@<domain> for the
+// default domain (domain.name) as zmgsautil createAccount does, but through
+// the admin SOAP API (zxadmin.CreateGalSyncAccount), not by starting the
+// tool's JVM. Done when such an account exists. Optional ("failed." and carry
+// on). The history stage is written on success only, as setup.pl did.
 func StepConfigCreateDefaultDomainGALSyncAcct() Step {
 	return Step{
 		Name:     svcStageGALSync,
@@ -744,11 +750,50 @@ func StepConfigCreateDefaultDomainGALSyncAcct() Step {
 
 			domain := e.Cfg.Domain.Name
 
-			return e.Zextras(e.Paths.Path("bin", "zmgsautil"), "createAccount",
-				"-a", "galsync."+suffix+"@"+domain, "-n", "InternalGAL", "--domain", domain,
-				"-s", svcOr(server, e.Cfg.Host.Hostname), "-t", "zimbra", "-f", "_InternalGAL", "-p", "1d")
+			admin, err := svcOpenGAL(e)
+			if err != nil {
+				return err
+			}
+
+			acct, err := admin.CreateGalSyncAccount(e.Ctx, &zxadmin.GalSyncAccountRequest{
+				Account: "galsync." + suffix + "@" + domain, Name: svcGALDataSource, Domain: domain,
+				Type: "zimbra", Folder: "_InternalGAL", Server: svcOr(server, e.Cfg.Host.Hostname),
+				PollingInterval: "1d",
+			})
+			if err != nil {
+				return fmt.Errorf("creating the GAL sync account: %w", err)
+			}
+
+			e.Log.Detail("Created GAL sync account %s (%s)", acct.Name, acct.ID)
+
+			return nil
 		},
 	}
+}
+
+// svcGALAdmin is the admin API call the GAL sync step makes (an interface so
+// tests need no mailbox).
+type svcGALAdmin interface {
+	CreateGalSyncAccount(ctx context.Context, r *zxadmin.GalSyncAccountRequest) (zxadmin.GalSyncAccount, error)
+}
+
+// svcOpenGAL opens the admin API of the node (replaced by tests).
+var svcOpenGAL = func(e *Env) (svcGALAdmin, error) {
+	lc, err := e.LC()
+	if err != nil {
+		return nil, err
+	}
+
+	return zxadmin.NewWithBaseURL(svcAdminURL(lc), lc), nil
+}
+
+// svcAdminURL is the admin URL of the server zmgsautil talked to:
+// zimbra_zmprov_default_soap_server on zimbra_admin_service_port.
+func svcAdminURL(lc map[string]string) string {
+	host := cmp.Or(lc["zimbra_zmprov_default_soap_server"], "localhost")
+	port := cmp.Or(lc["zimbra_admin_service_port"], strconv.Itoa(zxadmin.AdminPort))
+
+	return "https://" + net.JoinHostPort(host, port)
 }
 
 // StepGALSyncSkipNotice warns, as setup.pl did (L5996-6010), when the default
