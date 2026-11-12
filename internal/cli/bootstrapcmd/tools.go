@@ -38,6 +38,7 @@ var (
 	runLDAPEnableMMR     = setup.RunLDAPEnableMMR
 	runIPTool            = setup.RunIPTool
 	runIniUtil           = setup.RunIniUtil
+	runCertMgr           = setup.RunCertMgr
 )
 
 // lookupZextrasUID is the uid of zextras, -1 when there is no such user.
@@ -184,6 +185,20 @@ func toolEnv(ctx context.Context, env sys.System, stdout, stderr io.Writer, name
 		Ctx: ctx, Sys: env, Log: setup.NewLog(stdout, stderr), Paths: setup.DefaultPaths(),
 		IsZextras: uid != 0,
 	}, true
+}
+
+// RunCertMgr executes "setup certmgr": the port of bin/zmcertmgr, which
+// carbonio-core's wrapper calls with the command and options of the script.
+// args are what follows zmcertmgr (see setup.RunCertMgr); the exit status and
+// the output are the script's. Like it, it runs as zextras, and as root too,
+// where it gives what it creates to zextras.
+func RunCertMgr(ctx context.Context, env sys.System, stdout, stderr io.Writer, args []string) int {
+	e, ok := toolEnv(ctx, env, stdout, stderr, "certmgr")
+	if !ok {
+		return 1
+	}
+
+	return runCertMgr(e, args, stdout, stderr)
 }
 
 // RunProxyConfig executes "setup proxyconfig": the port of libexec/zmproxyconfig,

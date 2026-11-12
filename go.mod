@@ -19,6 +19,7 @@ require (
 	github.com/go-ldap/ldap/v3 v3.4.15
 	github.com/google/uuid v1.6.0
 	github.com/moby/moby/api v1.56.1
+	github.com/pavlo-v-chernykh/keystore-go/v4 v4.5.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.1.0
 	github.com/stretchr/testify v1.12.1

@@ -5,6 +5,7 @@
 package setup
 
 import (
+	"bytes"
 	"encoding/asn1"
 	"encoding/pem"
 	"errors"
@@ -24,7 +25,7 @@ import (
 )
 
 const (
-	certTestCertmgr = "/opt/zextras/bin/zmcertmgr"
+	certTestCertmgr = "zmcertmgr"
 	certTestHost    = "mail.example.com"
 	certTestServer  = "/opt/zextras/ssl/carbonio/server/server.crt"
 )
@@ -44,6 +45,19 @@ func certTestEnv(t *testing.T, packages ...string) (*Env, *systest.Fakes) {
 
 	for _, p := range packages {
 		e.Facts.Installed[p] = true
+	}
+
+	// zmcertmgr runs in process; the steps' calls of it are recorded (and
+	// answered) as the command "zmcertmgr <args>".
+	e.certRun = func(args []string) (int, string) {
+		var out bytes.Buffer
+
+		res, err := fakes.Exec.Run(e.Ctx, &sys.Cmd{Path: certTestCertmgr, Args: args, Stdout: &out, Stderr: &out})
+		if exitErr, ok := errors.AsType[*sys.ExitError](err); ok {
+			return exitErr.Code, out.String()
+		}
+
+		return res.ExitCode, out.String()
 	}
 
 	return e, fakes
@@ -77,7 +91,7 @@ func certTestFail(code int, output string) systest.Handler {
 
 func certTestVerb(verb string) func(*sys.Cmd) bool {
 	return func(c *sys.Cmd) bool {
-		return c.Path == "runuser" && len(c.Args) > 7 && c.Args[6] == certTestCertmgr && c.Args[7] == verb
+		return c.Path == certTestCertmgr && len(c.Args) > 0 && c.Args[0] == verb
 	}
 }
 
@@ -121,19 +135,24 @@ func TestCertCASetup_NewInstallMasterCreatesNewCA(t *testing.T) {
 
 func TestCertCASetup_ExpiredCAOnExistingMaster(t *testing.T) {
 	e, fakes := certTestEnv(t)
-	fakes.FS.Put("/opt/zextras/conf/ca/ca.pem", []byte("x"), 0o644)
 	fakes.FS.PutDir("/opt/zextras/ssl/carbonio/ca", 0o755)
-	fakes.Exec.OnPath("runuser", func(*sys.Cmd) (sys.Result, error) { return sys.Result{}, nil })
-	fakes.Exec.OnPath("/opt/zextras/common/bin/openssl", certTestFail(2,
-		"C = US\nerror 10 at 0 depth lookup: certificate has expired\nerror /x: verification failed\n"))
+
+	key, err := certNewRSAKey(2048)
+	require.NoError(t, err)
+
+	subject, err := certParseSubject("/O=CA/CN=" + certTestHost)
+	require.NoError(t, err)
+
+	// A CA of one day, made three days ago: setup.pl saw "error 10" of
+	// openssl verify and had a new CA made.
+	issued, err := certSelfSign(key, subject, nil, 1, "sha256", e.Sys.Clock.Now().AddDate(0, 0, -3))
+	require.NoError(t, err)
+	fakes.FS.Put("/opt/zextras/conf/ca/ca.pem", certPEMBlock("CERTIFICATE", issued.DER), 0o644)
 
 	require.NoError(t, StepConfigCASetup().Apply(e))
 
-	assert.Equal(t, []string{
-		"/opt/zextras/common/bin/openssl verify -purpose sslserver -CAfile /opt/zextras/conf/ca/ca.pem /opt/zextras/conf/ca/ca.pem",
-		certTestCertmgr + " createca -new",
-		certTestCertmgr + " deployca -localonly",
-	}, certTestCmds(fakes))
+	assert.Equal(t, []string{certTestCertmgr + " createca -new", certTestCertmgr + " deployca -localonly"},
+		certTestCmds(fakes))
 	assert.True(t, e.Flags.NeedNewCert)
 }
 
@@ -148,7 +167,7 @@ func TestCertCASetup_ValidCAOnReplicaKeepsCAAndStoresLDAPCredentials(t *testing.
 	require.NoError(t, StepConfigCASetup().Apply(e))
 
 	cmds := certTestCmds(fakes)
-	assert.Equal(t, certTestCertmgr+" createca", cmds[1], "not the master, valid CA: no -new")
+	assert.Equal(t, certTestCertmgr+" createca", cmds[0], "not the master, valid CA: no -new")
 	assert.False(t, e.Flags.NeedNewCert)
 
 	for _, c := range cmds {
@@ -255,7 +274,7 @@ func TestCertCreateCert_ValidSelfSignedCertIsKept(t *testing.T) {
 	e, fakes := certTestEnv(t, PkgMTA)
 	fakes.FS.Put("/opt/zextras/conf/smtpd.crt", []byte("x"), 0o644)
 	fakes.Exec.When(func(c *sys.Cmd) bool {
-		return certTestVerb("verifycrt")(c) && c.Args[8] == "comm"
+		return certTestVerb("verifycrt")(c) && c.Args[1] == "comm"
 	}, certTestFail(1, "no"))
 
 	require.NoError(t, StepConfigCreateCert().Apply(e))

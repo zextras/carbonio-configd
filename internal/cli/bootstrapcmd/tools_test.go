@@ -42,12 +42,12 @@ func newToolHarness(t *testing.T, root bool) *toolHarness {
 
 	oldEUID, oldGAL, oldKey, oldAuth, oldSyslog := geteuid, createGalSyncAccount, generateSSHKey, updateAuthKeys, setupSyslog
 	oldUID, oldAuthAll, oldDH, oldPC := zextrasUID, updateAuthKeysAll, installDHParam, runProxyConfig
-	oldZmDH, oldPasswd := runDHParam, runLDAPPasswd
+	oldZmDH, oldPasswd, oldCertMgr := runDHParam, runLDAPPasswd, runCertMgr
 
 	t.Cleanup(func() {
 		geteuid, createGalSyncAccount, generateSSHKey, updateAuthKeys, setupSyslog = oldEUID, oldGAL, oldKey, oldAuth, oldSyslog
 		zextrasUID, updateAuthKeysAll, installDHParam, runProxyConfig = oldUID, oldAuthAll, oldDH, oldPC
-		runDHParam, runLDAPPasswd = oldZmDH, oldPasswd
+		runDHParam, runLDAPPasswd, runCertMgr = oldZmDH, oldPasswd, oldCertMgr
 	})
 
 	script := func(name string) func(*setup.Env, []string, io.Reader, io.Writer, io.Writer) int {
@@ -72,6 +72,14 @@ func newToolHarness(t *testing.T, root bool) *toolHarness {
 
 		_, _ = io.WriteString(stdout, "out\n")
 		_, _ = io.WriteString(stderr, "err\n")
+
+		return h.code
+	}
+	runCertMgr = func(e *setup.Env, args []string, stdout, stderr io.Writer) int {
+		h.calls, h.env, h.args = append(h.calls, "zmcertmgr"), e, args
+
+		_, _ = io.WriteString(stdout, "zmcertmgr out\n")
+		_, _ = io.WriteString(stderr, "zmcertmgr err\n")
 
 		return h.code
 	}
@@ -424,4 +432,35 @@ func TestRunLDAPPasswd_RefusesOtherUsers(t *testing.T) {
 	assert.Equal(t, "Error: carbonio-bootstrap ldap-passwd must run as root or zextras\n", errb.String())
 	assert.Empty(t, h.calls)
 	assert.Empty(t, h.stdin, "the password of a refused caller is not read")
+}
+
+func TestRunCertMgr_PassesTheCommandLineAndTheScriptsStatus(t *testing.T) {
+	for _, root := range []bool{true, false} {
+		h := newToolHarness(t, root)
+		h.code = 255
+		zextrasUID = func() int { return 1000 }
+
+		var out, errb bytes.Buffer
+
+		status := RunCertMgr(context.Background(), systest.New().System(), &out, &errb,
+			[]string{"deploycrt", "comm", "-deploy", "mta,proxy", "/tmp/c.crt", "/tmp/ca.crt"})
+
+		assert.Equal(t, 255, status, "the status of the port, root %v", root)
+		assert.Equal(t, "zmcertmgr out\n", out.String())
+		assert.Equal(t, "zmcertmgr err\n", errb.String())
+		assert.Equal(t, []string{"deploycrt", "comm", "-deploy", "mta,proxy", "/tmp/c.crt", "/tmp/ca.crt"}, h.args)
+		assert.Equal(t, !root, h.env.IsZextras, "a zextras caller runs the tools without runuser")
+	}
+}
+
+func TestRunCertMgr_RefusesOtherUsers(t *testing.T) {
+	h := newToolHarness(t, false)
+
+	var out, errb bytes.Buffer
+
+	status := RunCertMgr(context.Background(), systest.New().System(), &out, &errb, []string{"viewdeployedcrt"})
+
+	assert.Equal(t, 1, status)
+	assert.Equal(t, "Error: carbonio-bootstrap certmgr must run as root or zextras\n", errb.String())
+	assert.Empty(t, h.calls)
 }

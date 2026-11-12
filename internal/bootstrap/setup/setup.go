@@ -13,6 +13,7 @@ package setup
 
 import (
 	"context"
+	"crypto"
 	"errors"
 	"fmt"
 	"time"
@@ -54,6 +55,15 @@ type Env struct {
 	// kit replaces the native LDAP kit of the LDAP tools for this Env
 	// (tests): a per-Env seam, so parallel tests do not race on a variable.
 	kit *ldapKit
+	// certDir and certKeyGen replace the LDAP client and the RSA key
+	// generator of zmcertmgr for this Env (tests), like provOpen.
+	certDir    func(*Env) (certDirectory, error)
+	certKeyGen func(bits int) (crypto.Signer, error)
+	// certRun replaces the in-process zmcertmgr the certificate steps call
+	// (tests): it returns the exit status and what the command printed.
+	certRun func(args []string) (status int, output string)
+	// certTTY replaces the check that the standard input is a terminal.
+	certTTY func() bool
 	// perlLib caches the zextras PERL5LIB.
 	perlLib string
 	// lc caches the effective localconfig until the next write.
