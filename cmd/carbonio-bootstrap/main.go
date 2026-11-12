@@ -17,6 +17,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -24,6 +25,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/zextras/carbonio-configd/internal/cli/bootstrapcmd"
+	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
@@ -40,6 +42,10 @@ type flags struct {
 }
 
 func main() {
+	// The bootstrap reports through its own step output and log file; the
+	// shared packages' routine INFO lines would only clutter the terminal
+	// (and break the full-screen interface), so they log warnings only.
+	logger.InitStructuredLogging(&logger.Config{Format: logger.FormatText, Level: slog.LevelWarn, Output: os.Stderr})
 	os.Exit(run(os.Args[1:], sys.Real(), os.Stdin, os.Stdout, os.Stderr))
 }
 
