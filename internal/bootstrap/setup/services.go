@@ -78,6 +78,11 @@ type svcDir interface {
 	Global() (map[string]string, error)
 	// MTAServers is the number of servers with the mta service enabled.
 	MTAServers() (int, error)
+	// ServerAttribute is attr of every server, by server name; "" for a
+	// server that does not set it.
+	ServerAttribute(attr string) (map[string]string, error)
+	// SetServerAttribute replaces attr on the entry of server host.
+	SetServerAttribute(host, attr, value string) error
 	Close() error
 }
 
@@ -96,6 +101,8 @@ type svcLDAPClient interface {
 	Search(baseDN, filter string, attributes []string, scope int) (*ldap.SearchResult, error)
 	GetGlobalConfig() (map[string]string, error)
 	GetAllServersWithAttributes() (map[string]map[string]string, error)
+	ModifyAttribute(dn, attribute, value string) error
+	BaseDN() string
 	Close() error
 }
 
@@ -127,6 +134,31 @@ func (d svcLDAP) MTAServers() (int, error) {
 	}
 
 	return n, nil
+}
+
+func (d svcLDAP) ServerAttribute(attr string) (map[string]string, error) {
+	all, err := d.c.GetAllServersWithAttributes()
+	if err != nil {
+		return nil, err
+	}
+
+	out := make(map[string]string, len(all))
+
+	for host, attrs := range all {
+		out[host] = ""
+
+		for name, v := range attrs {
+			if strings.EqualFold(name, attr) {
+				out[host] = v
+			}
+		}
+	}
+
+	return out, nil
+}
+
+func (d svcLDAP) SetServerAttribute(host, attr, value string) error {
+	return d.c.ModifyAttribute("cn="+ldap.EscapeDN(host)+",cn=servers,"+d.c.BaseDN(), attr, value)
 }
 
 func (d svcLDAP) Close() error { return d.c.Close() }
@@ -924,27 +956,4 @@ func svcStripBlock(s string) string {
 	}
 
 	return b.String()
-}
-
-// StepZmsshkeygen ports setup.pl applyConfig L6011-6013: zmsshkeygen as
-// zextras on a new install. It regenerates the key on a re-run of an
-// unfinished new install (cheap, so no Done). Optional: setup.pl ignored the
-// status.
-func StepZmsshkeygen() Step {
-	return Step{
-		Title:    "Generate zextras SSH key",
-		Optional: true,
-		When:     func(e *Env) bool { return e.Facts.NewInstall },
-		Apply:    func(e *Env) error { return e.Zextras(e.Paths.Path("bin", "zmsshkeygen")) },
-	}
-}
-
-// StepZmupdateauthkeys ports setup.pl applyConfig L6014-6018: zmupdateauthkeys
-// as zextras on every run. Optional: setup.pl ignored the status.
-func StepZmupdateauthkeys() Step {
-	return Step{
-		Title:    "Update authorized SSH keys",
-		Optional: true,
-		Apply:    func(e *Env) error { return e.Zextras(e.Paths.Path("bin", "zmupdateauthkeys")) },
-	}
 }

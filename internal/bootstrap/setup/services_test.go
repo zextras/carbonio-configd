@@ -26,6 +26,11 @@ type svcFakeDir struct {
 	existing []string // substrings of filters that match
 	global   map[string]string
 	mtas     int
+	// keys is zimbraSshPublicKey by server name ("" for a server without one).
+	keys map[string]string
+	// set records the SetServerAttribute calls as host -> attr -> value.
+	set    map[string]map[string]string
+	setErr error
 }
 
 func (d *svcFakeDir) Exists(filter string) (bool, error) {
@@ -41,6 +46,26 @@ func (d *svcFakeDir) Exists(filter string) (bool, error) {
 func (d *svcFakeDir) Global() (map[string]string, error) { return d.global, nil }
 func (d *svcFakeDir) MTAServers() (int, error)           { return d.mtas, nil }
 func (d *svcFakeDir) Close() error                       { return nil }
+
+func (d *svcFakeDir) ServerAttribute(string) (map[string]string, error) { return d.keys, nil }
+
+func (d *svcFakeDir) SetServerAttribute(host, attr, value string) error {
+	if d.setErr != nil {
+		return d.setErr
+	}
+
+	if d.set == nil {
+		d.set = map[string]map[string]string{}
+	}
+
+	if d.set[host] == nil {
+		d.set[host] = map[string]string{}
+	}
+
+	d.set[host][attr] = value
+
+	return nil
+}
 
 func svcWithDir(t *testing.T, d *svcFakeDir) {
 	t.Helper()
@@ -605,24 +630,6 @@ func TestSvcCrontab_WithoutMarkersStartsFresh(t *testing.T) {
 func TestSvcCrontab_MissingBaseFileFails(t *testing.T) {
 	e, _ := svcEnv(t)
 	require.Error(t, StepSetupCrontab().Apply(e))
-}
-
-func TestSvcSSHKeys(t *testing.T) {
-	e, fakes := svcEnv(t)
-	gen, upd := StepZmsshkeygen(), StepZmupdateauthkeys()
-
-	assert.False(t, gen.When(e))
-
-	e.Facts.NewInstall = true
-	assert.True(t, gen.When(e))
-	require.NoError(t, gen.Apply(e))
-	require.NoError(t, upd.Apply(e))
-
-	lines := fakes.Exec.Lines()
-	require.Len(t, lines, 2)
-	assert.Contains(t, lines[0], "/opt/zextras/bin/zmsshkeygen")
-	assert.Contains(t, lines[1], "/opt/zextras/bin/zmupdateauthkeys")
-	assert.Nil(t, upd.When)
 }
 
 func TestSvcRandomPassword(t *testing.T) {
