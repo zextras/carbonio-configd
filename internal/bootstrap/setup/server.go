@@ -148,9 +148,9 @@ func srvZmiptool(e *Env) {
 	}
 }
 
-// srvWarn prints a "WARNING:" progress line.
+// srvWarn reports a warning of the step.
 func srvWarn(e *Env, format string, args ...any) {
-	e.Log.Info("WARNING: "+format, args...)
+	e.Log.Warn(format, args...)
 }
 
 // StepRemoveUnusedWebapps ports setup.pl removeUnusedWebapps /
@@ -162,7 +162,7 @@ func srvWarn(e *Env, format string, args ...any) {
 // setup.pl reads, is not kept.
 func StepRemoveUnusedWebapps() Step {
 	return Step{
-		Title: "Determining installed web applications",
+		Title: "Determine installed web applications",
 		When:  func(e *Env) bool { return e.Facts.IsEnabled(PkgAppserver) },
 		Apply: func(e *Env) error {
 			e.Facts.ServiceWebapp = true
@@ -179,7 +179,7 @@ func StepRemoveUnusedWebapps() Step {
 func StepConfigInitCore() Step {
 	return Step{
 		Name:  "configInitCore",
-		Title: "Initializing core config",
+		Title: "Initialize core config",
 		Apply: func(*Env) error { return nil },
 	}
 }
@@ -187,7 +187,7 @@ func StepConfigInitCore() Step {
 func srvCreateServerEntry(replica bool) Step {
 	return Step{
 		Name:     "configCreateServerEntry",
-		Title:    "Creating server entry",
+		Title:    "Create server entry",
 		When:     func(e *Env) bool { return srvIsLDAPReplica(e.Cfg) == replica },
 		Optional: true,
 		Done: func(e *Env) (bool, error) {
@@ -322,7 +322,7 @@ func srvServicePortAttrs(e *Env) [][]string {
 func StepConfigSetServicePorts() Step {
 	return Step{
 		Name:  "configSetServicePorts",
-		Title: "Setting service ports",
+		Title: "Set service ports",
 		When:  func(e *Env) bool { return e.Facts.IsEnabled(PkgAppserver) },
 		Done: func(e *Env) (bool, error) {
 			if !srvLCMatches(e, map[string]string{"zimbra_mail_service_port": srvItoa(srvPorts(e).http)}) {
@@ -364,7 +364,7 @@ func StepConfigSetKeyboardShortcutsPref() Step {
 
 	return Step{
 		Name:     "zimbraPrefUseKeyboardShortcuts",
-		Title:    "Setting Keyboard Shortcut Preferences",
+		Title:    "Set keyboard shortcut preferences",
 		When:     func(e *Env) bool { return e.Facts.IsEnabled(PkgAppserver) && !e.Facts.NewInstall },
 		Optional: true,
 		Done: func(e *Env) (bool, error) {
@@ -422,7 +422,7 @@ func srvStoreJoins(e *Env) bool { return e.Facts.NewInstall && e.Facts.ServiceWe
 // When: isEnabled(carbonio-appserver). No stage name.
 func StepConfigSetStoreDefaults() Step {
 	return Step{
-		Title: "Setting store defaults",
+		Title: "Set store defaults",
 		When:  func(e *Env) bool { return e.Facts.IsEnabled(PkgAppserver) },
 		Done:  srvStoreDefaultsDone,
 		Apply: srvStoreDefaultsApply,
@@ -596,7 +596,7 @@ func srvOnIf(b bool) srvToggle {
 // attributes, so running it again is harmless and the step has no Done.
 func StepConfigSetStoreProxy() Step {
 	return Step{
-		Title: "Enabling proxy on the store",
+		Title: "Enable proxy on the store",
 		When: func(e *Env) bool {
 			return e.Facts.IsEnabled(PkgAppserver) && e.Facts.NewInstall &&
 				(e.Cfg.Store.MailProxy || e.Cfg.Store.WebProxy)
@@ -616,7 +616,7 @@ func StepConfigSetStoreProxy() Step {
 func StepConfigSetTimeZonePref() Step {
 	return Step{
 		Name:     "zimbraPrefTimeZoneId",
-		Title:    "Setting TimeZone Preference",
+		Title:    "Set time zone preference",
 		When:     func(e *Env) bool { return e.Facts.IsEnabled(srvPkgDirectory) },
 		Optional: true,
 		// setup.pl records the stage on every directory server, and writes
@@ -641,7 +641,7 @@ func StepConfigSetTimeZonePref() Step {
 // result).
 func StepSetSkinLogoURL() Step {
 	return Step{
-		Title:    "Setting skin logo URL",
+		Title:    "Set skin logo URL",
 		When:     func(e *Env) bool { return e.Facts.IsEnabled(srvPkgDirectory) },
 		Optional: true,
 		Done: func(e *Env) (bool, error) {
@@ -730,7 +730,7 @@ func srvSetProxyPublicHostname(e *Env) error {
 // read the lookup-target and memcached servers from LDAP directly.
 func StepConfigSetProxyPrefs() Step {
 	return Step{
-		Title:    "Setting proxy preferences",
+		Title:    "Set proxy preferences",
 		When:     func(e *Env) bool { return e.Facts.IsInstalled(srvPkgProxy) },
 		Optional: true,
 		Apply: func(e *Env) error {
@@ -824,7 +824,7 @@ func srvMissingProxyBits(e *Env) ([]string, error) {
 // backslashes before the parentheses); LDAP normally has them already.
 func StepSetProxyBits() Step {
 	return Step{
-		Title: "Setting Proxy pieces",
+		Title: "Set proxy options",
 		When: func(e *Env) bool {
 			return !e.Facts.NewInstall && e.Facts.IsInstalled(srvPkgDirectory)
 		},
@@ -851,7 +851,7 @@ func StepSetProxyBits() Step {
 // When: always. LDAP problems are logged and skipped, as in setup.pl.
 func StepWarnDeprecatedVirtualIPs() Step {
 	return Step{
-		Title:    "Checking deprecated virtual IPs",
+		Title:    "Check deprecated virtual IPs",
 		Optional: true,
 		Apply: func(e *Env) error {
 			err := srvRead(e, func(d srvDirectory) error {
@@ -997,7 +997,7 @@ func srvKeepServiceDiscover(ent srvEntry, enabled []string) []string {
 func StepConfigSetEnabledServices() Step {
 	return Step{
 		Name:  "configSetEnabledServices",
-		Title: "Setting services",
+		Title: "Set enabled services",
 		Done: func(e *Env) (bool, error) {
 			installed, enabled := srvServiceLists(e)
 			done := false
@@ -1091,7 +1091,7 @@ func srvHostPool(e *Env) (id string, pool []string, member bool, err error) {
 // setup.pl printed "failed." and carried on.
 func StepAddServerToHostPool() Step {
 	return Step{
-		Title:    "Adding server to MailHostPool in default COS",
+		Title:    "Add server to MailHostPool in default COS",
 		When:     func(e *Env) bool { return e.Facts.IsEnabled(PkgAppserver) && e.Facts.ServiceWebapp },
 		Optional: true,
 		Done: func(e *Env) (bool, error) {
@@ -1131,7 +1131,7 @@ func StepSetProxyPortsOnExisting() Step {
 	}
 
 	return Step{
-		Title: "Setting proxy ports",
+		Title: "Set proxy ports",
 		When: func(e *Env) bool {
 			return !e.Facts.NewInstall && e.Facts.IsInstalled(srvPkgProxy) && e.Facts.IsEnabled(srvPkgProxy) &&
 				e.Cfg.Proxy.WebEnabled

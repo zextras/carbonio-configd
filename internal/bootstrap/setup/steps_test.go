@@ -52,21 +52,21 @@ func TestSteps_OrderFollowsSetupPl(t *testing.T) {
 
 	idx := func(title string) int { return stepsIndex(t, steps, title) }
 
-	ldap := idx("Configuring LDAP")
-	assert.Less(t, idx("Setting up CA"), idx("Creating SSL certificates"))
-	assert.Less(t, idx("Installing LDAP SSL certificate"), idx("Updating LDAP passwords"))
-	assert.Less(t, idx("Installing Proxy SSL certificate"), ldap, "the certificates are deployed before LDAP is set up")
-	assert.Equal(t, ldap-1, idx("Updating LDAP passwords"), "the passwords are written right before configSetupLdap")
-	assert.Less(t, idx("Saving CA in ldap"), idx("Starting servers"), "the CA is saved in LDAP before the servers start")
-	assert.Less(t, idx("Starting ldap"), idx("Starting servers"))
-	assert.Less(t, idx("Starting servers"), idx("Creating galsync account for default domain"),
+	ldap := idx("Configure LDAP")
+	assert.Less(t, idx("Set up the CA"), idx("Create SSL certificates"))
+	assert.Less(t, idx("Install LDAP SSL certificate"), idx("Update the LDAP passwords"))
+	assert.Less(t, idx("Install proxy SSL certificate"), ldap, "the certificates are deployed before LDAP is set up")
+	assert.Equal(t, ldap-1, idx("Update the LDAP passwords"), "the passwords are written right before configSetupLdap")
+	assert.Less(t, idx("Save the CA in LDAP"), idx("Start servers"), "the CA is saved in LDAP before the servers start")
+	assert.Less(t, idx("Start LDAP"), idx("Start servers"))
+	assert.Less(t, idx("Start servers"), idx("Create GAL sync account"),
 		"the GAL sync account needs the mailbox running")
-	assert.Less(t, idx("Creating galsync account for default domain"), idx("Setting up zextras crontab"))
-	assert.Less(t, idx("Setting up zextras crontab"), idx("Updating the authorized ssh keys"))
-	assert.Equal(t, "Updating the authorized ssh keys", steps[len(steps)-1].Title)
+	assert.Less(t, idx("Create GAL sync account"), idx("Set up the zextras crontab"))
+	assert.Less(t, idx("Set up the zextras crontab"), idx("Update authorized SSH keys"))
+	assert.Equal(t, "Update authorized SSH keys", steps[len(steps)-1].Title)
 
 	// The pre-steps of the main program run before applyConfig.
-	assert.Less(t, idx("Updating the LDAP directory"), idx("Setting mailboxd local config values"))
+	assert.Less(t, idx("Update the LDAP directory"), idx("Set mailboxd local config values"))
 }
 
 // TestSteps_ServerEntryAroundLdapSetup: a replica creates its server entry
@@ -74,7 +74,7 @@ func TestSteps_OrderFollowsSetupPl(t *testing.T) {
 // other node after it; exactly one of the two runs on a node.
 func TestSteps_ServerEntryAroundLdapSetup(t *testing.T) {
 	steps := Steps()
-	ldap := stepsIndex(t, steps, "Configuring LDAP")
+	ldap := stepsIndex(t, steps, "Configure LDAP")
 
 	var entries []int
 

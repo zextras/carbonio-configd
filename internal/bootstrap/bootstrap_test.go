@@ -173,10 +173,14 @@ func TestApplyLegacy(t *testing.T) {
 	assert.Equal(t, SourceUnset, r.Source("store.smtp_host"), "an empty value leaves the default")
 	assert.Equal(t, []LegacyDrop{{"EXPANDMENU", reasonObsolete}, {"LDAPROOTPASSSET", reasonDerived}}, drops)
 
+	drops, err = NewResolved(readFiles(nil)).ApplyLegacy([]byte("LDAPROOTPW=x\nldap_host=h\n"))
+	require.NoError(t, err, "setup.pl ignored keys it never read; container files carry them")
+	assert.Equal(t, []LegacyDrop{{"LDAPROOTPW", reasonUnknown}, {"ldap_host", reasonUnknown}}, drops)
+
 	_, err = NewResolved(readFiles(nil)).ApplyLegacy([]byte("LDAPREPLICATIONTYPE=multi\nFOO=1\nbare\nZIMBRA_REQ_SECURITY=yes\n"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `line 1: LDAPREPLICATIONTYPE: ldap.replication_type: "multi" is not one of master, replica, mmr`)
-	assert.Contains(t, err.Error(), "line 2: unknown key FOO")
+	assert.NotContains(t, err.Error(), "FOO")
 	assert.Contains(t, err.Error(), "line 3: expected KEY=VALUE")
 }
 

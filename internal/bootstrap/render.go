@@ -33,7 +33,7 @@ func (r *Resolved) Render(mode RenderMode) ([]byte, error) {
 	root := &yaml.Node{Kind: yaml.MappingNode}
 
 	if mode == Save {
-		root.HeadComment = "carbonio bootstrap configuration (configd bootstrap)"
+		root.HeadComment = "carbonio bootstrap configuration (carbonio-bootstrap)"
 	}
 
 	for _, f := range Fields {

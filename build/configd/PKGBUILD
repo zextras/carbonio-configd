@@ -69,6 +69,22 @@ _package_common() {
   install -Dm755 "${srcdir}/postfix-conf" \
     "${pkgdir}/opt/zextras/libexec/postfix-conf"
 
+  # The bootstrap of a node: a binary of its own, so the terminal interface
+  # is not linked into configd. Installed as libexec/setup, where zmsetup.pl
+  # and setup.pl lived; the user entry point stays carbonio-core's
+  # /usr/bin/carbonio-bootstrap, which runs it. The completions are for that
+  # command name.
+  install -Dm755 "${srcdir}/setup" \
+    "${pkgdir}/opt/zextras/libexec/setup"
+  install -Dm644 "${srcdir}/carbonio-bootstrap.bash" \
+    "${pkgdir}/usr/share/bash-completion/completions/carbonio-bootstrap"
+  install -Dm644 "${srcdir}/carbonio-bootstrap.bash" \
+    "${pkgdir}/opt/zextras/common/share/bash-completion/completions/carbonio-bootstrap"
+  install -Dm644 "${srcdir}/carbonio-bootstrap.zsh" \
+    "${pkgdir}/usr/share/zsh/site-functions/_carbonio-bootstrap"
+  install -Dm644 "${srcdir}/carbonio-bootstrap.fish" \
+    "${pkgdir}/usr/share/fish/vendor_completions.d/carbonio-bootstrap.fish"
+
   # Its staging directory, on every distro (legacy and systemd).
   install -Dm644 "${srcdir}/${pkgname}-tmpfile.conf" \
     "${pkgdir}/usr/lib/tmpfiles.d/${pkgname}.conf"
@@ -115,12 +131,16 @@ build() {
     -o "${srcdir}/configd" ./cmd/configd/
   CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
     -o "${srcdir}/postfix-conf" ./cmd/postfix-conf/
+  CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
+    -o "${srcdir}/setup" ./cmd/setup/
 
   # The completion scripts come from the command tree itself. Run them with the
   # build host's toolchain target, not the (possibly cross-compiled) package one.
   for shell in bash zsh fish; do
     GOOS="$(go env GOHOSTOS)" GOARCH="$(go env GOHOSTARCH)" CGO_ENABLED=0 \
       go run ./cmd/configd completion "${shell}" >"${srcdir}/configd.${shell}"
+    GOOS="$(go env GOHOSTOS)" GOARCH="$(go env GOHOSTARCH)" CGO_ENABLED=0 \
+      go run ./cmd/setup completion "${shell}" >"${srcdir}/carbonio-bootstrap.${shell}"
   done
 }
 

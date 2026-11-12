@@ -559,9 +559,24 @@ func TestNativeKit_StartWithoutSystemdDoesNotWaitOnTheSocket(t *testing.T) {
 	k.dial = f.kit().dial
 
 	require.NoError(t, k.start(e))
-	assert.Equal(t, []string{"/usr/bin/systemctl start carbonio-openldap.service"}, lwSystemctl(fakes, "start"))
+	assert.Empty(t, lwSystemctl(fakes, "start"))
+	assert.Equal(t, []string{"/opt/zextras/bin/ldap start"}, lwZextrasCalls(fakes),
+		"without systemd slapd is started as zextras, like setup.pl, so zmcontrol can stop it")
 	assert.True(t, e.Flags.LDAPStarted)
 	assert.Empty(t, f.dials, "no readiness poll: setup.pl only waits under systemd")
+}
+
+// lwZextrasCalls returns the commands run as zextras (through runuser).
+func lwZextrasCalls(fakes *systest.Fakes) []string {
+	var out []string
+
+	for _, c := range fakes.Exec.Calls() {
+		if c.Path == "runuser" && len(c.Args) > 6 {
+			out = append(out, strings.Join(c.Args[6:], " "))
+		}
+	}
+
+	return out
 }
 
 func TestNativeKit_StartUnderSystemdWaitsUntilSlapdAnswersOnTheSocket(t *testing.T) {
@@ -610,6 +625,7 @@ func TestNativeKit_StartUnderSystemdGivesUpWhenSlapdNeverAnswers(t *testing.T) {
 func TestNativeKit_StartFailureIsReportedAndNotRemembered(t *testing.T) {
 	e, fakes, _ := ldapTestEnv(t)
 	e.Ctl, _ = lwCtl(fakes)
+	e.Facts.Systemd = true
 	fakes.Exec.OnCmdline("/usr/bin/systemctl start", systest.Fail(1, "Job failed"))
 
 	err := ldapNativeKit().start(e)
@@ -621,9 +637,17 @@ func TestNativeKit_StartFailureIsReportedAndNotRemembered(t *testing.T) {
 
 func TestNativeKit_Stop(t *testing.T) {
 	e, fakes, _ := ldapTestEnv(t)
-	e.Ctl, _ = lwCtl(fakes)
+
+	var slapd *lwSlapd
+
+	e.Ctl, slapd = lwCtl(fakes)
+	e.Facts.Systemd = true
 
 	k := ldapNativeKit()
+	require.NoError(t, k.stop(e))
+	assert.Empty(t, lwSystemctl(fakes, "stop"), "a stopped slapd is left alone, like setup.pl stopLdap")
+
+	slapd.up.Store(true)
 	require.NoError(t, k.stop(e))
 	assert.Equal(t, []string{"/usr/bin/systemctl stop carbonio-openldap.service"}, lwSystemctl(fakes, "stop"))
 

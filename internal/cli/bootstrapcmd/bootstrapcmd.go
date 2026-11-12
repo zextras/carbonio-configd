@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Package bootstrapcmd implements "configd bootstrap config": it resolves the
+// Package bootstrapcmd implements "carbonio-bootstrap config": it resolves the
 // bootstrap configuration from the YAML file (or a legacy setup.pl config
 // file), the CARBONIO_BOOTSTRAP_* environment, the --set flags and the
 // wizard, validates it, and prints or saves it.
@@ -16,11 +16,13 @@ import (
 	"io"
 	"net"
 	"os"
+	"slices"
 	"strings"
 
 	"golang.org/x/term"
 
 	"github.com/zextras/carbonio-configd/internal/bootstrap"
+	"github.com/zextras/carbonio-configd/internal/bootstrap/tui"
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
@@ -34,7 +36,7 @@ const (
 // files, so it is kept private.
 const saveMode = 0o600
 
-// Options are the parsed flags of "configd bootstrap config".
+// Options are the parsed flags of "carbonio-bootstrap config".
 type Options struct {
 	// ConfigPath is the YAML configuration file.
 	ConfigPath string
@@ -49,8 +51,18 @@ type Options struct {
 	Wizard string
 	// Output saves the configuration there instead of printing it.
 	Output string
+	// Plain keeps the line wizard and the line output on a terminal.
+	Plain bool
+	// Verbose lists every legacy key that is not imported.
+	Verbose bool
 	// Environ is the process environment ("NAME=value").
 	Environ []string
+}
+
+// LegacyDrops collects the legacy keys a run did not import, for the caller
+// to report (nil Deps.Drops: the command reports them itself on stderr).
+type LegacyDrops struct {
+	List []bootstrap.LegacyDrop
 }
 
 // Deps are the parts of the node the command reads besides sys.System.
@@ -65,22 +77,79 @@ type Deps struct {
 	// Existing are the values of an existing install (key path to value),
 	// ranked below every operator layer.
 	Existing map[string]string
+	// Screens are the full-screen pages; nil when the terminal cannot show
+	// them (the line wizard and the plain output are used).
+	Screens *Screens
+	// Session is what the screens of "run" share (nil for "config").
+	Session *Session
+	// Drops, if set, collects the legacy keys not imported instead of
+	// printing a note about them.
+	Drops *LegacyDrops
+	// LogPath is the log file of the run ("" in a dry run).
+	LogPath string
+	// Display is how the plain output of "run" is drawn.
+	Display Display
+}
+
+// Display is what the plain output of "run" may use of the terminal.
+type Display struct {
+	// Live redraws a line for the running step; Color paints the statuses.
+	Live, Color bool
+	// Width is the terminal width (0: unknown).
+	Width int
+}
+
+// displayOf tells what w, the output of "run", can show: nothing fancy
+// unless it is a terminal that is not "dumb"; colour also needs NO_COLOR
+// unset.
+func displayOf(w io.Writer, environ []string) Display {
+	f, ok := w.(*os.File)
+	if !ok || !term.IsTerminal(int(f.Fd())) {
+		return Display{}
+	}
+
+	if slices.Contains(environ, "TERM=dumb") {
+		return Display{}
+	}
+
+	d := Display{Live: true, Color: !noColor(environ)}
+	if width, _, err := term.GetSize(int(f.Fd())); err == nil {
+		d.Width = width
+	}
+
+	return d
+}
+
+// useScreens: the full-screen pages replace the line wizard and the line
+// output unless the operator or the terminal asks for plain text.
+func useScreens(opts *Options, deps *Deps) bool {
+	return deps.Screens != nil && !opts.Plain && !opts.NonInteractive
 }
 
 // Run executes the command and returns the exit status: 0 when the
 // configuration is valid, 1 otherwise.
 func Run(ctx context.Context, env sys.System, stdin io.Reader, stdout, stderr io.Writer, opts *Options) int {
-	return run(ctx, env, stdin, stdout, stderr, opts, realDeps(ctx, env, stdin, stdout))
+	deps := realDeps(ctx, env, stdin, stdout)
+
+	return run(ctx, env, stdin, stdout, stderr, opts, &deps)
 }
 
 func realDeps(ctx context.Context, env sys.System, stdin io.Reader, stdout io.Writer) Deps {
-	d := Deps{Host: &systemHost{ctx: ctx, env: env}, Resolver: net.DefaultResolver}
+	d := Deps{
+		Host: &systemHost{ctx: ctx, env: env}, Resolver: net.DefaultResolver,
+		Display: displayOf(stdout, os.Environ()),
+	}
 
 	in, inOK := stdin.(*os.File)
 	out, outOK := stdout.(*os.File)
 
 	if inOK && outOK && term.IsTerminal(int(in.Fd())) && term.IsTerminal(int(out.Fd())) {
 		d.Terminal = true
+
+		if os.Getenv("TERM") != "dumb" {
+			d.Screens = &Screens{Configure: tui.Configure, Apply: tui.Apply}
+		}
+
 		d.ReadSecret = func() (string, error) {
 			b, err := term.ReadPassword(int(in.Fd()))
 
@@ -91,7 +160,9 @@ func realDeps(ctx context.Context, env sys.System, stdin io.Reader, stdout io.Wr
 	return d
 }
 
-func run(ctx context.Context, env sys.System, stdin io.Reader, stdout, stderr io.Writer, opts *Options, deps Deps) int {
+func run(ctx context.Context, env sys.System, stdin io.Reader, stdout, stderr io.Writer,
+	opts *Options, deps *Deps,
+) int {
 	r, ok := resolveValid(ctx, env, stdin, stdout, stderr, opts, deps)
 	if !ok {
 		return 1
@@ -124,7 +195,7 @@ func run(ctx context.Context, env sys.System, stdin io.Reader, stdout, stderr io
 // resolveValid resolves and validates the configuration, printing the
 // errors to stderr.
 func resolveValid(ctx context.Context, env sys.System, stdin io.Reader, stdout, stderr io.Writer,
-	opts *Options, deps Deps,
+	opts *Options, deps *Deps,
 ) (*bootstrap.Resolved, bool) {
 	r, err := resolve(ctx, env, stdin, stdout, stderr, opts, deps)
 	if err != nil {
@@ -147,7 +218,7 @@ func resolveValid(ctx context.Context, env sys.System, stdin io.Reader, stdout, 
 // resolve builds the configuration from every layer, running the wizard
 // when it applies.
 func resolve(ctx context.Context, env sys.System, stdin io.Reader, stdout, stderr io.Writer,
-	opts *Options, deps Deps,
+	opts *Options, deps *Deps,
 ) (*bootstrap.Resolved, error) {
 	if opts.ConfigPath != "" && opts.LegacyPath != "" {
 		return nil, errors.New("--config and --legacy-config are mutually exclusive")
@@ -176,12 +247,12 @@ func resolve(ctx context.Context, env sys.System, stdin io.Reader, stdout, stder
 
 // applyLayers applies the existing install, the files, the environment, the
 // --set flags and the defaults, in increasing precedence.
-func applyLayers(env sys.System, r *bootstrap.Resolved, stderr io.Writer, opts *Options, deps Deps) error {
+func applyLayers(env sys.System, r *bootstrap.Resolved, stderr io.Writer, opts *Options, deps *Deps) error {
 	if err := r.ApplyExisting(deps.Existing); err != nil {
 		return err
 	}
 
-	if err := applyFiles(env, r, stderr, opts); err != nil {
+	if err := applyFiles(env, r, stderr, opts, deps.Drops); err != nil {
 		return err
 	}
 
@@ -199,8 +270,12 @@ func applyLayers(env sys.System, r *bootstrap.Resolved, stderr io.Writer, opts *
 // runWizard asks the questions and, unless the configuration goes to
 // --output, offers to save the answers.
 func runWizard(ctx context.Context, env sys.System, stdin io.Reader, stdout io.Writer,
-	r *bootstrap.Resolved, opts *Options, deps Deps,
+	r *bootstrap.Resolved, opts *Options, deps *Deps,
 ) error {
+	if useScreens(opts, deps) {
+		return runConfigure(ctx, env, stdin, stdout, r, opts, deps)
+	}
+
 	w := &bootstrap.Wizard{
 		In:         bufio.NewReader(stdin),
 		Out:        stdout,
@@ -226,42 +301,74 @@ func runWizard(ctx context.Context, env sys.System, stdin io.Reader, stdout io.W
 }
 
 // applyFiles applies the legacy file or the YAML file, reporting the legacy
-// keys that are not imported.
-func applyFiles(env sys.System, r *bootstrap.Resolved, stderr io.Writer, opts *Options) error {
+// keys that are not imported: to drops, or on stderr as one summary line
+// (every key with --verbose).
+func applyFiles(env sys.System, r *bootstrap.Resolved, stderr io.Writer, opts *Options, drops *LegacyDrops) error {
 	if opts.LegacyPath != "" {
 		data, err := env.FS.ReadFile(opts.LegacyPath)
 		if err != nil {
 			return err
 		}
 
-		drops, err := r.ApplyLegacy(data)
+		dropped, err := r.ApplyLegacy(data)
 		if err != nil {
 			return inFile(opts.LegacyPath, err)
 		}
 
-		for _, d := range drops {
-			_, _ = fmt.Fprintf(stderr, "Note: legacy key %s not imported: %s\n", d.Key, d.Reason)
+		if drops != nil {
+			drops.List = dropped
+		} else {
+			noteDrops(stderr, dropped, opts.Verbose)
 		}
 	}
 
-	if opts.ConfigPath != "" {
-		data, err := env.FS.ReadFile(opts.ConfigPath)
-		if err != nil {
-			return err
-		}
+	return applyYAML(env, r, opts)
+}
 
-		if err := r.ApplyYAML(data); err != nil {
-			return inFile(opts.ConfigPath, err)
-		}
+func applyYAML(env sys.System, r *bootstrap.Resolved, opts *Options) error {
+	if opts.ConfigPath == "" {
+		return nil
+	}
+
+	data, err := env.FS.ReadFile(opts.ConfigPath)
+	if err != nil {
+		return err
+	}
+
+	if err := r.ApplyYAML(data); err != nil {
+		return inFile(opts.ConfigPath, err)
 	}
 
 	return nil
 }
 
+// noteDrops tells on w how many legacy keys were not imported, and which
+// with verbose.
+func noteDrops(w io.Writer, drops []bootstrap.LegacyDrop, verbose bool) {
+	if len(drops) == 0 {
+		return
+	}
+
+	if !verbose {
+		noun := "keys"
+		if len(drops) == 1 {
+			noun = "key"
+		}
+
+		_, _ = fmt.Fprintf(w, "Note: %d legacy %s not imported (--verbose lists them)\n", len(drops), noun)
+
+		return
+	}
+
+	for _, d := range drops {
+		_, _ = fmt.Fprintf(w, "Note: legacy key %s not imported: %s\n", d.Key, d.Reason)
+	}
+}
+
 // wantWizard: on a terminal, unless --non-interactive, the wizard runs when
 // a required key is missing, when no file, environment variable or flag gave
 // any key, or on --wizard=all.
-func wantWizard(r *bootstrap.Resolved, opts *Options, deps Deps) bool {
+func wantWizard(r *bootstrap.Resolved, opts *Options, deps *Deps) bool {
 	if opts.NonInteractive || !deps.Terminal {
 		return false
 	}

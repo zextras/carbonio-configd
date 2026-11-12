@@ -36,7 +36,7 @@ func runCmd(t *testing.T, opts *Options, deps Deps, stdin string) (int, string, 
 
 	var out, errb strings.Builder
 
-	status := run(context.Background(), sys.Real(), strings.NewReader(stdin), &out, &errb, opts, deps)
+	status := run(context.Background(), sys.Real(), strings.NewReader(stdin), &out, &errb, opts, &deps)
 
 	return status, out.String(), errb.String()
 }
@@ -109,7 +109,11 @@ func TestRun_LegacyMigration(t *testing.T) {
 	status, out, errb := runCmd(t, &Options{LegacyPath: legacy, Output: output}, Deps{}, "")
 	require.Equal(t, 0, status, errb)
 	assert.Contains(t, out, "Configuration saved to "+output)
-	assert.Contains(t, errb, "legacy key EXPANDMENU not imported: obsolete")
+	assert.Contains(t, errb, "Note: 1 legacy key not imported (--verbose lists them)")
+	assert.NotContains(t, errb, "EXPANDMENU", "the keys are listed with --verbose only")
+
+	_, _, errb = runCmd(t, &Options{LegacyPath: legacy, Output: output, Verbose: true}, Deps{}, "")
+	assert.Contains(t, errb, "Note: legacy key EXPANDMENU not imported: obsolete")
 
 	data, err := os.ReadFile(output)
 	require.NoError(t, err)

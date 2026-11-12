@@ -207,9 +207,15 @@ func (w *Wizard) keepCurrent(r *Resolved, f *Field) bool {
 // applyAnswer sets and validates ans, restoring the previous value when it
 // is rejected.
 func (w *Wizard) applyAnswer(r *Resolved, f *Field, ans string) error {
+	return r.Answer(f, ans)
+}
+
+// Answer sets f to the operator's answer raw (source: wizard) and checks its
+// format. A rejected answer leaves the key as it was.
+func (r *Resolved) Answer(f *Field, raw string) error {
 	restore := r.snapshot(f)
 
-	err := r.Set(f, ans, SourceWizard)
+	err := r.Set(f, raw, SourceWizard)
 	if err == nil {
 		err = CheckValue(f, &r.Config)
 	}
@@ -219,6 +225,18 @@ func (w *Wizard) applyAnswer(r *Resolved, f *Field, ans string) error {
 	}
 
 	return err
+}
+
+// CheckInput reports why raw is not a valid value of f in a node configured
+// as c, without changing c: what the operator is told while typing.
+func CheckInput(f *Field, c *Config, raw string) error {
+	scratch := *c
+
+	if err := f.Set(&scratch, raw); err != nil {
+		return err
+	}
+
+	return CheckValue(f, &scratch)
 }
 
 // secret reads a secret twice, without echo. Enter keeps the current value

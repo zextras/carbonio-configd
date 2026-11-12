@@ -308,7 +308,6 @@ func TestCommandTree_Flags(t *testing.T) {
 		"ldap":                  {"url", "bind-dn", "password-file", "json"},
 		"ldap search":           {"base", "filter", "scope", "attr"},
 		"ldap wait":             {"timeout"},
-		"bootstrap config":      {"config", "legacy-config", "set", "non-interactive", "wizard", "output"},
 		"ldap gacf":             {},
 		"service stop":          {},
 		"control start":         {},
@@ -377,7 +376,7 @@ func TestCommandTree_Visible(t *testing.T) {
 	}
 
 	assert.ElementsMatch(t, []string{
-		"bootstrap", "completion", "control", "init", "ldap", "localconfig", "plan", "proxy", "release",
+		"completion", "control", "init", "ldap", "localconfig", "plan", "proxy", "release",
 		"rewrite", "service", "shadow", "status", "tls",
 	}, names(root))
 

@@ -6,25 +6,36 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 # Bootstrap configuration
 
-`configd bootstrap` replaces `carbonio-bootstrap` (`setup.pl` in
-carbonio-core). `configd bootstrap config` builds the node configuration,
-validates it, and prints it or saves it; `configd bootstrap run` builds it
-the same way and configures the node (see [Running](#running)).
+`carbonio-bootstrap` configures a Carbonio node. It is a binary of its own
+(`/opt/zextras/libexec/setup`, from the carbonio-configd package, run by
+carbonio-core's `/usr/bin/carbonio-bootstrap`) that replaces `setup.pl`; it is not part
+of `configd`, so the terminal interface is not linked into the daemon.
+`carbonio-bootstrap config` builds the node configuration, validates it, and
+prints it or saves it; `carbonio-bootstrap run` builds it the same way and
+configures the node (see [Running](#running)). Without a command it runs
+`run`.
+
+The options of the old script keep working: `-c FILE` is
+`--legacy-config FILE --non-interactive`, `-d` is accepted and ignored (the
+run always logs to `/opt/zextras/log/bootstrap.<date>.log`), and `-h` prints
+the help.
 
 ```bash
-configd bootstrap config                                    # wizard on a terminal, otherwise print
-configd bootstrap config --config /etc/carbonio/bootstrap.yaml --non-interactive
-configd bootstrap config --legacy-config /opt/zextras/config.12345 --output bootstrap.yaml
-CARBONIO_BOOTSTRAP_ADMIN_PASSWORD_FILE=/run/secrets/admin configd bootstrap config --set ldap.port=636
+carbonio-bootstrap config                                    # wizard on a terminal, otherwise print
+carbonio-bootstrap config --config /etc/carbonio/bootstrap.yaml --non-interactive
+carbonio-bootstrap config --legacy-config /opt/zextras/config.12345 --output bootstrap.yaml
+CARBONIO_BOOTSTRAP_ADMIN_PASSWORD_FILE=/run/secrets/admin carbonio-bootstrap config --set ldap.port=636
 ```
 
 | Flag | Meaning |
 |---|---|
 | `--config FILE` | YAML configuration file |
-| `--legacy-config FILE` | `setup.pl` configuration file (`KEY=VALUE`, the `-c` of `carbonio-bootstrap`); not together with `--config` |
+| `--legacy-config FILE` | `setup.pl` configuration file (`KEY=VALUE`, the `-c` of the old script); not together with `--config` |
 | `--set key=value` | set one key (repeatable), e.g. `--set ldap.port=636` or `--set ldap.root_password_file=/run/secrets/root` |
 | `--non-interactive` | never run the wizard; a missing key is an error |
 | `--wizard missing\|all` | which questions the wizard asks (default `missing`) |
+| `--plain` | line-based wizard and output instead of the full-screen interface |
+| `--verbose` | list every legacy key that is not imported (otherwise only their number) |
 | `--output FILE` | save the configuration there (mode `0600`, no passwords) instead of printing it |
 
 Exit status: `0` when the configuration is valid, `1` otherwise. Every
@@ -37,7 +48,7 @@ printed configuration shows it as a comment (`# env`, `# detected`, ...).
 
 1. **Defaults**: built-in values, some read from the node (`detected`) and
    some drawn at random (`generated`).
-2. **Existing install** (`configd bootstrap run` only): on a node already
+2. **Existing install** (`carbonio-bootstrap run` only): on a node already
    bootstrapped, the values in localconfig and LDAP (`existing`).
 3. **File**: the YAML file, or the legacy file (`legacy`).
 4. **Environment**: `CARBONIO_BOOTSTRAP_*`.
@@ -149,9 +160,71 @@ mta:
 
 On a terminal (stdin and stdout), and unless `--non-interactive` is given,
 the wizard runs when a required key is missing, when no file, variable or
-flag set any key, or with `--wizard all`. It asks only the questions that
-apply to the node's roles (about a dozen), and checks each answer as it is
-given.
+flag set any key, or with `--wizard all`. It asks only about the keys that
+apply to the node's roles, and checks each answer as it is given.
+
+There are two interfaces. The default on a capable terminal is the
+full-screen one below. The line wizard is used instead with `--plain`,
+`--non-interactive` (which never asks), `TERM=dumb`, or when stdin or stdout
+is not a terminal; it behaves as it always did.
+
+### Full-screen interface
+
+Configure screen:
+
+- The header shows the breadcrumb and the node (hostname, OS, new or existing
+  install). Under it, the **roles** of the node (`directory-server`, `mta`,
+  `appserver`, `proxy`, `clamav`, `memcached`) are shown enabled (`●`) or
+  disabled (`○`), with where they come from (installed packages, a file, the
+  environment). Toggling a role recomputes the defaults and shows or hides
+  the sections and keys that apply to it.
+- The left pane lists the sections (Node, Directory (LDAP), Domain & admin,
+  Mail transport, Mailbox store, Proxy, Notifications, Advanced) with
+  `✓` (complete), `● N` required values missing, or `○` optional and
+  untouched. Every key of [Keys](#keys) is in a section; the rarely changed
+  ones (SSL digest, interprocess security, memory, ports, base DN, ...) are
+  under Advanced. **Review & apply** stays locked while a required value is
+  missing.
+- The right pane is a table of SETTING, VALUE and SOURCE (`default`,
+  `detected`, `generated`, `existing`, `legacy`, `file`, `env`, `flag`,
+  `wizard`). A value set by the environment or a `--set` flag is locked
+  (`🔒`): it is shown, with why, but not editable here. Passwords are shown
+  as `••••` (or `required`) and typed in a masked input, twice; they appear
+  nowhere else on the screen.
+- Under the focused key an inline help box shows the live validation message
+  while you type (names, e-mail addresses, networks, passwords, numbers,
+  enums as a list, booleans as a toggle), the help text, and the YAML key
+  and the environment variable (`CARBONIO_BOOTSTRAP_*`, with `_FILE` for
+  secrets) that set it.
+- A DNS line checks, in the background, that the hostname resolves and the
+  domain has an MX record. It never blocks.
+- The status bar counts the required values still missing and the keys by
+  source.
+
+| Key | Action |
+|---|---|
+| `↑` `↓` | move (in a pane, or in a list) |
+| `Enter` | edit the focused key; toggle a role; open a section |
+| `Tab` / `Shift+Tab` | next / previous pane (roles, sections, keys) |
+| `n` | jump to the next required value that is missing |
+| `/` | search the keys by name |
+| `u` | reset the key to its default |
+| `s` | save the YAML (no passwords) |
+| `r` | review the configuration |
+| `?` | key help |
+| `q` | quit (asks first if you changed something) |
+
+The review page shows the YAML that would be used (`config` prints the same,
+with the passwords masked) and offers Apply (in `run`) or Done (in `config`),
+Save yaml and Back.
+
+With `run`, a first page shows the licence notice of the installed edition
+(Carbonio Bootstrap, from `/opt/zextras/.mini_alue_ce`); it is informational,
+Enter continues. After Apply, the apply screen takes over (see
+[Running](#running)). The screen needs 80x24; a smaller terminal shows a
+message instead. Colors follow the terminal background and `NO_COLOR`.
+
+### Line wizard
 
 - `--wizard missing` skips the keys set by a file, the environment or a
   flag. Defaults and detected values are asked, pre-filled.
@@ -177,15 +250,20 @@ on the first `=`, with double quotes removed. Combined with `--output`, it
 converts the file to YAML:
 
 ```bash
-configd bootstrap config --legacy-config /opt/zextras/config.12345 --output /etc/carbonio/bootstrap.yaml
+carbonio-bootstrap config --legacy-config /opt/zextras/config.12345 --output /etc/carbonio/bootstrap.yaml
 ```
 
 - Keys with a YAML equivalent are imported (see the table). An empty value,
   and `PUBLICSERVICEHOSTNAME=UNSET`, leave the key to its default.
 - Keys that are computed, fixed, obsolete or read from LDAP are not imported.
-  Each one is listed on stderr with the reason (`Note: legacy key EXPANDMENU
-  not imported: obsolete`).
-- An unknown key is an error.
+  `config` prints their number on stderr (`Note: 27 legacy keys not imported
+  (--verbose lists them)`); with `--verbose` each one is listed with the
+  reason (`Note: legacy key EXPANDMENU not imported: obsolete`). `run` shows
+  the number on its `Config:` line and always writes the list to the log
+  file; `--verbose` also prints it under that line.
+- A key neither mapped nor listed above (for example the extra keys some
+  container images add) is ignored and listed on stderr as
+  `unknown key, ignored`, as `setup.pl` ignored it (counted with the others).
 - Files saved by `setup.pl` hold no passwords, because `saveConfig` skips
   them. A hand-written file may hold some. They are used for the run but not
   written by `--output`; give them again through `*_FILE`, a `_file` key or
@@ -193,7 +271,7 @@ configd bootstrap config --legacy-config /opt/zextras/config.12345 --output /etc
 
 ## Running
 
-`configd bootstrap run` (as root) takes the flags of `config`, plus
+`carbonio-bootstrap run` (as root) takes the flags of `config`, plus
 `--dry-run`. It reads the node first: whether this is a new install
 (`.install_history`, as `setup.pl`), the installed and enabled packages, and
 on an existing install the values in localconfig and LDAP. A new node whose
@@ -208,13 +286,87 @@ it runs the steps of `setup.pl` in its order:
 3. Default domain and accounts, SQL, syslog, service start (systemd targets,
    or `zmcontrol`), GAL sync account, crontab, ssh keys.
 
+Before the steps, `run` prints "Starting Carbonio Bootstrap..." and the
+licence notice, wrapped at 80 columns between two rules (also with
+`--dry-run`; `config` does not print it). On a terminal with the full-screen
+interface the notice is the first page instead.
+
+The first step, "Prepare system users and directories", is the one the old
+shell script did before `setup.pl`: it runs `systemd-sysusers` for each
+`/usr/lib/sysusers.d/carbonio-*.conf`, then gives `/opt/zextras/conf` to
+`root:root`, runs `systemd-tmpfiles --create` for each
+`/usr/lib/tmpfiles.d/carbonio-*.conf`, and gives the directory back to
+`zextras:zextras`. It has no `.install_history` stage and always runs, so
+the users and directories exist on every run. A failure of one of those
+commands is logged, not fatal; a missing `systemd-sysusers` or
+`systemd-tmpfiles` is skipped. `--dry-run` lists it as `would apply`. The
+tools' output goes to the log only. Like the rest of `run`, it needs root.
+
 Each step first checks whether the node already holds what it produces and
 skips it then, so after a failure running the command again resumes. Steps
 that `setup.pl` let fail with a warning still only warn. Each finished step
 is recorded in `.install_history` as `setup.pl` did (`CONFIGURED <stage>`).
 The run logs to `/opt/zextras/log/bootstrap.<date>.log` (mode `0600`).
 
-`--dry-run` prints each step with `skipped`, `done` or `would apply` and
+On a terminal, the apply screen shows the run. On the left, the preflight
+checks (root, the hostname resolves, the domain MX, the needed ports are
+free, memory against what the roles recommend; they only warn) and the plan
+(steps, already done, where the YAML was saved). On the right, the steps with
+a progress bar and the elapsed time: `✓` done (with its duration), `↷`
+already done, a spinner on the running one, `·` pending, `⋮ N more` when the
+list does not fit, and `✗` on the one that failed, with its error and the
+reminder that running the command again resumes. At the bottom, the last log
+lines, already redacted; `l` opens the whole log. `Ctrl+C` stops after the
+current step: it never kills one in the middle. The colours are those of the
+Carbonio Design System (brand blue `#2b73d2` for the title, accents and the
+progress bar; green, amber and red for done, warning and failure; grey for
+the rest), with darker shades of green and amber on a light terminal.
+
+### Plain output
+
+Without a terminal, with `--plain` or with `--non-interactive` (so with
+`-c FILE`), `run` prints the notice, then a header, one line per step and a
+summary. A step that does not apply to the node is not listed and not
+counted; one already done is listed as `skip`. A step's own messages follow
+its line, indented. The details of the commands go to the log file only.
+
+```text
+Carbonio Bootstrap 26.12.0 · mail.example.com · new install
+Config:  /opt/product.config (legacy) · 27 keys not imported, see log
+Log:     /opt/zextras/log/bootstrap.20261112-005601.log
+
+[ 1/46] Prepare system users and directories   ok      0.4s
+[ 4/46] Check port conflicts                   skip    already done
+[10/46] Create SSL certificates                ok      3.1s
+        · carbonio-appserver certificate created
+[20/46] Generate dhparam key                   ok      1:05
+[44/46] Create GAL sync account                warn    skipped: services not started
+
+Done in 3:12 · 41 applied · 4 already done · 1 warning
+Warnings:
+  · Create GAL sync account: skipped: services not started
+Services not started (start_services: no). Start them with: systemctl start carbonio-directory-server.target carbonio-appserver.target
+Admin console: https://mail.example.com:6071   Webmail: https://mail.example.com
+```
+
+Durations under a minute are `0.4s` or `12s`, then `m:ss`. On failure the
+step shows `FAIL` with its error, and stderr gets `Failed at step n/N:
+<title>`, the error, and the reminder that running the command again resumes
+(exit status `1`). The services line shows the command that starts them
+(`systemctl start` the role targets on a systemd node, else
+`su - zextras -c 'zmcontrol start'`); the URLs are shown for a node that
+runs the proxy web service.
+
+On a terminal that is not `dumb`, the running step has a live line (a
+spinner and the elapsed time) that its final line replaces, and the statuses
+are coloured (`ok` green, `skip` grey, `warn` amber, `FAIL` red); `NO_COLOR`
+turns the colours off. Piped output has no colour and no carriage returns:
+one line per step, clean in a CI log.
+
+The step titles are in one style: an imperative verb, sentence case, upper
+case acronyms, no final punctuation.
+
+`--dry-run` prints each step with `skipped`, `done` or `would apply` (a table, not the plain output above) and
 writes nothing. On an existing install it may start the local LDAP server to
 read the node.
 
@@ -232,6 +384,6 @@ Differences from `setup.pl`:
   menu. Its server entry is created before replication is enabled: from a
   `-c` file `setup.pl` created it after, so enabling the directory-server
   service on the new replica failed (`NO_SUCH_SERVER`), and it left the
-  replica's slapd stopped. `configd bootstrap run` leaves it running.
+  replica's slapd stopped. `carbonio-bootstrap run` leaves it running.
 - With the mail proxy off, the POP3S proxy port, not the mailbox one, moves
   to 995.

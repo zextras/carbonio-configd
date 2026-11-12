@@ -321,7 +321,8 @@ func (e *Env) EnsureLDAPRunning() error {
 
 	e.Log.Detail("Starting the local LDAP server")
 
-	if err := factsServicesOf(e).ServiceStart(e.Ctx, "ldap"); err != nil {
+	svc := factsServicesOf(e)
+	if err := ldapControl(e, svc.IsSystemdMode(), ldapStart, svc.ServiceStart); err != nil {
 		return fmt.Errorf("starting ldap: %w", err)
 	}
 

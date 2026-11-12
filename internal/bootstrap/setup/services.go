@@ -134,7 +134,7 @@ func (d svcLDAP) Close() error { return d.c.Close() }
 // warns.
 func StepCheckPortConflicts() Step {
 	return Step{
-		Title:    "Checking for port conflicts",
+		Title:    "Check port conflicts",
 		Optional: true,
 		Apply: func(e *Env) error {
 			ports, err := svcListeningPorts(e)
@@ -216,7 +216,7 @@ var ErrCoreNotEnabled = errors.New("carbonio-core must be enabled")
 // isEnabled("carbonio-core").
 func StepCheckCoreEnabled() Step {
 	return Step{
-		Title: "Checking that carbonio-core is enabled",
+		Title: "Check that carbonio-core is enabled",
 		When:  func(e *Env) bool { return !e.Facts.IsEnabled(PkgCore) },
 		Apply: func(*Env) error { return ErrCoreNotEnabled },
 	}
@@ -236,7 +236,7 @@ func StepCheckCoreEnabled() Step {
 func StepConfigInitMta() Step {
 	return Step{
 		Name:  svcStageInitMta,
-		Title: "Initializing mta config",
+		Title: "Initialize MTA config",
 		When:  func(e *Env) bool { return e.Facts.IsEnabled(PkgMTA) },
 		Apply: svcInitMta,
 	}
@@ -292,7 +292,7 @@ func svcOr(v, def string) string {
 // exists, "true" otherwise. When isEnabled(carbonio-mta) && newinstall.
 func StepSetTrainSACleanupHost() Step {
 	return Step{
-		Title: "Setting the spam training cleanup host",
+		Title: "Set the spam training cleanup host",
 		When:  func(e *Env) bool { return e.Facts.IsEnabled(PkgMTA) && e.Facts.NewInstall },
 		Apply: func(e *Env) error {
 			dir, err := svcOpenDir(e)
@@ -330,7 +330,7 @@ func StepSetTrainSACleanupHost() Step {
 func StepConfigCreateDomain() Step {
 	return Step{
 		Name:     svcStageCreateDom,
-		Title:    "Creating domain and accounts",
+		Title:    "Create domain and accounts",
 		Optional: true,
 		When: func(e *Env) bool {
 			return e.Facts.IsEnabled(svcPkgDirectory) || e.Facts.IsEnabled(PkgAppserver)
@@ -544,7 +544,7 @@ func svcRandomPassword(n int, alphabet string) (string, error) {
 func StepConfigInitSQL() Step {
 	return Step{
 		Name:  svcStageInitSQL,
-		Title: "Initializing store sql database",
+		Title: "Initialize the store SQL database",
 		When:  func(e *Env) bool { return e.Facts.IsEnabled(PkgAppserver) },
 		Done: func(e *Env) (bool, error) {
 			_, err := e.Sys.FS.Stat(e.Paths.Path("db", "data", "zimbra"))
@@ -570,7 +570,7 @@ func StepConfigInitSQL() Step {
 func StepSetupSyslog() Step {
 	return Step{
 		Name:     svcStageSyslog,
-		Title:    "Setting up syslog.conf",
+		Title:    "Set up syslog.conf",
 		Optional: true,
 		Apply: func(e *Env) error {
 			tool := e.Paths.Path("libexec", "zmsyslogsetup")
@@ -595,7 +595,7 @@ func StepSetupSyslog() Step {
 // control itself is not called in process: it requires to run as zextras.
 func StepStartServers() Step {
 	return Step{
-		Title:    "Starting servers",
+		Title:    "Start servers",
 		Optional: true,
 		When:     func(e *Env) bool { return e.Cfg.StartServices },
 		Apply:    svcStartServers,
@@ -713,7 +713,7 @@ func svcStopStrayConfigd(e *Env) error {
 func StepConfigCreateDefaultDomainGALSyncAcct() Step {
 	return Step{
 		Name:     svcStageGALSync,
-		Title:    "Creating galsync account for default domain",
+		Title:    "Create GAL sync account",
 		Optional: true,
 		When: func(e *Env) bool {
 			return e.Cfg.StartServices && e.Facts.NewInstall && e.Facts.ServiceWebapp &&
@@ -749,26 +749,18 @@ func StepConfigCreateDefaultDomainGALSyncAcct() Step {
 	}
 }
 
-// StepGALSyncSkipNotice prints the messages setup.pl printed when the
-// default domain GAL sync account is not created (L5996-6010): the warning when
-// the servers are not started, or why it is skipped.
+// StepGALSyncSkipNotice warns, as setup.pl did (L5996-6010), when the default
+// domain GAL sync account is not created because the servers are not started.
+// The other reasons it is not created (not a service node, existing install)
+// are not worth the operator's attention and the step does not apply.
 func StepGALSyncSkipNotice() Step {
 	return Step{
-		Title: "Default domain GAL sync account",
+		Title: "Create GAL sync account",
 		When: func(e *Env) bool {
-			return e.Facts.IsEnabled(PkgAppserver) &&
-				(!e.Cfg.StartServices || !e.Facts.NewInstall || !e.Facts.ServiceWebapp)
+			return e.Facts.IsEnabled(PkgAppserver) && !e.Cfg.StartServices
 		},
 		Apply: func(e *Env) error {
-			switch {
-			case !e.Cfg.StartServices:
-				e.Log.Info("WARNING: galsync account creation for default domain skipped because " +
-					"Application Server was not configured to start.")
-			case e.Facts.NewInstall:
-				e.Log.Info("Skipping creation of default domain GAL sync account - not a service node.")
-			default:
-				e.Log.Info("Skipping creation of default domain GAL sync account - existing install detected.")
-			}
+			e.Log.Warn("skipped: services not started")
 
 			return nil
 		},
@@ -784,7 +776,7 @@ func StepGALSyncSkipNotice() Step {
 func StepSetupCrontab() Step {
 	return Step{
 		Name:  svcStageCrontab,
-		Title: "Setting up zextras crontab",
+		Title: "Set up the zextras crontab",
 		Done: func(e *Env) (bool, error) {
 			want, cur, err := svcCrontab(e)
 			if err != nil {
@@ -893,7 +885,7 @@ func svcStripBlock(s string) string {
 // status.
 func StepZmsshkeygen() Step {
 	return Step{
-		Title:    "Generating the zextras ssh key",
+		Title:    "Generate zextras SSH key",
 		Optional: true,
 		When:     func(e *Env) bool { return e.Facts.NewInstall },
 		Apply:    func(e *Env) error { return e.Zextras(e.Paths.Path("bin", "zmsshkeygen")) },
@@ -904,7 +896,7 @@ func StepZmsshkeygen() Step {
 // as zextras on every run. Optional: setup.pl ignored the status.
 func StepZmupdateauthkeys() Step {
 	return Step{
-		Title:    "Updating the authorized ssh keys",
+		Title:    "Update authorized SSH keys",
 		Optional: true,
 		Apply:    func(e *Env) error { return e.Zextras(e.Paths.Path("bin", "zmupdateauthkeys")) },
 	}

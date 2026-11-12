@@ -8,7 +8,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 Compares the node state left by the legacy bootstrap (`carbonio-bootstrap` →
 `/opt/zextras/libexec/setup.pl`, as shipped in `carbonio-core`) with the state left
-by `configd bootstrap run`, starting from the **same image** and the **same
+by `carbonio-bootstrap run`, starting from the **same image** and the **same
 `-c` configuration file**.
 
 ```
@@ -17,7 +17,7 @@ config/*.config      setup.pl -c files (KEY="VALUE"), used verbatim by both path
                      single-node, single-node-start (STARTSERVERS=yes), store-node, replica-node
 build.sh             build the image (--store: appserver-only, --ldap: directory-server-only image of node 2)
 run-legacy.sh        fresh container -> carbonio-bootstrap -c -> snapshot   (-> out/legacy)
-run-configd.sh BIN   fresh container -> configd bootstrap run -> snapshot   (-> out/configd)
+run-configd.sh BIN   fresh container -> carbonio-bootstrap run -> snapshot   (-> out/configd)
 run-2node.sh MODE    2-node scenarios (legacy | configd BIN), --scenario store|replica: node 1 = single-node,
                      node 2 = second store / LDAP replica
 snapshot.sh          runs inside the container, writes the normalised state
@@ -40,8 +40,8 @@ golden/single-node/  reference snapshot of the legacy path (local data, not comm
 cd tests/bootstrap-parity
 ./build.sh                         # ~3 min, image localhost/carbonio-parity:noble
 ./run-legacy.sh                    # ~4 min -> out/legacy/ (+ out/legacy.bootstrap.log, out/legacy.timing)
-make -C ../.. build                # any linux/amd64 configd binary
-./run-configd.sh ../../bin/configd # -> out/configd/
+make -C ../.. build                # the linux/amd64 bin/setup (carbonio-bootstrap)
+./run-configd.sh ../../bin/setup # -> out/configd/
 ./diff.sh                          # golden/single-node vs out/configd; exit 1 on any difference
 ./diff.sh out/legacy out/configd   # compare two fresh runs instead
 ```
@@ -196,7 +196,7 @@ LDAP of node 1 (`config/store-node.config`, `LDAPHOST=mail.parity.test`).
 ./build.sh                    # node 1 image
 ./build.sh --store            # node 2 image: localhost/carbonio-parity:noble-store (~2 min)
 ./run-2node.sh legacy         # out/2node-legacy/{node1,node2}, out/2node-legacy.node{1,2}.bootstrap.log
-./run-2node.sh configd ../../bin/configd
+./run-2node.sh configd ../../bin/setup
 ```
 
 Both containers join the podman network `parity-net` (10.89.77.0/24, fixed IPs .10 and .11), and resolve each
@@ -222,7 +222,7 @@ the passwords of the master (`LDAPREPPASS`, `LDAPROOTPASS`, `LDAPADMINPASS`, ...
 ```
 ./build.sh --ldap
 ./run-2node.sh legacy --scenario replica                      # out/replica-legacy/{node1,node2,node2-synced}
-./run-2node.sh configd ../../bin/configd --scenario replica   # out/replica-configd/...
+./run-2node.sh configd ../../bin/setup --scenario replica   # out/replica-configd/...
 for n in node1 node2 node2-synced; do ./diff.sh out/replica-legacy/$n out/replica-configd/$n; done
 ```
 
@@ -248,7 +248,7 @@ carbonio targets and then creates the galsync account (needs the mailbox up).
 
 ```
 ./run-legacy.sh --config config/single-node-start.config --out out/start-legacy
-./run-configd.sh ../../bin/configd --config config/single-node-start.config --out out/start-configd
+./run-configd.sh ../../bin/setup --config config/single-node-start.config --out out/start-configd
 ./diff.sh out/start-legacy out/start-configd
 ```
 

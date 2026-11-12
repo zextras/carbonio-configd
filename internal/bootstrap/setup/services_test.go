@@ -431,7 +431,7 @@ func TestSvcGALSync_Conditions(t *testing.T) {
 
 	e.Facts.NewInstall = false
 	assert.False(t, StepConfigCreateDefaultDomainGALSyncAcct().When(e))
-	assert.True(t, StepGALSyncSkipNotice().When(e))
+	assert.False(t, StepGALSyncSkipNotice().When(e), "an existing install is not worth a warning")
 
 	e.Facts.NewInstall = true
 	e.Cfg.StartServices = false

@@ -6,6 +6,7 @@ package setup
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -62,7 +63,11 @@ func (e *Env) Root(name string, args ...string) error {
 }
 
 func (e *Env) output(c *Cmd, capture bool) ([]byte, error) {
-	cmd := &sys.Cmd{Path: c.Path, Args: c.Args, Stdin: c.Stdin, Env: c.Env}
+	// Setsid: no step command gets the controlling terminal. A child that
+	// opens /dev/tty (zmprov's JLine runs stty on it) would otherwise be
+	// stopped by SIGTTOU from its background process group, hanging the run
+	// whenever bootstrap is started from a terminal.
+	cmd := &sys.Cmd{Path: c.Path, Args: c.Args, Stdin: c.Stdin, Env: c.Env, Setsid: true}
 
 	if c.AsZextras {
 		env, err := e.zextrasEnv()
@@ -71,10 +76,11 @@ func (e *Env) output(c *Cmd, capture bool) ([]byte, error) {
 		}
 
 		cmd = &sys.Cmd{
-			Path:  "runuser",
-			Args:  append([]string{"-u", config.ZextrasUser, "--", "sh", "-c", zextrasShim, c.Path}, c.Args...),
-			Stdin: c.Stdin,
-			Env:   append(env, c.Env...),
+			Path:   "runuser",
+			Args:   append([]string{"-u", config.ZextrasUser, "--", "sh", "-c", zextrasShim, c.Path}, c.Args...),
+			Stdin:  c.Stdin,
+			Env:    append(env, c.Env...),
+			Setsid: true,
 		}
 	}
 
@@ -102,6 +108,18 @@ func (e *Env) output(c *Cmd, capture bool) ([]byte, error) {
 	}
 
 	res, err := e.Sys.Exec.Run(e.Ctx, cmd)
+
+	// The real Exec reports a non-zero exit as *sys.ExitError next to the
+	// Result: that is a command that ran and said no (a CmdError, which
+	// callers inspect), not a failure to run it.
+	if exitErr, ok := errors.AsType[*sys.ExitError](err); ok {
+		err = nil
+
+		if res.ExitCode == 0 {
+			res.ExitCode = exitErr.Code
+		}
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", c.Path, err)
 	}

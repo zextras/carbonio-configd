@@ -228,6 +228,7 @@ func TestDetectFacts_ExistingInstallWarnsAboutUnknownServices(t *testing.T) {
 func TestDetectFacts_ExistingInstallStartsTheLocalLDAP(t *testing.T) {
 	lc := map[string]string{"zimbra_server_hostname": "ldap1.example.com", "ldap_url": "ldap://ldap1.example.com:389"}
 	e, ctl, _, _ := factsCovExisting(t, lc, map[string]string{}, PkgCore, "carbonio-directory-server")
+	ctl.systemd = true
 
 	_, err := DetectFacts(e)
 	require.NoError(t, err)
@@ -248,6 +249,7 @@ func TestDetectFacts_ExistingInstallErrors(t *testing.T) {
 
 	t.Run("ldap start fails", func(t *testing.T) {
 		e, ctl, _, _ := factsCovExisting(t, lc, nil, PkgCore)
+		ctl.systemd = true
 		ctl.startErr = errors.New("slapd: bad config")
 
 		_, err := DetectFacts(e)
@@ -275,12 +277,29 @@ func TestDetectFacts_ExistingInstallErrors(t *testing.T) {
 
 func TestEnsureLDAPRunning_IgnoresStatusErrorAndStarts(t *testing.T) {
 	e, _, _ := testEnv(t)
-	ctl := &factsCovCtl{statusErr: errors.New("status failed"), running: true}
+	ctl := &factsCovCtl{systemd: true, statusErr: errors.New("status failed"), running: true}
 	factsCovInstall(t, ctl, nil)
 
 	require.NoError(t, e.EnsureLDAPRunning())
 	assert.Equal(t, 1, ctl.startCalls, "a failed status check is treated as not running")
 	assert.True(t, e.Flags.LDAPStarted)
+}
+
+// Without the carbonio systemd units, slapd must be started as zextras:
+// started by the root bootstrap it ran as root and zmcontrol could not stop it.
+func TestEnsureLDAPRunning_WithoutSystemdStartsAsZextras(t *testing.T) {
+	e, fakes, _ := testEnv(t)
+	ctl := &factsCovCtl{}
+	factsCovInstall(t, ctl, nil)
+
+	require.NoError(t, e.EnsureLDAPRunning())
+	assert.Zero(t, ctl.startCalls, "not started in-process as root")
+	assert.True(t, e.Flags.LDAPStarted)
+
+	calls := fakes.Exec.Calls()
+	require.Len(t, calls, 1)
+	assert.Equal(t, "runuser", calls[0].Path)
+	assert.Equal(t, []string{"/opt/zextras/bin/ldap", "start"}, calls[0].Args[len(calls[0].Args)-2:])
 }
 
 func TestSplitValues(t *testing.T) {

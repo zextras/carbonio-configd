@@ -66,7 +66,8 @@ build:
 	@mkdir -p $(BUILD_DIR)
 	CGO_ENABLED=0 $(GOBUILD) $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) $(MAIN_PATH)
 	CGO_ENABLED=0 $(GOBUILD) $(BUILD_FLAGS) -o $(BUILD_DIR)/postfix-conf ./cmd/postfix-conf
-	@echo "Build complete: $(BUILD_DIR)/$(BINARY_NAME) $(BUILD_DIR)/postfix-conf"
+	CGO_ENABLED=0 $(GOBUILD) $(BUILD_FLAGS) -o $(BUILD_DIR)/setup ./cmd/setup
+	@echo "Build complete: $(BUILD_DIR)/$(BINARY_NAME) $(BUILD_DIR)/postfix-conf $(BUILD_DIR)/setup"
 
 # Build with profiling support enabled
 build-profiling:
@@ -188,6 +189,8 @@ install: build
 	@sudo chmod 755 /opt/zextras/libexec/$(BINARY_NAME)
 	@echo "Installing postfix-conf (root-owned: the only writer of common/conf)..."
 	@sudo install -m 755 -o root -g root $(BUILD_DIR)/postfix-conf /opt/zextras/libexec/postfix-conf
+	@echo "Installing setup (carbonio-bootstrap) to /opt/zextras/libexec/..."
+	@sudo install -m 755 -o root -g root $(BUILD_DIR)/setup /opt/zextras/libexec/setup
 	@echo "Installation complete"
 
 # Build for different architectures

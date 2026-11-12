@@ -5,6 +5,7 @@
 package setup
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -49,7 +50,7 @@ func ldapNativeKit() *ldapKit {
 			return nil
 		}
 
-		if err := e.Ctl.ServiceStart(e.Ctx, ldapService); err != nil {
+		if err := ldapControl(e, e.Facts.Systemd, ldapStart, e.Ctl.ServiceStart); err != nil {
 			return fmt.Errorf("starting ldap: %w", err)
 		}
 
@@ -63,7 +64,12 @@ func ldapNativeKit() *ldapKit {
 	}
 
 	k.stop = func(e *Env) error {
-		if err := e.Ctl.ServiceStop(e.Ctx, ldapService); err != nil {
+		// Like setup.pl stopLdap: a stopped slapd is left alone.
+		if up, err := k.running(e); err == nil && !up {
+			return nil
+		}
+
+		if err := ldapControl(e, e.Facts.Systemd, ldapStop, e.Ctl.ServiceStop); err != nil {
 			return fmt.Errorf("stopping ldap: %w", err)
 		}
 
@@ -72,6 +78,29 @@ func ldapNativeKit() *ldapKit {
 
 	return k
 }
+
+// ldapControl starts or stops slapd like setup.pl startLdap/stopLdap: through
+// systemd when the node runs the carbonio units, else "ldap start|stop" as
+// zextras. Spawned by this root process, slapd would run as root, and the
+// zextras-owned controls (zmcontrol, zmconfigdctl) could not stop it later.
+//
+// viaUnit is the controller call for the verb (ServiceStart or ServiceStop);
+// systemd is passed in because DetectFacts needs this before e.Facts is set.
+func ldapControl(e *Env, systemd bool, verb ldapVerb, viaUnit func(context.Context, string) error) error {
+	if systemd {
+		return viaUnit(e.Ctx, ldapService)
+	}
+
+	return e.Zextras(e.Paths.Path("bin", ldapService), string(verb))
+}
+
+// ldapVerb is the argument of bin/ldap.
+type ldapVerb string
+
+const (
+	ldapStart ldapVerb = "start"
+	ldapStop  ldapVerb = "stop"
+)
 
 // waitFor is setup.pl waitForLdap: it polls the ldapi socket, binding as the
 // cn=config root, until slapd answers or seconds have passed.

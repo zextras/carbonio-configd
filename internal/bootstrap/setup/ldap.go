@@ -48,7 +48,7 @@ func ldapTouch(e *Env, path string) error {
 // cn=config that slapd has since changed.
 func StepInstallLdapConfig() Step {
 	return Step{
-		Title: "Installing LDAP configuration database",
+		Title: "Install the LDAP configuration database",
 		When: func(e *Env) bool {
 			return e.Facts.IsInstalled(ldapPkgDirectory) &&
 				(e.Facts.NewInstall || ldapMissing(e, filepath.Join(ldapConfigDir(e), "cn=config.ldif"))) &&
@@ -65,7 +65,7 @@ func StepInstallLdapConfig() Step {
 // L152): zmldapschema as zextras. Optional: setup.pl discarded its result.
 func StepInstallLdapSchema() Step {
 	return Step{
-		Title: "Installing LDAP schema",
+		Title: "Install the LDAP schema",
 		When:  func(e *Env) bool { return e.Facts.IsInstalled(ldapPkgDirectory) },
 		// zmldapschema rebuilds the same schema files every time.
 		Apply: func(e *Env) error {
@@ -81,7 +81,7 @@ func StepInstallLdapSchema() Step {
 // which Done checks as the tool does. Optional: setup.pl ignored the result.
 func StepZmldapupdateldif() Step {
 	return Step{
-		Title: "Updating the LDAP directory",
+		Title: "Update the LDAP directory",
 		When:  func(e *Env) bool { return !e.Facts.NewInstall },
 		Done: func(e *Env) (bool, error) {
 			v, err := e.LCValue(ldapLCIsMaster)
@@ -111,7 +111,7 @@ func StepUpdatePasswordsInLocalConfig() Step { return ldapStepUpdatePasswords(ld
 
 func ldapStepUpdatePasswords(k *ldapKit) Step {
 	return Step{
-		Title: "Updating LDAP passwords",
+		Title: "Update the LDAP passwords",
 		When: func(e *Env) bool {
 			if ldapIsDirectory(e) {
 				return !e.Facts.NewInstall && e.LDAPConfigured()
@@ -252,7 +252,7 @@ func StepConfigSetupLdap() Step { return ldapStepConfigSetupLdap(ldapNativeKit()
 func ldapStepConfigSetupLdap(k *ldapKit) Step {
 	return Step{
 		Name:  ldapStageSetup,
-		Title: "Configuring LDAP",
+		Title: "Configure LDAP",
 		Done: func(e *Env) (bool, error) {
 			return e.Facts.Configured[ldapStageSetup], nil
 		},
@@ -499,7 +499,7 @@ func ldapReplicationFailed(e *Env, k *ldapKit, cause error) error {
 // $haveSetLdapSchemaVersion flag.
 func StepConfigLDAPSchemaVersion() Step {
 	return Step{
-		Title: "Updating LDAP Schema version",
+		Title: "Update the LDAP schema version",
 		When:  ldapIsDirectory,
 		Done: func(e *Env) (bool, error) {
 			want, err := ldapSchemaVersion(e)
@@ -550,7 +550,7 @@ func StepStartLdap() Step { return ldapStepStartLdap(ldapNativeKit()) }
 
 func ldapStepStartLdap(k *ldapKit) Step {
 	return Step{
-		Title: "Starting ldap",
+		Title: "Start LDAP",
 		When:  func(e *Env) bool { return !e.Facts.NewInstall && e.LDAPConfigured() },
 		Done: func(e *Env) (bool, error) {
 			up, err := k.running(e)
