@@ -29,6 +29,7 @@ var (
 	zextrasUID           = lookupZextrasUID
 	updateAuthKeysAll    = setup.UpdateAuthKeysEverywhere
 	installDHParam       = setup.InstallDHParam
+	runProxyConfig       = setup.RunProxyConfig
 )
 
 // lookupZextrasUID is the uid of zextras, -1 when there is no such user.
@@ -128,13 +129,10 @@ func RunSyslog(ctx context.Context, env sys.System, stdout, stderr io.Writer, ar
 func runTool(ctx context.Context, env sys.System, stdout, stderr io.Writer, name string,
 	fn func(*setup.Env) error,
 ) int {
-	if uid := geteuid(); uid != 0 && uid != zextrasUID() {
-		_, _ = fmt.Fprintf(stderr, "Error: carbonio-bootstrap %s must run as root or %s\n", name, config.ZextrasUser)
-
+	e, ok := toolEnv(ctx, env, stdout, stderr, name)
+	if !ok {
 		return 1
 	}
-
-	e := &setup.Env{Ctx: ctx, Sys: env, Log: setup.NewLog(stdout, stderr), Paths: setup.DefaultPaths()}
 
 	if err := fn(e); err != nil {
 		_, _ = fmt.Fprintf(stderr, "Error: %v\n", err)
@@ -143,4 +141,29 @@ func runTool(ctx context.Context, env sys.System, stdout, stderr io.Writer, name
 	}
 
 	return 0
+}
+
+// toolEnv is the Env of a tool, false after printing why it must not run: the
+// caller is neither root nor zextras.
+func toolEnv(ctx context.Context, env sys.System, stdout, stderr io.Writer, name string) (*setup.Env, bool) {
+	if uid := geteuid(); uid != 0 && uid != zextrasUID() {
+		_, _ = fmt.Fprintf(stderr, "Error: carbonio-bootstrap %s must run as root or %s\n", name, config.ZextrasUser)
+
+		return nil, false
+	}
+
+	return &setup.Env{Ctx: ctx, Sys: env, Log: setup.NewLog(stdout, stderr), Paths: setup.DefaultPaths()}, true
+}
+
+// RunProxyConfig executes "setup proxyconfig": the port of libexec/zmproxyconfig,
+// which carbonio-core's wrapper calls with the options of the script. args are
+// its options (see setup.ParseProxyConfigArgs); the exit status and the
+// output are the script's. Like it, it runs as root or zextras.
+func RunProxyConfig(ctx context.Context, env sys.System, stdout, stderr io.Writer, args []string) int {
+	e, ok := toolEnv(ctx, env, stdout, stderr, "proxyconfig")
+	if !ok {
+		return 1
+	}
+
+	return runProxyConfig(e, args, stdout, stderr)
 }

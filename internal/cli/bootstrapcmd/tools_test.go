@@ -29,6 +29,8 @@ type toolHarness struct {
 	env    *setup.Env
 	domain string
 	server string
+	args   []string
+	code   int
 }
 
 func newToolHarness(t *testing.T, root bool) *toolHarness {
@@ -37,14 +39,22 @@ func newToolHarness(t *testing.T, root bool) *toolHarness {
 	h := &toolHarness{root: root}
 
 	oldEUID, oldGAL, oldKey, oldAuth, oldSyslog := geteuid, createGalSyncAccount, generateSSHKey, updateAuthKeys, setupSyslog
-	oldUID, oldAuthAll, oldDH := zextrasUID, updateAuthKeysAll, installDHParam
+	oldUID, oldAuthAll, oldDH, oldPC := zextrasUID, updateAuthKeysAll, installDHParam, runProxyConfig
 
 	t.Cleanup(func() {
 		geteuid, createGalSyncAccount, generateSSHKey, updateAuthKeys, setupSyslog = oldEUID, oldGAL, oldKey, oldAuth, oldSyslog
-		zextrasUID, updateAuthKeysAll, installDHParam = oldUID, oldAuthAll, oldDH
+		zextrasUID, updateAuthKeysAll, installDHParam, runProxyConfig = oldUID, oldAuthAll, oldDH, oldPC
 	})
 
 	zextrasUID = func() int { return 999 }
+	runProxyConfig = func(e *setup.Env, args []string, stdout, stderr io.Writer) int {
+		h.calls, h.env, h.args = append(h.calls, "proxyconfig"), e, args
+
+		_, _ = io.WriteString(stdout, "out\n")
+		_, _ = io.WriteString(stderr, "err\n")
+
+		return h.code
+	}
 	updateAuthKeysAll = func(e *setup.Env) error {
 		h.calls, h.env = append(h.calls, "authkeys -a"), e
 
@@ -280,4 +290,36 @@ func TestScriptCommands_ArgumentsAndUsers(t *testing.T) {
 			assert.Equal(t, tc.errb, errb.String())
 		})
 	}
+}
+
+// proxyconfig has the script's own exit status and output, so it is not one of
+// toolRuns (whose failures are "Error: ..." and 1).
+func TestRunProxyConfig_PassesTheOptionsAndTheScriptsStatus(t *testing.T) {
+	for _, root := range []bool{true, false} {
+		h := newToolHarness(t, root)
+		h.code = 2
+		zextrasUID = func() int { return 1000 } // the caller is zextras when not root
+
+		var out, errb bytes.Buffer
+
+		status := RunProxyConfig(context.Background(), systest.New().System(), &out, &errb, []string{"-m", "-e", "-H", "h"})
+
+		assert.Equal(t, 2, status, "the status of the port, root %v", root)
+		assert.Equal(t, "out\n", out.String())
+		assert.Equal(t, "err\n", errb.String())
+		assert.Equal(t, []string{"-m", "-e", "-H", "h"}, h.args)
+		assert.Nil(t, h.env.Cfg)
+	}
+}
+
+func TestRunProxyConfig_RefusesOtherUsers(t *testing.T) {
+	h := newToolHarness(t, false)
+
+	var out, errb bytes.Buffer
+
+	status := RunProxyConfig(context.Background(), systest.New().System(), &out, &errb, []string{"-h"})
+
+	assert.Equal(t, 1, status)
+	assert.Contains(t, errb.String(), "carbonio-bootstrap proxyconfig must run as root or zextras")
+	assert.Empty(t, h.calls)
 }

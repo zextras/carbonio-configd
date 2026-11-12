@@ -71,7 +71,7 @@ func TestSetupPlCommandsAreListedAndValidated(t *testing.T) {
 	status, out, _ := exec(t, "-h")
 	require.Equal(t, 0, status)
 
-	for _, c := range []string{"gal-sync-account", "ssh-keygen", "update-authkeys", "syslog", "dhparam"} {
+	for _, c := range []string{"gal-sync-account", "ssh-keygen", "update-authkeys", "syslog", "dhparam", "proxyconfig"} {
 		assert.Contains(t, out, c)
 	}
 
@@ -123,6 +123,7 @@ func TestSetupPlCommandsRefuseNonRoot(t *testing.T) {
 		{"syslog"},
 		{"update-authkeys", "-a"},
 		{"dhparam"},
+		{"proxyconfig", "-m", "-e", "-H", "h"},
 	} {
 		status, out, errb := exec(t, args...)
 
@@ -173,4 +174,19 @@ func TestSyslogCommandTakesNoArguments(t *testing.T) {
 	assert.Equal(t, 2, status)
 	assert.Empty(t, out)
 	assert.Contains(t, errb, "Usage: syslog")
+}
+
+// The options are the script's: cobra must not read -h or -H as its own flags.
+func TestProxyConfigCommandPassesTheScriptOptionsThrough(t *testing.T) {
+	status, _, errb := exec(t, "proxyconfig", "-z")
+
+	if os.Geteuid() == 0 || os.Getenv("USER") == "zextras" {
+		assert.Equal(t, 255, status, "getopts fails: Unable to set options")
+		assert.Contains(t, errb, "Unable to set options")
+
+		return
+	}
+
+	assert.Equal(t, 1, status)
+	assert.Contains(t, errb, "must run as root")
 }

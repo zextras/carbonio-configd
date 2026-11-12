@@ -149,7 +149,9 @@ func newRootCmd(env sys.System, stdin io.Reader, stdout, stderr io.Writer, statu
 		newToolCmd("dhparam", "Install the RFC 7919 ffdhe2048 dhparam and record it in zimbraSSLDHParam",
 			bootstrapcmd.RunDHParam, env, stdout, stderr, status),
 		newToolCmd("syslog", "Set up rsyslog for Carbonio logging, local or remote (zmsyslogsetup)",
-			bootstrapcmd.RunSyslog, env, stdout, stderr, status))
+			bootstrapcmd.RunSyslog, env, stdout, stderr, status),
+		newToolCmd("proxyconfig", "Configure the reverse proxy attributes, the options of libexec/zmproxyconfig",
+			bootstrapcmd.RunProxyConfig, env, stdout, stderr, status))
 
 	return root
 }
