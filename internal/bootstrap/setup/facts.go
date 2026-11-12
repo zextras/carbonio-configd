@@ -321,14 +321,8 @@ func (e *Env) EnsureLDAPRunning() error {
 
 	e.Log.Detail("Starting the local LDAP server")
 
-	// Without the carbonio systemd units slapd is started as zextras (see
-	// ldapControl): started by this root process it would run as root.
-	start := func() error { return e.Zextras(e.Paths.Path("bin", ldapService), "start") }
-	if factsServicesOf(e).IsSystemdMode() {
-		start = func() error { return factsServicesOf(e).ServiceStart(e.Ctx, ldapService) }
-	}
-
-	if err := start(); err != nil {
+	svc := factsServicesOf(e)
+	if err := ldapControl(e, svc.IsSystemdMode(), ldapStart, svc.ServiceStart); err != nil {
 		return fmt.Errorf("starting ldap: %w", err)
 	}
 

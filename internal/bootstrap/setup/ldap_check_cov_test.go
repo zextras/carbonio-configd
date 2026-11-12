@@ -637,10 +637,17 @@ func TestNativeKit_StartFailureIsReportedAndNotRemembered(t *testing.T) {
 
 func TestNativeKit_Stop(t *testing.T) {
 	e, fakes, _ := ldapTestEnv(t)
-	e.Ctl, _ = lwCtl(fakes)
+
+	var slapd *lwSlapd
+
+	e.Ctl, slapd = lwCtl(fakes)
 	e.Facts.Systemd = true
 
 	k := ldapNativeKit()
+	require.NoError(t, k.stop(e))
+	assert.Empty(t, lwSystemctl(fakes, "stop"), "a stopped slapd is left alone, like setup.pl stopLdap")
+
+	slapd.up.Store(true)
 	require.NoError(t, k.stop(e))
 	assert.Equal(t, []string{"/usr/bin/systemctl stop carbonio-openldap.service"}, lwSystemctl(fakes, "stop"))
 
