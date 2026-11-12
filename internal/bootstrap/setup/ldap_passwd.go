@@ -22,6 +22,7 @@ const (
 	ldapDNPostfix = "uid=zmpostfix,cn=appaccts,cn=zimbra"
 	ldapDNAmavis  = "uid=zmamavis,cn=appaccts,cn=zimbra"
 	ldapDNNginx   = "uid=zmnginx,cn=appaccts,cn=zimbra"
+	ldapDNBES     = "uid=zmbes-searcher,cn=appaccts,cn=zimbra"
 	ldapDNRootDB  = "olcDatabase={0}config,cn=config"
 	ldapDNMdbDB   = "olcDatabase={2}mdb,cn=config"
 
@@ -33,7 +34,7 @@ const (
 )
 
 // ldapAccount is one of the LDAP passwords: what zmldappasswd's -r, none,
-// -l, -p, -a and -n options address.
+// -l, -p, -a, -n and -b options address.
 type ldapAccount struct {
 	// Name is the account as the operator reads it.
 	Name string
@@ -61,6 +62,10 @@ var (
 		get: func(c *bootstrap.LDAPConfig) string { return c.AmavisPassword }}
 	ldapAcctNginx = ldapAccount{Name: "nginx", LCKey: "ldap_nginx_password", DN: ldapDNNginx,
 		get: func(c *bootstrap.LDAPConfig) string { return c.NginxPassword }}
+	// ldapAcctBES is only set by "setup ldap-passwd -b": the bootstrap
+	// configuration has no password for it and ldapAllAccounts leaves it out.
+	ldapAcctBES = ldapAccount{Name: "bes-searcher", LCKey: "ldap_bes_searcher_password", DN: ldapDNBES,
+		get: func(*bootstrap.LDAPConfig) string { return "" }}
 )
 
 // ldapAllAccounts is the order of setup.pl updatePasswordsInLocalConfig.
@@ -136,10 +141,19 @@ func ldapPasswordWorks(e *Env, k *ldapKit, a ldapAccount, password string) bool 
 }
 
 // ldapSetPassword is zmldappasswd for account a (bin/ldappasswd.pl, the -r, -l,
-// -p, -a, -n options and the plain one) done in-process, so that the password
-// is never on a command line: localconfig first, then the directory, then the
-// hash in conf/carbonio.ldif.
+// -p, -a, -n, -b options and the plain one) done in-process, so that the
+// password is never on a command line: localconfig first, then the directory,
+// then the hash in conf/carbonio.ldif.
 func ldapSetPassword(e *Env, k *ldapKit, a ldapAccount, password string) error {
+	return ldapChangePassword(e, k, a, password, false)
+}
+
+// ldapChangePassword is ldapSetPassword, or with onReplica zmldappasswd -c -l:
+// the replication password on a replica after the master changed it. The
+// replica reaches its own directory over the socket, which already replicates
+// the account (so there is no password to set and no hash to record), and only
+// its syncrepl credentials follow.
+func ldapChangePassword(e *Env, k *ldapKit, a ldapAccount, password string, onReplica bool) error {
 	if password == "" {
 		return fmt.Errorf("%s password is empty", a.Name)
 	}
@@ -166,26 +180,27 @@ func ldapSetPassword(e *Env, k *ldapKit, a ldapAccount, password string) error {
 		return ldapSetRootPassword(e, k, curRoot, password, hash)
 	}
 
-	conn, err := k.dial(e, ldapMasterDial(lc))
+	dial := ldapMasterDial(lc)
+	if onReplica {
+		dial = ldapDial{URLs: []string{ldapSocketURL}}
+	}
+
+	conn, err := k.dial(e, dial)
 	if err != nil {
-		return fmt.Errorf("connecting to the LDAP master: %w", err)
+		return fmt.Errorf("connecting to the LDAP %s: %w", ldapDialTarget(onReplica), err)
 	}
 	defer conn.Close()
 
 	dn := ldapAccountDN(a, lc)
 
-	if conn.Bind(dn, password) != nil {
-		if err := conn.Bind(ldapConfigDN, curRoot); err != nil {
-			return fmt.Errorf("binding as %s to set the %s password: %w", ldapConfigDN, a.Name, err)
-		}
-
-		if err := conn.SetPassword(dn, password); err != nil {
-			return fmt.Errorf("setting the %s password: %w", a.Name, err)
-		}
+	if err := ldapEnsurePassword(conn, a, dn, curRoot, password, onReplica); err != nil {
+		return err
 	}
 
-	if err := ldapStoreLDIFPassword(e, dn, hash); err != nil {
-		return err
+	if !onReplica {
+		if err := ldapStoreLDIFPassword(e, dn, hash); err != nil {
+			return err
+		}
 	}
 
 	if a.DN == ldapDNReplica {
@@ -193,6 +208,38 @@ func ldapSetPassword(e *Env, k *ldapKit, a ldapAccount, password string) error {
 	}
 
 	return nil
+}
+
+// ldapEnsurePassword makes the directory accept password for the account dn:
+// nothing when it binds already, else cn=config, with the root password in
+// force, sets it (a replica does not: it replicates the account).
+func ldapEnsurePassword(conn ldapConn, a ldapAccount, dn, curRoot, password string, onReplica bool) error {
+	if conn.Bind(dn, password) == nil {
+		return nil
+	}
+
+	if err := conn.Bind(ldapConfigDN, curRoot); err != nil {
+		return fmt.Errorf("binding as %s to set the %s password: %w", ldapConfigDN, a.Name, err)
+	}
+
+	if onReplica {
+		return nil
+	}
+
+	if err := conn.SetPassword(dn, password); err != nil {
+		return fmt.Errorf("setting the %s password: %w", a.Name, err)
+	}
+
+	return nil
+}
+
+// ldapDialTarget names the server ldapChangePassword connects to.
+func ldapDialTarget(onReplica bool) string {
+	if onReplica {
+		return "replica"
+	}
+
+	return "master"
 }
 
 // ldapSetRootPassword changes olcRootPW of the cn=config database over the

@@ -73,7 +73,7 @@ func run(args []string, env sys.System, stdin io.Reader, stdout, stderr io.Write
 
 // toolCommands are the commands that replace scripts and parse their own
 // arguments (proxyconfig has a -c and a -d of its own).
-var toolCommands = []string{"ssh-keygen", "update-authkeys", "syslog", "dhparam", "proxyconfig"}
+var toolCommands = []string{"ssh-keygen", "update-authkeys", "syslog", "dhparam", "proxyconfig", "ldap-passwd"}
 
 // legacyArgs maps the options of the former shell script: "-c FILE" is
 // "--legacy-config FILE --non-interactive", and "-d" (debug) is accepted and
@@ -155,8 +155,13 @@ func newRootCmd(env sys.System, stdin io.Reader, stdout, stderr io.Writer, statu
 		newToolCmd("update-authkeys [-a]",
 			"Update ~zextras/.ssh/authorized_keys from the servers' keys; -a first on every server (zmupdateauthkeys)",
 			bootstrapcmd.RunUpdateAuthKeys, env, stdout, stderr, status),
-		newToolCmd("dhparam", "Install the RFC 7919 ffdhe2048 dhparam and record it in zimbraSSLDHParam",
-			bootstrapcmd.RunDHParam, env, stdout, stderr, status),
+		newStdinToolCmd("dhparam [get|set ...]",
+			"Install the RFC 7919 ffdhe2048 dhparam and record it in zimbraSSLDHParam; get and set are zmdhparam",
+			bootstrapcmd.RunDHParam, env, stdin, stdout, stderr, status),
+		newStdinToolCmd("ldap-passwd [-h] [-r|-a|-b|-n|-p|[-c] -l] [password]",
+			"Change an LDAP password in localconfig, the directory and carbonio.ldif (zmldappasswd); "+
+				"without a password argument it is read from stdin",
+			bootstrapcmd.RunLDAPPasswd, env, stdin, stdout, stderr, status),
 		newToolCmd("syslog", "Set up rsyslog for Carbonio logging, local or remote (zmsyslogsetup)",
 			bootstrapcmd.RunSyslog, env, stdout, stderr, status),
 		newToolCmd("proxyconfig", "Configure the reverse proxy attributes, the options of libexec/zmproxyconfig",
@@ -202,13 +207,25 @@ func newToolCmd(use, short string,
 	fn func(context.Context, sys.System, io.Writer, io.Writer, []string) int,
 	env sys.System, stdout, stderr io.Writer, status *int,
 ) *cobra.Command {
+	return newStdinToolCmd(use, short,
+		func(ctx context.Context, env sys.System, _ io.Reader, stdout, stderr io.Writer, args []string) int {
+			return fn(ctx, env, stdout, stderr, args)
+		}, env, nil, stdout, stderr, status)
+}
+
+// newStdinToolCmd is newToolCmd for a script that reads standard input (a
+// password, which must not be on a command line).
+func newStdinToolCmd(use, short string,
+	fn func(context.Context, sys.System, io.Reader, io.Writer, io.Writer, []string) int,
+	env sys.System, stdin io.Reader, stdout, stderr io.Writer, status *int,
+) *cobra.Command {
 	return &cobra.Command{
 		Use:                use,
 		Short:              short,
 		Long:               short + ". Runs as root or zextras.",
 		DisableFlagParsing: true,
 		RunE: func(_ *cobra.Command, args []string) error {
-			*status = fn(context.Background(), env, stdout, stderr, args)
+			*status = fn(context.Background(), env, stdin, stdout, stderr, args)
 
 			return nil
 		},

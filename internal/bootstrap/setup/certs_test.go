@@ -423,7 +423,7 @@ func TestCertDHParam(t *testing.T) {
 			t.Skip("openssl not available")
 		}
 
-		data, err := certDHParamPEM()
+		data, err := dhGroupPEM(dhDefaultBits)
 		require.NoError(t, err)
 
 		file := filepath.Join(t.TempDir(), "dhparam.pem")

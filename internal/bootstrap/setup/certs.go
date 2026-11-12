@@ -5,11 +5,8 @@
 package setup
 
 import (
-	"encoding/asn1"
-	"encoding/pem"
 	"errors"
 	"fmt"
-	"math/big"
 	"strings"
 )
 
@@ -579,34 +576,6 @@ func StepGenerateDHParam() Step {
 	}
 }
 
-// certFFDHE2048Prime is the prime p of the ffdhe2048 group, RFC 7919
-// appendix A.1. Its generator is 2.
-const certFFDHE2048Prime = "" +
-	"FFFFFFFFFFFFFFFFADF85458A2BB4A9AAFDC5620273D3CF1D8B9C583CE2D3695" +
-	"A9E13641146433FBCC939DCE249B3EF97D2FE363630C75D8F681B202AEC4617A" +
-	"D3DF1ED5D5FD65612433F51F5F066ED0856365553DED1AF3B557135E7F57C935" +
-	"984F0C70E0E68B77E2A689DAF3EFE8721DF158A136ADE73530ACCA4F483A797A" +
-	"BC0AB182B324FB61D108A94BB2C8E3FBB96ADAB760D7F4681D4F42A3DE394DF4" +
-	"AE56EDE76372BB190B07A7C8EE0A6D709E02FCE1CDF7E2ECC03404CD28342F61" +
-	"9172FE9CE98583FF8E4F1232EEF28183C3FE3B1B4C6FAD733BB5FCBC2EC22005" +
-	"C58EF1837D1683B2C6F34A26C1B2EFFA886B423861285C97FFFFFFFFFFFFFFFF"
-
-// certDHParamPEM returns the ffdhe2048 group as the PEM "DH PARAMETERS" block
-// openssl dhparam writes: the PKCS#3 DER SEQUENCE { prime, generator }.
-func certDHParamPEM() ([]byte, error) {
-	p, ok := new(big.Int).SetString(certFFDHE2048Prime, 16)
-	if !ok {
-		return nil, errors.New("invalid ffdhe2048 prime")
-	}
-
-	der, err := asn1.Marshal(struct{ P, G *big.Int }{p, big.NewInt(2)})
-	if err != nil {
-		return nil, fmt.Errorf("encoding the dhparam group: %w", err)
-	}
-
-	return pem.EncodeToMemory(&pem.Block{Type: "DH PARAMETERS", Bytes: der}), nil
-}
-
 // InstallDHParam writes conf/dhparam.pem.crb (ffdhe2048) unless present and
 // records it in zimbraSSLDHParam: the step's work, shared with the setup.pl
 // command.
@@ -616,7 +585,7 @@ func certApplyDHParam(e *Env) error {
 	dest := certFile(e, "conf", certDHParamFile)
 
 	if !certIsFile(e, dest) {
-		data, err := certDHParamPEM()
+		data, err := dhGroupPEM(dhDefaultBits)
 		if err != nil {
 			return fmt.Errorf("failed to generate dhparam key: %w", err)
 		}

@@ -30,6 +30,8 @@ var (
 	updateAuthKeysAll    = setup.UpdateAuthKeysEverywhere
 	installDHParam       = setup.InstallDHParam
 	runProxyConfig       = setup.RunProxyConfig
+	runDHParam           = setup.RunDHParam
+	runLDAPPasswd        = setup.RunLDAPPasswd
 )
 
 // lookupZextrasUID is the uid of zextras, -1 when there is no such user.
@@ -90,16 +92,35 @@ func RunUpdateAuthKeys(ctx context.Context, env sys.System, stdout, stderr io.Wr
 	}
 }
 
-// RunDHParam executes "carbonio-bootstrap dhparam": conf/dhparam.pem.crb
-// with the RFC 7919 ffdhe2048 group, recorded in zimbraSSLDHParam.
-func RunDHParam(ctx context.Context, env sys.System, stdout, stderr io.Writer, args []string) int {
-	if len(args) != 0 {
-		_, _ = fmt.Fprintf(stderr, "Usage: dhparam\n")
-
-		return 2
+// RunDHParam executes "setup dhparam". Without arguments it is the step of
+// setup.pl: conf/dhparam.pem.crb with the RFC 7919 ffdhe2048 group, recorded
+// in zimbraSSLDHParam. With arguments it is zmdhparam ("get" and "set", see
+// setup.RunDHParam), whose exit status and output it keeps; stdin feeds
+// "-in -".
+func RunDHParam(ctx context.Context, env sys.System, stdin io.Reader, stdout, stderr io.Writer, args []string) int {
+	if len(args) == 0 {
+		return runTool(ctx, env, stdout, stderr, "dhparam", installDHParam)
 	}
 
-	return runTool(ctx, env, stdout, stderr, "dhparam", installDHParam)
+	e, ok := toolEnv(ctx, env, stdout, stderr, "dhparam")
+	if !ok {
+		return 1
+	}
+
+	return runDHParam(e, args, stdin, stdout, stderr)
+}
+
+// RunLDAPPasswd executes "setup ldap-passwd": the port of zmldappasswd with
+// its options and exit statuses (see setup.RunLDAPPasswd). The password is the
+// argument after the options or, without one, the first line of stdin. Like
+// the script, it runs as root or zextras.
+func RunLDAPPasswd(ctx context.Context, env sys.System, stdin io.Reader, stdout, stderr io.Writer, args []string) int {
+	e, ok := toolEnv(ctx, env, stdout, stderr, "ldap-passwd")
+	if !ok {
+		return 1
+	}
+
+	return runLDAPPasswd(e, args, stdin, stdout, stderr)
 }
 
 // RunSyslog executes "setup syslog" (zmsyslogsetup): it sets rsyslog up for

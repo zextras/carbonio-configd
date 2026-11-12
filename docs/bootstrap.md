@@ -530,6 +530,8 @@ configuration: the host name, the `zextras` ids, the LDAP and the admin
 credentials come from localconfig. They take the scripts' arguments, print
 what the scripts printed to stdout and the details to stderr, and exit `1`
 on failure with `Error: <reason>` on stderr; a wrong command line exits `2`.
+`proxyconfig`, `ldap-passwd` and `dhparam get|set` keep the output and exit
+statuses of their scripts instead.
 
 | Command | Replaces | Runs as | |
 | --- | --- | --- | --- |
@@ -537,7 +539,9 @@ on failure with `Error: <reason>` on stderr; a wrong command line exits `2`.
 | `setup ssh-keygen [rsa]` | `zmsshkeygen` | root, zextras | Generates the key pair and stores the public key in the server entry. Another key type prints `Bad keytype`. |
 | `setup update-authkeys [-a]` | `zmupdateauthkeys` | root, zextras | Rewrites `authorized_keys`; `-a` first asks every server, through `zmrc`, to update its own (a server that does not answer is logged). |
 | `setup syslog` | `zmsyslogsetup` | root | Sets up rsyslog as the "Set up syslog.conf" step does. |
-| `setup dhparam` | `openssl dhparam` in setup.pl | root | Installs `conf/dhparam.pem.crb` (ffdhe2048) unless present and sets `zimbraSSLDHParam`. |
+| `setup dhparam` | `openssl dhparam` in setup.pl | root, zextras | Installs `conf/dhparam.pem.crb` (ffdhe2048) unless present and sets `zimbraSSLDHParam`. |
+| `setup dhparam get\|set [options]` | `zmdhparam` | root, zextras | Reads or stores the DH parameters of `zimbraSSLDHParam`; see [`setup dhparam get` and `set`](#setup-dhparam-get-and-set). |
+| `setup ldap-passwd [options] [password]` | `zmldappasswd` | root, zextras | Changes an LDAP password in localconfig, the directory and `conf/carbonio.ldif`; the password is read from stdin when it is not an argument. See [`setup ldap-passwd`](#setup-ldap-passwd). |
 | `setup proxyconfig [options]` | `zmproxyconfig` (Perl) | root, zextras | Every option, default, check, message, help text and exit status of the script (`-h -o -m -w -d -e -f -r -s -t -c -C -n -u -U -i -p -a -x -H`; options parse like Perl's `Getopt::Std`). `1`: refused options or checks (usage on stdout), `2`: an attribute change failed, `255`: unusable options or LDAP. Nothing is printed on success; `-e` and `-f` warn about domains with `zimbraVirtualIPAddress` on stderr. |
 
 ### `setup proxyconfig`
@@ -566,3 +570,107 @@ Differences from the script:
   disable) never ran: it read the values with `zmprov ... 1>/dev/null`. It is
   not ported. The `-e -c` store branch sets `zimbraAdminPort` to the proxy
   port `n2`, as the script did.
+
+### `setup ldap-passwd`
+
+carbonio-core installs `bin/zmldappasswd` as `exec /opt/zextras/libexec/setup
+ldap-passwd "$@"`. The command is `ldapSetPassword`, the function the
+bootstrap steps use to set the account passwords, so the two cannot drift. It
+takes the script's options (parsed like Perl's `Getopt::Std`, `arcblnph`):
+
+| Option | Changes | In localconfig | Bound as |
+| --- | --- | --- | --- |
+| none | the admin account | `zimbra_ldap_password` | `zimbra_ldap_userdn` |
+| `-r` | `olcRootPW` of `cn=config`, over the ldapi socket | `ldap_root_password` | `cn=config` |
+| `-l` | the replication account | `ldap_replication_password` | `uid=zmreplica,cn=admins,cn=zimbra` |
+| `-c -l` | on a replica, after `-l` on the master: its localconfig and the credentials of its `olcSyncrepl`; nothing else | `ldap_replication_password` | the replica's own directory, over the ldapi socket |
+| `-p` | the postfix account | `ldap_postfix_password` | `uid=zmpostfix,cn=appaccts,cn=zimbra` |
+| `-a` | the amavis account | `ldap_amavis_password` | `uid=zmamavis,cn=appaccts,cn=zimbra` |
+| `-n` | the nginx account | `ldap_nginx_password` | `uid=zmnginx,cn=appaccts,cn=zimbra` |
+| `-b` | the BES searcher account | `ldap_bes_searcher_password` | `uid=zmbes-searcher,cn=appaccts,cn=zimbra` |
+| `-h` | prints the usage text and exits `1` | | |
+
+The password of the account is written to localconfig, the account is
+bound with it (the directory already holds it: nothing more), and otherwise
+`cn=config` is bound with the previous `ldap_root_password` to set it; the
+`{SSHA512}` hash goes to the account's entry in `conf/carbonio.ldif` (not for
+`-r`, nor `-c`). `-l` also swaps the credentials in `olcSyncrepl`. The
+script's checks are kept: only one account option; `-c` needs `-l` and a node
+that is not the LDAP master (`ldap_is_master`); each breach prints the usage
+and exits `1`. It prints `Updating local config and LDAP`, and exits `255`
+for an option `Getopt::Std` does not know.
+
+**The password.** Without a password argument it is the first line of stdin,
+without its line end, so that it never is on a command line (where `ps` shows
+it to every user). `setup.pl` is to call:
+
+```sh
+printf '%s\n' "$password" | /opt/zextras/libexec/setup ldap-passwd -p
+printf '%s\n' "$password" | /opt/zextras/libexec/setup ldap-passwd        # zimbra_ldap_password
+printf '%s\n' "$password" | /opt/zextras/libexec/setup ldap-passwd -r
+```
+
+(with `-l`, `-a`, `-n` or `-b` the same way). The argument form
+(`ldap-passwd -p 'secret'`, and `-- -secret` for a password that begins with
+`-`) works as it did.
+
+Differences from the script:
+
+- A missing or empty password, and arguments after the password (the script
+  ignored them, which silently cut a password containing spaces), print the
+  usage and exit `1`; the script printed it for a missing password only.
+- A failure is `Error: <reason>` on stderr and exit `1`: the connection to
+  the LDAP master or `ldapi`, and the bind as `cn=config` that authorises the
+  change, which the script did not check (it went on, the next step failing
+  without a message and the exit status being `0`).
+- The messages of the LDIF update (`Failed to backup ...`, `Failed to
+  move ...`) do not exist: the file is replaced atomically, so there is no
+  backup to restore.
+- localconfig is written by the process itself, not with `zmlocalconfig -f -e
+  key='value'`, whose quoting broke a password that contains `'`.
+
+### `setup dhparam get` and `set`
+
+carbonio-core installs `bin/zmdhparam` as `exec /opt/zextras/libexec/setup
+dhparam "$@"`. `setup dhparam` without arguments stays the step of setup.pl
+described above; with a first argument `get` or `set` it is `zmdhparam`:
+
+| Command | Does |
+| --- | --- |
+| `get` | prints the PEM of `zimbraSSLDHParam` (global config) to stdout |
+| `get -in FILE` | checks and prints a file (`-` is stdin) |
+| `get -out FILE` | writes `zimbraSSLDHParam` to a file, saying `writing params to 'FILE'` (`-` is stdout) |
+| `get -in FILE -out FILE2` | checks and copies, silently |
+| `set -new [BITS]` | stores the RFC 7919 group of BITS (2048, 3072 or 4096; 2048 when there is no number, which prints `defaulting numbits to '2048'`) in `zimbraSSLDHParam`, saying `saving 'zimbraSSLDHParam' to LDAP` |
+| `set -in FILE` | checks a file (`-` is stdin) and stores it |
+| `set ... -out FILE` | writes the parameters to a file instead of LDAP |
+| `-help`, `-man` | the usage, and the usage with the notes (exit `0`) |
+| `-debug [N]`, `-ldap` | accepted; `-debug` prints what is done on stderr, `-ldap` does nothing, as in the script |
+
+The options parse like Getopt::Long: one or two dashes, any case, unique
+abbreviations (`-n`, `-i`, `-o`), `-name=value`, `-new` taking a number only
+when one follows. The exit status is `0` for done, `1` otherwise (a command
+line refused, with the messages and the usage on stdout, like `pod2usage`; a
+failed check or LDAP write, with `zmdhparam: ERROR: ...` on stderr).
+`zmconfigd` still writes `conf/dhparam.pem` from the attribute, and the
+services use new parameters when restarted.
+
+Differences from the script:
+
+- `-new` does not run `openssl dhparam` (minutes of work, and a group
+  nobody had vetted): it takes the RFC 7919 group of that size, as the
+  bootstrap step does, so only `ffdhe2048`, `ffdhe3072` and `ffdhe4096` exist.
+  Another size is refused (below 2048, as before: `numbits 'N' must be >=
+  2048`; above it: `numbits 'N' is not the size of an RFC 7919 group`).
+- The check is in process (no `openssl`): the PEM must hold a `DH PARAMETERS`
+  block with a prime `p` (Miller-Rabin) and a generator in `2..p-2`;
+  `openssl dhparam -check` only warned about a composite `p`. The strength is
+  not checked, as before. What is stored or written is that block alone, in
+  canonical PEM, whatever surrounded it in the file.
+- `set -in FILE -out FILE2` copies the parameters; the script did nothing.
+  `get -out -` with LDAP prints to stdout; the script failed with "no
+  zimbraSSLDHParam".
+- The script told `saving 'zimbraSSLDHParam' via zmprov modifyConfig`; the
+  attribute is written to LDAP directly, and the message says so.
+- `-help` and `-man` print the synopsis (and the notes), not the whole Perl
+  pod.
