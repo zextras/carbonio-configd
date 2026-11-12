@@ -286,20 +286,37 @@ func TestWaitUntilNiceRoundSecond(t *testing.T) {
 		te := newTestEnv(t, files{})
 		te.fakes.Clock.Advance(tc.at)
 
-		done := make(chan bool, 1)
-
-		go func() { done <- te.waitUntilNiceRoundSecond(context.Background(), tc.interval) }()
-
-		if tc.wait == 0 {
-			assert.True(t, <-done, name)
-
-			continue
-		}
-
-		require.Eventually(t, func() bool { return te.fakes.Clock.Waiters() > 0 }, 5*time.Second, time.Millisecond, name)
-		te.fakes.Clock.Advance(tc.wait - time.Second)
-		assert.Empty(t, done, name, "not yet")
-		te.fakes.Clock.Advance(time.Second)
-		assert.True(t, <-done, name)
+		assert.Equal(t, tc.wait, te.niceRoundWait(tc.interval), name)
 	}
+}
+
+// A SIGTERM during the wait for the first round second stops the collector at
+// once, without a sample.
+func TestRunStopsDuringTheInitialWait(t *testing.T) {
+	t.Parallel()
+
+	te := cpuEnv(t)
+	te.fakes.Clock.Advance(7 * time.Second)
+
+	r := start(t, te, "cpu", "-c", "-i", "30")
+
+	assert.Equal(t, exitOK, r.stop(t))
+	assert.Equal(t, cpuHeading+"\n", te.stdout.String())
+}
+
+// A SIGHUP during that wait rotates the log at once.
+func TestRunRotatesDuringTheInitialWait(t *testing.T) {
+	t.Parallel()
+
+	te := cpuEnv(t)
+	te.fakes.Clock.Advance(7 * time.Second)
+
+	r := start(t, te, "cpu", "-i", "30")
+	r.sigs <- syscall.SIGHUP
+
+	gz := filepath.Join(te.Dir, "2026-01-01", "cpu.csv.gz")
+	require.Eventually(t, func() bool { return fileExists(gz) }, 5*time.Second, time.Millisecond)
+
+	assert.Equal(t, exitOK, r.stop(t))
+	assert.Equal(t, cpuHeading+"\n", readFile(t, filepath.Join(te.Dir, "cpu.csv")))
 }

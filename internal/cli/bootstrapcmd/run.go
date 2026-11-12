@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"strings"
 	"text/tabwriter"
@@ -16,6 +17,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/bootstrap/brand"
 	"github.com/zextras/carbonio-configd/internal/bootstrap/setup"
 	"github.com/zextras/carbonio-configd/internal/bootstrap/tui"
+	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/services"
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
@@ -83,6 +85,10 @@ func RunSetup(ctx context.Context, env sys.System, stdin io.Reader, stdout, stde
 		}
 	}
 
+	if screens {
+		defer quietScreenLogs(logFile, stderr)()
+	}
+
 	e := &setup.Env{
 		Ctx:   ctx,
 		Sys:   env,
@@ -94,6 +100,23 @@ func RunSetup(ctx context.Context, env sys.System, stdin io.Reader, stdout, stde
 	}
 
 	return runSetup(e, stdin, stdout, stderr, opts, &deps, setup.Steps())
+}
+
+// quietScreenLogs sends the warnings of the shared packages (the LDAP client,
+// localconfig...), which go to stderr, to the run's log file while the screens
+// are up: on the terminal they would be drawn over the interface. Without a
+// log file (dry run) they are dropped. The returned func puts them back on
+// stderr.
+func quietScreenLogs(logFile io.Writer, stderr io.Writer) func() {
+	if logFile == nil {
+		logFile = io.Discard
+	}
+
+	logger.InitStructuredLogging(&logger.Config{Format: logger.FormatText, Level: slog.LevelWarn, Output: logFile})
+
+	return func() {
+		logger.InitStructuredLogging(&logger.Config{Format: logger.FormatText, Level: slog.LevelWarn, Output: stderr})
+	}
 }
 
 func runSetup(e *setup.Env, stdin io.Reader, stdout, stderr io.Writer, opts *RunOptions,

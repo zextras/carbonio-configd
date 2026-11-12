@@ -121,6 +121,8 @@ type cmTest struct {
 	remote []string
 	// remoteFail makes the commands of zmrc that contain it fail.
 	remoteFail string
+	// remoteStartErr makes zmrc fail to start, with no exit status.
+	remoteStartErr error
 	// trusted are the certificates (DER) of the fake cacerts, by alias.
 	trusted map[string][]byte
 	// keytools are the keytool runs: the arguments after the program and the
@@ -175,8 +177,12 @@ func newCMTest(t *testing.T, lc map[string]string) *cmTest {
 			in, _ := io.ReadAll(c.Stdin)
 			h.remote = append(h.remote, c.Args[len(c.Args)-1]+": "+strings.TrimSpace(string(in)))
 
+			if h.remoteStartErr != nil {
+				return sys.Result{}, h.remoteStartErr
+			}
+
 			if h.remoteFail != "" && strings.Contains(string(in), h.remoteFail) {
-				return sys.Result{ExitCode: 3, Stdout: []byte("no route\n")}, &sys.ExitError{Code: 3}
+				return sys.Result{ExitCode: 3, Stderr: []byte("ssh: no route to host\n")}, &sys.ExitError{Code: 3}
 			}
 
 			return sys.Result{}, nil

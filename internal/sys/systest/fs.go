@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/zextras/carbonio-configd/internal/sys"
@@ -25,7 +26,11 @@ import (
 const (
 	fmtPathMode = "%s mode=%04o"
 	fmtPathPair = "%s -> %s"
+	fmtPathIDs  = "%s %d:%d"
 )
+
+// opOpen is the operation of the path errors of an open.
+const opOpen = "open"
 
 type node struct {
 	data     []byte
@@ -182,7 +187,7 @@ func (f *FS) ReadFile(name string) ([]byte, error) {
 
 	data, ok := f.Data(name)
 	if !ok {
-		return nil, pathErr("open", name, fs.ErrNotExist)
+		return nil, pathErr(opOpen, name, fs.ErrNotExist)
 	}
 
 	return data, nil
@@ -213,18 +218,25 @@ func (f *FS) openFile(op, name string, flag int, perm fs.FileMode) (sys.File, er
 	defer f.mu.Unlock()
 
 	p := clean(name)
+
+	if flag&syscall.O_NOFOLLOW != 0 {
+		if l, found := f.nodes[p]; found && l.mode&fs.ModeSymlink != 0 {
+			return nil, pathErr(opOpen, name, syscall.ELOOP)
+		}
+	}
+
 	n, ok := f.resolve(p)
 
 	switch {
 	case ok && flag&os.O_CREATE != 0 && flag&os.O_EXCL != 0:
-		return nil, pathErr("open", name, fs.ErrExist)
+		return nil, pathErr(opOpen, name, fs.ErrExist)
 	case !ok && flag&os.O_CREATE == 0:
-		return nil, pathErr("open", name, fs.ErrNotExist)
+		return nil, pathErr(opOpen, name, fs.ErrNotExist)
 	case !ok:
 		n = &node{mode: perm.Perm()}
 		f.nodes[p] = n
 	case n.mode.IsDir() && flag&(os.O_WRONLY|os.O_RDWR) != 0:
-		return nil, pathErr("open", name, errors.New("is a directory"))
+		return nil, pathErr(opOpen, name, errors.New("is a directory"))
 	}
 
 	if flag&os.O_TRUNC != 0 {
@@ -327,6 +339,44 @@ func (m *memFile) Close() error {
 	return nil
 }
 
+// Chown implements sys.File: the owner of the open file (fchown).
+func (m *memFile) Chown(uid, gid int) error {
+	m.fs.rec.Recordf("fs.fchown", fmtPathIDs, m.name, uid, gid)
+
+	m.fs.mu.Lock()
+	defer m.fs.mu.Unlock()
+
+	if m.closed {
+		return os.ErrClosed
+	}
+
+	if uid >= 0 {
+		m.n.uid = uid
+	}
+
+	if gid >= 0 {
+		m.n.gid = gid
+	}
+
+	return nil
+}
+
+// Chmod implements sys.File: the mode of the open file (fchmod).
+func (m *memFile) Chmod(mode fs.FileMode) error {
+	m.fs.rec.Recordf("fs.fchmod", fmtPathMode, m.name, mode.Perm())
+
+	m.fs.mu.Lock()
+	defer m.fs.mu.Unlock()
+
+	if m.closed {
+		return os.ErrClosed
+	}
+
+	m.n.mode = m.n.mode&^fs.ModePerm | mode.Perm()
+
+	return nil
+}
+
 type info struct {
 	name string
 	n    node
@@ -390,7 +440,7 @@ func (f *FS) ReadDir(name string) ([]fs.DirEntry, error) {
 
 	dir := clean(name)
 	if n, ok := f.resolve(dir); !ok || !n.mode.IsDir() {
-		return nil, pathErr("open", name, fs.ErrNotExist)
+		return nil, pathErr(opOpen, name, fs.ErrNotExist)
 	}
 
 	var out []fs.DirEntry
@@ -522,7 +572,7 @@ func (f *FS) CopyFile(_ context.Context, src, dst string) error {
 
 	n, ok := f.resolve(clean(src))
 	if !ok {
-		return pathErr("open", src, fs.ErrNotExist)
+		return pathErr(opOpen, src, fs.ErrNotExist)
 	}
 
 	f.nodes[clean(dst)] = &node{data: slices.Clone(n.data), mode: n.mode.Perm()}
@@ -637,7 +687,7 @@ func (f *FS) Chmod(name string, mode fs.FileMode) error {
 
 // Chown implements sys.FS.
 func (f *FS) Chown(name string, uid, gid int) error {
-	f.rec.Recordf("fs.chown", "%s %d:%d", name, uid, gid)
+	f.rec.Recordf("fs.chown", fmtPathIDs, name, uid, gid)
 
 	if err := f.check("Chown", name); err != nil {
 		return err
@@ -664,7 +714,7 @@ func (f *FS) Chown(name string, uid, gid int) error {
 
 // Lchown implements sys.FS: the owner of the link itself.
 func (f *FS) Lchown(name string, uid, gid int) error {
-	f.rec.Recordf("fs.lchown", "%s %d:%d", name, uid, gid)
+	f.rec.Recordf("fs.lchown", fmtPathIDs, name, uid, gid)
 
 	if err := f.check("Lchown", name); err != nil {
 		return err

@@ -99,13 +99,18 @@ func RunUpdateAuthKeys(ctx context.Context, env sys.System, stdout, stderr io.Wr
 	}
 }
 
-// RunDHParam executes "setup dhparam". Without arguments it is the step of
-// setup.pl: conf/dhparam.pem.crb with the RFC 7919 ffdhe2048 group, recorded
-// in zimbraSSLDHParam. With arguments it is zmdhparam ("get" and "set", see
-// setup.RunDHParam), whose exit status and output it keeps; stdin feeds
-// "-in -".
+// dhparamInstall is the argument of "setup dhparam" that runs the step of
+// setup.pl.
+const dhparamInstall = "install"
+
+// RunDHParam executes "setup dhparam". "install" is the step of setup.pl:
+// conf/dhparam.pem.crb with the RFC 7919 ffdhe2048 group, recorded in
+// zimbraSSLDHParam. Without arguments it does the same, because setup.pl of
+// carbonio-core calls it so and the two packages ship independently. Any other
+// command line is zmdhparam ("get" and "set", see setup.RunDHParam), whose exit
+// status and output it keeps; stdin feeds "-in -".
 func RunDHParam(ctx context.Context, env sys.System, stdin io.Reader, stdout, stderr io.Writer, args []string) int {
-	if len(args) == 0 {
+	if len(args) == 0 || (len(args) == 1 && args[0] == dhparamInstall) {
 		return runTool(ctx, env, stdout, stderr, "dhparam", installDHParam)
 	}
 
@@ -153,7 +158,7 @@ func RunSyslog(ctx context.Context, env sys.System, stdout, stderr io.Writer, ar
 // runTool runs fn as root or zextras (the scripts it replaces ran as
 // zextras, zmrc runs them remotely) against the node, with no bootstrap
 // configuration: fn reads what it needs from localconfig. Progress goes to
-// stdout, the details to stderr; a failure is printed and the status is 1.
+// stdout; a failure is printed on stderr and the status is 1.
 func runTool(ctx context.Context, env sys.System, stdout, stderr io.Writer, name string,
 	fn func(*setup.Env) error,
 ) int {
@@ -182,7 +187,7 @@ func toolEnv(ctx context.Context, env sys.System, stdout, stderr io.Writer, name
 	}
 
 	return &setup.Env{
-		Ctx: ctx, Sys: env, Log: setup.NewLog(stdout, stderr), Paths: setup.DefaultPaths(),
+		Ctx: ctx, Sys: env, Log: setup.NewLog(stdout, nil), Paths: setup.DefaultPaths(),
 		IsZextras: uid != 0,
 	}, true
 }

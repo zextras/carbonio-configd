@@ -114,6 +114,13 @@ func fdControl(env *Env, args []string) (int, bool) {
 	pidFile := filepath.Join(env.PidDir, "fd.pid")
 	pid, _ := strconv.Atoi(readPid(pidFile))
 
+	if pid <= 0 {
+		// A corrupt file: kill(-n) would signal a process group.
+		_ = os.Remove(pidFile)
+
+		return exitOK, true
+	}
+
 	if args[0] == "rotate" {
 		_ = env.Sys.Proc.Signal(pid, syscall.SIGHUP)
 

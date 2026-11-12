@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/user"
@@ -19,6 +20,8 @@ import (
 	"syscall"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // The modes of the files zmcertmgr creates: the script runs with umask 027
@@ -200,8 +203,54 @@ func (m *certMgr) checkFiles(files ...string) bool {
 // slurp reads a file.
 func (m *certMgr) slurp(name string) ([]byte, error) { return m.e.Sys.FS.ReadFile(name) }
 
-// chownZextras gives a file or directory this run created to zextras when the
-// process runs as root; zextras' own files already belong to it.
+// errCertSymlink is why root refuses a link: the trees the script works in
+// belong to zextras, which could point a link at a file only root can reach.
+var errCertSymlink = errors.New("is a symbolic link: refusing to follow it as root")
+
+// noFollow tells whether the run must not follow symbolic links: root does
+// not, zextras may (its own links, such as one to a Let's Encrypt key, give
+// it nothing it does not have).
+func (m *certMgr) noFollow() bool { return !m.e.IsZextras }
+
+// openFile opens name; as root a symbolic link at name is an error, both
+// when it is there before the open and when it is swapped in after the check.
+func (m *certMgr) openFile(name string, flag int, perm fs.FileMode) (sys.File, error) {
+	if m.noFollow() {
+		if fi, err := m.e.Sys.FS.Lstat(name); err == nil && fi.Mode()&fs.ModeSymlink != 0 {
+			return nil, &fs.PathError{Op: "open", Path: name, Err: errCertSymlink}
+		}
+
+		flag |= syscall.O_NOFOLLOW
+	}
+
+	f, err := m.e.Sys.FS.OpenFile(name, flag, perm)
+	if errors.Is(err, syscall.ELOOP) {
+		return nil, &fs.PathError{Op: "open", Path: name, Err: errCertSymlink}
+	}
+
+	return f, err
+}
+
+// slurpOwn reads a file of the script's own trees: as root without following
+// a symbolic link.
+func (m *certMgr) slurpOwn(name string) ([]byte, error) {
+	if !m.noFollow() {
+		return m.slurp(name)
+	}
+
+	f, err := m.openFile(name, os.O_RDONLY, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	defer func() { _ = f.Close() }()
+
+	return io.ReadAll(f)
+}
+
+// chownZextras gives a directory this run created to zextras when the
+// process runs as root; zextras' own files already belong to it. A link is
+// given away itself, never what it points to.
 func (m *certMgr) chownZextras(name string) error {
 	if m.e.IsZextras {
 		return nil
@@ -211,7 +260,26 @@ func (m *certMgr) chownZextras(name string) error {
 		return err
 	}
 
-	return m.e.Sys.FS.Chown(name, m.zuid, m.zgid)
+	return m.e.Sys.FS.Lchown(name, m.zuid, m.zgid)
+}
+
+// initNew gives a file this run just created its mode and, as root, its
+// owner, through the descriptor and before any data is written: a key is
+// never on disk with the wrong owner or mode, and no path can be redirected.
+func (m *certMgr) initNew(f sys.File, perm fs.FileMode) error {
+	if err := f.Chmod(perm); err != nil {
+		return err
+	}
+
+	if m.e.IsZextras {
+		return nil
+	}
+
+	if err := m.loadIDs(); err != nil {
+		return err
+	}
+
+	return f.Chown(m.zuid, m.zgid)
 }
 
 func (m *certMgr) loadIDs() error {
@@ -236,29 +304,27 @@ func (m *certMgr) appendFile(name string, data []byte, perm fs.FileMode) error {
 }
 
 func (m *certMgr) putFile(name string, data []byte, perm fs.FileMode, mode int) error {
-	_, statErr := m.stat(name)
-	created := statErr != nil
+	_, lstatErr := m.e.Sys.FS.Lstat(name)
+	created := lstatErr != nil
 
-	f, err := m.e.Sys.FS.OpenFile(name, os.O_WRONLY|os.O_CREATE|mode, perm)
+	f, err := m.openFile(name, os.O_WRONLY|os.O_CREATE|mode, perm)
 	if err != nil {
 		return err
 	}
 
-	_, err = f.Write(data)
+	if created {
+		err = m.initNew(f, perm)
+	}
+
+	if err == nil {
+		_, err = f.Write(data)
+	}
 
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
 
-	if err != nil || !created {
-		return err
-	}
-
-	if err := m.e.Sys.FS.Chmod(name, perm); err != nil {
-		return err
-	}
-
-	return m.chownZextras(name)
+	return err
 }
 
 // mkdirAll is File::Path::make_path: the directories it creates get perm and
@@ -304,15 +370,26 @@ func (m *certMgr) sameFile(a, b string) bool {
 }
 
 // copyFile is _copy: File::Copy::copy, which does not carry the mode over;
-// copying a file over itself is not an error.
+// copying a file over itself is not an error. The source is a file of the
+// script's own trees, so root does not follow a link there.
 func (m *certMgr) copyFile(from, to string, perm fs.FileMode) bool {
+	return m.copyWith(from, to, perm, m.slurpOwn)
+}
+
+// copyGiven is copyFile for a source the operator named on the command line:
+// a link there (a Let's Encrypt live/ file, say) is what was asked for.
+func (m *certMgr) copyGiven(from, to string, perm fs.FileMode) bool {
+	return m.copyWith(from, to, perm, m.slurp)
+}
+
+func (m *certMgr) copyWith(from, to string, perm fs.FileMode, read func(string) ([]byte, error)) bool {
 	m.say("** Copying '%s' to '%s'\n", from, to)
 
 	if m.sameFile(from, to) && m.exists(from) {
 		return true
 	}
 
-	data, err := m.slurp(from)
+	data, err := read(from)
 	if err == nil {
 		err = m.writeFile(to, data, perm)
 	}

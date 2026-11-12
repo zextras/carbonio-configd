@@ -9,6 +9,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -703,4 +704,52 @@ func TestFS_LchownOwnsTheLinkOnly(t *testing.T) {
 	assert.Zero(t, uid, "the target is untouched")
 
 	require.ErrorIs(t, f.FS.Lchown("/missing", 1, 1), fs.ErrNotExist)
+}
+
+// O_NOFOLLOW refuses a link, a dangling one too, and leaves its target alone.
+func TestFS_OpenNoFollowRefusesLinks(t *testing.T) {
+	t.Parallel()
+
+	f := systest.New()
+	f.FS.Put("/t", []byte("x"), 0o600)
+	f.FS.PutLink("/l", "t")
+	f.FS.PutLink("/dangling", "/none")
+
+	flag := os.O_WRONLY | os.O_CREATE | os.O_TRUNC | syscall.O_NOFOLLOW
+
+	_, err := f.FS.OpenFile("/l", flag, 0o600)
+	require.ErrorIs(t, err, syscall.ELOOP)
+
+	_, err = f.FS.OpenFile("/dangling", flag, 0o600)
+	require.ErrorIs(t, err, syscall.ELOOP)
+
+	data, _ := f.FS.Data("/t")
+	assert.Equal(t, "x", string(data))
+	assert.False(t, f.FS.Exists("/none"))
+
+	w, err := f.FS.OpenFile("/t", flag, 0o600)
+	require.NoError(t, err, "a regular file opens as usual")
+	require.NoError(t, w.Close())
+}
+
+// Chown and Chmod of an open file act on the file, not on a path.
+func TestFS_OpenFileOwnershipThroughTheDescriptor(t *testing.T) {
+	t.Parallel()
+
+	f := systest.New()
+
+	w, err := f.FS.OpenFile("/new", os.O_WRONLY|os.O_CREATE, 0o644)
+	require.NoError(t, err)
+	require.NoError(t, w.Chmod(0o600))
+	require.NoError(t, w.Chown(10, 20))
+	require.NoError(t, w.Close())
+
+	mode, _ := f.FS.Mode("/new")
+	assert.Equal(t, fs.FileMode(0o600), mode.Perm())
+
+	uid, gid, _ := f.FS.Owner("/new")
+	assert.Equal(t, [2]int{10, 20}, [2]int{uid, gid})
+	assert.Equal(t, []string{"/new 10:20"}, f.Rec.Of("fs.fchown"))
+
+	require.ErrorIs(t, w.Chown(1, 1), os.ErrClosed)
 }

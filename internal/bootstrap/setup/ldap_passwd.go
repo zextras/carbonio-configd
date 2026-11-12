@@ -9,6 +9,7 @@ import (
 	"crypto/sha512"
 	"encoding/base64"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/zextras/carbonio-configd/internal/bootstrap"
@@ -172,12 +173,8 @@ func ldapChangePassword(e *Env, k *ldapKit, a ldapAccount, password string, onRe
 		return err
 	}
 
-	if err := e.SetLC(map[string]string{a.LCKey: password}); err != nil {
-		return fmt.Errorf("setting %s: %w", a.LCKey, err)
-	}
-
 	if a.root {
-		return ldapSetRootPassword(e, k, curRoot, password, hash)
+		return ldapSetRootPassword(e, k, a, curRoot, password, hash)
 	}
 
 	dial := ldapMasterDial(lc)
@@ -190,6 +187,10 @@ func ldapChangePassword(e *Env, k *ldapKit, a ldapAccount, password string, onRe
 		return fmt.Errorf("connecting to the LDAP %s: %w", ldapDialTarget(onReplica), err)
 	}
 	defer conn.Close()
+
+	if err := ldapRecordPassword(e, a, password); err != nil {
+		return err
+	}
 
 	dn := ldapAccountDN(a, lc)
 
@@ -244,27 +245,40 @@ func ldapDialTarget(onReplica bool) string {
 
 // ldapSetRootPassword changes olcRootPW of the cn=config database over the
 // ldapi socket; it is a no-op when the new password already binds.
-func ldapSetRootPassword(e *Env, k *ldapKit, curRoot, password, hash string) error {
+// localconfig follows only a change the directory took: the current root
+// password is the key to the next attempt.
+func ldapSetRootPassword(e *Env, k *ldapKit, a ldapAccount, curRoot, password, hash string) error {
 	conn, err := k.dial(e, ldapDial{URLs: []string{ldapSocketURL}})
 	if err != nil {
 		return fmt.Errorf("connecting to %s: %w", ldapSocketURL, err)
 	}
 	defer conn.Close()
 
-	if conn.Bind(ldapConfigDN, password) == nil {
-		return nil
+	if conn.Bind(ldapConfigDN, password) != nil {
+		if err := conn.Bind(ldapConfigDN, curRoot); err != nil {
+			return fmt.Errorf("binding as %s with the current root password: %w", ldapConfigDN, err)
+		}
+
+		if err := conn.Replace(ldapDNRootDB, "olcRootPW", []string{hash}); err != nil {
+			return fmt.Errorf("setting olcRootPW: %w", err)
+		}
 	}
 
-	if err := conn.Bind(ldapConfigDN, curRoot); err != nil {
-		return fmt.Errorf("binding as %s with the current root password: %w", ldapConfigDN, err)
-	}
+	return ldapRecordPassword(e, a, password)
+}
 
-	if err := conn.Replace(ldapDNRootDB, "olcRootPW", []string{hash}); err != nil {
-		return fmt.Errorf("setting olcRootPW: %w", err)
+// ldapRecordPassword stores password under the account's localconfig key.
+func ldapRecordPassword(e *Env, a ldapAccount, password string) error {
+	if err := e.SetLC(map[string]string{a.LCKey: password}); err != nil {
+		return fmt.Errorf("setting %s: %w", a.LCKey, err)
 	}
 
 	return nil
 }
+
+// ldapSyncreplCredentialsRE is the credentials parameter of an olcSyncrepl
+// value; the other parameters (starttls=critical, filter=...) are kept.
+var ldapSyncreplCredentialsRE = regexp.MustCompile(`credentials=\S+`)
 
 // ldapUpdateSyncrepl swaps the credentials of the olcSyncrepl value of the
 // mdb database (a replica that follows the master with the replication account).
@@ -280,14 +294,11 @@ func ldapUpdateSyncrepl(conn ldapConn, password string) error {
 		return nil
 	}
 
-	head, rest, ok := strings.Cut(vals[0], "credentials=")
-	if !ok {
+	if !ldapSyncreplCredentialsRE.MatchString(vals[0]) {
 		return nil
 	}
 
-	_, tail, _ := strings.Cut(rest, "filter=")
-
-	repl := head + "credentials=" + password + " filter=" + tail
+	repl := ldapSyncreplCredentialsRE.ReplaceAllLiteralString(vals[0], "credentials="+password)
 
 	if err := conn.Replace(entries[0].DN, "olcSyncrepl", []string{repl}); err != nil {
 		return fmt.Errorf("updating olcSyncrepl: %w", err)

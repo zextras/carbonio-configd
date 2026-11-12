@@ -7,6 +7,7 @@ package setup
 import (
 	"bytes"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"testing/iotest"
@@ -172,6 +173,38 @@ func TestRunLDAPPasswd_RootGoesOverTheSocket(t *testing.T) {
 	assert.Equal(t, "NewRoot", lc["ldap_root_password"])
 }
 
+// localconfig keeps the root password the directory still has when the
+// directory cannot be reached or refuses the change.
+func TestRunLDAPPasswd_RootFailureLeavesLocalConfigAlone(t *testing.T) {
+	t.Run("no connection", func(t *testing.T) {
+		e, _, f := ldapPasswdTestEnv(t, "true")
+		k := f.kit()
+		k.dial = func(*Env, ldapDial) (ldapConn, error) { return nil, errors.New("refused") }
+
+		var out, errb bytes.Buffer
+
+		assert.Equal(t, 1, runLDAPPasswd(e, k, []string{"-r", "NewRoot"}, strings.NewReader(""), &out, &errb))
+
+		lc, err := e.LC()
+		require.NoError(t, err)
+		assert.Equal(t, "oldroot", lc["ldap_root_password"])
+	})
+
+	t.Run("olcRootPW refused", func(t *testing.T) {
+		e, _, f := ldapPasswdTestEnv(t, "true")
+		f.bindOK = func(_, pw string) bool { return pw == "oldroot" }
+		f.replaceErr = errors.New("insufficient access")
+
+		r := ldapPasswdExec(t, e, f, "", "-r", "NewRoot")
+
+		assert.Equal(t, 1, r.code)
+
+		lc, err := e.LC()
+		require.NoError(t, err)
+		assert.Equal(t, "oldroot", lc["ldap_root_password"])
+	})
+}
+
 // The password of a command line without one is the first line of stdin.
 func TestRunLDAPPasswd_PasswordFromStdin(t *testing.T) {
 	for _, tc := range []struct{ name, stdin, want string }{
@@ -287,6 +320,24 @@ func TestRunLDAPPasswd_ReplicaFollowsTheMaster(t *testing.T) {
 	assert.Equal(t, string(ldifBefore), string(ldifAfter), "carbonio.ldif is the master's business")
 }
 
+// Only the credentials of the syncrepl line change: starttls=critical and the
+// other parameters stay.
+func TestRunLDAPPasswd_SyncreplKeepsTheOtherParameters(t *testing.T) {
+	e, _, f := ldapPasswdTestEnv(t, "false")
+	f.bindOK = func(dn, pw string) bool { return dn == ldapConfigDN && pw == "oldroot" }
+	f.search = []ldapEntry{{DN: ldapDNMdbDB, Attrs: map[string][]string{
+		"olcSyncrepl": {"{0}rid=100 provider=ldap://m bindmethod=simple binddn=\"uid=zmreplica,cn=admins,cn=zimbra\" " +
+			"credentials=OLDPW starttls=critical filter=(objectclass=*) type=refreshAndPersist"},
+	}}}
+
+	r := ldapPasswdExec(t, e, f, "", "-c", "-l", "Repl-New")
+
+	assert.Equal(t, 0, r.code, r.stderr)
+	assert.Equal(t, []string{ldapDNMdbDB + "|olcSyncrepl|{0}rid=100 provider=ldap://m bindmethod=simple " +
+		"binddn=\"uid=zmreplica,cn=admins,cn=zimbra\" credentials=Repl-New starttls=critical " +
+		"filter=(objectclass=*) type=refreshAndPersist"}, f.replace)
+}
+
 // Without -c, -l is the master's change: it sets the password in the
 // directory and records the hash in carbonio.ldif as well.
 func TestRunLDAPPasswd_ReplicationOnTheMaster(t *testing.T) {
@@ -367,4 +418,50 @@ func TestRunLDAPPasswd_Failures(t *testing.T) {
 		assert.Equal(t, 1, r.code)
 		assert.True(t, strings.HasPrefix(r.stderr, "Error: "), r.stderr)
 	})
+}
+
+// breakLocalConfigOnDial makes localconfig unwritable once the directory has
+// been reached, so the password is accepted by LDAP but cannot be recorded.
+func breakLocalConfigOnDial(t *testing.T, e *Env, f *ldapFake) *ldapKit {
+	t.Helper()
+
+	k := f.kit()
+	dial := k.dial
+	k.dial = func(env *Env, d ldapDial) (ldapConn, error) {
+		require.NoError(t, os.Remove(e.Paths.LocalConfig))
+		require.NoError(t, os.Mkdir(e.Paths.LocalConfig, 0o755))
+
+		return dial(env, d)
+	}
+
+	return k
+}
+
+func TestRunLDAPPasswd_LocalConfigThatCannotBeWritten(t *testing.T) {
+	for _, args := range [][]string{{"-p", "pw"}, {"-r", "pw"}} {
+		e, _, f := ldapPasswdTestEnv(t, "true")
+		k := breakLocalConfigOnDial(t, e, f)
+
+		var out, errb bytes.Buffer
+
+		assert.Equal(t, 1, runLDAPPasswd(e, k, args, strings.NewReader(""), &out, &errb), args)
+		assert.Contains(t, errb.String(), "Error: setting ", args)
+	}
+}
+
+// Root is changed through cn=config bound with the current root password: a
+// directory that refuses that password leaves everything as it was.
+func TestRunLDAPPasswd_RootWhoseCurrentPasswordIsRefused(t *testing.T) {
+	e, _, f := ldapPasswdTestEnv(t, "true")
+	f.bindOK = func(string, string) bool { return false }
+
+	r := ldapPasswdExec(t, e, f, "", "-r", "NewRoot")
+
+	assert.Equal(t, 1, r.code)
+	assert.Contains(t, r.stderr, "binding as cn=config with the current root password")
+	assert.Empty(t, f.replace)
+
+	lc, err := e.LC()
+	require.NoError(t, err)
+	assert.Equal(t, "oldroot", lc["ldap_root_password"])
 }

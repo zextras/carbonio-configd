@@ -10,10 +10,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 )
+
+// errLogClosed is a write to a log that could not be reopened.
+var errLogClosed = errors.New("log file is not open")
 
 // logFile is the CSV a collector appends to: Stat.pm openLogFile and
 // rotateLogFile. The console (path "" or "-") is standard output and is never
@@ -23,6 +27,7 @@ type logFile struct {
 	path    string
 	heading string
 	f       *os.File
+	console bool
 }
 
 // openLog is openLogFile: it creates the directory, rotates a file whose last
@@ -33,6 +38,7 @@ func openLog(env *Env, path, heading string, now func() string) (*logFile, error
 
 	if path == "" || path == "-" {
 		l.path = ""
+		l.console = true
 		_, err := fmt.Fprintln(env.Stdout, heading)
 
 		return l, err
@@ -156,10 +162,14 @@ func lineDate(line string) (string, bool) {
 func (l *logFile) write(lines []string) error {
 	text := strings.Join(lines, "\n") + "\n"
 
-	if l.f == nil {
+	if l.console {
 		_, err := io.WriteString(l.env.Stdout, text)
 
 		return err //nolint:wrapcheck // plain write error
+	}
+
+	if l.f == nil {
+		return errLogClosed
 	}
 
 	_, err := l.f.WriteString(text)
@@ -171,25 +181,24 @@ func (l *logFile) write(lines []string) error {
 // goes to <dir>/<date>/<name>.gz (appended to an existing one) and a new file
 // starts with the heading. The console is not rotated.
 func (l *logFile) rotate(date string) error {
-	if l.f == nil {
+	if l.console {
 		return nil
 	}
 
-	_ = l.f.Close()
-	l.f = nil
+	l.close()
 
-	if err := l.rotateFile(date); err != nil {
-		return err
-	}
+	// The log is reopened even when the move failed, so the CSV keeps going
+	// to the file instead of being lost.
+	rotErr := l.rotateFile(date)
 
 	n, err := openLog(l.env, l.path, l.heading, func() string { return date })
 	if err != nil {
-		return err
+		return errors.Join(rotErr, err)
 	}
 
 	l.f = n.f
 
-	return nil
+	return rotErr
 }
 
 func (l *logFile) close() {
@@ -202,6 +211,10 @@ func (l *logFile) close() {
 // rotateFile moves the log to <dir>/<date>/<name>.gz. When that gz (or a bare
 // copy) is already there, the old content comes first, as `cat old new | gzip`.
 func (l *logFile) rotateFile(date string) error {
+	if _, err := os.Stat(l.path); errors.Is(err, fs.ErrNotExist) {
+		return nil // nothing to move
+	}
+
 	dir, name := filepath.Split(l.path)
 	rdir := filepath.Join(dir, date)
 

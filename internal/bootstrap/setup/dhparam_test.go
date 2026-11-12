@@ -9,6 +9,7 @@ import (
 	"encoding/asn1"
 	"encoding/pem"
 	"errors"
+	"io/fs"
 	"math/big"
 	"strconv"
 	"strings"
@@ -264,6 +265,25 @@ func TestRunDHParam_Get(t *testing.T) {
 		assert.Equal(t, "zmdhparam: (over)writing params to '/tmp/dh.pem'\n", r.stdout)
 	})
 
+	t.Run("-out writes in place and keeps the mode and owner of the file", func(t *testing.T) {
+		e, fakes, _ := testEnv(t)
+		dhGlobalConfig(t, string(ffdhe2048), nil)
+		fakes.FS.Put("/tmp/dh.pem", []byte(strings.Repeat("old", 5000)), 0o600)
+		require.NoError(t, fakes.FS.Chown("/tmp/dh.pem", 123, 456))
+
+		r := dhExec(t, e, "", "get", "-out", "/tmp/dh.pem")
+		assert.Equal(t, 0, r.code)
+
+		data, _ := fakes.FS.Data("/tmp/dh.pem")
+		assert.Equal(t, string(ffdhe2048), string(data), "truncated, not appended")
+
+		mode, _ := fakes.FS.Mode("/tmp/dh.pem")
+		assert.Equal(t, fs.FileMode(0o600), mode.Perm())
+
+		uid, gid, _ := fakes.FS.Owner("/tmp/dh.pem")
+		assert.Equal(t, [2]int{123, 456}, [2]int{uid, gid})
+	})
+
 	t.Run("-out - is stdout", func(t *testing.T) {
 		e, _, _ := testEnv(t)
 		dhGlobalConfig(t, string(ffdhe2048), nil)
@@ -471,4 +491,33 @@ func TestRunDHParam_DebugGoesToStderr(t *testing.T) {
 	assert.Equal(t, 0, r.code)
 	assert.Equal(t, "DEBUG: using the RFC 7919 group of 2048 bits\n", r.stderr)
 	assert.NotContains(t, r.stdout, "DEBUG")
+}
+
+// A -out file that cannot be opened or written is an error naming the file.
+func TestRunDHParam_OutThatCannotBeWritten(t *testing.T) {
+	for want, fault := range map[string]faultFS{
+		"disk full": {write: errors.New("disk full")},
+		"read-only": {},
+	} {
+		t.Run(want, func(t *testing.T) {
+			e, fakes, _ := testEnv(t)
+			fault.FS = e.Sys.FS
+			e.Sys.FS = fault
+
+			if want == "read-only" {
+				fakes.FS.Fail = func(op, name string) error {
+					if op == "OpenFile" && name == "/tmp/new.pem" {
+						return errors.New("read-only")
+					}
+
+					return nil
+				}
+			}
+
+			r := dhExec(t, e, "", "set", "-new", "2048", "-out", "/tmp/new.pem")
+
+			assert.Equal(t, 1, r.code)
+			assert.Contains(t, r.stderr, "create '/tmp/new.pem' failed: "+want)
+		})
+	}
 }

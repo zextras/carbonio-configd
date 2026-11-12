@@ -48,6 +48,8 @@ type ldapFake struct {
 	searchFn func(base, filter string) ([]ldapEntry, error)
 	// modifyErr fails a modify of the DN.
 	modifyErr func(dn string) error
+	// replaceErr fails every replace.
+	replaceErr error
 	// attrs are the attributes of every add, by DN.
 	attrs map[string][]ldapLDIFAttr
 	// mods are the changes of the modifies, "dn|add|attr|v1,v2".
@@ -89,7 +91,7 @@ func (c ldapFakeConn) Add(dn string, attrs []ldapLDIFAttr) error {
 func (c ldapFakeConn) Replace(dn, attr string, values []string) error {
 	c.f.replace = append(c.f.replace, dn+"|"+attr+"|"+strings.Join(values, ","))
 
-	return nil
+	return c.f.replaceErr
 }
 
 func (c ldapFakeConn) Modify(dn string, mods []ldapMod) error {

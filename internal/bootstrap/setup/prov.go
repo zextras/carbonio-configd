@@ -5,6 +5,7 @@
 package setup
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"maps"
@@ -324,6 +325,12 @@ func (e *Env) SetLC(pairs map[string]string) error {
 // LDAP opens a client to the LDAP master with the credentials of the
 // effective localconfig. The caller closes it.
 func (e *Env) LDAP() (*ldap.Client, error) {
+	return e.ldapClient(context.Background())
+}
+
+// ldapClient is LDAP with ctx as the lifecycle context of the client, which
+// also carries the logger of its connection warnings.
+func (e *Env) ldapClient(ctx context.Context) (*ldap.Client, error) {
 	lc, err := e.LC()
 	if err != nil {
 		return nil, err
@@ -333,6 +340,8 @@ func (e *Env) LDAP() (*ldap.Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("LDAP parameters: %w", err)
 	}
+
+	params.Context = ctx
 
 	return ldap.NewClient(params)
 }
