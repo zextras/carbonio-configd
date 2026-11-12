@@ -483,29 +483,11 @@ Always exits `0`, even with a missing `.version` (like legacy `zmcontrol -v`/`-V
 
 ## bootstrap
 
-```bash
-configd bootstrap config [--config FILE | --legacy-config FILE] [--set key=value]... \
-    [--non-interactive] [--wizard missing|all] [--output FILE]
-```
-
-Builds the node's bootstrap configuration from a YAML file, or a legacy
-`setup.pl` file, plus the `CARBONIO_BOOTSTRAP_*` environment, `--set` and the
-wizard. It validates the result, then prints it with the source of each key
-(passwords masked) or saves it to `--output` (mode `0600`, no passwords).
-Exits `0` when the configuration is valid and `1` otherwise. Keys, layers,
-the wizard and legacy migration are described in [bootstrap.md](bootstrap.md).
-
-```bash
-configd bootstrap run [same flags as config] [--dry-run]
-```
-
-Configures the node, as root: the work of the legacy `setup.pl`. It resolves
-the configuration as `config` does (plus the values of an existing install),
-then runs the bootstrap steps in order, each one only when the node is not
-already in the state it produces. `--dry-run` prints which steps would apply
-and changes nothing; `--output` also saves the configuration. Exits `0` when
-every step succeeded; after a failure, running it again resumes. See
-[bootstrap.md](bootstrap.md#running).
+Not a `configd` command: the node bootstrap is the separate
+`carbonio-bootstrap` binary (`carbonio-bootstrap config`,
+`carbonio-bootstrap run`, bare `carbonio-bootstrap` is `run`), so the full-screen
+terminal interface is not linked into the daemon. Flags, keys, the wizard and
+the steps are in [bootstrap.md](bootstrap.md).
 
 ## completion
 
