@@ -523,60 +523,61 @@ const (
 	srvOn
 )
 
-// srvUpstream is the zmproxyconfig upstream flag: -U with interprocess
-// security, -u without.
-func srvUpstream(e *Env) string {
-	if e.Cfg.Host.RequireInterprocessSecurity {
-		return "-U"
-	}
-
-	return "-u"
-}
-
-func srvMailProxyArgs(e *Env, on bool) []string {
-	ps, host := srvPorts(e), srvHost(e)
-	imap := fmt.Sprintf("%d:%d:%d:%d", ps.imap, ps.imapProxy, ps.imaps, ps.imapsProxy)
-	pop := fmt.Sprintf("%d:%d:%d:%d", ps.pop, ps.popProxy, ps.pops, ps.popsProxy)
+// srvProxyOptions are the zmproxyconfig options of one run on this host: -e
+// or -d, -o, -H, and for the upstream -U with interprocess security, -u
+// without (enable only).
+func srvProxyOptions(e *Env, on bool) *ProxyConfigOptions {
+	o := &ProxyConfigOptions{Override: true, Host: srvHost(e), Enable: on, Disable: !on}
 
 	if on {
-		return []string{srvUpstream(e), "-m", "-e", "-o", "-i", imap, "-p", pop, "-H", host}
+		o.UpstreamSSL = e.Cfg.Host.RequireInterprocessSecurity
+		o.NoUpstreamSSL = !o.UpstreamSSL
 	}
 
-	return []string{"-m", "-d", "-o", "-i", imap, "-p", pop, "-H", host}
+	return o
 }
 
-// srvWebProxyArgs: enabling passes the proxy mode, disabling the store mode,
+func srvMailProxyOptions(e *Env, on bool) *ProxyConfigOptions {
+	ps, o := srvPorts(e), srvProxyOptions(e, on)
+
+	o.Mail = true
+	o.ImapPorts = fmt.Sprintf("%d:%d:%d:%d", ps.imap, ps.imapProxy, ps.imaps, ps.imapsProxy)
+	o.PopPorts = fmt.Sprintf("%d:%d:%d:%d", ps.pop, ps.popProxy, ps.pops, ps.popsProxy)
+
+	return o
+}
+
+// srvWebProxyOptions: enabling passes the proxy mode, disabling the store mode,
 // as setup.pl did.
-func srvWebProxyArgs(e *Env, on bool) []string {
-	ps, host := srvPorts(e), srvHost(e)
-	web := fmt.Sprintf("%d:%d:%d:%d", ps.http, ps.httpProxy, ps.https, ps.httpsProxy)
+func srvWebProxyOptions(e *Env, on bool) *ProxyConfigOptions {
+	ps, o := srvPorts(e), srvProxyOptions(e, on)
+
+	o.Web = true
+	o.WebPorts = fmt.Sprintf("%d:%d:%d:%d", ps.http, ps.httpProxy, ps.https, ps.httpsProxy)
+	o.Mode = e.Cfg.Store.Mode
 
 	if on {
-		return []string{srvUpstream(e), "-w", "-e", "-o", "-x", e.Cfg.Proxy.Mode, "-a", web, "-H", host}
+		o.Mode = e.Cfg.Proxy.Mode
 	}
 
-	return []string{"-w", "-d", "-o", "-x", e.Cfg.Store.Mode, "-a", web, "-H", host}
+	return o
 }
 
-// srvProxyConfig runs libexec/zmproxyconfig as zextras for the mail proxy,
-// then the web proxy, as setup.pl did. A failure of either is returned after
-// both ran.
+// srvProxyConfig is the zmproxyconfig calls of setup.pl for the mail proxy,
+// then the web proxy, run in process (see proxyConfig). A failure of either is
+// returned after both ran.
 func srvProxyConfig(e *Env, mail, web srvToggle) error {
-	var errs []error
-
-	run := func(args []string) {
-		errs = append(errs, e.Zextras(e.Paths.Path("libexec", "zmproxyconfig"), args...))
-	}
+	var sets []*ProxyConfigOptions
 
 	if mail != srvLeave {
-		run(srvMailProxyArgs(e, mail == srvOn))
+		sets = append(sets, srvMailProxyOptions(e, mail == srvOn))
 	}
 
 	if web != srvLeave {
-		run(srvWebProxyArgs(e, web == srvOn))
+		sets = append(sets, srvWebProxyOptions(e, web == srvOn))
 	}
 
-	return errors.Join(errs...)
+	return proxyConfigStep(e, sets...)
 }
 
 func srvOnIf(b bool) srvToggle {
@@ -589,10 +590,12 @@ func srvOnIf(b bool) srvToggle {
 
 // StepConfigSetStoreProxy ports the zmproxyconfig calls at the end of setup.pl
 // configSetStoreDefaults (5176-5188): on a new install, enable the mail and
-// web proxy on the store as zimbraMailProxy / zimbraWebProxy ask.
+// web proxy on the store as zimbraMailProxy / zimbraWebProxy ask. The calls
+// run in process (proxyConfig, the port of libexec/zmproxyconfig) and set the
+// attributes of both with one command.
 //
 // When: isEnabled(carbonio-appserver) && $newinstall && (zimbraWebProxy ||
-// zimbraMailProxy). Optional (setup.pl ignored the result). zmproxyconfig sets
+// zimbraMailProxy). Optional (setup.pl ignored the result). The proxy config sets
 // attributes, so running it again is harmless and the step has no Done.
 func StepConfigSetStoreProxy() Step {
 	return Step{
@@ -718,14 +721,14 @@ func srvSetProxyPublicHostname(e *Env) error {
 
 // StepConfigSetProxyPrefs ports setup.pl configSetProxyPrefs (5346-5409). On
 // a node with the proxy enabled: strict server name on the server entry, the
-// zmproxyconfig calls for mail and web, warnings when no mailstore or
+// proxy config for mail and web (proxyConfig, in process), warnings when no mailstore or
 // memcached is known, and zimbraPublicServiceHostname. A proxy with neither
 // mail nor web proxy is marked disabled (Facts.Enabled), as setup.pl did to
 // %enabledPackages. On any other node with the proxy installed, mail and web
 // proxying are switched off.
 //
 // When: isInstalled(carbonio-proxy). Optional: setup.pl ignored every result.
-// No Done: zmproxyconfig and the zmprov calls only set attributes, and the
+// No Done: the proxy config and the zmprov calls only set attributes, and the
 // step must run to keep Facts.Enabled consistent. The garpu / gamcs checks
 // read the lookup-target and memcached servers from LDAP directly.
 func StepConfigSetProxyPrefs() Step {
@@ -855,28 +858,12 @@ func StepWarnDeprecatedVirtualIPs() Step {
 		Optional: true,
 		Apply: func(e *Env) error {
 			err := srvRead(e, func(d srvDirectory) error {
-				domains, err := d.VIPDomains()
-				if err != nil {
-					return err
+				msgs, err := srvVirtualIPWarnings(d)
+				for _, m := range msgs {
+					srvWarn(e, "%s", m)
 				}
 
-				for _, dom := range domains {
-					srvWarn(e, "domain %s has zimbraVirtualIPAddress set (%s): IP-based virtual hosting is deprecated, "+
-						"use SNI with zimbraVirtualHostname instead.", dom.first("zimbraDomainName"),
-						strings.Join(dom.values("zimbraVirtualIPAddress"), ", "))
-				}
-
-				g, err := d.Global()
-				if err != nil {
-					return err
-				}
-
-				if strings.EqualFold(g.first("zimbraReverseProxySNIEnabled"), srvFalseUpper) {
-					srvWarn(e, "zimbraReverseProxySNIEnabled is FALSE: "+
-						"disabling SNI to use IP-based virtual hosts is deprecated.")
-				}
-
-				return nil
+				return err
 			})
 			if err != nil {
 				e.Log.Detail("virtual IP check skipped: %v", err)
@@ -885,6 +872,36 @@ func StepWarnDeprecatedVirtualIPs() Step {
 			return nil
 		},
 	}
+}
+
+// srvVirtualIPWarnings are the warnings warnDeprecatedVirtualIPs prints: a
+// domain per zimbraVirtualIPAddress, and SNI turned off. The warnings found
+// before an LDAP error are returned with it.
+func srvVirtualIPWarnings(d srvDirectory) ([]string, error) {
+	domains, err := d.VIPDomains()
+	if err != nil {
+		return nil, err
+	}
+
+	var msgs []string
+
+	for _, dom := range domains {
+		msgs = append(msgs, fmt.Sprintf("domain %s has zimbraVirtualIPAddress set (%s): "+
+			"IP-based virtual hosting is deprecated, use SNI with zimbraVirtualHostname instead.",
+			dom.first("zimbraDomainName"), strings.Join(dom.values("zimbraVirtualIPAddress"), ", ")))
+	}
+
+	g, err := d.Global()
+	if err != nil {
+		return msgs, err
+	}
+
+	if strings.EqualFold(g.first("zimbraReverseProxySNIEnabled"), srvFalseUpper) {
+		msgs = append(msgs, "zimbraReverseProxySNIEnabled is FALSE: "+
+			"disabling SNI to use IP-based virtual hosts is deprecated.")
+	}
+
+	return msgs, nil
 }
 
 // srvServiceName is the zimbraService value of a package.

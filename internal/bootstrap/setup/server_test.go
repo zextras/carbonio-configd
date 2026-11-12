@@ -193,9 +193,10 @@ func TestSrvProxyPrefs_DisablesIdleProxyAndSkipsPublicHostnameWhenSet(t *testing
 	}
 }
 
-func TestSrvProxyPrefs_ZmproxyconfigArgv(t *testing.T) {
-	dir := &srvFakeDir{global: srvEntry{}, servers: map[string]srvEntry{}}
-	e, fakes, _ := srvTestEnv(t, dir)
+func TestSrvProxyPrefs_ProxyAttributes(t *testing.T) {
+	dir := &srvFakeDir{global: srvEntry{}, servers: map[string]srvEntry{pcTestHost: pcEnt("zimbraServiceEnabled", "proxy")}}
+	e, _, _ := srvTestEnv(t, dir)
+	w := pcUseFake(t, e, "")
 	srvEnabled(e, PkgCore, "carbonio-proxy")
 	e.Cfg.Host.RequireInterprocessSecurity = true
 	e.Cfg.Proxy.WebEnabled = true
@@ -207,9 +208,13 @@ func TestSrvProxyPrefs_ZmproxyconfigArgv(t *testing.T) {
 
 	require.NoError(t, StepConfigSetProxyPrefs().Apply(e))
 
-	lines := strings.Join(fakes.Exec.Lines(), "\n")
-	assert.Contains(t, lines, "zmproxyconfig -m -d -o -i 7143:143:7993:993 -p 7110:110:7995:995 -H mail.example.com")
-	assert.Contains(t, lines, "zmproxyconfig -U -w -e -o -x redirect -a 8080:80:8443:443 -H mail.example.com")
+	// The mail proxy is switched off and the web proxy on, in one modify.
+	require.Len(t, w.writes, 1)
+	assert.Equal(t, pcMerge(pcMailPorts("7143:143:7993:993", "7110:110:7995:995"), pcWebPorts("8080:80:8443:443"),
+		map[string]string{
+			"zimbraReverseProxyMailEnabled": "FALSE", "zimbraReverseProxyMailMode": "redirect",
+			"zimbraReverseProxyHttpEnabled": "TRUE", "zimbraReverseProxySSLToUpstreamEnabled": "TRUE",
+		}), pcFlatten(w.writes[0].replace))
 	assert.Equal(t, []string{"public.example.com"}, provTestLDAP.values(provGlobalDN, "zimbraPublicServiceHostname"))
 	assert.True(t, e.Facts.Enabled["carbonio-proxy"])
 }

@@ -538,3 +538,31 @@ on failure with `Error: <reason>` on stderr; a wrong command line exits `2`.
 | `setup update-authkeys [-a]` | `zmupdateauthkeys` | root, zextras | Rewrites `authorized_keys`; `-a` first asks every server, through `zmrc`, to update its own (a server that does not answer is logged). |
 | `setup syslog` | `zmsyslogsetup` | root | Sets up rsyslog as the "Set up syslog.conf" step does. |
 | `setup dhparam` | `openssl dhparam` in setup.pl | root | Installs `conf/dhparam.pem.crb` (ffdhe2048) unless present and sets `zimbraSSLDHParam`. |
+| `setup proxyconfig [options]` | `zmproxyconfig` (Perl) | root, zextras | Every option, default, check, message, help text and exit status of the script (`-h -o -m -w -d -e -f -r -s -t -c -C -n -u -U -i -p -a -x -H`; options parse like Perl's `Getopt::Std`). `1`: refused options or checks (usage on stdout), `2`: an attribute change failed, `255`: unusable options or LDAP. Nothing is printed on success; `-e` and `-f` warn about domains with `zimbraVirtualIPAddress` on stderr. |
+
+### `setup proxyconfig`
+
+The "Enable proxy on the store" and "Set proxy preferences" steps call the
+same function as the command (`setup.proxyConfig`), with the options
+`setup.pl` passed to `zmproxyconfig`, so the two cannot drift. carbonio-core
+installs `libexec/zmproxyconfig` as `exec /opt/zextras/libexec/setup
+proxyconfig "$@"`.
+
+Differences from the script:
+
+- The attributes of every run of a call are applied to the entries in memory
+  and given to `RunProv` as one `ms <host>` (and one `mcf` for `-f`), where
+  the script ran one `zmprov ms` per run. The `*BindPort` and proxy/SSL
+  ports, `zimbraMailPort` and `zimbraMailMode` have Java callbacks
+  (`CheckPortConflict`, `MailPort`, `LocalBind`), so that command goes to
+  zmprov; a change of allowlisted attributes only (for example the proxy
+  switches) is written to LDAP. Attributes that already hold the value are
+  left out.
+- A value that zmprov would refuse (an enum, a port, a boolean) fails its own
+  command with `ERROR: ...` and exit `2`; the other commands of the run still
+  apply. A merged command refused by zmprov (a port conflict) fails as a whole.
+- The script's code after the "is the proxy still enabled" read-back
+  (`-zimbraServiceEnabled proxy`, `zimbraReverseProxyLookupTarget FALSE` on
+  disable) never ran: it read the values with `zmprov ... 1>/dev/null`. It is
+  not ported. The `-e -c` store branch sets `zimbraAdminPort` to the proxy
+  port `n2`, as the script did.
