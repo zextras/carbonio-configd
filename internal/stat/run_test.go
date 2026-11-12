@@ -195,7 +195,7 @@ func TestRunRefusals(t *testing.T) {
 		wantStderr string
 		wantStdout string
 	}{
-		"no collector": {wantStderr: "Usage: setup zmstat <name> [options]\nCollectors: " + strings.Join(Names(), ", ") + "\n"},
+		"no collector": {wantStderr: "Usage: setup stat <name> [options]\nCollectors: " + strings.Join(Names(), ", ") + "\n"},
 		"unknown":      {args: []string{"bogus"}, wantStderr: "Unknown collector \"bogus\"; one of: " + strings.Join(Names(), ", ") + "\n"},
 		"wrong user":   {args: []string{"cpu"}, user: "alice", wantStderr: "Must be user zextras to run this command\n"},
 		"root is only for fd": {args: []string{"cpu"}, user: "root",

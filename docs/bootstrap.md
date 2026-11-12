@@ -543,7 +543,7 @@ statuses of their scripts instead.
 | `setup dhparam get\|set [options]` | `zmdhparam` | root, zextras | Reads or stores the DH parameters of `zimbraSSLDHParam`; see [`setup dhparam get` and `set`](#setup-dhparam-get-and-set). |
 | `setup ldap-passwd [options] [password]` | `zmldappasswd` | root, zextras | Changes an LDAP password in localconfig, the directory and `conf/carbonio.ldif`; the password is read from stdin when it is not an argument. See [`setup ldap-passwd`](#setup-ldap-passwd). |
 | `setup proxyconfig [options]` | `zmproxyconfig` (Perl) | root, zextras | Every option, default, check, message, help text and exit status of the script (`-h -o -m -w -d -e -f -r -s -t -c -C -n -u -U -i -p -a -x -H`; options parse like Perl's `Getopt::Std`). `1`: refused options or checks (usage on stdout), `2`: an attribute change failed, `255`: unusable options or LDAP. Nothing is printed on success; `-e` and `-f` warn about domains with `zimbraVirtualIPAddress` on stderr. |
-| `setup zmstat <name> [options]` | `zmstat-<name>` (Perl), `<name>` one of `proc cpu vm io df fd allprocs mysql nginx mtaqueue ldap` | zextras (root too for `fd`) | One statistics collector in the foreground; configd's `stats` service starts one per collector. Same options, files and formats as the script; see [`setup zmstat`](#setup-zmstat). |
+| `setup stat <name> [options]` | `zmstat-<name>` (Perl), `<name>` one of `proc cpu vm io df fd allprocs mysql nginx mtaqueue ldap` | zextras (root too for `fd`) | One statistics collector in the foreground; configd's `stats` service starts one per collector. Same options, files and formats as the script; see [`setup stat`](#setup-stat). |
 | `setup ldap-schema` | `zmldapschema` | root, zextras | Installs the slapd schemas into `data/ldap/config/cn=config/cn=schema`; see [LDAP and ini tools](#ldap-and-ini-tools). |
 | `setup ldap-update-ldif` | `zmldapupdateldif` | root | Adds the missing base entries and applies `lib/conf/*.ldif` on an LDAP master. |
 | `setup ldap-enable-replica` | `zmldapenablereplica` | root | The provider overlays on the master, the consumer configuration on a replica. |
@@ -739,11 +739,11 @@ Differences from the script:
 - `-help` and `-man` print the synopsis (and the notes), not the whole Perl
   pod.
 
-### `setup zmstat`
+### `setup stat`
 
 carbonio-core installs `libexec/zmstat-proc`, `-cpu`, `-vm`, `-io`, `-df`,
 `-fd`, `-allprocs`, `-mysql`, `-nginx`, `-mtaqueue` and `-ldap` as `exec
-/opt/zextras/libexec/setup zmstat <name> "$@"`. Each collector keeps the
+/opt/zextras/libexec/setup stat <name> "$@"`. Each collector keeps the
 command line (`-i/--interval`, `-l/--log`, `-c/--console`, and for mtaqueue
 `--max-qsize`, `--backoff-interval`, `--max-interval`; `zmstat-io -x` is the
 extended io collector), the usage text, the pid file (`/run/carbonio/stats`),
@@ -787,6 +787,16 @@ Differences from the scripts:
   mount point wins; squashfs, udev, devtmpfs, overlay and efivarfs and
   mounts that are not backed by a `/` device are skipped.
 - `fd`: one pid file (`fd.pid`); the sudo wrapper and `fd-real.pid` are gone,
-  so the sudoers entry for `zmstat-fd` is no longer needed. `rotate` only
-  signals the running collector; `-c` skips the check of the log path.
+  so the sudoers entry for `zmstat-fd` is no longer needed. The script ran
+  its sampling loop as root through sudo, but both of its columns are
+  readable as `zextras`: `fd_count` is the first number of
+  `/proc/sys/fs/file-nr` and `mailboxd_fd_count` the entries of
+  `/proc/<pid>/fd` of mailboxd, which runs as `zextras` (the `pgrep -o -f`
+  that finds it only reads command lines). configd runs as `zextras`
+  (`User=zextras`) and starts the collector as itself, so the columns are the
+  ones the script wrote; only a process of another user would be out of
+  reach, and the script did not count any. `setup stat fd` still accepts root
+  (an operator running `zmstat-fd` by hand); it hands the log to `zextras`
+  with mode 0640. `rotate` only signals the running collector; `-c` skips the
+  check of the log path.
 - `ldap`: go-ldap over `ldapi` instead of `ldapsearch`; no debug output.

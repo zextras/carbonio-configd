@@ -2064,25 +2064,25 @@ exec /usr/bin/sudo -n /opt/zextras/common/sbin/postfix reload
 
 ## stats | legacy start cold
 fs.open /opt/zextras/log/zmstat-proc.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat proc
+exec.start /opt/zextras/libexec/setup stat proc
 fs.open /opt/zextras/log/zmstat-cpu.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat cpu
+exec.start /opt/zextras/libexec/setup stat cpu
 fs.open /opt/zextras/log/zmstat-vm.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat vm
+exec.start /opt/zextras/libexec/setup stat vm
 fs.open /opt/zextras/log/zmstat-io.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat io -x
+exec.start /opt/zextras/libexec/setup stat io -x
 fs.open /opt/zextras/log/zmstat-df.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat df
+exec.start /opt/zextras/libexec/setup stat df
 fs.open /opt/zextras/log/zmstat-io.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat io
+exec.start /opt/zextras/libexec/setup stat io
 fs.open /opt/zextras/log/zmstat-fd.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat fd
+exec.start /opt/zextras/libexec/setup stat fd
 fs.open /opt/zextras/log/zmstat-allprocs.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat allprocs
+exec.start /opt/zextras/libexec/setup stat allprocs
 fs.open /opt/zextras/log/zmstat-mysql.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat mysql
+exec.start /opt/zextras/libexec/setup stat mysql
 fs.open /opt/zextras/log/zmstat-nginx.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat nginx
+exec.start /opt/zextras/libexec/setup stat nginx
 => ok
 
 ## stats | legacy start running
@@ -2110,25 +2110,25 @@ fs.remove /run/carbonio/stats/zmstat-cpu.pid
 proc.signal-group 1002 15
 fs.remove /run/carbonio/stats/zmstat-vm.pid
 fs.open /opt/zextras/log/zmstat-proc.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat proc
+exec.start /opt/zextras/libexec/setup stat proc
 fs.open /opt/zextras/log/zmstat-cpu.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat cpu
+exec.start /opt/zextras/libexec/setup stat cpu
 fs.open /opt/zextras/log/zmstat-vm.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat vm
+exec.start /opt/zextras/libexec/setup stat vm
 fs.open /opt/zextras/log/zmstat-io.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat io -x
+exec.start /opt/zextras/libexec/setup stat io -x
 fs.open /opt/zextras/log/zmstat-df.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat df
+exec.start /opt/zextras/libexec/setup stat df
 fs.open /opt/zextras/log/zmstat-io.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat io
+exec.start /opt/zextras/libexec/setup stat io
 fs.open /opt/zextras/log/zmstat-fd.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat fd
+exec.start /opt/zextras/libexec/setup stat fd
 fs.open /opt/zextras/log/zmstat-allprocs.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat allprocs
+exec.start /opt/zextras/libexec/setup stat allprocs
 fs.open /opt/zextras/log/zmstat-mysql.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat mysql
+exec.start /opt/zextras/libexec/setup stat mysql
 fs.open /opt/zextras/log/zmstat-nginx.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat nginx
+exec.start /opt/zextras/libexec/setup stat nginx
 => ok
 
 ## stats | legacy reload running
@@ -2137,71 +2137,71 @@ fs.remove /run/carbonio/stats/zmstat-cpu.pid
 proc.signal-group 1002 15
 fs.remove /run/carbonio/stats/zmstat-vm.pid
 fs.open /opt/zextras/log/zmstat-proc.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat proc
+exec.start /opt/zextras/libexec/setup stat proc
 fs.open /opt/zextras/log/zmstat-cpu.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat cpu
+exec.start /opt/zextras/libexec/setup stat cpu
 fs.open /opt/zextras/log/zmstat-vm.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat vm
+exec.start /opt/zextras/libexec/setup stat vm
 fs.open /opt/zextras/log/zmstat-io.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat io -x
+exec.start /opt/zextras/libexec/setup stat io -x
 fs.open /opt/zextras/log/zmstat-df.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat df
+exec.start /opt/zextras/libexec/setup stat df
 fs.open /opt/zextras/log/zmstat-io.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat io
+exec.start /opt/zextras/libexec/setup stat io
 fs.open /opt/zextras/log/zmstat-fd.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat fd
+exec.start /opt/zextras/libexec/setup stat fd
 fs.open /opt/zextras/log/zmstat-allprocs.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat allprocs
+exec.start /opt/zextras/libexec/setup stat allprocs
 fs.open /opt/zextras/log/zmstat-mysql.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat mysql
+exec.start /opt/zextras/libexec/setup stat mysql
 fs.open /opt/zextras/log/zmstat-nginx.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat nginx
+exec.start /opt/zextras/libexec/setup stat nginx
 => ok
 
 ## stats | legacy reload stopped
 fs.open /opt/zextras/log/zmstat-proc.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat proc
+exec.start /opt/zextras/libexec/setup stat proc
 fs.open /opt/zextras/log/zmstat-cpu.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat cpu
+exec.start /opt/zextras/libexec/setup stat cpu
 fs.open /opt/zextras/log/zmstat-vm.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat vm
+exec.start /opt/zextras/libexec/setup stat vm
 fs.open /opt/zextras/log/zmstat-io.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat io -x
+exec.start /opt/zextras/libexec/setup stat io -x
 fs.open /opt/zextras/log/zmstat-df.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat df
+exec.start /opt/zextras/libexec/setup stat df
 fs.open /opt/zextras/log/zmstat-io.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat io
+exec.start /opt/zextras/libexec/setup stat io
 fs.open /opt/zextras/log/zmstat-fd.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat fd
+exec.start /opt/zextras/libexec/setup stat fd
 fs.open /opt/zextras/log/zmstat-allprocs.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat allprocs
+exec.start /opt/zextras/libexec/setup stat allprocs
 fs.open /opt/zextras/log/zmstat-mysql.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat mysql
+exec.start /opt/zextras/libexec/setup stat mysql
 fs.open /opt/zextras/log/zmstat-nginx.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat nginx
+exec.start /opt/zextras/libexec/setup stat nginx
 => ok
 
 ## stats | legacy start-systemd cold
 fs.open /opt/zextras/log/zmstat-proc.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat proc
+exec.start /opt/zextras/libexec/setup stat proc
 fs.open /opt/zextras/log/zmstat-cpu.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat cpu
+exec.start /opt/zextras/libexec/setup stat cpu
 fs.open /opt/zextras/log/zmstat-vm.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat vm
+exec.start /opt/zextras/libexec/setup stat vm
 fs.open /opt/zextras/log/zmstat-io.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat io -x
+exec.start /opt/zextras/libexec/setup stat io -x
 fs.open /opt/zextras/log/zmstat-df.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat df
+exec.start /opt/zextras/libexec/setup stat df
 fs.open /opt/zextras/log/zmstat-io.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat io
+exec.start /opt/zextras/libexec/setup stat io
 fs.open /opt/zextras/log/zmstat-fd.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat fd
+exec.start /opt/zextras/libexec/setup stat fd
 fs.open /opt/zextras/log/zmstat-allprocs.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat allprocs
+exec.start /opt/zextras/libexec/setup stat allprocs
 fs.open /opt/zextras/log/zmstat-mysql.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat mysql
+exec.start /opt/zextras/libexec/setup stat mysql
 fs.open /opt/zextras/log/zmstat-nginx.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat nginx
+exec.start /opt/zextras/libexec/setup stat nginx
 => ok
 
 ## stats | legacy stop-systemd running
@@ -2245,25 +2245,25 @@ exec /usr/bin/systemctl is-active carbonio-stats.service
 
 ## stats | systemd start-systemd
 fs.open /opt/zextras/log/zmstat-proc.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat proc
+exec.start /opt/zextras/libexec/setup stat proc
 fs.open /opt/zextras/log/zmstat-cpu.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat cpu
+exec.start /opt/zextras/libexec/setup stat cpu
 fs.open /opt/zextras/log/zmstat-vm.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat vm
+exec.start /opt/zextras/libexec/setup stat vm
 fs.open /opt/zextras/log/zmstat-io.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat io -x
+exec.start /opt/zextras/libexec/setup stat io -x
 fs.open /opt/zextras/log/zmstat-df.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat df
+exec.start /opt/zextras/libexec/setup stat df
 fs.open /opt/zextras/log/zmstat-io.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat io
+exec.start /opt/zextras/libexec/setup stat io
 fs.open /opt/zextras/log/zmstat-fd.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat fd
+exec.start /opt/zextras/libexec/setup stat fd
 fs.open /opt/zextras/log/zmstat-allprocs.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat allprocs
+exec.start /opt/zextras/libexec/setup stat allprocs
 fs.open /opt/zextras/log/zmstat-mysql.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat mysql
+exec.start /opt/zextras/libexec/setup stat mysql
 fs.open /opt/zextras/log/zmstat-nginx.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup zmstat nginx
+exec.start /opt/zextras/libexec/setup stat nginx
 => ok
 
 ## stats | systemd stop-systemd

@@ -110,10 +110,10 @@ const (
 	socketFamilyUnixgram = "unixgram"
 )
 
-// The statistics collectors run as "<libexec>/setup zmstat <name> [options]"
+// The statistics collectors run as "<libexec>/setup stat <name> [options]"
 // and log to <log>/zmstat-<name>.out.
 const (
 	collectorBinary    = "setup"
-	collectorCommand   = "zmstat"
+	collectorCommand   = "stat"
 	collectorLogPrefix = "zmstat-"
 )

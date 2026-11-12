@@ -11,7 +11,7 @@
 //	carbonio-bootstrap gal-sync-account | ssh-keygen | update-authkeys
 //	                           what the legacy setup.pl calls instead of zmgsautil,
 //	                           zmsshkeygen and zmupdateauthkeys
-//	carbonio-bootstrap zmstat <name> [options]
+//	carbonio-bootstrap stat <name> [options]
 //	                           the zmstat-* statistics collectors (proc, cpu, vm, io, df,
 //	                           fd, allprocs, mysql, nginx, mtaqueue, ldap), natively
 //

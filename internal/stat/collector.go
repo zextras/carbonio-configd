@@ -19,6 +19,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/zextras/carbonio-configd/internal/getopt"
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
@@ -151,14 +152,14 @@ type options struct {
 	args     []string
 }
 
-// spec describes one collector of "setup zmstat <name>".
+// spec describes one collector of "setup stat <name>".
 type spec struct {
 	name string
 	// csv and pid are the file names under the zmstat and the pid directory;
 	// they depend on the options (io -x).
 	files func(o *options) (csv, pid string)
 	// opts are the options besides -i, -l and -c.
-	opts []optDef
+	opts []getopt.Spec
 	// usage is the text zmstat-<name> prints for a bad command line.
 	usage string
 	// disk selects zmstat_disk_interval as the default interval.
@@ -190,7 +191,7 @@ func specs() []*spec {
 	}
 }
 
-// Names lists the collectors "setup zmstat" runs, sorted.
+// Names lists the collectors "setup stat" runs, sorted.
 func Names() []string {
 	var names []string
 

@@ -75,7 +75,7 @@ func (f *fd) mailboxdFDs() int {
 		return 0
 	}
 
-	ents, err := fs.ReadDir(f.env.Root, "proc/"+strconv.Itoa(pid)+"/fd")
+	ents, err := fs.ReadDir(f.env.Root, procPath(strconv.Itoa(pid), "fd"))
 	if err != nil {
 		_, _ = fmt.Fprintln(f.env.Stderr, err)
 

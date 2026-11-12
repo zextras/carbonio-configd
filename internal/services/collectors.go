@@ -19,11 +19,11 @@ import (
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
-const zmstatEnabledTrue = "TRUE"
+const statEnabledTrue = "TRUE"
 
 // statsCollectors is the CollectorSpec of stats, mirroring legacy statctl.pl:
 // the base collectors every host runs (io twice: extended and plain) plus the
-// ones whose localconfig key is TRUE, each as "setup zmstat <name>". Each
+// ones whose localconfig key is TRUE, each as "setup stat <name>". Each
 // collector writes its own PID file under the stats run directory.
 func statsCollectors() *CollectorSpec {
 	return &CollectorSpec{
@@ -60,7 +60,7 @@ func (c *Controller) startCollectors(ctx context.Context, def *ServiceDef) error
 	collectors := slices.Clone(def.Collectors.Always)
 
 	for _, opt := range def.Collectors.Optional {
-		if lc[opt.LCKey] == zmstatEnabledTrue {
+		if lc[opt.LCKey] == statEnabledTrue {
 			collectors = append(collectors, opt.Cmd)
 		}
 	}

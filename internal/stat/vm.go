@@ -158,11 +158,20 @@ func (v *vm) read() (*vmSample, vmProcs, error) {
 		return nil, vmProcs{}, fmt.Errorf("can't open /proc/vmstat: %w", err)
 	}
 
+	s, p := parseProcStat(string(stat))
+	s.parseVMStat(string(vmstat))
+
+	return s, p, nil
+}
+
+// parseProcStat reads /proc/stat: the cpu line, the interrupt and context switch
+// counters and the number of processes running and blocked.
+func parseProcStat(stat string) (*vmSample, vmProcs) {
 	s := &vmSample{}
 
 	var p vmProcs
 
-	for line := range strings.SplitSeq(string(stat), "\n") {
+	for line := range strings.SplitSeq(stat, "\n") {
 		f := strings.Fields(line)
 		if len(f) < 2 {
 			continue
@@ -185,14 +194,17 @@ func (v *vm) read() (*vmSample, vmProcs, error) {
 		}
 	}
 
-	for line := range strings.SplitSeq(string(vmstat), "\n") {
+	return s, p
+}
+
+// parseVMStat reads the "name value" lines of /proc/vmstat.
+func (s *vmSample) parseVMStat(vmstat string) {
+	for line := range strings.SplitSeq(vmstat, "\n") {
 		f := strings.Fields(line)
 		if len(f) == 2 {
 			s.setVM(f[0], num(f[1]))
 		}
 	}
-
-	return s, p, nil
 }
 
 func num(s string) uint64 {

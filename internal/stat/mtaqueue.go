@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zextras/carbonio-configd/internal/getopt"
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
@@ -37,7 +38,11 @@ func mtaqueueSpec() *spec {
 	return &spec{
 		name:  "mtaqueue",
 		files: fixedFiles("mtaqueue.csv", "mtaqueue.pid"),
-		opts:  []optDef{{"max-qsize", kindInt}, {"backoff-interval", kindInt}, {"max-interval", kindInt}},
+		opts: []getopt.Spec{
+			{Names: []string{"backoff-interval"}, Kind: getopt.Int},
+			{Names: []string{"max-interval"}, Kind: getopt.Int},
+			{Names: []string{"max-qsize"}, Kind: getopt.Int},
+		},
 		usage: mtaqueueUsage,
 		build: func(env *Env, o *options) (Collector, error) {
 			secs := func(key string, def int) time.Duration {

@@ -204,7 +204,7 @@ func (h *traceHost) run(name string, pid *int) {
 
 		for _, collector := range []string{"cpu", "vm"} {
 			*pid++
-			h.f.Proc.Add(sys.ProcEntry{PID: *pid, Argv: []string{h.ctl.p.libexec + "/setup", "zmstat", collector}})
+			h.f.Proc.Add(sys.ProcEntry{PID: *pid, Argv: []string{h.ctl.p.libexec + "/setup", "stat", collector}})
 			h.f.FS.Put(h.ctl.p.statsPidDir+"/zmstat-"+collector+".pid", []byte(strconv.Itoa(*pid)), 0o644)
 		}
 

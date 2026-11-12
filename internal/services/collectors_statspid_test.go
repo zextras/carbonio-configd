@@ -70,7 +70,7 @@ func TestKillStatsPidFile_KillsCollectorGroup(t *testing.T) {
 	assert.False(t, f.FS.Exists(statsPidFile))
 }
 
-// TestStartCollectors_RunsSetupStat: every collector is "setup zmstat <name>
+// TestStartCollectors_RunsSetupStat: every collector is "setup stat <name>
 // [options]" with its log in zmstat-<name>.out, the optional ones only when
 // their localconfig key is TRUE (statctl.pl, zmstatctl start).
 func TestStartCollectors_RunsSetupStat(t *testing.T) {
@@ -92,8 +92,8 @@ func TestStartCollectors_RunsSetupStat(t *testing.T) {
 	}
 
 	assert.Equal(t, []string{
-		"zmstat proc", "zmstat cpu", "zmstat vm", "zmstat io -x", "zmstat df", "zmstat io",
-		"zmstat fd", "zmstat allprocs", "zmstat mysql",
+		"stat proc", "stat cpu", "stat vm", "stat io -x", "stat df", "stat io",
+		"stat fd", "stat allprocs", "stat mysql",
 	}, started)
 	assert.True(t, f.FS.Exists(ctl.p.log+"/zmstat-io.out"))
 	assert.True(t, f.FS.Exists(ctl.p.log+"/zmstat-mysql.out"))
@@ -112,13 +112,13 @@ func TestStartCollectors_NoSetupBinary(t *testing.T) {
 }
 
 // TestKillStatsPidFile_KillsSetupCollectorGroup: a collector of this release
-// ("setup zmstat <name>") is recognised and its group terminated.
+// ("setup stat <name>") is recognised and its group terminated.
 func TestKillStatsPidFile_KillsSetupCollectorGroup(t *testing.T) {
 	t.Parallel()
 
 	ctl, f := newFakeController(t)
 	f.FS.Put(statsPidFile, []byte("4242\n"), 0o644)
-	f.Proc.Add(sys.ProcEntry{PID: 4242, Argv: []string{ctl.p.libexec + "/setup", "zmstat", "proc"}})
+	f.Proc.Add(sys.ProcEntry{PID: 4242, Argv: []string{ctl.p.libexec + "/setup", "stat", "proc"}})
 
 	require.True(t, ctl.killStatsPidFile(context.Background(), statsPidFile, ctl.registry[svcStats].ProcessName))
 	require.NotEmpty(t, f.Proc.Signals())

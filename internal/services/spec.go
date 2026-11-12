@@ -97,7 +97,7 @@ type CommandSpec struct {
 }
 
 // CollectorSpec supervises a set of helper processes that each write a pidfile
-// (the collectors of stats, "setup zmstat <name>"): started one by one from the
+// (the collectors of stats, "setup stat <name>"): started one by one from the
 // libexec directory with a <LogPrefix><name>.out log, stopped through the pidfiles of the
 // controller's stats pid directory — killing each process group, with sudo for
 // root-owned collectors — then by identity (ServiceDef.ProcessName) for

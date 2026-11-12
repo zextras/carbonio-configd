@@ -497,7 +497,7 @@ func TestRunningPID_RealContainerArgvForms(t *testing.T) {
 	add(116657, argv("/opt/zextras/common/sbin/saslauthd", "-r", "-a", "zimbra"), "saslauthd", false)
 	add(116775, argv("/opt/zextras/common/libexec/master", "-w"), "master", false)
 	add(116776, argv("pickup", "-l", "-t", "unix", "-u"), "pickup", false)
-	add(116824, argv("/opt/zextras/libexec/setup", "zmstat", "proc"), "setup", false)
+	add(116824, argv("/opt/zextras/libexec/setup", "stat", "proc"), "setup", false)
 	add(117319, argv("sudo", "/opt/zextras/libexec/zmstat-fd"), "sudo", false)
 	add(117557, argv("/usr/bin/iostat", "-d", "-k", "-x", "30"), "iostat", false)
 

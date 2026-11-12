@@ -26,32 +26,37 @@ date changes.  Current log is renamed to <dir>/YYYY-MM-DD/proc.csv
 and a new file is created.
 `
 
-const postfixUser = "postfix"
+const (
+	postfixUser = "postfix"
+	procMailbox = "mailbox"
+	procAmavis  = "amavis"
+	procClam    = "clam"
+)
 
 // defaultProcs are monitored when the enabled services cannot be read.
-var defaultProcs = []string{"mailbox", procMySQL, procLDAP, "postfix", "amavis", "clam", procStat}
+var defaultProcs = []string{procMailbox, procMySQL, procLDAP, postfixUser, procAmavis, procClam, procStat}
 
 // procMatchers are the command line filters of the monitored process groups
 // (the %ps_subs of stat-proc.pl): the user that owns them, the expressions the
 // command must match and the one it must not. The zmstat group also matches
-// "setup zmstat", how the collectors run now that they are not zmstat-*
+// "setup stat", how the collectors run now that they are not zmstat-*
 // scripts.
 var procMatchers = map[string]struct {
 	postfix bool
 	all     []*regexp.Regexp
 	not     *regexp.Regexp
 }{
-	"mailbox": {all: []*regexp.Regexp{regexp.MustCompile(`jetty_home/start[.]jar`)}},
+	procMailbox: {all: []*regexp.Regexp{regexp.MustCompile(`jetty_home/start[.]jar`)}},
 	procMySQL: {
 		all: []*regexp.Regexp{regexp.MustCompile(`/(libexec|bin)/mysqld `), regexp.MustCompile(`/my\.cnf`)},
 		not: regexp.MustCompile(`logger`),
 	},
-	procLDAP:  {all: []*regexp.Regexp{regexp.MustCompile(`slapd`)}},
-	"postfix": {postfix: true},
-	"amavis":  {all: []*regexp.Regexp{regexp.MustCompile(`amavisd`)}},
-	"clam":    {all: []*regexp.Regexp{regexp.MustCompile(`(freshclam|clamd)`)}},
+	procLDAP:    {all: []*regexp.Regexp{regexp.MustCompile(`slapd`)}},
+	postfixUser: {postfix: true},
+	procAmavis:  {all: []*regexp.Regexp{regexp.MustCompile(`amavisd`)}},
+	procClam:    {all: []*regexp.Regexp{regexp.MustCompile(`(freshclam|clamd)`)}},
 	procStat: {all: []*regexp.Regexp{
-		regexp.MustCompile(`(zmstat-|setup zmstat |iostat|vmstat|vm_stat|postqueue)`),
+		regexp.MustCompile(`(zmstat-|setup stat |iostat|vmstat|vm_stat|postqueue)`),
 	}},
 }
 
@@ -133,7 +138,7 @@ func (e *Env) enabledProcs() []string {
 
 	svcs, err := e.Enabled(ctx, e.LC["zimbra_server_hostname"])
 	if err != nil {
-		_, _ = fmt.Fprintf(e.Stderr, "zmstat proc: cannot read the enabled services: %v\n", err)
+		_, _ = fmt.Fprintf(e.Stderr, "stat proc: cannot read the enabled services: %v\n", err)
 
 		return defaultProcs
 	}
@@ -146,8 +151,8 @@ func (e *Env) enabledProcs() []string {
 
 	var procs []string
 
-	if has("mailbox") {
-		procs = append(procs, "mailbox", procMySQL)
+	if has(procMailbox) {
+		procs = append(procs, procMailbox, procMySQL)
 	}
 
 	if has(procLDAP) {
@@ -155,11 +160,11 @@ func (e *Env) enabledProcs() []string {
 	}
 
 	if has("mta") {
-		procs = append(procs, "postfix")
+		procs = append(procs, postfixUser)
 	}
 
 	if has("antispam", "antivirus") {
-		procs = append(procs, "amavis", "clam")
+		procs = append(procs, procAmavis, procClam)
 	}
 
 	return append(procs, procStat)
@@ -203,7 +208,7 @@ func (p *proc) snapshot() []psProc {
 
 // owner is the user of a process (its effective uid in /proc/<pid>/status).
 func (e *Env) owner(pid int) string {
-	data, err := fs.ReadFile(e.Root, "proc/"+strconv.Itoa(pid)+"/status")
+	data, err := fs.ReadFile(e.Root, procPath(strconv.Itoa(pid), "status"))
 	if err != nil {
 		return ""
 	}
@@ -241,9 +246,21 @@ func (e *Env) command(pid int) string {
 		return strings.Join(args, " ")
 	}
 
-	data, _ := fs.ReadFile(e.Root, "proc/"+strconv.Itoa(pid)+"/comm")
+	data, _ := fs.ReadFile(e.Root, procPath(strconv.Itoa(pid), "comm"))
 
 	return "[" + strings.TrimSpace(string(data)) + "]"
+}
+
+// matchesAll tells a command that matches every expression of all and not the
+// one of not (which may be nil).
+func matchesAll(all []*regexp.Regexp, not *regexp.Regexp, command string) bool {
+	for _, re := range all {
+		if !re.MatchString(command) {
+			return false
+		}
+	}
+
+	return not == nil || !not.MatchString(command)
 }
 
 // pick is the filterProcs of a group.
@@ -257,23 +274,10 @@ func pick(name, zuser string, all []psProc) []psProc {
 
 	var out []psProc
 
-next:
 	for _, ps := range all {
-		if ps.user != user {
-			continue
+		if ps.user == user && matchesAll(m.all, m.not, ps.command) {
+			out = append(out, ps)
 		}
-
-		for _, re := range m.all {
-			if !re.MatchString(ps.command) {
-				continue next
-			}
-		}
-
-		if m.not != nil && m.not.MatchString(ps.command) {
-			continue
-		}
-
-		out = append(out, ps)
 	}
 
 	return out
@@ -426,7 +430,7 @@ func (p *proc) processStat(pid int, stamp string) [6]float64 {
 	var zero [6]float64
 
 	read := func(file string) []string {
-		data, err := fs.ReadFile(p.env.Root, "proc/"+strconv.Itoa(pid)+"/"+file)
+		data, err := fs.ReadFile(p.env.Root, procPath(strconv.Itoa(pid), file))
 		if err != nil {
 			_, _ = fmt.Fprintf(p.env.Stderr, "%s: ERROR: No such process: '%d'\n", stamp, pid)
 

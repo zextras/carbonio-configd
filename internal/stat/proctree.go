@@ -44,7 +44,7 @@ func (e *Env) scanTree(withNames bool) *procTree {
 			continue
 		}
 
-		status, err := fs.ReadFile(e.Root, "proc/"+ent.Name()+"/status")
+		status, err := fs.ReadFile(e.Root, procPath(ent.Name(), "status"))
 		if err != nil {
 			continue // the process has gone away
 		}
@@ -99,7 +99,7 @@ func (e *Env) processName(pid int, name string) string {
 
 // cmdline is the argument vector of a process (nil when unreadable).
 func (e *Env) cmdline(pid int) []string {
-	data, err := fs.ReadFile(e.Root, "proc/"+strconv.Itoa(pid)+"/cmdline")
+	data, err := fs.ReadFile(e.Root, procPath(strconv.Itoa(pid), "cmdline"))
 	if err != nil || len(data) == 0 {
 		return nil
 	}
@@ -115,12 +115,12 @@ func (e *Env) collect(pid int, t *procTree, out map[int]pidStat) {
 
 	st := pidStat{}
 
-	if data, err := fs.ReadFile(e.Root, "proc/"+strconv.Itoa(pid)+"/stat"); err == nil {
+	if data, err := fs.ReadFile(e.Root, procPath(strconv.Itoa(pid), "stat")); err == nil {
 		parseStat(string(data), st)
 		out[pid] = st
 	}
 
-	if data, err := fs.ReadFile(e.Root, "proc/"+strconv.Itoa(pid)+"/io"); err == nil {
+	if data, err := fs.ReadFile(e.Root, procPath(strconv.Itoa(pid), "io")); err == nil {
 		for line := range strings.SplitSeq(string(data), "\n") {
 			if k, v, ok := strings.Cut(line, ":"); ok {
 				n, _ := strconv.ParseInt(strings.TrimSpace(v), 10, 64)

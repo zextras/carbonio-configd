@@ -14,19 +14,24 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/zextras/carbonio-configd/internal/getopt"
 )
 
 const (
 	exitOK    = 0
 	exitError = 1
+
+	optInterval = "interval"
+	optConsole  = "console"
 )
 
-// Run executes "setup zmstat <name> [options]": the collector of that name
+// Run executes "setup stat <name> [options]": the collector of that name
 // with the command line of the zmstat-<name> script. It returns the exit
 // status; it runs until SIGTERM, SIGINT or ctx is done.
 func Run(ctx context.Context, env *Env, args []string) int {
 	if len(args) == 0 {
-		_, _ = fmt.Fprintf(env.Stderr, "Usage: setup zmstat <name> [options]\nCollectors: %s\n", strings.Join(Names(), ", "))
+		_, _ = fmt.Fprintf(env.Stderr, "Usage: setup stat <name> [options]\nCollectors: %s\n", strings.Join(Names(), ", "))
 
 		return exitError
 	}
@@ -38,15 +43,8 @@ func Run(ctx context.Context, env *Env, args []string) int {
 		return exitError
 	}
 
-	// Stat.pm userCheck: only zimbra_user (root too, for the fd collector the
-	// Perl ran through sudo).
-	want := env.LC["zimbra_user"]
-	if want == "" {
-		want = defaultUser
-	}
-
-	if env.User != want && (!sp.rootOK || env.User != "root") {
-		_, _ = fmt.Fprintf(env.Stderr, "Must be user %s to run this command\n", want)
+	if !env.userAllowed(sp) {
+		_, _ = fmt.Fprintf(env.Stderr, "Must be user %s to run this command\n", env.zimbraUser())
 
 		return exitError
 	}
@@ -73,12 +71,31 @@ func Run(ctx context.Context, env *Env, args []string) int {
 	return env.serve(ctx, sp, o)
 }
 
+// zimbraUser is the user the collectors run as (zimbra_user).
+func (e *Env) zimbraUser() string {
+	if u := e.LC["zimbra_user"]; u != "" {
+		return u
+	}
+
+	return defaultUser
+}
+
+// userAllowed is Stat.pm userCheck: only zimbra_user may run a collector (root
+// too for fd, which the Perl ran through sudo).
+func (e *Env) userAllowed(sp *spec) bool {
+	return e.User == e.zimbraUser() || sp.rootOK && e.User == "root"
+}
+
 // parse is GetOptions plus the defaults every script applies.
 func (e *Env) parse(sp *spec, args []string) (*options, bool) {
-	defs := append([]optDef{{"interval", kindInt}, {"log", kindString}, {"console", kindBool}}, sp.opts...)
+	specs := append([]getopt.Spec{
+		{Names: []string{optInterval}, Kind: getopt.Int},
+		{Names: []string{"log"}, Kind: getopt.String},
+		{Names: []string{optConsole}},
+	}, sp.opts...)
 
-	po, ok := parseGetopt(defs, args, e.Stderr)
-	if !ok {
+	po := getopt.Parse(args, specs, e.Stderr)
+	if !po.AllGood {
 		_, _ = fmt.Fprintln(e.Stderr)
 		_, _ = fmt.Fprint(e.Stderr, sp.usage)
 
@@ -87,16 +104,16 @@ func (e *Env) parse(sp *spec, args []string) (*options, bool) {
 
 	o := &options{
 		interval: e.defaultInterval(sp.disk),
-		logPath:  po.strs["log"],
-		console:  po.bools["console"],
-		flags:    po.bools,
-		ints:     po.ints,
-		strs:     po.strs,
-		args:     po.rest,
+		logPath:  po.Strs["log"],
+		console:  po.Has(optConsole),
+		flags:    po.Given,
+		ints:     po.Ints,
+		strs:     po.Strs,
+		args:     po.Rest,
 	}
 
 	// A zero or negative interval would spin; the default stands in.
-	if n, set := po.ints["interval"]; set && n >= 1 {
+	if n, set := po.Ints[optInterval]; set && n >= 1 {
 		o.interval = time.Duration(n) * time.Second
 	}
 
@@ -174,7 +191,9 @@ type runner struct {
 
 func (e *Env) signals() (sigs <-chan os.Signal, stop func()) {
 	if e.Signals != nil {
-		return e.Signals, func() {}
+		return e.Signals, func() {
+			// The channel is the caller's: there is no subscription to cancel.
+		}
 	}
 
 	ch := make(chan os.Signal, 4)
@@ -248,7 +267,7 @@ func (r *runner) tick(sched time.Time) {
 
 	lines, err := r.c.Sample(tk)
 	if err != nil {
-		_, _ = fmt.Fprintf(r.env.Stderr, "zmstat %s: %v\n", r.sp.name, err)
+		r.report(err)
 
 		return
 	}
@@ -263,7 +282,7 @@ func (r *runner) tick(sched time.Time) {
 	}
 
 	if err := r.lf.write(lines); err != nil {
-		_, _ = fmt.Fprintf(r.env.Stderr, "zmstat %s: %v\n", r.sp.name, err)
+		r.report(err)
 	}
 
 	if r.env.Syslog == nil || r.sp.noSyslog {
@@ -275,6 +294,11 @@ func (r *runner) tick(sched time.Time) {
 	}
 }
 
+// report prints a collector error as "stat <name>: <error>".
+func (r *runner) report(err error) {
+	_, _ = fmt.Fprintf(r.env.Stderr, "stat %s: %v\n", r.sp.name, err)
+}
+
 // rotate moves the log of date away and starts a new one.
 func (r *runner) rotate(date string) {
 	if r.console {
@@ -282,7 +306,7 @@ func (r *runner) rotate(date string) {
 	}
 
 	if err := r.lf.rotate(date); err != nil {
-		_, _ = fmt.Fprintf(r.env.Stderr, "zmstat %s: %v\n", r.sp.name, err)
+		r.report(err)
 	}
 
 	if r.sp.afterOpen != nil {

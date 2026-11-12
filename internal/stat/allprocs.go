@@ -21,10 +21,15 @@ the date changes.  The current log is renamed to <dir>/YYY-MM-DD/allprocs.csv
 and a new file is created.
 `
 
+const (
+	colRSS     = "rss"
+	colThreads = "threads"
+)
+
 // treeColumns are the columns zmstat-allprocs and zmstat-nginx report after
 // the timestamp (and the process name).
 var treeColumns = []string{
-	colUtime, colStime, "cputime", "rchar", "wchar", "read_bytes", "write_bytes", "rss", "processes", "threads",
+	colUtime, colStime, "cputime", "rchar", "wchar", "read_bytes", "write_bytes", colRSS, "processes", colThreads,
 }
 
 func allprocsSpec() *spec {
@@ -109,8 +114,8 @@ func treeSum(prev, cur map[int]pidStat, pids []int, keys []string) usageSum {
 			}
 		}
 
-		s.rss += cur[pid]["rss"]
-		s.threads += cur[pid]["threads"]
+		s.rss += cur[pid][colRSS]
+		s.threads += cur[pid][colThreads]
 	}
 
 	return s
@@ -126,11 +131,11 @@ func (s usageSum) row() string {
 		switch c {
 		case "cputime":
 			v = s.vals[colUtime] + s.vals[colStime]
-		case "rss":
+		case colRSS:
 			v = s.rss
 		case "processes":
 			v = s.processCount
-		case "threads":
+		case colThreads:
 			v = s.threads
 		default:
 			v = s.vals[c]

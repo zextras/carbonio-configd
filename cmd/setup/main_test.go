@@ -72,7 +72,7 @@ func TestSetupPlCommandsAreListedAndValidated(t *testing.T) {
 	require.Equal(t, 0, status)
 
 	for _, c := range []string{"gal-sync-account", "ssh-keygen", "update-authkeys", "syslog", "dhparam", "proxyconfig", "ldap-passwd",
-		"ldap-schema", "ldap-update-ldif", "ldap-enable-replica", "ldap-enable-mmr", "iptool", "iniutil"} {
+		"ldap-schema", "ldap-update-ldif", "ldap-enable-replica", "ldap-enable-mmr", "iptool", "iniutil", "stat"} {
 		assert.Contains(t, out, c)
 	}
 
@@ -207,7 +207,20 @@ func TestLegacyArgs_ToolCommandsKeepTheirOptions(t *testing.T) {
 		"-d is the dry run of zmiptool")
 	assert.Equal(t, []string{"ldap-enable-mmr", "-s", "2", "-m", "ldap://h:389/"},
 		legacyArgs([]string{"ldap-enable-mmr", "-s", "2", "-m", "ldap://h:389/"}))
+	assert.Equal(t, []string{"stat", "cpu", "-c", "-i", "30"}, legacyArgs([]string{"stat", "cpu", "-c", "-i", "30"}),
+		"-c is the console option of the zmstat collectors, not the bootstrap's config file")
+	assert.Equal(t, []string{"stat", "io", "-x"}, legacyArgs([]string{"stat", "io", "-x"}))
 	assert.Equal(t, []string{"dhparam", "set", "-d", "-new"}, legacyArgs([]string{"dhparam", "set", "-d", "-new"}))
 	assert.Equal(t, []string{"--legacy-config", "f", "--non-interactive"}, legacyArgs([]string{"-d", "-c", "f"}),
 		"the bootstrap's own mapping stays")
+}
+
+// The options are those of the zmstat-<name> scripts: cobra must not read -c
+// or -x as its own flags, nor the bootstrap map them.
+func TestStatCommandPassesTheCollectorOptionsThrough(t *testing.T) {
+	status, out, errb := exec(t, "stat", "bogus", "-c", "-x")
+
+	assert.Equal(t, 1, status)
+	assert.Empty(t, out)
+	assert.Contains(t, errb, `Unknown collector "bogus"; one of: allprocs, cpu, df, fd, io, ldap, mtaqueue, mysql, nginx, proc, vm`)
 }

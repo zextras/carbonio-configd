@@ -100,7 +100,7 @@ func emit(send func(string), pid int, level, msg string) {
 		m = m[syslogChunk:]
 
 		if last != "" {
-			piece = ":::" + last + ":::" + piece
+			piece = marker(last) + piece
 		}
 
 		last = strings.ToUpper(uuid.NewString())
@@ -111,5 +111,8 @@ func emit(send func(string), pid int, level, msg string) {
 		}
 	}
 
-	send(":::" + last + ":::" + m)
+	send(marker(last) + m)
 }
+
+// marker is the ":::<uuid>:::" that chains the pieces of a long message.
+func marker(id string) string { return ":::" + id + ":::" }

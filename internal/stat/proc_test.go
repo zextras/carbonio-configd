@@ -103,7 +103,7 @@ func TestEnabledProcs(t *testing.T) {
 		"nothing": {want: []string{procStat}},
 		"ldap down": {
 			err: errors.New("down"), want: defaultProcs,
-			stderr: "zmstat proc: cannot read the enabled services: down\n",
+			stderr: "stat proc: cannot read the enabled services: down\n",
 		},
 	} {
 		te := newTestEnv(t, files{})

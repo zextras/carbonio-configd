@@ -38,7 +38,7 @@ declares at most one (checked for the whole registry by
 | `Java` (`JavaSpec`) | mailbox, milter | java binary of localconfig, `Args`, log file, `Mkdirs`, `Touch` | kill by `ProcessName` |
 | `Mysqld` (`MysqldSpec`) | appserver-db, antispam-db | `mysqld_safe` with the defaults file of localconfig | SIGTERM and a bounded wait, **never SIGKILL** (InnoDB crash recovery) |
 | `Commands` (`CommandSpec`) | mta (`postfix`) | `Status` probe, `Prepare` steps, `Start` verb | `Stop` verb |
-| `Collectors` (`CollectorSpec`) | stats (`setup zmstat <name>`) | one process per collector | pidfiles (process group; legacy `zmstat-*` Perl collectors are stopped too), then identity |
+| `Collectors` (`CollectorSpec`) | stats (`setup stat <name>`) | one process per collector | pidfiles (process group; legacy `zmstat-*` Perl collectors are stopped too), then identity |
 | `BinaryPath` + `Direct` (`DirectSpec`) + `Companions` | amavis | `Companions` through sudo, skip when running, `Prepare` steps, spawn, bounded wait for the process | `ProcessName`, then each companion |
 | `CustomStart` / `CustomStop` | none today | named hook | named hook |
 

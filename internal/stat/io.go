@@ -9,6 +9,8 @@ import (
 	"io/fs"
 	"strconv"
 	"strings"
+
+	"github.com/zextras/carbonio-configd/internal/getopt"
 )
 
 const ioUsage = `Usage: zmstat-io [options]
@@ -37,19 +39,22 @@ var (
 	}
 )
 
+// optExtended is the -x option of zmstat-io.
+const optExtended = "xtended"
+
 func ioSpec() *spec {
 	return &spec{
 		name: "io",
 		files: func(o *options) (string, string) {
-			if o.flags["xtended"] {
+			if o.flags[optExtended] {
 				return "io-x.csv", "io-x.pid"
 			}
 
 			return "io.csv", "io.pid"
 		},
-		opts:  []optDef{{"xtended", kindBool}},
+		opts:  []getopt.Spec{{Names: []string{optExtended}}},
 		usage: ioUsage,
-		build: func(env *Env, o *options) (Collector, error) { return newIO(env, o.flags["xtended"]) },
+		build: func(env *Env, o *options) (Collector, error) { return newIO(env, o.flags[optExtended]) },
 	}
 }
 
@@ -183,11 +188,7 @@ func (c *diskIO) Sample(t Tick) ([]string, error) {
 		old := c.prev[d]
 		c.prev[d] = cur
 
-		// A device that was removed and came back starts from zero.
-		if cur.rdIOs+cur.wrIOs+cur.dcIOs+cur.flIOs < old.rdIOs+old.wrIOs+old.dcIOs+old.flIOs &&
-			(old.rdSectors == 0 || cur.rdSectors < old.rdSectors) &&
-			(old.wrSectors == 0 || cur.wrSectors < old.wrSectors) &&
-			(old.dcSectors == 0 || cur.dcSectors < old.dcSectors) {
+		if restarted(&cur, &old) {
 			old = diskStats{}
 		}
 
@@ -201,6 +202,15 @@ func (c *diskIO) Sample(t Tick) ([]string, error) {
 	c.prevUp = up
 
 	return []string{t.Stamp + ", " + strings.Join(vals, ", ")}, nil
+}
+
+// restarted tells a device that was removed and came back (its counters went
+// down) from one that kept counting: it starts from zero.
+func restarted(cur, old *diskStats) bool {
+	return cur.rdIOs+cur.wrIOs+cur.dcIOs+cur.flIOs < old.rdIOs+old.wrIOs+old.dcIOs+old.flIOs &&
+		(old.rdSectors == 0 || cur.rdSectors < old.rdSectors) &&
+		(old.wrSectors == 0 || cur.wrSectors < old.wrSectors) &&
+		(old.dcSectors == 0 || cur.dcSectors < old.dcSectors)
 }
 
 func f2(v float64) string { return strconv.FormatFloat(v, 'f', 2, 64) }

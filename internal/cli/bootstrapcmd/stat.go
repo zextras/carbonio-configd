@@ -37,7 +37,7 @@ const (
 // runStat is the collector runner, replaced by tests.
 var runStat = stat.Run
 
-// RunStat executes "setup zmstat <name> [options]": the zmstat-<name>
+// RunStat executes "setup stat <name> [options]": the zmstat-<name>
 // collector of carbonio-core, with the options of the script. It runs until
 // SIGTERM or SIGINT; the exit status is the script's. Unlike the other tools
 // it must run as the zimbra user (as Zextras::Mon::Stat userCheck), root only

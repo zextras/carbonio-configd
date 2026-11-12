@@ -91,7 +91,7 @@ func (e *Env) waitUntilNiceRoundSecond(ctx context.Context, interval time.Durati
 }
 
 // alive is Perl's kill(0, pid) hardened against pid reuse: the process must
-// exist and be a zmstat collector (its command line mentions zmstat).
+// exist and be a collector (its command line is a zmstat-* script or "setup stat <name>").
 func (e *Env) alive(pid int) bool {
 	if e.PidAlive != nil {
 		return e.PidAlive(pid)
@@ -101,9 +101,9 @@ func (e *Env) alive(pid int) bool {
 		return false
 	}
 
-	cmdline, err := fs.ReadFile(e.Root, "proc/"+strconv.Itoa(pid)+"/cmdline")
+	cmdline, err := fs.ReadFile(e.Root, procPath(strconv.Itoa(pid), "cmdline"))
 
-	return err != nil || strings.Contains(string(cmdline), "zmstat")
+	return err != nil || strings.Contains(string(cmdline), "zmstat") || strings.Contains(string(cmdline), "\x00stat\x00")
 }
 
 // readPid is Stat.pm readPidFile: the first line of the file, "" when it
@@ -165,3 +165,6 @@ func (e *Env) removePid(name string) {
 		_ = os.Remove(pidFile)
 	}
 }
+
+// procPath is the path, in Env.Root, of a file of process pid (a number).
+func procPath(pid, name string) string { return "proc/" + pid + "/" + name }
