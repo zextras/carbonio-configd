@@ -71,7 +71,7 @@ func TestSetupPlCommandsAreListedAndValidated(t *testing.T) {
 	status, out, _ := exec(t, "-h")
 	require.Equal(t, 0, status)
 
-	for _, c := range []string{"gal-sync-account", "ssh-keygen", "update-authkeys", "syslog", "dhparam", "proxyconfig"} {
+	for _, c := range []string{"gal-sync-account", "ssh-keygen", "update-authkeys", "syslog", "dhparam", "proxyconfig", "ldap-passwd"} {
 		assert.Contains(t, out, c)
 	}
 
@@ -103,7 +103,6 @@ func TestSetupPlCommandsAreListedAndValidated(t *testing.T) {
 	}{
 		{[]string{"ssh-keygen", "dsa"}, 1, "Bad keytype: dsa"},
 		{[]string{"update-authkeys", "-x"}, exitUsage, "Usage: update-authkeys [-a]"},
-		{[]string{"dhparam", "2048"}, exitUsage, "Usage: dhparam"},
 	} {
 		status, _, errb := exec(t, tc.args...)
 		assert.Equal(t, tc.status, status, tc.args)
@@ -123,6 +122,8 @@ func TestSetupPlCommandsRefuseNonRoot(t *testing.T) {
 		{"syslog"},
 		{"update-authkeys", "-a"},
 		{"dhparam"},
+		{"dhparam", "get"},
+		{"ldap-passwd", "-p", "pw"},
 		{"proxyconfig", "-m", "-e", "-H", "h"},
 	} {
 		status, out, errb := exec(t, args...)
@@ -196,6 +197,9 @@ func TestProxyConfigCommandPassesTheScriptOptionsThrough(t *testing.T) {
 func TestLegacyArgs_ToolCommandsKeepTheirOptions(t *testing.T) {
 	assert.Equal(t, []string{"proxyconfig", "-w", "-d", "-o", "-c", "-H", "h"},
 		legacyArgs([]string{"proxyconfig", "-w", "-d", "-o", "-c", "-H", "h"}))
+	assert.Equal(t, []string{"ldap-passwd", "-c", "-l", "-d"}, legacyArgs([]string{"ldap-passwd", "-c", "-l", "-d"}),
+		"-c is the replica option of zmldappasswd")
+	assert.Equal(t, []string{"dhparam", "set", "-d", "-new"}, legacyArgs([]string{"dhparam", "set", "-d", "-new"}))
 	assert.Equal(t, []string{"--legacy-config", "f", "--non-interactive"}, legacyArgs([]string{"-d", "-c", "f"}),
 		"the bootstrap's own mapping stays")
 }

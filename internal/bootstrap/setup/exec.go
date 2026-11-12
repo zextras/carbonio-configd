@@ -79,7 +79,7 @@ func (e *Env) output(c *Cmd, capture bool) ([]byte, error) {
 	shown := shownArgs(append([]string{c.Path}, c.Args...))
 	who := "root"
 
-	if c.AsZextras {
+	if c.AsZextras || e.IsZextras {
 		who = config.ZextrasUser
 	}
 

@@ -73,7 +73,7 @@ func run(args []string, env sys.System, stdin io.Reader, stdout, stderr io.Write
 
 // toolCommands are the commands that replace scripts and parse their own
 // arguments (proxyconfig has a -c and a -d of its own).
-var toolCommands = []string{"ssh-keygen", "update-authkeys", "syslog", "dhparam", "proxyconfig"}
+var toolCommands = []string{"ssh-keygen", "update-authkeys", "syslog", "dhparam", "proxyconfig", "ldap-passwd"}
 
 // legacyArgs maps the options of the former shell script: "-c FILE" is
 // "--legacy-config FILE --non-interactive", and "-d" (debug) is accepted and
@@ -149,18 +149,25 @@ func newRootCmd(env sys.System, stdin io.Reader, stdout, stderr io.Writer, statu
 	}
 
 	addFlags(runCmd, &sf, true)
+
+	tio := &toolIO{env: env, stdin: stdin, stdout: stdout, stderr: stderr, status: status}
 	root.AddCommand(config, runCmd, newGalSyncCmd(env, stdout, stderr, status),
 		newToolCmd("ssh-keygen [rsa]", "Generate the zextras SSH key and store its public key (zmsshkeygen)",
-			bootstrapcmd.RunSSHKeygen, env, stdout, stderr, status),
+			bootstrapcmd.RunSSHKeygen, tio),
 		newToolCmd("update-authkeys [-a]",
 			"Update ~zextras/.ssh/authorized_keys from the servers' keys; -a first on every server (zmupdateauthkeys)",
-			bootstrapcmd.RunUpdateAuthKeys, env, stdout, stderr, status),
-		newToolCmd("dhparam", "Install the RFC 7919 ffdhe2048 dhparam and record it in zimbraSSLDHParam",
-			bootstrapcmd.RunDHParam, env, stdout, stderr, status),
+			bootstrapcmd.RunUpdateAuthKeys, tio),
+		newStdinToolCmd("dhparam [get|set ...]",
+			"Install the RFC 7919 ffdhe2048 dhparam and record it in zimbraSSLDHParam; get and set are zmdhparam",
+			bootstrapcmd.RunDHParam, tio),
+		newStdinToolCmd("ldap-passwd [-h] [-r|-a|-b|-n|-p|[-c] -l] [password]",
+			"Change an LDAP password in localconfig, the directory and carbonio.ldif (zmldappasswd); "+
+				"without a password argument it is read from stdin",
+			bootstrapcmd.RunLDAPPasswd, tio),
 		newToolCmd("syslog", "Set up rsyslog for Carbonio logging, local or remote (zmsyslogsetup)",
-			bootstrapcmd.RunSyslog, env, stdout, stderr, status),
+			bootstrapcmd.RunSyslog, tio),
 		newToolCmd("proxyconfig", "Configure the reverse proxy attributes, the options of libexec/zmproxyconfig",
-			bootstrapcmd.RunProxyConfig, env, stdout, stderr, status))
+			bootstrapcmd.RunProxyConfig, tio))
 
 	return root
 }
@@ -195,12 +202,31 @@ func newGalSyncCmd(env sys.System, stdout, stderr io.Writer, status *int) *cobra
 	return cmd
 }
 
+// toolIO is the process the tool commands run in: the system, the standard
+// streams and where the exit status goes.
+type toolIO struct {
+	env            sys.System
+	stdin          io.Reader
+	stdout, stderr io.Writer
+	status         *int
+}
+
 // newToolCmd is a command that replaces a legacy script: it runs fn as root
 // or zextras with the arguments as the script took them (no cobra flags, so
 // "-a" reaches fn).
 func newToolCmd(use, short string,
-	fn func(context.Context, sys.System, io.Writer, io.Writer, []string) int,
-	env sys.System, stdout, stderr io.Writer, status *int,
+	fn func(context.Context, sys.System, io.Writer, io.Writer, []string) int, tio *toolIO,
+) *cobra.Command {
+	return newStdinToolCmd(use, short,
+		func(ctx context.Context, env sys.System, _ io.Reader, stdout, stderr io.Writer, args []string) int {
+			return fn(ctx, env, stdout, stderr, args)
+		}, tio)
+}
+
+// newStdinToolCmd is newToolCmd for a script that reads standard input (a
+// password, which must not be on a command line).
+func newStdinToolCmd(use, short string,
+	fn func(context.Context, sys.System, io.Reader, io.Writer, io.Writer, []string) int, tio *toolIO,
 ) *cobra.Command {
 	return &cobra.Command{
 		Use:                use,
@@ -208,7 +234,7 @@ func newToolCmd(use, short string,
 		Long:               short + ". Runs as root or zextras.",
 		DisableFlagParsing: true,
 		RunE: func(_ *cobra.Command, args []string) error {
-			*status = fn(context.Background(), env, stdout, stderr, args)
+			*tio.status = fn(context.Background(), tio.env, tio.stdin, tio.stdout, tio.stderr, args)
 
 			return nil
 		},

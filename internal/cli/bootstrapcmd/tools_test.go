@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -31,6 +32,7 @@ type toolHarness struct {
 	server string
 	args   []string
 	code   int
+	stdin  string
 }
 
 func newToolHarness(t *testing.T, root bool) *toolHarness {
@@ -40,11 +42,29 @@ func newToolHarness(t *testing.T, root bool) *toolHarness {
 
 	oldEUID, oldGAL, oldKey, oldAuth, oldSyslog := geteuid, createGalSyncAccount, generateSSHKey, updateAuthKeys, setupSyslog
 	oldUID, oldAuthAll, oldDH, oldPC := zextrasUID, updateAuthKeysAll, installDHParam, runProxyConfig
+	oldZmDH, oldPasswd := runDHParam, runLDAPPasswd
 
 	t.Cleanup(func() {
 		geteuid, createGalSyncAccount, generateSSHKey, updateAuthKeys, setupSyslog = oldEUID, oldGAL, oldKey, oldAuth, oldSyslog
 		zextrasUID, updateAuthKeysAll, installDHParam, runProxyConfig = oldUID, oldAuthAll, oldDH, oldPC
+		runDHParam, runLDAPPasswd = oldZmDH, oldPasswd
 	})
+
+	script := func(name string) func(*setup.Env, []string, io.Reader, io.Writer, io.Writer) int {
+		return func(e *setup.Env, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+			h.calls, h.env, h.args = append(h.calls, name), e, args
+
+			in, _ := io.ReadAll(stdin)
+			h.stdin = string(in)
+
+			_, _ = io.WriteString(stdout, name+" out\n")
+			_, _ = io.WriteString(stderr, name+" err\n")
+
+			return h.code
+		}
+	}
+
+	runDHParam, runLDAPPasswd = script("zmdhparam"), script("zmldappasswd")
 
 	zextrasUID = func() int { return 999 }
 	runProxyConfig = func(e *setup.Env, args []string, stdout, stderr io.Writer) int {
@@ -254,8 +274,7 @@ func TestRunSyslog_IsForRootOnly(t *testing.T) {
 	assert.Empty(t, h.calls, "zextras is refused")
 }
 
-// The commands that replace zmsshkeygen, zmupdateauthkeys and setup.pl's
-// dhparam take the scripts' arguments, and zextras may run them as it ran
+// The commands that replace zmsshkeygen and zmupdateauthkeys take the scripts' arguments, and zextras may run them as it ran
 // the scripts (zmrc runs zmupdateauthkeys remotely as zextras).
 func TestScriptCommands_ArgumentsAndUsers(t *testing.T) {
 	for _, tc := range []struct {
@@ -272,8 +291,6 @@ func TestScriptCommands_ArgumentsAndUsers(t *testing.T) {
 		{"authkeys", RunUpdateAuthKeys, nil, 999, 0, []string{"authkeys"}, ""},
 		{"authkeys everywhere", RunUpdateAuthKeys, []string{"-a"}, 0, 0, []string{"authkeys -a"}, ""},
 		{"authkeys bad option", RunUpdateAuthKeys, []string{"-x"}, 0, 2, nil, "Usage: update-authkeys [-a]\n"},
-		{"dhparam", RunDHParam, nil, 0, 0, []string{"dhparam"}, ""},
-		{"dhparam argument", RunDHParam, []string{"2048"}, 0, 2, nil, "Usage: dhparam\n"},
 		{"another user", RunUpdateAuthKeys, nil, 1000, 1, nil,
 			"Error: carbonio-bootstrap update-authkeys must run as root or zextras\n"},
 	} {
@@ -322,4 +339,89 @@ func TestRunProxyConfig_RefusesOtherUsers(t *testing.T) {
 	assert.Equal(t, 1, status)
 	assert.Contains(t, errb.String(), "carbonio-bootstrap proxyconfig must run as root or zextras")
 	assert.Empty(t, h.calls)
+}
+
+// "setup dhparam" without arguments is the step of setup.pl; with arguments it is
+// zmdhparam, which keeps its output and exit status, and stdin reaches it.
+func TestRunDHParam_StepWithoutArgumentsScriptWithThem(t *testing.T) {
+	t.Run("no arguments", func(t *testing.T) {
+		h := newToolHarness(t, true)
+
+		var out, errb bytes.Buffer
+
+		status := RunDHParam(context.Background(), systest.New().System(), strings.NewReader("in"), &out, &errb, nil)
+
+		assert.Equal(t, 0, status)
+		assert.Equal(t, []string{"dhparam"}, h.calls)
+		assert.Empty(t, out.String())
+		assert.Empty(t, errb.String())
+	})
+
+	for _, root := range []bool{true, false} {
+		t.Run("zmdhparam", func(t *testing.T) {
+			h := newToolHarness(t, root)
+			h.code = 1
+			zextrasUID = func() int { return 1000 } // the caller is zextras when not root
+
+			var out, errb bytes.Buffer
+
+			status := RunDHParam(context.Background(), systest.New().System(), strings.NewReader("PEM"), &out, &errb,
+				[]string{"set", "-in", "-"})
+
+			assert.Equal(t, 1, status, "the status of the port")
+			assert.Equal(t, []string{"zmdhparam"}, h.calls)
+			assert.Equal(t, []string{"set", "-in", "-"}, h.args)
+			assert.Equal(t, "PEM", h.stdin)
+			assert.Equal(t, "zmdhparam out\n", out.String())
+			assert.Equal(t, "zmdhparam err\n", errb.String())
+			assert.Nil(t, h.env.Cfg)
+		})
+	}
+
+	t.Run("other users", func(t *testing.T) {
+		h := newToolHarness(t, false)
+
+		var out, errb bytes.Buffer
+
+		status := RunDHParam(context.Background(), systest.New().System(), strings.NewReader(""), &out, &errb,
+			[]string{"get"})
+
+		assert.Equal(t, 1, status)
+		assert.Equal(t, "Error: carbonio-bootstrap dhparam must run as root or zextras\n", errb.String())
+		assert.Empty(t, h.calls)
+	})
+}
+
+func TestRunLDAPPasswd_PassesTheOptionsAndStdin(t *testing.T) {
+	for _, root := range []bool{true, false} {
+		h := newToolHarness(t, root)
+		h.code = 255
+		zextrasUID = func() int { return 1000 }
+
+		var out, errb bytes.Buffer
+
+		status := RunLDAPPasswd(context.Background(), systest.New().System(), strings.NewReader("secret\n"), &out, &errb,
+			[]string{"-c", "-l"})
+
+		assert.Equal(t, 255, status, "the status of the port, root %v", root)
+		assert.Equal(t, []string{"zmldappasswd"}, h.calls)
+		assert.Equal(t, []string{"-c", "-l"}, h.args, "the password is not an argument")
+		assert.Equal(t, "secret\n", h.stdin)
+		assert.Equal(t, "zmldappasswd out\n", out.String())
+		assert.Nil(t, h.env.Cfg)
+	}
+}
+
+func TestRunLDAPPasswd_RefusesOtherUsers(t *testing.T) {
+	h := newToolHarness(t, false)
+
+	var out, errb bytes.Buffer
+
+	status := RunLDAPPasswd(context.Background(), systest.New().System(), strings.NewReader("secret\n"), &out, &errb,
+		[]string{"-p"})
+
+	assert.Equal(t, 1, status)
+	assert.Equal(t, "Error: carbonio-bootstrap ldap-passwd must run as root or zextras\n", errb.String())
+	assert.Empty(t, h.calls)
+	assert.Empty(t, h.stdin, "the password of a refused caller is not read")
 }
