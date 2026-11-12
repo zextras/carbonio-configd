@@ -71,10 +71,19 @@ func run(args []string, env sys.System, stdin io.Reader, stdout, stderr io.Write
 	return status
 }
 
+// toolCommands are the commands that replace scripts and parse their own
+// arguments (proxyconfig has a -c and a -d of its own).
+var toolCommands = []string{"ssh-keygen", "update-authkeys", "syslog", "dhparam", "proxyconfig"}
+
 // legacyArgs maps the options of the former shell script: "-c FILE" is
 // "--legacy-config FILE --non-interactive", and "-d" (debug) is accepted and
-// ignored, the run always logs to /opt/zextras/log/bootstrap.*.log.
+// ignored, the run always logs to /opt/zextras/log/bootstrap.*.log. The
+// arguments of a tool command are left as they are.
 func legacyArgs(args []string) []string {
+	if len(args) > 0 && slices.Contains(toolCommands, args[0]) {
+		return args
+	}
+
 	out := make([]string, 0, len(args)+1)
 
 	for i := 0; i < len(args); i++ {
@@ -141,10 +150,17 @@ func newRootCmd(env sys.System, stdin io.Reader, stdout, stderr io.Writer, statu
 
 	addFlags(runCmd, &sf, true)
 	root.AddCommand(config, runCmd, newGalSyncCmd(env, stdout, stderr, status),
-		newToolCmd("ssh-keygen", "Generate the zextras SSH key and store its public key (zmsshkeygen)",
+		newToolCmd("ssh-keygen [rsa]", "Generate the zextras SSH key and store its public key (zmsshkeygen)",
 			bootstrapcmd.RunSSHKeygen, env, stdout, stderr, status),
-		newToolCmd("update-authkeys", "Update ~zextras/.ssh/authorized_keys from the servers' keys (zmupdateauthkeys)",
-			bootstrapcmd.RunUpdateAuthKeys, env, stdout, stderr, status))
+		newToolCmd("update-authkeys [-a]",
+			"Update ~zextras/.ssh/authorized_keys from the servers' keys; -a first on every server (zmupdateauthkeys)",
+			bootstrapcmd.RunUpdateAuthKeys, env, stdout, stderr, status),
+		newToolCmd("dhparam", "Install the RFC 7919 ffdhe2048 dhparam and record it in zimbraSSLDHParam",
+			bootstrapcmd.RunDHParam, env, stdout, stderr, status),
+		newToolCmd("syslog", "Set up rsyslog for Carbonio logging, local or remote (zmsyslogsetup)",
+			bootstrapcmd.RunSyslog, env, stdout, stderr, status),
+		newToolCmd("proxyconfig", "Configure the reverse proxy attributes, the options of libexec/zmproxyconfig",
+			bootstrapcmd.RunProxyConfig, env, stdout, stderr, status))
 
 	return root
 }
@@ -179,18 +195,20 @@ func newGalSyncCmd(env sys.System, stdout, stderr io.Writer, status *int) *cobra
 	return cmd
 }
 
-// newToolCmd is a command without options that runs fn as root.
+// newToolCmd is a command that replaces a legacy script: it runs fn as root
+// or zextras with the arguments as the script took them (no cobra flags, so
+// "-a" reaches fn).
 func newToolCmd(use, short string,
-	fn func(context.Context, sys.System, io.Writer, io.Writer) int,
+	fn func(context.Context, sys.System, io.Writer, io.Writer, []string) int,
 	env sys.System, stdout, stderr io.Writer, status *int,
 ) *cobra.Command {
 	return &cobra.Command{
-		Use:   use,
-		Short: short,
-		Long:  short + ". Must run as root.",
-		Args:  cobra.NoArgs,
-		RunE: func(*cobra.Command, []string) error {
-			*status = fn(context.Background(), env, stdout, stderr)
+		Use:                use,
+		Short:              short,
+		Long:               short + ". Runs as root or zextras.",
+		DisableFlagParsing: true,
+		RunE: func(_ *cobra.Command, args []string) error {
+			*status = fn(context.Background(), env, stdout, stderr, args)
 
 			return nil
 		},

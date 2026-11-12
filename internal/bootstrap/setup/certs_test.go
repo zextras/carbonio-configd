@@ -5,9 +5,12 @@
 package setup
 
 import (
-	"bytes"
+	"encoding/asn1"
+	"encoding/pem"
 	"errors"
+	"math/big"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -383,46 +386,51 @@ func TestCertInstallCertLDAP_RestartsConfiguredLDAPOnly(t *testing.T) {
 func TestCertDHParam(t *testing.T) {
 	const dest = "/opt/zextras/conf/dhparam.pem.crb"
 
-	t.Run("generates then records", func(t *testing.T) {
+	t.Run("writes the ffdhe2048 group then records", func(t *testing.T) {
 		e, fakes := certTestEnv(t)
-		fakes.Exec.When(func(c *sys.Cmd) bool { return len(c.Args) > 6 && c.Args[6] == "/opt/zextras/common/bin/openssl" },
-			func(*sys.Cmd) (sys.Result, error) {
-				fakes.FS.Put(dest+".tmp", []byte("dh"), 0o640)
-
-				return sys.Result{}, nil
-			})
-
-		var stdin string
-
-		fakes.Exec.When(func(c *sys.Cmd) bool { return len(c.Args) > 6 && c.Args[6] == "/opt/zextras/bin/zmprov" },
-			func(c *sys.Cmd) (sys.Result, error) {
-				b := new(bytes.Buffer)
-				_, _ = b.ReadFrom(c.Stdin)
-				stdin = b.String()
-
-				return sys.Result{}, nil
-			})
 
 		require.NoError(t, StepGenerateDHParam().Apply(e))
 
-		assert.Equal(t, "/opt/zextras/common/bin/openssl dhparam -out "+dest+".tmp 2048", certTestCmds(fakes)[0])
-		assert.Equal(t, "\"mcf\" \"zimbraSSLDHParam\" \""+dest+"\"\nexit\n", stdin)
-		assert.True(t, fakes.FS.Exists(dest))
-		assert.False(t, fakes.FS.Exists(dest+".tmp"))
-	})
-
-	t.Run("failure is an error", func(t *testing.T) {
-		e, fakes := certTestEnv(t)
-		fakes.Exec.When(func(c *sys.Cmd) bool { return len(c.Args) > 6 && c.Args[6] == "/opt/zextras/common/bin/openssl" },
-			certTestFail(1, "no entropy"))
-
-		err := StepGenerateDHParam().Apply(e)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to generate dhparam key")
+		assert.Equal(t, "chown zextras:zextras "+dest, certTestCmds(fakes)[0])
 
 		for _, c := range certTestCmds(fakes) {
-			assert.NotContains(t, c, "zmprov", "the attribute is not set after a failure")
+			assert.NotContains(t, c, "openssl")
+			assert.NotContains(t, c, "zmprov", "the attribute is written to LDAP")
 		}
+
+		data, err := fakes.FS.ReadFile(dest)
+		require.NoError(t, err)
+		assertFFDHE2048PEM(t, data)
+
+		// zmprov stores the content of the file named by the binary attribute.
+		assert.Equal(t, []string{string(data)}, provTestLDAP().values("cn=config,cn=zimbra", certDHParamAttr))
+	})
+
+	t.Run("keeps an existing file", func(t *testing.T) {
+		e, fakes := certTestEnv(t)
+		fakes.FS.Put(dest, []byte("existing"), 0o640)
+
+		require.NoError(t, StepGenerateDHParam().Apply(e))
+
+		data, err := fakes.FS.ReadFile(dest)
+		require.NoError(t, err)
+		assert.Equal(t, "existing", string(data))
+	})
+
+	t.Run("openssl accepts the file", func(t *testing.T) {
+		bin, err := exec.LookPath("openssl")
+		if err != nil {
+			t.Skip("openssl not available")
+		}
+
+		data, err := certDHParamPEM()
+		require.NoError(t, err)
+
+		file := filepath.Join(t.TempDir(), "dhparam.pem")
+		require.NoError(t, os.WriteFile(file, data, 0o600))
+
+		out, err := exec.Command(bin, "dhparam", "-in", file, "-check", "-noout").CombinedOutput() //nolint:gosec
+		require.NoError(t, err, string(out))
 	})
 
 	t.Run("applies to new installs only", func(t *testing.T) {
@@ -457,10 +465,51 @@ func TestCertDHParam(t *testing.T) {
 
 		attr = dest
 		done, _ = step.Done(e)
-		assert.True(t, done)
+		assert.False(t, done, "the attribute is binary: it holds the file, never its path")
+
+		attr = "dh"
+		done, _ = step.Done(e)
+		assert.True(t, done, "the attribute holds the installed file")
 
 		certGlobalConfig = func(*Env) (map[string]string, error) { return nil, errors.New("ldap down") }
 		_, err = step.Done(e)
 		require.Error(t, err)
 	})
 }
+
+// assertFFDHE2048PEM checks that data is a DH PARAMETERS block holding the RFC
+// 7919 ffdhe2048 prime (2048 bits) and generator 2.
+func assertFFDHE2048PEM(t *testing.T, data []byte) {
+	t.Helper()
+
+	block, rest := pem.Decode(data)
+	require.NotNil(t, block)
+	assert.Empty(t, rest)
+	assert.Equal(t, "DH PARAMETERS", block.Type)
+
+	var params struct{ P, G *big.Int }
+
+	tail, err := asn1.Unmarshal(block.Bytes, &params)
+	require.NoError(t, err)
+	assert.Empty(t, tail)
+
+	want, ok := new(big.Int).SetString(rfc7919FFDHE2048, 16)
+	require.True(t, ok)
+	assert.Equal(t, 2048, params.P.BitLen())
+	assert.Zero(t, want.Cmp(params.P), "p is the RFC 7919 prime")
+	assert.Equal(t, int64(2), params.G.Int64())
+
+	q := new(big.Int).Rsh(params.P, 1)
+	assert.True(t, params.P.ProbablyPrime(10), "p is prime")
+	assert.True(t, q.ProbablyPrime(10), "(p-1)/2 is prime: p is a safe prime")
+}
+
+// rfc7919FFDHE2048 is the RFC 7919 appendix A.1 prime as the RFC prints it.
+const rfc7919FFDHE2048 = "FFFFFFFFFFFFFFFFADF85458A2BB4A9AAFDC5620273D3CF1D8B9C583CE2D3695" +
+	"A9E13641146433FBCC939DCE249B3EF97D2FE363630C75D8F681B202AEC4617A" +
+	"D3DF1ED5D5FD65612433F51F5F066ED0856365553DED1AF3B557135E7F57C935" +
+	"984F0C70E0E68B77E2A689DAF3EFE8721DF158A136ADE73530ACCA4F483A797A" +
+	"BC0AB182B324FB61D108A94BB2C8E3FBB96ADAB760D7F4681D4F42A3DE394DF4" +
+	"AE56EDE76372BB190B07A7C8EE0A6D709E02FCE1CDF7E2ECC03404CD28342F61" +
+	"9172FE9CE98583FF8E4F1232EEF28183C3FE3B1B4C6FAD733BB5FCBC2EC22005" +
+	"C58EF1837D1683B2C6F34A26C1B2EFFA886B423861285C97FFFFFFFFFFFFFFFF"

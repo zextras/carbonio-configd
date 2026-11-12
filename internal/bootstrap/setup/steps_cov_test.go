@@ -108,7 +108,8 @@ func TestStepConstructors_Server(t *testing.T) {
 }
 
 func TestStepConfigSetStoreProxy_WhenAndArguments(t *testing.T) {
-	e, fakes, _ := srvTestEnv(t, &srvFakeDir{})
+	e, _, _ := srvTestEnv(t, &srvFakeDir{servers: map[string]srvEntry{pcTestHost: pcEnt("zimbraServiceEnabled", "mailbox")}})
+	w := pcUseFake(t, e, "")
 	s := StepConfigSetStoreProxy()
 
 	assert.True(t, s.Optional)
@@ -131,10 +132,12 @@ func TestStepConfigSetStoreProxy_WhenAndArguments(t *testing.T) {
 	srvEnabled(e, PkgCore, PkgAppserver)
 	require.NoError(t, s.Apply(e))
 
-	lines := ldapAllLines(fakes)
-	assert.Contains(t, lines, "zmproxyconfig")
-	assert.Contains(t, lines, " -m -e ", "mail proxy enabled")
-	assert.NotContains(t, lines, " -w ", "the web proxy is left alone")
+	require.Len(t, w.writes, 1)
+
+	got := pcFlatten(w.writes[0].replace)
+	assert.Contains(t, got, "zimbraImapBindPort", "mail proxy enabled")
+	assert.Equal(t, "TRUE", got["zimbraReverseProxyLookupTarget"])
+	assert.NotContains(t, got, "zimbraMailPort", "the web proxy is left alone")
 }
 
 func TestSrvOnIf(t *testing.T) {

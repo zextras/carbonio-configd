@@ -71,7 +71,7 @@ func TestSetupPlCommandsAreListedAndValidated(t *testing.T) {
 	status, out, _ := exec(t, "-h")
 	require.Equal(t, 0, status)
 
-	for _, c := range []string{"gal-sync-account", "ssh-keygen", "update-authkeys"} {
+	for _, c := range []string{"gal-sync-account", "ssh-keygen", "update-authkeys", "syslog", "dhparam", "proxyconfig"} {
 		assert.Contains(t, out, c)
 	}
 
@@ -89,11 +89,24 @@ func TestSetupPlCommandsAreListedAndValidated(t *testing.T) {
 		{[]string{"gal-sync-account", "--domain", "example.com", "--server", " "}, "must not be empty"},
 		{[]string{"gal-sync-account", "--domain", "", "--server", "s"}, "must not be empty"},
 		{[]string{"gal-sync-account", "--domain", "d", "--server", "s", "extra"}, "unknown command"},
-		{[]string{"ssh-keygen", "extra"}, "unknown command"},
-		{[]string{"update-authkeys", "-a"}, "unknown shorthand flag"},
 	} {
 		status, _, errb := exec(t, tc.args...)
 		assert.Equal(t, exitUsage, status, tc.args)
+		assert.Contains(t, errb, tc.want, tc.args)
+	}
+
+	// The commands that replace scripts take the scripts' arguments.
+	for _, tc := range []struct {
+		args   []string
+		status int
+		want   string
+	}{
+		{[]string{"ssh-keygen", "dsa"}, 1, "Bad keytype: dsa"},
+		{[]string{"update-authkeys", "-x"}, exitUsage, "Usage: update-authkeys [-a]"},
+		{[]string{"dhparam", "2048"}, exitUsage, "Usage: dhparam"},
+	} {
+		status, _, errb := exec(t, tc.args...)
+		assert.Equal(t, tc.status, status, tc.args)
 		assert.Contains(t, errb, tc.want, tc.args)
 	}
 }
@@ -107,6 +120,10 @@ func TestSetupPlCommandsRefuseNonRoot(t *testing.T) {
 		{"gal-sync-account", "--domain", "example.com", "--server", "store.example.com"},
 		{"ssh-keygen"},
 		{"update-authkeys"},
+		{"syslog"},
+		{"update-authkeys", "-a"},
+		{"dhparam"},
+		{"proxyconfig", "-m", "-e", "-H", "h"},
 	} {
 		status, out, errb := exec(t, args...)
 
@@ -149,4 +166,36 @@ func TestAbsPath(t *testing.T) {
 	assert.Empty(t, absPath(""))
 	assert.Equal(t, "/etc/x.yaml", absPath("/etc/x.yaml"))
 	assert.True(t, strings.HasPrefix(absPath("rel.yaml"), "/"))
+}
+
+func TestSyslogCommandTakesNoArguments(t *testing.T) {
+	status, out, errb := exec(t, "syslog", "extra")
+
+	assert.Equal(t, 2, status)
+	assert.Empty(t, out)
+	assert.Contains(t, errb, "Usage: syslog")
+}
+
+// The options are the script's: cobra must not read -h or -H as its own flags.
+func TestProxyConfigCommandPassesTheScriptOptionsThrough(t *testing.T) {
+	status, _, errb := exec(t, "proxyconfig", "-z")
+
+	if os.Geteuid() == 0 || os.Getenv("USER") == "zextras" {
+		assert.Equal(t, 255, status, "getopts fails: Unable to set options")
+		assert.Contains(t, errb, "Unable to set options")
+
+		return
+	}
+
+	assert.Equal(t, 1, status)
+	assert.Contains(t, errb, "must run as root")
+}
+
+// -d and -c are options of zmproxyconfig; the bootstrap's legacy mapping must
+// not eat them.
+func TestLegacyArgs_ToolCommandsKeepTheirOptions(t *testing.T) {
+	assert.Equal(t, []string{"proxyconfig", "-w", "-d", "-o", "-c", "-H", "h"},
+		legacyArgs([]string{"proxyconfig", "-w", "-d", "-o", "-c", "-H", "h"}))
+	assert.Equal(t, []string{"--legacy-config", "f", "--non-interactive"}, legacyArgs([]string{"-d", "-c", "f"}),
+		"the bootstrap's own mapping stays")
 }

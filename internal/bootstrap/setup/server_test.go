@@ -145,37 +145,31 @@ func TestSrvServiceLists(t *testing.T) {
 	dir := &srvFakeDir{servers: map[string]srvEntry{"mail.example.com": {
 		"zimbraserviceenabled": {"service-discover", "stats"},
 	}}}
-	e, fakes, _ := srvTestEnv(t, dir)
+	e, _, _ := srvTestEnv(t, dir)
 	srvEnabled(e, PkgCore, PkgAppserver, PkgMTA, "carbonio-clamav", "carbonio-proxy")
 	e.Facts.ServiceWebapp = true
 	e.Cfg.MTA.Antispam = true
 	e.Cfg.Proxy.WebEnabled = true
-	stdin := provStdin(fakes)
 
 	require.NoError(t, StepConfigSetEnabledServices().Apply(e))
 
-	for _, want := range []string{
-		`"zimbraServiceEnabled" "stats"`, `"zimbraServiceEnabled" "service" "zimbraServiceEnabled" "mailbox"`,
-		`"zimbraServiceEnabled" "amavis"`, `"zimbraServiceEnabled" "antispam"`, `"zimbraServiceEnabled" "proxy"`,
-		`"zimbraServiceEnabled" "service-discover"`, `"zimbraServiceInstalled" "service-discover"`,
-		`"zimbraServiceEnabled" "antivirus"`,
-	} {
-		assert.Contains(t, *stdin, want)
-	}
-
-	assert.NotContains(t, *stdin, `"zimbraServiceEnabled" "opendkim"`)
-	assert.NotContains(t, *stdin, `"zimbraServiceEnabled" "cbpolicyd"`)
+	enabled := provTestLDAP().values(provServerDN("mail.example.com"), "zimbraServiceEnabled")
+	assert.Subset(t, enabled, []string{"stats", "service", "mailbox", "amavis", "antispam", "proxy", "service-discover", "antivirus"})
+	assert.Contains(t, provTestLDAP().values(provServerDN("mail.example.com"), "zimbraServiceInstalled"), "service-discover")
+	assert.NotContains(t, enabled, "opendkim")
+	assert.NotContains(t, enabled, "cbpolicyd")
 }
 
 func TestSrvServiceLists_DoesNotIntroduceServiceDiscoverAndDropsIdleProxy(t *testing.T) {
 	dir := &srvFakeDir{servers: map[string]srvEntry{"mail.example.com": {}}}
 	e, fakes, _ := srvTestEnv(t, dir)
 	srvEnabled(e, PkgCore, "carbonio-proxy")
-	stdin := provStdin(fakes)
 
 	require.NoError(t, StepConfigSetEnabledServices().Apply(e))
-	assert.NotContains(t, *stdin, `"zimbraServiceEnabled" "service-discover"`)
-	assert.NotContains(t, *stdin, `"zimbraServiceEnabled" "proxy"`)
+
+	enabled := provTestLDAP().values(provServerDN("mail.example.com"), "zimbraServiceEnabled")
+	assert.NotContains(t, enabled, "service-discover")
+	assert.NotContains(t, enabled, "proxy")
 
 	// zmiptool runs after the batch.
 	assert.Contains(t, fakes.Exec.Lines()[len(fakes.Exec.Lines())-1], "zmiptool")
@@ -187,11 +181,11 @@ func TestSrvProxyPrefs_DisablesIdleProxyAndSkipsPublicHostnameWhenSet(t *testing
 	srvEnabled(e, PkgCore, "carbonio-proxy")
 	e.Cfg.Host.PublicHostname = "public.example.com"
 	e.Cfg.Proxy.StrictServerName = true
-	stdin := provStdin(fakes)
 
 	require.NoError(t, StepConfigSetProxyPrefs().Apply(e))
-	assert.Contains(t, *stdin, `"ms" "mail.example.com" "zimbraReverseProxyStrictServerNameEnabled" "TRUE"`)
-	assert.NotContains(t, *stdin, "zimbraPublicServiceHostname")
+	assert.Equal(t, []string{"TRUE"},
+		provTestLDAP().values(provServerDN("mail.example.com"), "zimbraReverseProxyStrictServerNameEnabled"))
+	assert.Empty(t, provTestLDAP().values(provGlobalDN, "zimbraPublicServiceHostname"))
 	assert.False(t, e.Facts.Enabled["carbonio-proxy"])
 
 	for _, c := range fakes.Exec.Calls() {
@@ -199,9 +193,10 @@ func TestSrvProxyPrefs_DisablesIdleProxyAndSkipsPublicHostnameWhenSet(t *testing
 	}
 }
 
-func TestSrvProxyPrefs_ZmproxyconfigArgv(t *testing.T) {
-	dir := &srvFakeDir{global: srvEntry{}, servers: map[string]srvEntry{}}
-	e, fakes, _ := srvTestEnv(t, dir)
+func TestSrvProxyPrefs_ProxyAttributes(t *testing.T) {
+	dir := &srvFakeDir{global: srvEntry{}, servers: map[string]srvEntry{pcTestHost: pcEnt("zimbraServiceEnabled", "proxy")}}
+	e, _, _ := srvTestEnv(t, dir)
+	w := pcUseFake(t, e, "")
 	srvEnabled(e, PkgCore, "carbonio-proxy")
 	e.Cfg.Host.RequireInterprocessSecurity = true
 	e.Cfg.Proxy.WebEnabled = true
@@ -210,14 +205,17 @@ func TestSrvProxyPrefs_ZmproxyconfigArgv(t *testing.T) {
 	e.Cfg.Store.Ports = bootstrap.StorePorts{IMAP: 7143, IMAPS: 7993, POP3: 7110, POP3S: 7995, HTTP: 8080, HTTPS: 8443}
 	e.Cfg.Proxy.Ports = bootstrap.ProxyPorts{IMAP: 143, IMAPS: 993, POP3: 110, POP3S: 995, HTTP: 80, HTTPS: 443}
 	e.Cfg.Host.PublicHostname = "public.example.com"
-	stdin := provStdin(fakes)
 
 	require.NoError(t, StepConfigSetProxyPrefs().Apply(e))
 
-	lines := strings.Join(fakes.Exec.Lines(), "\n")
-	assert.Contains(t, lines, "zmproxyconfig -m -d -o -i 7143:143:7993:993 -p 7110:110:7995:995 -H mail.example.com")
-	assert.Contains(t, lines, "zmproxyconfig -U -w -e -o -x redirect -a 8080:80:8443:443 -H mail.example.com")
-	assert.Contains(t, *stdin, `"mcf" "zimbraPublicServiceHostname" "public.example.com"`)
+	// The mail proxy is switched off and the web proxy on, in one modify.
+	require.Len(t, w.writes, 1)
+	assert.Equal(t, pcMerge(pcMailPorts("7143:143:7993:993", "7110:110:7995:995"), pcWebPorts("8080:80:8443:443"),
+		map[string]string{
+			"zimbraReverseProxyMailEnabled": "FALSE", "zimbraReverseProxyMailMode": "redirect",
+			"zimbraReverseProxyHttpEnabled": "TRUE", "zimbraReverseProxySSLToUpstreamEnabled": "TRUE",
+		}), pcFlatten(w.writes[0].replace))
+	assert.Equal(t, []string{"public.example.com"}, provTestLDAP().values(provGlobalDN, "zimbraPublicServiceHostname"))
 	assert.True(t, e.Facts.Enabled["carbonio-proxy"])
 }
 
@@ -236,15 +234,18 @@ func TestSrvStoreDefaults_JoinsLookupTargetsOnlyWhenNoneExist(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			e, fakes, _ := srvTestEnv(t, &srvFakeDir{global: tc.global, servers: tc.servers})
+			e, _, _ := srvTestEnv(t, &srvFakeDir{global: tc.global, servers: tc.servers})
 			srvEnabled(e, PkgCore, PkgAppserver)
 			e.Facts.NewInstall, e.Facts.ServiceWebapp = true, true
-			stdin := provStdin(fakes)
 
 			require.NoError(t, StepConfigSetStoreDefaults().Apply(e))
-			assert.Equal(t, tc.wantALT, strings.Contains(*stdin, "+zimbraReverseProxyAvailableLookupTargets"))
-			assert.Contains(t, *stdin, `"mcf" "+zimbraReverseProxyUpstreamEwsServers" "mail.example.com"`)
-			assert.Contains(t, *stdin, `"zimbraReverseProxyLookupTarget" "TRUE" "zimbraMtaAuthTarget" "TRUE"`)
+			assert.Equal(t, tc.wantALT,
+				len(provTestLDAP().values(provGlobalDN, "zimbraReverseProxyAvailableLookupTargets")) > 0)
+			assert.Equal(t, []string{"mail.example.com"}, provTestLDAP().values(provGlobalDN, "zimbraReverseProxyUpstreamEwsServers"))
+
+			srv := provServerDN("mail.example.com")
+			assert.Equal(t, []string{"TRUE"}, provTestLDAP().values(srv, "zimbraReverseProxyLookupTarget"))
+			assert.Equal(t, []string{"TRUE"}, provTestLDAP().values(srv, "zimbraMtaAuthTarget"))
 		})
 	}
 }
@@ -318,7 +319,8 @@ func TestSrvCreateServerEntry_OrderByReplica(t *testing.T) {
 
 	s := StepConfigCreateServerEntry()
 	require.NoError(t, s.Apply(e))
-	assert.Equal(t, "\"cs\" \"mail.example.com\"\n\"ms\" \"mail.example.com\" \"zimbraIPMode\" \"ipv4\"\nexit\n", *stdin)
+	assert.Equal(t, "\"cs\" \"mail.example.com\"\nexit\n", *stdin, "only the creation goes to zmprov")
+	assert.Equal(t, []string{"ipv4"}, provTestLDAP().values(provServerDN("mail.example.com"), "zimbraIPMode"))
 
 	dir.servers["mail.example.com"] = srvEntry{"zimbraipmode": {"ipv4"}}
 	done, err := s.Done(e)

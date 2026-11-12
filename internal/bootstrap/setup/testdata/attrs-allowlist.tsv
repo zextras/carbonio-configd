@@ -1,0 +1,41 @@
+name	type	callback	min	max	value	immutable	deprecated
+zimbraSSLDHParam	binary						
+zimbraLDAPSchemaVersion	string						
+zimbraReverseProxyAvailableLookupTargets	string						
+zimbraReverseProxyUpstreamEwsServers	string						
+zimbraSkinLogoURL	string			256			
+zimbraPublicServiceHostname	string			256			
+zimbraReverseProxyMailHostQuery	string						
+zimbraReverseProxyPortQuery	string						
+zimbraReverseProxyDomainNameQuery	string						
+zimbraReverseProxyMailHostAttribute	string						
+zimbraReverseProxyPop3PortAttribute	string						
+zimbraReverseProxyPop3SSLPortAttribute	string						
+zimbraReverseProxyImapPortAttribute	string						
+zimbraReverseProxyImapSSLPortAttribute	string						
+zimbraReverseProxyDomainNameAttribute	string						
+zimbraImapCleartextLoginEnabled	boolean						
+zimbraPop3CleartextLoginEnabled	boolean						
+zimbraReverseProxyHttpEnabled	boolean						
+zimbraReverseProxyMailEnabled	boolean						
+zimbraReverseProxyAuthWaitInterval	duration						
+zimbraReverseProxyIPLoginLimit	integer		0				
+zimbraReverseProxyIPLoginLimitTime	integer		0				
+zimbraReverseProxyUserLoginLimit	integer		0				
+zimbraReverseProxyUserLoginLimitTime	integer		0				
+zimbraDefaultDomainName	string			256			
+zimbraMtaMyOrigin	astring			256			
+carbonioNotificationFrom	email			256			
+carbonioNotificationRecipients	email			256			
+zimbraSpamIsSpamAccount	email			256			
+zimbraSpamIsNotSpamAccount	email			256			
+zimbraAmavisQuarantineAccount	email			256			
+zimbraServiceEnabled	string			256			
+zimbraServiceInstalled	string			256			
+zimbraIPMode	enum				ipv4,ipv6,both		
+zimbraReverseProxyLookupTarget	boolean						
+zimbraMtaAuthTarget	boolean						
+zimbraReverseProxyStrictServerNameEnabled	boolean						
+zimbraMtaMyNetworks	astring			10240			
+zimbraPrefUseKeyboardShortcuts	boolean						
+zimbraPrefTimeZoneId	string			256			

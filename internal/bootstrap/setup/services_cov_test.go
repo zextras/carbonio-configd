@@ -38,7 +38,6 @@ func TestSvcInitMta_ToolRunsWithTheMasterAndLocalConfigGetsOwnerDefaults(t *test
 	e.Cfg.LDAP.Host, e.Cfg.LDAP.Port = "ldap.example.com", 636
 	e.Cfg.MTA.MyNetworks = []string{"127.0.0.0/8", "10.0.0.0/8"}
 	fakes.FS.Put("/opt/zextras/libexec/zmmtainit", []byte("#!/bin/sh"), 0o755)
-	stdin := provStdin(fakes)
 
 	s := StepConfigInitMta()
 	assert.Equal(t, "configInitMta", s.Name)
@@ -52,8 +51,8 @@ func TestSvcInitMta_ToolRunsWithTheMasterAndLocalConfigGetsOwnerDefaults(t *test
 
 	lines := ldapAllLines(fakes)
 	assert.Contains(t, lines, "zmmtainit ldap.example.com 636")
-	assert.Contains(t, *stdin, "zimbraMtaMyNetworks")
-	assert.Contains(t, *stdin, "127.0.0.0/8 10.0.0.0/8")
+	assert.Equal(t, []string{"127.0.0.0/8 10.0.0.0/8"},
+		provTestLDAP().values(provServerDN("mail.example.com"), "zimbraMtaMyNetworks"))
 }
 
 func TestSvcInitMta_KeepsConfiguredOwnerAndSkipsMissingToolAndNetworks(t *testing.T) {

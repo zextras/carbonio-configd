@@ -26,3 +26,10 @@ SPDX-License-Identifier = "GPL-2.0-only"
 path = ["internal/proxy/testdata/templates/**", "internal/proxy/testdata/fixtures/**"]
 SPDX-FileCopyrightText = "2026 Zextras <https://www.zextras.com>"
 SPDX-License-Identifier = "AGPL-3.0-only"
+
+# Snapshot of the attrs.xml entries of the attributes bootstrap writes to LDAP,
+# compared by scripts/check-attrs-drift.sh.
+[[annotations]]
+path = ["internal/bootstrap/setup/testdata/attrs-allowlist.tsv"]
+SPDX-FileCopyrightText = "2026 Zextras <https://www.zextras.com>"
+SPDX-License-Identifier = "AGPL-3.0-only"

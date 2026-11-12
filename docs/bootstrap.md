@@ -286,6 +286,15 @@ it runs the steps of `setup.pl` in its order:
 3. Default domain and accounts, SQL, syslog, service start (systemd targets,
    or `zmcontrol`), GAL sync account, crontab, ssh keys.
 
+The syslog step runs in process (`setup syslog`, which is also what
+`libexec/zmsyslogsetup` calls): it adds the local0, auth and mail rules to
+`/etc/rsyslog.conf` (Ubuntu with `/etc/rsyslog.d`: to `60-carbonio.conf`, and
+the catch-all rules of `50-default.conf` lose those facilities), forwards to
+`zimbraLogHostname` over UDP when that is another host, creates
+`/var/log/carbonio.log`, sets the owner in `/etc/logrotate.d/carbonio` and
+restarts rsyslog only if a file changed. Only rsyslog is handled; syslog-ng and
+`/etc/syslog.conf` are not.
+
 Before the steps, `run` prints "Starting Carbonio Bootstrap..." and the
 licence notice, wrapped at 80 columns between two rules (also with
 `--dry-run`; `config` does not print it). On a terminal with the full-screen
@@ -360,7 +369,7 @@ Log:     /opt/zextras/log/bootstrap.20261112-005601.log
 [ 4/46] Check port conflicts                   skip    already done
 [10/46] Create SSL certificates                ok      3.1s
         · carbonio-appserver certificate created
-[20/46] Generate dhparam key                   ok      1:05
+[20/46] Generate dhparam key                   ok      0.0s
 [44/46] Create GAL sync account                warn    skipped: services not started
 
 Done in 3:12 · 41 applied · 4 already done · 1 warning
@@ -395,6 +404,65 @@ Passwords are never passed on a command line or written to the log:
 `zmprov` reads its commands on stdin, localconfig is written directly, and
 the LDAP passwords are set natively (no `zmldappasswd`).
 
+#### Directory changes: LDAP or zmprov
+
+A `zmprov` start is a JVM start (0.6-0.8 s), and a fresh bootstrap made 13.
+The steps still collect their directory commands in a batch, but the batch is
+split in order:
+
+- `mcf` (global config), `ms <server>` and `mc <class of service>` that modify
+  only attributes of the allowlist (`provAttrList` in
+  `internal/bootstrap/setup/prov_attrs.go`) are written to LDAP over the
+  bootstrap's own connection, with the semantics of `zmprov`: `attr v` replaces
+  the values, `attr ""` removes the attribute, `+attr v` adds a value and
+  `-attr v` removes one, and neither fails when the value is already, or is
+  not, there. The same checks of the value as `zmprov` apply (boolean, integer,
+  enum, duration, maximum length); a value that fails them is left to `zmprov`
+  so it reports the error. A binary attribute (`zimbraSSLDHParam`) stores the
+  content of the file named, as `zmprov` does, not its path.
+- Everything else runs in one `zmprov -r -m -l` process for each run of
+  consecutive commands: `cs`, `cd`, `ca` and `aaa` (these create the entries
+  with their defaults, ids and passwords), a command on a server or class of
+  service given by id, and any command with an attribute that is not in the
+  allowlist, whole. The allowlist is the exception: what is not listed goes to
+  `zmprov`.
+- The batch runs in order and goes on after a failure, as `zmprov` does; the
+  error lists the failures. The detail log has one line, `zmprov batch: ldap:
+  mcf zimbraFoo | zmprov: cs host`, with the commands and no values.
+
+Each allowlisted attribute is there because `attrs.xml` (the schema of the
+attributes, `src/main/resources/conf/attrs/attrs.xml` of carbonio-directory-server,
+installed as `/opt/zextras/conf/attrs/attrs.xml`) gives it no callback: the
+callbacks are the code `zmprov` runs on the server side of a change, and LDAP
+does not run them. These attributes carry a callback and stay on `zmprov`:
+
+| Attribute | Callback | What it does |
+|---|---|---|
+| `zimbraMailMode` | `LocalBind` | writes `zimbraMailLocalBind` of the server, or of every server for the global config |
+| `zimbraMailPort` | `MailPort` | writes `zimbra_mail_service_port` to localconfig |
+| `zimbraImapBindPort`, `zimbraImapSSLBindPort`, `zimbraImapProxyBindPort`, `zimbraImapSSLProxyBindPort`, `zimbraPop3BindPort`, `zimbraPop3SSLBindPort`, `zimbraPop3ProxyBindPort`, `zimbraPop3SSLProxyBindPort`, `zimbraMailSSLPort`, `zimbraMailProxyPort`, `zimbraMailSSLProxyPort` | `CheckPortConflict` | rejects a port another service of the server uses |
+| `zimbraMailHostPool` | `MailHostPool` | rejects an id that is not a server with the webapp service |
+
+So the "Set service ports", proxy port and host pool steps still start
+`zmprov`; the others write to LDAP.
+
+`internal/bootstrap/setup/testdata/attrs-allowlist.tsv` is a snapshot of the
+`attrs.xml` entries of the allowlisted attributes (type, callback, limits,
+immutable, deprecated). A unit test fails when an allowlisted attribute has no
+row, has a callback that is not recorded as reviewed
+(`provReviewedCallbacks`), has a different type from its check, or is immutable
+or deprecated. To find out whether `attrs.xml` changed since the snapshot:
+
+```
+scripts/check-attrs-drift.sh <SOURCE>           # prints a diff, exits 1 on drift
+scripts/check-attrs-drift.sh --update <SOURCE>  # regenerates the snapshot
+```
+
+`<SOURCE>` is a checkout of carbonio-directory-server (or any directory with an
+`attrs.xml`), the path of an `attrs.xml`, or the URL of the raw file. CI does
+not run it. When it reports a change, read the callback again before updating
+the snapshot, and the allowlist if the attribute is concerned.
+
 Three steps that `setup.pl` ran as shell scripts or JVM tools are done in
 Go, without starting a process:
 
@@ -428,6 +496,16 @@ Differences from `setup.pl`:
 
 - A failure of `zmmtainit`, `zmmyinit` or the dhparam key ends the run
   (`setup.pl` went on, or exited `0`).
+- `conf/dhparam.pem.crb` holds the fixed RFC 7919 `ffdhe2048` group (the one
+  Mozilla's TLS guidelines recommend), written in process, instead of a group
+  freshly generated by `openssl dhparam 2048`: it takes no time instead of
+  15-30 seconds, and every node shares the same group. It is still recorded in
+  `zimbraSSLDHParam`, which nginx reads. The attribute holds the content of
+  the file (the PEM), as with `zmprov`, which reads the file it is given.
+- Directory changes to allowlisted attributes are written to LDAP, not run by
+  `zmprov` (see "Directory changes: LDAP or zmprov"): the callbacks of
+  `attrs.xml` that `zmprov` ran for them do nothing the bootstrap relies on.
+  For an attribute with a callback, `zmprov` still runs.
 - No `/opt/zextras/config.<pid>` file is written; use `--output`.
 - A replica or multi-master directory server is set up from the
   configuration (`ldap.replication_type`), not only from the interactive
@@ -441,19 +519,50 @@ Differences from `setup.pl`:
   `zmupdateauthkeys` leaves when the file did not exist; a file that has one
   keeps it.
 
-## Commands for setup.pl
+## Commands for setup.pl and the scripts they replace
 
-While carbonio-core still runs `setup.pl`, it calls these commands of the
-same binary (`/opt/zextras/libexec/setup`) instead of the scripts and JVM
-tools. They do exactly what the three steps above do, without a bootstrap
+The binary (`/opt/zextras/libexec/setup`) also has commands that are the
+only implementation of some former scripts: carbonio-core installs the old
+names as wrappers that execute them (`zmsshkeygen` is `exec
+/opt/zextras/libexec/setup ssh-keygen "$@"`), so `setup.pl`, the operators
+and `zmrc` run the same code as the bootstrap steps. They need no bootstrap
 configuration: the host name, the `zextras` ids, the LDAP and the admin
-credentials come from localconfig. They must run as root (otherwise they
-print an error and exit `1`), print what the legacy tools printed to stdout
-and the details to stderr, and exit `1` on failure with `Error: <reason>` on
-stderr; a wrong command line exits `2`.
+credentials come from localconfig. They take the scripts' arguments, print
+what the scripts printed to stdout and the details to stderr, and exit `1`
+on failure with `Error: <reason>` on stderr; a wrong command line exits `2`.
 
-| Command | Replaces | |
-| --- | --- | --- |
-| `setup gal-sync-account --domain D --server S` | `zmgsautil createAccount -a galsync.<random>@D -n InternalGAL --domain D -s S -t zimbra -f _InternalGAL -p 1d` | Creates the account and prints `<name>` and `<id>` separated by a tab. It fails when the account cannot be created; it does not check for an existing one. |
-| `setup ssh-keygen` | `zmsshkeygen` | Generates the key pair and stores the public key in the server entry. |
-| `setup update-authkeys` | `zmupdateauthkeys` | Rewrites `authorized_keys`. There is no `-a` (remote) mode. |
+| Command | Replaces | Runs as | |
+| --- | --- | --- | --- |
+| `setup gal-sync-account --domain D --server S` | `zmgsautil createAccount -a galsync.<random>@D -n InternalGAL --domain D -s S -t zimbra -f _InternalGAL -p 1d` (setup.pl) | root, zextras | Creates the account and prints `<name>` and `<id>` separated by a tab. It fails when the account cannot be created; it does not check for an existing one. |
+| `setup ssh-keygen [rsa]` | `zmsshkeygen` | root, zextras | Generates the key pair and stores the public key in the server entry. Another key type prints `Bad keytype`. |
+| `setup update-authkeys [-a]` | `zmupdateauthkeys` | root, zextras | Rewrites `authorized_keys`; `-a` first asks every server, through `zmrc`, to update its own (a server that does not answer is logged). |
+| `setup syslog` | `zmsyslogsetup` | root | Sets up rsyslog as the "Set up syslog.conf" step does. |
+| `setup dhparam` | `openssl dhparam` in setup.pl | root | Installs `conf/dhparam.pem.crb` (ffdhe2048) unless present and sets `zimbraSSLDHParam`. |
+| `setup proxyconfig [options]` | `zmproxyconfig` (Perl) | root, zextras | Every option, default, check, message, help text and exit status of the script (`-h -o -m -w -d -e -f -r -s -t -c -C -n -u -U -i -p -a -x -H`; options parse like Perl's `Getopt::Std`). `1`: refused options or checks (usage on stdout), `2`: an attribute change failed, `255`: unusable options or LDAP. Nothing is printed on success; `-e` and `-f` warn about domains with `zimbraVirtualIPAddress` on stderr. |
+
+### `setup proxyconfig`
+
+The "Enable proxy on the store" and "Set proxy preferences" steps call the
+same function as the command (`setup.proxyConfig`), with the options
+`setup.pl` passed to `zmproxyconfig`, so the two cannot drift. carbonio-core
+installs `libexec/zmproxyconfig` as `exec /opt/zextras/libexec/setup
+proxyconfig "$@"`.
+
+Differences from the script:
+
+- The attributes of every run of a call are applied to the entries in memory
+  and given to `RunProv` as one `ms <host>` (and one `mcf` for `-f`), where
+  the script ran one `zmprov ms` per run. The `*BindPort` and proxy/SSL
+  ports, `zimbraMailPort` and `zimbraMailMode` have Java callbacks
+  (`CheckPortConflict`, `MailPort`, `LocalBind`), so that command goes to
+  zmprov; a change of allowlisted attributes only (for example the proxy
+  switches) is written to LDAP. Attributes that already hold the value are
+  left out.
+- A value that zmprov would refuse (an enum, a port, a boolean) fails its own
+  command with `ERROR: ...` and exit `2`; the other commands of the run still
+  apply. A merged command refused by zmprov (a port conflict) fails as a whole.
+- The script's code after the "is the proxy still enabled" read-back
+  (`-zimbraServiceEnabled proxy`, `zimbraReverseProxyLookupTarget FALSE` on
+  disable) never ran: it read the values with `zmprov ... 1>/dev/null`. It is
+  not ported. The `-e -c` store branch sets `zimbraAdminPort` to the proxy
+  port `n2`, as the script did.

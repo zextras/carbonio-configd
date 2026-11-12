@@ -397,6 +397,10 @@ type svcPlanner struct {
 	global  map[string]string
 	prov    *Prov
 	domains map[string]bool
+	// globals are the global config changes; they follow the creations, so the
+	// batch runs the creations in one zmprov process and the changes to LDAP
+	// (RunProv keeps the order of a batch). None of them depends on a creation.
+	globals [][]string
 	err     error
 }
 
@@ -429,6 +433,10 @@ func svcDomainPlan(e *Env) (*Prov, error) {
 		if cfg.Store.SpamTraining {
 			pl.training(cfg)
 		}
+	}
+
+	for _, g := range pl.globals {
+		pl.prov.Add(g...)
 	}
 
 	return pl.prov, pl.err
@@ -476,7 +484,7 @@ func (pl *svcPlanner) global1(kv ...string) {
 	}
 
 	if len(args) > 0 {
-		pl.prov.Add(append([]string{"mcf"}, args...)...)
+		pl.globals = append(pl.globals, append([]string{provMCF}, args...))
 	}
 }
 
@@ -602,21 +610,28 @@ func StepConfigInitSQL() Step {
 	}
 }
 
-// StepSetupSyslog ports setup.pl setupSyslog (L6054-6069): zmsyslogsetup as
-// root; "Failed" (here a warning) when it is missing or fails.
+// StepSetupSyslog ports setup.pl setupSyslog (L6054-6069), which ran
+// libexec/zmsyslogsetup (Perl) as root. It is done in process now (syslog.go):
+// the local0, auth and mail rules of Carbonio go to /var/log/carbonio.log (and
+// to zimbraLogHostname over UDP when that is another host), and local0, local1,
+// mail and auth are kept out of the catch-all rules. Files are replaced
+// atomically, a re-run changes nothing, and rsyslog is restarted only when a
+// file changed.
+//
+// Deviations: only rsyslog is handled (/etc/rsyslog.conf, plus Ubuntu's
+// rsyslog.d layout); the syslog-ng and /etc/syslog.conf branches of the script
+// are not ported, as no supported platform uses them. A mail rule of an earlier
+// run is recognised by carbonio.log as well, so a log host on this node does
+// not pile one up on every run. The "no rsyslog.service" case still fails the
+// step (a warning), but only when there is something to restart. A failing
+// restart is logged as a warning, as the script ignored it. The failure to
+// read zimbraLogHostname is an error here; the script treated it as unset.
 func StepSetupSyslog() Step {
 	return Step{
 		Name:     svcStageSyslog,
 		Title:    "Set up syslog.conf",
 		Optional: true,
-		Apply: func(e *Env) error {
-			tool := e.Paths.Path("libexec", "zmsyslogsetup")
-			if _, err := e.Sys.FS.Stat(tool); err != nil {
-				return fmt.Errorf("%s: %w", tool, err)
-			}
-
-			return e.Root(tool)
-		},
+		Apply:    ConfigureSyslog,
 	}
 }
 
