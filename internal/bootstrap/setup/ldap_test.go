@@ -42,8 +42,16 @@ type ldapFake struct {
 	adds    []string
 	replace []string
 	setPw   []string
-	// search is the answer to every search.
-	search  []ldapEntry
+	// search is the answer to every search, unless searchFn is set.
+	search []ldapEntry
+	// searchFn answers a search by its base and filter.
+	searchFn func(base, filter string) ([]ldapEntry, error)
+	// modifyErr fails a modify of the DN.
+	modifyErr func(dn string) error
+	// attrs are the attributes of every add, by DN.
+	attrs map[string][]ldapLDIFAttr
+	// mods are the changes of the modifies, "dn|add|attr|v1,v2".
+	mods    []string
 	running bool
 	// startErr fails the start.
 	startErr error
@@ -62,8 +70,14 @@ func (c ldapFakeConn) Bind(dn, pw string) error {
 	return nil
 }
 
-func (c ldapFakeConn) Add(dn string, _ []ldapLDIFAttr) error {
+func (c ldapFakeConn) Add(dn string, attrs []ldapLDIFAttr) error {
 	c.f.adds = append(c.f.adds, dn)
+
+	if c.f.attrs == nil {
+		c.f.attrs = map[string][]ldapLDIFAttr{}
+	}
+
+	c.f.attrs[dn] = attrs
 
 	if c.f.addErr != nil {
 		return c.f.addErr(dn)
@@ -78,13 +92,36 @@ func (c ldapFakeConn) Replace(dn, attr string, values []string) error {
 	return nil
 }
 
+func (c ldapFakeConn) Modify(dn string, mods []ldapMod) error {
+	if c.f.modifyErr != nil {
+		if err := c.f.modifyErr(dn); err != nil {
+			return err
+		}
+	}
+
+	for _, m := range mods {
+		op := "add"
+		if m.Op == ldapModReplace {
+			op = "replace"
+		}
+
+		c.f.mods = append(c.f.mods, dn+"|"+op+"|"+m.Attr+"|"+strings.Join(m.Values, ","))
+	}
+
+	return nil
+}
+
 func (c ldapFakeConn) SetPassword(userDN, _ string) error {
 	c.f.setPw = append(c.f.setPw, userDN)
 
 	return nil
 }
 
-func (c ldapFakeConn) Search(string, string, bool, []string) ([]ldapEntry, error) {
+func (c ldapFakeConn) Search(base, filter string, _ bool, _ []string) ([]ldapEntry, error) {
+	if c.f.searchFn != nil {
+		return c.f.searchFn(base, filter)
+	}
+
 	return c.f.search, nil
 }
 
@@ -306,15 +343,20 @@ func TestLdapStepInstallConfig_ExistingInstallOnlyWhenTreeMissing(t *testing.T) 
 }
 
 func TestLdapStepSchemaAndUpdateLdif(t *testing.T) {
-	e, fakes, _ := ldapTestEnv(t)
+	e, fakes, f := ldapTestEnv(t)
+	ldapPutSchemas(fakes)
 
 	schema := StepInstallLdapSchema()
 	require.True(t, schema.When(e))
 	assert.True(t, schema.Optional)
 	require.NoError(t, schema.Apply(e))
-	assert.Contains(t, ldapAllLines(fakes), "/opt/zextras/libexec/zmldapschema")
 
-	upd := StepZmldapupdateldif()
+	core, ok := fakes.FS.Data("/opt/zextras/data/ldap/config/cn=config/cn=schema/cn={0}core.ldif")
+	require.True(t, ok, "installed in-process, no zmldapschema")
+	assert.Contains(t, string(core), "dn: cn={0}core\n")
+	assert.NotContains(t, ldapAllLines(fakes), "zmldapschema")
+
+	upd := ldapStepUpdateLDIF(f.kit())
 	assert.False(t, upd.When(e), "new install")
 
 	e.Facts.NewInstall = false
@@ -331,8 +373,8 @@ func TestLdapStepSchemaAndUpdateLdif(t *testing.T) {
 	assert.False(t, done)
 
 	require.NoError(t, upd.Apply(e))
-	assert.Equal(t, "/opt/zextras/libexec/zmldapupdateldif", fakes.Exec.Lines()[len(fakes.Exec.Lines())-1],
-		"as root: no runuser wrapper")
+	assert.Contains(t, f.adds, "cn=zimbra_globalconfig,cn=zimbra", "the entries are added in-process")
+	assert.NotContains(t, ldapAllLines(fakes), "zmldapupdateldif")
 }
 
 func TestLdapPreStartWritesHashesAndLocalConfig(t *testing.T) {
@@ -545,7 +587,9 @@ func TestLdapSetPassword_Errors(t *testing.T) {
 func TestLdapStepConfigSetupLdap_NewMasterOrder(t *testing.T) {
 	e, fakes, f := ldapTestEnv(t)
 	e.Cfg.LDAP.ForceReplication = true
-	require.NoError(t, e.SetLC(map[string]string{ldapLCMasterURL: "ldap://" + ldapTestHost + ":389"}))
+	require.NoError(t, e.SetLC(map[string]string{
+		ldapLCMasterURL: "ldap://" + ldapTestHost + ":389", "zimbra_server_hostname": ldapTestHost,
+	}))
 
 	f.running = true
 	f.bindOK = func(dn, pw string) bool { return dn == ldapConfigDN && pw == ldapTestRoot }
@@ -565,11 +609,13 @@ func TestLdapStepConfigSetupLdap_NewMasterOrder(t *testing.T) {
 		"bind " + ldapDNReplica, "bind cn=config",
 		"bind " + ldapDNPostfix, "bind cn=config",
 		"bind " + ldapDNAmavis, "bind cn=config",
-		"bind " + ldapDNNginx, "bind cn=config"}, f.events)
-	assert.Len(t, f.adds, 6)
+		"bind " + ldapDNNginx, "bind cn=config",
+		"bind cn=config"}, f.events, "the last bind is the enabling of the provider")
+	assert.Len(t, f.adds, 10, "the LDIF entries, then the accesslog database and the overlays")
 	assert.Equal(t, []string{ldapDNReplica, ldapDNPostfix, ldapDNAmavis, ldapDNNginx}, f.setPw)
 
-	assert.Contains(t, ldapAllLines(fakes), "/opt/zextras/libexec/zmldapenablereplica")
+	assert.Contains(t, f.adds, "olcOverlay={1}accesslog,olcDatabase={3}mdb,cn=config")
+	assert.NotContains(t, ldapAllLines(fakes), "zmldapenablereplica")
 	assert.True(t, fakes.FS.Exists("/opt/zextras/.enable_replica"))
 	ldapAssertNoSecret(t, fakes)
 
@@ -622,16 +668,19 @@ func TestLdapStepConfigSetupLdap_ReplicaEnabled(t *testing.T) {
 	e.Cfg.LDAP.ReplicationType = bootstrap.ReplicationReplica
 	e.Cfg.Admin.Create = true
 	e.Cfg.Domain.Create = true
-	require.NoError(t, e.SetLC(map[string]string{ldapLCMasterURL: "ldap://master.example.com:389"}))
+	require.NoError(t, e.SetLC(map[string]string{
+		ldapLCMasterURL: "ldap://master.example.com:389", "zimbra_server_hostname": ldapTestHost,
+	}))
 
 	require.NoError(t, ldapStepConfigSetupLdap(f.kit()).Apply(e))
 
-	assert.Contains(t, ldapAllLines(fakes), "/opt/zextras/libexec/zmldapenablereplica")
-	assert.NotContains(t, ldapAllLines(fakes), "zmldapenable-mmr")
+	assert.Contains(t, f.mods, ldapDNMdbDB+"|add|olcUpdateRef|ldap://master.example.com:389",
+		"enabled in-process as a replica of the master")
+	assert.NotContains(t, ldapAllLines(fakes), "zmldapenable")
 	assert.True(t, fakes.FS.Exists("/opt/zextras/.enable_replica"))
 	assert.False(t, e.Cfg.Domain.Create)
 	assert.False(t, e.Cfg.Admin.Create, "no appserver: no admin either")
-	assert.Equal(t, []string{"stop", "start"}, f.events)
+	assert.Equal(t, []string{"bind uid=zimbra,cn=admins,cn=zimbra", "start", "bind cn=config", "stop", "start"}, f.events)
 
 	// the root password reached localconfig before the LDIF was applied
 	ldif, _ := fakes.FS.Data("/opt/zextras/data/ldap/config/cn=config/olcDatabase={0}config.ldif")
@@ -658,15 +707,17 @@ func TestLdapStepConfigSetupLdap_MMR(t *testing.T) {
 	e.Cfg.LDAP.Host = "master.example.com"
 	e.Cfg.LDAP.ReplicationType = bootstrap.ReplicationMMR
 	e.Cfg.LDAP.ServerID = 7
-	require.NoError(t, e.SetLC(map[string]string{ldapLCMasterURL: "ldap://master.example.com:389"}))
+	require.NoError(t, e.SetLC(map[string]string{
+		ldapLCMasterURL: "ldap://master.example.com:389", "zimbra_server_hostname": ldapTestHost,
+	}))
 
 	f.bindOK = func(dn, pw string) bool { return dn == ldapConfigDN }
 
 	require.NoError(t, ldapStepConfigSetupLdap(f.kit()).Apply(e))
 
-	lines := ldapAllLines(fakes)
-	assert.Contains(t, lines, "libexec/zmldapenable-mmr -s 7 -m ldap://master.example.com:389/")
-	assert.Contains(t, lines, "runuser -u zextras")
+	assert.Contains(t, f.mods, "cn=config|add|olcServerID|7", "zmldapenable-mmr -s 7, in-process")
+	assert.Contains(t, f.mods, "olcDatabase={3}mdb,cn=config|replace|olcMirrorMode|TRUE")
+	assert.NotContains(t, ldapAllLines(fakes), "zmldapenable-mmr")
 	assert.Equal(t, []string{ldapDNPostfix, ldapDNAmavis, ldapDNNginx}, f.setPw)
 
 	lc, err := e.LC()
@@ -681,12 +732,19 @@ func TestLdapStepConfigSetupLdap_ReplicaFailureDisablesDirectoryServer(t *testin
 	e.Cfg.LDAP.Host = "master.example.com"
 	e.Cfg.Admin.Create = true
 	e.Cfg.Domain.Create = true
-	fakes.Exec.OnPath("/opt/zextras/libexec/zmldapenablereplica", systest.Fail(1, "boom"))
+	require.NoError(t, e.SetLC(map[string]string{
+		ldapLCMasterURL: "ldap://master.example.com:389", "zimbra_server_hostname": ldapTestHost,
+	}))
+
+	f.modifyErr = func(string) error { return goldap.NewError(goldap.LDAPResultOther, errors.New("boom")) }
 
 	require.NoError(t, ldapStepConfigSetupLdap(f.kit()).Apply(e), "setup.pl carried on")
 
 	assert.True(t, e.Cfg.Domain.Create)
-	assert.Equal(t, []string{"stop"}, f.events)
+	assert.Equal(t, []string{"bind uid=zimbra,cn=admins,cn=zimbra", "start", "bind cn=config", "stop"}, f.events)
+	lc, err := e.LC()
+	require.NoError(t, err)
+	assert.Equal(t, "ldap://master.example.com:389", lc[ldapLCURL], "ldap_url is reset to the master")
 	assert.True(t, fakes.FS.Exists("/opt/zextras/.enable_replica"))
 
 	assert.Equal(t, []provCall{{
@@ -695,14 +753,14 @@ func TestLdapStepConfigSetupLdap_ReplicaFailureDisablesDirectoryServer(t *testin
 	}}, provTestLDAP().calls)
 }
 
-func TestLdapStepConfigSetupLdap_ExistingMasterRunsUpdateLdifAsRoot(t *testing.T) {
+func TestLdapStepConfigSetupLdap_ExistingMasterRunsUpdateLdif(t *testing.T) {
 	e, fakes, f := ldapTestEnv(t)
 	e.Facts.NewInstall = false
 
 	require.NoError(t, ldapStepConfigSetupLdap(f.kit()).Apply(e))
 
-	assert.Equal(t, []string{"/opt/zextras/libexec/zmldapupdateldif"}, fakes.Exec.Lines())
-	assert.Empty(t, f.events)
+	assert.Empty(t, fakes.Exec.Lines(), "zmldapupdateldif is not run, the update is in-process")
+	assert.Empty(t, f.events, "nothing starts unless ldap_is_master")
 }
 
 func TestLdapStepUpdatePasswords_NonDirectoryNode(t *testing.T) {

@@ -6,9 +6,9 @@ package setup
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/zextras/carbonio-configd/internal/bootstrap"
@@ -62,14 +62,15 @@ func StepInstallLdapConfig() Step {
 }
 
 // StepInstallLdapSchema is setup.pl installLdapSchema (L1328-1330, called at
-// L152): zmldapschema as zextras. Optional: setup.pl discarded its result.
+// L152): zmldapschema, done in-process. Optional: setup.pl discarded its
+// result.
 func StepInstallLdapSchema() Step {
 	return Step{
 		Title: "Install the LDAP schema",
 		When:  func(e *Env) bool { return e.Facts.IsInstalled(ldapPkgDirectory) },
 		// zmldapschema rebuilds the same schema files every time.
 		Apply: func(e *Env) error {
-			return e.Zextras(e.Paths.Path("libexec", "zmldapschema"))
+			return ldapToolOutput(e, func(out io.Writer) error { return ldapInstallSchema(e, out) })
 		},
 		Optional: true,
 	}
@@ -78,8 +79,11 @@ func StepInstallLdapSchema() Step {
 // StepZmldapupdateldif is the zmldapupdateldif call of the main flow (setup.pl
 // L194-197): on an existing install it brings the directory to the LDIF of the
 // installed version. The tool does nothing unless ldap_is_master is true,
-// which Done checks as the tool does. Optional: setup.pl ignored the result.
-func StepZmldapupdateldif() Step {
+// which Done checks as the tool does. The tool is done in-process. Optional:
+// setup.pl ignored the result.
+func StepZmldapupdateldif() Step { return ldapStepUpdateLDIF(ldapNativeKit()) }
+
+func ldapStepUpdateLDIF(k *ldapKit) Step {
 	return Step{
 		Title: "Update the LDAP directory",
 		When:  func(e *Env) bool { return !e.Facts.NewInstall },
@@ -88,10 +92,7 @@ func StepZmldapupdateldif() Step {
 
 			return !strings.EqualFold(v, "true"), err
 		},
-		Apply: func(e *Env) error {
-			// The tool checks that it runs as root.
-			return e.Root(e.Paths.Path("libexec", "zmldapupdateldif"))
-		},
+		Apply:    func(e *Env) error { return ldapUpdateLDIFStep(e, k) },
 		Optional: true,
 	}
 }
@@ -332,7 +333,8 @@ func ldapConfigNewMaster(e *Env, k *ldapKit) error {
 
 	if e.Cfg.LDAP.ForceReplication {
 		// setup.pl ignored the result and created the marker anyway.
-		if err := e.Root(e.Paths.Path("libexec", "zmldapenablereplica")); err != nil {
+		err := ldapToolOutput(e, func(out io.Writer) error { return ldapEnableReplica(e, k, out) })
+		if err != nil {
 			e.Log.Warn("zmldapenablereplica: %v", err)
 		}
 
@@ -348,7 +350,7 @@ func ldapConfigDirectory(e *Env, k *ldapKit) error {
 
 	// stale is the result setup.pl still holds, and tests, when the replica
 	// was enabled before this run.
-	stale, err := ldapApplyDirectoryLDIF(e, remote)
+	stale, err := ldapApplyDirectoryLDIF(e, k, remote)
 	if err != nil || !remote {
 		return err
 	}
@@ -359,7 +361,7 @@ func ldapConfigDirectory(e *Env, k *ldapKit) error {
 // ldapApplyDirectoryLDIF loads the LDIF of the directory (zmldapapplyldif on
 // a new install, zmldapupdateldif otherwise) and, on a node that follows
 // another master, writes the passwords to localconfig.
-func ldapApplyDirectoryLDIF(e *Env, remote bool) (stale, err error) {
+func ldapApplyDirectoryLDIF(e *Env, k *ldapKit, remote bool) (stale, err error) {
 	accts := []ldapAccount{ldapAcctRoot, ldapAcctAdmin, ldapAcctReplica}
 
 	if e.Facts.NewInstall {
@@ -376,7 +378,7 @@ func ldapApplyDirectoryLDIF(e *Env, remote bool) (stale, err error) {
 		return nil, nil
 	}
 
-	if stale = e.Root(e.Paths.Path("libexec", "zmldapupdateldif")); stale != nil {
+	if stale = ldapUpdateLDIFStep(e, k); stale != nil {
 		e.Log.Warn("zmldapupdateldif: %v", stale)
 	}
 
@@ -443,7 +445,7 @@ func ldapSetAppPassword(e *Env, k *ldapKit, a ldapAccount) error {
 // as a multi-master peer of it, and returns the result of the tool.
 func ldapEnableReplication(e *Env, k *ldapKit, mmr bool) error {
 	if !mmr {
-		return e.Root(e.Paths.Path("libexec", "zmldapenablereplica"))
+		return ldapToolOutput(e, func(out io.Writer) error { return ldapEnableReplica(e, k, out) })
 	}
 
 	master, err := e.LCValue(ldapLCMasterURL)
@@ -472,8 +474,14 @@ func ldapEnableReplication(e *Env, k *ldapKit, mmr bool) error {
 		return err
 	}
 
-	return e.Zextras(e.Paths.Path("libexec", "zmldapenable-mmr"),
-		"-s", strconv.Itoa(e.Cfg.LDAP.ServerID), "-m", master)
+	opts := ldapMMROptions{SID: e.Cfg.LDAP.ServerID, RID: 100, URI: master}
+
+	return ldapToolOutput(e, func(out io.Writer) error { return ldapEnableMMR(e, k, opts, out) })
+}
+
+// ldapUpdateLDIFStep is zmldapupdateldif, in-process.
+func ldapUpdateLDIFStep(e *Env, k *ldapKit) error {
+	return ldapToolOutput(e, func(out io.Writer) error { return ldapUpdateLDIF(e, k, out) })
 }
 
 // ldapReplicationFailed is the failure branch of configSetupLdap: the

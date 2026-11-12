@@ -51,6 +51,9 @@ type Env struct {
 	// provOpen replaces provOpenLDAP for this Env (tests): a per-Env seam,
 	// so parallel tests do not race on a package variable.
 	provOpen func(*Env) (provDirectory, error)
+	// kit replaces the native LDAP kit of the LDAP tools for this Env
+	// (tests): a per-Env seam, so parallel tests do not race on a variable.
+	kit *ldapKit
 	// perlLib caches the zextras PERL5LIB.
 	perlLib string
 	// lc caches the effective localconfig until the next write.

@@ -71,7 +71,8 @@ func TestSetupPlCommandsAreListedAndValidated(t *testing.T) {
 	status, out, _ := exec(t, "-h")
 	require.Equal(t, 0, status)
 
-	for _, c := range []string{"gal-sync-account", "ssh-keygen", "update-authkeys", "syslog", "dhparam", "proxyconfig", "ldap-passwd"} {
+	for _, c := range []string{"gal-sync-account", "ssh-keygen", "update-authkeys", "syslog", "dhparam", "proxyconfig", "ldap-passwd",
+		"ldap-schema", "ldap-update-ldif", "ldap-enable-replica", "ldap-enable-mmr", "iptool", "iniutil"} {
 		assert.Contains(t, out, c)
 	}
 
@@ -125,6 +126,9 @@ func TestSetupPlCommandsRefuseNonRoot(t *testing.T) {
 		{"dhparam", "get"},
 		{"ldap-passwd", "-p", "pw"},
 		{"proxyconfig", "-m", "-e", "-H", "h"},
+		{"ldap-schema"},
+		{"ldap-enable-mmr", "-m", "ldap://h:389/"},
+		{"iptool", "-d"},
 	} {
 		status, out, errb := exec(t, args...)
 
@@ -199,6 +203,10 @@ func TestLegacyArgs_ToolCommandsKeepTheirOptions(t *testing.T) {
 		legacyArgs([]string{"proxyconfig", "-w", "-d", "-o", "-c", "-H", "h"}))
 	assert.Equal(t, []string{"ldap-passwd", "-c", "-l", "-d"}, legacyArgs([]string{"ldap-passwd", "-c", "-l", "-d"}),
 		"-c is the replica option of zmldappasswd")
+	assert.Equal(t, []string{"iptool", "-d", "-m", "ipv6"}, legacyArgs([]string{"iptool", "-d", "-m", "ipv6"}),
+		"-d is the dry run of zmiptool")
+	assert.Equal(t, []string{"ldap-enable-mmr", "-s", "2", "-m", "ldap://h:389/"},
+		legacyArgs([]string{"ldap-enable-mmr", "-s", "2", "-m", "ldap://h:389/"}))
 	assert.Equal(t, []string{"dhparam", "set", "-d", "-new"}, legacyArgs([]string{"dhparam", "set", "-d", "-new"}))
 	assert.Equal(t, []string{"--legacy-config", "f", "--non-interactive"}, legacyArgs([]string{"-d", "-c", "f"}),
 		"the bootstrap's own mapping stays")

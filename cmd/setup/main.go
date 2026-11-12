@@ -73,7 +73,8 @@ func run(args []string, env sys.System, stdin io.Reader, stdout, stderr io.Write
 
 // toolCommands are the commands that replace scripts and parse their own
 // arguments (proxyconfig has a -c and a -d of its own).
-var toolCommands = []string{"ssh-keygen", "update-authkeys", "syslog", "dhparam", "proxyconfig", "ldap-passwd"}
+var toolCommands = []string{"ssh-keygen", "update-authkeys", "syslog", "dhparam", "proxyconfig", "ldap-passwd",
+	"ldap-schema", "ldap-update-ldif", "ldap-enable-replica", "ldap-enable-mmr", "iptool", "iniutil"}
 
 // legacyArgs maps the options of the former shell script: "-c FILE" is
 // "--legacy-config FILE --non-interactive", and "-d" (debug) is accepted and
@@ -167,7 +168,21 @@ func newRootCmd(env sys.System, stdin io.Reader, stdout, stderr io.Writer, statu
 		newToolCmd("syslog", "Set up rsyslog for Carbonio logging, local or remote (zmsyslogsetup)",
 			bootstrapcmd.RunSyslog, tio),
 		newToolCmd("proxyconfig", "Configure the reverse proxy attributes, the options of libexec/zmproxyconfig",
-			bootstrapcmd.RunProxyConfig, tio))
+			bootstrapcmd.RunProxyConfig, tio),
+		newToolCmd("ldap-schema", "Install the slapd schemas (zmldapschema)",
+			bootstrapcmd.RunLDAPSchema, tio),
+		newToolCmd("ldap-update-ldif", "Bring the LDAP directory to the LDIF of the installed version (zmldapupdateldif)",
+			bootstrapcmd.RunLDAPUpdateLDIF, tio),
+		newToolCmd("ldap-enable-replica", "Enable replication: the provider on the master, a replica elsewhere "+
+			"(zmldapenablereplica)", bootstrapcmd.RunLDAPEnableReplica, tio),
+		newToolCmd("ldap-enable-mmr [-r RID] [-s SID] -m MMRURI",
+			"Enable multi-master replication with another master (zmldapenable-mmr)",
+			bootstrapcmd.RunLDAPEnableMMR, tio),
+		newToolCmd("iptool [-d [-m ipmode]]",
+			"Apply zimbraIPMode to the Java options and the MySQL bind address (zmiptool)",
+			bootstrapcmd.RunIPTool, tio),
+		newToolCmd("iniutil [options] inifile", "Read or edit one ini file (zminiutil)",
+			bootstrapcmd.RunIniUtil, tio))
 
 	return root
 }
