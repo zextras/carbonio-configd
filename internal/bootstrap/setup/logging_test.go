@@ -140,3 +140,23 @@ func TestCertZmcertmgr_VerboseExplainsTheExpectedLookupFailures(t *testing.T) {
 	assert.Contains(t, file.String(), "Retrieving CA private key from LDAP... failed")
 	assert.Contains(t, file.String(), "are expected when nothing is stored yet")
 }
+
+// An Optional step that fails is a warning: the log must not also call it a
+// failure.
+func TestRun_OptionalStepFailureIsLoggedOnceAsAWarning(t *testing.T) {
+	e, _, _ := testEnv(t)
+
+	var file bytes.Buffer
+
+	e.Log = NewLog(nil, &file)
+	steps := []Step{{Title: "Create domain and accounts", Optional: true,
+		Apply: func(*Env) error { return errors.New("DOMAIN_EXISTS") }}}
+
+	results, err := Run(e, steps, false)
+	require.NoError(t, err)
+	assert.Equal(t, Warned, results[0].Outcome)
+	assert.Equal(t, []string{
+		"Create domain and accounts: running",
+		"Create domain and accounts: warning after 0s: DOMAIN_EXISTS",
+	}, logLines(&file))
+}
