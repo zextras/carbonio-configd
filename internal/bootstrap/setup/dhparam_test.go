@@ -246,7 +246,8 @@ func TestRunDHParam_Get(t *testing.T) {
 
 		r := dhExec(t, e, "", "get")
 
-		assert.Equal(t, dhTestRun{0, string(ffdhe2048), ""}, r)
+		assert.Equal(t, dhTestRun{0, string(ffdhe2048), dhCheckOK + "\n"}, r,
+			"openssl said the parameters were ok on stderr, for every check")
 	})
 
 	t.Run("writes them to a file and says so", func(t *testing.T) {
@@ -255,7 +256,7 @@ func TestRunDHParam_Get(t *testing.T) {
 
 		r := dhExec(t, e, "", "get", "-out", "/tmp/dh.pem")
 
-		assert.Equal(t, dhTestRun{0, "zmdhparam: writing params to '/tmp/dh.pem'\n", ""}, r)
+		assert.Equal(t, dhTestRun{0, "zmdhparam: writing params to '/tmp/dh.pem'\n", dhCheckOK + "\n"}, r)
 
 		data, ok := fakes.FS.Data("/tmp/dh.pem")
 		require.True(t, ok)
@@ -288,21 +289,22 @@ func TestRunDHParam_Get(t *testing.T) {
 		e, _, _ := testEnv(t)
 		dhGlobalConfig(t, string(ffdhe2048), nil)
 
-		assert.Equal(t, dhTestRun{0, string(ffdhe2048), ""}, dhExec(t, e, "", "get", "-out", "-"))
+		assert.Equal(t, dhTestRun{0, string(ffdhe2048), dhCheckOK + "\n"}, dhExec(t, e, "", "get", "-out", "-"))
 	})
 
 	t.Run("checks a file and prints it", func(t *testing.T) {
 		e, fakes, _ := testEnv(t)
 		fakes.FS.Put("/tmp/in.pem", []byte("x\n"+string(ffdhe2048)), 0o644)
 
-		assert.Equal(t, dhTestRun{0, string(ffdhe2048), ""}, dhExec(t, e, "", "get", "-in", "/tmp/in.pem"))
+		assert.Equal(t, dhTestRun{0, string(ffdhe2048), dhCheckOK + "\n"}, dhExec(t, e, "", "get", "-in", "/tmp/in.pem"))
 	})
 
-	t.Run("copies a file to another, silently", func(t *testing.T) {
+	t.Run("copies a file to another, saying only that the check passed", func(t *testing.T) {
 		e, fakes, _ := testEnv(t)
 		fakes.FS.Put("/tmp/in.pem", ffdhe2048, 0o644)
 
-		assert.Equal(t, dhTestRun{0, "", ""}, dhExec(t, e, "", "get", "-in", "/tmp/in.pem", "-out", "/tmp/out.pem"))
+		assert.Equal(t, dhTestRun{0, "", dhCheckOK + "\n"},
+			dhExec(t, e, "", "get", "-in", "/tmp/in.pem", "-out", "/tmp/out.pem"))
 
 		data, _ := fakes.FS.Data("/tmp/out.pem")
 		assert.Equal(t, string(ffdhe2048), string(data))
@@ -311,7 +313,8 @@ func TestRunDHParam_Get(t *testing.T) {
 	t.Run("reads stdin", func(t *testing.T) {
 		e, _, _ := testEnv(t)
 
-		assert.Equal(t, dhTestRun{0, string(ffdhe2048), ""}, dhExec(t, e, string(ffdhe2048), "get", "-in", "-"))
+		assert.Equal(t, dhTestRun{0, string(ffdhe2048), dhCheckOK + "\n"},
+			dhExec(t, e, string(ffdhe2048), "get", "-in", "-"))
 	})
 
 	for _, tc := range []struct {
@@ -329,8 +332,6 @@ func TestRunDHParam_Get(t *testing.T) {
 			"zmdhparam: ERROR: check zimbraSSLDHParam in LDAP failed: no PEM \"DH PARAMETERS\" block\n"},
 		{"empty stdin", "", nil, "", []string{"get", "-in", "-"},
 			"zmdhparam: ERROR: no DH parameters in '-'\n"},
-		{"missing file", "", nil, "", []string{"get", "-in", "/nope"},
-			"zmdhparam: ERROR: In '/nope': unable to read file\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e, _, _ := testEnv(t)
@@ -384,8 +385,22 @@ func TestRunDHParam_Set(t *testing.T) {
 			r := dhExec(t, e, string(want), args...)
 
 			assert.Equal(t, 0, r.code, r.stderr)
+			assert.Equal(t, dhCheckOK+"\n", r.stderr, "a file is checked, and openssl said so")
 			assert.Equal(t, []string{string(want)}, provTestLDAP().values(global, certDHParamAttr))
 		}
+	})
+
+	t.Run("a group made here, and -debug, are not announced as checked", func(t *testing.T) {
+		e, fakes, _ := testEnv(t)
+		want, _ := dhGroupPEM(2048)
+		fakes.FS.Put("/tmp/in.pem", want, 0o644)
+
+		r := dhExec(t, e, "", "set", "-new", "2048")
+		assert.NotContains(t, r.stderr, dhCheckOK)
+
+		r = dhExec(t, e, "", "set", "-in", "/tmp/in.pem", "-debug")
+		assert.Equal(t, 0, r.code)
+		assert.NotContains(t, r.stderr, dhCheckOK, "the script ran -text instead of -check")
 	})
 
 	t.Run("-out writes a file and leaves LDAP alone", func(t *testing.T) {
@@ -465,12 +480,24 @@ func TestRunDHParam_RefusedCommandLines(t *testing.T) {
 		{"man", []string{"get", "-man"}, 0, dhSynopsis + dhNotes, ""},
 		{"unknown option", []string{"get", "-x"}, 1, dhSynopsis, "Unknown option: x\n"},
 		{"neither -new nor -in", []string{"set"}, 1, "zmdhparam: -new or -in must be specified\n" + dhSynopsis, ""},
-		{"too small", []string{"set", "-new", "1024"}, 1, dhSynopsis, "zmdhparam: ERROR: numbits '1024' must be >= 2048\n"},
+		// The values the script refused while it built its object: exit status
+		// 2, and the error before the usage, both on stderr.
 		{
-			"no group", []string{"set", "-new", "5000"}, 1, dhSynopsis,
-			"zmdhparam: ERROR: numbits '5000' is not the size of an RFC 7919 group (2048, 3072, 4096)\n",
+			"too small", []string{"set", "-new", "1024"}, 2, "",
+			"zmdhparam: ERROR: numbits '1024' must be >= 2048\n" + dhSynopsis,
 		},
-		{"unreadable -in", []string{"set", "-in", "/nope"}, 1, dhSynopsis, "zmdhparam: ERROR: In '/nope': unable to read file\n"},
+		{
+			"no group", []string{"set", "-new", "5000"}, 2, "",
+			"zmdhparam: ERROR: numbits '5000' is not the size of an RFC 7919 group (2048, 3072, 4096)\n" + dhSynopsis,
+		},
+		{
+			"unreadable -in", []string{"set", "-in", "/nope"}, 2, "",
+			"zmdhparam: ERROR: In '/nope': unable to read file\n" + dhSynopsis,
+		},
+		{
+			"unreadable -in of get", []string{"get", "-in", "/nonexistent"}, 2, "",
+			"zmdhparam: ERROR: In '/nonexistent': unable to read file\n" + dhSynopsis,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e, _, _ := testEnv(t)

@@ -107,11 +107,11 @@ func (o *ldapPasswdOptions) usageNeeded(isMaster bool) bool {
 	return false
 }
 
-// ldapPasswdUsage is the text zmldappasswd printed for -h and for refused
+// LDAPPasswdUsage is the text zmldappasswd printed for -h and for refused
 // options; program is its path. The script wanted the password as an
 // argument; without it, it is read from stdin, so that it need not be on a
 // command line.
-func ldapPasswdUsage(program string) string {
+func LDAPPasswdUsage(program string) string {
 	return "Usage: " + program + " [-h] [-r] [-p] [[-c]-l] [newpassword]\n" +
 		"\t-h: display this help message\n" +
 		"\t-a: change ldap_amavis_password\n" +
@@ -167,7 +167,7 @@ func runLDAPPasswd(e *Env, k *ldapKit, args []string, stdin io.Reader, stdout, s
 	}
 
 	usage := func() int {
-		_, _ = io.WriteString(stdout, ldapPasswdUsage(e.Paths.Path("bin", "zmldappasswd")))
+		_, _ = io.WriteString(stdout, LDAPPasswdUsage(e.Paths.Path("bin", "zmldappasswd")))
 
 		return 1
 	}

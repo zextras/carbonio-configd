@@ -24,6 +24,15 @@ const dhPEMType = "DH PARAMETERS"
 // dhProg is the program name the messages of zmdhparam carry.
 const dhProg = "zmdhparam"
 
+// dhExitBadOption is the exit status of zmdhparam for a value of an option
+// that it refuses after the command line parsed.
+const dhExitBadOption = 2
+
+// dhCheckOK is what "openssl dhparam -check" printed, on stderr, for
+// parameters that passed; zmdhparam ran it for every "get" and for "set -in"
+// (not with -debug, which runs -text instead) and let it through.
+const dhCheckOK = "DH parameters appear to be ok."
+
 // dhGroupPrimes are the groups "set -new" can give, by size in bits: the
 // RFC 7919 finite field groups, whose generator is 2.
 var dhGroupPrimes = map[int]string{2048: dhPrime2048, 3072: dhPrime3072, 4096: dhPrime4096}
@@ -161,7 +170,8 @@ type dhRun struct {
 // -in, or takes the RFC 7919 group of -new bits, and stores them in
 // zimbraSSLDHParam (or writes -out). It returns the exit status, which is the
 // script's: 0 when the work was done, 1 otherwise, the usage text and the
-// messages on stdout.
+// messages on stdout; 2 for a value of an option that is refused (-new too
+// small, an -in that cannot be read), whose error and usage are on stderr.
 func RunDHParam(e *Env, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	p := parseDHParamArgs(args, stderr)
 	r := &dhRun{e: e, o: &p.opts, stdin: stdin, stdout: stdout, stderr: stderr}
@@ -192,13 +202,16 @@ func RunDHParam(e *Env, args []string, stdin io.Reader, stdout, stderr io.Writer
 	}
 
 	if msgs := r.checkOptions(); len(msgs) > 0 {
+		// The script found these while it built its object and had Pod::Usage
+		// print the usage with exit status 2, which is for stderr: the error
+		// first, then the usage.
 		for _, m := range msgs {
 			_, _ = fmt.Fprintf(stderr, "%s: ERROR: %s\n", dhProg, m)
 		}
 
-		_, _ = io.WriteString(stdout, dhSynopsis)
+		_, _ = io.WriteString(stderr, dhSynopsis)
 
-		return 1
+		return dhExitBadOption
 	}
 
 	var err error
@@ -293,6 +306,13 @@ func (r *dhRun) say(format string, args ...any) {
 	_, _ = fmt.Fprintf(r.stdout, "%s: %s\n", dhProg, fmt.Sprintf(format, args...))
 }
 
+// checked tells on stderr that the parameters passed the check, as openssl did.
+func (r *dhRun) checked() {
+	if r.o.Debug == 0 {
+		_, _ = fmt.Fprintln(r.stderr, dhCheckOK)
+	}
+}
+
 // debug prints a message on stderr when -debug is on.
 func (r *dhRun) debug(format string, args ...any) {
 	if r.o.Debug > 0 {
@@ -330,6 +350,8 @@ func (r *dhRun) get() error {
 	if err != nil {
 		return fmt.Errorf("check %s in %s failed: %w", desc, src, err)
 	}
+
+	r.checked()
 
 	// The parameters of LDAP are announced as written; those of a file that
 	// are copied are not (the script said nothing then).
@@ -452,6 +474,11 @@ func (r *dhRun) set() error {
 	pemData, err := dhCheckPEM(data)
 	if err != nil {
 		return fmt.Errorf("check %s from %s failed: %w", desc, src, err)
+	}
+
+	// The script checked the parameters of a file, not the group it made.
+	if o.HasIn {
+		r.checked()
 	}
 
 	if o.HasOut {

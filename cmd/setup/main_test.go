@@ -112,6 +112,62 @@ func TestSetupPlCommandsAreListedAndValidated(t *testing.T) {
 	}
 }
 
+// A request for help prints the usage and runs nothing: not the schema
+// installation, not the refusal of the user that is neither root nor zextras.
+func TestToolCommandsAnswerHelpWithoutRunningTheAction(t *testing.T) {
+	for name, spellings := range toolHelp {
+		for _, spelling := range spellings {
+			fake := systest.New()
+
+			var out, errb strings.Builder
+
+			status := run([]string{name, spelling}, fake.System(), strings.NewReader(""), &out, &errb)
+
+			assert.Equal(t, 0, status, "%s %s", name, spelling)
+			assert.Contains(t, out.String(), "Usage:", "%s %s", name, spelling)
+			assert.Empty(t, errb.String(), "%s %s", name, spelling)
+			assert.Empty(t, fake.Exec.Calls(), "%s %s ran a command", name, spelling)
+			assert.Empty(t, fake.FS.Paths(), "%s %s touched the filesystem", name, spelling)
+		}
+	}
+}
+
+func TestLDAPSchemaHelpPrintsTheUseAndTheDescription(t *testing.T) {
+	status, out, _ := exec(t, "ldap-schema", "--help")
+
+	require.Equal(t, 0, status)
+	assert.Equal(t, "Usage: carbonio-bootstrap ldap-schema\n\nInstall the slapd schemas (zmldapschema)\n", out)
+}
+
+// The tools that have the usage of their script print that one.
+func TestToolHelpPrintsTheUsageOfTheScript(t *testing.T) {
+	_, out, _ := exec(t, "ldap-passwd", "--help")
+	assert.Contains(t, out, "-h: display this help message")
+	assert.Contains(t, out, "zmldappasswd [-h]")
+
+	_, out, _ = exec(t, "proxyconfig", "-help")
+	assert.Contains(t, out, "-H: Hostname of server on which enable/disable proxy functionality.")
+
+	_, out, _ = exec(t, "rc", "-h")
+	assert.Equal(t, "Usage: zmrc <hostname> [command words...]\n", out)
+}
+
+// Only the first argument asks for help, and the tools whose own parsing
+// answers -h keep doing it.
+func TestToolHelpIsOnlyTheFirstArgumentAndSkipsTheToolsThatParseIt(t *testing.T) {
+	status, out, _ := exec(t, "ldap-passwd", "-h")
+	assert.Equal(t, 1, status, "-h stays the usage of zmldappasswd, which refuses")
+	assert.NotContains(t, out, "carbonio-bootstrap ldap-passwd")
+
+	status, out, _ = exec(t, "ssh-keygen", "rsa", "--help")
+	assert.Equal(t, 1, status, "an argument after the first is the script's own")
+	assert.Empty(t, out)
+
+	status, out, _ = exec(t, "random-password", "--help")
+	assert.Equal(t, 1, status, "random-password prints its own usage")
+	assert.Contains(t, out, "RandomPassword [-l]")
+}
+
 func TestSetupPlCommandsRefuseNonRoot(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("the refusal is for non-root users")
@@ -127,7 +183,6 @@ func TestSetupPlCommandsRefuseNonRoot(t *testing.T) {
 		{"dhparam", "get"},
 		{"ldap-passwd", "-p", "pw"},
 		{"proxyconfig", "-m", "-e", "-H", "h"},
-		{"ldap-schema"},
 		{"ldap-enable-mmr", "-m", "ldap://h:389/"},
 		{"iptool", "-d"},
 		{"certmgr", "verifycrt", "self"},
@@ -141,6 +196,15 @@ func TestSetupPlCommandsRefuseNonRoot(t *testing.T) {
 		assert.Empty(t, out, args)
 		assert.Contains(t, errb, "must run as root", args)
 	}
+}
+
+// zmldapschema was for zextras only and said so with echo, on stdout.
+func TestLDAPSchemaRefusesTheOthers(t *testing.T) {
+	status, out, errb := exec(t, "ldap-schema")
+
+	assert.Equal(t, 1, status)
+	assert.Equal(t, "Error: must be run as zextras user\n", out)
+	assert.Empty(t, errb)
 }
 
 func TestConfigNonInteractiveFailsOnMissingKeys(t *testing.T) {

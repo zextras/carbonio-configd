@@ -111,12 +111,13 @@ const dhparamInstall = "install"
 
 // RunDHParam executes "setup dhparam". "install" is the step of setup.pl:
 // conf/dhparam.pem.crb with the RFC 7919 ffdhe2048 group, recorded in
-// zimbraSSLDHParam. Without arguments it does the same, because setup.pl of
-// carbonio-core calls it so and the two packages ship independently. Any other
-// command line is zmdhparam ("get" and "set", see setup.RunDHParam), whose exit
-// status and output it keeps; stdin feeds "-in -".
+// zimbraSSLDHParam; setup.pl of carbonio-core calls it so. Any other command
+// line, none included, is zmdhparam ("get" and "set", see setup.RunDHParam),
+// whose exit status and output it keeps: without a command it asks for one, as
+// the script did, since bin/zmdhparam passes its arguments through; stdin feeds
+// "-in -".
 func RunDHParam(ctx context.Context, env sys.System, stdin io.Reader, stdout, stderr io.Writer, args []string) int {
-	if len(args) == 0 || (len(args) == 1 && args[0] == dhparamInstall) {
+	if len(args) == 1 && args[0] == dhparamInstall {
 		return runTool(ctx, env, stdout, stderr, "dhparam", installDHParam)
 	}
 
@@ -229,9 +230,16 @@ func RunProxyConfig(ctx context.Context, env sys.System, stdout, stderr io.Write
 }
 
 // RunLDAPSchema executes "setup ldap-schema": zmldapschema, which installs the
-// slapd schemas (see setup.RunLDAPSchema). The script ran as zextras; it runs
-// as root or zextras here.
+// slapd schemas (see setup.RunLDAPSchema). Like the script it is for zextras
+// only: anybody else gets "Error: must be run as zextras user" on stdout and
+// exit status 1.
 func RunLDAPSchema(ctx context.Context, env sys.System, stdout, stderr io.Writer, args []string) int {
+	if geteuid() != zextrasUID() {
+		_, _ = fmt.Fprintf(stdout, "Error: must be run as %s user\n", config.ZextrasUser)
+
+		return 1
+	}
+
 	e, ok := toolEnv(ctx, env, stdout, stderr, "ldap-schema")
 	if !ok {
 		return 1
@@ -359,6 +367,25 @@ func RunServerIPs(ctx context.Context, env sys.System, stdout, stderr io.Writer,
 // script checked no user, and neither does this.
 func RunIniUtil(_ context.Context, env sys.System, stdout, stderr io.Writer, args []string) int {
 	return runIniUtil(env.FS, args, stdout, stderr)
+}
+
+// ToolUsage is the usage text of the script that the tool command replaces, for
+// the tools that have one; "" for the others.
+func ToolUsage(name string) string {
+	paths := setup.DefaultPaths()
+
+	switch name {
+	case "ldap-passwd":
+		return setup.LDAPPasswdUsage(paths.Path("bin", "zmldappasswd"))
+	case "proxyconfig":
+		return setup.ProxyConfigUsage(paths.Path("libexec", "zmproxyconfig"))
+	case "rc":
+		return setup.RCUsage
+	case "rcd":
+		return setup.RCDUsage
+	default:
+		return ""
+	}
 }
 
 // rootToolEnv is toolEnv for a script that refused any user but root, with the

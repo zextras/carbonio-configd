@@ -11,7 +11,10 @@
 package provision
 
 import (
+	"errors"
 	"fmt"
+
+	goldap "github.com/go-ldap/ldap/v3"
 )
 
 // The error codes of the Java service exceptions the commands raise.
@@ -54,6 +57,27 @@ func fail(code, format string, args ...any) *Error {
 
 func failWith(err error, format string, args ...any) *Error {
 	return &Error{Code: CodeFailure, Msg: fmt.Sprintf(format, args...), Err: err}
+}
+
+// modifyFailed is the exception of LdapProvisioning.modifyLdapAttrs for a
+// modification the directory refused. LdapException.mapToLdapException turns
+// "undefined attribute type" into the invalid attr name exception and
+// "constraint violation" or "invalid attribute syntax" into the invalid attr
+// value one, and modifyLdapAttrs prefixes their message with its own; any
+// other failure is service.FAILURE.
+func modifyFailed(err error, dn string) *Error {
+	if ldapErr, ok := errors.AsType[*goldap.Error](err); ok {
+		switch ldapErr.ResultCode {
+		case goldap.LDAPResultUndefinedAttributeType:
+			return fail(CodeInvalidAttrName,
+				"invalid attr name: invalid attr name - unable to modify attributes: %v", ldapErr.Err)
+		case goldap.LDAPResultConstraintViolation, goldap.LDAPResultInvalidAttributeSyntax:
+			return fail(CodeInvalidAttrValue,
+				"invalid attr value: invalid attr value - unable to modify attributes: %v", ldapErr.Err)
+		}
+	}
+
+	return failWith(err, "unable to modify %s", dn)
 }
 
 // invalidRequest is service.INVALID_REQUEST.

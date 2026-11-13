@@ -279,8 +279,8 @@ func (d *iniDie) status() int {
 
 // iniApply runs ed on file. get, isset and list print to out and return their
 // exit status; the other operations rewrite the file after saving it as
-// file+backup (".bak" when none is given). A write keeps the mode and the
-// owner of the file.
+// file+backup (".bak" when none is given). A write keeps the mode of the file
+// and its owner, when the caller may give the file to it (see iniWrite).
 func iniApply(fsys sys.FS, file string, ed *iniEdit, out, dbg io.Writer) (status int, err error) {
 	data, err := fsys.ReadFile(file)
 	if err != nil {
@@ -335,14 +335,19 @@ func iniApply(fsys sys.FS, file string, ed *iniEdit, out, dbg io.Writer) (status
 	return 0, nil
 }
 
-// iniWrite writes name atomically with the mode and the owner of info.
+// iniWrite writes name atomically with the mode of info and, when the caller
+// may give it away, its owner. The script renamed a new file of the caller's
+// over the original, so a caller who may not (not root, the owner being
+// someone else) leaves the file owned by itself, as it did, rather than failing.
 func iniWrite(fsys sys.FS, name string, data []byte, info fs.FileInfo) error {
 	if err := fsys.WriteFileAtomic(name, data, info.Mode().Perm()); err != nil {
 		return err
 	}
 
 	if st, ok := info.Sys().(*syscall.Stat_t); ok {
-		return fsys.Chown(name, int(st.Uid), int(st.Gid))
+		if err := fsys.Chown(name, int(st.Uid), int(st.Gid)); err != nil && !errors.Is(err, syscall.EPERM) {
+			return err
+		}
 	}
 
 	return nil

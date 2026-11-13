@@ -599,7 +599,13 @@ func isConnectionError(err error) bool {
 }
 
 // isLDAPErrorRetryable determines if an LDAP error should be retried.
-// Permanent errors like "No Such Object" should not be retried.
+//
+// Only the failures of the server or of the transport are: the server is down,
+// busy, unavailable or too slow, or the network failed. Every other result
+// code is the server's answer to the request itself (an attribute type that
+// is undefined, an entry that is not there, a value its syntax or its rules
+// refuse, a bind that is refused, a request the server will not perform), and
+// asking again gets the same answer after the backoff.
 func isLDAPErrorRetryable(err error) bool {
 	if err == nil {
 		return false
@@ -608,43 +614,11 @@ func isLDAPErrorRetryable(err error) bool {
 	ldapErr := &ldap.Error{}
 	if errors.As(err, &ldapErr) {
 		switch ldapErr.ResultCode {
-		case ldap.LDAPResultNoSuchObject:
-			// Object doesn't exist - don't retry
-			return false
-		case ldap.LDAPResultInvalidDNSyntax, ldap.LDAPResultInvalidCredentials:
-			// Bad DN syntax or bad credentials - don't retry
-			return false
-		case ldap.LDAPResultInsufficientAccessRights:
-			// Permission denied - don't retry
-			return false
-		case ldap.LDAPResultObjectClassViolation:
-			// Schema violation - don't retry
-			return false
-		case ldap.LDAPResultEntryAlreadyExists, ldap.LDAPResultConstraintViolation,
-			ldap.LDAPResultAttributeOrValueExists, ldap.LDAPResultNoSuchAttribute:
-			// The entry to add is there already, the server's rules refuse the
-			// value (a password its policy rejects), or the modification
-			// contradicts the entry's state (ModifyValues treats the last two as
-			// converged): repeating the request cannot change that
-			return false
-		case ldap.LDAPResultServerDown:
-			// Server down - retry
-			return true
-		case ldap.LDAPResultTimeout:
-			// Timeout - retry
-			return true
-		case ldap.LDAPResultBusy:
-			// Server busy - retry
-			return true
-		case ldap.LDAPResultUnavailable:
-			// Server unavailable - retry
-			return true
-		case ldap.LDAPResultUnwillingToPerform:
-			// Server unwilling - retry
+		case ldap.LDAPResultServerDown, ldap.LDAPResultTimeout, ldap.LDAPResultBusy,
+			ldap.LDAPResultUnavailable, ldap.ErrorNetwork:
 			return true
 		default:
-			// Unknown error - retry to be safe
-			return true
+			return false
 		}
 	}
 

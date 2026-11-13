@@ -136,9 +136,39 @@ func TestIsLDAPErrorRetryable(t *testing.T) {
 			expected: true,
 		},
 		{
-			name:     "unwilling to perform - retryable",
+			name:     "unwilling to perform - the answer to the request, not retryable",
 			err:      ldap.NewError(ldap.LDAPResultUnwillingToPerform, errors.New("unwilling")),
+			expected: false,
+		},
+		{
+			name:     "transport error of the library - retryable",
+			err:      ldap.NewError(ldap.ErrorNetwork, errors.New("connection reset")),
 			expected: true,
+		},
+		{
+			name:     "undefined attribute type - not retryable",
+			err:      ldap.NewError(ldap.LDAPResultUndefinedAttributeType, errors.New("zimbraNoSuchAttr: attribute type undefined")),
+			expected: false,
+		},
+		{
+			name:     "invalid attribute syntax - not retryable",
+			err:      ldap.NewError(ldap.LDAPResultInvalidAttributeSyntax, errors.New("bad syntax")),
+			expected: false,
+		},
+		{
+			name:     "naming violation - not retryable",
+			err:      ldap.NewError(ldap.LDAPResultNamingViolation, errors.New("naming")),
+			expected: false,
+		},
+		{
+			name:     "not allowed on non-leaf - not retryable",
+			err:      ldap.NewError(ldap.LDAPResultNotAllowedOnNonLeaf, errors.New("has children")),
+			expected: false,
+		},
+		{
+			name:     "other result code - not retryable",
+			err:      ldap.NewError(ldap.LDAPResultOther, errors.New("other")),
+			expected: false,
 		},
 		{
 			name:     "network error - retryable",

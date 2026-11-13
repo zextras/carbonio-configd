@@ -534,7 +534,7 @@ statuses of their scripts instead.
 | `setup rc <host> [command words...]` | `zmrc` | root, zextras | Runs a `zmrcd` command on another server over SSH; see [`setup rc`](#setup-rc). |
 | `setup rcd` | `zmrcd` | root, zextras | The receiving side of `zmrc`, the forced command of the SSH key: reads one command line on stdin and runs it if it is in a closed table; see [`setup rcd`](#setup-rcd). |
 | `setup syslog` | `zmsyslogsetup` | root | Sets up rsyslog as the "Set up syslog.conf" step does. |
-| `setup dhparam install` | `openssl dhparam` in setup.pl | root, zextras | Installs `conf/dhparam.pem.crb` (ffdhe2048) unless present and sets `zimbraSSLDHParam`. Plain `setup dhparam` does the same, kept for setup.pl; use `install`. |
+| `setup dhparam install` | `openssl dhparam` in setup.pl | root, zextras | Installs `conf/dhparam.pem.crb` (ffdhe2048) unless present and sets `zimbraSSLDHParam`. `install` must be given: plain `setup dhparam` is `zmdhparam` without a command and asks for one (exit status `1`). |
 | `setup dhparam [get\|set options]` | `zmdhparam` | root, zextras | Reads or stores the DH parameters of `zimbraSSLDHParam`; see [`setup dhparam get` and `set`](#setup-dhparam-get-and-set). |
 | `setup ldap-passwd [options] [password]` | `zmldappasswd` | root, zextras | Changes an LDAP password in localconfig, the directory and `conf/carbonio.ldif`; the password is read from stdin when it is not an argument. See [`setup ldap-passwd`](#setup-ldap-passwd). |
 | `setup proxyconfig [options]` | `zmproxyconfig` (Perl) | root, zextras | Every option, default, check, message, help text and exit status of the script (`-h -o -m -w -d -e -f -r -s -t -c -C -n -u -U -i -p -a -x -H`; options parse like Perl's `Getopt::Std`). `1`: refused options or checks (usage on stdout), `2`: an attribute change failed, `255`: unusable options or LDAP. Nothing is printed on success; `-e` and `-f` warn about domains with `zimbraVirtualIPAddress` on stderr. |
@@ -634,15 +634,17 @@ Messages (the `Verifying ldap on ...`, `Enabling sync provider on master...`,
 `Error: A replication agreement for rid N already exists.` and so on) are the
 scripts' own. `ldap-update-ldif` and `ldap-enable-replica` accept root only
 (`Error: must be run as root user`, exit `1`, as the scripts' own check);
-`ldap-schema`, `ldap-enable-mmr` and `iptool` accept root or zextras.
+`ldap-schema` accepts zextras only (`Error: must be run as zextras user` on
+stdout, exit `1`, as `zmldapschema` did); `ldap-enable-mmr` and `iptool` accept
+root or zextras.
 `ldappromote-replica-mmr`, `ldapmmrtool` and `ldapreplicatool` (installed as
 `zmldappromote-replica-mmr`, `zmldapmmrtool`, `zmldapreplicatool`) are
 administrator tools the bootstrap never calls; they are not ported.
 
 Differences from the scripts:
 
-- `ldap-schema`, `ldap-enable-mmr` and `iptool` also accept root (the
-  scripts were zextras only); they chown what they create to zextras.
+- `ldap-enable-mmr` and `iptool` also accept root (the scripts were zextras
+  only); they chown what they create to zextras.
 - A Perl `die` printed the message and exited `255`; the same messages are
   printed without a prefix and exit `255` here (`Bind: <error>`,
   `Add Failed: <error>`, `Server ID: ...`, `Syncrepl: ...`, `Mirror mode:
@@ -998,9 +1000,9 @@ Differences from the script:
 
 carbonio-core installs `bin/zmdhparam` as `exec /opt/zextras/libexec/setup
 dhparam "$@"`. `setup dhparam install` is the step of setup.pl described
-above; plain `setup dhparam` still does the same, kept for the setup.pl of
-carbonio-core (use `install`). `get`, `set` and any other first argument are
-`zmdhparam`, which prints the usage and exits `1` for an unknown one. `-out
+above; it must be spelled out, as the setup.pl of carbonio-core does. `get`,
+`set`, no argument and any other first argument are `zmdhparam`, which prints
+`a command must be specified` or the usage and exits `1` for those. `-out
 FILE` truncates and writes the file where it is (`open(">")`), keeping its
 mode, owner and symlinks, so `-out /dev/stdout` works:
 
@@ -1009,7 +1011,7 @@ mode, owner and symlinks, so `-out /dev/stdout` works:
 | `get` | prints the PEM of `zimbraSSLDHParam` (global config) to stdout |
 | `get -in FILE` | checks and prints a file (`-` is stdin) |
 | `get -out FILE` | writes `zimbraSSLDHParam` to a file, saying `writing params to 'FILE'` (`-` is stdout) |
-| `get -in FILE -out FILE2` | checks and copies, silently |
+| `get -in FILE -out FILE2` | checks and copies, saying nothing on stdout |
 | `set -new [BITS]` | stores the RFC 7919 group of BITS (2048, 3072 or 4096; 2048 when there is no number, which prints `defaulting numbits to '2048'`) in `zimbraSSLDHParam`, saying `saving 'zimbraSSLDHParam' to LDAP` |
 | `set -in FILE` | checks a file (`-` is stdin) and stores it |
 | `set ... -out FILE` | writes the parameters to a file instead of LDAP |
@@ -1018,9 +1020,13 @@ mode, owner and symlinks, so `-out /dev/stdout` works:
 
 The options parse like Getopt::Long: one or two dashes, any case, unique
 abbreviations (`-n`, `-i`, `-o`), `-name=value`, `-new` taking a number only
-when one follows. The exit status is `0` for done, `1` otherwise (a command
-line refused, with the messages and the usage on stdout, like `pod2usage`; a
-failed check or LDAP write, with `zmdhparam: ERROR: ...` on stderr).
+when one follows. The exit status is `0` for done, `1` for a command line
+refused (the messages and the usage on stdout, like `pod2usage`) or a failed
+check or LDAP write (`zmdhparam: ERROR: ...` on stderr), and `2` for a value
+the script refuses while it reads its options (`-new` under 2048, an unreadable
+`-in`): `zmdhparam: ERROR: ...` and then the usage, both on stderr. A check
+that passes prints `DH parameters appear to be ok.` on stderr, as `openssl
+dhparam -check` did for `get` and `set -in`.
 `zmconfigd` still writes `conf/dhparam.pem` from the attribute, and the
 services use new parameters when restarted.
 

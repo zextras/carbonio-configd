@@ -272,7 +272,7 @@ func (p *Provisioner) modify(kind entryKind, entry *Entry, mods Mods) error {
 	}
 
 	if err := p.Dir.ModifyValues(entry.DN, change.add, change.del, change.replace); err != nil {
-		return failWith(err, "unable to modify %s", entry.DN)
+		return modifyFailed(err, entry.DN)
 	}
 
 	p.postModifyReload(ctx, mods)
