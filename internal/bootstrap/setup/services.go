@@ -24,6 +24,7 @@ import (
 
 	"github.com/zextras/carbonio-configd/internal/bootstrap"
 	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/provision"
 	"github.com/zextras/carbonio-configd/internal/zxadmin"
 )
 
@@ -484,7 +485,7 @@ func (pl *svcPlanner) global1(kv ...string) {
 	}
 
 	if len(args) > 0 {
-		pl.globals = append(pl.globals, append([]string{provMCF}, args...))
+		pl.globals = append(pl.globals, append([]string{provision.VerbModifyConfig}, args...))
 	}
 }
 

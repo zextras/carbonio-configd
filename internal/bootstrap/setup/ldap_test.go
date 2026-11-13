@@ -752,7 +752,7 @@ func TestLdapStepConfigSetupLdap_ReplicaFailureDisablesDirectoryServer(t *testin
 	assert.Equal(t, []provCall{{
 		DN: "cn=ldap1.example.com,cn=servers,cn=zimbra", Del: map[string][]string{"zimbraServiceEnabled": {"directory-server"}},
 		Add: map[string][]string{}, Replace: map[string][]string{},
-	}}, provTestLDAP().calls)
+	}}, provTestLDAP().Calls)
 }
 
 func TestLdapStepConfigSetupLdap_ExistingMasterRunsUpdateLdif(t *testing.T) {

@@ -463,14 +463,12 @@ func TestProxyConfig_TheBootstrapCallsAreOneModify(t *testing.T) {
 // The bootstrap's call on a store with the proxy: the web ports and the mode go
 // to zmprov in one "ms", so CheckPortConflict, MailPort and LocalBind see them
 // together (they write zimbra_mail_service_port and zimbraMailLocalBind).
-func TestProxyConfig_StoreChangeGoesToZmprovAsOneCommand(t *testing.T) {
-	e, fakes, _ := srvTestEnv(t, &srvFakeDir{servers: map[string]srvEntry{
+func TestProxyConfig_StoreChangeIsWrittenToTheServerEntry(t *testing.T) {
+	e, _, _ := srvTestEnv(t, &srvFakeDir{servers: map[string]srvEntry{
 		pcTestHost: pcEnt("zimbraServiceEnabled", "mailbox"),
 	}})
 	pcUseFake(t, e, "")
 	pcRunProv = func(e *Env, p *Prov) error { return e.RunProv(p) }
-
-	stdin := provStdin(fakes)
 
 	var out, errw bytes.Buffer
 
@@ -480,12 +478,10 @@ func TestProxyConfig_StoreChangeGoesToZmprovAsOneCommand(t *testing.T) {
 
 	require.Zero(t, proxyConfig(e, pio, o), errw.String())
 
-	lines := strings.Split(strings.TrimSpace(*stdin), "\n")
-	require.Len(t, lines, 2, "one ms and the exit")
-	assert.True(t, strings.HasPrefix(lines[0], `"ms" "mail.example.com" `), lines[0])
-	assert.Contains(t, lines[0], `"zimbraMailPort" "8080" "zimbraMailProxyPort" "80"`)
-	assert.Contains(t, lines[0], `"zimbraMailMode" "http"`)
-	assert.Equal(t, "exit", lines[1])
+	srv := provServerDN(pcTestHost)
+	assert.Equal(t, []string{"8080"}, provTestLDAP().values(srv, "zimbraMailPort"))
+	assert.Equal(t, []string{"80"}, provTestLDAP().values(srv, "zimbraMailProxyPort"))
+	assert.Equal(t, []string{"http"}, provTestLDAP().values(srv, "zimbraMailMode"))
 }
 
 func TestProxyConfig_InvalidValuesFailTheirCommandOnly(t *testing.T) {

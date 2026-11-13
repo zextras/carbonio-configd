@@ -594,11 +594,8 @@ func isLDAPErrorRetryable(err error) bool {
 		case ldap.LDAPResultNoSuchObject:
 			// Object doesn't exist - don't retry
 			return false
-		case ldap.LDAPResultInvalidDNSyntax:
-			// Bad DN syntax - don't retry
-			return false
-		case ldap.LDAPResultInvalidCredentials:
-			// Bad credentials - don't retry
+		case ldap.LDAPResultInvalidDNSyntax, ldap.LDAPResultInvalidCredentials:
+			// Bad DN syntax or bad credentials - don't retry
 			return false
 		case ldap.LDAPResultInsufficientAccessRights:
 			// Permission denied - don't retry
@@ -606,9 +603,12 @@ func isLDAPErrorRetryable(err error) bool {
 		case ldap.LDAPResultObjectClassViolation:
 			// Schema violation - don't retry
 			return false
-		case ldap.LDAPResultAttributeOrValueExists, ldap.LDAPResultNoSuchAttribute:
-			// The modification contradicts the entry's state; repeating the
-			// request cannot change that (ModifyValues treats both as converged)
+		case ldap.LDAPResultEntryAlreadyExists, ldap.LDAPResultConstraintViolation,
+			ldap.LDAPResultAttributeOrValueExists, ldap.LDAPResultNoSuchAttribute:
+			// The entry to add is there already, the server's rules refuse the
+			// value (a password its policy rejects), or the modification
+			// contradicts the entry's state (ModifyValues treats the last two as
+			// converged): repeating the request cannot change that
 			return false
 		case ldap.LDAPResultServerDown:
 			// Server down - retry

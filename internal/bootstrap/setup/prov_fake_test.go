@@ -5,27 +5,25 @@
 package setup
 
 import (
-	"slices"
-	"strings"
+	"os"
 	"sync/atomic"
 	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/zextras/carbonio-configd/internal/provision"
+	"github.com/zextras/carbonio-configd/internal/provision/provtest"
 )
 
 // provCall is one ModifyValues call.
-type provCall struct {
-	DN                string
-	Add, Del, Replace map[string][]string
-}
+type provCall = provtest.ModifyCall
 
-// provFakeLDAP is the directory of RunProv in tests: an in-memory store that
-// applies ModifyValues as the real client does (add what is missing, delete
-// what is there, replace) and records the calls.
+// provFakeLDAP is the directory of RunProv in tests: the in-memory directory of
+// the provisioning tests, which stores entries as the LDAP server would, with
+// the global config and the default class of service a node has before
+// bootstrap provisions it.
 type provFakeLDAP struct {
-	base    string
-	entries map[string]map[string][]string
-	calls   []provCall
-	// failDN makes ModifyValues of that entry fail with the error.
-	failDN map[string]error
+	*provtest.Dir
 	// openErr makes provOpenLDAP fail.
 	openErr error
 	opened  int
@@ -39,15 +37,35 @@ var provTestFake atomic.Pointer[provFakeLDAP]
 // provTestLDAP is the fake of the running (sequential) test.
 func provTestLDAP() *provFakeLDAP { return provTestFake.Load() }
 
-// installProvFake makes RunProv on e use a new fake directory.
+// provTestSchema is the attribute schema the tests provision with: the
+// fixture of the provisioning package.
+func provTestSchema(t *testing.T) *provision.Schema {
+	t.Helper()
+
+	f, err := os.Open("../../provision/testdata/attrs.xml")
+	require.NoError(t, err)
+
+	defer func() { _ = f.Close() }()
+
+	s, err := provision.ParseSchema(f)
+	require.NoError(t, err)
+
+	return s
+}
+
+// installProvFake makes RunProv on e use a new fake directory and the test
+// schema.
 func installProvFake(t *testing.T, e *Env) *provFakeLDAP {
 	t.Helper()
 
-	f := &provFakeLDAP{
-		base:    "cn=zimbra",
-		entries: map[string]map[string][]string{},
-		failDN:  map[string]error{},
-	}
+	f := &provFakeLDAP{Dir: provtest.New()}
+	f.Set(provGlobalDN, "objectClass", "zimbraGlobalConfig")
+	f.Set("cn=default,cn=cos,cn=zimbra", "objectClass", "zimbraCOS")
+	f.Set("cn=default,cn=cos,cn=zimbra", "zimbraId", "0f1e2d3c-0000-4000-8000-000000000001")
+
+	f.addServer("mail.example.com")
+	f.addServer("mta.example.com")
+	f.addServer("ldap1.example.com")
 
 	oldFake := provTestFake.Swap(f)
 	e.provOpen = func(*Env) (provDirectory, error) {
@@ -60,75 +78,33 @@ func installProvFake(t *testing.T, e *Env) *provFakeLDAP {
 		return f, nil
 	}
 
-	t.Cleanup(func() { provTestFake.Store(oldFake) })
+	provSchemas.Store(e, provTestSchema(t))
+
+	t.Cleanup(func() {
+		provTestFake.Store(oldFake)
+		provSchemas.Delete(e)
+	})
 
 	return f
 }
 
-func (f *provFakeLDAP) BaseDN() string { return f.base }
-
+// Close counts the closes.
 func (f *provFakeLDAP) Close() error {
 	f.closed++
 
 	return nil
 }
 
-func (f *provFakeLDAP) ModifyValues(dn string, add, del, replace map[string][]string) error {
-	f.calls = append(f.calls, provCall{dn, add, del, replace})
-
-	if err := f.failDN[dn]; err != nil {
-		return err
-	}
-
-	ent := f.entries[dn]
-	if ent == nil {
-		ent = map[string][]string{}
-		f.entries[dn] = ent
-	}
-
-	for attr, values := range del {
-		key := strings.ToLower(attr)
-		if len(values) == 0 {
-			delete(ent, key)
-
-			continue
-		}
-
-		ent[key] = slices.DeleteFunc(slices.Clone(ent[key]), func(v string) bool { return slices.Contains(values, v) })
-		if len(ent[key]) == 0 {
-			delete(ent, key)
-		}
-	}
-
-	for attr, values := range add {
-		key := strings.ToLower(attr)
-
-		for _, v := range values {
-			if !slices.Contains(ent[key], v) {
-				ent[key] = append(ent[key], v)
-			}
-		}
-	}
-
-	for attr, values := range replace {
-		ent[strings.ToLower(attr)] = slices.Clone(values)
-	}
-
-	return nil
-}
-
 // values is what the entry dn holds for attr.
-func (f *provFakeLDAP) values(dn, attr string) []string {
-	return f.entries[dn][strings.ToLower(attr)]
-}
+func (f *provFakeLDAP) values(dn, attr string) []string { return f.Values(dn, attr) }
 
 // set gives the entry dn the values of attr.
-func (f *provFakeLDAP) set(dn, attr string, values ...string) {
-	if f.entries[dn] == nil {
-		f.entries[dn] = map[string][]string{}
-	}
+func (f *provFakeLDAP) set(dn, attr string, values ...string) { f.Set(dn, attr, values...) }
 
-	f.entries[dn][strings.ToLower(attr)] = values
+// addServer creates the server entry of host, as "cs" would.
+func (f *provFakeLDAP) addServer(host string) {
+	f.Set(provServerDN(host), "objectClass", "zimbraServer")
+	f.Set(provServerDN(host), "zimbraServiceHostname", host)
 }
 
 // provGlobalDN is the global config of the fake directory.

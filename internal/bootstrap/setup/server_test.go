@@ -108,12 +108,11 @@ func provStdin(fakes *systest.Fakes) *string {
 
 func TestSrvServicePorts_ProxyOffMovesProxyPorts(t *testing.T) {
 	dir := &srvFakeDir{servers: map[string]srvEntry{}}
-	e, fakes, _ := srvTestEnv(t, dir)
+	e, _, _ := srvTestEnv(t, dir)
 	srvEnabled(e, PkgCore, PkgAppserver)
 	e.Cfg.Store.Ports = bootstrap.StorePorts{IMAP: 7143, IMAPS: 7993, POP3: 7110, POP3S: 7995, HTTP: 8080, HTTPS: 8443}
 	e.Cfg.Proxy.Ports = bootstrap.ProxyPorts{IMAP: 7143, IMAPS: 7993, POP3: 7110, POP3S: 7995, HTTP: 8080, HTTPS: 8443}
 	e.Cfg.Store.Mode = "https"
-	stdin := provStdin(fakes)
 
 	s := StepConfigSetServicePorts()
 	require.True(t, s.When(e))
@@ -122,9 +121,14 @@ func TestSrvServicePorts_ProxyOffMovesProxyPorts(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, done)
 	require.NoError(t, s.Apply(e))
-	assert.Contains(t, *stdin, `"zimbraImapProxyBindPort" "143" "zimbraImapSSLProxyBindPort" "993"`)
-	assert.Contains(t, *stdin, `"zimbraPop3SSLBindPort" "7995" "zimbraPop3ProxyBindPort" "110" "zimbraPop3SSLProxyBindPort" "995"`)
-	assert.Contains(t, *stdin, `"zimbraMailProxyPort" "80" "zimbraMailSSLProxyPort" "443" "zimbraMailMode" "https"`)
+	srv := provServerDN("mail.example.com")
+	for attr, want := range map[string]string{
+		"zimbraImapProxyBindPort": "143", "zimbraImapSSLProxyBindPort": "993", "zimbraPop3SSLBindPort": "7995",
+		"zimbraPop3ProxyBindPort": "110", "zimbraPop3SSLProxyBindPort": "995", "zimbraMailProxyPort": "80",
+		"zimbraMailSSLProxyPort": "443", "zimbraMailMode": "https",
+	} {
+		assert.Equal(t, []string{want}, provTestLDAP().values(srv, attr), attr)
+	}
 
 	lc, _ := e.LCValue("zimbra_mail_service_port")
 	assert.Equal(t, "8080", lc)
@@ -309,11 +313,11 @@ func TestSrvLCValues_LDAPS(t *testing.T) {
 
 func TestSrvCreateServerEntry_OrderByReplica(t *testing.T) {
 	dir := &srvFakeDir{servers: map[string]srvEntry{}}
-	e, fakes, _ := srvTestEnv(t, dir)
+	e, _, _ := srvTestEnv(t, dir)
 	srvEnabled(e, PkgCore, srvPkgDirectory)
 	e.Cfg.Roles = []string{bootstrap.RoleDirectoryServer}
 	e.Cfg.Host.IPMode = "ipv4"
-	stdin := provStdin(fakes)
+	require.NoError(t, provTestLDAP().Delete(provServerDN("mail.example.com")))
 
 	assert.True(t, StepConfigCreateServerEntry().When(e))
 	assert.False(t, StepConfigCreateServerEntryReplica().When(e))
@@ -324,7 +328,7 @@ func TestSrvCreateServerEntry_OrderByReplica(t *testing.T) {
 
 	s := StepConfigCreateServerEntry()
 	require.NoError(t, s.Apply(e))
-	assert.Equal(t, "\"cs\" \"mail.example.com\"\nexit\n", *stdin, "only the creation goes to zmprov")
+	assert.Equal(t, []string{"zimbraServer"}, provTestLDAP().values(provServerDN("mail.example.com"), "objectClass"))
 	assert.Equal(t, []string{"ipv4"}, provTestLDAP().values(provServerDN("mail.example.com"), "zimbraIPMode"))
 
 	dir.servers["mail.example.com"] = srvEntry{"zimbraipmode": {"ipv4"}}
@@ -334,50 +338,57 @@ func TestSrvCreateServerEntry_OrderByReplica(t *testing.T) {
 }
 
 func TestSrvSetProxyBits_OnlyMissing(t *testing.T) {
-	e, fakes, _ := srvTestEnv(t, &srvFakeDir{global: srvEntry{"zimbrareverseproxyiploginlimit": {"5"}}})
+	e, _, _ := srvTestEnv(t, &srvFakeDir{global: srvEntry{"zimbrareverseproxyiploginlimit": {"5"}}})
 	srvEnabled(e, PkgCore, srvPkgDirectory)
-	stdin := provStdin(fakes)
 
 	require.NoError(t, StepSetProxyBits().Apply(e))
-	assert.NotContains(t, *stdin, "zimbraReverseProxyIPLoginLimit\"")
-	assert.Contains(t, *stdin, `"zimbraReverseProxyIPLoginLimitTime" "3600"`)
+	assert.Empty(t, provTestLDAP().values(provGlobalDN, "zimbraReverseProxyIPLoginLimit"), "the one that is set is left alone")
+	assert.Equal(t, []string{"3600"}, provTestLDAP().values(provGlobalDN, "zimbraReverseProxyIPLoginLimitTime"))
 
 	e.Facts.NewInstall = true
 	assert.False(t, StepSetProxyBits().When(e))
 }
 
 func TestSrvHostPool_AddsIDOnce(t *testing.T) {
+	const id1, id2 = "00000000-0000-4000-8000-000000000001", "00000000-0000-4000-8000-000000000002"
+
 	dir := &srvFakeDir{
-		servers: map[string]srvEntry{"mail.example.com": {"zimbraid": {"id-2"}}},
-		cos:     map[string]srvEntry{"default": {"zimbramailhostpool": {"id-1"}}},
+		servers: map[string]srvEntry{"mail.example.com": {"zimbraid": {id2}}},
+		cos:     map[string]srvEntry{"default": {"zimbramailhostpool": {id1}}},
 	}
-	e, fakes, _ := srvTestEnv(t, dir)
-	stdin := provStdin(fakes)
+	e, _, _ := srvTestEnv(t, dir)
+	for id, host := range map[string]string{id1: "pool1.example.com", id2: "mail.example.com"} {
+		provTestLDAP().set(provServerDN(host), "objectClass", "zimbraServer")
+		provTestLDAP().set(provServerDN(host), "zimbraId", id)
+		provTestLDAP().set(provServerDN(host), "zimbraServiceEnabled", "service")
+		provTestLDAP().set(provServerDN(host), "zimbraServiceHostname", host)
+	}
+	provTestLDAP().set("cn=default,cn=cos,cn=zimbra", "zimbraMailHostPool", id1)
 	s := StepAddServerToHostPool()
 
 	done, err := s.Done(e)
 	require.NoError(t, err)
 	assert.False(t, done)
 	require.NoError(t, s.Apply(e))
-	assert.Equal(t, "\"mc\" \"default\" \"zimbraMailHostPool\" \"id-1\" \"zimbraMailHostPool\" \"id-2\"\nexit\n", *stdin)
+	assert.Equal(t, []string{id1, id2}, provTestLDAP().values("cn=default,cn=cos,cn=zimbra", "zimbraMailHostPool"))
 
-	dir.cos["default"] = srvEntry{"zimbramailhostpool": {"id-1", "id-2"}}
+	dir.cos["default"] = srvEntry{"zimbramailhostpool": {id1, id2}}
 	done, err = s.Done(e)
 	require.NoError(t, err)
 	assert.True(t, done)
 }
 
 func TestSrvProxyPortsOnExisting_Condition(t *testing.T) {
-	e, fakes, _ := srvTestEnv(t, &srvFakeDir{servers: map[string]srvEntry{}})
+	e, _, _ := srvTestEnv(t, &srvFakeDir{servers: map[string]srvEntry{}})
 	srvEnabled(e, PkgCore, "carbonio-proxy")
 	e.Cfg.Proxy.WebEnabled = true
 	e.Cfg.Proxy.Ports = bootstrap.ProxyPorts{HTTP: 80, HTTPS: 443}
-	stdin := provStdin(fakes)
 	s := StepSetProxyPortsOnExisting()
 
 	assert.True(t, s.When(e))
 	require.NoError(t, s.Apply(e))
-	assert.Contains(t, *stdin, `"zimbraMailProxyPort" "80" "zimbraMailSSLProxyPort" "443"`)
+	assert.Equal(t, []string{"80"}, provTestLDAP().values(provServerDN("mail.example.com"), "zimbraMailProxyPort"))
+	assert.Equal(t, []string{"443"}, provTestLDAP().values(provServerDN("mail.example.com"), "zimbraMailSSLProxyPort"))
 
 	e.Facts.NewInstall = true
 	assert.False(t, s.When(e))
