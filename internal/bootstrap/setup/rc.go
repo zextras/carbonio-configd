@@ -158,25 +158,28 @@ func (e *Env) rcConnect(ctx context.Context, host string, signer ssh.Signer) (*s
 	return ssh.NewClient(c, chans, reqs), nil
 }
 
+// rcSessionError is the error of a session that could not be opened.
+func rcSessionError(err error) error { return fmt.Errorf("opening the session: %w", err) }
+
 // rcSession runs the default command of the connection (ssh -T: no
 // terminal, no command: a shell request, which the forced command of
 // authorized_keys turns into zmrcd), feeds it in and relays its output.
 func (e *Env) rcSession(ctx context.Context, client *ssh.Client, in io.Reader, out, errw io.Writer) error {
 	session, err := client.NewSession()
 	if err != nil {
-		return fmt.Errorf("opening the session: %w", err)
+		return rcSessionError(err)
 	}
 
 	defer func() { _ = session.Close() }()
 
 	stdinPipe, err := session.StdinPipe()
 	if err != nil {
-		return fmt.Errorf("opening the session: %w", err)
+		return rcSessionError(err)
 	}
 
 	stdoutPipe, err := session.StdoutPipe()
 	if err != nil {
-		return fmt.Errorf("opening the session: %w", err)
+		return rcSessionError(err)
 	}
 
 	// The session copies its stderr on its own goroutine, which may outlive

@@ -117,6 +117,9 @@ func (p *Provisioner) timestamp(cfg *Entry) (string, error) {
 	return gentime(p.Now(), millis), nil
 }
 
+// createFailed is the error of an entry the directory refused to create.
+func createFailed(err error, dn string) error { return failWith(err, "unable to create %s", dn) }
+
 // add creates the entry; a DN that is taken is reported as the error built by
 // exists.
 func (p *Provisioner) add(dn string, attrs map[string][]string, exists func() error) error {
@@ -127,7 +130,7 @@ func (p *Provisioner) add(dn string, attrs map[string][]string, exists func() er
 	case errors.Is(err, ErrEntryExists):
 		return exists()
 	default:
-		return failWith(err, "unable to create %s", dn)
+		return createFailed(err, dn)
 	}
 }
 
@@ -329,7 +332,7 @@ func (p *Provisioner) createParentDomains(parts, dns []string) error {
 		attrs.set(attrDC, parts[i])
 
 		if err := p.Dir.Add(dns[i], attrs); err != nil {
-			return failWith(err, "unable to create %s", dns[i])
+			return createFailed(err, dns[i])
 		}
 	}
 
@@ -361,7 +364,7 @@ func (p *Provisioner) addDomainBases(domainDN string) error {
 		}
 
 		if err != nil {
-			return failWith(err, "unable to create %s", b.dn)
+			return createFailed(err, b.dn)
 		}
 	}
 
