@@ -132,7 +132,7 @@ _package_systemd() {
 build() {
   cd "${repodir}"
   # Stamp the release: source-tree builds otherwise report "(devel)".
-  local _ldflags="-s -w -X github.com/zextras/carbonio-configd/internal/version.stamped=${pkgver}"
+  _ldflags="-s -w -X github.com/zextras/carbonio-configd/internal/version.stamped=${pkgver}"
   CGO_ENABLED=0 go build -trimpath -ldflags="${_ldflags}" \
     -o "${srcdir}/configd" ./cmd/configd/
   CGO_ENABLED=0 go build -trimpath -ldflags="${_ldflags}" \
