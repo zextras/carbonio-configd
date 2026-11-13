@@ -6,6 +6,7 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io/fs"
@@ -454,10 +455,20 @@ func (g *Generator) ensureIncludesDir(ctx context.Context) error {
 
 // writeFile writes a file atomically with proper permissions via
 // FS.WriteFileAtomic (write temp file → fsync → chmod → rename), ensuring
-// no partial updates are ever visible.
+// no partial updates are ever visible. A target that is already a regular
+// file (not a symlink) with identical bytes and mode is left untouched: the
+// fsync + rename costs tens of milliseconds per file on slow disks.
 func (g *Generator) writeFile(ctx context.Context, path string, content []byte) error {
 	if g.DryRun {
 		logger.DebugContext(ctx, "DRY-RUN: Would write file",
+			"byte_count", len(content),
+			"path", path)
+
+		return nil
+	}
+
+	if g.isUnchanged(path, content) {
+		logger.DebugContext(ctx, "Unchanged, skipping write",
 			"byte_count", len(content),
 			"path", path)
 
@@ -475,6 +486,21 @@ func (g *Generator) writeFile(ctx context.Context, path string, content []byte) 
 		"path", path)
 
 	return nil
+}
+
+// isUnchanged reports whether path is a regular file (a symlink is never
+// treated as unchanged, so it gets replaced) whose permission bits are
+// generatedFileMode and whose bytes equal content.
+func (g *Generator) isUnchanged(path string, content []byte) bool {
+	info, err := g.env.FS.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != generatedFileMode {
+		return false
+	}
+
+	//nolint:gosec // G304: path is a generated proxy config file under ConfDir/IncludesDir
+	existing, err := g.env.FS.ReadFile(path)
+
+	return err == nil && bytes.Equal(existing, content)
 }
 
 // outputName maps a template file name to the file it generates: the
