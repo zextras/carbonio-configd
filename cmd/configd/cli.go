@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 
@@ -222,6 +223,11 @@ func (c *DaemonCmd) Run(cli *CLI, env sys.System, std *stdio) error {
 	if err != nil {
 		logger.ErrorContext(ctx, "Failed to initialize sd_notify", "error", err)
 	}
+
+	// Like sd_notify(unset_environment=1): children (systemctl reload/restart
+	// on systemd >= 255) must not message configd's socket, which systemd
+	// rejects with NotifyAccess=main.
+	_ = os.Unsetenv("NOTIFY_SOCKET")
 
 	if notifier != nil {
 		logger.InfoContext(ctx, "SD notify enabled, will notify systemd on readiness")

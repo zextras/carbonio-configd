@@ -211,7 +211,9 @@ only packaged for rocky-9 and ubuntu-noble, with the unit.
 ## Polkit rule
 
 `50-carbonio-configd.rules` lets the `zextras` user run `start`, `stop`,
-`restart`, `reload`, `try-restart` and `try-reload-or-restart` on an explicit
+`restart`, `reload`, `try-restart`, `try-reload-or-restart` and the polkit
+verbs systemd uses for `systemctl reload-or-restart` / `try-reload-or-restart`
+(`reload-or-restart`, `reload-or-try-restart`) on an explicit
 allowlist of units (`carbonio-antispam`, `-antivirus`, `-appserver-db`,
 `-appserver`, `-configd`, `-freshclam`, `-mailthreat`, `-memcached`, `-milter`,
 `-nginx`, `-opendkim`, `-openldap`, `-policyd`, `-postfix`, `-postfix-conf`,

@@ -15,7 +15,7 @@ import (
 )
 
 func TestRewriteConfigs_Contents(t *testing.T) {
-	expected := []string{"sasl", "webxml", "mailbox", "service", "zextras", "zextrasAdmin", "zimlet"}
+	expected := []string{"sasl", "mailbox"}
 	if !slices.Equal(rewriteConfigs, expected) {
 		t.Errorf("rewriteConfigs = %v, want %v", rewriteConfigs, expected)
 	}

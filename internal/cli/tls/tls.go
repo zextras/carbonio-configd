@@ -26,10 +26,10 @@ import (
 const errFmt = "Error: %v\n"
 
 // rewriteConfigs is the set of Carbonio configs rewritten after a successful
-// mail-mode change (matches the legacy zmtlsctl script).
-var rewriteConfigs = []string{
-	"sasl", "webxml", "mailbox", "service", "zextras", "zextrasAdmin", "zimlet",
-}
+// mail-mode change: the legacy zmtlsctl set, restricted to the names that are
+// zmconfigd.cf sections (webxml, service, zextras, zextrasAdmin and zimlet have
+// none and were never rewritten).
+var rewriteConfigs = []string{"sasl", "mailbox"}
 
 // Options are the parsed command-line flags of "configd tls".
 type Options struct {
