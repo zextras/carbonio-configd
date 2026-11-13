@@ -8,6 +8,7 @@ import (
 	"errors"
 	"testing"
 
+	goldap "github.com/go-ldap/ldap/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -82,6 +83,67 @@ func provisionerOver(t *testing.T, r *rig, dir provision.Directory) *provision.P
 	opts.Dir = dir
 
 	return provision.New(opts)
+}
+
+// refusingDir answers every modification with err.
+type refusingDir struct {
+	provision.Directory
+
+	err error
+}
+
+func (d refusingDir) ModifyValues(string, map[string][]string, map[string][]string, map[string][]string) error {
+	return d.err
+}
+
+// LdapProvisioning.modifyLdapAttrs maps the result codes of a refused
+// modification the way LdapException.mapToLdapException does, and prefixes the
+// message with its own text; zmprov printed "ERROR: account.INVALID_ATTR_NAME
+// (invalid attr name: invalid attr name - unable to modify attributes: ...)".
+func TestModify_ARefusedModificationIsMappedLikeJava(t *testing.T) {
+	for name, tc := range map[string]struct {
+		code    uint16
+		wantErr string
+	}{
+		"undefined attribute type": {
+			goldap.LDAPResultUndefinedAttributeType,
+			provision.CodeInvalidAttrName + " (invalid attr name: invalid attr name - unable to modify attributes: zimbraNoSuchAttr: attribute type undefined)",
+		},
+		"constraint violation": {
+			goldap.LDAPResultConstraintViolation,
+			provision.CodeInvalidAttrValue + " (invalid attr value: invalid attr value - unable to modify attributes: zimbraNoSuchAttr: attribute type undefined)",
+		},
+		"invalid attribute syntax": {
+			goldap.LDAPResultInvalidAttributeSyntax,
+			provision.CodeInvalidAttrValue + " (invalid attr value: invalid attr value - unable to modify attributes: zimbraNoSuchAttr: attribute type undefined)",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := newRig(t)
+			r.withServer(t)
+
+			cause := goldap.NewError(tc.code, errors.New("zimbraNoSuchAttr: attribute type undefined"))
+			r.Provisioner = provisionerOver(t, r, refusingDir{Directory: r.dir, err: cause})
+
+			_, err := r.Exec([]string{"ms", host, "zimbraNoSuchAttr", "x"})
+
+			require.Error(t, err)
+			assert.Equal(t, tc.wantErr, err.Error())
+		})
+	}
+
+	t.Run("any other failure is service.FAILURE", func(t *testing.T) {
+		r := newRig(t)
+		r.withServer(t)
+
+		cause := goldap.NewError(goldap.LDAPResultInsufficientAccessRights, errors.New("no access"))
+		r.Provisioner = provisionerOver(t, r, refusingDir{Directory: r.dir, err: cause})
+
+		_, err := r.Exec([]string{"ms", host, "zimbraMailPort", "8080"})
+
+		assert.True(t, hasCode(err, provision.CodeFailure), "%v", err)
+		assert.ErrorIs(t, err, cause)
+	})
 }
 
 // A directory that fails at any step of a command is reported by the command:
