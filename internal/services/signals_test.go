@@ -106,6 +106,26 @@ func TestServiceRotate_StatsSignalsEveryPidfileWithSIGHUP(t *testing.T) {
 	assert.Equal(t, map[int]syscall.Signal{801: syscall.SIGHUP, 802: syscall.SIGHUP}, got)
 }
 
+// TestServiceRotate_StatsSignalsOneProcessOnce: the pidfiles of the collectors
+// of one process all name it, and it reopens its logs once.
+func TestServiceRotate_StatsSignalsOneProcessOnce(t *testing.T) {
+	t.Parallel()
+
+	ctl, f := newFakeController(t)
+	f.FS.PutDir(ctl.p.statsPidDir, 0o755)
+	f.FS.Put(ctl.p.statsPidDir+"/cpu.pid", []byte("801\n"), 0o644)
+	f.FS.Put(ctl.p.statsPidDir+"/vm.pid", []byte("801\n"), 0o644)
+	f.FS.Put(ctl.p.statsPidDir+"/df.pid", []byte("801\n"), 0o644)
+	f.Proc.Add(sys.ProcEntry{PID: 801, Argv: []string{ctl.p.libexec + "/setup", "stat", "run", "cpu", "vm", "df"}})
+
+	report, err := ctl.ServiceRotate(context.Background(), "stats")
+
+	require.NoError(t, err)
+	assert.Equal(t, []int{801}, report.Signaled)
+	require.Len(t, f.Proc.Signals(), 1)
+	assert.Equal(t, syscall.SIGHUP, f.Proc.Signals()[0].Sig)
+}
+
 func TestServiceRotate_StatsReportsNotRunningPids(t *testing.T) {
 	t.Parallel()
 

@@ -23,13 +23,19 @@ const statEnabledTrue = "TRUE"
 
 // statsCollectors is the CollectorSpec of stats, mirroring legacy statctl.pl:
 // the base collectors every host runs (io twice: extended and plain) plus the
-// ones whose localconfig key is TRUE, each as "setup stat <name>". Each
-// collector writes its own PID file under the stats run directory.
+// ones whose localconfig key is TRUE, all run by one process, "setup stat run
+// <collector>...". Every collector keeps its own PID file under the stats run
+// directory, all naming that process.
+//
+// They share a process because they share a user: every collector runs as the
+// zextras user configd runs as (fd included: its columns are readable without
+// root), so none needs a process of its own. ldap is not started by configd:
+// it has no localconfig key and is run by hand.
 func statsCollectors() *CollectorSpec {
 	return &CollectorSpec{
-		Binary:    collectorBinary,
-		Args:      []string{collectorCommand},
-		LogPrefix: collectorLogPrefix,
+		Binary:  collectorBinary,
+		Args:    []string{collectorCommand, collectorRun},
+		LogName: collectorLog,
 		Always: []string{
 			"proc",
 			"cpu",
@@ -48,85 +54,63 @@ func statsCollectors() *CollectorSpec {
 	}
 }
 
-// startCollectors starts the collectors of def.Collectors; a collector that
-// is missing or fails to start is logged and skipped, none starting is an
-// error.
+// startCollectors starts the one process that runs the collectors of
+// def.Collectors (the Always ones and the Optional ones that are enabled),
+// logging to <log>/zmstat.out. The process reports on its own log a collector
+// that cannot start and keeps the others running.
 func (c *Controller) startCollectors(ctx context.Context, def *ServiceDef) error {
 	lc, err := c.loadConfig()
 	if err != nil {
 		return fmt.Errorf("failed to load localconfig: %w", err)
 	}
 
-	collectors := slices.Clone(def.Collectors.Always)
+	spec := def.Collectors
+	collectors := slices.Clone(spec.Always)
 
-	for _, opt := range def.Collectors.Optional {
+	for _, opt := range spec.Optional {
 		if lc[opt.LCKey] == statEnabledTrue {
 			collectors = append(collectors, opt.Cmd)
 		}
 	}
 
-	var started int
-
-	spec := def.Collectors
 	binaryPath := filepath.Join(c.p.libexec, spec.Binary)
 
-	for _, collectorCmd := range collectors {
-		parts := strings.Fields(collectorCmd)
-		binary := spec.LogPrefix + parts[0]
-		args := append(slices.Clone(spec.Args), parts...)
+	if _, statErr := c.env.FS.Stat(binaryPath); statErr != nil {
+		logger.WarnContext(ctx, "Stats collectors binary is missing", "path", binaryPath)
 
-		if _, statErr := c.env.FS.Stat(binaryPath); statErr != nil {
-			logger.WarnContext(ctx, "Skipping missing stats collector",
-				"collector", binary, "path", binaryPath)
-
-			continue
-		}
-
-		logFile := filepath.Join(c.p.log, binary+".out")
-
-		logFd, openErr := c.openLogFile(logFile)
-		if openErr != nil {
-			logger.WarnContext(ctx, "Failed to open log for stats collector",
-				"collector", binary, "log", logFile, "error", openErr)
-
-			continue
-		}
-
-		proc, startErr := c.env.Exec.Start(ctx, &sys.Cmd{
-			Path:   binaryPath,
-			Args:   args,
-			Stdout: logFd,
-			Stderr: logFd,
-			Setsid: true,
-		})
-		if startErr != nil {
-			_ = logFd.Close()
-
-			logger.WarnContext(ctx, "Failed to start stats collector",
-				"collector", binary, "error", startErr)
-
-			continue
-		}
-
-		_ = logFd.Close()
-
-		started++
-
-		logger.InfoContext(ctx, "Started stats collector",
-			"collector", binary, "pid", proc.Pid(), "log", logFile)
+		return fmt.Errorf("no stats collectors started: %s is missing", binaryPath)
 	}
 
-	if started == 0 {
-		return fmt.Errorf("no stats collectors started")
+	logFile := filepath.Join(c.p.log, spec.LogName)
+
+	logFd, err := c.openLogFile(logFile)
+	if err != nil {
+		return fmt.Errorf("no stats collectors started: open log %s: %w", logFile, err)
 	}
 
-	logger.InfoContext(ctx, "Stats collectors started", "count", started, "piddir", c.p.statsPidDir)
+	defer func() { _ = logFd.Close() }()
+
+	// One argument per collector: its command line, as the zmstat script took it.
+	proc, err := c.env.Exec.Start(ctx, &sys.Cmd{
+		Path:   binaryPath,
+		Args:   append(slices.Clone(spec.Args), collectors...),
+		Stdout: logFd,
+		Stderr: logFd,
+		Setsid: true,
+	})
+	if err != nil {
+		return fmt.Errorf("no stats collectors started: %w", err)
+	}
+
+	logger.InfoContext(ctx, "Started stats collectors",
+		"collectors", collectors, "pid", proc.Pid(), "log", logFile, "piddir", c.p.statsPidDir)
 
 	return nil
 }
 
-// stopCollectors kills all collectors by reading their individual PID files
-// from the stats run directory. Always finishes with a process-name scan to
+// stopCollectors kills the collectors by reading their PID files from the
+// stats run directory (all naming the one process of this release, one per
+// process of an earlier one). Always finishes with a process-name scan to
 // catch any survivors (e.g. collectors that restarted or self-elevated).
 func (c *Controller) stopCollectors(ctx context.Context, def *ServiceDef) error {
 	entries, err := c.env.FS.ReadDir(c.p.statsPidDir)
@@ -134,16 +118,16 @@ func (c *Controller) stopCollectors(ctx context.Context, def *ServiceDef) error 
 		return fmt.Errorf("failed to read stats PID dir %s: %w", c.p.statsPidDir, err)
 	}
 
-	killed := 0
+	files := 0
 
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".pid") {
 			continue
 		}
 
-		if c.killStatsPidFile(ctx, filepath.Join(c.p.statsPidDir, entry.Name()), def.ProcessName) {
-			killed++
-		}
+		c.killStatsPidFile(ctx, filepath.Join(c.p.statsPidDir, entry.Name()), def.ProcessName)
+
+		files++
 	}
 
 	// Final pass: send SIGTERM to any collector survivors found in /proc,
@@ -151,7 +135,7 @@ func (c *Controller) stopCollectors(ctx context.Context, def *ServiceDef) error 
 	_ = c.killProcess(ctx, def.ProcessName)
 	_ = c.killProcess(ctx, c.p.statsGlob)
 
-	logger.InfoContext(ctx, "Stopped stats collectors", "killed", killed)
+	logger.InfoContext(ctx, "Stopped stats collectors", "pidfiles", files)
 
 	return nil
 }
@@ -237,9 +221,10 @@ func (c *Controller) hupCollector(ctx context.Context, pid int) bool {
 	return true
 }
 
-// rotateCollectors sends SIGHUP to the pid of every collector
-// pidfile (legacy statctl.pl rotate). Pids that are gone are reported, not an
-// error. A root-owned collector (sudo-spawned zmstat-fd) is signaled through
+// rotateCollectors sends SIGHUP to the pid of every collector pidfile (legacy
+// statctl.pl rotate), once per process although every collector of the one
+// process of this release has a pidfile naming it. Pids that are gone are
+// reported, not an error. A root-owned collector (sudo-spawned zmstat-fd) is signaled through
 // sudo.
 func (c *Controller) rotateCollectors(ctx context.Context) (SignalReport, error) {
 	entries, err := c.env.FS.ReadDir(c.p.statsPidDir)
@@ -252,17 +237,21 @@ func (c *Controller) rotateCollectors(ctx context.Context) (SignalReport, error)
 		found  bool
 	)
 
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".pid") {
-			continue
-		}
+	seen := map[int]bool{}
 
-		pid, ok := c.readStatsPid(ctx, filepath.Join(c.p.statsPidDir, entry.Name()))
+	for _, entry := range entries {
+		pid, ok := c.statsPidOf(ctx, entry)
 		if !ok {
 			continue
 		}
 
 		found = true
+
+		if seen[pid] {
+			continue
+		}
+
+		seen[pid] = true
 
 		if c.hupCollector(ctx, pid) {
 			report.Signaled = append(report.Signaled, pid)
@@ -276,4 +265,14 @@ func (c *Controller) rotateCollectors(ctx context.Context) (SignalReport, error)
 	}
 
 	return report, nil
+}
+
+// statsPidOf is the pid of a stats run directory entry that is a valid
+// pidfile.
+func (c *Controller) statsPidOf(ctx context.Context, entry fs.DirEntry) (int, bool) {
+	if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".pid") {
+		return 0, false
+	}
+
+	return c.readStatsPid(ctx, filepath.Join(c.p.statsPidDir, entry.Name()))
 }

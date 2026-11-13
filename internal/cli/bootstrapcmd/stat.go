@@ -38,11 +38,16 @@ const (
 var runStat = stat.Run
 
 // RunStat executes "setup stat <name> [options]": the zmstat-<name>
-// collector of carbonio-core, with the options of the script. It runs until
+// collector of carbonio-core, with the options of the script, or "setup stat
+// run <collector>...": several of them in this process. It runs until
 // SIGTERM or SIGINT; the exit status is the script's. Unlike the other tools
 // it must run as the zimbra user (as Zextras::Mon::Stat userCheck), root only
 // for "fd".
 func RunStat(ctx context.Context, env sys.System, stdout, stderr io.Writer, args []string) int {
+	if len(args) > 0 && args[0] == "run" {
+		stat.TuneMemory()
+	}
+
 	return runStat(ctx, statEnv(env, stdout, stderr), args)
 }
 

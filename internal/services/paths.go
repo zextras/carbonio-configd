@@ -28,9 +28,9 @@ type paths struct {
 	run string
 	// statsPidDir holds the per-collector pidfiles of the stats service.
 	statsPidDir string
-	// statsProc is the identity of every collector: libexec/setup with the
-	// argument zmstat, so `tail -f .../log/zmstat-proc.out` or another setup
-	// command is not mistaken for one.
+	// statsProc is the identity of the stats process: libexec/setup with the
+	// argument stat, so `tail -f .../log/zmstat.out` or another setup command
+	// is not mistaken for one.
 	statsProc string
 	// statsGlob is the identity of the collectors of earlier releases, the
 	// zmstat-* Perl scripts under libexec; they are still stopped after an

@@ -195,7 +195,7 @@ Controls one service: the verbs of the legacy `zm*ctl` scripts.
 | `reload` | reload; `norewrite` honoured |
 | `status` | detailed status (pid, uptime); exit `1` and `<service> is not running.` when it is stopped |
 | `refresh` | make the service re-read its configuration: defined only for `milter` (sends `SIGCONT` to the JVM) |
-| `rotate` | make the service reopen its logs: defined only for `stats` (`SIGHUP` to every collector) |
+| `rotate` | make the service reopen its logs: defined only for `stats` (`SIGHUP` to the stats process, which rotates the log of every collector) |
 
 `norewrite` is a positional word, accepted by every verb but meaningful only
 for `start`, `restart` and `reload`. Any other trailing argument is accepted
@@ -246,7 +246,7 @@ Registry names (what `service list` shows, start order top to bottom):
 | `saslauthd` | saslauthd | `carbonio-saslauthd` |
 | `milter` | milter JVM; only started when enabled in `mta_milter_options` | `carbonio-milter` |
 | `mta` | Postfix (depends on `saslauthd` and `milter`) | `carbonio-postfix` |
-| `stats` | the zmstat collectors (`setup stat <name>`) | `carbonio-stats` |
+| `stats` | the zmstat collectors, all in one process (`setup stat run <collector>...`) | `carbonio-stats` |
 
 Accepted aliases (resolved before lookup; they never appear in listings):
 

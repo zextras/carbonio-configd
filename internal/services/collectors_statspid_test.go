@@ -6,7 +6,7 @@ package services
 
 import (
 	"context"
-	"strings"
+	"errors"
 	"syscall"
 	"testing"
 
@@ -70,10 +70,11 @@ func TestKillStatsPidFile_KillsCollectorGroup(t *testing.T) {
 	assert.False(t, f.FS.Exists(statsPidFile))
 }
 
-// TestStartCollectors_RunsSetupStat: every collector is "setup stat <name>
-// [options]" with its log in zmstat-<name>.out, the optional ones only when
-// their localconfig key is TRUE (statctl.pl, zmstatctl start).
-func TestStartCollectors_RunsSetupStat(t *testing.T) {
+// TestStartCollectors_RunsOneProcess: the collectors are one process, "setup
+// stat run" with the command line of each collector as an argument and the log
+// in zmstat.out; the optional ones only when their localconfig key is TRUE
+// (statctl.pl, zmstatctl start).
+func TestStartCollectors_RunsOneProcess(t *testing.T) {
 	t.Parallel()
 
 	ctl, f := newFakeController(t, WithConfigLoader(func() (map[string]string, error) {
@@ -84,19 +85,33 @@ func TestStartCollectors_RunsSetupStat(t *testing.T) {
 
 	require.NoError(t, ctl.startCollectors(context.Background(), ctl.registry[svcStats]))
 
-	var started []string
-
-	for _, c := range f.Exec.Calls() {
-		assert.Equal(t, ctl.p.libexec+"/setup", c.Path)
-		started = append(started, strings.Join(c.Args, " "))
-	}
-
+	calls := f.Exec.Calls()
+	require.Len(t, calls, 1)
+	assert.Equal(t, ctl.p.libexec+"/setup", calls[0].Path)
 	assert.Equal(t, []string{
-		"stat proc", "stat cpu", "stat vm", "stat io -x", "stat df", "stat io",
-		"stat fd", "stat allprocs", "stat mysql",
-	}, started)
-	assert.True(t, f.FS.Exists(ctl.p.log+"/zmstat-io.out"))
-	assert.True(t, f.FS.Exists(ctl.p.log+"/zmstat-mysql.out"))
+		"stat", "run", "proc", "cpu", "vm", "io -x", "df", "io", "fd", "allprocs", "mysql",
+	}, calls[0].Args)
+	assert.True(t, calls[0].Setsid, "its own session: stop signals its process group")
+	assert.True(t, f.FS.Exists(ctl.p.log+"/zmstat.out"))
+}
+
+// TestStartCollectors_EveryOptionalCollector: all three keys TRUE add the
+// optional collectors after the base ones, in their order.
+func TestStartCollectors_EveryOptionalCollector(t *testing.T) {
+	t.Parallel()
+
+	ctl, f := newFakeController(t, WithConfigLoader(func() (map[string]string, error) {
+		return map[string]string{
+			"zmstat_mysql_enabled": "TRUE", "zmstat_nginx_enabled": "TRUE", "zmstat_mtaqueue_enabled": "TRUE",
+		}, nil
+	}))
+	f.FS.Put(ctl.p.libexec+"/setup", []byte("x"), 0o755)
+	f.FS.PutDir(ctl.p.log, 0o755)
+
+	require.NoError(t, ctl.startCollectors(context.Background(), ctl.registry[svcStats]))
+
+	require.Len(t, f.Exec.Calls(), 1)
+	assert.Equal(t, []string{"mysql", "nginx", "mtaqueue"}, f.Exec.Calls()[0].Args[len(f.Exec.Calls()[0].Args)-3:])
 }
 
 // TestStartCollectors_NoSetupBinary: without libexec/setup nothing starts.
@@ -109,6 +124,38 @@ func TestStartCollectors_NoSetupBinary(t *testing.T) {
 	require.ErrorContains(t, ctl.startCollectors(context.Background(), ctl.registry[svcStats]),
 		"no stats collectors started")
 	assert.Empty(t, f.Exec.Calls())
+}
+
+// TestStartCollectors_ProcessDoesNotStart: a process that cannot be started is
+// an error of the start.
+func TestStartCollectors_ProcessDoesNotStart(t *testing.T) {
+	t.Parallel()
+
+	ctl, f := newFakeController(t)
+	f.FS.Put(ctl.p.libexec+"/setup", []byte("x"), 0o755)
+	f.FS.PutDir(ctl.p.log, 0o755)
+	f.Exec.FailStart(func(*sys.Cmd) bool { return true }, errors.New("exec format error"))
+
+	require.ErrorContains(t, ctl.startCollectors(context.Background(), ctl.registry[svcStats]),
+		"no stats collectors started: exec format error")
+}
+
+// TestStopCollectors_OneProcessManyPidfiles: the pidfiles of the collectors all
+// name the one process; it is killed once and every pidfile is removed.
+func TestStopCollectors_OneProcessManyPidfiles(t *testing.T) {
+	t.Parallel()
+
+	ctl, f := newFakeController(t)
+	f.FS.PutDir(ctl.p.statsPidDir, 0o755)
+	f.FS.Put(ctl.p.statsPidDir+"/cpu.pid", []byte("4242\n"), 0o644)
+	f.FS.Put(ctl.p.statsPidDir+"/io-x.pid", []byte("4242\n"), 0o644)
+	f.Proc.Add(sys.ProcEntry{PID: 4242, Argv: []string{ctl.p.libexec + "/setup", "stat", "run", "cpu", "io -x"}})
+
+	require.NoError(t, ctl.stopCollectors(context.Background(), ctl.registry[svcStats]))
+
+	assert.False(t, f.Proc.Alive(4242))
+	assert.False(t, f.FS.Exists(ctl.p.statsPidDir+"/cpu.pid"))
+	assert.False(t, f.FS.Exists(ctl.p.statsPidDir+"/io-x.pid"))
 }
 
 // TestKillStatsPidFile_KillsSetupCollectorGroup: a collector of this release
