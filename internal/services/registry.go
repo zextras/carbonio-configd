@@ -538,10 +538,10 @@ func (c *Controller) defaultRegistry() map[string]*ServiceDef {
 
 // mailboxConfigRewrite is the zmtlsctl configuration set of the mailbox
 // (legacy zmstorectl/zmmailboxdctl run `zmtlsctl` unless `norewrite`): the
-// files mailboxd reads at boot.
-var mailboxConfigRewrite = []string{
-	svcSasl, "webxml", svcMailbox, svcService, "zextras", "zextrasAdmin", "zimlet",
-}
+// files mailboxd reads at boot. Only the names that are zmconfigd.cf sections:
+// webxml, service, zextras, zextrasAdmin and zimlet have none and were never
+// rewritten.
+var mailboxConfigRewrite = []string{svcSasl, svcMailbox}
 
 // amavisMemberApplies skips amavis on hosts without amavisd installed
 // (zmantivirusctl lists it among its scripts, which are no-ops there).

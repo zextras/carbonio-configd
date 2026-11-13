@@ -344,7 +344,7 @@ fs.remove /run/carbonio/mysql.pid
 => err: reload service appserver-db: no native reload
 
 ## store | legacy start cold
-exec /opt/zextras/libexec/configrewrite sasl webxml mailbox service zextras zextrasAdmin zimlet
+exec /opt/zextras/libexec/configrewrite sasl mailbox
 fs.open /opt/zextras/log/mysqld_safe_appserver-db.out flag=0x441 perm=0640
 exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/my.cnf --external-locking --log-error=/opt/zextras/log/mysql_error.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
 fs.open /opt/zextras/log/mysqld_safe_appserver-db.out flag=0x441 perm=0640
@@ -357,7 +357,7 @@ exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAM
 => ok
 
 ## store | legacy start running
-exec /opt/zextras/libexec/configrewrite sasl webxml mailbox service zextras zextrasAdmin zimlet
+exec /opt/zextras/libexec/configrewrite sasl mailbox
 => ok
 
 ## store | legacy stop running
@@ -380,7 +380,7 @@ fs.remove /run/carbonio/mysql.pid
 proc.signal 1002 15
 proc.signal 1001 15
 fs.remove /run/carbonio/mysql.pid
-exec /opt/zextras/libexec/configrewrite sasl webxml mailbox service zextras zextrasAdmin zimlet
+exec /opt/zextras/libexec/configrewrite sasl mailbox
 fs.open /opt/zextras/log/mysqld_safe_appserver-db.out flag=0x441 perm=0640
 exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/my.cnf --external-locking --log-error=/opt/zextras/log/mysql_error.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
 fs.open /opt/zextras/log/mysqld_safe_appserver-db.out flag=0x441 perm=0640
@@ -396,7 +396,7 @@ exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAM
 proc.signal 1002 15
 proc.signal 1001 15
 fs.remove /run/carbonio/mysql.pid
-exec /opt/zextras/libexec/configrewrite sasl webxml mailbox service zextras zextrasAdmin zimlet
+exec /opt/zextras/libexec/configrewrite sasl mailbox
 fs.open /opt/zextras/log/mysqld_safe_appserver-db.out flag=0x441 perm=0640
 exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/my.cnf --external-locking --log-error=/opt/zextras/log/mysql_error.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
 fs.open /opt/zextras/log/mysqld_safe_appserver-db.out flag=0x441 perm=0640
@@ -410,7 +410,7 @@ exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAM
 
 ## store | legacy reload stopped
 fs.remove /run/carbonio/mysql.pid
-exec /opt/zextras/libexec/configrewrite sasl webxml mailbox service zextras zextrasAdmin zimlet
+exec /opt/zextras/libexec/configrewrite sasl mailbox
 fs.open /opt/zextras/log/mysqld_safe_appserver-db.out flag=0x441 perm=0640
 exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/my.cnf --external-locking --log-error=/opt/zextras/log/mysql_error.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
 fs.open /opt/zextras/log/mysqld_safe_appserver-db.out flag=0x441 perm=0640
@@ -448,7 +448,7 @@ fs.remove /run/carbonio/mysql.pid
 => signaled=[] gone=[] err: verb not supported by this service: store has no rotate
 
 ## store | systemd start
-exec /opt/zextras/libexec/configrewrite sasl webxml mailbox service zextras zextrasAdmin zimlet
+exec /opt/zextras/libexec/configrewrite sasl mailbox
 exec /usr/bin/systemctl is-active carbonio-appserver-db.service
 exec /usr/bin/systemctl is-active carbonio-appserver.service
 => ok
@@ -461,7 +461,7 @@ exec /usr/bin/systemctl stop carbonio-appserver-db.service
 ## store | systemd restart
 exec /usr/bin/systemctl stop carbonio-appserver.service
 exec /usr/bin/systemctl stop carbonio-appserver-db.service
-exec /opt/zextras/libexec/configrewrite sasl webxml mailbox service zextras zextrasAdmin zimlet
+exec /opt/zextras/libexec/configrewrite sasl mailbox
 exec /usr/bin/systemctl is-active carbonio-appserver-db.service
 exec /usr/bin/systemctl is-active carbonio-appserver.service
 => ok
@@ -469,7 +469,7 @@ exec /usr/bin/systemctl is-active carbonio-appserver.service
 ## store | systemd reload
 exec /usr/bin/systemctl stop carbonio-appserver.service
 exec /usr/bin/systemctl stop carbonio-appserver-db.service
-exec /opt/zextras/libexec/configrewrite sasl webxml mailbox service zextras zextrasAdmin zimlet
+exec /opt/zextras/libexec/configrewrite sasl mailbox
 exec /usr/bin/systemctl is-active carbonio-appserver-db.service
 exec /usr/bin/systemctl is-active carbonio-appserver.service
 => ok
@@ -499,7 +499,7 @@ fs.remove /run/carbonio/mysql.pid
 ## mailbox | legacy start cold
 fs.open /opt/zextras/log/mysqld_safe_appserver-db.out flag=0x441 perm=0640
 exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/my.cnf --external-locking --log-error=/opt/zextras/log/mysql_error.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
-exec /opt/zextras/libexec/configrewrite sasl webxml mailbox service zextras zextrasAdmin zimlet
+exec /opt/zextras/libexec/configrewrite sasl mailbox
 fs.mkdir /opt/zextras/mailboxd/work/service/jsp mode=0755
 fs.mkdir /opt/zextras/mailboxd/work mode=0755
 fs.open /opt/zextras/log/gc.log flag=0x41 perm=0640
@@ -527,7 +527,7 @@ proc.signal 1001 15
 proc.signal 1001 15
 fs.open /opt/zextras/log/mysqld_safe_appserver-db.out flag=0x441 perm=0640
 exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/my.cnf --external-locking --log-error=/opt/zextras/log/mysql_error.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
-exec /opt/zextras/libexec/configrewrite sasl webxml mailbox service zextras zextrasAdmin zimlet
+exec /opt/zextras/libexec/configrewrite sasl mailbox
 fs.mkdir /opt/zextras/mailboxd/work/service/jsp mode=0755
 fs.mkdir /opt/zextras/mailboxd/work mode=0755
 fs.open /opt/zextras/log/gc.log flag=0x41 perm=0640
