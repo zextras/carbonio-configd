@@ -7,6 +7,8 @@ package main
 import (
 	"runtime/debug"
 	"strings"
+
+	"github.com/zextras/carbonio-configd/internal/version"
 )
 
 // VersionInfo holds structured version information extracted from build metadata.
@@ -20,16 +22,12 @@ type VersionInfo struct {
 // GetVersionInfo extracts version information from Go's embedded build info.
 func GetVersionInfo() VersionInfo {
 	info := VersionInfo{
-		Version: "(unknown)",
+		Version: version.Main(),
 	}
 
 	bi, ok := debug.ReadBuildInfo()
 	if !ok {
 		return info
-	}
-
-	if bi.Main.Version != "" {
-		info.Version = bi.Main.Version
 	}
 
 	for _, s := range bi.Settings {

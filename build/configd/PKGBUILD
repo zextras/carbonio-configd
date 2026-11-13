@@ -131,11 +131,13 @@ _package_systemd() {
 
 build() {
   cd "${repodir}"
-  CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
+  # Stamp the release: source-tree builds otherwise report "(devel)".
+  local _ldflags="-s -w -X github.com/zextras/carbonio-configd/internal/version.stamped=${pkgver}"
+  CGO_ENABLED=0 go build -trimpath -ldflags="${_ldflags}" \
     -o "${srcdir}/configd" ./cmd/configd/
-  CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
+  CGO_ENABLED=0 go build -trimpath -ldflags="${_ldflags}" \
     -o "${srcdir}/postfix-conf" ./cmd/postfix-conf/
-  CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
+  CGO_ENABLED=0 go build -trimpath -ldflags="${_ldflags}" \
     -o "${srcdir}/setup" ./cmd/setup/
 
   # The completion scripts come from the command tree itself. Run them with the
