@@ -183,7 +183,6 @@ func TestSetupPlCommandsRefuseNonRoot(t *testing.T) {
 		{"dhparam", "get"},
 		{"ldap-passwd", "-p", "pw"},
 		{"proxyconfig", "-m", "-e", "-H", "h"},
-		{"ldap-schema"},
 		{"ldap-enable-mmr", "-m", "ldap://h:389/"},
 		{"iptool", "-d"},
 		{"certmgr", "verifycrt", "self"},
@@ -197,6 +196,15 @@ func TestSetupPlCommandsRefuseNonRoot(t *testing.T) {
 		assert.Empty(t, out, args)
 		assert.Contains(t, errb, "must run as root", args)
 	}
+}
+
+// zmldapschema was for zextras only and said so with echo, on stdout.
+func TestLDAPSchemaRefusesTheOthers(t *testing.T) {
+	status, out, errb := exec(t, "ldap-schema")
+
+	assert.Equal(t, 1, status)
+	assert.Equal(t, "Error: must be run as zextras user\n", out)
+	assert.Empty(t, errb)
 }
 
 func TestConfigNonInteractiveFailsOnMissingKeys(t *testing.T) {

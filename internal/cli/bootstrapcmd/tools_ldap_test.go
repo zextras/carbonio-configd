@@ -25,6 +25,8 @@ type ldapToolCase struct {
 	run  ldapToolRun
 	// rootOnly marks the scripts that refused every user but root.
 	rootOnly bool
+	// zextrasOnly marks the one that refused every user but zextras.
+	zextrasOnly bool
 }
 
 // ldapToolCases are the tools that run a setup port with the Env of toolEnv:
@@ -53,11 +55,11 @@ func ldapToolCases(t *testing.T, h *toolHarness) []ldapToolCase {
 	runLDAPEnableMMR, runIPTool = script("mmr"), script("iptool")
 
 	return []ldapToolCase{
-		{"ldap-schema", RunLDAPSchema, false},
-		{"ldap-update-ldif", RunLDAPUpdateLDIF, true},
-		{"ldap-enable-replica", RunLDAPEnableReplica, true},
-		{"ldap-enable-mmr", RunLDAPEnableMMR, false},
-		{"iptool", RunIPTool, false},
+		{"ldap-schema", RunLDAPSchema, false, true},
+		{"ldap-update-ldif", RunLDAPUpdateLDIF, true, false},
+		{"ldap-enable-replica", RunLDAPEnableReplica, true, false},
+		{"ldap-enable-mmr", RunLDAPEnableMMR, false, false},
+		{"iptool", RunIPTool, false, false},
 	}
 }
 
@@ -68,7 +70,7 @@ func TestLDAPTools_PassTheOptionsAndTheScriptsStatus(t *testing.T) {
 		zextrasUID = func() int { return 1000 }
 
 		for _, c := range ldapToolCases(t, h) {
-			if c.rootOnly && !root {
+			if (c.rootOnly && !root) || (c.zextrasOnly && root) {
 				continue
 			}
 
@@ -102,9 +104,40 @@ func TestLDAPTools_RefuseOtherUsers(t *testing.T) {
 			want = "Error: must be run as root user\n"
 		}
 
+		if c.zextrasOnly {
+			// zmldapschema said it with echo, so on stdout.
+			assert.Equal(t, "Error: must be run as zextras user\n", out.String(), c.name)
+			assert.Empty(t, errb.String(), c.name)
+			assert.Equal(t, 1, status, c.name)
+
+			continue
+		}
+
 		assert.Equal(t, 1, status, c.name)
 		assert.Equal(t, want, errb.String(), c.name)
 		assert.Empty(t, out.String(), c.name)
+	}
+
+	assert.Empty(t, h.calls)
+}
+
+// zmldapschema refused root as well as everybody else: the port ran for root
+// too, and left root-owned files in the slapd configuration.
+func TestRunLDAPSchema_RefusesRoot(t *testing.T) {
+	h := newToolHarness(t, true)
+
+	for _, c := range ldapToolCases(t, h) {
+		if !c.zextrasOnly {
+			continue
+		}
+
+		var out, errb bytes.Buffer
+
+		status := c.run(context.Background(), systest.New().System(), &out, &errb, nil)
+
+		assert.Equal(t, 1, status)
+		assert.Equal(t, "Error: must be run as zextras user\n", out.String())
+		assert.Empty(t, errb.String())
 	}
 
 	assert.Empty(t, h.calls)

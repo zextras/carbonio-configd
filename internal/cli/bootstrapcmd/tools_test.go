@@ -349,8 +349,8 @@ func TestRunProxyConfig_RefusesOtherUsers(t *testing.T) {
 	assert.Empty(t, h.calls)
 }
 
-// "setup dhparam install" is the step of setup.pl, and so is "setup dhparam"
-// alone (kept for the setup.pl of carbonio-core); every other command line is zmdhparam, which keeps its output and exit status, and
+// "setup dhparam install" is the step of setup.pl; every other command line,
+// none included, is zmdhparam, which keeps its output and exit status, and
 // stdin reaches it.
 func TestRunDHParam_StepWithInstallScriptWithTheRest(t *testing.T) {
 	t.Run("install", func(t *testing.T) {
@@ -367,17 +367,18 @@ func TestRunDHParam_StepWithInstallScriptWithTheRest(t *testing.T) {
 		assert.Empty(t, errb.String())
 	})
 
-	t.Run("no arguments installs too", func(t *testing.T) {
+	// bin/zmdhparam passes its arguments through, and the script asked for a
+	// command when it had none: writing the parameters silently was a change.
+	t.Run("no arguments is zmdhparam, which asks for a command", func(t *testing.T) {
 		h := newToolHarness(t, true)
 
 		var out, errb bytes.Buffer
 
 		status := RunDHParam(context.Background(), systest.New().System(), strings.NewReader("in"), &out, &errb, nil)
 
-		assert.Equal(t, 0, status)
-		assert.Equal(t, []string{"dhparam"}, h.calls)
-		assert.Empty(t, out.String())
-		assert.Empty(t, errb.String())
+		assert.Equal(t, 0, status, "the status of the port")
+		assert.Equal(t, []string{"zmdhparam"}, h.calls)
+		assert.Empty(t, h.args)
 	})
 
 	for _, root := range []bool{true, false} {
@@ -502,4 +503,21 @@ func TestRunTool_DetailsStayOffStderr(t *testing.T) {
 	assert.Contains(t, out.String(), "progress")
 	assert.NotContains(t, out.String(), "internal command line")
 	assert.Empty(t, errb.String())
+}
+
+// ToolUsage is the text of the script, for the tools that print one when asked
+// and for no other.
+func TestToolUsage(t *testing.T) {
+	paths := setup.DefaultPaths()
+
+	assert.Equal(t, setup.LDAPPasswdUsage(paths.Path("bin", "zmldappasswd")), ToolUsage("ldap-passwd"))
+	assert.Equal(t, setup.ProxyConfigUsage(paths.Path("libexec", "zmproxyconfig")), ToolUsage("proxyconfig"))
+	assert.Equal(t, setup.RCUsage, ToolUsage("rc"))
+	assert.Equal(t, setup.RCDUsage, ToolUsage("rcd"))
+
+	for _, name := range []string{"prov", "ssh-keygen", "ldap-schema", "no-such-tool", ""} {
+		assert.Empty(t, ToolUsage(name), name)
+	}
+
+	assert.Contains(t, ToolUsage("ldap-passwd"), "zmldappasswd")
 }
