@@ -12,13 +12,14 @@ import (
 
 // The attributes and values the creation of entries sets.
 const (
-	attrCreateTimestamp = "zimbraCreateTimestamp"
-	attrDomainType      = "zimbraDomainType"
-	attrDomainStatus    = "zimbraDomainStatus"
-	attrGentimeFraction = "zimbraLdapGentimeFractionalSecondsEnabled"
-	attrAllowNonLDH     = "zimbraAllowNonLDHCharsInDomain"
-	attrServerExtraOC   = "zimbraServerExtraObjectClass"
-	attrDomainExtraOC   = "zimbraDomainExtraObjectClass"
+	attrCreateTimestamp  = "zimbraCreateTimestamp"
+	attrDomainType       = "zimbraDomainType"
+	attrDomainRenameInfo = "zimbraDomainRenameInfo"
+	attrDomainStatus     = "zimbraDomainStatus"
+	attrGentimeFraction  = "zimbraLdapGentimeFractionalSecondsEnabled"
+	attrAllowNonLDH      = "zimbraAllowNonLDHCharsInDomain"
+	attrServerExtraOC    = "zimbraServerExtraObjectClass"
+	attrDomainExtraOC    = "zimbraDomainExtraObjectClass"
 
 	domainTypeLocal  = "local"
 	statusActive     = "active"

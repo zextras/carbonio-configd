@@ -42,9 +42,23 @@ const (
 	typeRegex       attrType = "regex"
 )
 
-// flagServerInherited marks an attribute whose value on a server entry
-// defaults to the global config value.
-const flagServerInherited = "serverInherited"
+// The inheritance flags of attrs.xml: which entry an attribute value defaults
+// from (AttributeFlag in the Java AttributeManager).
+const (
+	// flagServerInherited marks an attribute whose value on a server entry
+	// defaults to the global config value.
+	flagServerInherited = "serverInherited"
+	// flagDomainInherited marks an attribute whose value on a domain defaults to
+	// the global config value.
+	flagDomainInherited = "domainInherited"
+	// flagAccountInherited marks an attribute whose value on an account defaults
+	// to the value of its class of service.
+	flagAccountInherited = "accountInherited"
+	// flagAccountCosDomainInherited marks an attribute whose value on an account
+	// defaults to the value of its domain, which itself defaults to the class of
+	// service.
+	flagAccountCosDomainInherited = "accountCosDomainInherited"
+)
 
 // The patterns of LdapAttributeInfo.
 var (
@@ -62,6 +76,8 @@ type Attr struct {
 	// Callback is the name of the Java attribute callback, "" for none.
 	Callback        string
 	ServerInherited bool
+	// flags are the flags of the attribute (attrs.xml "flags").
+	flags []string
 
 	min, max int64
 	enum     []string
@@ -176,7 +192,8 @@ func newAttr(xattrs []xml.Attr) (*Attr, error) {
 		return nil, errors.New("attribute schema: <attr> without a name")
 	}
 
-	a.ServerInherited = slices.Contains(strings.Split(props["flags"], ","), flagServerInherited)
+	a.flags = strings.Split(props["flags"], ",")
+	a.ServerInherited = slices.Contains(a.flags, flagServerInherited)
 
 	a.setLimits(props["min"], props["max"])
 
@@ -268,6 +285,22 @@ func (s *Schema) ServerInherited(name string) bool {
 	a := s.Lookup(name)
 
 	return a != nil && a.ServerInherited
+}
+
+// WithFlag lists the names of the attributes that have the flag, sorted
+// (AttributeManager.getAttrsWithFlag).
+func (s *Schema) WithFlag(flag string) []string {
+	var names []string
+
+	for _, a := range s.attrs {
+		if slices.Contains(a.flags, flag) {
+			names = append(names, a.Name)
+		}
+	}
+
+	slices.Sort(names)
+
+	return names
 }
 
 // Check validates one value of the attribute name as LdapAttributeInfo

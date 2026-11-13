@@ -28,6 +28,9 @@ const (
 type Entry struct {
 	DN    string
 	Attrs map[string][]string
+	// Names holds the name of an attribute as the directory returned it, by
+	// lower-case name; a directory that does not tell leaves it nil.
+	Names map[string]string
 }
 
 // Values returns the values of the attribute (name in any case).

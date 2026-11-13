@@ -74,4 +74,5 @@
 <attr id="482" name="zimbraNotebookMaxRevisions" type="integer" min="0" cardinality="single" optionalIn="account,cos" flags="accountInherited" deprecatedSince="23.9.0"/>
 <attr id="1100" name="zimbraAmavisQuarantineAccount" type="email" max="256" cardinality="single" optionalIn="globalConfig" since="7.0.0"/>
 <attr id="900001" name="zimbraTestUnportedCallback" type="string" cardinality="single" optionalIn="globalConfig" callback="NotPorted"/>
+<attr id="13" name="displayName" type="string" max="256" cardinality="single" optionalIn="account,distributionList" callback="DisplayName" flags="accountInfo"/>
 </attrs>

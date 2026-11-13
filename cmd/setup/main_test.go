@@ -73,7 +73,7 @@ func TestSetupPlCommandsAreListedAndValidated(t *testing.T) {
 
 	for _, c := range []string{"gal-sync-account", "ssh-keygen", "update-authkeys", "syslog", "dhparam", "proxyconfig", "ldap-passwd",
 		"ldap-schema", "ldap-update-ldif", "ldap-enable-replica", "ldap-enable-mmr", "iptool", "iniutil", "certmgr",
-		"stat", "rc"} {
+		"stat", "rc", "prov", "random-password", "serverips"} {
 		assert.Contains(t, out, c)
 	}
 
@@ -132,6 +132,7 @@ func TestSetupPlCommandsRefuseNonRoot(t *testing.T) {
 		{"iptool", "-d"},
 		{"certmgr", "verifycrt", "self"},
 		{"rc", "mta.example.com", "status"},
+		{"prov", "-r", "-m", "-l", "gs", "mta.example.com"},
 	} {
 		status, out, errb := exec(t, args...)
 
@@ -228,4 +229,16 @@ func TestStatCommandPassesTheCollectorOptionsThrough(t *testing.T) {
 	assert.Equal(t, 1, status)
 	assert.Empty(t, out)
 	assert.Contains(t, errb, `Unknown collector "bogus"; one of: allprocs, cpu, df, fd, io, ldap, mtaqueue, mysql, nginx, proc, vm`)
+}
+
+// The options of zmprov and RandomPassword are theirs: cobra must not read -l.
+func TestRandomPasswordCommandPassesItsOptionsThrough(t *testing.T) {
+	status, out, errb := exec(t, "random-password", "-l", "9", "9")
+
+	require.Equal(t, 0, status, errb)
+	assert.Regexp(t, `^[0-9A-Za-z_]{9}\n$`, out)
+
+	status, out, _ = exec(t, "random-password", "8")
+	assert.Equal(t, 1, status)
+	assert.Contains(t, out, "RandomPassword [-l]")
 }

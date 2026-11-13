@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"slices"
 	"strings"
@@ -253,4 +254,77 @@ func (e *Env) ldapClient(ctx context.Context) (*ldap.Client, error) {
 
 func sortedKeys(m map[string]string) []string {
 	return slices.Sorted(maps.Keys(m))
+}
+
+// Exit statuses of zmprov: 1 for a command line it does not understand, 2 when
+// the command failed.
+const (
+	provExitUsage  = 1
+	provExitFailed = 2
+)
+
+// provIgnoredFlags are the zmprov options that choose how it connects (-l:
+// LDAP, -m: the master, -r: replace a multi-valued attribute on modify); the
+// native provisioning always talks to the LDAP master and replaces.
+var provIgnoredFlags = []string{"-l", "-m", "-r"}
+
+// RunProvCLI is the command line of zmprov for the commands setup.pl runs:
+// "[-r] [-m] [-l] <verb> args...". It prints what zmprov prints. An unknown
+// verb or a wrong argument count exits 1, a failed command prints
+// "ERROR: <code> (<message>)" and exits 2; there is no fallback to the Java
+// zmprov. Nothing of the arguments is logged: a verb may carry a password.
+func RunProvCLI(e *Env, args []string, stdout, stderr io.Writer) int {
+	for len(args) > 0 && slices.Contains(provIgnoredFlags, args[0]) {
+		args = args[1:]
+	}
+
+	if len(args) == 0 || !provision.IsVerb(args[0]) {
+		name := ""
+		if len(args) > 0 {
+			name = args[0]
+		}
+
+		_, _ = fmt.Fprintf(stderr, "prov: unknown command %q: it is not one of the commands the native provisioning "+
+			"implements\n", name)
+
+		return provExitUsage
+	}
+
+	dir, err := e.provDirectory()
+	if err != nil {
+		return provFailed(stderr, fmt.Errorf("opening LDAP: %w", err))
+	}
+
+	defer func() { _ = dir.Close() }()
+
+	prv, err := e.provisioner(dir)
+	if err != nil {
+		return provFailed(stderr, err)
+	}
+
+	if err := prv.Run(args, stdout); err != nil {
+		return provFailed(stderr, err)
+	}
+
+	return 0
+}
+
+// provFailed prints a failure as zmprov does and returns the exit status.
+func provFailed(stderr io.Writer, err error) int {
+	if usage, ok := errors.AsType[*provision.UsageError](err); ok {
+		_, _ = fmt.Fprintf(stderr, "prov: %s\n", usage.Msg)
+
+		return provExitUsage
+	}
+
+	msg := "service.FAILURE (" + err.Error() + ")"
+	if perr, ok := errors.AsType[*provision.Error](err); ok {
+		msg = perr.Error()
+	}
+
+	masked, _ := redact.Text(msg)
+
+	_, _ = fmt.Fprintf(stderr, "ERROR: %s\n", masked)
+
+	return provExitFailed
 }

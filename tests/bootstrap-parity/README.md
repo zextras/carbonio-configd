@@ -52,6 +52,18 @@ container for inspection: `podman exec -it NAME bash`), `--config FILE`
 `PARITY_FQDN` (default `mail.parity.test`, must match `HOSTNAME` of the config),
 `BOOT_TIMEOUT`.
 
+`run-legacy.sh` can also run the legacy bootstrap with parts of a newer
+carbonio-core and the carbonio-configd `setup` binary, and prove which Java
+tools it still starts: `--setup-pl FILE` (over `libexec/setup.pl`),
+`--setup-bin FILE` (as `libexec/setup`), `--zmserverips FILE`,
+`--install SRC=DEST` (repeatable, e.g. the `zmcertmgr`/`zmproxyconfig`
+wrappers that exec `setup`) and `--trace`. `--trace` (trace-install.sh) wraps
+`zmprov` and `zmjava` to log each start, with the Java class and the chain of
+ancestor processes but never the arguments (they hold passwords), and samples
+the process table for `ProvUtil`, `RandomPassword` and the Perl `zmserverips`;
+both logs are in `out/<name>.trace/`. The `zmsetup.log` of the run is
+`out/<name>.zmsetup.log`.
+
 To refresh the reference after an intentional change of the legacy side (new
 package versions, new image):
 

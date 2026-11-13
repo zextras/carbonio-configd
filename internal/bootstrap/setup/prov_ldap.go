@@ -42,11 +42,15 @@ func (d ldapDirectory) Search(
 
 	for _, e := range res.Entries {
 		attrs := make(map[string][]string, len(e.Attributes))
+		names := make(map[string]string, len(e.Attributes))
+
 		for _, a := range e.Attributes {
-			attrs[strings.ToLower(a.Name)] = a.Values
+			lower := strings.ToLower(a.Name)
+			attrs[lower] = a.Values
+			names[lower] = a.Name
 		}
 
-		entries = append(entries, provision.Entry{DN: e.DN, Attrs: attrs})
+		entries = append(entries, provision.Entry{DN: e.DN, Attrs: attrs, Names: names})
 	}
 
 	return entries, nil

@@ -95,7 +95,7 @@ func TestCreateAccount_Refusals(t *testing.T) {
 		"derived alias": {[]string{"ca", "u@example.com", "x", "zimbraMailAlias", "u2@example.com"}, provision.CodeInvalidRequest},
 		"status":        {[]string{"ca", "u@example.com", "x", "zimbraAccountStatus", "bogus"}, provision.CodeInvalidAttrValue},
 		"add form":      {[]string{"ca", "u@example.com", "x", "+description", "d"}, provision.CodeInvalidRequest},
-		"cos missing":   {[]string{"ca", "u@example.com", "x", "zimbraCOSId", "cccccccc-0000-4000-8000-0000000000aa"}, provision.CodeNoSuchCOS},
+		"cos missing":   {[]string{"ca", "u@example.com", "x", "zimbraCOSId", "cccccccc-0000-4000-8000-0000000000aa"}, provision.CodeInvalidRequest},
 		"cos not an id": {[]string{"ca", "u@example.com", "x", "zimbraCOSId", "nosuch"}, provision.CodeInvalidAttrValue},
 		"odd attribute": {[]string{"ca", "u@example.com", "x", "description"}, provision.CodeInvalidRequest},
 	} {

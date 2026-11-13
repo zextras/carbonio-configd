@@ -15,6 +15,8 @@ const (
 	kindConfig
 	kindServer
 	kindCOS
+	kindAccount
+	kindDomain
 )
 
 // callbackContext is the CallbackContext of the Java code plus the entry the
@@ -26,6 +28,24 @@ type callbackContext struct {
 	// create is set for an entry being created.
 	create bool
 	done   map[string]bool
+}
+
+// existingEntry reports whether the entry is an account or domain that
+// exists: the callbacks of the Java code do more for those than for the
+// entries the bootstrap creates and configures.
+func (c *callbackContext) existingEntry() bool { return c.kind == kindAccount || c.kind == kindDomain }
+
+// forEntry is the part of the refusal that names the kind of entry, for the
+// kinds where only some callbacks are ported.
+func (k entryKind) forEntry() string {
+	switch k {
+	case kindAccount:
+		return " for an account"
+	case kindDomain:
+		return " for a domain"
+	default:
+		return ""
+	}
 }
 
 // once is CallbackContext.isDoneAndSetIfNot: it reports whether the callback
@@ -45,32 +65,34 @@ type attrCallback struct {
 	// post runs after the modification on the entry as it is then; its failure
 	// is only a warning.
 	post func(c *callbackContext, attr string) error
+	// existing marks a callback that is ported for an existing account or
+	// domain (ma, md): the others do more than the checks there (they publish
+	// events, move aliases or distribution list members) and the native
+	// provisioning refuses the attributes they guard.
+	existing bool
 }
 
 // callbacks are the callbacks the native provisioning ports, by the name in
 // attrs.xml. The others are refused (see preModify): the run would otherwise
 // change an attribute without what the Java code does around it.
 //
-// Callbacks that do nothing for the entries the commands touch (servers, the
-// global config, classes of service, and entries being created) are listed
+// Callbacks that do nothing for the entries the commands touch are listed
 // with an empty callback: ServerConfig reloads a running mailbox (it checks
-// Zimbra.started()), DisplayName and AccountStatus's post only apply to an
-// existing account, CosId validates ids only for a non-UUID provisioning,
-// MtaAuthHost does nothing.
+// Zimbra.started()), MtaAuthHost does nothing.
 var callbacks = map[string]attrCallback{
-	"CheckPortConflict":    {pre: checkPortConflict},
+	"CheckPortConflict":    {pre: checkPortConflict, existing: true},
 	"MailPort":             {pre: checkPortConflict, post: mailPortPost},
 	"MailHostPool":         {pre: mailHostPoolPre},
-	"MailHost":             {pre: mailHostPre},
+	"MailHost":             {pre: mailHostPre, existing: true},
 	"LocalBind":            {post: localBindPost},
 	"AccountStatus":        {pre: accountStatusPre},
-	"DomainStatus":         {pre: domainStatusPre},
+	"DomainStatus":         {pre: domainStatusPre, existing: true},
 	"MtaRelayHost":         {pre: mtaRelayHostPre},
-	"PositiveTimeInterval": {pre: positiveIntervalPre},
+	"PositiveTimeInterval": {pre: positiveIntervalPre, existing: true},
 	"ServerConfig":         {},
-	"DisplayName":          {},
-	"CosId":                {},
-	"MtaAuthHost":          {},
+	"DisplayName":          {pre: displayNamePre, existing: true},
+	"CosId":                {pre: cosIDPre, existing: true},
+	"MtaAuthHost":          {existing: true},
 }
 
 // preModify is LdapAttributeCallbackHelper.preModify with checkImmutable: the
@@ -110,9 +132,9 @@ func (p *Provisioner) runPre(c *callbackContext, a *Attr, mods Mods, key string)
 	}
 
 	cb, ok := callbacks[a.Callback]
-	if !ok {
-		return invalidRequest("%s is checked by the %s callback, which the native provisioning does not implement",
-			a.Name, a.Callback)
+	if !ok || (c.existingEntry() && !cb.existing) {
+		return invalidRequest("%s is checked by the %s callback, which the native provisioning does not implement%s",
+			a.Name, a.Callback, c.kind.forEntry())
 	}
 
 	if cb.pre == nil {
@@ -206,6 +228,10 @@ func domainStatusPre(c *callbackContext, attr string, values []string, mods Mods
 	case "closed":
 		mods[attrMailStatus] = []string{statusDisabled}
 	default:
+		if c.entry != nil && c.entry.First(attrDomainRenameInfo) != "" {
+			return invalidRequest("domain %s is being renamed, cannot change %s", c.entry.First(attrDomainName), attr)
+		}
+
 		if len(mods[attrMailStatus]) > 0 {
 			return nil
 		}
@@ -239,6 +265,46 @@ func positiveIntervalPre(_ *callbackContext, attr string, _ []string, mods Mods)
 
 	if d, perr := parseDuration(value); perr != nil || d <= 0 {
 		return invalidRequest("cannot set %s less than or equal to 0", attr)
+	}
+
+	return nil
+}
+
+// displayNamePre is the preModify of DisplayName: the cn of an account follows
+// its display name (the account is named by uid, so cn is not its naming
+// attribute); other entries, and an account being created, do nothing.
+func displayNamePre(c *callbackContext, attr string, _ []string, mods Mods) error {
+	if c.kind != kindAccount {
+		return nil
+	}
+
+	name, set, err := mods.singleValue(attr)
+	if err != nil || !set {
+		return err
+	}
+
+	if !mods.has(attrCN) {
+		mods[attrCN] = []string{name}
+	}
+
+	return nil
+}
+
+// cosIDPre is the preModify of CosId: a class of service id must point to a
+// class of service.
+func cosIDPre(c *callbackContext, attr string, _ []string, mods Mods) error {
+	id, set, err := mods.singleValue(attr)
+	if err != nil || !set {
+		return err
+	}
+
+	cos, err := c.p.cos(id)
+	if err != nil {
+		return err
+	}
+
+	if cos == nil {
+		return invalidRequest("cos id %s does not point to a valid cos", id)
 	}
 
 	return nil
