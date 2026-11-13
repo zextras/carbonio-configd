@@ -405,6 +405,78 @@ func TestServerBoundsConcurrentConnections(t *testing.T) {
 	}
 }
 
+// TestIdleConnectionsDoNotStarveRealClients verifies that connections which
+// never send a request hold no slot: with more idle sockets than slots, a real
+// client still gets its STATUS reply while the idle sockets stay open.
+func TestIdleConnectionsDoNotStarveRealClients(t *testing.T) {
+	const (
+		limit = 2
+		idle  = 3 * limit
+	)
+
+	server := NewThreadedStreamServer("127.0.0.1", 0, false, &ConfigdRequestHandler{})
+	server.slots = make(chan struct{}, limit)
+	// Far longer than the test: the idle sockets must not rely on timing out.
+	server.readTimeout = time.Minute
+	startServer(context.Background(), t, server)
+
+	for range idle {
+		conn, err := net.DialTimeout("tcp", serverAddr(server), testDeadline)
+		if err != nil {
+			t.Fatalf("dial idle connection: %v", err)
+		}
+
+		t.Cleanup(func() { _ = conn.Close() })
+	}
+
+	resp, err := roundTrip(serverAddr(server), "STATUS\n")
+	if err != nil {
+		t.Fatalf("STATUS with %d idle connections: %v", idle, err)
+	}
+
+	if resp != respSuccessActive {
+		t.Errorf("STATUS = %q, want %q", resp, respSuccessActive)
+	}
+}
+
+// TestRequestSlotWaitEndsOnShutdown verifies a client whose request is complete
+// but that waits for a slot is answered, not left hanging, when the server shuts
+// down.
+func TestRequestSlotWaitEndsOnShutdown(t *testing.T) {
+	handler := &gateHandler{release: make(chan struct{})}
+	server := NewThreadedStreamServer("127.0.0.1", 0, false, handler)
+	server.slots = make(chan struct{}, 1)
+	startServer(context.Background(), t, server)
+
+	t.Cleanup(func() { close(handler.release) })
+
+	// The first request takes the only slot and blocks in the handler.
+	go func() { _, _ = roundTrip(serverAddr(server), "STATUS\n") }()
+
+	waitUntil(t, func() bool { return handler.inflight.Load() == 1 }, "first request to hold the slot")
+
+	result := make(chan string, 1)
+
+	go func() {
+		resp, _ := roundTrip(serverAddr(server), "STATUS\n")
+		result <- resp
+	}()
+
+	// Give the second request time to be read and queue for the slot.
+	time.Sleep(100 * time.Millisecond)
+
+	go server.Shutdown(context.Background())
+
+	select {
+	case resp := <-result:
+		if resp != errShuttingDown {
+			t.Errorf("queued request answered %q, want %q", resp, errShuttingDown)
+		}
+	case <-time.After(testDeadline):
+		t.Fatal("queued request was not released by shutdown")
+	}
+}
+
 // failingListener fails every Accept with err until failures are exhausted,
 // then returns net.ErrClosed.
 type failingListener struct {

@@ -56,7 +56,7 @@ Inside `RunMainLoop` before the first iteration:
   manager restarts on purpose is removed from the watchdog first.
 - Signal handlers are registered (`cmd/configd/signals.go`): SIGTERM/SIGINT send `STOPPING=1` and
   cancel the context; SIGHUP, SIGUSR2 and SIGALRM send `RELOADING=1`, zero the sleep timer and
-  wake the loop through the one-slot reload channel; SIGCHLD is only logged.
+  wake the loop through the one-slot reload channel; SIGCHLD is not subscribed.
 - The systemd watchdog keep-alive goroutine is started when `WATCHDOG_USEC` is set, pinging
   at half the declared interval.
 
@@ -133,8 +133,11 @@ A bind failure is fatal.
 closed. The daemon does a single read of at most 4096 bytes and takes the request up to the first
 newline, or the whole chunk when the client sends no newline (the legacy client sends none and does
 not half-close). A chunk that fills the buffer without a newline, more than 256 arguments, or no
-request within 120 s drops the connection without a reply. At most 64 connections are handled at
-once; the rest wait in the accept backlog.
+request within 5 s drops the connection without a reply (this deadline covers only reading the
+request line; a REWRITE still waits up to 60 s for the main loop afterwards). At most 64 requests
+are handled at once: a slot is taken only after the request line has been read, so idle
+connections never hold one, and a complete request waits for a slot (answered `ERROR SHUTTING
+DOWN` if the daemon stops meanwhile).
 
 ```
 REQUEST  = COMMAND [SPACE ARG]* [NEWLINE]

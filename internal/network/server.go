@@ -37,10 +37,12 @@ const (
 	// TimeoutStartSec of units that probe the daemon from ExecStartPre (CO-4290).
 	DefaultRewriteTimeout = 60 * time.Second
 
-	// defaultConnReadTimeout bounds how long a single connection may take to
-	// send its command line. Without it, a stalled client holds a goroutine
-	// open and blocks graceful shutdown (which waits on all connection goroutines).
-	defaultConnReadTimeout = 120 * time.Second
+	// defaultRequestReadTimeout bounds how long a single connection may take to
+	// send its command line. A request is one tiny line that clients write as
+	// soon as they connect, so a connection that stays silent this long is
+	// idle or stalled. It only covers reading the request: the REWRITE wait
+	// for the main loop is DefaultRewriteTimeout.
+	defaultRequestReadTimeout = 5 * time.Second
 
 	// maxRequestLineBytes is the size of the single read that carries a request.
 	// The legacy listener (jylibs/listener.py) reads a single recv(2048), so every
@@ -51,10 +53,11 @@ const (
 	// lists configd service names; legitimate callers send a handful.
 	maxRequestArgs = 256
 
-	// maxConcurrentConns bounds simultaneously handled connections. The legacy
+	// maxConcurrentConns bounds simultaneously handled requests. The legacy
 	// ThreadingMixIn server is unbounded; the control interface is loopback-only
-	// and requests are tiny, so a small fixed bound is ample. Excess clients
-	// wait in the kernel accept backlog.
+	// and requests are tiny, so a small fixed bound is ample. A slot is taken
+	// only once the request line has been read, so idle connections never hold
+	// one; a client whose request is complete waits for a slot.
 	maxConcurrentConns = 64
 
 	// acceptFailuresBeforeError is the number of consecutive accept failures
@@ -103,7 +106,7 @@ type ThreadedStreamServer struct {
 	// acceptBackoff is the pause after a failed Accept.
 	acceptBackoff time.Duration
 	shutdownCh    chan struct{}
-	// slots is a counting semaphore bounding concurrently handled connections.
+	// slots is a counting semaphore bounding concurrently handled requests.
 	slots chan struct{}
 	// wg tracks the accept loop and every connection goroutine. Connection
 	// goroutines are only started from the accept loop, which itself holds a
@@ -126,7 +129,7 @@ func NewThreadedStreamServer(addr string, port int, ipv6 bool, handler RequestHa
 		addr:          addr,
 		port:          port,
 		ipv6:          ipv6,
-		readTimeout:   defaultConnReadTimeout,
+		readTimeout:   defaultRequestReadTimeout,
 		acceptBackoff: acceptErrorBackoff,
 		shutdownCh:    make(chan struct{}),
 		slots:         make(chan struct{}, maxConcurrentConns),
@@ -191,17 +194,14 @@ func (s *ThreadedStreamServer) ServeForever(ctx context.Context) error {
 func (s *ThreadedStreamServer) acceptLoop(ctx context.Context, listener net.Listener) {
 	failures := 0
 
+	// Accept no longer pauses on a full slot table, so it would block past a
+	// cancelled ctx; closing the listener ends it.
+	stop := context.AfterFunc(ctx, func() { _ = listener.Close() })
+	defer stop()
+
 	for {
-		if !s.acquireSlot(ctx) {
-			logger.InfoContext(ctx, "Listener shutting down")
-
-			return
-		}
-
 		conn, err := listener.Accept()
 		if err != nil {
-			s.releaseSlot()
-
 			failures++
 
 			if !s.handleAcceptError(ctx, err, failures) {
@@ -214,14 +214,12 @@ func (s *ThreadedStreamServer) acceptLoop(ctx context.Context, listener net.List
 		failures = 0
 
 		s.wg.Go(func() {
-			defer s.releaseSlot()
-
 			s.handleConnection(ctx, conn)
 		})
 	}
 }
 
-// acquireSlot blocks until a connection slot is free. It reports false when
+// acquireSlot blocks until a request slot is free. It reports false when
 // the server is shutting down or ctx is done.
 func (s *ThreadedStreamServer) acquireSlot(ctx context.Context) bool {
 	select {
@@ -244,6 +242,10 @@ func (s *ThreadedStreamServer) releaseSlot() {
 func (s *ThreadedStreamServer) handleAcceptError(ctx context.Context, err error, failures int) bool {
 	select {
 	case <-s.shutdownCh:
+		logger.InfoContext(ctx, "Listener shutting down")
+
+		return false
+	case <-ctx.Done():
 		logger.InfoContext(ctx, "Listener shutting down")
 
 		return false
@@ -301,7 +303,7 @@ func (s *ThreadedStreamServer) Shutdown(ctx context.Context) {
 		}
 
 		if s.listener != nil {
-			if err := s.listener.Close(); err != nil {
+			if err := s.listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
 				logger.ErrorContext(ctx, "Error closing listener",
 					"error", err)
 			}
@@ -417,6 +419,15 @@ func (s *ThreadedStreamServer) handleConnection(ctx context.Context, conn net.Co
 
 		return
 	}
+
+	// Only a client that has sent its request competes for a slot, so idle
+	// connections cannot starve real ones.
+	if !s.acquireSlot(ctx) {
+		s.writeResponse(ctx, conn, errShuttingDown)
+
+		return
+	}
+	defer s.releaseSlot()
 
 	response := s.handler.HandleRequest(ctx, parts[0], parts[1:])
 	s.writeResponse(ctx, conn, response)

@@ -100,7 +100,7 @@ only after its first config pass has completed. See
 
 Signals: `SIGTERM`/`SIGINT` stop it; `SIGHUP`, `SIGUSR2` and `SIGALRM` end the
 current sleep and run a full cycle (always a full load, even with
-`zmconfigd_skip_idle_polls=TRUE`). `SIGCHLD` is ignored.
+`zmconfigd_skip_idle_polls=TRUE`). `SIGCHLD` is not subscribed.
 
 Only `--disable-restarts` (and the build-tag flags above) apply to the
 daemon. Under systemd see [systemd.md](systemd.md) for readiness, watchdog and

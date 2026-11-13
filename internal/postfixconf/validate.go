@@ -17,6 +17,7 @@ package postfixconf
 import (
 	"errors"
 	"fmt"
+	"os"
 	"regexp"
 	"slices"
 	"strings"
@@ -55,6 +56,12 @@ const (
 
 	// MainCf is created empty when missing.
 	MainCf = "main.cf"
+
+	// InstalledFileMode is the permission of every whole file the helper
+	// installs into ConfDir (Postfix, running as other users, must read them).
+	// Callers that predict the installed state, such as plan, must use it
+	// instead of the REWRITE mode of the template.
+	InstalledFileMode os.FileMode = 0o644
 )
 
 // ErrValidation marks a request the helper refuses; nothing is applied.

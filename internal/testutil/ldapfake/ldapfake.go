@@ -54,8 +54,8 @@ type Options struct {
 	// the filter and the requested attributes are ignored. With no Entries
 	// every search is an empty success.
 	Entries map[string]map[string][]string
-	// HangOn is "starttls" or "bind": the server reads that request and never
-	// answers, like a wedged slapd.
+	// HangOn is "starttls", "bind" or "search": the server reads that request
+	// and never answers, like a wedged slapd.
 	HangOn string
 }
 
@@ -70,6 +70,7 @@ type Server struct {
 	startTLSOps atomic.Int32
 	binds       atomic.Int32
 	bindsInTLS  atomic.Int32
+	searches    atomic.Int32
 
 	wg sync.WaitGroup
 }
@@ -120,6 +121,9 @@ func (s *Server) Binds() int { return int(s.binds.Load()) }
 
 // BindsInTLS is the number of binds received over a TLS-protected connection.
 func (s *Server) BindsInTLS() int { return int(s.bindsInTLS.Load()) }
+
+// HungSearches is the number of search requests swallowed under HangOn "search".
+func (s *Server) HungSearches() int { return int(s.searches.Load()) }
 
 // Addr returns the host:port the server listens on.
 func (s *Server) Addr() string { return s.ln.Addr().String() }
@@ -198,6 +202,12 @@ func (ss *session) dispatch(id int64, req *ber.Packet) bool {
 
 		return writePacket(ss.conn, result(id, opBindResponse, resultSuccess)) == nil
 	case opSearchRequest:
+		if ss.s.opts.HangOn == "search" {
+			ss.s.searches.Add(1)
+
+			return ss.hang()
+		}
+
 		return ss.search(id, req)
 	case opUnbindRequest:
 		return false
