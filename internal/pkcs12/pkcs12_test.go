@@ -422,8 +422,15 @@ func TestKDF(t *testing.T) {
 func keytoolList(t *testing.T, keytool, file string) string {
 	t.Helper()
 
-	out, err := exec.Command(keytool, "-list", "-v", "-keystore", file, "-storepass", fixturePass).CombinedOutput()
-	require.NoError(t, err, string(out))
+	// Only stdout is the listing: the JVM may print warnings on stderr (e.g.
+	// under load), which must not make two listings differ.
+	var stderr strings.Builder
+
+	cmd := exec.Command(keytool, "-list", "-v", "-keystore", file, "-storepass", fixturePass)
+	cmd.Stderr = &stderr
+
+	out, err := cmd.Output()
+	require.NoError(t, err, stderr.String())
 
 	return regexp.MustCompile(`(?m)^Creation date:.*\n`).ReplaceAllString(string(out), "")
 }
