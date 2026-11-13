@@ -44,6 +44,7 @@ var (
 	runIniUtil           = setup.RunIniUtil
 	runCertMgr           = setup.RunCertMgr
 	runRC                = setup.RunRC
+	runRCD               = setup.RunRCD
 )
 
 // lookupZextrasUID is the uid of zextras, -1 when there is no such user.
@@ -285,6 +286,19 @@ func RunRC(ctx context.Context, env sys.System, stdin io.Reader, stdout, stderr 
 	}
 
 	return runRC(e, args, stdin, stdout, stderr)
+}
+
+// RunRCD executes "setup rcd": zmrcd, the receiving side of zmrc, which
+// carbonio-core's wrapper calls and the forced command of the SSH key of the
+// installation runs (see setup.RunRCD). stdin holds the command line; the exit
+// status and the output are the script's. It runs as root or zextras.
+func RunRCD(ctx context.Context, env sys.System, stdin io.Reader, stdout, stderr io.Writer, args []string) int {
+	e, ok := toolEnv(ctx, env, stdout, stderr, "rcd")
+	if !ok {
+		return 1
+	}
+
+	return runRCD(e, args, stdin, stdout, stderr)
 }
 
 // RunIPTool executes "setup iptool": zmiptool (see setup.RunIPTool). The

@@ -73,7 +73,7 @@ func TestSetupPlCommandsAreListedAndValidated(t *testing.T) {
 
 	for _, c := range []string{"gal-sync-account", "ssh-keygen", "update-authkeys", "syslog", "dhparam", "proxyconfig", "ldap-passwd",
 		"ldap-schema", "ldap-update-ldif", "ldap-enable-replica", "ldap-enable-mmr", "iptool", "iniutil", "certmgr",
-		"stat", "rc", "prov", "random-password", "serverips"} {
+		"stat", "rc", "rcd", "prov", "random-password", "serverips"} {
 		assert.Contains(t, out, c)
 	}
 
@@ -132,6 +132,7 @@ func TestSetupPlCommandsRefuseNonRoot(t *testing.T) {
 		{"iptool", "-d"},
 		{"certmgr", "verifycrt", "self"},
 		{"rc", "mta.example.com", "status"},
+		{"rcd"},
 		{"prov", "-r", "-m", "-l", "gs", "mta.example.com"},
 	} {
 		status, out, errb := exec(t, args...)

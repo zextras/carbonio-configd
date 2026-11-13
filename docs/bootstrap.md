@@ -532,6 +532,7 @@ statuses of their scripts instead.
 | `setup ssh-keygen [rsa]` | `zmsshkeygen` | root, zextras | Generates the key pair and stores the public key in the server entry. Another key type prints `Bad keytype`. |
 | `setup update-authkeys [-a]` | `zmupdateauthkeys` | root, zextras | Rewrites `authorized_keys`; `-a` first asks every server, through the `zmrc` client (see [`setup rc`](#setup-rc)), to update its own (a server that does not answer is logged). |
 | `setup rc <host> [command words...]` | `zmrc` | root, zextras | Runs a `zmrcd` command on another server over SSH; see [`setup rc`](#setup-rc). |
+| `setup rcd` | `zmrcd` | root, zextras | The receiving side of `zmrc`, the forced command of the SSH key: reads one command line on stdin and runs it if it is in a closed table; see [`setup rcd`](#setup-rcd). |
 | `setup syslog` | `zmsyslogsetup` | root | Sets up rsyslog as the "Set up syslog.conf" step does. |
 | `setup dhparam install` | `openssl dhparam` in setup.pl | root, zextras | Installs `conf/dhparam.pem.crb` (ffdhe2048) unless present and sets `zimbraSSLDHParam`. Plain `setup dhparam` does the same, kept for setup.pl; use `install`. |
 | `setup dhparam [get\|set options]` | `zmdhparam` | root, zextras | Reads or stores the DH parameters of `zimbraSSLDHParam`; see [`setup dhparam get` and `set`](#setup-dhparam-get-and-set). |
@@ -826,6 +827,85 @@ Differences from the script:
 - The words are not passed through a shell, as `echo @ARGV | ssh` did: `*`,
   quotes and `$` reach `zmrcd` as typed.
 - It runs as root or zextras (the owners of the key), not as any user.
+
+### `setup rcd`
+
+`zmrcd` is what `zmrc` talks to: the `authorized_keys` of every server holds
+`command="/opt/zextras/libexec/zmrcd" <key>` (written by `setup
+update-authkeys`), so every SSH login with the key of the installation runs
+it; the command line of `zmrc` comes on stdin (the command the client asked
+for, if any, is in `SSH_ORIGINAL_COMMAND`: see `rsync` below).
+carbonio-core installs `libexec/zmrcd` as `exec /opt/zextras/libexec/setup rcd
+"$@"`; the path in `authorized_keys` does not change. The mailbox
+(`RemoteManager`) sends the same line (`HOST:<host> <command>`, without a
+newline) over an exec channel and takes a non-zero exit status as a failure.
+It runs as root or zextras (sshd runs it as zextras) and reads no argument:
+an argument prints the usage and exits `1`.
+
+Same as `rcd.pl`:
+
+- The first line that is not `?` is the whole input: `HOST:<h>[,...]` or
+  `SERVICE:<s>[,...]` (`ALL` is every server with a service), then the command
+  and its arguments, split like `split(' ', $_, 3)`. `?` prints the table (one
+  line per command, with the allowed arguments) and reads the next line. An empty
+  line, or none, does nothing and exits `0`.
+- A host other than the server prints `Remote: HOST:<h> <command> <args>` and
+  runs nothing; the host is the local one when it matches `zimbra_server_hostname`
+  without case. The hosts are de-duplicated and sorted; services and `ALL`
+  come from the directory. Anything else prints `ERROR: Invalid hostlist` on
+  stderr and exits `1`.
+- The command is looked up in a closed table, never run through a shell:
+  first as a whole line (`start mta`, `status`, `zmqstat all`, ...), then by its
+  first word for the commands that take arguments (`zmqaction`, `zmbackupldap`,
+  `zmcertmgr`, `clusvcadm`, `zmclustat`, `zmloggerhostmap`, `rsync`, `certbot`,
+  `dkimutil`), whose arguments must match the expression of the table. An unknown
+  command prints `ERROR: Unknown command: "<command>"`, arguments that do not match
+  `ERROR: args '<args>' not allowed for command '<command>'`, both on stderr with
+  exit status `1`. `?` shows the table.
+- The output is `STARTCMD: <host> <command line>`, what the command printed
+  (a last line without a newline gets one) and `ENDCMD: <host> <command line>`.
+  The bulk commands (`zmqstat`, `zmcollectconfigfiles`, `zmcollectldapzimbra`,
+  `clusvcadm`, `zmclustat`) print neither line. The command's stderr is zmrcd's
+  stderr, and the exit status of the command is the one of zmrcd (after `ENDCMD`).
+  A command that cannot be started prints `ERROR: Can't run <command line>:
+  <reason>` and exits `1`.
+- With `zimbra_zmrcd_logging_enabled=TRUE` (any case) everything printed to
+  stdout, and every error without its `ERROR: ` prefix, is appended to
+  `log/zmrcd.log`. An `rsync` coming over SSH (`SSH_ORIGINAL_COMMAND` starting
+  with `rsync` or `/opt/zextras/common/bin/rsync`) is run in place of reading
+  commands, after the same kind of check (any other program ending in `rsync`:
+  `ERROR: command '<prog>' not allowed`; arguments out of the class:
+  `ERROR: invalid arguments in command [<line>]`).
+
+Differences from the script:
+
+- The arguments are split into words by zmrcd (blanks, quotes and backslash, as
+  the shell did) and given to the program as an argument list: `$`, `*`, `~`,
+  backquotes and the like reach the program as typed, nothing is expanded or
+  globbed. They never get to a shell, and there is none; the pipelines of
+  `zmcollectconfigfiles` and `zmcollectldapzimbra` are two processes connected
+  by a pipe, and the status of a pipeline is the one of its last process.
+  The classes of the arguments are the script's, except that `dkimutil` no
+  longer accepts `|` (its `[a|r]` was meant to be `[ar]`). Arguments with an
+  unbalanced quote (and `dkimutil -|`) are refused with `ERROR: args ... not
+  allowed ...` and exit `1`; the shell failed them with `sh: Syntax error` after
+  `STARTCMD` and `ENDCMD`, exit `2`.
+- `rsync` is still handed what the client sent, so its own options are the
+  limit: an allowed client can pass `-e <command>` to a real `rsync`, which is
+  what the legacy script allowed too. Only keys of the installation can log in.
+- A line over 64 KiB is refused (`ERROR: line too long`). The children read
+  nothing (`/dev/null`), where they inherited the session's input.
+- A command killed by a signal exits `128+<signal>` (Perl exited `0`).
+- The hosts of `SERVICE:`/`ALL` come from the native LDAP client, not from
+  `zmprov gas` and `zmprov gs`. An unreadable `localconfig.xml` or an LDAP that
+  does not answer is `ERROR: reading the local configuration: <reason>` or
+  `ERROR: listing the servers: <reason>` and exit `1`, where the script went
+  on with nothing and exited `0`.
+- The log does not get the output of `slapcat`, `zmcollectconfigfiles` and
+  `zmcollectldapzimbra` (directory data and keys); it still gets their
+  `STARTCMD` and `ENDCMD`.
+- The table keeps the absolute paths of the legacy script
+  (`/opt/zextras/bin/...`, `sudo` for `zmqstat`, `clusvcadm` and `zmclustat`).
 
 ### `setup proxyconfig`
 

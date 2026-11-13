@@ -517,6 +517,9 @@ garpu gamcs`, natively over LDAP), `setup gsautil <command> [options]`
 (`zmgsautil`, the GAL sync accounts), `setup random-password [-l] [min max]`
 (`RandomPassword`) and `setup serverips [--networks]` (`zmserverips`); see
 [bootstrap.md](bootstrap.md#setup-prov) and [`setup gsautil`](bootstrap.md#setup-gsautil).
+`setup rcd` is `zmrcd`, the forced command of the SSH key that `zmrc`
+(`setup rc`) connects to: it reads one command line on stdin and runs it only
+if it is in its closed table; see [bootstrap.md](bootstrap.md#setup-rcd).
 
 ## completion
 

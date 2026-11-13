@@ -66,6 +66,8 @@ type Env struct {
 	certTTY func() bool
 	// rc replaces parts of the zmrc client (tests), like provOpen.
 	rc *rcSeam
+	// rcd replaces parts of zmrcd (tests), like rc.
+	rcd *rcdSeam
 	// perlLib caches the zextras PERL5LIB.
 	perlLib string
 	// lc caches the effective localconfig until the next write.

@@ -18,6 +18,9 @@
 //	                           zmgsautil: the GAL sync accounts, natively (no JVM)
 //	carbonio-bootstrap rc <host> [command words...]
 //	                           zmrc: a zmrcd command on another server, over SSH, natively
+//	carbonio-bootstrap rcd
+//	                           zmrcd: the other end of zmrc, the forced command of the SSH key; it reads
+//	                           one command line on stdin and runs it if it is in its table
 //	carbonio-bootstrap stat <name> [options] | stat run <collector>...
 //	                           the same as "configd stat" (the statistics collectors),
 //	                           kept for the zmstat-<name> wrappers of older carbonio-core
@@ -86,7 +89,7 @@ func run(args []string, env sys.System, stdin io.Reader, stdout, stderr io.Write
 // arguments (proxyconfig has a -c and a -d of its own).
 var toolCommands = []string{"ssh-keygen", "update-authkeys", "syslog", "dhparam", "proxyconfig", "ldap-passwd",
 	"ldap-schema", "ldap-update-ldif", "ldap-enable-replica", "ldap-enable-mmr", "iptool", "iniutil", "certmgr",
-	"stat", "rc", "prov", "gsautil", "random-password", "serverips"}
+	"stat", "rc", "rcd", "prov", "gsautil", "random-password", "serverips"}
 
 // legacyArgs maps the options of the former shell script: "-c FILE" is
 // "--legacy-config FILE --non-interactive", and "-d" (debug) is accepted and
@@ -216,6 +219,9 @@ func newRootCmd(env sys.System, stdin io.Reader, stdout, stderr io.Writer, statu
 		newStdinToolCmd("rc <host> [command words...]",
 			"Run a zmrcd command on another server over SSH: the words, or stdin, are what zmrcd reads (zmrc)",
 			bootstrapcmd.RunRC, tio),
+		newStdinToolCmd("rcd",
+			"Run the command line zmrc sent over SSH, if it is in the table of allowed commands (zmrcd)",
+			bootstrapcmd.RunRCD, tio),
 		newToolCmd("stat <name> [options] | stat run <collector>...",
 			"Kept for the zmstat-<name> wrappers of older carbonio-core: the same as \"configd stat\"",
 			statcmd.Run, tio))
