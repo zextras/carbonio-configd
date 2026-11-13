@@ -32,6 +32,7 @@ const (
 	soapEnvelopeOpen       = `<?xml version="1.0" encoding="UTF-8"?>` +
 		`<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"><soap:Body>`
 	soapEnvelopeClose       = `</soap:Body></soap:Envelope>`
+	soapRequestSuffix       = "Request"
 	pollingIntervalAttrName = "zimbraDataSourcePollingInterval"
 	attrName                = "name"
 	attrBy                  = "by"
@@ -135,7 +136,7 @@ func buildGalSyncAccountEnvelope(op string, r *GalSyncAccountRequest) string {
 	var b strings.Builder
 
 	b.WriteString(soapEnvelopeOpen)
-	openElement(&b, op+"Request", true,
+	openElement(&b, op+soapRequestSuffix, true,
 		xmlAttr{attrName, r.Name}, xmlAttr{"domain", r.Domain}, xmlAttr{"type", r.Type},
 		xmlAttr{"folder", r.Folder}, xmlAttr{"server", r.Server})
 	textElement(&b, "account", r.Account, xmlAttr{attrBy, attrName})
@@ -144,7 +145,7 @@ func buildGalSyncAccountEnvelope(op string, r *GalSyncAccountRequest) string {
 		textElement(&b, "a", r.PollingInterval, xmlAttr{"n", pollingIntervalAttrName})
 	}
 
-	b.WriteString("</" + op + "Request>" + soapEnvelopeClose)
+	b.WriteString("</" + op + soapRequestSuffix + ">" + soapEnvelopeClose)
 
 	return b.String()
 }
@@ -169,10 +170,10 @@ func buildSyncGalEnvelope(r *GalSyncRequest) string {
 	var b strings.Builder
 
 	b.WriteString(soapEnvelopeOpen)
-	openElement(&b, opSyncGalAccount+"Request", true)
+	openElement(&b, opSyncGalAccount+soapRequestSuffix, true)
 	openElement(&b, "account", false, xmlAttr{"id", r.AccountID})
 	textElement(&b, "datasource", ds, attrs...)
-	b.WriteString("</account></" + opSyncGalAccount + "Request>" + soapEnvelopeClose)
+	b.WriteString("</account></" + opSyncGalAccount + soapRequestSuffix + ">" + soapEnvelopeClose)
 
 	return b.String()
 }
@@ -188,9 +189,9 @@ func buildDeleteGalSyncEnvelope(account string, byID bool) string {
 	var b strings.Builder
 
 	b.WriteString(soapEnvelopeOpen)
-	openElement(&b, opDeleteGalSyncAccount+"Request", true)
+	openElement(&b, opDeleteGalSyncAccount+soapRequestSuffix, true)
 	textElement(&b, "account", account, xmlAttr{attrBy, by})
-	b.WriteString("</" + opDeleteGalSyncAccount + "Request>" + soapEnvelopeClose)
+	b.WriteString("</" + opDeleteGalSyncAccount + soapRequestSuffix + ">" + soapEnvelopeClose)
 
 	return b.String()
 }
