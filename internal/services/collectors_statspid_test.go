@@ -70,7 +70,7 @@ func TestKillStatsPidFile_KillsCollectorGroup(t *testing.T) {
 	assert.False(t, f.FS.Exists(statsPidFile))
 }
 
-// TestStartCollectors_RunsOneProcess: the collectors are one process, "setup
+// TestStartCollectors_RunsOneProcess: the collectors are one process, "configd
 // stat run" with the command line of each collector as an argument and the log
 // in zmstat.out; the optional ones only when their localconfig key is TRUE
 // (statctl.pl, zmstatctl start).
@@ -80,14 +80,14 @@ func TestStartCollectors_RunsOneProcess(t *testing.T) {
 	ctl, f := newFakeController(t, WithConfigLoader(func() (map[string]string, error) {
 		return map[string]string{"zmstat_mysql_enabled": "TRUE", "zmstat_nginx_enabled": "FALSE"}, nil
 	}))
-	f.FS.Put(ctl.p.libexec+"/setup", []byte("x"), 0o755)
+	f.FS.Put(ctl.p.bin+"/configd", []byte("x"), 0o755)
 	f.FS.PutDir(ctl.p.log, 0o755)
 
 	require.NoError(t, ctl.startCollectors(context.Background(), ctl.registry[svcStats]))
 
 	calls := f.Exec.Calls()
 	require.Len(t, calls, 1)
-	assert.Equal(t, ctl.p.libexec+"/setup", calls[0].Path)
+	assert.Equal(t, ctl.p.bin+"/configd", calls[0].Path)
 	assert.Equal(t, []string{
 		"stat", "run", "proc", "cpu", "vm", "io -x", "df", "io", "fd", "allprocs", "mysql",
 	}, calls[0].Args)
@@ -105,7 +105,7 @@ func TestStartCollectors_EveryOptionalCollector(t *testing.T) {
 			"zmstat_mysql_enabled": "TRUE", "zmstat_nginx_enabled": "TRUE", "zmstat_mtaqueue_enabled": "TRUE",
 		}, nil
 	}))
-	f.FS.Put(ctl.p.libexec+"/setup", []byte("x"), 0o755)
+	f.FS.Put(ctl.p.bin+"/configd", []byte("x"), 0o755)
 	f.FS.PutDir(ctl.p.log, 0o755)
 
 	require.NoError(t, ctl.startCollectors(context.Background(), ctl.registry[svcStats]))
@@ -114,8 +114,8 @@ func TestStartCollectors_EveryOptionalCollector(t *testing.T) {
 	assert.Equal(t, []string{"mysql", "nginx", "mtaqueue"}, f.Exec.Calls()[0].Args[len(f.Exec.Calls()[0].Args)-3:])
 }
 
-// TestStartCollectors_NoSetupBinary: without libexec/setup nothing starts.
-func TestStartCollectors_NoSetupBinary(t *testing.T) {
+// TestStartCollectors_NoConfigdBinary: without bin/configd nothing starts.
+func TestStartCollectors_NoConfigdBinary(t *testing.T) {
 	t.Parallel()
 
 	ctl, f := newFakeController(t)
@@ -132,7 +132,7 @@ func TestStartCollectors_ProcessDoesNotStart(t *testing.T) {
 	t.Parallel()
 
 	ctl, f := newFakeController(t)
-	f.FS.Put(ctl.p.libexec+"/setup", []byte("x"), 0o755)
+	f.FS.Put(ctl.p.bin+"/configd", []byte("x"), 0o755)
 	f.FS.PutDir(ctl.p.log, 0o755)
 	f.Exec.FailStart(func(*sys.Cmd) bool { return true }, errors.New("exec format error"))
 
@@ -149,7 +149,7 @@ func TestStopCollectors_OneProcessManyPidfiles(t *testing.T) {
 	f.FS.PutDir(ctl.p.statsPidDir, 0o755)
 	f.FS.Put(ctl.p.statsPidDir+"/cpu.pid", []byte("4242\n"), 0o644)
 	f.FS.Put(ctl.p.statsPidDir+"/io-x.pid", []byte("4242\n"), 0o644)
-	f.Proc.Add(sys.ProcEntry{PID: 4242, Argv: []string{ctl.p.libexec + "/setup", "stat", "run", "cpu", "io -x"}})
+	f.Proc.Add(sys.ProcEntry{PID: 4242, Argv: []string{ctl.p.bin + "/configd", "stat", "run", "cpu", "io -x"}})
 
 	require.NoError(t, ctl.stopCollectors(context.Background(), ctl.registry[svcStats]))
 
@@ -158,8 +158,8 @@ func TestStopCollectors_OneProcessManyPidfiles(t *testing.T) {
 	assert.False(t, f.FS.Exists(ctl.p.statsPidDir+"/io-x.pid"))
 }
 
-// TestKillStatsPidFile_KillsSetupCollectorGroup: a collector of this release
-// ("setup stat <name>") is recognised and its group terminated.
+// TestKillStatsPidFile_KillsSetupCollectorGroup: a collector of the release
+// before ("setup stat <name>") is recognised and its group terminated.
 func TestKillStatsPidFile_KillsSetupCollectorGroup(t *testing.T) {
 	t.Parallel()
 
@@ -171,6 +171,43 @@ func TestKillStatsPidFile_KillsSetupCollectorGroup(t *testing.T) {
 	require.NotEmpty(t, f.Proc.Signals())
 	assert.True(t, f.Proc.Signals()[0].Group)
 	assert.False(t, f.FS.Exists(statsPidFile))
+}
+
+// TestStartCollectors_StopsTheCollectorsOfAnEarlierRelease: after an upgrade
+// the "setup stat" processes and the Perl scripts still run; they are stopped
+// before the new process starts, so no collector runs twice.
+func TestStartCollectors_StopsTheCollectorsOfAnEarlierRelease(t *testing.T) {
+	t.Parallel()
+
+	ctl, f := newFakeController(t)
+	f.FS.Put(ctl.p.bin+"/configd", []byte("x"), 0o755)
+	f.FS.PutDir(ctl.p.log, 0o755)
+	f.Proc.Add(sys.ProcEntry{PID: 4242, Argv: []string{ctl.p.libexec + "/setup", "stat", "proc"}})
+	f.Proc.Add(sys.ProcEntry{PID: 4243, Argv: []string{"/usr/bin/perl", ctl.p.libexec + "/zmstat-cpu"}})
+	f.Proc.Add(sys.ProcEntry{PID: 4244, Argv: []string{ctl.p.libexec + "/setup", "proxyconfig"}})
+
+	require.NoError(t, ctl.startCollectors(context.Background(), ctl.registry[svcStats]))
+
+	assert.False(t, f.Proc.Alive(4242))
+	assert.False(t, f.Proc.Alive(4243))
+	assert.True(t, f.Proc.Alive(4244), "another setup command is not a collector")
+	assert.Len(t, f.Exec.Calls(), 1)
+}
+
+// TestStatsIdentity: configd's own commands are not the stats process, only
+// "configd stat" is.
+func TestStatsIdentity(t *testing.T) {
+	t.Parallel()
+
+	ctl, f := newFakeController(t)
+	f.Proc.Add(sys.ProcEntry{PID: 4242, Argv: []string{ctl.p.bin + "/configd", "service", "status", "stats"}})
+	f.Proc.Add(sys.ProcEntry{PID: 4243, Argv: []string{ctl.p.bin + "/configd"}})
+
+	assert.Zero(t, ctl.RunningPID(context.Background(), ctl.registry[svcStats]))
+
+	f.Proc.Add(sys.ProcEntry{PID: 4244, Argv: []string{ctl.p.bin + "/configd", "stat", "run", "cpu"}})
+
+	assert.Equal(t, 4244, ctl.RunningPID(context.Background(), ctl.registry[svcStats]))
 }
 
 // TestKillStatsPidFile_OtherSetupCommandIsNotACollector: "setup proxyconfig"

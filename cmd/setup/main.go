@@ -13,11 +13,9 @@
 //	                           zmsshkeygen and zmupdateauthkeys
 //	carbonio-bootstrap rc <host> [command words...]
 //	                           zmrc: a zmrcd command on another server, over SSH, natively
-//	carbonio-bootstrap stat <name> [options]
-//	carbonio-bootstrap stat run <collector>...
-//	                           the zmstat-* statistics collectors (proc, cpu, vm, io, df,
-//	                           fd, allprocs, mysql, nginx, mtaqueue, ldap), natively, one
-//	                           or several in one process
+//	carbonio-bootstrap stat <name> [options] | stat run <collector>...
+//	                           the same as "configd stat" (the statistics collectors),
+//	                           kept for the zmstat-<name> wrappers of older carbonio-core
 //
 // It is a binary of its own, apart from configd, so the full-screen terminal
 // interface is not linked into the daemon.
@@ -37,6 +35,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/zextras/carbonio-configd/internal/cli/bootstrapcmd"
+	"github.com/zextras/carbonio-configd/internal/cli/statcmd"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
@@ -199,9 +198,8 @@ func newRootCmd(env sys.System, stdin io.Reader, stdout, stderr io.Writer, statu
 			"Run a zmrcd command on another server over SSH: the words, or stdin, are what zmrcd reads (zmrc)",
 			bootstrapcmd.RunRC, tio),
 		newToolCmd("stat <name> [options] | stat run <collector>...",
-			"Run a statistics collector: the zmstat-<name> scripts (proc, cpu, vm, io, df, fd, allprocs, "+
-				"mysql, nginx, mtaqueue, ldap), as the zextras user; \"run\" runs several in one process",
-			bootstrapcmd.RunStat, tio))
+			"Kept for the zmstat-<name> wrappers of older carbonio-core: the same as \"configd stat\"",
+			statcmd.Run, tio))
 
 	return root
 }

@@ -110,10 +110,12 @@ const (
 	socketFamilyUnixgram = "unixgram"
 )
 
-// The statistics collectors run in one process, "<libexec>/setup stat run
-// <collector>...", which logs to <log>/zmstat.out.
+// The statistics collectors run in one process, "<bin>/configd stat run
+// <collector>...", which logs to <log>/zmstat.out. It was "<libexec>/setup
+// stat" and, before that, one Perl zmstat-* script each.
 const (
-	collectorBinary  = "setup"
+	collectorBinary  = "configd"
+	collectorOldBin  = "setup"
 	collectorCommand = "stat"
 	collectorRun     = "run"
 	collectorLog     = "zmstat.out"

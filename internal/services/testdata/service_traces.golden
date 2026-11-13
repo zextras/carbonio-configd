@@ -2064,7 +2064,7 @@ exec /usr/bin/sudo -n /opt/zextras/common/sbin/postfix reload
 
 ## stats | legacy start cold
 fs.open /opt/zextras/log/zmstat.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup stat run proc cpu vm io -x df io fd allprocs mysql nginx
+exec.start /opt/zextras/bin/configd stat run proc cpu vm io -x df io fd allprocs mysql nginx
 => ok
 
 ## stats | legacy start running
@@ -2092,7 +2092,7 @@ fs.remove /run/carbonio/stats/zmstat-cpu.pid
 proc.signal-group 1002 15
 fs.remove /run/carbonio/stats/zmstat-vm.pid
 fs.open /opt/zextras/log/zmstat.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup stat run proc cpu vm io -x df io fd allprocs mysql nginx
+exec.start /opt/zextras/bin/configd stat run proc cpu vm io -x df io fd allprocs mysql nginx
 => ok
 
 ## stats | legacy reload running
@@ -2101,17 +2101,17 @@ fs.remove /run/carbonio/stats/zmstat-cpu.pid
 proc.signal-group 1002 15
 fs.remove /run/carbonio/stats/zmstat-vm.pid
 fs.open /opt/zextras/log/zmstat.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup stat run proc cpu vm io -x df io fd allprocs mysql nginx
+exec.start /opt/zextras/bin/configd stat run proc cpu vm io -x df io fd allprocs mysql nginx
 => ok
 
 ## stats | legacy reload stopped
 fs.open /opt/zextras/log/zmstat.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup stat run proc cpu vm io -x df io fd allprocs mysql nginx
+exec.start /opt/zextras/bin/configd stat run proc cpu vm io -x df io fd allprocs mysql nginx
 => ok
 
 ## stats | legacy start-systemd cold
 fs.open /opt/zextras/log/zmstat.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup stat run proc cpu vm io -x df io fd allprocs mysql nginx
+exec.start /opt/zextras/bin/configd stat run proc cpu vm io -x df io fd allprocs mysql nginx
 => ok
 
 ## stats | legacy stop-systemd running
@@ -2155,7 +2155,7 @@ exec /usr/bin/systemctl is-active carbonio-stats.service
 
 ## stats | systemd start-systemd
 fs.open /opt/zextras/log/zmstat.out flag=0x441 perm=0640
-exec.start /opt/zextras/libexec/setup stat run proc cpu vm io -x df io fd allprocs mysql nginx
+exec.start /opt/zextras/bin/configd stat run proc cpu vm io -x df io fd allprocs mysql nginx
 => ok
 
 ## stats | systemd stop-systemd

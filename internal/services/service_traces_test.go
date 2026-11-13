@@ -125,7 +125,7 @@ func (h *traceHost) install() {
 	f.FS.Put(ctl.p.configrewrite, []byte("#!/bin/sh"), 0o755)
 	f.FS.Put(ctl.p.altermime, []byte("#!/bin/sh"), 0o755)
 
-	f.FS.Put(ctl.p.libexec+"/setup", []byte("x"), 0o755)
+	f.FS.Put(ctl.p.bin+"/configd", []byte("x"), 0o755)
 
 	f.Proc.SetGID("postfix", 1001)
 
@@ -204,7 +204,7 @@ func (h *traceHost) run(name string, pid *int) {
 
 		for _, collector := range []string{"cpu", "vm"} {
 			*pid++
-			h.f.Proc.Add(sys.ProcEntry{PID: *pid, Argv: []string{h.ctl.p.libexec + "/setup", "stat", collector}})
+			h.f.Proc.Add(sys.ProcEntry{PID: *pid, Argv: []string{h.ctl.p.bin + "/configd", "stat", "run", collector}})
 			h.f.FS.Put(h.ctl.p.statsPidDir+"/zmstat-"+collector+".pid", []byte(strconv.Itoa(*pid)), 0o644)
 		}
 

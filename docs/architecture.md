@@ -560,6 +560,7 @@ entry no cycle reads is not reported).
 | `internal/services` | Service registry, `ServiceManager` (start order, retries, restart queue), host `Controller`, `HookBackend`; each service is a declarative entry run by generic launch executors, see [service-registry.md](service-registry.md) |
 | `internal/shadow` | `configd shadow`: side-effect-free Load/Plan cycle with a plan log and an optional report directory |
 | `internal/snapshot` | Immutable configuration snapshot (values + accessors) |
+| `internal/stat` | The statistics collectors (`proc`, `cpu`, `io`, ... from `/proc` and `/sys`) and the one-process runner; [stats.md](stats.md). `internal/cli/statcmd` is its command line (`configd stat`), apart from the bootstrap packages |
 | `internal/state` | Process state; holds the current snapshot behind an `atomic.Pointer` plus first-run, forced and requested bookkeeping |
 | `internal/sys` | Side-effect boundary (exec, fs, proc, clock); `sys.ReadOnly` is its mutation-refusing wrapper, `sys/systest` the recording fakes |
 | `internal/systemd` | `systemctl` detection and unit management, with the legacy init-script fallback |

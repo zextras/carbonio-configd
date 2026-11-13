@@ -67,6 +67,11 @@ func TestRun_ExitStatusAndStreams(t *testing.T) {
 			"Warning: local config file `/nonexistent-base/conf/localconfig.xml' is not readable\n"},
 		{"proxy conf without nginx reports on stdout", []string{"proxy", "conf"}, 1,
 			"Nginx not installed, exiting\n", ""},
+		{"stat without a collector prints the usage", []string{"stat"}, 1, "",
+			"Usage: configd stat <name> [options]\n       configd stat run <collector> [<collector>...]\n" +
+				"Collectors: allprocs, cpu, df, fd, io, ldap, mtaqueue, mysql, nginx, proc, vm\n"},
+		{"stat of an unknown collector", []string{"stat", "nosuch", "-i", "5"}, 1, "",
+			"Unknown collector \"nosuch\"; one of: allprocs, cpu, df, fd, io, ldap, mtaqueue, mysql, nginx, proc, vm\n"},
 		{"release", []string{"release"}, 0, "Carbonio Release \n", ""},
 	}
 

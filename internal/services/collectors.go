@@ -23,7 +23,7 @@ const statEnabledTrue = "TRUE"
 
 // statsCollectors is the CollectorSpec of stats, mirroring legacy statctl.pl:
 // the base collectors every host runs (io twice: extended and plain) plus the
-// ones whose localconfig key is TRUE, all run by one process, "setup stat run
+// ones whose localconfig key is TRUE, all run by one process, "configd stat run
 // <collector>...". Every collector keeps its own PID file under the stats run
 // directory, all naming that process.
 //
@@ -73,7 +73,7 @@ func (c *Controller) startCollectors(ctx context.Context, def *ServiceDef) error
 		}
 	}
 
-	binaryPath := filepath.Join(c.p.libexec, spec.Binary)
+	binaryPath := filepath.Join(c.p.bin, spec.Binary)
 
 	if _, statErr := c.env.FS.Stat(binaryPath); statErr != nil {
 		logger.WarnContext(ctx, "Stats collectors binary is missing", "path", binaryPath)
@@ -89,6 +89,10 @@ func (c *Controller) startCollectors(ctx context.Context, def *ServiceDef) error
 	}
 
 	defer func() { _ = logFd.Close() }()
+
+	// The collectors of an earlier release would run twice next to the new
+	// process, which would leave them their pid files.
+	c.killOldCollectors(ctx)
 
 	// One argument per collector: its command line, as the zmstat script took it.
 	proc, err := c.env.Exec.Start(ctx, &sys.Cmd{
@@ -133,11 +137,25 @@ func (c *Controller) stopCollectors(ctx context.Context, def *ServiceDef) error 
 	// Final pass: send SIGTERM to any collector survivors found in /proc,
 	// including the Perl ones of a release before the upgrade.
 	_ = c.killProcess(ctx, def.ProcessName)
-	_ = c.killProcess(ctx, c.p.statsGlob)
+	c.killOldCollectors(ctx)
 
 	logger.InfoContext(ctx, "Stopped stats collectors", "pidfiles", files)
 
 	return nil
+}
+
+// killOldCollectors stops what the collectors of an earlier release left
+// running: the "setup stat" processes and the Perl zmstat-* scripts.
+func (c *Controller) killOldCollectors(ctx context.Context) {
+	for _, identity := range c.p.statsOld {
+		_ = c.killProcess(ctx, identity)
+	}
+}
+
+// belongsToOldCollectors reports whether pid is a collector of an earlier
+// release.
+func (c *Controller) belongsToOldCollectors(ctx context.Context, pid int) bool {
+	return slices.ContainsFunc(c.p.statsOld, func(identity string) bool { return c.pidBelongsTo(ctx, pid, identity) })
 }
 
 // killStatsPidFile reads the PID from pidPath, kills its process group (so
@@ -168,7 +186,7 @@ func (c *Controller) killStatsPidFile(ctx context.Context, pidPath, processName 
 		return false
 	}
 
-	if !c.pidBelongsTo(ctx, pid, processName) && !c.pidBelongsTo(ctx, pid, c.p.statsGlob) {
+	if !c.pidBelongsTo(ctx, pid, processName) && !c.belongsToOldCollectors(ctx, pid) {
 		logger.InfoContext(ctx, "Stats PID file does not name a running collector, treating it as stale",
 			"path", pidPath, "pid", pid)
 		_ = c.env.FS.Remove(pidPath)

@@ -88,7 +88,8 @@ func (e *Env) niceRoundWait(interval time.Duration) time.Duration {
 }
 
 // alive is Perl's kill(0, pid) hardened against pid reuse: the process must
-// exist and be a collector (its command line is a zmstat-* script or "setup stat <name>").
+// exist and be a collector (its command line is a zmstat-* script, "configd stat" or, of the release before,
+// "setup stat").
 func (e *Env) alive(pid int) bool {
 	if e.PidAlive != nil {
 		return e.PidAlive(pid)

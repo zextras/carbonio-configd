@@ -258,6 +258,14 @@ func TestCommandTree_Parse(t *testing.T) {
 				assert.Equal(t, "/tmp/s", cli.Shadow.Dir)
 				assert.True(t, cli.Shadow.Once)
 			}},
+		{name: "stat keeps the options of the collector", argv: []string{"stat", "io", "-x", "--log", "/tmp/io.csv"},
+			want: "stat", check: func(t *testing.T, cli *CLI) {
+				assert.Equal(t, []string{"io", "-x", "--log", "/tmp/io.csv"}, cli.Stat.Args)
+			}},
+		{name: "stat run takes one command line per collector", argv: []string{"stat", "run", "io -x", "cpu"},
+			want: "stat", check: func(t *testing.T, cli *CLI) {
+				assert.Equal(t, []string{"run", "io -x", "cpu"}, cli.Stat.Args)
+			}},
 		{name: "shadow takes no argument", argv: []string{"shadow", "x"}, wantErr: "unexpected argument x"},
 	}
 
@@ -377,7 +385,7 @@ func TestCommandTree_Visible(t *testing.T) {
 
 	assert.ElementsMatch(t, []string{
 		"completion", "control", "init", "ldap", "localconfig", "plan", "proxy", "release",
-		"rewrite", "service", "shadow", "status", "tls",
+		"rewrite", "service", "shadow", "stat", "status", "tls",
 	}, names(root))
 
 	find := func(path ...string) *cobra.Command {

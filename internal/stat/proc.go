@@ -39,8 +39,8 @@ var defaultProcs = []string{procMailbox, procMySQL, procLDAP, postfixUser, procA
 // procMatchers are the command line filters of the monitored process groups
 // (the %ps_subs of stat-proc.pl): the user that owns them, the expressions the
 // command must match and the one it must not. The zmstat group also matches
-// "setup stat", how the collectors run now that they are not zmstat-*
-// scripts.
+// "configd stat" (and "setup stat", the previous release), how the collectors
+// run now that they are not zmstat-* scripts.
 var procMatchers = map[string]struct {
 	postfix bool
 	all     []*regexp.Regexp
@@ -56,7 +56,7 @@ var procMatchers = map[string]struct {
 	procAmavis:  {all: []*regexp.Regexp{regexp.MustCompile(`amavisd`)}},
 	procClam:    {all: []*regexp.Regexp{regexp.MustCompile(`(freshclam|clamd)`)}},
 	procStat: {all: []*regexp.Regexp{
-		regexp.MustCompile(`(zmstat-|setup stat |iostat|vmstat|vm_stat|postqueue)`),
+		regexp.MustCompile(`(zmstat-|(setup|configd) stat |iostat|vmstat|vm_stat|postqueue)`),
 	}},
 }
 

@@ -7,6 +7,7 @@ package stat
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -131,4 +132,26 @@ func TestProcMissingProcessIsReported(t *testing.T) {
 	require.Len(t, lines, 1)
 	assert.Contains(t, te.stderr.String(), "01/01/2026 00:00:00: ERROR: No such process: '10'\n")
 	assert.Contains(t, lines[0], "ldap, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1")
+}
+
+// The zmstat group counts the stats process of every release: configd stat,
+// the setup stat of the previous one and the zmstat-* scripts, but not another
+// command that has the word.
+func TestProcZmstatGroupCountsTheStatsProcessOfEveryRelease(t *testing.T) {
+	t.Parallel()
+
+	f := files{"proc/stat": "cpu  1000 0 500 8000 500 0 0 0\n"}
+	f.addProc(10, 1000, "configd", "/opt/zextras/bin/configd\x00stat\x00run\x00cpu\x00io\x00", 1, 1, "100 50 10 0 0 0 0")
+	f.addProc(11, 1000, "setup", "/opt/zextras/libexec/setup\x00stat\x00cpu\x00", 1, 1, "100 50 10 0 0 0 0")
+	f.addProc(12, 1000, "perl", "perl\x00/opt/zextras/libexec/zmstat-cpu\x00", 1, 1, "100 50 10 0 0 0 0")
+	f.addProc(13, 1000, "configd", "/opt/zextras/bin/configd\x00status\x00", 1, 1, "100 50 10 0 0 0 0")
+
+	te := newTestEnv(t, f)
+	te.UserName = userNames
+	c := newProc(te.Env, []string{procStat})
+
+	lines := te.sample(t, c, 0)
+	require.Len(t, lines, 1)
+	assert.Contains(t, lines[0], "zmstat, 0.0, 0.0, 0.0, ")
+	assert.True(t, strings.HasSuffix(lines[0], ", 3"), lines[0])
 }

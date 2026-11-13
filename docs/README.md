@@ -18,6 +18,7 @@ tour. The pages below are the reference.
 | [architecture.md](architecture.md) | follow the startup sequence, main loop, network protocol, cycle model (load, snapshot, plan, execute), observability, shadow mode and the package map |
 | [restart-behavior.md](restart-behavior.md) | learn when a configuration change restarts a service, the hybrid policy on systemd hosts, the watchdog and dependency cascading |
 | [service-registry.md](service-registry.md) | declare or change a service: the registry fields, the launch strategies and readiness probes, the lifecycle traces that guard them |
+| [stats.md](stats.md) | run the statistics collectors (`configd stat`, the Go port of the `zmstat-*` scripts), in one process or one by one, and know how they differ from the scripts |
 | [localconfig.md](localconfig.md) | see how the effective localconfig is built, the `zmlocalconfig` parity rules and the service hooks format |
 | [proxy-templates.md](proxy-templates.md) | write or debug nginx proxy templates and use `configd proxy gen` / `proxy conf` |
 | [performance.md](performance.md) | tune LDAP retries and parallel rewrites, and profile configd |

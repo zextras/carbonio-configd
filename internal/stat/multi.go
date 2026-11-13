@@ -29,10 +29,10 @@ const processPid = "stats.pid"
 const gcPercent = 25
 
 // TuneMemory sets the garbage collection target of the long-running process
-// of "setup stat run".
+// of "configd stat run".
 func TuneMemory() { debug.SetGCPercent(gcPercent) }
 
-// job is one collector of "setup stat run": its spec and parsed command line.
+// job is one collector of "configd stat run": its spec and parsed command line.
 type job struct {
 	sp  *spec
 	o   *options
@@ -61,7 +61,7 @@ func (l lockedWriter) Write(p []byte) (int, error) {
 	return l.w.Write(p) //nolint:wrapcheck // the stream's own error
 }
 
-// runMany is "setup stat run <collector>...": every argument is the command
+// runMany is "configd stat run <collector>...": every argument is the command
 // line of one collector as the zmstat-<name> script takes it ("proc", "io -x",
 // "mtaqueue --max-qsize 5000"), all of them run in this process, each in its
 // own goroutine with its own interval, log and rotation and, as in a process
@@ -72,7 +72,7 @@ func (l lockedWriter) Write(p []byte) (int, error) {
 // reported on stderr and the others keep running; the status is 1 then.
 func (e *Env) runMany(ctx context.Context, cmds []string) int {
 	if len(cmds) == 0 {
-		_, _ = fmt.Fprintf(e.Stderr, "Usage: setup stat %s <collector> [<collector>...]\nCollectors: %s\n",
+		_, _ = fmt.Fprintf(e.Stderr, "Usage: configd stat %s <collector> [<collector>...]\nCollectors: %s\n",
 			cmdRun, strings.Join(Names(), ", "))
 
 		return exitError

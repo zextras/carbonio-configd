@@ -29,7 +29,7 @@ func cpuFDEnv(t *testing.T) *testEnv {
 	})
 }
 
-// startMany runs "setup stat run <cmds>" on the manual clock, once the n
+// startMany runs "configd stat run <cmds>" on the manual clock, once the n
 // collectors that start are parked on it.
 func startMany(t *testing.T, te *testEnv, n int, cmds ...string) *running {
 	t.Helper()
@@ -50,7 +50,7 @@ func (r *running) settleN(t *testing.T, n int) {
 	require.Eventually(t, func() bool { return r.te.fakes.Clock.Waiters() == n }, 5*time.Second, time.Millisecond)
 }
 
-// "setup stat run cpu fd": each collector writes its own CSV at its own
+// "configd stat run cpu fd": each collector writes its own CSV at its own
 // interval and keeps the pid file of a process of its own, naming the one
 // process; a stop removes them.
 func TestRunManyWritesEveryCollector(t *testing.T) {
@@ -218,7 +218,7 @@ func TestRunManyEveryCollectorAlreadyRunning(t *testing.T) {
 func TestRunManyRefusals(t *testing.T) {
 	t.Parallel()
 
-	usage := "Usage: setup stat run <collector> [<collector>...]\nCollectors: " + strings.Join(Names(), ", ") + "\n"
+	usage := "Usage: configd stat run <collector> [<collector>...]\nCollectors: " + strings.Join(Names(), ", ") + "\n"
 
 	for name, tc := range map[string]struct {
 		cmds       []string

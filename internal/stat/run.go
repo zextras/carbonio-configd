@@ -29,14 +29,14 @@ const (
 	cmdRun = "run"
 )
 
-// Run executes "setup stat <name> [options]": the collector of that name
-// with the command line of the zmstat-<name> script, or "setup stat run
+// Run executes "configd stat <name> [options]": the collector of that name
+// with the command line of the zmstat-<name> script, or "configd stat run
 // <collector>...": several collectors in this one process (see runMany). It
 // returns the exit status; it runs until SIGTERM, SIGINT or ctx is done.
 func Run(ctx context.Context, env *Env, args []string) int {
 	if len(args) == 0 {
-		_, _ = fmt.Fprintf(env.Stderr, "Usage: setup stat <name> [options]\n"+
-			"       setup stat %s <collector> [<collector>...]\nCollectors: %s\n", cmdRun, strings.Join(Names(), ", "))
+		_, _ = fmt.Fprintf(env.Stderr, "Usage: configd stat <name> [options]\n"+
+			"       configd stat %s <collector> [<collector>...]\nCollectors: %s\n", cmdRun, strings.Join(Names(), ", "))
 
 		return exitError
 	}

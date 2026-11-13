@@ -28,14 +28,14 @@ type paths struct {
 	run string
 	// statsPidDir holds the per-collector pidfiles of the stats service.
 	statsPidDir string
-	// statsProc is the identity of the stats process: libexec/setup with the
-	// argument stat, so `tail -f .../log/zmstat.out` or another setup command
-	// is not mistaken for one.
+	// statsProc is the identity of the stats process: bin/configd with the
+	// argument stat, so `tail -f .../log/zmstat.out` or another configd
+	// command is not mistaken for one.
 	statsProc string
-	// statsGlob is the identity of the collectors of earlier releases, the
-	// zmstat-* Perl scripts under libexec; they are still stopped after an
-	// upgrade.
-	statsGlob string
+	// statsOld are the identities of the collectors of earlier releases:
+	// libexec/setup stat, and the zmstat-* Perl scripts under libexec. They are
+	// still stopped (and not left to run twice) after an upgrade.
+	statsOld []string
 
 	cacheFile      string
 	advancedJARDir string
@@ -93,8 +93,8 @@ func newPaths(base, run string) paths {
 	}
 
 	p.statsPidDir = run + "/stats"
-	p.statsProc = p.libexec + "/" + collectorBinary + " " + collectorCommand
-	p.statsGlob = p.libexec + "/zmstat-*"
+	p.statsProc = p.bin + "/" + collectorBinary + " " + collectorCommand
+	p.statsOld = []string{p.libexec + "/" + collectorOldBin + " " + collectorCommand, p.libexec + "/zmstat-*"}
 
 	p.cacheFile = p.log + "/.zmcontrol.cache"
 	p.advancedJARDir = p.lib + "/ext/carbonio"
