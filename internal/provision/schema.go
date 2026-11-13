@@ -193,6 +193,12 @@ func newAttr(xattrs []xml.Attr) (*Attr, error) {
 	}
 
 	a.flags = strings.Split(props["flags"], ",")
+	if slices.Contains(a.flags, flagAccountCosDomainInherited) && !slices.Contains(a.flags, flagAccountInherited) {
+		// AttributeManager: an accountCosDomainInherited attribute is also an
+		// accountInherited one, so the class of service supplies its value too.
+		a.flags = append(a.flags, flagAccountInherited)
+	}
+
 	a.ServerInherited = slices.Contains(a.flags, flagServerInherited)
 
 	a.setLimits(props["min"], props["max"])

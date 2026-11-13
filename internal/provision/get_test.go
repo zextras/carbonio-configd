@@ -166,6 +166,29 @@ func TestRun_GetAccountLayersOwnAttributesOverCOSOverDomain(t *testing.T) {
 	assert.Equal(t, "# name admin@example.com\nzimbraMailDeliveryAddress: admin@example.com\n\n", own)
 }
 
+// An attribute flagged accountCosDomainInherited only (zimbraPrefTimeZoneId in
+// the fixture) is also an accountInherited one (AttributeManager), so the
+// account shows the value its class of service holds, which wins over the
+// domain's.
+func TestRun_GetAccountShowsCOSValuesOfAccountCosDomainInheritedAttributes(t *testing.T) {
+	r := newRig(t)
+	r.dir.Set(cosDN, "zimbraPrefTimeZoneId", "Europe/London")
+	r.withDomain(t)
+	r.withServer(t)
+	r.run(t, "ca", adminAddr, "longenough-1")
+
+	assert.Equal(t, "# name admin@example.com\nzimbraPrefTimeZoneId: Europe/London\n\n",
+		r.output(t, "ga", adminAddr, "zimbraPrefTimeZoneId"))
+
+	r.run(t, "md", "example.com", "zimbraPrefTimeZoneId", "Europe/Rome")
+
+	assert.Equal(t, "# name admin@example.com\nzimbraPrefTimeZoneId: Europe/London\n\n",
+		r.output(t, "ga", adminAddr, "zimbraPrefTimeZoneId"))
+
+	assert.Equal(t, "# name admin@example.com\n\n",
+		r.output(t, "ga", "-e", adminAddr, "zimbraPrefTimeZoneId"))
+}
+
 func TestRun_GetAccountUsesTheDomainDefaultCOS(t *testing.T) {
 	r := newRig(t)
 
