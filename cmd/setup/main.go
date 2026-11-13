@@ -85,11 +85,35 @@ func run(args []string, env sys.System, stdin io.Reader, stdout, stderr io.Write
 	return status
 }
 
+// The names of the tool commands.
+const (
+	toolSSHKeygen      = "ssh-keygen"
+	toolUpdateAuthKeys = "update-authkeys"
+	toolSyslog         = "syslog"
+	toolDHParam        = "dhparam"
+	toolProxyConfig    = "proxyconfig"
+	toolLDAPPasswd     = "ldap-passwd"
+	toolLDAPSchema     = "ldap-schema"
+	toolLDAPUpdateLDIF = "ldap-update-ldif"
+	toolLDAPEnableRepl = "ldap-enable-replica"
+	toolLDAPEnableMMR  = "ldap-enable-mmr"
+	toolIPTool         = "iptool"
+	toolIniUtil        = "iniutil"
+	toolCertMgr        = "certmgr"
+	toolStat           = "stat"
+	toolRC             = "rc"
+	toolRCD            = "rcd"
+	toolProv           = "prov"
+	toolGSAUtil        = "gsautil"
+	toolRandomPassword = "random-password"
+	toolServerIPs      = "serverips"
+)
+
 // toolCommands are the commands that replace scripts and parse their own
 // arguments (proxyconfig has a -c and a -d of its own).
-var toolCommands = []string{"ssh-keygen", "update-authkeys", "syslog", "dhparam", "proxyconfig", "ldap-passwd",
-	"ldap-schema", "ldap-update-ldif", "ldap-enable-replica", "ldap-enable-mmr", "iptool", "iniutil", "certmgr",
-	"stat", "rc", "rcd", "prov", "gsautil", "random-password", "serverips"}
+var toolCommands = []string{toolSSHKeygen, toolUpdateAuthKeys, toolSyslog, toolDHParam, toolProxyConfig,
+	toolLDAPPasswd, toolLDAPSchema, toolLDAPUpdateLDIF, toolLDAPEnableRepl, toolLDAPEnableMMR, toolIPTool,
+	toolIniUtil, toolCertMgr, toolStat, toolRC, toolRCD, toolProv, toolGSAUtil, toolRandomPassword, toolServerIPs}
 
 // legacyArgs maps the options of the former shell script: "-c FILE" is
 // "--legacy-config FILE --non-interactive", and "-d" (debug) is accepted and
@@ -168,61 +192,61 @@ func newRootCmd(env sys.System, stdin io.Reader, stdout, stderr io.Writer, statu
 
 	tio := &toolIO{env: env, stdin: stdin, stdout: stdout, stderr: stderr, status: status}
 	root.AddCommand(config, runCmd, newGalSyncCmd(env, stdout, stderr, status),
-		newToolCmd("ssh-keygen [rsa]", "Generate the zextras SSH key and store its public key (zmsshkeygen)",
+		newToolCmd(toolSSHKeygen+" [rsa]", "Generate the zextras SSH key and store its public key (zmsshkeygen)",
 			bootstrapcmd.RunSSHKeygen, tio),
-		newToolCmd("update-authkeys [-a]",
+		newToolCmd(toolUpdateAuthKeys+" [-a]",
 			"Update ~zextras/.ssh/authorized_keys from the servers' keys; -a first on every server (zmupdateauthkeys)",
 			bootstrapcmd.RunUpdateAuthKeys, tio),
-		newStdinToolCmd("dhparam [install|get|set ...]",
-			"install (or no argument, for setup.pl): the RFC 7919 ffdhe2048 dhparam recorded in zimbraSSLDHParam; "+
+		newStdinToolCmd(toolDHParam+" [install|get|set ...]",
+			"install: the RFC 7919 ffdhe2048 dhparam recorded in zimbraSSLDHParam (for setup.pl); "+
 				"get and set are zmdhparam",
 			bootstrapcmd.RunDHParam, tio),
-		newStdinToolCmd("ldap-passwd [-h] [-r|-a|-b|-n|-p|[-c] -l] [password]",
+		newStdinToolCmd(toolLDAPPasswd+" [-h] [-r|-a|-b|-n|-p|[-c] -l] [password]",
 			"Change an LDAP password in localconfig, the directory and carbonio.ldif (zmldappasswd); "+
 				"without a password argument it is read from stdin",
 			bootstrapcmd.RunLDAPPasswd, tio),
-		newToolCmd("syslog", "Set up rsyslog for Carbonio logging, local or remote (zmsyslogsetup)",
+		newToolCmd(toolSyslog, "Set up rsyslog for Carbonio logging, local or remote (zmsyslogsetup)",
 			bootstrapcmd.RunSyslog, tio),
-		newToolCmd("certmgr <command> [options]",
+		newToolCmd(toolCertMgr+" <command> [options]",
 			"Create, verify, deploy and view the SSL certificates and the CA of the node (zmcertmgr)",
 			bootstrapcmd.RunCertMgr, tio),
-		newToolCmd("proxyconfig", "Configure the reverse proxy attributes, the options of libexec/zmproxyconfig",
+		newToolCmd(toolProxyConfig, "Configure the reverse proxy attributes, the options of libexec/zmproxyconfig",
 			bootstrapcmd.RunProxyConfig, tio),
-		newToolCmd("ldap-schema", "Install the slapd schemas (zmldapschema)",
+		newToolCmd(toolLDAPSchema, "Install the slapd schemas (zmldapschema)",
 			bootstrapcmd.RunLDAPSchema, tio),
-		newToolCmd("ldap-update-ldif", "Bring the LDAP directory to the LDIF of the installed version (zmldapupdateldif)",
+		newToolCmd(toolLDAPUpdateLDIF, "Bring the LDAP directory to the LDIF of the installed version (zmldapupdateldif)",
 			bootstrapcmd.RunLDAPUpdateLDIF, tio),
-		newToolCmd("ldap-enable-replica", "Enable replication: the provider on the master, a replica elsewhere "+
+		newToolCmd(toolLDAPEnableRepl, "Enable replication: the provider on the master, a replica elsewhere "+
 			"(zmldapenablereplica)", bootstrapcmd.RunLDAPEnableReplica, tio),
-		newToolCmd("ldap-enable-mmr [-r RID] [-s SID] -m MMRURI",
+		newToolCmd(toolLDAPEnableMMR+" [-r RID] [-s SID] -m MMRURI",
 			"Enable multi-master replication with another master (zmldapenable-mmr)",
 			bootstrapcmd.RunLDAPEnableMMR, tio),
-		newToolCmd("iptool [-d [-m ipmode]]",
+		newToolCmd(toolIPTool+" [-d [-m ipmode]]",
 			"Apply zimbraIPMode to the Java options and the MySQL bind address (zmiptool)",
 			bootstrapcmd.RunIPTool, tio),
-		newToolCmd("prov [-r] [-m] [-l] <verb> args...",
+		newToolCmd(toolProv+" [-r] [-m] [-l] <verb> args...",
 			"The zmprov commands setup.pl runs (cs cd ca aaa mcf ms mc ma md gs gcf gacf gad ga gc gd gas garpu gamcs), "+
 				"natively over LDAP",
 			bootstrapcmd.RunProv, tio),
-		newToolCmd("gsautil <command> [options]",
+		newToolCmd(toolGSAUtil+" <command> [options]",
 			"Create, extend, delete and synchronise the GAL sync accounts: createAccount, addDataSource, "+
 				"deleteAccount, trickleSync, fullSync, forceSync (zmgsautil)",
 			bootstrapcmd.RunGSAUtil, tio),
-		newToolCmd("random-password [-l] [min max]",
+		newToolCmd(toolRandomPassword+" [-l] [min max]",
 			"Print a random password, 24 to 32 characters by default; -l leaves out the dot "+
 				"(com.zimbra.common.util.RandomPassword)", bootstrapcmd.RunRandomPassword, tio),
-		newToolCmd("serverips [--networks]",
+		newToolCmd(toolServerIPs+" [--networks]",
 			"List the IP addresses of the server, or with --networks their networks (zmserverips)",
 			bootstrapcmd.RunServerIPs, tio),
-		newToolCmd("iniutil [options] inifile", "Read or edit one ini file (zminiutil)",
+		newToolCmd(toolIniUtil+" [options] inifile", "Read or edit one ini file (zminiutil)",
 			bootstrapcmd.RunIniUtil, tio),
-		newStdinToolCmd("rc <host> [command words...]",
+		newStdinToolCmd(toolRC+" <host> [command words...]",
 			"Run a zmrcd command on another server over SSH: the words, or stdin, are what zmrcd reads (zmrc)",
 			bootstrapcmd.RunRC, tio),
-		newStdinToolCmd("rcd",
+		newStdinToolCmd(toolRCD,
 			"Run the command line zmrc sent over SSH, if it is in the table of allowed commands (zmrcd)",
 			bootstrapcmd.RunRCD, tio),
-		newToolCmd("stat <name> [options] | stat run <collector>...",
+		newToolCmd(toolStat+" <name> [options] | "+toolStat+" run <collector>...",
 			"Kept for the zmstat-<name> wrappers of older carbonio-core: the same as \"configd stat\"",
 			statcmd.Run, tio))
 
@@ -242,17 +266,17 @@ func newRootCmd(env sys.System, stdin io.Reader, stdout, stderr io.Writer, statu
 // ldap-passwd and proxyconfig read "-h" themselves, but take "--help" and
 // "-help" for a run of unknown options.
 var toolHelp = map[string][]string{
-	"ssh-keygen":       helpArgs,
-	"update-authkeys":  helpArgs,
-	"syslog":           helpArgs,
-	"ldap-schema":      helpArgs,
-	"ldap-update-ldif": helpArgs,
-	"rc":               helpArgs,
-	"rcd":              helpArgs,
-	"prov":             helpArgs,
-	"stat":             helpArgs,
-	"ldap-passwd":      helpArgs[1:],
-	"proxyconfig":      helpArgs[1:],
+	toolSSHKeygen:      helpArgs,
+	toolUpdateAuthKeys: helpArgs,
+	toolSyslog:         helpArgs,
+	toolLDAPSchema:     helpArgs,
+	toolLDAPUpdateLDIF: helpArgs,
+	toolRC:             helpArgs,
+	toolRCD:            helpArgs,
+	toolProv:           helpArgs,
+	toolStat:           helpArgs,
+	toolLDAPPasswd:     helpArgs[1:],
+	toolProxyConfig:    helpArgs[1:],
 }
 
 // helpArgs are the arguments that ask a tool for its usage: "-h", then the
