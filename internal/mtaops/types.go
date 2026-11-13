@@ -68,6 +68,11 @@ type Executor interface {
 	// main.cf defines key explicitly (set=false otherwise, set=true with an empty
 	// value for an explicitly empty parameter). A failing postconf is an error.
 	ReadPostconf(ctx context.Context, key string, explicitOnly bool) (value string, set bool, err error)
+
+	// ReadMainCf returns every parameter main.cf defines explicitly (one
+	// `postconf -n` run), each value unwrapped to a single line. A failing
+	// postconf is an error; callers then treat every parameter as unknown.
+	ReadMainCf(ctx context.Context) (map[string]string, error)
 }
 
 // OperationResolver resolves directive values from a configuration snapshot.

@@ -187,3 +187,7 @@ func TestMapfilePlan_MultipleErrors(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, 2, strings.Count(err.Error(), "mapfile execution failed"))
 }
+
+func (m *mockMtaExecutorForMta) ReadMainCf(_ context.Context) (map[string]string, error) {
+	return nil, errMainCfUnknown
+}

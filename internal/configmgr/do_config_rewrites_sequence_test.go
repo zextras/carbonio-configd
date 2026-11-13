@@ -76,6 +76,10 @@ func TestDoConfigRewrites_SideEffectSequence(t *testing.T) {
 		},
 	}})
 
+	// main.cf sets smtpd_banner (so its removal is still needed) and not
+	// myhostname (so it is still set).
+	fakes.Exec.OnCmdline(base+"/common/sbin/postconf -n", systest.Reply("smtpd_banner = hello\n"))
+
 	env := fakes.System()
 	cm := &ConfigManager{
 		env:         env,
@@ -99,7 +103,7 @@ func TestDoConfigRewrites_SideEffectSequence(t *testing.T) {
 	ops := fakes.Rec.Strings()
 	nOps := len(ops)
 
-	require.Equal(t, 12, nOps, "unexpected side effects:\n%s", strings.Join(ops, "\n"))
+	require.Equal(t, 13, nOps, "unexpected side effects:\n%s", strings.Join(ops, "\n"))
 
 	// Serial phase: the mapped file is written before anything else runs.
 	assert.Equal(t, "fs.write-atomic "+base+"/conf/dhparam.pem mode=0640", ops[0])
@@ -113,12 +117,14 @@ func TestDoConfigRewrites_SideEffectSequence(t *testing.T) {
 		"fs.rename " + tmp + " -> " + base + "/conf/main.cf",
 	}, subsequence(ops[1:], ".zmconfigd-rewrite"), "rewrite step")
 
-	// postconf and postconf -X are never run by configd (common/conf is
-	// root-owned): each step stages its change and runs the root helper (sudo
+	// postconf -e and postconf -X are never run by configd (common/conf is
+	// root-owned): both steps share one read of main.cf with the read-only
+	// postconf -n, then each stages its change and runs the root helper (sudo
 	// -n here: the fake is neither root nor in systemd mode). The two steps run
 	// concurrently, their stage+trigger sequences are serialized.
 	helper := "exec /usr/bin/sudo -n " + base + "/libexec/postfix-conf apply"
-	assert.Empty(t, subsequence(ops[1:], "postconf -"), "configd must not run postconf itself")
+	assert.Equal(t, []string{"exec " + base + "/common/sbin/postconf -n"}, subsequence(ops[1:], "postconf -"),
+		"configd only reads main.cf, once per cycle")
 	assert.Equal(t, []string{helper, helper}, subsequence(ops[1:], "postfix-conf"), "helper triggers")
 	assert.Len(t, subsequence(ops[1:], "write-atomic "+base+"/data/postfix/conf-staging/postconf.set"), 1, "set staged")
 	assert.Len(t, subsequence(ops[1:], "write-atomic "+base+"/data/postfix/conf-staging/postconf.unset"), 1, "unset staged")

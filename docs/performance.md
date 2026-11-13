@@ -102,6 +102,32 @@ other writers of the daemon (mapped files, the metrics textfile through `sys.FS.
 use `fileutil.AtomicWrite`: a `.configd-*.tmp` file created in the destination's own
 directory, then `rename`, so the rename is always atomic at the VFS level.
 
+## Skipping what is already current
+
+Source: `internal/configmgr/manager_actions_rewrite.go` (`targetCurrent`),
+`internal/configmgr/manager_actions_mta.go` (`dropUnchangedPostconf`, `dropAbsentPostconfd`),
+`internal/proxy/generator.go` (`isUnchanged`, `appendConfGenResult`)
+
+A cycle that finds the host already in the planned state does no disk or Postfix work for it. What is
+skipped never changes which services restart: restarts come from the plan (a changed section), not
+from what Execute wrote.
+
+- **Proxy files**: a generated file that is a regular file with the generated mode and the rendered
+  bytes is not rewritten. `nginx.conf` ends with a result marker (`#__SUCCESS__` or
+  `#__CONF_GEN_ERROR__:...`) that `zmnginxctl restart` reads; the check ignores one trailing marker, and
+  after the run the file always ends with the marker of the current run (appended to a fresh file, replaced
+  when only the marker changed, left alone when it is the same).
+- **REWRITE targets**: the template is rendered in memory and the target is left alone when it is a regular
+  file (a symlink is replaced) with the same bytes and the same permission bits. Targets under `common/conf`
+  (installed by the root helper) also need `root:root` ownership and the helper's mode `0644`; when nothing
+  of the batch differs, nothing is staged and the helper is not started. A hand-edited file differs, so an
+  explicit `REWRITE <section>` still restores it.
+- **postconf**: one `postconf -n` per Execute (shared by the postconf and the postconf -X step) gives the
+  explicit main.cf settings. A `-e` operation is dropped only when main.cf defines the key with the same
+  value, whitespace ignored. A key that main.cf does not define (default or master.cf only) is still set, and
+  a failing read applies every operation. A `-X` operation is dropped when main.cf does not define the key.
+  An empty batch runs nothing.
+
 ## Profiling tooling
 
 Source: `cmd/configd/args_profiling.go`, `cmd/configd/profiling.go`, `cmd/configd/args_tracing.go`,

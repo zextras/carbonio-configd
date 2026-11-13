@@ -299,7 +299,7 @@ func logServiceToggle(ctx context.Context, service string, kind plan.ReasonKind)
 // ApplyRestarts. What did not complete is remembered and re-included by the
 // next Plan, so failed actions are retried until they succeed.
 func (cm *ConfigManager) Execute(ctx context.Context, pl *plan.Plan) error {
-	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
+	ctx = withMainCfRead(logger.ContextWithComponentOnce(ctx, "configmgr"))
 	logger.DebugContext(ctx, "Executing config rewrites")
 
 	var (

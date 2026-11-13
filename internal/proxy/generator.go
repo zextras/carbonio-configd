@@ -6,6 +6,7 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io/fs"
@@ -145,6 +146,7 @@ func (g *Generator) GenerateAll(ctx context.Context) error {
 	defer tracing.EndSpan(span)
 
 	startTime := time.Now()
+	g.confBody = nil
 
 	logger.DebugContext(ctx, "Starting nginx proxy configuration generation")
 
@@ -284,24 +286,64 @@ func (g *Generator) processTemplates(
 // zmnginxctl restart can detect generation problems. Legacy
 // ProxyConfGen.appendConfGenResultToConf: skipped on dry-run and when the file
 // does not exist; write failures are ignored.
+//
+// A run that left nginx.conf unchanged (writeFile skipped it, so it still ends
+// with the marker of an earlier run) appends nothing when that marker already
+// is text, and otherwise replaces the stale marker, so the file always ends
+// with the marker of the latest run.
 func (g *Generator) appendConfGenResult(ctx context.Context, text string) {
 	if g.DryRun {
 		return
 	}
 
+	marker := "\n#" + text + "\n"
+	path := g.confPath()
+
+	if g.refreshResultMarker(ctx, path, marker) {
+		return
+	}
+
 	//nolint:gosec // G304: path is ConfDir joined with a constant file name
-	f, err := g.env.FS.OpenFile(filepath.Join(g.ConfDir, g.confPrefix()), os.O_WRONLY|os.O_APPEND, 0)
+	f, err := g.env.FS.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0)
 	if err != nil {
 		return
 	}
 
-	if _, err := f.WriteString("\n#" + text + "\n"); err != nil {
+	if _, err := f.WriteString(marker); err != nil {
 		logger.WarnContext(ctx, "Failed to append generation result to nginx.conf", "error", err)
 	}
 
 	if err := f.Close(); err != nil {
 		logger.WarnContext(ctx, "Failed to close nginx.conf", "error", err)
 	}
+}
+
+// refreshResultMarker handles the file that writeFile left untouched because
+// it already held this run's rendered content plus an earlier run's marker:
+// it leaves a file that already ends with marker as it is and replaces any
+// other marker. It reports false when the file is not in that state (freshly
+// written without marker, or unreadable), so the caller appends the marker.
+func (g *Generator) refreshResultMarker(ctx context.Context, path, marker string) bool {
+	if g.confBody == nil {
+		return false
+	}
+
+	//nolint:gosec // G304: path is ConfDir joined with a constant file name
+	existing, err := g.env.FS.ReadFile(path)
+	if err != nil || !hasResultMarker(existing, g.confBody) {
+		return false
+	}
+
+	if string(existing[len(g.confBody):]) == marker {
+		return true
+	}
+
+	updated := append(bytes.Clone(g.confBody), marker...)
+	if err := g.env.FS.WriteFileAtomic(path, updated, generatedFileMode); err != nil {
+		logger.WarnContext(ctx, "Failed to update generation result in nginx.conf", "error", err)
+	}
+
+	return true
 }
 
 // prefetchOperation executes a single prefetch operation with timing and error logging.
@@ -420,6 +462,10 @@ func (g *Generator) ProcessTemplateWithProcessor(
 		"path", outputPath,
 		"byte_count", len(result))
 
+	if outputName == g.confPrefix() {
+		g.confBody = []byte(result)
+	}
+
 	if err := g.writeFile(ctx, outputPath, []byte(result)); err != nil {
 		return fmt.Errorf("failed to write output %s: %w", outputPath, err)
 	}
@@ -454,10 +500,20 @@ func (g *Generator) ensureIncludesDir(ctx context.Context) error {
 
 // writeFile writes a file atomically with proper permissions via
 // FS.WriteFileAtomic (write temp file → fsync → chmod → rename), ensuring
-// no partial updates are ever visible.
+// no partial updates are ever visible. A target that is already a regular
+// file (not a symlink) with identical bytes and mode is left untouched: the
+// fsync + rename costs tens of milliseconds per file on slow disks.
 func (g *Generator) writeFile(ctx context.Context, path string, content []byte) error {
 	if g.DryRun {
 		logger.DebugContext(ctx, "DRY-RUN: Would write file",
+			"byte_count", len(content),
+			"path", path)
+
+		return nil
+	}
+
+	if g.isUnchanged(path, content) {
+		logger.DebugContext(ctx, "Unchanged, skipping write",
 			"byte_count", len(content),
 			"path", path)
 
@@ -475,6 +531,40 @@ func (g *Generator) writeFile(ctx context.Context, path string, content []byte) 
 		"path", path)
 
 	return nil
+}
+
+// isUnchanged reports whether path is a regular file (a symlink is never
+// treated as unchanged, so it gets replaced) whose permission bits are
+// generatedFileMode and whose bytes equal content. The main nginx.conf also
+// counts when it is content followed by the result marker of an earlier run
+// (appendConfGenResult), which is not part of the rendered content.
+func (g *Generator) isUnchanged(path string, content []byte) bool {
+	info, err := g.env.FS.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != generatedFileMode {
+		return false
+	}
+
+	//nolint:gosec // G304: path is a generated proxy config file under ConfDir/IncludesDir
+	existing, err := g.env.FS.ReadFile(path)
+	if err != nil {
+		return false
+	}
+
+	return bytes.Equal(existing, content) ||
+		(path == g.confPath() && hasResultMarker(existing, content))
+}
+
+// hasResultMarker reports whether existing is body followed by one result
+// marker block, "\n#<text>\n" as appendConfGenResult writes it.
+func hasResultMarker(existing, body []byte) bool {
+	tail, found := bytes.CutPrefix(existing, body)
+
+	return found && len(tail) >= 3 && tail[0] == '\n' && tail[1] == '#' && tail[len(tail)-1] == '\n'
+}
+
+// confPath is the main entry-point config, the one nginx -c points at.
+func (g *Generator) confPath() string {
+	return filepath.Join(g.ConfDir, g.confPrefix())
 }
 
 // outputName maps a template file name to the file it generates: the

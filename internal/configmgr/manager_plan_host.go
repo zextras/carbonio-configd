@@ -346,7 +346,7 @@ func (cm *ConfigManager) postconfDrift(ctx context.Context, p *plan.Postconf) (s
 		return "", fmt.Errorf("read postconf %s: %w", p.Key, err)
 	}
 
-	if strings.Join(strings.Fields(have), " ") == strings.Join(strings.Fields(want), " ") {
+	if samePostconfValue(have, want) {
 		return "", nil
 	}
 

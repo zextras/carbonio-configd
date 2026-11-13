@@ -6,6 +6,7 @@ package testutil
 
 import (
 	"context"
+	"errors"
 
 	"github.com/zextras/carbonio-configd/internal/mtaops"
 	"github.com/zextras/carbonio-configd/internal/snapshot"
@@ -26,6 +27,20 @@ type MockMtaExecutor struct {
 	ExecuteMapfileFn        func(ctx context.Context, op mtaops.MapfileOperation) error
 	ExecuteLdapWriteFn      func(ctx context.Context, op mtaops.LdapOperation) error
 	ReadPostconfFn          func(ctx context.Context, key string, explicitOnly bool) (string, bool, error)
+	ReadMainCfFn            func(ctx context.Context) (map[string]string, error)
+}
+
+// errMainCfNotMocked is what ReadMainCf returns without ReadMainCfFn: main.cf
+// is unknown, so callers apply every postconf operation.
+var errMainCfNotMocked = errors.New("testutil: ReadMainCfFn not set")
+
+// ReadMainCf delegates to ReadMainCfFn or fails, as for an unreadable main.cf.
+func (m *MockMtaExecutor) ReadMainCf(ctx context.Context) (map[string]string, error) {
+	if m.ReadMainCfFn != nil {
+		return m.ReadMainCfFn(ctx)
+	}
+
+	return nil, errMainCfNotMocked
 }
 
 // ReadPostconf delegates to ReadPostconfFn or returns ("", false, nil).
