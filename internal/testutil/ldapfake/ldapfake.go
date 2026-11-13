@@ -3,8 +3,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Package ldapfake is a minimal in-process LDAP server for tests: it answers
-// StartTLS, simple bind (always success) and search (always empty result), and
-// can imitate a wedged server.
+// StartTLS, simple bind (always success) and search (an empty result, or the
+// entries of Options.Entries for a base-object search), and can imitate a
+// wedged server.
 package ldapfake
 
 import (
@@ -13,6 +14,7 @@ import (
 	"crypto/tls"
 	"io"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -28,9 +30,11 @@ const (
 	opExtendedRequest ber.Tag = 23
 
 	opBindResponse       ber.Tag = 1
+	opSearchResultEntry  ber.Tag = 4
 	opSearchResultDone   ber.Tag = 5
 	opExtendedResponse   ber.Tag = 24
 	resultSuccess        int64   = 0
+	resultNoSuchObject   int64   = 32
 	resultProtocolError  int64   = 2
 	resultUnavailableErr int64   = 52
 )
@@ -44,16 +48,24 @@ type Options struct {
 	ImplicitTLS bool
 	// NoStartTLS makes the server refuse the StartTLS operation.
 	NoStartTLS bool
+	// Entries are the entries the server holds, by DN (compared without case
+	// or spaces after the commas), each with its attributes. A base-object
+	// search returns the entry at the base, or noSuchObject when there is none;
+	// the filter and the requested attributes are ignored. With no Entries
+	// every search is an empty success.
+	Entries map[string]map[string][]string
 	// HangOn is "starttls" or "bind": the server reads that request and never
 	// answers, like a wedged slapd.
 	HangOn string
 }
 
 // Server is a minimal in-process LDAP server: it answers StartTLS,
-// simple bind (always success) and search (always empty result).
+// simple bind (always success) and search (see Options.Entries).
 type Server struct {
 	ln   net.Listener
 	opts Options
+
+	entries map[string]map[string][]string
 
 	startTLSOps atomic.Int32
 	binds       atomic.Int32
@@ -72,6 +84,14 @@ func New(t *testing.T, opts Options) *Server {
 	}
 
 	s := &Server{opts: opts}
+
+	if opts.Entries != nil {
+		s.entries = make(map[string]map[string][]string, len(opts.Entries))
+
+		for dn, attrs := range opts.Entries {
+			s.entries[normalizeDN(dn)] = attrs
+		}
+	}
 
 	if opts.ImplicitTLS {
 		ln = tls.NewListener(ln, opts.TLS)
@@ -154,15 +174,15 @@ func (s *Server) handle(conn net.Conn) {
 
 		id, _ := p.Children[0].Value.(int64)
 
-		if !ss.dispatch(id, p.Children[1].Tag) {
+		if !ss.dispatch(id, p.Children[1]) {
 			return
 		}
 	}
 }
 
 // dispatch answers one request and reports whether the connection stays open.
-func (ss *session) dispatch(id int64, op ber.Tag) bool {
-	switch op {
+func (ss *session) dispatch(id int64, req *ber.Packet) bool {
+	switch req.Tag {
 	case opExtendedRequest:
 		return ss.startTLS(id)
 	case opBindRequest:
@@ -178,12 +198,67 @@ func (ss *session) dispatch(id int64, op ber.Tag) bool {
 
 		return writePacket(ss.conn, result(id, opBindResponse, resultSuccess)) == nil
 	case opSearchRequest:
-		return writePacket(ss.conn, result(id, opSearchResultDone, resultSuccess)) == nil
+		return ss.search(id, req)
 	case opUnbindRequest:
 		return false
 	default:
 		return writePacket(ss.conn, result(id, opExtendedResponse, resultUnavailableErr)) == nil
 	}
+}
+
+// search answers a search request: the entry at the base DN when the server
+// holds entries, else an empty result.
+func (ss *session) search(id int64, req *ber.Packet) bool {
+	if ss.s.entries == nil || len(req.Children) == 0 {
+		return writePacket(ss.conn, result(id, opSearchResultDone, resultSuccess)) == nil
+	}
+
+	base, _ := req.Children[0].Value.(string)
+
+	attrs, ok := ss.s.entries[normalizeDN(base)]
+	if !ok {
+		return writePacket(ss.conn, result(id, opSearchResultDone, resultNoSuchObject)) == nil
+	}
+
+	if writePacket(ss.conn, searchEntry(id, base, attrs)) != nil {
+		return false
+	}
+
+	return writePacket(ss.conn, result(id, opSearchResultDone, resultSuccess)) == nil
+}
+
+// normalizeDN compares DNs without case and without spaces after commas.
+func normalizeDN(dn string) string {
+	return strings.ToLower(strings.ReplaceAll(dn, ", ", ","))
+}
+
+// searchEntry builds a SearchResultEntry message.
+func searchEntry(id int64, dn string, attrs map[string][]string) *ber.Packet {
+	msg := ber.Encode(ber.ClassUniversal, ber.TypeConstructed, ber.TagSequence, nil, "LDAPMessage")
+	msg.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagInteger, id, "MessageID"))
+
+	entry := ber.Encode(ber.ClassApplication, ber.TypeConstructed, opSearchResultEntry, nil, "SearchResultEntry")
+	entry.AppendChild(ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, dn, "objectName"))
+
+	list := ber.Encode(ber.ClassUniversal, ber.TypeConstructed, ber.TagSequence, nil, "attributes")
+
+	for name, values := range attrs {
+		attr := ber.Encode(ber.ClassUniversal, ber.TypeConstructed, ber.TagSequence, nil, "attribute")
+		attr.AppendChild(ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, name, "type"))
+
+		set := ber.Encode(ber.ClassUniversal, ber.TypeConstructed, ber.TagSet, nil, "vals")
+		for _, v := range values {
+			set.AppendChild(ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, v, "val"))
+		}
+
+		attr.AppendChild(set)
+		list.AppendChild(attr)
+	}
+
+	entry.AppendChild(list)
+	msg.AppendChild(entry)
+
+	return msg
 }
 
 // hang swallows the connection without ever answering, until the client gives up.
