@@ -8,18 +8,17 @@ import (
 	"bytes"
 	"crypto"
 	"crypto/x509"
+	"errors"
 	"io"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/pavlo-v-chernykh/keystore-go/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/zextras/carbonio-configd/internal/sys"
+	"github.com/zextras/carbonio-configd/internal/pkcs12"
 	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
 
@@ -119,21 +118,10 @@ type cmTest struct {
 	keyN   int
 	bits   []int
 	remote []string
-	// remoteFail makes the commands of zmrc that contain it fail.
+	// remoteFail makes the commands sent through zmrc that contain it fail.
 	remoteFail string
-	// remoteStartErr makes zmrc fail to start, with no exit status.
+	// remoteStartErr makes every zmrc call fail with it.
 	remoteStartErr error
-	// trusted are the certificates (DER) of the fake cacerts, by alias.
-	trusted map[string][]byte
-	// keytools are the keytool runs: the arguments after the program and the
-	// environment of the process.
-	keytools []cmKeytoolRun
-}
-
-// cmKeytoolRun is one run of the fake keytool.
-type cmKeytoolRun struct {
-	args []string
-	env  []string
 }
 
 func newCMTest(t *testing.T, lc map[string]string) *cmTest {
@@ -171,24 +159,23 @@ func newCMTest(t *testing.T, lc map[string]string) *cmTest {
 	}
 	e.certTTY = func() bool { return false }
 
-	// zmrc runs as zextras: the command of runuser ends with it and the server.
-	fakes.Exec.When(func(c *sys.Cmd) bool { return slices.Contains(c.Args, "/opt/zextras/libexec/zmrc") },
-		func(c *sys.Cmd) (sys.Result, error) {
-			in, _ := io.ReadAll(c.Stdin)
-			h.remote = append(h.remote, c.Args[len(c.Args)-1]+": "+strings.TrimSpace(string(in)))
+	// The zmrc client: what each server was sent, or why it cannot be reached.
+	e.rc = &rcSeam{run: func(host string, in io.Reader, _, errw io.Writer) error {
+		line, _ := io.ReadAll(in)
+		h.remote = append(h.remote, host+": "+strings.TrimSpace(string(line)))
 
-			if h.remoteStartErr != nil {
-				return sys.Result{}, h.remoteStartErr
-			}
+		if h.remoteStartErr != nil {
+			return h.remoteStartErr
+		}
 
-			if h.remoteFail != "" && strings.Contains(string(in), h.remoteFail) {
-				return sys.Result{ExitCode: 3, Stderr: []byte("ssh: no route to host\n")}, &sys.ExitError{Code: 3}
-			}
+		if h.remoteFail != "" && strings.Contains(string(line), h.remoteFail) {
+			_, _ = io.WriteString(errw, "zmrcd: refused\n")
 
-			return sys.Result{}, nil
-		})
-	h.trusted = map[string][]byte{}
-	fakes.Exec.When(func(c *sys.Cmd) bool { return slices.Contains(c.Args, cmKeytool) }, h.keytool)
+			return errors.New("connecting to " + host + ": no route to host")
+		}
+
+		return nil
+	}}
 	fakes.Exec.OnCmdline("id -u zextras", systest.Reply("998\n"))
 	fakes.Exec.OnCmdline("id -g zextras", systest.Reply("997\n"))
 	fakes.FS.PutDir("/opt/zextras/conf", 0o755)
@@ -199,99 +186,14 @@ func newCMTest(t *testing.T, lc map[string]string) *cmTest {
 	return h
 }
 
-const (
-	cmKeytool = "/opt/zextras/common/bin/keytool"
+// trusted is the truststore (cacerts) the commands wrote.
+func (h *cmTest) trusted(pass string) *pkcs12.Store {
+	h.t.Helper()
 
-	cmKeytoolTampered = "keytool error: java.io.IOException: Keystore was tampered with, or password was incorrect\n"
-)
+	s, err := pkcs12.Decode([]byte(h.read(cmCacerts)), pass)
+	require.NoError(h.t, err)
 
-// keytool is the fake keytool: it keeps the cacerts as a map of aliases,
-// reads the mailboxd keystore for -export, and checks the store password is
-// not on the command line but in the variable -storepass:env names.
-func (h *cmTest) keytool(c *sys.Cmd) (sys.Result, error) {
-	args := c.Args[slices.Index(c.Args, cmKeytool)+1:]
-	h.keytools = append(h.keytools, cmKeytoolRun{args: args, env: c.Env})
-
-	opt := func(name string) string {
-		if i := slices.Index(args, name); i >= 0 && i+1 < len(args) {
-			return args[i+1]
-		}
-
-		return ""
-	}
-
-	pass := ""
-
-	for _, e := range c.Env {
-		if v, ok := strings.CutPrefix(e, opt("-storepass:env")+"="); ok {
-			pass = v
-		}
-	}
-
-	require.NotContains(h.t, args, "-storepass", "the password must not be an argument")
-	require.NotContains(h.t, strings.Join(args, " "), cmPassword)
-
-	fail := func(msg string) (sys.Result, error) {
-		return sys.Result{ExitCode: 1, Stderr: []byte(msg + "\n")}, &sys.ExitError{Code: 1}
-	}
-
-	if pass != cmPassword {
-		return fail(cmKeytoolTampered[:len(cmKeytoolTampered)-1])
-	}
-
-	alias := strings.ToLower(opt("-alias"))
-
-	switch {
-	case slices.Contains(args, "-delete"):
-		if _, ok := h.trusted[alias]; !ok {
-			return fail("keytool error: java.lang.Exception: Alias <" + alias + "> does not exist")
-		}
-
-		delete(h.trusted, alias)
-	case slices.Contains(args, "-import"):
-		data, err := h.fakes.FS.ReadFile(opt("-file"))
-		if err != nil {
-			return fail("keytool error: java.io.FileNotFoundException: " + opt("-file") + " (No such file or directory)")
-		}
-
-		certs, err := certParseCerts(data)
-		if err != nil || len(certs) == 0 {
-			return fail("keytool error: java.lang.Exception: Input not an X.509 certificate")
-		}
-
-		h.trusted[alias] = certs[0].Raw
-
-		return sys.Result{Stdout: []byte("Certificate was added to keystore\n")}, nil
-	case slices.Contains(args, "-export"):
-		return h.exportAlias(opt("-keystore"), alias, opt("-file"), pass)
-	}
-
-	return sys.Result{}, nil
-}
-
-// exportAlias is keytool -export on the mailboxd keystore.
-func (h *cmTest) exportAlias(store, alias, file, pass string) (sys.Result, error) {
-	data, err := h.fakes.FS.ReadFile(store)
-	ks := keystore.New()
-
-	if err == nil {
-		err = ks.Load(bytes.NewReader(data), []byte(pass))
-	}
-
-	if err != nil {
-		return sys.Result{ExitCode: 1, Stderr: []byte(cmKeytoolTampered)}, &sys.ExitError{Code: 1}
-	}
-
-	chain, err := ks.GetPrivateKeyEntryCertificateChain(alias)
-	if err != nil {
-		msg := "keytool error: java.lang.Exception: Alias <" + alias + "> does not exist\n"
-
-		return sys.Result{ExitCode: 1, Stderr: []byte(msg)}, &sys.ExitError{Code: 1}
-	}
-
-	h.fakes.FS.Put(file, chain[0].Content, 0o644)
-
-	return sys.Result{Stdout: []byte("Certificate stored in file <" + file + ">\n")}, nil
+	return s
 }
 
 // run is zmcertmgr <args>.

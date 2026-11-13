@@ -181,8 +181,9 @@ func UpdateAuthKeys(e *Env) error {
 }
 
 // UpdateAuthKeysEverywhere is zmupdateauthkeys -a: it first asks every
-// server, through zmrc, to run zmupdateauthkeys itself, then updates this
-// node. A server that cannot be reached is logged, as the script went on.
+// server, through the zmrc client (rc.go), to run zmupdateauthkeys itself,
+// then updates this node. A server that cannot be reached is logged, as the
+// script went on.
 func UpdateAuthKeysEverywhere(e *Env) error {
 	d, err := svcOpenDir(e)
 	if err != nil {
@@ -196,13 +197,16 @@ func UpdateAuthKeysEverywhere(e *Env) error {
 		return fmt.Errorf("listing the servers: %w", err)
 	}
 
-	zmrc := e.Paths.Path("libexec", "zmrc")
-
 	for _, host := range slices.Sorted(maps.Keys(keys)) {
 		e.Log.Detail("Updating authkeys on remote server %s", host)
 
-		if err := e.Run(&Cmd{Path: zmrc, Args: []string{host},
-			Stdin: strings.NewReader("HOST:" + host + " zmupdateauthkeys\n")}); err != nil {
+		out, errw := e.Log.Writer(), e.Log.Writer()
+		err := e.rcRun(host, strings.NewReader(rcLine(host, "zmupdateauthkeys")), out, errw)
+
+		out.Flush()
+		errw.Flush()
+
+		if err != nil {
 			e.Log.Detail("Updating authkeys on remote server %s failed: %v", host, err)
 		}
 	}
