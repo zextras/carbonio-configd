@@ -152,16 +152,16 @@ func (c *Client) authenticate(ctx context.Context) error {
 
 	body := buildAuthEnvelope(c.username, c.password)
 
-	resp, err := c.doWithRetry(ctx, 0, func() (*http.Request, error) {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+soapPath, strings.NewReader(body))
-		if err != nil {
-			return nil, fmt.Errorf("zxadmin: build auth request: %w", err)
-		}
+	// One attempt, whatever the status: the server answers a refused login
+	// with a SOAP fault and HTTP 500, whose reason the caller needs.
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+soapPath, strings.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("zxadmin: build auth request: %w", err)
+	}
 
-		req.Header.Set("Content-Type", "text/xml; charset=UTF-8")
+	req.Header.Set("Content-Type", "text/xml; charset=UTF-8")
 
-		return req, nil
-	})
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		logger.WarnContext(ctx, "zxadmin: auth request failed", "error", err)
 
@@ -180,6 +180,12 @@ func (c *Client) authenticate(ctx context.Context) error {
 	if resp.StatusCode != http.StatusOK {
 		logger.WarnContext(ctx, "zxadmin: auth failed",
 			"status", resp.StatusCode, "body", truncate(string(raw)))
+
+		// The server answers a refused login with a SOAP fault and HTTP 500.
+		var fault *Fault
+		if _, _, perr := parseAuthResponse(raw); errors.As(perr, &fault) {
+			return fault
+		}
 
 		return fmt.Errorf("zxadmin: auth failed: HTTP %d: %s", resp.StatusCode, truncate(string(raw)))
 	}
@@ -461,7 +467,7 @@ func parseAuthResponse(raw []byte) (token string, lifetimeMs int64, err error) {
 			msg = env.Body.Fault.FaultString
 		}
 
-		return "", 0, fmt.Errorf("zxadmin: auth fault: %s", msg)
+		return "", 0, &Fault{Op: "auth", Reason: msg}
 	}
 
 	if env.Body.AuthResponse.AuthToken == "" {

@@ -543,7 +543,8 @@ statuses of their scripts instead.
 | `setup ldap-enable-replica` | `zmldapenablereplica` | root | The provider overlays on the master, the consumer configuration on a replica. |
 | `setup ldap-enable-mmr [-r RID] [-s SID] -m MMRURI` | `zmldapenable-mmr` | root, zextras | Adds a multi-master agreement with another master. |
 | `setup iptool [-d [-m ipmode]]` | `zmiptool` | root, zextras | Applies `zimbraIPMode` to the Java options and the MySQL bind address. |
-| `setup prov [-r] [-m] [-l] <verb> args...` | `zmprov -r -m -l <verb> ...` (Java, one JVM per call) in setup.pl | root, zextras | The zmprov commands setup.pl runs, natively over LDAP: `cs cd ca aaa mcf ms mc ma md gs gcf gacf ga gc gd gas garpu gamcs`. See [`setup prov`](#setup-prov). |
+| `setup prov [-r] [-m] [-l] <verb> args...` | `zmprov -r -m -l <verb> ...` (Java, one JVM per call) in setup.pl | root, zextras | The zmprov commands setup.pl runs, natively over LDAP: `cs cd ca aaa mcf ms mc ma md gs gcf gacf gad ga gc gd gas garpu gamcs`. See [`setup prov`](#setup-prov). carbonio-core's `clientcertmgr` and `cbpolicydinit` call it too. |
+| `setup gsautil <command> [options]` | `zmgsautil` (`com.zimbra.cs.util.GalSyncAccountUtil`, Java) | root, zextras | `createAccount addDataSource deleteAccount trickleSync fullSync forceSync`, with the options, output, usage text and exit statuses of the tool. See [`setup gsautil`](#setup-gsautil). |
 | `setup random-password [-l] [min max]` | `zmjava com.zimbra.common.util.RandomPassword` | any user | Prints a random password of `min` to `max` characters (24 to 32 when they are not given) from `crypto/rand`; `-l` leaves out the dot, as for a local part. |
 | `setup serverips [--networks]` | `zmserverips` (Perl) | any user | Lists the addresses of `/sbin/ip addr` without the link-local ones, as `addr:<ip> Mask:<mask>`; `--networks` (`-n`) prints the networks (`10.1.5.0/24`, `[::1]/128`). `0` when an address was listed, `1` when none, `2` when `/sbin/ip` cannot run. |
 | `setup iniutil [options] inifile` | `zminiutil` | any user | Reads or edits one ini file (`--list --get --isset --set --setmin --setmax --unset`). |
@@ -565,6 +566,7 @@ given to `ca` is on the command line of the process.
 | `ma <account\|id> [+\|-]attr value...`, `md <domain\|id> [+\|-]attr value...` | Modify an existing account or domain, running the attribute callbacks of the Java provisioning that are ported for them (`CheckPortConflict`, `MailHost`, `PositiveTimeInterval`, `MtaAuthHost`, `DisplayName`, `CosId`, and for a domain `DomainStatus`, which refuses a domain being renamed). An attribute of any other callback (`AccountStatus`: it publishes events and removes the account from distribution lists), and `userPassword` (which would be stored unhashed), are refused. `setup.pl` does not call `ma` or `md` today. |
 | `gs [-e] <server\|id> [attr...]`, `gd [-e] <domain\|id> [attr...]`, `ga [-e] <account\|id> [attr...]`, `gc <cos\|id> [attr...]` | `# name <name>`, the `attr: value` lines sorted by attribute name (one per value, in directory order, empty values skipped) and a blank line, as `ProvUtilDumper`. Without `-e` the values an entry inherits are added: for a server and a domain the global config ones flagged `serverInherited`/`domainInherited`; for an account the ones of its class of service (`zimbraCOSId`, else the domain's `zimbraDomainDefaultCOSId`, else `default`) over the domain's `accountCosDomainInherited` ones. `attr` (any case) or `attr=value` selects. A binary attribute (`zimbraSSLDHParam`) is `attr:: ` and its base64 in lines of 76 characters ended by CRLF, as commons-codec writes it. |
 | `gcf <attr>`, `gacf [attr...]` | The global config attributes, with no header and no blank line. |
+| `gad [-v [-e]] [attr...]` | The domain names, one per line, in the order of the directory (as `zmprov gad` of a fresh process lists them); `-v` dumps the domains as `gd` does, `attr...` selects. `-e` without `-v` is refused. A mailbox that has run for a while may list the domains in the order of its cache; sort the output when the order matters. |
 | `gas [-v [-e]] [service]` | The server names, sorted, of those with the service enabled; `-v` dumps them. |
 | `garpu` | `<host>:<zimbraExtensionBindPort, 7072>/service/extension/nginx-lookup ` (with the trailing blank) for each mail client server with `zimbraReverseProxyLookupTarget` TRUE, then a newline. |
 | `gamcs` | `<zimbraServiceHostname>:<zimbraMemcachedBindPort, 11211> ` for each server running `memcached`, then a newline. The `zmprov` of the installed mailbox has no `gamcs` (setup.pl then always warns that there is no memcached server); the legacy Zimbra one printed this. |
@@ -573,6 +575,40 @@ A failure prints `ERROR: <code> (<message>)` on stderr and exits `2`, as zmprov
 does (`account.NO_SUCH_SERVER (no such server: x)`, `account.NO_SUCH_ACCOUNT`,
 `account.NO_SUCH_DOMAIN`, `account.NO_SUCH_COS`). An unknown verb or a wrong
 number of arguments exits `1`; there is no fallback to the Java zmprov.
+
+`mcf`, `ms` and `md` set any attribute of the schema that has no callback, with
+the value as one argument (a PEM with its newlines included): carbonio-core's
+`clientcertmgr savecrt|cleancrt` sets and clears `zimbraReverseProxyClientCertCA`
+with `setup prov -m -l mcf|ms <server>|md <domain> zimbraReverseProxyClientCertCA <pem>`;
+an empty value deletes the attribute, as in zmprov. The options `-r -m -l` select
+nothing here, so a read (`gad`, `gacf`, `gs`: carbonio-core's `cbpolicydinit`)
+always goes to LDAP, where the Java `zmprov` without `-l` asked the mailbox.
+
+### `setup gsautil`
+
+`setup gsautil <command> [options]` is `zmgsautil`, the port of
+`com.zimbra.cs.util.GalSyncAccountUtil`: carbonio-core's `zmgsautil` wrapper
+`exec`s it, and `gsaupdate` still calls `zmgsautil trickleSync`. It authenticates to
+the admin SOAP API as "Create GAL sync account" does (the LDAP master credentials
+of localconfig, `zimbra_zmprov_default_soap_server:zimbra_admin_service_port`) and
+sends the same requests.
+
+| Command | Options | Request and output |
+| --- | --- | --- |
+| `createAccount` | `-a account -n datasource --domain domain -t zimbra\|ldap -s server [-f folder] [-p polling]` | `CreateGalSyncAccountRequest`; prints `<name>` and `<id>` separated by a tab. |
+| `addDataSource` | `-a account -n datasource --domain domain -t zimbra\|ldap [-f folder] [-p polling]` | `AddGalSyncDataSourceRequest` (no server); prints `<name>` and `<id>` of each account of the answer. |
+| `deleteAccount` | `-a account` or `-i id` | `DeleteGalSyncAccountRequest`, the account by name when given, else by id; prints nothing. |
+| `trickleSync`, `fullSync`, `forceSync` | `-a account` or `-i id`, and `-d datasource-id` or `-n datasource-name` | `SyncGalAccountRequest` for the data source (by id when both are given); `fullSync` adds `fullSync="TRUE"`, `forceSync` `reset="TRUE"`. `-a` is looked up in LDAP (`Error: no such account: <name>`). Prints nothing. |
+
+The options (`-a/--account -i/--id -n/--name -d/--did -x/--domain -f/--folder
+-p/--polling -t/--type -s/--server -h/--help`) parse as the tool's commons-cli
+`GnuParser` does: `--name=value` and `-nvalue` work, the first occurrence of an
+option wins, and every option takes a value (`-h` included). A missing option,
+an unknown command, `-h <x>` or a refused option line prints the usage
+(`error: <reason>` first for a refused option) on stdout and exits `1`. An
+error the server or the directory reports is printed as `Error: <message>` on
+stdout with status `0`, as the tool did; a server that cannot be reached is
+printed on stderr with status `1`. Every request is sent once and may take up to 5 minutes.
 
 ### LDAP and ini tools
 

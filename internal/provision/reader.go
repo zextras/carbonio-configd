@@ -150,6 +150,21 @@ func (p *Provisioner) account(addr string) (*Entry, error) {
 	return p.find("", f)
 }
 
+// AccountID is the zimbraId of the account named name, a delivery address or an
+// alias (Provisioning.getAccountByName). An unknown name is account.NO_SUCH_ACCOUNT.
+func (p *Provisioner) AccountID(name string) (string, error) {
+	acct, err := p.account(strings.ToLower(strings.TrimSpace(name)))
+	if err != nil {
+		return "", err
+	}
+
+	if acct == nil {
+		return "", fail(CodeNoSuchAccount, "no such account: %s", name)
+	}
+
+	return acct.First(attrZimbraID), nil
+}
+
 // entryByID finds the account or server entry of a zimbraId, for the alias
 // target check.
 func (p *Provisioner) accountByID(id string) (*Entry, error) {

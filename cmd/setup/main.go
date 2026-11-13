@@ -14,6 +14,8 @@
 //	carbonio-bootstrap prov [-r] [-m] [-l] <verb> args... | random-password [-l] [min max] | serverips [--networks]
 //	                           the zmprov commands, RandomPassword and zmserverips that setup.pl runs,
 //	                           natively (no JVM)
+//	carbonio-bootstrap gsautil <command> [options]
+//	                           zmgsautil: the GAL sync accounts, natively (no JVM)
 //	carbonio-bootstrap rc <host> [command words...]
 //	                           zmrc: a zmrcd command on another server, over SSH, natively
 //	carbonio-bootstrap stat <name> [options] | stat run <collector>...
@@ -84,7 +86,7 @@ func run(args []string, env sys.System, stdin io.Reader, stdout, stderr io.Write
 // arguments (proxyconfig has a -c and a -d of its own).
 var toolCommands = []string{"ssh-keygen", "update-authkeys", "syslog", "dhparam", "proxyconfig", "ldap-passwd",
 	"ldap-schema", "ldap-update-ldif", "ldap-enable-replica", "ldap-enable-mmr", "iptool", "iniutil", "certmgr",
-	"stat", "rc", "prov", "random-password", "serverips"}
+	"stat", "rc", "prov", "gsautil", "random-password", "serverips"}
 
 // legacyArgs maps the options of the former shell script: "-c FILE" is
 // "--legacy-config FILE --non-interactive", and "-d" (debug) is accepted and
@@ -196,9 +198,13 @@ func newRootCmd(env sys.System, stdin io.Reader, stdout, stderr io.Writer, statu
 			"Apply zimbraIPMode to the Java options and the MySQL bind address (zmiptool)",
 			bootstrapcmd.RunIPTool, tio),
 		newToolCmd("prov [-r] [-m] [-l] <verb> args...",
-			"The zmprov commands setup.pl runs (cs cd ca aaa mcf ms mc ma md gs gcf gacf ga gc gd gas garpu gamcs), "+
+			"The zmprov commands setup.pl runs (cs cd ca aaa mcf ms mc ma md gs gcf gacf gad ga gc gd gas garpu gamcs), "+
 				"natively over LDAP",
 			bootstrapcmd.RunProv, tio),
+		newToolCmd("gsautil <command> [options]",
+			"Create, extend, delete and synchronise the GAL sync accounts: createAccount, addDataSource, "+
+				"deleteAccount, trickleSync, fullSync, forceSync (zmgsautil)",
+			bootstrapcmd.RunGSAUtil, tio),
 		newToolCmd("random-password [-l] [min max]",
 			"Print a random password, 24 to 32 characters by default; -l leaves out the dot "+
 				"(com.zimbra.common.util.RandomPassword)", bootstrapcmd.RunRandomPassword, tio),

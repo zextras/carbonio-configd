@@ -201,6 +201,71 @@ func TestRun_GetAllServersListsNamesSortedAndFiltersByService(t *testing.T) {
 	require.True(t, errors.As(err, &usage))
 }
 
+func TestRun_GetAllDomainsPrintsOneNamePerLine(t *testing.T) {
+	r := newRig(t)
+
+	assert.Equal(t, "", r.output(t, "gad"), "a node without domains prints nothing")
+
+	r.run(t, "cd", "b.example.org")
+	r.run(t, "cd", "a.example.com")
+
+	// "dc=example,dc=org" sorts after "dc=example,dc=com" in the directory.
+	assert.Equal(t, "a.example.com\nb.example.org\n", r.output(t, "gad"))
+}
+
+func TestRun_GetAllDomainsVerboseDumpsTheNamedAttributesOfEachDomain(t *testing.T) {
+	r := newRig(t)
+	r.dir.Set(globalDN, "zimbraReverseProxyClientCertCA", "global-ca")
+	r.run(t, "cd", "a.example.com", "zimbraDomainStatus", "active")
+	r.run(t, "cd", "b.example.org", "zimbraDomainStatus", "suspended")
+
+	assert.Equal(t, "# name a.example.com\nzimbraDomainStatus: active\n\n"+
+		"# name b.example.org\nzimbraDomainStatus: suspended\n\n",
+		r.output(t, "gad", "-v", "zimbraDomainStatus"))
+
+	assert.Contains(t, r.output(t, "gad", "-v", "zimbraReverseProxyClientCertCA"),
+		"zimbraReverseProxyClientCertCA: global-ca\n", "a domain shows the global value it inherits")
+	assert.NotContains(t, r.output(t, "gad", "-v", "-e", "zimbraReverseProxyClientCertCA"),
+		"zimbraReverseProxyClientCertCA")
+}
+
+func TestRun_GetAllDomainsRefusesDashEWithoutDashV(t *testing.T) {
+	r := newRig(t)
+
+	err := r.Run([]string{"gad", "-e"}, &bytes.Buffer{})
+
+	var usage *provision.UsageError
+
+	require.True(t, errors.As(err, &usage))
+	assert.Equal(t, "arg -e is invalid unless -v is also specified", usage.Msg)
+}
+
+func TestAccountID_ByNameOrAliasAnyCase(t *testing.T) {
+	r := newRig(t)
+	r.withServer(t)
+	r.withDomain(t)
+	adminID := r.createAdmin(t)
+	r.run(t, "aaa", adminAddr, "root@example.com")
+
+	for _, name := range []string{adminAddr, " Admin@Example.com ", "root@example.com"} {
+		id, err := r.AccountID(name)
+		require.NoError(t, err, name)
+		assert.Equal(t, adminID, id, name)
+	}
+}
+
+func TestAccountID_UnknownAccountIsNoSuchAccount(t *testing.T) {
+	r := newRig(t)
+
+	_, err := r.AccountID("nobody@example.com")
+
+	var perr *provision.Error
+
+	require.True(t, errors.As(err, &perr))
+	assert.Equal(t, provision.CodeNoSuchAccount, perr.Code)
+	assert.Equal(t, "no such account: nobody@example.com", perr.Msg)
+}
+
 func TestRun_ReverseProxyURLsAndMemcachedServers(t *testing.T) {
 	r := newRig(t)
 	r.dir.Set(globalDN, "zimbraReverseProxyLookupTarget", "TRUE")

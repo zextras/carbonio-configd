@@ -263,3 +263,34 @@ func TestStatusAndIntervalCallbacks(t *testing.T) {
 	r.run(t, "mcf", "zimbraMtaRelayHost", "relay.example.com:25")
 	assert.Equal(t, []string{"relay.example.com:25"}, r.dir.Values(globalDN, "zimbraMtaRelayHost"))
 }
+
+const clientCertPEM = "-----BEGIN CERTIFICATE-----\nMIIBszCCAVmgAwIBAgIUZm9v\nYmFy\n-----END CERTIFICATE-----"
+
+// zmclientcertmgr saves the CA that nginx trusts for client certificates on
+// the global config, the server or a domain, and clears it with an empty value.
+func TestRun_ClientCertCASetAndClearOnConfigServerAndDomain(t *testing.T) {
+	r := newRig(t)
+	r.withServer(t)
+	r.withDomain(t)
+
+	const attr = "zimbraReverseProxyClientCertCA"
+
+	for name, tc := range map[string]struct {
+		set   []string
+		get   []string
+		clear []string
+	}{
+		"global": {[]string{"mcf"}, []string{"gcf", attr}, []string{"mcf"}},
+		"server": {[]string{"ms", host}, []string{"gs", "-e", host, attr}, []string{"ms", host}},
+		"domain": {[]string{"md", "example.com"}, []string{"gd", "-e", "example.com", attr}, []string{"md", "example.com"}},
+	} {
+		r.run(t, append(tc.set, attr, clientCertPEM)...)
+
+		got := r.output(t, tc.get...)
+		assert.Contains(t, got, attr+": "+clientCertPEM+"\n", "%s keeps the multi-line PEM as one value", name)
+
+		r.run(t, append(tc.clear, attr, "")...)
+
+		assert.NotContains(t, r.output(t, tc.get...), attr, "%s: an empty value removes the attribute", name)
+	}
+}
