@@ -11,6 +11,15 @@ PartOf=carbonio-appserver.target carbonio-directory-server.target carbonio-mta.t
 After=network-online.target carbonio-openldap.service
 Wants=network-online.target
 
+# No start rate limit. With a limit (formerly 5 starts per 300 s) a handful of
+# admin "systemctl restart" calls leaves the unit in failed (start-limit-hit):
+# Restart=on-failure no longer applies, zextras cannot reset-failed (polkit),
+# and every REWRITE then gets connection refused, appserver's ExecStartPre
+# included. Crash loops stay throttled without it: RestartSec=3 spaces
+# automatic restarts and every start first runs the bounded
+# "configd ldap wait" (up to 120 s).
+StartLimitIntervalSec=0
+
 [Service]
 Type=notify
 User=zextras
@@ -42,8 +51,6 @@ KillSignal=SIGTERM
 # Restart policy
 Restart=on-failure
 RestartSec=3
-StartLimitInterval=300
-StartLimitBurst=5
 
 # Resource limits
 MemoryMax=512M

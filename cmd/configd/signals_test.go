@@ -5,11 +5,16 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"github.com/stretchr/testify/require"
+	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/sdnotify"
 	"github.com/zextras/carbonio-configd/internal/state"
+	"log/slog"
 	"os"
+	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -145,35 +150,60 @@ func TestSetupSignalHandler_SIGALRM(t *testing.T) {
 	}
 }
 
-// SIGCHLD is informational: it must neither reload nor cancel nor touch the
-// sleep timer. dispatchSignal is synchronous, so this needs no waiting; the OS
-// delivery path is covered by the other SetupSignalHandler tests.
-func TestDispatchSignal_SIGCHLD(t *testing.T) {
+// lockedBuffer is a bytes.Buffer safe to read while the signal goroutine logs.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.buf.String()
+}
+
+// SIGCHLD is not subscribed: every helper exit would otherwise log a line and
+// nothing acts on it. It must neither be reported nor reload nor cancel. A
+// SIGHUP sent after it proves the handler has drained everything delivered
+// before, so the log check does not rely on a sleep.
+func TestSetupSignalHandler_SIGCHLDIsNotSubscribed(t *testing.T) {
 	appState := &state.State{SleepTimer: 100}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	reloadChan := make(chan struct{}, 1)
+	var logs lockedBuffer
 
-	stop := dispatchSignal(ctx, syscall.SIGCHLD, appState, cancel, reloadChan, nil)
+	l := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	reloadChan := make(chan struct{}, 2)
 
-	if stop {
-		t.Error("SIGCHLD must not stop the handler")
-	}
+	SetupSignalHandler(logger.ContextWithLogger(ctx, l), appState, cancel, reloadChan, nil)
+
+	p, err := os.FindProcess(os.Getpid())
+	require.NoError(t, err)
+	require.NoError(t, p.Signal(syscall.SIGCHLD))
+	require.NoError(t, p.Signal(syscall.SIGHUP))
 
 	select {
 	case <-reloadChan:
-		t.Error("SIGCHLD should not trigger reload")
-	default:
+	case <-time.After(time.Second):
+		t.Fatal("SIGHUP was not handled")
 	}
 
-	if ctx.Err() != nil {
-		t.Error("Context should not be canceled after SIGCHLD")
+	require.Contains(t, logs.String(), "signal=hangup", "the capturing logger must see the SIGHUP")
+
+	if strings.Contains(logs.String(), "SIGCHLD") || strings.Contains(logs.String(), "child exited") {
+		t.Errorf("SIGCHLD reached the handler:\n%s", logs.String())
 	}
 
-	if got := appState.GetSleepTimer(); got != 100 {
-		t.Errorf("SIGCHLD changed SleepTimer to %f, want 100", got)
-	}
+	require.NoError(t, ctx.Err(), "SIGCHLD must not cancel the context")
 }
 
 func TestSetupSignalHandler_ReloadChannelBlocked(t *testing.T) {

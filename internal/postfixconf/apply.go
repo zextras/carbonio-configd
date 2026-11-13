@@ -252,7 +252,7 @@ func finishFile(f *os.File, uid, gid int) error {
 
 	steps := []func() error{
 		func() error { return f.Chown(uid, gid) },
-		func() error { return f.Chmod(0o644) },
+		func() error { return f.Chmod(InstalledFileMode) },
 		f.Sync,
 		f.Close,
 	}

@@ -7,6 +7,7 @@ package configmgr
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/plan"
+	"github.com/zextras/carbonio-configd/internal/postfixconf"
 	"github.com/zextras/carbonio-configd/internal/snapshot"
 	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
@@ -141,6 +143,48 @@ func TestRewriteDrift(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+// TestRewriteDrift_PostfixInstalledTarget verifies a target under common/conf
+// is compared with the mode postfix-conf installs (0644), not the REWRITE mode
+// (0440 by default): the executor never changes it, so it is no drift, while a
+// content change still is.
+func TestRewriteDrift_PostfixInstalledTarget(t *testing.T) {
+	t.Parallel()
+
+	const masterCf = planHostBase + "/common/conf/master.cf"
+
+	rw := &plan.Rewrite{Source: "conf/main.cf.in", Target: "common/conf/master.cf"}
+
+	tests := []struct {
+		name    string
+		content string
+		mode    os.FileMode
+		want    string
+	}{
+		{"installed mode is in sync", "alpha = 1\nbeta = 2\n", 0o644, ""},
+		{"content change is drift", "stale\n", 0o644, masterCf + " content differs from the rendered template"},
+		{"other mode is drift", "alpha = 1\nbeta = 2\n", 0o440, masterCf + " mode 0440 would become 0644"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			f := newPlanHostFixture(t)
+			f.fakes.FS.Put(masterCf, []byte(tt.content), tt.mode)
+
+			got, err := f.cm.rewriteDrift(context.Background(), rw)
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+
+	f := newPlanHostFixture(t)
+	_, mode, err := f.cm.RenderRewrite(context.Background(), rw)
+	require.NoError(t, err)
+	assert.Equal(t, postfixconf.InstalledFileMode, mode)
 }
 
 func TestRenderRewrite(t *testing.T) {

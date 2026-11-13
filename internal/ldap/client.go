@@ -486,7 +486,7 @@ func (c *Client) executeWithRetry(ctx context.Context, operation func(*ldap.Conn
 		// requests on this connection.
 		conn.SetTimeout(c.opTimeout)
 
-		err = operation(conn)
+		err = c.runOperation(ctx, conn, operation)
 		if err == nil {
 			c.returnConnection(conn)
 			return nil
@@ -500,6 +500,23 @@ func (c *Client) executeWithRetry(ctx context.Context, operation func(*ldap.Conn
 	}
 
 	return fmt.Errorf("operation failed after %d retries: %w", c.maxRetries, lastErr)
+}
+
+// runOperation runs operation on conn. go-ldap requests take no context and
+// wait for the server reply up to opTimeout, so a stalled server would hold the
+// caller (and a daemon shutdown) for that long; closing conn when ctx is done
+// or the client is closed makes the pending request fail at once. The
+// connection is then unusable and executeWithRetry discards it and stops.
+func (c *Client) runOperation(ctx context.Context, conn *ldap.Conn, operation func(*ldap.Conn) error) error {
+	abort := func() { _ = conn.Close() }
+
+	stopCtx := context.AfterFunc(ctx, abort)
+	defer stopCtx()
+
+	stopLife := context.AfterFunc(c.lifecycle(), abort)
+	defer stopLife()
+
+	return operation(conn)
 }
 
 // waitRetry blocks for delay before the next attempt. It reports false when

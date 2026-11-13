@@ -18,6 +18,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/mtaops"
 	"github.com/zextras/carbonio-configd/internal/plan"
+	"github.com/zextras/carbonio-configd/internal/postfixconf"
 	"github.com/zextras/carbonio-configd/internal/redact"
 	"github.com/zextras/carbonio-configd/internal/state"
 )
@@ -176,6 +177,19 @@ func (cm *ConfigManager) observeHost(ctx context.Context, cand *plan.Plan) (*pla
 
 // observeActionDrift fills the rewrite, postconf and postconfd drift of host.
 func (cm *ConfigManager) observeActionDrift(ctx context.Context, cand *plan.Plan, host *plan.Host) error {
+	if err := cm.observeRewriteDrift(ctx, cand, host); err != nil {
+		return err
+	}
+
+	if err := cm.observePostconfDrift(ctx, cand, host); err != nil {
+		return err
+	}
+
+	return cm.observePostconfdDrift(ctx, cand, host)
+}
+
+// observeRewriteDrift fills the rewrite drift of host.
+func (cm *ConfigManager) observeRewriteDrift(ctx context.Context, cand *plan.Plan, host *plan.Host) error {
 	for i := range cand.Rewrites {
 		r := &cand.Rewrites[i]
 
@@ -189,6 +203,11 @@ func (cm *ConfigManager) observeActionDrift(ctx context.Context, cand *plan.Plan
 		}
 	}
 
+	return nil
+}
+
+// observePostconfDrift fills the postconf drift of host.
+func (cm *ConfigManager) observePostconfDrift(ctx context.Context, cand *plan.Plan, host *plan.Host) error {
 	for i := range cand.Postconf {
 		p := &cand.Postconf[i]
 
@@ -202,6 +221,11 @@ func (cm *ConfigManager) observeActionDrift(ctx context.Context, cand *plan.Plan
 		}
 	}
 
+	return nil
+}
+
+// observePostconfdDrift fills the postconfd drift of host.
+func (cm *ConfigManager) observePostconfdDrift(ctx context.Context, cand *plan.Plan, host *plan.Host) error {
 	for i := range cand.Postconfd {
 		key := cand.Postconfd[i].Key
 
@@ -283,13 +307,18 @@ func (cm *ConfigManager) rewriteDrift(ctx context.Context, r *plan.Rewrite) (str
 // RenderRewrite renders the template of r in memory, exactly as the executor
 // would write it, and returns the content and the file mode of the target. It
 // reads the template and the lookups only: nothing is written.
+//
+// The mode is the one the executor leaves on the target: the REWRITE mode, or
+// postfixconf.InstalledFileMode for targets under common/conf, which
+// processRewrite hands to the postfix-conf helper (it ignores the REWRITE mode).
 func (cm *ConfigManager) RenderRewrite(
 	ctx context.Context, r *plan.Rewrite,
 ) (content []byte, mode os.FileMode, err error) {
 	ctx = logger.ContextWithComponentOnce(ctx, "configmgr")
 
-	mode, err = rewriteFileMode(r.Mode)
-	if err != nil {
+	if cm.postfixClient().IsConfPath(cm.mainConfig.BaseDir + "/" + r.Target) {
+		mode = postfixconf.InstalledFileMode
+	} else if mode, err = rewriteFileMode(r.Mode); err != nil {
 		return nil, 0, err
 	}
 

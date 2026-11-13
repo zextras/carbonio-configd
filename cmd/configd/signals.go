@@ -37,14 +37,15 @@ func SetupSignalHandler(
 	// Register ALL signals in one call to avoid overwriting
 	// Shutdown signals: SIGINT, SIGTERM
 	// Reload signals: SIGHUP, SIGUSR2, SIGALRM
-	// Info signals: SIGCHLD (child process exits - logged but not acted upon)
+	// SIGCHLD is deliberately not subscribed: nothing acts on it (os/exec reaps
+	// each child through its own Wait), and every helper exit would only add a
+	// log line.
 	signal.Notify(signals,
 		syscall.SIGINT, syscall.SIGTERM, // Shutdown
 		syscall.SIGHUP, syscall.SIGUSR2, syscall.SIGALRM, // Reload
-		syscall.SIGCHLD, // Info only
 	)
 
-	logger.InfoContext(ctx, "Signal handler registered for: SIGINT, SIGTERM, SIGHUP, SIGUSR2, SIGALRM, SIGCHLD")
+	logger.InfoContext(ctx, "Signal handler registered for: SIGINT, SIGTERM, SIGHUP, SIGUSR2, SIGALRM")
 
 	go func() {
 		// Release the registration when the handler exits, so no signal stays
@@ -153,8 +154,6 @@ func dispatchSignal(
 		default:
 			logger.DebugContext(ctx, "Reload channel blocked, main loop already processing or not ready")
 		}
-	case syscall.SIGCHLD:
-		logger.DebugContext(ctx, "Child process exited (SIGCHLD), not triggering reload")
 	}
 
 	return false
