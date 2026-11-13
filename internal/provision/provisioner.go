@@ -66,7 +66,9 @@ func New(o Options) *Provisioner { //nolint:gocritic // the options are given by
 	}
 
 	if o.Warn == nil {
-		o.Warn = func(string, ...any) {}
+		o.Warn = func(string, ...any) {
+			// No sink given: warnings are dropped.
+		}
 	}
 
 	if o.SetLocalConfig == nil {

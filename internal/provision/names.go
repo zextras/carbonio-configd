@@ -34,16 +34,19 @@ const (
 	attrMailAlias = "zimbraMailAlias"
 )
 
+// errInvalidEmail is the message of an address that does not parse.
+const errInvalidEmail = "must be valid email address: %s"
+
 // validEmail is NameUtil.validEmailAddress: a single address, with a display
 // name only when personal is set.
 func validEmail(addr string, personal bool) error {
 	parsed, err := mail.ParseAddress(addr)
 	if err != nil {
-		return invalidValue("must be valid email address: %s", addr)
+		return invalidValue(errInvalidEmail, addr)
 	}
 
 	if !personal && (parsed.Name != "" || parsed.Address != addr) {
-		return invalidValue("must be valid email address: %s", addr)
+		return invalidValue(errInvalidEmail, addr)
 	}
 
 	return nil
@@ -69,7 +72,7 @@ func splitEmail(addr string) (local, domain string, err error) {
 
 	parts := strings.Split(addr, "@")
 	if len(parts) != 2 {
-		return "", "", invalidRequest("must be valid email address: %s", addr)
+		return "", "", invalidRequest(errInvalidEmail, addr)
 	}
 
 	domain, err = asciiDomain(parts[1])
