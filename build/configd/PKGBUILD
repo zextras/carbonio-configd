@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 
 pkgname="carbonio-configd"
-pkgver="1.10.0"
+pkgver="1.11.0"
 pkgrel="1"
 pkgdesc="High-performance configuration daemon for Carbonio with service management and legacy wrappers"
 arch=('aarch64' 'x86_64')
