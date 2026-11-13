@@ -361,6 +361,25 @@ func RunIniUtil(_ context.Context, env sys.System, stdout, stderr io.Writer, arg
 	return runIniUtil(env.FS, args, stdout, stderr)
 }
 
+// ToolUsage is the usage text of the script that the tool command replaces, for
+// the tools that have one; "" for the others.
+func ToolUsage(name string) string {
+	paths := setup.DefaultPaths()
+
+	switch name {
+	case "ldap-passwd":
+		return setup.LDAPPasswdUsage(paths.Path("bin", "zmldappasswd"))
+	case "proxyconfig":
+		return setup.ProxyConfigUsage(paths.Path("libexec", "zmproxyconfig"))
+	case "rc":
+		return setup.RCUsage
+	case "rcd":
+		return setup.RCDUsage
+	default:
+		return ""
+	}
+}
+
 // rootToolEnv is toolEnv for a script that refused any user but root, with the
 // message it printed.
 func rootToolEnv(ctx context.Context, env sys.System, stdout, stderr io.Writer, name string) (*setup.Env, bool) {

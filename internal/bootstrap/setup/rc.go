@@ -28,8 +28,10 @@ const (
 	// rcDialTimeout bounds the TCP connection and the SSH handshake (ssh had
 	// no bound of its own but the kernel's).
 	rcDialTimeout = 30 * time.Second
-	rcUsage       = "Usage: zmrc <hostname> [command words...]\n"
 )
+
+// RCUsage is what zmrc prints without a host.
+const RCUsage = "Usage: zmrc <hostname> [command words...]\n"
 
 // rcSeam replaces parts of the zmrc client for one Env (tests).
 type rcSeam struct {
@@ -52,7 +54,7 @@ type rcSeam struct {
 // connection that fails is printed on stderr.
 func RunRC(e *Env, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 || args[0] == "" {
-		_, _ = fmt.Fprint(stdout, rcUsage)
+		_, _ = fmt.Fprint(stdout, RCUsage)
 
 		return 1
 	}

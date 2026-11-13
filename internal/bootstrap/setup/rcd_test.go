@@ -665,7 +665,7 @@ func TestRunRCD_TakesNoArguments(t *testing.T) {
 
 	assert.Equal(t, 1, status)
 	assert.Empty(t, out.String())
-	assert.Equal(t, rcdUsage, errb.String())
+	assert.Equal(t, RCDUsage, errb.String())
 	assert.Empty(t, r.argvs())
 }
 

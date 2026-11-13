@@ -22,8 +22,10 @@ import (
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
+// RCDUsage is what zmrcd prints for an argument.
+const RCDUsage = "Usage: zmrcd (the commands are read from the standard input)\n"
+
 const (
-	rcdUsage = "Usage: zmrcd (the commands are read from the standard input)\n"
 	// rcdMaxLine is the longest line zmrcd reads: the longest legitimate one
 	// is a certificate command with its subject alternative names.
 	rcdMaxLine = 64 << 10
@@ -156,7 +158,7 @@ type rcdSession struct {
 // status of a failed command is the status of zmrcd.
 func RunRCD(e *Env, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) > 0 {
-		_, _ = fmt.Fprint(stderr, rcdUsage)
+		_, _ = fmt.Fprint(stderr, RCDUsage)
 
 		return 1
 	}

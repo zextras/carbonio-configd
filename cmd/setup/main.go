@@ -226,7 +226,60 @@ func newRootCmd(env sys.System, stdin io.Reader, stdout, stderr io.Writer, statu
 			"Kept for the zmstat-<name> wrappers of older carbonio-core: the same as \"configd stat\"",
 			statcmd.Run, tio))
 
+	for _, c := range root.Commands() {
+		if spellings, ok := toolHelp[c.Name()]; ok {
+			answerHelp(c, tio, spellings)
+		}
+	}
+
 	return root
+}
+
+// toolHelp lists, for the tool commands that would run an action or refuse a
+// request for help, the first arguments that ask for it. The tools whose own
+// option parsing answers it (dhparam, certmgr, iniutil, iptool, serverips,
+// gsautil, random-password, ldap-enable-replica, ldap-enable-mmr) are not here;
+// ldap-passwd and proxyconfig read "-h" themselves, but take "--help" and
+// "-help" for a run of unknown options.
+var toolHelp = map[string][]string{
+	"ssh-keygen":       helpArgs,
+	"update-authkeys":  helpArgs,
+	"syslog":           helpArgs,
+	"ldap-schema":      helpArgs,
+	"ldap-update-ldif": helpArgs,
+	"rc":               helpArgs,
+	"rcd":              helpArgs,
+	"prov":             helpArgs,
+	"stat":             helpArgs,
+	"ldap-passwd":      helpArgs[1:],
+	"proxyconfig":      helpArgs[1:],
+}
+
+// helpArgs are the arguments that ask a tool for its usage: "-h", then the
+// long spellings.
+var helpArgs = []string{"-h", "--help", "-help"}
+
+// answerHelp makes the tool command print its usage on stdout and succeed,
+// running nothing, when its first argument is one of the spellings: the usage
+// of the script when it has one, else the use and the short description.
+func answerHelp(cmd *cobra.Command, tio *toolIO, spellings []string) {
+	run := cmd.RunE
+
+	cmd.RunE = func(c *cobra.Command, args []string) error {
+		if len(args) == 0 || !slices.Contains(spellings, args[0]) {
+			return run(c, args)
+		}
+
+		usage := bootstrapcmd.ToolUsage(c.Name())
+		if usage == "" {
+			usage = "Usage: " + c.Root().Name() + " " + c.Use + "\n\n" + c.Short + "\n"
+		}
+
+		_, _ = io.WriteString(tio.stdout, usage)
+		*tio.status = 0
+
+		return nil
+	}
 }
 
 // newGalSyncCmd is "gal-sync-account": zmgsautil createAccount for the
