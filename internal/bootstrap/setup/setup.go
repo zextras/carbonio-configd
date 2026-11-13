@@ -64,6 +64,8 @@ type Env struct {
 	certRun func(args []string) (status int, output string)
 	// certTTY replaces the check that the standard input is a terminal.
 	certTTY func() bool
+	// rc replaces parts of the zmrc client (tests), like provOpen.
+	rc *rcSeam
 	// perlLib caches the zextras PERL5LIB.
 	perlLib string
 	// lc caches the effective localconfig until the next write.

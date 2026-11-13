@@ -17,7 +17,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/ssh"
 
-	"github.com/zextras/carbonio-configd/internal/sys"
 	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
 
@@ -392,7 +391,7 @@ func TestSSHKeygen_LDAPUnavailable(t *testing.T) {
 	require.ErrorContains(t, GenerateSSHKey(e), "ldap down")
 }
 
-// zmupdateauthkeys -a: every server is asked through zmrc to update its own
+// zmupdateauthkeys -a: every server is asked through the zmrc client to update its own
 // keys (an unreachable one does not stop the others), then this node's file.
 func TestSSHAuthKeysEverywhere_AsksEveryServerThenUpdatesThisNode(t *testing.T) {
 	e, fakes, logs := sshEnv(t)
@@ -402,23 +401,29 @@ func TestSSHAuthKeysEverywhere_AsksEveryServerThenUpdatesThisNode(t *testing.T) 
 
 	var stdin []string
 
-	fakes.Exec.OnPath("/opt/zextras/libexec/zmrc", func(c *sys.Cmd) (sys.Result, error) {
-		in, _ := io.ReadAll(c.Stdin)
-		stdin = append(stdin, c.Args[0]+" <- "+string(in))
+	e.rc = &rcSeam{run: func(host string, in io.Reader, out, errw io.Writer) error {
+		line, _ := io.ReadAll(in)
+		stdin = append(stdin, host+" <- "+string(line))
 
-		if c.Args[0] == "host-a.example.com" {
-			return sys.Result{ExitCode: 1}, &sys.ExitError{Code: 1}
+		_, _ = io.WriteString(out, "remote said hello\n")
+		_, _ = io.WriteString(errw, "remote complained\n")
+
+		if host == "host-a.example.com" {
+			return errors.New("connecting to host-a.example.com: no route to host")
 		}
 
-		return sys.Result{}, nil
-	})
+		return nil
+	}}
 
 	require.NoError(t, UpdateAuthKeysEverywhere(e))
 	assert.Equal(t, []string{
 		"host-a.example.com <- HOST:host-a.example.com zmupdateauthkeys\n",
 		"host-b.example.com <- HOST:host-b.example.com zmupdateauthkeys\n",
 	}, stdin)
-	assert.Contains(t, logs.String(), "Updating authkeys on remote server host-a.example.com failed")
+	assert.Contains(t, logs.String(), "Updating authkeys on remote server host-a.example.com failed: "+
+		"connecting to host-a.example.com: no route to host")
+	assert.Contains(t, logs.String(), "remote said hello", "what the servers print is logged")
+	assert.Contains(t, logs.String(), "remote complained")
 
 	got := assertSSHFile(t, fakes, sshTestAuthPath, 0o644)
 	assert.Equal(t, sshTestCmd+sshTestKeyA+"\n"+sshTestCmd+sshTestKeyB+"\n", string(got))

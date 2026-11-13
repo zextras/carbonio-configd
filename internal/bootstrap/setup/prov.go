@@ -11,17 +11,18 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/zextras/carbonio-configd/internal/ldap"
 	"github.com/zextras/carbonio-configd/internal/localconfig"
+	"github.com/zextras/carbonio-configd/internal/provision"
 	"github.com/zextras/carbonio-configd/internal/redact"
 )
 
-// Prov is a batch of zmprov commands. RunProv writes the modifications of
-// allowlisted attributes (provAttrList) to LDAP itself and sends everything
-// else to zmprov, which reads its commands on stdin: one JVM for a run of
-// commands, where setup.pl started one zmprov per command, with the passwords
-// on its command line.
+// Prov is a batch of zmprov commands (cs, cd, ca, aaa, mcf, ms, mc). RunProv
+// runs them natively over LDAP, with the checks and the entries of the Java
+// provisioning (see internal/provision): no zmprov process, no JVM, and the
+// passwords never on a command line.
 type Prov struct {
 	cmds [][]string
 }
@@ -31,25 +32,6 @@ func (p *Prov) Add(args ...string) { p.cmds = append(p.cmds, slices.Clone(args))
 
 // Len is the number of commands.
 func (p *Prov) Len() int { return len(p.cmds) }
-
-// provQuote quotes s for zmprov's line parser (StringUtil.parseLine): double
-// quotes, with backslash and double quote escaped and control characters
-// spelled \n \r \t.
-func provQuote(s string) string {
-	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`, "\r", `\r`, "\t", `\t`)
-
-	return `"` + r.Replace(s) + `"`
-}
-
-// provLine is the zmprov input line of one command.
-func provLine(args []string) string {
-	quoted := make([]string, len(args))
-	for i, a := range args {
-		quoted[i] = provQuote(a)
-	}
-
-	return strings.Join(quoted, " ")
-}
 
 // provWhat is the logged form of a command: the verb and its first argument
 // only, as the rest may be a password.
@@ -62,12 +44,11 @@ func provWhat(args []string) string {
 }
 
 // ErrProv is returned when a command of a batch failed.
-var ErrProv = errors.New("zmprov failed")
+var ErrProv = errors.New("provisioning failed")
 
 // provDirectory is the LDAP access of a batch: the client of the node.
 type provDirectory interface {
-	BaseDN() string
-	ModifyValues(dn string, add, del, replace map[string][]string) error
+	provision.Directory
 	Close() error
 }
 
@@ -81,120 +62,87 @@ func (e *Env) provDirectory() (provDirectory, error) {
 	return provOpenLDAP(e)
 }
 
-// provOpenLDAP opens the directory for the commands that RunProv does not
-// give to zmprov; tests replace it.
+// provOpenLDAP opens the directory of the node; tests replace it.
 var provOpenLDAP = func(e *Env) (provDirectory, error) {
 	c, err := e.LDAP()
 	if err != nil {
 		return nil, err
 	}
 
-	return c, nil
+	return ldapDirectory{c}, nil
 }
 
-// provRun is a run of consecutive commands that go the same way: all to LDAP
-// (changes holds them, parsed) or all to zmprov (cmds).
-type provRun struct {
-	cmds    [][]string
-	changes []provChange
-}
+// provSchemas keeps the attribute schema each Env read, so a run of many
+// commands parses it once.
+var provSchemas sync.Map // *Env -> *provision.Schema
 
-func (r provRun) viaLDAP() bool { return len(r.changes) > 0 }
-
-// provPlan splits the batch, in order, into runs: the commands that modify
-// allowlisted attributes go to LDAP, the others to zmprov.
-func (e *Env) provPlan(p *Prov) []provRun {
-	var runs []provRun
-
-	for _, cmd := range p.cmds {
-		change, ok := e.provParse(cmd)
-
-		last := len(runs) - 1
-		if last < 0 || runs[last].viaLDAP() != ok {
-			runs = append(runs, provRun{})
-			last++
-		}
-
-		runs[last].cmds = append(runs[last].cmds, cmd)
-
-		if ok {
-			runs[last].changes = append(runs[last].changes, change)
-		}
+// provSchema is the attribute schema of the node, conf/attrs/*.xml.
+func (e *Env) provSchema() (*provision.Schema, error) {
+	if s, ok := provSchemas.Load(e); ok {
+		return s.(*provision.Schema), nil
 	}
 
-	return runs
-}
-
-// provDescribe is the log form of a plan: "ldap: mcf zimbraFoo | zmprov: cs host".
-func provDescribe(runs []provRun) string {
-	parts := make([]string, len(runs))
-
-	for i, r := range runs {
-		whats := make([]string, len(r.cmds))
-		for j, c := range r.cmds {
-			whats[j] = provWhat(c)
-		}
-
-		via := "zmprov"
-		if r.viaLDAP() {
-			via = "ldap"
-		}
-
-		parts[i] = via + ": " + strings.Join(whats, "; ")
+	s, err := provision.LoadSchema(e.Sys.FS, e.Paths.Path("conf", "attrs"))
+	if err != nil {
+		return nil, err
 	}
 
-	return strings.Join(parts, " | ")
+	provSchemas.Store(e, s)
+
+	return s, nil
 }
 
-// RunProv runs the batch, in order. The commands that modify only allowlisted
-// attributes (mcf, ms and mc, see provAttrList) are written to LDAP; the
-// others, the creation commands among them, are run by "zmprov -r -m -l" as
-// zextras, one process per run of consecutive commands. Like zmprov, which
+// provisioner builds the provisioner of a batch over dir.
+func (e *Env) provisioner(dir provision.Directory) (*provision.Provisioner, error) {
+	schema, err := e.provSchema()
+	if err != nil {
+		return nil, err
+	}
+
+	host, err := e.LCValue("zimbra_server_hostname")
+	if err != nil {
+		return nil, err
+	}
+
+	return provision.New(provision.Options{
+		Dir:            dir,
+		Schema:         schema,
+		LocalHostname:  host,
+		ReadFile:       e.Sys.FS.ReadFile,
+		SetLocalConfig: func(key, value string) error { return e.SetLC(map[string]string{key: value}) },
+		Warn:           e.Log.Warn,
+	}), nil
+}
+
+// RunProv runs the batch, in order, against the directory. Like zmprov, which
 // goes on after a command failed and exits 2 at the end (ProvUtil
-// errorOccursDuringInteraction), RunProv runs every command and the error
-// lists the failures. The commands are not logged with their values.
+// errorOccursDuringInteraction), RunProv runs every command and the error lists
+// the failures. The commands are not logged with their values.
 func (e *Env) RunProv(p *Prov) error {
 	if p.Len() == 0 {
 		return nil
 	}
 
-	runs := e.provPlan(p)
-	e.Log.Detail("zmprov batch: %s", provDescribe(runs))
+	e.Log.Detail("provisioning batch: %s", provDescribe(p.cmds))
 
-	var (
-		msgs []string
-		dir  provDirectory
-	)
+	dir, err := e.provDirectory()
+	if err != nil {
+		return fmt.Errorf("%w: opening LDAP: %w", ErrProv, err)
+	}
 
-	defer func() {
-		if dir != nil {
-			_ = dir.Close()
+	defer func() { _ = dir.Close() }()
+
+	prv, err := e.provisioner(dir)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrProv, err)
+	}
+
+	var msgs []string
+
+	for _, cmd := range p.cmds {
+		if _, err := prv.Exec(cmd); err != nil {
+			msgs = append(msgs, fmt.Sprintf("ERROR: %s: %v", provWhat(cmd), err))
 		}
-	}()
-
-	for _, r := range runs {
-		if !r.viaLDAP() {
-			m, err := e.provZmprov(r.cmds)
-			if err != nil {
-				return err
-			}
-
-			msgs = append(msgs, m...)
-
-			continue
-		}
-
-		if dir == nil {
-			var err error
-
-			if dir, err = e.provDirectory(); err != nil {
-				msgs = append(msgs, fmt.Sprintf("ERROR: opening LDAP: %v", err))
-
-				continue
-			}
-		}
-
-		msgs = append(msgs, provModify(dir, r)...)
 	}
 
 	if len(msgs) == 0 {
@@ -206,57 +154,14 @@ func (e *Env) RunProv(p *Prov) error {
 	return fmt.Errorf("%w: %s", ErrProv, masked)
 }
 
-// provModify writes the changes of a run and returns the failures.
-func provModify(dir provDirectory, r provRun) []string {
-	var msgs []string
-
-	for i, c := range r.changes {
-		if err := dir.ModifyValues(c.dn(dir.BaseDN()), c.add, c.del, c.replace); err != nil {
-			msgs = append(msgs, fmt.Sprintf("ERROR: ldap: %s: %v", provWhat(r.cmds[i]), err))
-		}
-	}
-
-	return msgs
-}
-
-// provZmprov runs the commands with one zmprov process and returns its ERROR
-// lines (or its exit status when it printed none). The input ends with
-// "exit", so zmprov exits 2 when any command failed.
-func (e *Env) provZmprov(cmds [][]string) ([]string, error) {
-	lines := make([]string, len(cmds))
+// provDescribe is the log form of a batch: "cs host; ms host".
+func provDescribe(cmds [][]string) string {
+	whats := make([]string, len(cmds))
 	for i, c := range cmds {
-		lines[i] = provLine(c)
+		whats[i] = provWhat(c)
 	}
 
-	_, err := e.Output(&Cmd{
-		AsZextras: true,
-		Path:      e.Paths.Path("bin", "zmprov"),
-		Args:      []string{"-r", "-m", "-l"},
-		Stdin:     strings.NewReader(strings.Join(lines, "\n") + "\nexit\n"),
-		Quiet:     true,
-	})
-	if err == nil {
-		return nil, nil
-	}
-
-	var cmdErr *CmdError
-	if !errors.As(err, &cmdErr) {
-		return nil, fmt.Errorf("%w: %w", ErrProv, err)
-	}
-
-	var msgs []string
-
-	for line := range strings.SplitSeq(cmdErr.Output, "\n") {
-		if i := strings.Index(line, "ERROR: "); i >= 0 {
-			msgs = append(msgs, line[i:])
-		}
-	}
-
-	if len(msgs) == 0 {
-		msgs = []string{fmt.Sprintf("exit status %d", cmdErr.Code)}
-	}
-
-	return msgs, nil
+	return strings.Join(whats, "; ")
 }
 
 // Prov runs the single command args (see RunProv).

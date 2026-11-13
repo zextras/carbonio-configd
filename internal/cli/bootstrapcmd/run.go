@@ -85,7 +85,10 @@ func RunSetup(ctx context.Context, env sys.System, stdin io.Reader, stdout, stde
 		}
 	}
 
-	if screens {
+	// The run reports through its own step output and log: the warnings of
+	// the shared packages (e.g. the LDAP client probing before slapd is up)
+	// go to the log file, and behind the screens nowhere else.
+	if logFile != nil || screens {
 		defer quietScreenLogs(logFile, stderr)()
 	}
 

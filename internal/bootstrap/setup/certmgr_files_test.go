@@ -8,12 +8,19 @@ import (
 	"bytes"
 	"crypto/rsa"
 	"crypto/x509"
+	"io/fs"
+	"os"
+	"path"
+	"slices"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/pavlo-v-chernykh/keystore-go/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/zextras/carbonio-configd/internal/pkcs12"
 )
 
 const (
@@ -177,68 +184,190 @@ func TestRunCertMgr_AddCACert(t *testing.T) {
 	h := newCMTest(t, nil)
 	h.bootstrap()
 
-	h.keytools = nil
+	// deployca made the store: zextras' (this run is root's), 0640.
+	uid, gid, ok := h.fakes.FS.Owner(cmCacerts)
+	assert.True(t, ok)
+	assert.Equal(t, [2]int{998, 997}, [2]int{uid, gid}, "a new store is zextras'")
+
 	out := h.ok("addcacert", cmCACrt)
 	assert.Equal(t, "** Importing cert '"+cmCACrt+"' as 'zcs-user-ca' into cacerts '"+cmCacerts+"'\n"+
 		"** NOTE: restart mailboxd to use the imported certificate.\n", out)
 
-	// 1823-1841: keytool deletes the alias, then imports the file under it; the
-	// password is in the environment, not on the command line.
-	pass := []string{"-keystore", cmCacerts, "-storepass:env", certStorePassEnv}
-	assert.Equal(t, []cmKeytoolRun{
-		{args: append([]string{"-delete", "-alias", "zcs-user-ca"}, pass...)},
-		{args: append([]string{"-import", "-alias", "zcs-user-ca", "-noprompt", "-file", cmCACrt}, pass...)},
-	}, mapSlice(h.keytools, func(r cmKeytoolRun) cmKeytoolRun { return cmKeytoolRun{args: r.args} }))
+	// The CA of deployca and the one of addcacert, under their aliases, in a
+	// PKCS12 store that keytool reads: no process runs, and the password is
+	// not on any command line.
+	trusted := h.trusted(cmPassword)
+	ca := h.cert(cmCACrt).Raw
 
-	for _, r := range h.keytools {
-		assert.Contains(t, r.env, certStorePassEnv+"="+cmPassword)
+	for _, alias := range []string{"zcs-user-ca", "my_ca"} {
+		e, ok := trusted.Get(alias)
+		require.True(t, ok, alias)
+		assert.Equal(t, ca, e.Cert, alias)
 	}
 
-	// The CA of deployca and the one of addcacert, under their aliases.
-	assert.Equal(t, h.cert(cmCACrt).Raw, h.trusted["zcs-user-ca"])
-	assert.Equal(t, h.cert(cmCACrt).Raw, h.trusted["my_ca"])
+	assert.Len(t, trusted.Entries, 2)
+	assert.Equal(t, uint32(0o640), h.mode(cmCacerts))
+	assert.Equal(t, []string{cmCacerts}, h.storeFiles(), "no temporary file is left")
 
-	// Again: the alias exists, deleted first without complaint; an alias of
-	// the command line.
+	// Again: the alias exists, replaced.
 	h.ok("addcacert", cmCACrt)
-	assert.Len(t, h.trusted, 2)
+	assert.Len(t, h.trusted(cmPassword).Entries, 2)
 
 	status, out, _ := h.run("addcacert", "/none.pem")
 	assert.Equal(t, 1, status)
 	assert.Equal(t, "ERROR: Can't read file '/none.pem'\n", out)
 }
 
-func TestRunCertMgr_AddCACertKeytoolFailures(t *testing.T) {
+// storeFiles are the files in the directory of the cacerts.
+func (h *cmTest) storeFiles() []string {
+	var files []string
+
+	for _, p := range h.fakes.FS.Paths() {
+		if strings.HasPrefix(p, path.Dir(cmCacerts)+"/") {
+			files = append(files, p)
+		}
+	}
+
+	return files
+}
+
+func TestRunCertMgr_AddCACertKeepsTheStore(t *testing.T) {
+	h := newCMTest(t, nil)
+	h.bootstrap()
+
+	// A store as the JDK of Carbonio has it: its entries stay, as they are, and
+	// so do the encryption and the MAC the file has (RC2 and SHA-1).
+	legacy, err := os.ReadFile("../../pkcs12/testdata/legacy.p12")
+	require.NoError(t, err)
+
+	h.fakes.FS.Put(cmCacerts, legacy, 0o664)
+	require.NoError(t, h.e.SetLC(map[string]string{"mailboxd_truststore_password": "changeit"}))
+
+	before, err := pkcs12.Decode(legacy, "changeit")
+	require.NoError(t, err)
+
+	h.ok("addcacert", cmCACrt)
+
+	data := []byte(h.read(cmCacerts))
+	assert.NotEqual(t, legacy, data)
+	assert.Equal(t, uint32(0o664), h.mode(cmCacerts), "the mode of the file")
+	assert.Equal(t, []string{cmCacerts}, h.storeFiles())
+
+	after, err := pkcs12.Decode(data, "changeit")
+	require.NoError(t, err)
+	require.Len(t, after.Entries, len(before.Entries)+1)
+	assert.Equal(t, before.Entries, after.Entries[:len(before.Entries)], "the entries, spelled as they are")
+
+	last := after.Entries[len(after.Entries)-1]
+	assert.Equal(t, "zcs-user-ca", last.Alias)
+	assert.Equal(t, h.cert(cmCACrt).Raw, last.Cert)
+
+	// An alias is found whatever its case, and takes the spelling of the new one
+	// (the legacy store has zcs-user-two, as the file name gives).
+	two, err := os.ReadFile("../../pkcs12/testdata/two.pem")
+	require.NoError(t, err)
+	h.fakes.FS.Put("/tmp/TWO.pem", two, 0o644)
+	h.ok("addcacert", "/tmp/TWO.pem")
+
+	replaced := h.trusted("changeit")
+	assert.Len(t, replaced.Entries, len(before.Entries)+1, "replaced, not added")
+
+	e, ok := replaced.Get("zcs-user-two")
+	require.True(t, ok)
+	assert.Equal(t, "zcs-user-TWO", e.Alias)
+
+	// RC2-40 with SHA-1 are still there: the OIDs are in the file.
+	assert.Contains(t, string(data), "\x2a\x86\x48\x86\xf7\x0d\x01\x0c\x01\x06", "pbeWithSHA1And40BitRC2-CBC")
+	assert.NotContains(t, string(data), "\x2a\x86\x48\x86\xf7\x0d\x01\x05\x0d", "not PBES2")
+}
+
+func TestRunCertMgr_AddCACertToAJKSStore(t *testing.T) {
+	h := newCMTest(t, nil)
+	h.bootstrap()
+
+	ks := keystore.New()
+	require.NoError(t, ks.SetTrustedCertificateEntry("old", keystore.TrustedCertificateEntry{
+		CreationTime: h.e.Sys.Clock.Now(),
+		Certificate:  keystore.Certificate{Type: certX509, Content: h.cert(cmCACrt).Raw},
+	}))
+
+	var buf bytes.Buffer
+
+	require.NoError(t, ks.Store(&buf, []byte(cmPassword)))
+	h.fakes.FS.Put(cmCacerts, buf.Bytes(), 0o640)
+
+	h.fakes.FS.Put("/tmp/New_One.pem", []byte(h.read(cmCACrt)), 0o644)
+	h.ok("addcacert", "/tmp/New_One.pem")
+
+	// keytool keeps the type of the file it opens.
+	data := []byte(h.read(cmCacerts))
+	require.True(t, bytes.HasPrefix(data, jksMagic))
+
+	got := keystore.New()
+	require.NoError(t, got.Load(bytes.NewReader(data), []byte(cmPassword)))
+	assert.Equal(t, []string{"old", "zcs-user-new_one"}, slices.Sorted(slices.Values(got.Aliases())))
+}
+
+func TestRunCertMgr_AddCACertFailures(t *testing.T) {
 	h := newCMTest(t, nil)
 	h.bootstrap()
 	h.fakes.FS.Put("/tmp/junk.pem", []byte("junk\n"), 0o644)
 
-	// A file that is not a certificate: the alias is not there to delete.
+	trusted := h.read(cmCacerts)
+
+	// A file that is not a certificate: the store is as it was.
 	status, out, _ := h.run("addcacert", "/tmp/junk.pem")
 	assert.Equal(t, 1, status)
 	assert.Equal(t, "** Importing cert '/tmp/junk.pem' as 'zcs-user-junk' into cacerts '"+cmCacerts+"'\n"+
-		"ERROR: cacerts keytool(-import -alias zcs-user-junk -noprompt -file /tmp/junk.pem) returned non-zero(1):\n"+
-		"keytool error: java.lang.Exception: Input not an X.509 certificate\n", out)
+		"ERROR: importing '/tmp/junk.pem' as 'zcs-user-junk' into cacerts '"+cmCacerts+"' failed: "+
+		certKeytoolNoCert+"\n", out)
+	assert.Equal(t, trusted, h.read(cmCacerts))
 
-	// The wrong password: both keytool runs fail, the second ends the command.
+	// A certificate in DER, which keytool reads as well.
+	h.fakes.FS.Put("/tmp/ca.der", h.cert(cmCACrt).Raw, 0o644)
+	h.ok("addcacert", "/tmp/ca.der")
+
+	e, ok := h.trusted(cmPassword).Get("zcs-user-ca")
+	require.True(t, ok)
+	assert.Equal(t, h.cert(cmCACrt).Raw, e.Cert)
+
+	// The wrong password: the store is as it was.
+	trusted = h.read(cmCacerts)
 	require.NoError(t, h.e.SetLC(map[string]string{"mailboxd_truststore_password": "wrong"}))
 
 	status, out, _ = h.run("addcacert", cmCACrt)
 	assert.Equal(t, 1, status)
-	assert.Contains(t, out, "ERROR: cacerts keytool(-delete -alias zcs-user-ca) returned non-zero(1):\n"+cmKeytoolTampered)
-	assert.Contains(t, out, "ERROR: cacerts keytool(-import -alias zcs-user-ca -noprompt -file "+cmCACrt+
-		") returned non-zero(1):\n"+cmKeytoolTampered)
+	assert.Contains(t, out, "ERROR: importing '"+cmCACrt+"' as 'zcs-user-ca' into cacerts '"+cmCacerts+"' failed: "+
+		certKeytoolBadPass+"\n")
 	assert.NotContains(t, out, "restart mailboxd")
-}
+	assert.Equal(t, trusted, h.read(cmCacerts))
 
-// mapSlice is the slice of f of each element.
-func mapSlice[T, U any](in []T, f func(T) U) []U {
-	out := make([]U, len(in))
-	for i, v := range in {
-		out[i] = f(v)
+	// A file that is not a keystore.
+	h.fakes.FS.Put(cmCacerts, []byte("garbage\n"), 0o640)
+
+	status, out, _ = h.run("addcacert", cmCACrt)
+	assert.Equal(t, 1, status)
+	assert.Contains(t, out, certKeytoolFormat+"\n")
+	assert.Equal(t, "garbage\n", h.read(cmCacerts))
+
+	// A store that cannot be put in place: the error is shown, and nothing is
+	// left beside it.
+	h.fakes.FS.Put(cmCacerts, []byte(trusted), 0o640)
+	require.NoError(t, h.e.SetLC(map[string]string{"mailboxd_truststore_password": cmPassword}))
+
+	h.fakes.FS.Fail = func(op, name string) error {
+		if op == "Rename" && strings.HasPrefix(name, path.Dir(cmCacerts)) {
+			return &fs.PathError{Op: "rename", Path: name, Err: syscall.EROFS}
+		}
+
+		return nil
 	}
 
-	return out
+	status, out, _ = h.run("addcacert", cmCACrt)
+	assert.Equal(t, 1, status)
+	assert.Contains(t, out, "failed: Read-only file system\n")
+	assert.Equal(t, trusted, h.read(cmCacerts))
+	assert.Equal(t, []string{cmCacerts}, h.storeFiles())
 }
 
 func TestRunCertMgr_MailboxdKeystore(t *testing.T) {
@@ -448,7 +577,7 @@ func TestRunCertMgr_RemoteServerFailuresDoNotStopTheOthers(t *testing.T) {
 	status, out, _ := h.run("deploycrt", "self", "-allservers")
 
 	assert.Equal(t, 1, status)
-	assert.Contains(t, out, "ERROR: zmrc: zmcertmgr getcrt self -allservers failed(3):\nssh: no route to host\n")
+	assert.Contains(t, out, "ERROR: zmrc: zmcertmgr getcrt self -allservers failed(1):\nzmrcd: refused\nconnecting to a.example.com: no route to host\n")
 	assert.Len(t, h.remote, 2, "each server was tried once and its deploy skipped")
 }
 
@@ -481,6 +610,8 @@ func TestRunCertMgr_LocalFailuresAreReported(t *testing.T) {
 }
 
 // The script prints no command lines; with -debug they are shown (on stderr).
+// No process runs for the keystores now: nothing is shown, and the password
+// never is.
 func TestRunCertMgr_CommandLinesShowOnlyWithDebug(t *testing.T) {
 	h := newCMTest(t, nil)
 	h.bootstrap()
@@ -491,8 +622,8 @@ func TestRunCertMgr_CommandLinesShowOnlyWithDebug(t *testing.T) {
 	assert.NotContains(t, out+errs, "keytool")
 
 	_, _, errs = h.run("addcacert", cmCACrt, "-debug")
-	assert.Contains(t, errs, "*** Running as zextras: ")
-	assert.Contains(t, errs, "keytool -delete -alias zcs-user-ca")
+	assert.Contains(t, errs, "DEBUG: addcacert("+cmCACrt+" )")
+	assert.NotContains(t, errs, "keytool")
 	assert.NotContains(t, errs, cmPassword, "the password is not shown")
 }
 

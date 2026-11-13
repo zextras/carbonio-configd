@@ -27,9 +27,16 @@ path = ["internal/proxy/testdata/templates/**", "internal/proxy/testdata/fixture
 SPDX-FileCopyrightText = "2026 Zextras <https://www.zextras.com>"
 SPDX-License-Identifier = "AGPL-3.0-only"
 
-# Snapshot of the attrs.xml entries of the attributes bootstrap writes to LDAP,
-# compared by scripts/check-attrs-drift.sh.
+# The attribute schema of the provisioning tests: the <attr> entries of
+# attrs.xml (name, type, flags, callback, limits) of the attributes they use.
 [[annotations]]
-path = ["internal/bootstrap/setup/testdata/attrs-allowlist.tsv"]
+path = ["internal/provision/testdata/**"]
+SPDX-FileCopyrightText = "2026 Zextras <https://www.zextras.com>"
+SPDX-License-Identifier = "AGPL-3.0-only"
+
+# Trust stores written by keytool (the JDK of Carbonio, 21.0.12) over generated
+# test certificates: the fixtures of the PKCS#12 reader and writer's tests.
+[[annotations]]
+path = ["internal/pkcs12/testdata/**"]
 SPDX-FileCopyrightText = "2026 Zextras <https://www.zextras.com>"
 SPDX-License-Identifier = "AGPL-3.0-only"

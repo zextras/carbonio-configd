@@ -67,6 +67,7 @@ type lwServer struct {
 	// Hooks, set before the first request; nil answers success.
 	BindCode   func(dn, password string) uint8
 	AddCode    func(dn string) uint8
+	DelCode    func(dn string) uint8
 	ModifyCode func(dn string) uint8
 	PasswdCode uint8
 	Search     func(base string, scope int64, filter string) ([]lwEntry, uint8)
@@ -206,6 +207,8 @@ func (s *lwServer) serve(conn net.Conn, startTLS bool) {
 			s.bind(conn, id, op)
 		case goldap.ApplicationAddRequest:
 			s.add(conn, id, op)
+		case goldap.ApplicationDelRequest:
+			s.del(conn, id, op)
 		case goldap.ApplicationModifyRequest:
 			s.modify(conn, id, op)
 		case goldap.ApplicationSearchRequest:
@@ -275,6 +278,19 @@ func (s *lwServer) add(conn net.Conn, id int64, op *ber.Packet) {
 	}
 
 	_, _ = conn.Write(lwResult(id, goldap.ApplicationAddResponse, code, lwDiag(code)))
+}
+
+func (s *lwServer) del(conn net.Conn, id int64, op *ber.Packet) {
+	dn := lwText(op)
+
+	s.record("del " + dn)
+
+	var code uint8
+	if s.DelCode != nil {
+		code = s.DelCode(dn)
+	}
+
+	_, _ = conn.Write(lwResult(id, goldap.ApplicationDelResponse, code, lwDiag(code)))
 }
 
 func (s *lwServer) modify(conn net.Conn, id int64, op *ber.Packet) {

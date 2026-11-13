@@ -398,7 +398,7 @@ func TestRunDHParam_Set(t *testing.T) {
 
 		data, _ := fakes.FS.Data("/tmp/new.pem")
 		assert.Equal(t, string(want), string(data))
-		assert.Empty(t, provTestLDAP().calls)
+		assert.Empty(t, provTestLDAP().Calls)
 
 		// zmdhparam did nothing for -in with -out; it now copies.
 		fakes.FS.Put("/tmp/in.pem", want, 0o644)
@@ -406,7 +406,7 @@ func TestRunDHParam_Set(t *testing.T) {
 		r = dhExec(t, e, "", "set", "-in", "/tmp/in.pem", "-out", "/tmp/copy.pem")
 		assert.Equal(t, 0, r.code)
 		assert.True(t, fakes.FS.Exists("/tmp/copy.pem"))
-		assert.Empty(t, provTestLDAP().calls)
+		assert.Empty(t, provTestLDAP().Calls)
 	})
 
 	t.Run("an invalid file is not stored", func(t *testing.T) {
@@ -416,7 +416,7 @@ func TestRunDHParam_Set(t *testing.T) {
 
 		assert.Equal(t, 1, r.code)
 		assert.Contains(t, r.stderr, "check DH parameters from '-' failed: p value is not prime")
-		assert.Empty(t, provTestLDAP().calls)
+		assert.Empty(t, provTestLDAP().Calls)
 
 		r = dhExec(t, e, "", "set", "-in", "-")
 		assert.Equal(t, "zmdhparam: ERROR: no DH parameters in '-'\n", r.stderr)
@@ -424,12 +424,12 @@ func TestRunDHParam_Set(t *testing.T) {
 
 	t.Run("a failure of LDAP", func(t *testing.T) {
 		e, _, _ := testEnv(t)
-		provTestLDAP().failDN[global] = errors.New("insufficient access")
+		provTestLDAP().FailModify[global] = errors.New("insufficient access")
 
 		r := dhExec(t, e, "", "set", "-new", "2048")
 
 		assert.Equal(t, 1, r.code)
-		assert.Contains(t, r.stderr, "zmdhparam: ERROR: save to LDAP failed: zmprov failed")
+		assert.Contains(t, r.stderr, "zmdhparam: ERROR: save to LDAP failed: provisioning failed")
 		assert.Contains(t, r.stderr, "insufficient access")
 	})
 
@@ -478,7 +478,7 @@ func TestRunDHParam_RefusedCommandLines(t *testing.T) {
 			r := dhExec(t, e, "", tc.args...)
 
 			assert.Equal(t, dhTestRun{tc.code, tc.stdout, tc.stderr}, r)
-			assert.Empty(t, provTestLDAP().calls)
+			assert.Empty(t, provTestLDAP().Calls)
 		})
 	}
 }

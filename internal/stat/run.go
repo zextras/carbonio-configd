@@ -24,16 +24,25 @@ const (
 
 	optInterval = "interval"
 	optConsole  = "console"
+
+	// cmdRun is the command that runs several collectors in one process.
+	cmdRun = "run"
 )
 
-// Run executes "setup stat <name> [options]": the collector of that name
-// with the command line of the zmstat-<name> script. It returns the exit
-// status; it runs until SIGTERM, SIGINT or ctx is done.
+// Run executes "configd stat <name> [options]": the collector of that name
+// with the command line of the zmstat-<name> script, or "configd stat run
+// <collector>...": several collectors in this one process (see runMany). It
+// returns the exit status; it runs until SIGTERM, SIGINT or ctx is done.
 func Run(ctx context.Context, env *Env, args []string) int {
 	if len(args) == 0 {
-		_, _ = fmt.Fprintf(env.Stderr, "Usage: setup stat <name> [options]\nCollectors: %s\n", strings.Join(Names(), ", "))
+		_, _ = fmt.Fprintf(env.Stderr, "Usage: configd stat <name> [options]\n"+
+			"       configd stat %s <collector> [<collector>...]\nCollectors: %s\n", cmdRun, strings.Join(Names(), ", "))
 
 		return exitError
+	}
+
+	if args[0] == cmdRun {
+		return env.runMany(ctx, args[1:])
 	}
 
 	sp := findSpec(args[0])
@@ -136,7 +145,7 @@ func (e *Env) parse(sp *spec, args []string) (*options, bool) {
 // serve is the part every script shares: pid file, collector, log, then one
 // sample per interval on a round second until stopped.
 func (e *Env) serve(ctx context.Context, sp *spec, o *options) int {
-	csv, pid := sp.files(o)
+	_, pid := sp.files(o)
 
 	if err := e.createPid(pid); err != nil {
 		if errors.Is(err, errAlreadyRunning) {
@@ -154,31 +163,40 @@ func (e *Env) serve(ctx context.Context, sp *spec, o *options) int {
 	sigs, stop := e.signals()
 	defer stop()
 
-	c, err := sp.build(e, o)
+	r, err := e.start(sp, o)
 	if err != nil {
 		_, _ = fmt.Fprintln(e.Stderr, err)
 
 		return exitError
+	}
+
+	defer r.lf.close()
+
+	return r.loop(ctx, sigs)
+}
+
+// start builds the collector of a spec and opens its log: the part of serve
+// that several collectors of one process each do.
+func (e *Env) start(sp *spec, o *options) (*runner, error) {
+	csv, _ := sp.files(o)
+
+	c, err := sp.build(e, o)
+	if err != nil {
+		return nil, err
 	}
 
 	date := e.date(e.Sys.Clock.Now())
 
 	lf, err := openLog(e, o.logPath, c.Heading(), func() string { return date })
 	if err != nil {
-		_, _ = fmt.Fprintln(e.Stderr, err)
-
-		return exitError
+		return nil, err
 	}
-
-	defer lf.close()
 
 	if sp.afterOpen != nil && !o.console {
 		sp.afterOpen(e, o.logPath)
 	}
 
-	r := &runner{env: e, sp: sp, c: c, lf: lf, csv: csv, date: date, interval: o.interval, console: o.console}
-
-	return r.loop(ctx, sigs)
+	return &runner{env: e, sp: sp, c: c, lf: lf, csv: csv, date: date, interval: o.interval, console: o.console}, nil
 }
 
 // runner is a collector running.

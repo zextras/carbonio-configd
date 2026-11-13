@@ -207,25 +207,78 @@ func (m *certMgr) slurp(name string) ([]byte, error) { return m.e.Sys.FS.ReadFil
 // belong to zextras, which could point a link at a file only root can reach.
 var errCertSymlink = errors.New("is a symbolic link: refusing to follow it as root")
 
+// opOpen is the operation of the errors of an open.
+const opOpen = "open"
+
+// maxLinks is how many symbolic links in a row are followed.
+const maxLinks = 8
+
 // noFollow tells whether the run must not follow symbolic links: root does
 // not, zextras may (its own links, such as one to a Let's Encrypt key, give
 // it nothing it does not have).
 func (m *certMgr) noFollow() bool { return !m.e.IsZextras }
 
-// openFile opens name; as root a symbolic link at name is an error, both
-// when it is there before the open and when it is swapped in after the check.
-func (m *certMgr) openFile(name string, flag int, perm fs.FileMode) (sys.File, error) {
-	if m.noFollow() {
-		if fi, err := m.e.Sys.FS.Lstat(name); err == nil && fi.Mode()&fs.ModeSymlink != 0 {
-			return nil, &fs.PathError{Op: "open", Path: name, Err: errCertSymlink}
+// rootOnlyDir tells whether only root can change a directory: it is root's and
+// neither its group nor others can write it. What it holds cannot be swapped
+// for a link by anyone else. An owner the system does not tell is not root's.
+func (m *certMgr) rootOnlyDir(dir string) bool {
+	fi, err := m.e.Sys.FS.Stat(dir)
+	if err != nil {
+		return false
+	}
+
+	uid, _, known := fileOwner(fi)
+
+	return known && uid == 0 && fi.Mode().Perm()&0o022 == 0
+}
+
+// resolve follows the symbolic links at name and returns the path of what is
+// at the end of them (which may not exist yet). root follows the links that
+// are in a directory only root can change, such as the one of the JDK to its
+// cacerts, and refuses the others: a link a user can plant is not followed.
+func (m *certMgr) resolve(name string) (string, error) {
+	for range maxLinks {
+		fi, err := m.e.Sys.FS.Lstat(name)
+		if isLink := err == nil && fi.Mode()&fs.ModeSymlink != 0; !isLink {
+			return name, nil // a file, or nothing yet: what is to be opened
 		}
 
+		dir := filepath.Dir(name)
+		if m.noFollow() && !m.rootOnlyDir(dir) {
+			return "", &fs.PathError{Op: opOpen, Path: name, Err: errCertSymlink}
+		}
+
+		target, err := m.e.Sys.FS.Readlink(name)
+		if err != nil {
+			return "", err
+		}
+
+		name = target
+		if !filepath.IsAbs(name) {
+			name = filepath.Join(dir, target)
+		}
+	}
+
+	return "", &fs.PathError{Op: opOpen, Path: name, Err: syscall.ELOOP}
+}
+
+// openFile opens name; as root a symbolic link that a user could have planted
+// at name is an error, both when it is there before the open and when it is
+// swapped in after the check.
+func (m *certMgr) openFile(name string, flag int, perm fs.FileMode) (sys.File, error) {
+	if m.noFollow() {
+		resolved, err := m.resolve(name)
+		if err != nil {
+			return nil, err
+		}
+
+		name = resolved
 		flag |= syscall.O_NOFOLLOW
 	}
 
 	f, err := m.e.Sys.FS.OpenFile(name, flag, perm)
 	if errors.Is(err, syscall.ELOOP) {
-		return nil, &fs.PathError{Op: "open", Path: name, Err: errCertSymlink}
+		return nil, &fs.PathError{Op: opOpen, Path: name, Err: errCertSymlink}
 	}
 
 	return f, err
@@ -304,6 +357,11 @@ func (m *certMgr) appendFile(name string, data []byte, perm fs.FileMode) error {
 }
 
 func (m *certMgr) putFile(name string, data []byte, perm fs.FileMode, mode int) error {
+	name, err := m.resolve(name)
+	if err != nil {
+		return err
+	}
+
 	_, lstatErr := m.e.Sys.FS.Lstat(name)
 	created := lstatErr != nil
 

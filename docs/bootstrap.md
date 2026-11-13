@@ -292,7 +292,9 @@ The syslog step runs in process (`setup syslog`, which is also what
 the catch-all rules of `50-default.conf` lose those facilities), forwards to
 `zimbraLogHostname` over UDP when that is another host, creates
 `/var/log/carbonio.log`, sets the owner in `/etc/logrotate.d/carbonio` and
-restarts rsyslog only if a file changed. Only rsyslog is handled; syslog-ng and
+restarts rsyslog only if a file changed. A changed `/etc/rsyslog.conf` is kept
+in `rsyslog.conf.bak`; the drop-in `50-default.conf` has no backup, as with
+`zmsyslogsetup`. Only rsyslog is handled; syslog-ng and
 `/etc/syslog.conf` are not.
 
 Before the steps, `run` prints "Starting Carbonio Bootstrap..." and the
@@ -401,67 +403,49 @@ writes nothing. On an existing install it may start the local LDAP server to
 read the node.
 
 Passwords are never passed on a command line or written to the log:
-`zmprov` reads its commands on stdin, localconfig is written directly, and
-the LDAP passwords are set natively (no `zmldappasswd`).
+localconfig is written directly, the LDAP passwords are set natively (no
+`zmldappasswd`) and the passwords of accounts go to the directory in the LDAP
+Password Modify operation, which the server hashes.
 
-#### Directory changes: LDAP or zmprov
+#### Directory changes: native LDAP, no zmprov
 
-A `zmprov` start is a JVM start (0.6-0.8 s), and a fresh bootstrap made 13.
-The steps still collect their directory commands in a batch, but the batch is
-split in order:
+Bootstrap does not run `zmprov` (a JVM start of 0.6-0.8 s, 13 of them on a
+fresh install). The steps collect their directory commands in a batch
+(`Prov`) and `RunProv` runs each natively over the bootstrap's own LDAP
+connection, with the checks and the entries of the Java provisioning the
+mailbox runs (`ProvUtil`, `LdapProvisioning`); the code is
+`internal/provision`.
 
-- `mcf` (global config), `ms <server>` and `mc <class of service>` that modify
-  only attributes of the allowlist (`provAttrList` in
-  `internal/bootstrap/setup/prov_attrs.go`) are written to LDAP over the
-  bootstrap's own connection, with the semantics of `zmprov`: `attr v` replaces
-  the values, `attr ""` removes the attribute, `+attr v` adds a value and
-  `-attr v` removes one, and neither fails when the value is already, or is
-  not, there. The same checks of the value as `zmprov` apply (boolean, integer,
-  enum, duration, maximum length); a value that fails them is left to `zmprov`
-  so it reports the error. A binary attribute (`zimbraSSLDHParam`) stores the
-  content of the file named, as `zmprov` does, not its path.
-- Everything else runs in one `zmprov -r -m -l` process for each run of
-  consecutive commands: `cs`, `cd`, `ca` and `aaa` (these create the entries
-  with their defaults, ids and passwords), a command on a server or class of
-  service given by id, and any command with an attribute that is not in the
-  allowlist, whole. The allowlist is the exception: what is not listed goes to
-  `zmprov`.
+| Command | What it writes |
+|---|---|
+| `cs <host>` | `cn=<host>,cn=servers,cn=zimbra`: `zimbraServer` (+ `zimbraServerExtraObjectClass`), `zimbraId`, `zimbraCreateTimestamp`, `cn`, `zimbraServiceHostname` |
+| `cd <domain>` | the parent `dc=` entries, the domain entry (`dcObject`, `organization`, `zimbraDomain` + `zimbraDomainExtraObjectClass`, type `local`, status `active`, `zimbraMailStatus enabled`, `o`, `dc`) and its `ou=people` and `cn=groups` bases |
+| `ca <address> <password> [attr value]...` | `uid=<local>,ou=people,<domain>`: `inetOrgPerson`, `zimbraAccount` (+ `zimbraAccountExtraObjectClass`), id, timestamp, status, mail host and transport (class of service pool, local server, first server with the webapp), `mail`, `cn`, `sn`, `uid`, `zimbraPasswordModifiedTime`; the password checked against the password policy of the class of service, then set by the Password Modify operation |
+| `aaa <account> <alias>` | the `zimbraAlias` entry under the alias' domain, and `zimbraMailAlias` and `mail` of the account |
+| `mcf`, `ms <server>`, `mc <cos>` | the attributes: `attr v` replaces the values, `attr ""` removes the attribute, `+attr v` adds a value and `-attr v` removes one, and neither fails when the value is already, or is not, there |
+
+- The value of every attribute is checked against `attrs.xml` (the schema,
+  read from `/opt/zextras/conf/attrs/*.xml`, as the mailbox's
+  `AttributeManager` does) by its type: boolean, enum, integer, long, port,
+  duration, id, email, generalized time, regex, length and the limits. An
+  immutable attribute is refused.
+- The attribute callbacks run as in Java: `CheckPortConflict` and `MailPort`
+  (port conflicts of a server, of the global config and its servers),
+  `MailPort` also writes `zimbra_mail_service_port` to localconfig for the
+  local server, `LocalBind` (`zimbraMailLocalBind`, `zimbraAdminLocalBind`),
+  `MailHostPool`, `MailHost`, `AccountStatus`, `DomainStatus`, `MtaRelayHost`,
+  `PositiveTimeInterval`; the ones that do nothing for these entries
+  (`ServerConfig`, `DisplayName`, `CosId`, `MtaAuthHost`) are skipped. An
+  attribute whose callback is not ported is refused, not written without it.
+- A binary attribute (`zimbraSSLDHParam`) stores the content of the file named.
+- A domain with an account limit (`zimbraDomainMaxAccounts`,
+  `zimbraDomainCOSMaxAccounts`, `zimbraDomainFeatureMaxAccounts`) is refused for
+  `ca`: the quota validators are not ported. Internationalized domain names are
+  refused: give the punycode form.
 - The batch runs in order and goes on after a failure, as `zmprov` does; the
-  error lists the failures. The detail log has one line, `zmprov batch: ldap:
-  mcf zimbraFoo | zmprov: cs host`, with the commands and no values.
-
-Each allowlisted attribute is there because `attrs.xml` (the schema of the
-attributes, `src/main/resources/conf/attrs/attrs.xml` of carbonio-directory-server,
-installed as `/opt/zextras/conf/attrs/attrs.xml`) gives it no callback: the
-callbacks are the code `zmprov` runs on the server side of a change, and LDAP
-does not run them. These attributes carry a callback and stay on `zmprov`:
-
-| Attribute | Callback | What it does |
-|---|---|---|
-| `zimbraMailMode` | `LocalBind` | writes `zimbraMailLocalBind` of the server, or of every server for the global config |
-| `zimbraMailPort` | `MailPort` | writes `zimbra_mail_service_port` to localconfig |
-| `zimbraImapBindPort`, `zimbraImapSSLBindPort`, `zimbraImapProxyBindPort`, `zimbraImapSSLProxyBindPort`, `zimbraPop3BindPort`, `zimbraPop3SSLBindPort`, `zimbraPop3ProxyBindPort`, `zimbraPop3SSLProxyBindPort`, `zimbraMailSSLPort`, `zimbraMailProxyPort`, `zimbraMailSSLProxyPort` | `CheckPortConflict` | rejects a port another service of the server uses |
-| `zimbraMailHostPool` | `MailHostPool` | rejects an id that is not a server with the webapp service |
-
-So the "Set service ports", proxy port and host pool steps still start
-`zmprov`; the others write to LDAP.
-
-`internal/bootstrap/setup/testdata/attrs-allowlist.tsv` is a snapshot of the
-`attrs.xml` entries of the allowlisted attributes (type, callback, limits,
-immutable, deprecated). A unit test fails when an allowlisted attribute has no
-row, has a callback that is not recorded as reviewed
-(`provReviewedCallbacks`), has a different type from its check, or is immutable
-or deprecated. To find out whether `attrs.xml` changed since the snapshot:
-
-```
-scripts/check-attrs-drift.sh <SOURCE>           # prints a diff, exits 1 on drift
-scripts/check-attrs-drift.sh --update <SOURCE>  # regenerates the snapshot
-```
-
-`<SOURCE>` is a checkout of carbonio-directory-server (or any directory with an
-`attrs.xml`), the path of an `attrs.xml`, or the URL of the raw file. CI does
-not run it. When it reports a change, read the callback again before updating
-the snapshot, and the allowlist if the attribute is concerned.
+  error lists the failures as the Java error codes (`account.NO_SUCH_DOMAIN`,
+  `account.DOMAIN_EXISTS`, ...). The detail log has one line with the verb and
+  the first argument of each command, never the values.
 
 Three steps that `setup.pl` ran as shell scripts or JVM tools are done in
 Go, without starting a process:
@@ -500,12 +484,11 @@ Differences from `setup.pl`:
   Mozilla's TLS guidelines recommend), written in process, instead of a group
   freshly generated by `openssl dhparam 2048`: it takes no time instead of
   15-30 seconds, and every node shares the same group. It is still recorded in
-  `zimbraSSLDHParam`, which nginx reads. The attribute holds the content of
+  `zimbraSSLDHParam`, which nginx reads. The file is `zextras:zextras`, mode
+  `0640`, as `openssl` run as zextras left it. The attribute holds the content of
   the file (the PEM), as with `zmprov`, which reads the file it is given.
-- Directory changes to allowlisted attributes are written to LDAP, not run by
-  `zmprov` (see "Directory changes: LDAP or zmprov"): the callbacks of
-  `attrs.xml` that `zmprov` ran for them do nothing the bootstrap relies on.
-  For an attribute with a callback, `zmprov` still runs.
+- Directory changes are written to LDAP, not run by `zmprov` (see "Directory
+  changes: native LDAP, no zmprov").
 - No `/opt/zextras/config.<pid>` file is written; use `--output`.
 - A replica or multi-master directory server is set up from the
   configuration (`ldap.replication_type`), not only from the interactive
@@ -518,6 +501,16 @@ Differences from `setup.pl`:
 - `authorized_keys` is written without the empty first line that
   `zmupdateauthkeys` leaves when the file did not exist; a file that has one
   keeps it.
+
+## Environment of commands run as zextras
+
+Commands run as zextras (`zmprov`, `zmmtainit`, `zmcontrol`, ...) get the
+environment `zextras.bashrc` sets up. Its `PERL5LIB`/`PERLLIB` (for the Perl
+scripts that are still shipped) is `common/lib/perl5/<archname>:common/lib/perl5`,
+the value `perl -V:archname` gave the shell; bootstrap does not run perl but
+takes `<archname>` from the directory of `common/lib/perl5` named like one
+(`x86_64-linux-thread-multi`; with several, the one for this CPU, then the
+first by name). Without such a directory the value is `common/lib/perl5`.
 
 ## Commands for setup.pl and the scripts they replace
 
@@ -537,20 +530,21 @@ statuses of their scripts instead.
 | --- | --- | --- | --- |
 | `setup gal-sync-account --domain D --server S` | `zmgsautil createAccount -a galsync.<random>@D -n InternalGAL --domain D -s S -t zimbra -f _InternalGAL -p 1d` (setup.pl) | root, zextras | Creates the account and prints `<name>` and `<id>` separated by a tab. It fails when the account cannot be created; it does not check for an existing one. |
 | `setup ssh-keygen [rsa]` | `zmsshkeygen` | root, zextras | Generates the key pair and stores the public key in the server entry. Another key type prints `Bad keytype`. |
-| `setup update-authkeys [-a]` | `zmupdateauthkeys` | root, zextras | Rewrites `authorized_keys`; `-a` first asks every server, through `zmrc`, to update its own (a server that does not answer is logged). |
+| `setup update-authkeys [-a]` | `zmupdateauthkeys` | root, zextras | Rewrites `authorized_keys`; `-a` first asks every server, through the `zmrc` client (see [`setup rc`](#setup-rc)), to update its own (a server that does not answer is logged). |
+| `setup rc <host> [command words...]` | `zmrc` | root, zextras | Runs a `zmrcd` command on another server over SSH; see [`setup rc`](#setup-rc). |
 | `setup syslog` | `zmsyslogsetup` | root | Sets up rsyslog as the "Set up syslog.conf" step does. |
 | `setup dhparam install` | `openssl dhparam` in setup.pl | root, zextras | Installs `conf/dhparam.pem.crb` (ffdhe2048) unless present and sets `zimbraSSLDHParam`. Plain `setup dhparam` does the same, kept for setup.pl; use `install`. |
 | `setup dhparam [get\|set options]` | `zmdhparam` | root, zextras | Reads or stores the DH parameters of `zimbraSSLDHParam`; see [`setup dhparam get` and `set`](#setup-dhparam-get-and-set). |
 | `setup ldap-passwd [options] [password]` | `zmldappasswd` | root, zextras | Changes an LDAP password in localconfig, the directory and `conf/carbonio.ldif`; the password is read from stdin when it is not an argument. See [`setup ldap-passwd`](#setup-ldap-passwd). |
 | `setup proxyconfig [options]` | `zmproxyconfig` (Perl) | root, zextras | Every option, default, check, message, help text and exit status of the script (`-h -o -m -w -d -e -f -r -s -t -c -C -n -u -U -i -p -a -x -H`; options parse like Perl's `Getopt::Std`). `1`: refused options or checks (usage on stdout), `2`: an attribute change failed, `255`: unusable options or LDAP. Nothing is printed on success; `-e` and `-f` warn about domains with `zimbraVirtualIPAddress` on stderr. |
-| `setup stat <name> [options]` | `zmstat-<name>` (Perl), `<name>` one of `proc cpu vm io df fd allprocs mysql nginx mtaqueue ldap` | zextras (root too for `fd`) | One statistics collector in the foreground; configd's `stats` service starts one per collector. Same options, files and formats as the script; see [`setup stat`](#setup-stat). |
+| `setup stat <name> [options]`, `setup stat run <collector>...` | `configd stat ...` | zextras (root too for `fd`) | The same as [`configd stat`](stats.md), kept for the `zmstat-<name>` wrappers of the `carbonio-core` releases that call `libexec/setup stat`; delegates to the same code. |
 | `setup ldap-schema` | `zmldapschema` | root, zextras | Installs the slapd schemas into `data/ldap/config/cn=config/cn=schema`; see [LDAP and ini tools](#ldap-and-ini-tools). |
 | `setup ldap-update-ldif` | `zmldapupdateldif` | root | Adds the missing base entries and applies `lib/conf/*.ldif` on an LDAP master. |
 | `setup ldap-enable-replica` | `zmldapenablereplica` | root | The provider overlays on the master, the consumer configuration on a replica. |
 | `setup ldap-enable-mmr [-r RID] [-s SID] -m MMRURI` | `zmldapenable-mmr` | root, zextras | Adds a multi-master agreement with another master. |
 | `setup iptool [-d [-m ipmode]]` | `zmiptool` | root, zextras | Applies `zimbraIPMode` to the Java options and the MySQL bind address. |
 | `setup iniutil [options] inifile` | `zminiutil` | any user | Reads or edits one ini file (`--list --get --isset --set --setmin --setmax --unset`). |
-| `setup certmgr <command> [options]` | `zmcertmgr` (certmgr.pl) | root, zextras | Every command, option, message and exit status of the script, without openssl; `keytool` is still run for `cacerts` and to read the mailboxd keystore: `createca createcrt deployca createcsr deploycrt getcrt savecrt viewcsr viewstagedcrt viewcrt verifycrt verifycrtchain verifycrtkey viewdeployedcrt checkcrtexpiration addcacert migrate`. See [`setup certmgr`](#setup-certmgr). |
+| `setup certmgr <command> [options]` | `zmcertmgr` (certmgr.pl) | root, zextras | Every command, option, message and exit status of the script, without openssl, keytool or any other process for the keystores: `createca createcrt deployca createcsr deploycrt getcrt savecrt viewcsr viewstagedcrt viewcrt verifycrt verifycrtchain verifycrtkey viewdeployedcrt checkcrtexpiration addcacert migrate`. See [`setup certmgr`](#setup-certmgr). |
 
 ### LDAP and ini tools
 
@@ -616,8 +610,8 @@ certificates") call the same function as the command (`setup.RunCertMgr`),
 in process, where they ran `zmcertmgr` and `openssl verify`. carbonio-core
 installs `bin/zmcertmgr` as `exec /opt/zextras/libexec/setup certmgr "$@"`.
 `setup.pl`, `setservername.pl`, `checkexpiredcerts.pl`, the mailbox
-(`GetCSR`, `InstallCert`, `VerifyCert`) and `zmrc` (`-allservers`) keep calling
-`zmcertmgr`.
+(`GetCSR`, `InstallCert`, `VerifyCert`) and `zmrcd` (the remote side of
+`-allservers`) keep calling `zmcertmgr`.
 
 Same as the script: the command line (command first, then the type, options
 abbreviable and mixed with arguments), the usage and `-man` texts, the files
@@ -630,8 +624,9 @@ failed (`ERROR: ...`, or a wrong command line: the message and the usage on stdo
 `pod2usage` prints them), `255` a die (`zmcertmgr: ERROR
 <command>(<args>) failed:`). Root is accepted as well as zextras.
 
-The command lines it runs (`keytool`, `zmrc`) are not printed, as the script
-printed none; `-debug` shows them on stderr.
+The command lines of the processes it runs are not printed, as the script
+printed none; `-debug` shows them on stderr. `keytool` is not run: the
+keystores are read and written in Go.
 
 Differences from the script:
 
@@ -647,21 +642,34 @@ Differences from the script:
   `unsupported digest '<d>' (supported: ...)`. An invalid
   `ssl_default_digest` is an error. Certificates signed with SHA-1 may not
   verify in Go.
-- `cacerts` is changed with `keytool`, as the script does (`-delete -alias A`,
-  then `-import -alias A -noprompt -file F`, run as zextras, the alias
-  `my_ca` for `deployca` and `zcs-user-<name>` for `addcacert`), so the
-  PKCS#12 file the product ships keeps its format, aliases and attributes. The
-  store password (`mailboxd_truststore_password`, `mailboxd_keystore_password`)
-  is passed to `keytool` in the environment (`-storepass:env
-  ZMCERTMGR_STOREPASS`), never on its command line; the script put it on the
-  command line.
+- `keytool` is not run. `cacerts` is read and written by `internal/pkcs12`
+  (PKCS#12: the file the product ships, which Java and `keytool -list` read as
+  before) or, when the file is JKS, by the JKS writer: delete the alias, then
+  import it (`my_ca` for `deployca`, `zcs-user-<name>` for `addcacert`), in one
+  write. Aliases are found whatever their case and keep the spelling they were
+  given; every other entry stays as it is (certificate, alias, the
+  trusted-certificate attribute `2.16.840.1.113894.746875.1.1`), and so do the
+  algorithms the file has, as `keytool` keeps them: the RC2-40/SHA-1 store of
+  the JDK 21 of Carbonio stays so, a new store gets what the JDK 21 writes
+  (PBES2 with AES-256, HMAC-SHA256, 10000 iterations). A PKCS#12 store with
+  private keys is read but never rewritten, so no key is lost. The file is
+  replaced atomically (a temporary file in its directory, renamed over it),
+  with its mode and owner; a new one is `0640`, zextras'. The certificate file
+  is read before anything changes (PEM or DER), so a file that is no
+  certificate leaves the store as it was, where the script had already deleted
+  the alias. The errors keep the text of `keytool`
+  (`keystore password was incorrect`, `Input not an X.509 certificate`,
+  `Alias <a> does not exist`, ...). The store password
+  (`mailboxd_truststore_password`, `mailboxd_keystore_password`) is never on a
+  command line, and no process gets it.
 - The keystore of mailboxd is created natively, as the Java class
   `MyPKCS12Import` of the script does: a JKS file written in place (an existing
   JKS keeps its other aliases); no `ssl/carbonio/jetty.pkcs12` is left. A
   mailboxd keystore of another type (PKCS#12) is refused with
   `Keystore was tampered with, or password was incorrect`, where Java's JKS
-  reader would load it. The certificate of the keystore is read back with
-  `keytool -export`, so any type works there.
+  reader would load it. The file is replaced atomically, with its mode and
+  owner. The certificate of the keystore is read back in Go (what
+  `keytool -export` printed), from a JKS or a PKCS#12 file.
 - `ca.key` is `0600` (the script left it `0640`); the backup copy keeps modes
   and owners but not the timestamps.
 - The `no write permission` check and the `.rnd` touch are not done; `-debug`
@@ -673,15 +681,24 @@ Differences from the script:
   file that cannot be read or whose first certificate Go cannot parse is
   reported as `<name>: '<file>' CANNOT BE CHECKED: <reason>` (status `1`),
   not as `EXPIRED!`.
-- Root, which the script refused, never follows a symbolic link in the trees
-  zextras controls (`ssl/carbonio/**`, `conf/ca`, the service copies): opening
-  a link for writing, or reading the source of a copy that is one, fails with
+- Root, which the script refused, does not follow a symbolic link that a user
+  could have planted in the trees zextras controls (`ssl/carbonio/**`,
+  `conf/ca`, the service copies): opening a link for writing, or reading the
+  source of a copy that is one, fails when the directory of the link is not
+  root's or can be written by its group or others, with
   `Is a symbolic link: refusing to follow it as root`. A file the run creates
   gets its mode and owner through the open file, before any data is written;
   directories and hash links are given to zextras without following links.
   A certificate or CA file named on the command line may be a link (a Let's
   Encrypt `live/` file), and when the process is zextras links are followed as
-  usual.
+  usual. A link in a directory only root can change is followed, up to 8 in a
+  row: on a node the `cacerts` of the JDK is such a link, to a file of zextras
+  in `common/etc/java`. The file it leads to is replaced (atomically, in its
+  own directory, with its mode and owner) and the link stays a link; zextras,
+  which cannot create files in that directory, writes it in place.
+- A failed import into `cacerts` prints
+  `ERROR: importing '<file>' as '<alias>' into cacerts '<path>' failed: <reason>`,
+  where the script printed the lines of the failed `keytool` runs.
 - A certificate after the first one of a bundle that Go cannot parse (OpenSSL
   accepts some it rejects) is skipped, as `openssl verify -CAfile` does; the
   first one, the leaf, must parse.
@@ -690,8 +707,13 @@ Differences from the script:
   that call it (`deploycrt` without files, `createcrt`). The script took the
   failed read for an empty value and removed the key and certificate; a value
   that LDAP does return empty still removes the file.
-- The error of a failed `zmrc` (`-allservers`) includes what it wrote on
-  stderr, after its output.
+- `-allservers` reaches the other servers with the `zmrc` client of the
+  process (see [`setup rc`](#setup-rc)), not `libexec/zmrc`. The script's
+  `zmrc` exited `0` whatever happened, so a server that could not be reached
+  was taken as done; the failure to reach it (key, connection, authentication)
+  is now reported as `ERROR: zmrc: <command> failed(1):`, with what the server
+  printed and the reason, and the deploy goes on with the other servers. The
+  exit status of the remote command is still ignored.
 - `zmssl.cnf` is still rendered from `conf/zmssl.cnf.in` for the tools that
   read it, but the CA's alternative names follow the current settings; the
   servers come from LDAP directly (`zmprov gas` and `mcf`/`ms` are not run)
@@ -699,6 +721,47 @@ Differences from the script:
 - `deploycrt self` with files is refused by the command line check
   (`certfile argument is not allowed for type 'self'`); `comm` takes both
   files or none (status `1`, with the usage).
+
+### `setup rc`
+
+`zmrc <host> [command words...]` runs a command of the `zmrcd` of another
+server. carbonio-core installs `libexec/zmrc` as `exec
+/opt/zextras/libexec/setup rc "$@"`; the steps that talk to other servers
+(`zmupdateauthkeys -a`, `zmcertmgr deploycrt -allservers`) call the same client
+in process, where they ran `libexec/zmrc`. It needs no `ssh` binary.
+
+Same as `rc.pl`:
+
+- It connects to port 22 as `zextras` with the key
+  `/opt/zextras/.ssh/zimbra_identity` and no terminal (`ssh -T`), and asks for
+  the default command: the `authorized_keys` of the server forces `zmrcd`.
+- What `zmrcd` reads is the words joined by a space and a newline
+  (`zmrc host zmqstat all` sends `zmqstat all`), or, without words, the
+  caller's stdin up to its end (`echo "HOST:h zmupdateauthkeys" | zmrc h`).
+  What it prints is copied to stdout; its stderr goes to stderr.
+- The legacy `alarm(10)`: after each line of output the client waits at most
+  10 seconds for the next one and then leaves with exit status `0`; before the
+  first line it waits as long as the command takes.
+- No host (or an empty one): `Usage: zmrc <hostname> [command words...]` on
+  stdout and exit status `1`. Every other case exits `0`, whatever the remote
+  command did: its exit status is ignored, as `close P` ignored it.
+
+Differences from the script:
+
+- A failure to reach the command (unreadable key, connection refused, key not
+  accepted) prints `zmrc: <reason>` on stderr; `ssh` printed its own message
+  there. The exit status stays `0`. Setting up the connection is bounded to 30
+  seconds.
+- The host key is not checked, like `StrictHostKeyChecking=no`; unlike `ssh`,
+  nothing is added to `known_hosts`. The key of the node is also the only
+  thing that limits who can run `zmrcd`, which runs a fixed set of commands.
+  Checking the host keys against `known_hosts` is not done.
+- Only the key file is used: no `ssh_config`, no agent, no other identity
+  files. A key protected by a passphrase is not supported (`zmsshkeygen` makes
+  none).
+- The words are not passed through a shell, as `echo @ARGV | ssh` did: `*`,
+  quotes and `$` reach `zmrcd` as typed.
+- It runs as root or zextras (the owners of the key), not as any user.
 
 ### `setup proxyconfig`
 
@@ -714,10 +777,8 @@ Differences from the script:
   and given to `RunProv` as one `ms <host>` (and one `mcf` for `-f`), where
   the script ran one `zmprov ms` per run. The `*BindPort` and proxy/SSL
   ports, `zimbraMailPort` and `zimbraMailMode` have Java callbacks
-  (`CheckPortConflict`, `MailPort`, `LocalBind`), so that command goes to
-  zmprov; a change of allowlisted attributes only (for example the proxy
-  switches) is written to LDAP. Attributes that already hold the value are
-  left out.
+  (`CheckPortConflict`, `MailPort`, `LocalBind`), which run as one set for the
+  merged command. Attributes that already hold the value are left out.
 - A value that zmprov would refuse (an enum, a port, a boolean) fails its own
   command with `ERROR: ...` and exit `2`; the other commands of the run still
   apply. A merged command refused by zmprov (a port conflict) fails as a whole.
@@ -838,65 +899,3 @@ Differences from the script:
   attribute is written to LDAP directly, and the message says so.
 - `-help` and `-man` print the synopsis (and the notes), not the whole Perl
   pod.
-
-### `setup stat`
-
-carbonio-core installs `libexec/zmstat-proc`, `-cpu`, `-vm`, `-io`, `-df`,
-`-fd`, `-allprocs`, `-mysql`, `-nginx`, `-mtaqueue` and `-ldap` as `exec
-/opt/zextras/libexec/setup stat <name> "$@"`. Each collector keeps the
-command line (`-i/--interval`, `-l/--log`, `-c/--console`, and for mtaqueue
-`--max-qsize`, `--backoff-interval`, `--max-interval`; `zmstat-io -x` is the
-extended io collector), the usage text, the pid file (`/run/carbonio/stats`),
-the CSV in `zmstat/` (name, heading, column order, number formatting,
-`MM/DD/YYYY HH:MM:SS` timestamps), the rotation (SIGHUP, and at midnight to
-`<dir>/YYYY-MM-DD/<name>.gz`) and the syslog lines of `Zextras::Mon::Stat.pm`,
-so `zmstat-chart`, the chart tool and log rotation keep working. The interval
-comes from `zmstat_interval` (`zmstat_disk_interval` for df). The `stats`
-service runs the collectors itself (`zmstat_mysql_enabled`,
-`zmstat_nginx_enabled` and `zmstat_mtaqueue_enabled` are still the keys of the
-optional ones; `ldap` has no key and is run by hand).
-
-The numbers come from `/proc` and `/sys` instead of `vmstat`, `iostat`, `ps`
-and `df`. Only `mysql` (`bin/mysql`, with the password in `MYSQL_PWD`, not on
-the command line) and `mtaqueue` (`postqueue -p`, and `postfix-prometheus` in
-the background on every sample) still run another program.
-
-Differences from the scripts:
-
-- Samples are aligned to the first round second (`t0 + k*interval`); the
-  scripts slept an interval after each sample and drifted. A sample that
-  fails is logged on stderr and skipped. An interval below 1 is the default.
-- A log whose last line has no timestamp is not treated as stale. A pid file
-  of a live process that is not a zmstat process is replaced. The pid file is
-  removed on a clean stop. The syslog marker of long messages is an upper-case
-  random UUID.
-- `io`: computed from `/sys/block/*/stat` and `/proc/uptime`; the devices are
-  those with I/O when the collector starts, sorted by name; one that
-  disappears reads zero. The heading follows sysstat 12.5 or later (with
-  `kB_dscd`), the `-x` columns sysstat 12.7.4.
-- `vm`: the procps 3.3 columns without `gu`; the first reading only sets the
-  reference.
-- `proc`: `ps` is replaced by `/proc` (the user is the Uid of the process);
-  the postfix master pattern bug of the script is not copied; when the
-  enabled services cannot be read from LDAP the default process list is
-  used; the memory columns use 4 kB pages, as the script did.
-- `allprocs`, `nginx`: names with spaces are parsed correctly and the
-  processes are sorted by name; no row is written on the first tick, and
-  `nginx` writes none while there is no pid file (the script waited 15 s).
-- `df`: from the mount table and `statfs`, one row per device, the shortest
-  mount point wins; squashfs, udev, devtmpfs, overlay and efivarfs and
-  mounts that are not backed by a `/` device are skipped.
-- `fd`: one pid file (`fd.pid`); the sudo wrapper and `fd-real.pid` are gone,
-  so the sudoers entry for `zmstat-fd` is no longer needed. The script ran
-  its sampling loop as root through sudo, but both of its columns are
-  readable as `zextras`: `fd_count` is the first number of
-  `/proc/sys/fs/file-nr` and `mailboxd_fd_count` the entries of
-  `/proc/<pid>/fd` of mailboxd, which runs as `zextras` (the `pgrep -o -f`
-  that finds it only reads command lines). configd runs as `zextras`
-  (`User=zextras`) and starts the collector as itself, so the columns are the
-  ones the script wrote; only a process of another user would be out of
-  reach, and the script did not count any. `setup stat fd` still accepts root
-  (an operator running `zmstat-fd` by hand); it hands the log to `zextras`
-  with mode 0640. `rotate` only signals the running collector; `-c` skips the
-  check of the log path.
-- `ldap`: go-ldap over `ldapi` instead of `ldapsearch`; no debug output.

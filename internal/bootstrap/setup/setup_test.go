@@ -14,7 +14,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/zextras/carbonio-configd/internal/sys"
 	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
 
@@ -127,33 +126,4 @@ func TestReadHistory(t *testing.T) {
 			assert.Equal(t, tc.newInst, f.NewInstall)
 		})
 	}
-}
-
-func TestRunProv_BatchesOnStdinAndReportsErrors(t *testing.T) {
-	e, fakes, _ := testEnv(t)
-
-	var stdin string
-
-	fakes.Exec.OnPath("runuser", func(c *sys.Cmd) (sys.Result, error) {
-		b := new(bytes.Buffer)
-		_, _ = b.ReadFrom(c.Stdin)
-		stdin = b.String()
-		_, _ = c.Stderr.Write([]byte("ERROR: account.NO_SUCH_DOMAIN (no such domain: x)\n"))
-
-		return sys.Result{ExitCode: 2}, nil
-	})
-
-	var p Prov
-	p.Add("ca", "admin@example.com", "pa\"ss\\word")
-	p.Add("mcf", "zimbraFoo", "a b")
-
-	err := e.RunProv(&p)
-	require.ErrorIs(t, err, ErrProv)
-	assert.Contains(t, err.Error(), "NO_SUCH_DOMAIN")
-	assert.Equal(t, `"ca" "admin@example.com" "pa\"ss\\word"`+"\n"+`"mcf" "zimbraFoo" "a b"`+"\nexit\n", stdin)
-
-	call := fakes.Exec.Calls()[0]
-	assert.Equal(t, []string{"-u", "zextras", "--", "sh", "-c", zextrasShim, "/opt/zextras/bin/zmprov", "-r", "-m", "-l"},
-		call.Args)
-	assert.NotContains(t, strings.Join(call.Args, " "), "word")
 }

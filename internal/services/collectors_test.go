@@ -97,9 +97,9 @@ func TestStatsCustomStart_SomeCollectorsPresent(t *testing.T) {
 		return map[string]string{}, nil
 	}
 
-	writeExecutable(t, filepath.Join(tmp, "setup"), []byte("#!/bin/sh\nexit 0\n"))
+	writeExecutable(t, filepath.Join(tmp, "configd"), []byte("#!/bin/sh\nexit 0\n"))
 
-	ctl.p.libexec = tmp
+	ctl.p.bin = tmp
 
 	ctl.p.log = logDir
 
@@ -129,9 +129,9 @@ func TestStatsCustomStart_ConditionalMysqlCollectorEnabled(t *testing.T) {
 		}, nil
 	}
 
-	writeExecutable(t, filepath.Join(tmp, "setup"), []byte("#!/bin/sh\nexit 0\n"))
+	writeExecutable(t, filepath.Join(tmp, "configd"), []byte("#!/bin/sh\nexit 0\n"))
 
-	ctl.p.libexec = tmp
+	ctl.p.bin = tmp
 
 	ctl.p.log = logDir
 

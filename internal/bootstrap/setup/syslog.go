@@ -178,10 +178,11 @@ func (s *syslogSetup) write(name string, old, data []byte, mode fs.FileMode) err
 	return nil
 }
 
-// update rewrites an existing syslog configuration: the previous content is
-// kept in name+".bak" (as zmsyslogsetup did), the file loses the rules of an
-// earlier run and gets extra appended.
-func (s *syslogSetup) update(fn, name string, rewrite func(string) string, extra string) error {
+// update rewrites an existing syslog configuration: the file loses the rules
+// of an earlier run and gets extra appended. With backup the previous content
+// is kept in name+".bak": zmsyslogsetup did that for rsyslog.conf (updateSyslog)
+// but not for the rsyslog.d drop-in file (updateRsyslogd).
+func (s *syslogSetup) update(fn, name string, backup bool, rewrite func(string) string, extra string) error {
 	e := s.e
 
 	old, err := e.Sys.FS.ReadFile(name)
@@ -209,8 +210,10 @@ func (s *syslogSetup) update(fn, name string, rewrite func(string) string, extra
 		return nil
 	}
 
-	if err := s.write(name+".bak", nil, old, info.Mode().Perm()); err != nil {
-		return err
+	if backup {
+		if err := s.write(name+".bak", nil, old, info.Mode().Perm()); err != nil {
+			return err
+		}
 	}
 
 	if err := s.write(name, old, []byte(next), info.Mode().Perm()); err != nil {
@@ -225,7 +228,7 @@ func (s *syslogSetup) update(fn, name string, rewrite func(string) string, extra
 // updateRsyslogConf is updateSyslog of the script: the rules go to the end of
 // /etc/rsyslog.conf.
 func (s *syslogSetup) updateRsyslogConf(ubuntu bool) error {
-	return s.update("updateSyslog", syslogConf, func(c string) string {
+	return s.update("updateSyslog", syslogConf, true, func(c string) string {
 		return syslogStrip(c, &s.target, !ubuntu)
 	}, s.target.rules())
 }
@@ -237,7 +240,7 @@ func (s *syslogSetup) updateRsyslogD() error {
 		return fmt.Errorf("no default rsyslog configuration: %w", err)
 	}
 
-	if err := s.update("updateRsyslogd", syslogDefaultConf, func(c string) string {
+	if err := s.update("updateRsyslogd", syslogDefaultConf, false, func(c string) string {
 		return syslogStrip(c, nil, false)
 	}, ""); err != nil {
 		return err

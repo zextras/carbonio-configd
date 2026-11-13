@@ -135,18 +135,18 @@ func TestRunCertMgr_CreateCRTCarriesOnWhenLDAPCannotBeRead(t *testing.T) {
 	assert.NotNil(t, h.cert(cmSelfCrt), "a new certificate was made")
 }
 
-// A zmrc that cannot even be started is reported with the reason.
+// A server that cannot be reached is reported with the reason.
 func TestRunCertMgr_RemoteThatCannotBeStarted(t *testing.T) {
 	h := newCMTest(t, nil)
 	h.dir.all = []string{cmHost, "a.example.com"}
-	h.remoteStartErr = errors.New("fork/exec zmrc: no such file")
+	h.remoteStartErr = errors.New("reading the SSH key: no such file")
 
 	h.ok("createca", "-new")
 
 	status, out, _ := h.run("deploycrt", "self", "-allservers")
 
 	assert.Equal(t, 1, status)
-	assert.Contains(t, out, "ERROR: zmrc: zmcertmgr getcrt self -allservers failed(1):\n/opt/zextras/libexec/zmrc: fork/exec zmrc: no such file\n")
+	assert.Contains(t, out, "ERROR: zmrc: zmcertmgr getcrt self -allservers failed(1):\nreading the SSH key: no such file\n")
 }
 
 // A certificate file that cannot be read cannot be checked either.

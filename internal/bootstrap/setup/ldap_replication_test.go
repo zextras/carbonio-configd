@@ -173,7 +173,7 @@ func TestLdapEnableReplica_Replica(t *testing.T) {
 		assert.Equal(t, []provCall{{
 			DN: "cn=ldap1.example.com,cn=servers,cn=zimbra", Add: map[string][]string{"zimbraServiceEnabled": {"ldap"}},
 			Del: map[string][]string{}, Replace: map[string][]string{},
-		}}, provTestLDAP().calls, name)
+		}}, provTestLDAP().Calls, name)
 		ldapAssertNoSecret(t, fakes)
 	}
 }

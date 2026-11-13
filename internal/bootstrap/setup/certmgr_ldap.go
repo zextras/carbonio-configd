@@ -5,6 +5,7 @@
 package setup
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"log/slog"
@@ -205,30 +206,18 @@ func (m *certMgr) allServers() []string {
 }
 
 // remote runs a zmcertmgr command on another server through zmrc (the script
-// piped "HOST:<server> <command>" into libexec/zmrc <server>): a failure is
-// reported and false.
+// piped "HOST:<server> <command>" into libexec/zmrc <server>), with the zmrc
+// client of this process: a failure to reach the server is reported and false.
 func (m *certMgr) remote(server, command string) bool {
-	out, err := m.e.Output(&Cmd{
-		AsZextras: true,
-		Path:      m.e.Paths.Path("libexec", "zmrc"),
-		Args:      []string{server},
-		Stdin:     strings.NewReader("HOST:" + server + " " + command + "\n"),
-	})
+	var out, errw bytes.Buffer
+
+	err := m.e.rcRun(server, strings.NewReader(rcLine(server, command)), &out, &errw)
 	if err == nil {
 		return true
 	}
 
-	status := 1
-	text := string(out)
-
-	if ce, ok := errors.AsType[*CmdError](err); ok {
-		status = ce.Code
-		text += ce.Output // what zmrc says on stderr: why it failed
-	} else {
-		text += err.Error() + "\n"
-	}
-
-	m.say("ERROR: zmrc: %s failed(%d):\n%s", command, status, text)
+	// What zmrc printed, then why it failed.
+	m.say("ERROR: zmrc: %s failed(1):\n%s%s%s\n", command, out.String(), errw.String(), err)
 
 	return false
 }

@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<attrs group="ZimbraAttrType" groupid="1">
+<attr id="1" name="zimbraId" type="id" immutable="1" cardinality="single" requiredIn="account,alias,distributionList,cos,domain,server,calendarResource,xmppComponent,group,groupDynamicUnit,groupStaticUnit,addressList" flags="accountInfo"/>
+<attr id="790" name="zimbraCreateTimestamp" type="gentime" cardinality="single" immutable="1" optionalIn="account,alias,distributionList,cos,dataSource,domain,identity,globalConfig,server,signature,calendarResource,xmppComponent,zimletEntry,group,groupDynamicUnit,groupStaticUnit" since="6.0.0_BETA1"/>
+<attr id="65" name="zimbraServiceHostname" type="string" max="256" cardinality="single" optionalIn="server"/>
+<attr id="220" name="zimbraServiceEnabled" type="string" max="256" cardinality="multi" optionalIn="server"/>
+<attr id="24" name="zimbraLmtpBindPort" type="port" cardinality="single" optionalIn="globalConfig,server" flags="serverInherited" callback="CheckPortConflict" requiresRestart="mailbox"/>
+<attr id="154" name="zimbraMailPort" type="port" cardinality="single" optionalIn="globalConfig,server" flags="serverInherited" callback="MailPort" requiresRestart="mailbox,mta,nginxproxy"/>
+<attr id="166" name="zimbraMailSSLPort" type="port" cardinality="single" optionalIn="globalConfig,server" flags="serverInherited" callback="CheckPortConflict" requiresRestart="mailbox,mta,nginxproxy"/>
+<attr id="155" name="zimbraAdminPort" type="port" cardinality="single" optionalIn="globalConfig,server" flags="serverInherited" callback="CheckPortConflict"/>
+<attr id="180" name="zimbraImapBindPort" type="port" cardinality="single" optionalIn="globalConfig,server" flags="serverInherited" callback="CheckPortConflict" requiresRestart="mailbox"/>
+<attr id="626" name="zimbraMailProxyPort" type="port" cardinality="single" optionalIn="globalConfig,server" flags="serverInherited" callback="CheckPortConflict" requiresRestart="nginxproxy" since="5.0.3"/>
+<attr id="1322" name="zimbraAdminProxyPort" type="port" cardinality="single" optionalIn="globalConfig,server" flags="serverInherited" callback="CheckPortConflict" since="8.0.0"/>
+<attr id="1199" name="zimbraMailSSLClientCertPort" type="port" cardinality="single" optionalIn="globalConfig,server" flags="serverInherited" callback="CheckPortConflict" requiresRestart="mailbox" since="7.1.0"/>
+<attr id="94" name="zimbraPop3BindPort" type="port" cardinality="single" optionalIn="globalConfig,server" flags="serverInherited" callback="CheckPortConflict" requiresRestart="mailbox"/>
+<attr id="627" name="zimbraMailSSLProxyPort" type="port" cardinality="single" optionalIn="globalConfig,server" flags="serverInherited" callback="CheckPortConflict" requiresRestart="nginxproxy" since="5.0.3"/>
+<attr id="98" name="zimbraSmtpPort" type="port" cardinality="single" optionalIn="globalConfig,server,domain" flags="serverInherited" requiresRestart="mta"/>
+<attr id="308" name="zimbraMailMode" type="enum" value="http,https,both,mixed,redirect" callback="LocalBind" cardinality="single" optionalIn="globalConfig,server" flags="serverInherited"/>
+<attr id="1365" name="zimbraMailBindAddress" type="string" max="128" callback="LocalBind" cardinality="single" optionalIn="server" requiresRestart="mailbox" since="8.0.0"/>
+<attr id="1366" name="zimbraMailSSLBindAddress" type="string" max="128" callback="LocalBind" cardinality="single" optionalIn="server" requiresRestart="mailbox" since="8.0.0"/>
+<attr id="1380" name="zimbraMailLocalBind" type="boolean" cardinality="single" immutable="1" optionalIn="server" requiresRestart="mailbox" since="8.0.0"/>
+<attr id="1368" name="zimbraAdminBindAddress" type="string" max="128" callback="LocalBind" cardinality="single" optionalIn="server" requiresRestart="mailbox" since="8.0.0"/>
+<attr id="1377" name="zimbraAdminLocalBind" type="boolean" cardinality="single" immutable="1" optionalIn="server" requiresRestart="mailbox" since="8.0.0"/>
+<attr id="125" name="zimbraMailHostPool" type="id" callback="MailHostPool" cardinality="multi" optionalIn="cos"/>
+<attr id="4" name="zimbraMailHost" type="astring" max="256" callback="MailHost" cardinality="single" optionalIn="mailRecipient,group"/>
+<attr id="247" name="zimbraMailTransport" type="astring" max="320" cardinality="single" optionalIn="mailRecipient"/>
+<attr id="15" name="zimbraMailStatus" type="enum" value="enabled,disabled" cardinality="single" optionalIn="mailRecipient,group,groupDynamicUnit" flags="domainAdminModifiable"/>
+<attr id="13" name="zimbraMailDeliveryAddress" type="email" max="256" immutable="1" cardinality="multi" optionalIn="mailRecipient"/>
+<attr id="20" name="zimbraMailAlias" type="email" max="256" immutable="1" cardinality="multi" optionalIn="mailRecipient,group,groupDynamicUnit" flags="accountInfo"/>
+<attr id="2" name="zimbraAccountStatus" type="enum" value="active,maintenance,locked,closed,lockout,pending" callback="AccountStatus" cardinality="single" requiredIn="account" flags="domainAdminModifiable,accountInfo"/>
+<attr id="535" name="zimbraDomainStatus" type="enum" value="active,maintenance,locked,closed,suspended,shutdown" callback="DomainStatus" cardinality="single" optionalIn="globalConfig,domain" flags="domainInherited" since="5.0.0"/>
+<attr id="212" name="zimbraDomainType" type="enum" value="local,alias" immutable="1" cardinality="single" requiredIn="domain"/>
+<attr id="19" name="zimbraDomainName" type="string" max="256" immutable="1" cardinality="single" requiredIn="domain" flags="idn"/>
+<attr id="14" name="zimbraCOSId" type="id" cardinality="single" optionalIn="account" callback="CosId"/>
+<attr id="299" name="zimbraDomainDefaultCOSId" type="id" cardinality="single" optionalIn="domain" callback="CosId"/>
+<attr id="33" name="zimbraPasswordMinLength" type="integer" min="0" cardinality="single" optionalIn="account,cos" flags="accountInfo,accountInherited,domainAdminModifiable"/>
+<attr id="34" name="zimbraPasswordMaxLength" type="integer" min="0" cardinality="single" optionalIn="account,cos" flags="accountInfo,accountInherited,domainAdminModifiable"/>
+<attr id="389" name="zimbraPasswordMinUpperCaseChars" type="integer" min="0" cardinality="single" optionalIn="account,cos" flags="accountInfo,accountInherited,domainAdminModifiable"/>
+<attr id="390" name="zimbraPasswordMinLowerCaseChars" type="integer" min="0" cardinality="single" optionalIn="account,cos" flags="accountInfo,accountInherited,domainAdminModifiable"/>
+<attr id="392" name="zimbraPasswordMinNumericChars" type="integer" min="0" cardinality="single" optionalIn="account,cos" flags="accountInfo,accountInherited,domainAdminModifiable"/>
+<attr id="391" name="zimbraPasswordMinPunctuationChars" type="integer" min="0" cardinality="single" optionalIn="account,cos" flags="accountInfo,accountInherited,domainAdminModifiable"/>
+<attr id="1162" name="zimbraPasswordMinAlphaChars" type="integer" min="0" cardinality="single" optionalIn="account,cos" flags="accountInfo,accountInherited,domainAdminModifiable" since="7.1.0"/>
+<attr id="1255" name="zimbraPasswordMinDigitsOrPuncs" type="integer" min="0" cardinality="single" optionalIn="account,cos" flags="accountInfo,accountInherited,domainAdminModifiable" since="7.1.3"/>
+<attr id="1163" name="zimbraPasswordAllowedChars" type="cstring" max="1024" cardinality="single" optionalIn="account,cos" flags="accountInfo,accountInherited,domainAdminModifiable" since="7.1.0"/>
+<attr id="1256" name="zimbraPasswordAllowedPunctuationChars" type="cstring" max="64" cardinality="single" optionalIn="account,cos" flags="accountInfo,accountInherited,domainAdminModifiable" since="7.1.3"/>
+<attr id="39" name="zimbraPasswordModifiedTime" type="gentime" cardinality="single" optionalIn="account" flags="accountInfo"/>
+<attr id="31" name="zimbraIsAdminAccount" type="boolean" cardinality="single" optionalIn="account" flags="accountInfo"/>
+<attr id="761" name="zimbraAdminConsoleUIComponents" type="string" cardinality="multi" optionalIn="account,distributionList,group" flags="accountInfo" since="6.0.0_BETA1"/>
+<attr id="199" name="zimbraMtaRelayHost" type="astring" max="256" cardinality="multi" optionalIn="globalConfig,server" flags="serverInherited" requiresRestart="mta" callback="MtaRelayHost"/>
+<attr id="311" name="zimbraMtaMyNetworks" type="astring" max="10240" cardinality="multi" optionalIn="globalConfig,server" flags="serverInherited" requiresRestart="mta"/>
+<attr id="510" name="zimbraMtaMyOrigin" type="astring" max="256" cardinality="single" optionalIn="globalConfig,server" flags="serverInherited" requiresRestart="mta"/>
+<attr id="1968" name="zimbraSSLDHParam" type="binary" cardinality="single" optionalIn="globalConfig" requiresRestart="ldap,mta,nginxproxy" since="8.7.0,9.0.0"/>
+<attr id="172" name="zimbraDefaultDomainName" type="string" max="256" cardinality="single" optionalIn="globalConfig" flags="idn" requiresRestart="mailbox"/>
+<attr id="2018" name="zimbraLdapGentimeFractionalSecondsEnabled" type="boolean" cardinality="single" optionalIn="globalConfig,server" flags="serverInherited" requiresRestart="mailbox" since="8.7.0,9.0.0"/>
+<attr id="1052" name="zimbraAllowNonLDHCharsInDomain" type="boolean" cardinality="single" optionalIn="globalConfig" since="6.0.2"/>
+<attr id="756" name="zimbraServerExtraObjectClass" type="string" max="256" cardinality="multi" optionalIn="globalConfig" since="6.0.0_BETA1"/>
+<attr id="755" name="zimbraDomainExtraObjectClass" type="string" max="256" cardinality="multi" optionalIn="globalConfig" since="6.0.0_BETA1"/>
+<attr id="438" name="zimbraAccountExtraObjectClass" type="string" max="256" cardinality="multi" optionalIn="globalConfig"/>
+<attr id="40" name="zimbraAliasTargetId" type="string" max="256" immutable="1" cardinality="single" requiredIn="alias"/>
+<attr id="400" name="zimbraDomainMaxAccounts" type="integer" min="0" cardinality="single" optionalIn="domain"/>
+<attr id="106" name="zimbraMailMessageLifetime" type="duration" cardinality="single" optionalIn="account,cos" flags="accountInherited,domainAdminModifiable,accountInfo"/>
+<attr id="16" name="zimbraMailQuota" type="long" cardinality="single" optionalIn="account,cos" flags="accountInfo,accountInherited,domainAdminModifiable" deprecatedSince="26.9.0"/>
+<attr id="376" name="zimbraIsSystemResource" type="boolean" cardinality="single" optionalIn="account"/>
+<attr id="1214" name="zimbraIsSystemAccount" type="boolean" cardinality="single" optionalIn="account" since="8.0.0"/>
+<attr id="353" name="zimbraHideInGal" type="boolean" cardinality="single" optionalIn="mailRecipient,group" flags="domainAdminModifiable"/>
+<attr id="173" name="zimbraAttachmentsIndexingEnabled" type="boolean" cardinality="single" optionalIn="account,cos" flags="accountInherited,domainAdminModifiable"/>
+<attr id="235" name="zimbraPrefTimeZoneId" type="string" max="256" cardinality="multi" optionalIn="account,cos,domain" flags="accountCosDomainInherited,domainAdminModifiable"/>
+<attr id="61" name="zimbraPrefUseKeyboardShortcuts" type="boolean" cardinality="single" optionalIn="account,cos" flags="accountInherited,domainAdminModifiable"/>
+<attr id="504" name="zimbraReverseProxyLookupTarget" type="boolean" cardinality="single" optionalIn="globalConfig,server" flags="serverInherited" requiresRestart="nginxproxy"/>
+<attr id="244" name="zimbraSpamIsSpamAccount" type="email" max="256" cardinality="single" optionalIn="globalConfig"/>
+<attr id="3127" name="carbonioNotificationFrom" type="email" max="256" cardinality="single" optionalIn="globalConfig,domain" flags="domainInherited,domainAdminModifiable" since="23.4.0"/>
+<attr id="108" name="zimbraAuthTokenLifetime" type="duration" cardinality="single" optionalIn="account,cos" flags="accountInherited,domainAdminModifiable" callback="PositiveTimeInterval"/>
+<attr id="114" name="zimbraLastLogonTimestampFrequency" type="duration" cardinality="single" optionalIn="globalConfig"/>
+<attr id="482" name="zimbraNotebookMaxRevisions" type="integer" min="0" cardinality="single" optionalIn="account,cos" flags="accountInherited" deprecatedSince="23.9.0"/>
+<attr id="1100" name="zimbraAmavisQuarantineAccount" type="email" max="256" cardinality="single" optionalIn="globalConfig" since="7.0.0"/>
+<attr id="900001" name="zimbraTestUnportedCallback" type="string" cardinality="single" optionalIn="globalConfig" callback="NotPorted"/>
+</attrs>

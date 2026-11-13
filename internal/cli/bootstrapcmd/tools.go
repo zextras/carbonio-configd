@@ -39,6 +39,7 @@ var (
 	runIPTool            = setup.RunIPTool
 	runIniUtil           = setup.RunIniUtil
 	runCertMgr           = setup.RunCertMgr
+	runRC                = setup.RunRC
 )
 
 // lookupZextrasUID is the uid of zextras, -1 when there is no such user.
@@ -267,6 +268,19 @@ func RunLDAPEnableMMR(ctx context.Context, env sys.System, stdout, stderr io.Wri
 	}
 
 	return runLDAPEnableMMR(e, args, stdout, stderr)
+}
+
+// RunRC executes "setup rc": zmrc, which runs a command of zmrcd on another
+// server over SSH (see setup.RunRC). args are "<host> [command words...]";
+// the exit status and the output are the script's. It runs as root or zextras
+// (the owners of the SSH key).
+func RunRC(ctx context.Context, env sys.System, stdin io.Reader, stdout, stderr io.Writer, args []string) int {
+	e, ok := toolEnv(ctx, env, stdout, stderr, "rc")
+	if !ok {
+		return 1
+	}
+
+	return runRC(e, args, stdin, stdout, stderr)
 }
 
 // RunIPTool executes "setup iptool": zmiptool (see setup.RunIPTool). The

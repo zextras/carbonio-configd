@@ -11,9 +11,11 @@
 //	carbonio-bootstrap gal-sync-account | ssh-keygen | update-authkeys
 //	                           what the legacy setup.pl calls instead of zmgsautil,
 //	                           zmsshkeygen and zmupdateauthkeys
-//	carbonio-bootstrap stat <name> [options]
-//	                           the zmstat-* statistics collectors (proc, cpu, vm, io, df,
-//	                           fd, allprocs, mysql, nginx, mtaqueue, ldap), natively
+//	carbonio-bootstrap rc <host> [command words...]
+//	                           zmrc: a zmrcd command on another server, over SSH, natively
+//	carbonio-bootstrap stat <name> [options] | stat run <collector>...
+//	                           the same as "configd stat" (the statistics collectors),
+//	                           kept for the zmstat-<name> wrappers of older carbonio-core
 //
 // It is a binary of its own, apart from configd, so the full-screen terminal
 // interface is not linked into the daemon.
@@ -33,6 +35,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/zextras/carbonio-configd/internal/cli/bootstrapcmd"
+	"github.com/zextras/carbonio-configd/internal/cli/statcmd"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
@@ -78,7 +81,7 @@ func run(args []string, env sys.System, stdin io.Reader, stdout, stderr io.Write
 // arguments (proxyconfig has a -c and a -d of its own).
 var toolCommands = []string{"ssh-keygen", "update-authkeys", "syslog", "dhparam", "proxyconfig", "ldap-passwd",
 	"ldap-schema", "ldap-update-ldif", "ldap-enable-replica", "ldap-enable-mmr", "iptool", "iniutil", "certmgr",
-	"stat"}
+	"stat", "rc"}
 
 // legacyArgs maps the options of the former shell script: "-c FILE" is
 // "--legacy-config FILE --non-interactive", and "-d" (debug) is accepted and
@@ -191,10 +194,12 @@ func newRootCmd(env sys.System, stdin io.Reader, stdout, stderr io.Writer, statu
 			bootstrapcmd.RunIPTool, tio),
 		newToolCmd("iniutil [options] inifile", "Read or edit one ini file (zminiutil)",
 			bootstrapcmd.RunIniUtil, tio),
-		newToolCmd("stat <name> [options]",
-			"Run a statistics collector: the zmstat-<name> scripts (proc, cpu, vm, io, df, fd, allprocs, "+
-				"mysql, nginx, mtaqueue, ldap), as the zextras user",
-			bootstrapcmd.RunStat, tio))
+		newStdinToolCmd("rc <host> [command words...]",
+			"Run a zmrcd command on another server over SSH: the words, or stdin, are what zmrcd reads (zmrc)",
+			bootstrapcmd.RunRC, tio),
+		newToolCmd("stat <name> [options] | stat run <collector>...",
+			"Kept for the zmstat-<name> wrappers of older carbonio-core: the same as \"configd stat\"",
+			statcmd.Run, tio))
 
 	return root
 }

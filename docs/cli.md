@@ -31,6 +31,7 @@ Source of truth: the [cobra](https://github.com/spf13/cobra) command tree in
 - [proxy](#proxy)
 - [tls](#tls)
 - [ldap](#ldap)
+- [stat](#stat)
 - [release](#release)
 - [completion](#completion)
 - [Legacy wrappers](#legacy-wrappers)
@@ -195,7 +196,7 @@ Controls one service: the verbs of the legacy `zm*ctl` scripts.
 | `reload` | reload; `norewrite` honoured |
 | `status` | detailed status (pid, uptime); exit `1` and `<service> is not running.` when it is stopped |
 | `refresh` | make the service re-read its configuration: defined only for `milter` (sends `SIGCONT` to the JVM) |
-| `rotate` | make the service reopen its logs: defined only for `stats` (`SIGHUP` to every collector) |
+| `rotate` | make the service reopen its logs: defined only for `stats` (`SIGHUP` to the stats process, which rotates the log of every collector) |
 
 `norewrite` is a positional word, accepted by every verb but meaningful only
 for `start`, `restart` and `reload`. Any other trailing argument is accepted
@@ -246,7 +247,7 @@ Registry names (what `service list` shows, start order top to bottom):
 | `saslauthd` | saslauthd | `carbonio-saslauthd` |
 | `milter` | milter JVM; only started when enabled in `mta_milter_options` | `carbonio-milter` |
 | `mta` | Postfix (depends on `saslauthd` and `milter`) | `carbonio-postfix` |
-| `stats` | the zmstat collectors (`setup stat <name>`) | `carbonio-stats` |
+| `stats` | the zmstat collectors, all in one process (`configd stat run <collector>...`) | `carbonio-stats` |
 
 Accepted aliases (resolved before lookup; they never appear in listings):
 
@@ -472,6 +473,26 @@ StartTLS is used only when `ldap_starttls_supported=1` together with
 `zimbra_require_interprocess_security=1`; see
 [architecture.md](architecture.md#ldap-transport-security-and-timeouts).
 
+## stat
+
+```bash
+configd stat <name> [options]            # one collector, in the foreground
+configd stat run <collector>...          # several, in one process
+configd stat run proc cpu "io -x" df     # each argument is one collector's command line
+```
+
+The statistics collectors of the `zmstat-<name>` scripts (`proc cpu vm io df fd
+allprocs mysql nginx mtaqueue ldap`), with their options (`-i`, `-l`, `-c`, ...,
+parsed by the collector, not by configd), files and exit codes. They run until
+SIGTERM or SIGINT, as `zextras` (root too for `fd`: the user check is the
+collector's own, so the table above does not list it). `status 1` is a refused
+command line (usage, unknown collector, wrong user) or a collector that could
+not start. The `stats` service runs `configd stat run`. Everything about them is
+in [stats.md](stats.md).
+
+`/opt/zextras/libexec/setup stat` is the same command, kept for the `zmstat-<name>`
+wrappers of older `carbonio-core` releases.
+
 ## release
 
 ```bash
@@ -537,6 +558,7 @@ is a `#!/bin/bash` one-liner around the binary, so scripts keep working.
 | `zmcbpolicydctl` | `… cbpolicyd` |
 | `zmmilterctl` | `… milter` |
 | `zmstatctl` | `… stats` |
+| `libexec/zmstat-<name>` (`proc cpu vm io df fd allprocs mysql nginx mtaqueue ldap`) | `configd stat <name> …` |
 | `zmamavisdctl` | `… amavis` |
 | `zmantispamctl` | `… antispam` |
 | `zmantivirusctl` | `… antivirus` |

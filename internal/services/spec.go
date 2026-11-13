@@ -96,22 +96,22 @@ type CommandSpec struct {
 	ReloadRestartsDependencies bool
 }
 
-// CollectorSpec supervises a set of helper processes that each write a pidfile
-// (the collectors of stats, "setup stat <name>"): started one by one from the
-// libexec directory with a <LogPrefix><name>.out log, stopped through the pidfiles of the
-// controller's stats pid directory — killing each process group, with sudo for
-// root-owned collectors — then by identity (ServiceDef.ProcessName) for
-// survivors, and rotated by sending SIGHUP (they reopen their logs) to every
-// pidfile's process.
+// CollectorSpec supervises the collectors of stats ("configd stat run
+// <collector>..."): all of them run in one process, started from the bin
+// directory with a LogName log, which keeps a pidfile per collector in the
+// controller's stats pid directory (all naming that process). Stop kills the
+// process group of each pidfile's process, with sudo for a root-owned one,
+// then by identity (ServiceDef.ProcessName) for survivors; rotate sends SIGHUP
+// (the collectors reopen their logs) to the process of the pidfiles, once.
 type CollectorSpec struct {
-	// Binary is the executable under libexec that runs every collector, and
-	// Args the arguments before the collector (its command line), LogPrefix
-	// what precedes the collector name in its log file name.
-	Binary    string
-	Args      []string
-	LogPrefix string
+	// Binary is the executable under bin that runs the collectors, Args
+	// the arguments before them ("stat", "run"), and LogName the file of the
+	// log directory the process writes to.
+	Binary  string
+	Args    []string
+	LogName string
 	// Always are the collectors every host runs, as the name and its options
-	// ("io -x").
+	// ("io -x"); each is one argument of the process.
 	Always []string
 	// Optional are the collectors enabled by a localconfig key set to TRUE.
 	Optional []OptionalCollector

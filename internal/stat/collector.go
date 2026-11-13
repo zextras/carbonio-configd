@@ -152,7 +152,7 @@ type options struct {
 	args     []string
 }
 
-// spec describes one collector of "setup stat <name>".
+// spec describes one collector of "configd stat <name>".
 type spec struct {
 	name string
 	// csv and pid are the file names under the zmstat and the pid directory;
@@ -191,7 +191,7 @@ func specs() []*spec {
 	}
 }
 
-// Names lists the collectors "setup stat" runs, sorted.
+// Names lists the collectors "configd stat" runs, sorted.
 func Names() []string {
 	var names []string
 
