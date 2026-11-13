@@ -7,6 +7,7 @@ package setup
 import (
 	"bytes"
 	"errors"
+	"io/fs"
 	"os"
 	"syscall"
 	"testing"
@@ -265,6 +266,79 @@ func TestRunIniUtil_MissingFileExitsWithErrno(t *testing.T) { // die: the exit s
 
 	assert.Equal(t, 2, (&iniDie{err: &os.PathError{Err: syscall.ENOENT}}).status())
 	assert.Equal(t, 255, (&iniDie{err: errors.New("x")}).status())
+}
+
+// rootOwnedFS shows every file as owned by root and answers Chown with chownErr:
+// the fake filesystem has no owners in its Stat, which is what the write reads.
+type rootOwnedFS struct {
+	*systest.FS
+
+	chownErr error
+	chowns   []string
+}
+
+type rootOwnedInfo struct{ fs.FileInfo }
+
+func (rootOwnedInfo) Sys() any { return &syscall.Stat_t{} }
+
+func (f *rootOwnedFS) Stat(name string) (fs.FileInfo, error) {
+	info, err := f.FS.Stat(name)
+	if err != nil {
+		return nil, err
+	}
+
+	return rootOwnedInfo{info}, nil
+}
+
+func (f *rootOwnedFS) Chown(name string, _, _ int) error {
+	f.chowns = append(f.chowns, name)
+
+	return f.chownErr
+}
+
+// A file of another user cannot be given back to it unless the caller is root:
+// the script renamed a file of its own over it, which worked, so the write does
+// too and the file is the caller's.
+func TestRunIniUtil_FileOfAnotherUserIsEditedWhenTheOwnerCannotBeKept(t *testing.T) {
+	_, fakes, _ := ldapTestEnv(t)
+	fakes.FS.Put(iniTestFile, []byte(iniTestSample), 0o666)
+
+	ofs := &rootOwnedFS{FS: fakes.FS, chownErr: &fs.PathError{Op: "chown", Path: iniTestFile, Err: syscall.EPERM}}
+
+	var out, errb bytes.Buffer
+
+	code := RunIniUtil(ofs, []string{"--backup=.b", "--set", "--section=mysqld", "--key=port", "--value=3307", iniTestFile},
+		&out, &errb)
+
+	require.Equal(t, 0, code, errb.String())
+	assert.Empty(t, errb.String())
+	assert.Equal(t, []string{iniTestFile + ".b", iniTestFile}, ofs.chowns, "the owner was tried for the backup and the file")
+
+	got, _ := fakes.FS.Data(iniTestFile)
+	assert.Contains(t, string(got), "port = 3307\n")
+
+	backup, ok := fakes.FS.Data(iniTestFile + ".b")
+	assert.True(t, ok)
+	assert.Equal(t, iniTestSample, string(backup))
+
+	mode, _ := fakes.FS.Mode(iniTestFile)
+	assert.Equal(t, os.FileMode(0o666), mode.Perm(), "the mode stays")
+}
+
+// Only the refusal of the owner is let through: any other failure still stops the write.
+func TestRunIniUtil_OtherChownFailuresStillFail(t *testing.T) {
+	_, fakes, _ := ldapTestEnv(t)
+	fakes.FS.Put(iniTestFile, []byte(iniTestSample), 0o666)
+
+	ofs := &rootOwnedFS{FS: fakes.FS, chownErr: &fs.PathError{Op: "chown", Path: iniTestFile, Err: syscall.EIO}}
+
+	var out, errb bytes.Buffer
+
+	code := RunIniUtil(ofs, []string{"--backup=.b", "--set", "--section=mysqld", "--key=port", "--value=3307", iniTestFile},
+		&out, &errb)
+
+	assert.Equal(t, int(syscall.EIO), code)
+	assert.Contains(t, errb.String(), "can't open backup file")
 }
 
 func TestIniApply_ConsistentWithRender(t *testing.T) {
