@@ -11,7 +11,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/pavlo-v-chernykh/keystore-go/v4"
@@ -19,9 +18,6 @@ import (
 
 // certX509 is the certificate type of a Java keystore entry.
 const certX509 = "X509"
-
-// The message keytool gives for the failure zmcertmgr reports.
-const certKeytoolTampered = "keytool error: java.io.IOException: Keystore was tampered with, or password was incorrect"
 
 // certJKS reads a Java keystore; a missing file is an empty store.
 func (m *certMgr) certJKS(file string, pass []byte) (keystore.KeyStore, error) {
@@ -43,8 +39,8 @@ func (m *certMgr) certJKS(file string, pass []byte) (keystore.KeyStore, error) {
 	return ks, nil
 }
 
-// storeJKS writes a Java keystore over file (in place: it keeps its mode and
-// owner; a new one is 0640, owned by zextras).
+// storeJKS writes a Java keystore over file (atomically: it keeps its mode
+// and owner; a new one is 0640, owned by zextras).
 func (m *certMgr) storeJKS(ks keystore.KeyStore, file string, pass []byte) error {
 	var buf bytes.Buffer
 
@@ -52,7 +48,7 @@ func (m *certMgr) storeJKS(ks keystore.KeyStore, file string, pass []byte) error
 		return err
 	}
 
-	return m.writeFile(file, buf.Bytes(), certModeFile)
+	return m.replaceFile(file, buf.Bytes(), certModeFile)
 }
 
 // createkeystore is createkeystore: the key and the certificates of a type
@@ -176,22 +172,22 @@ func certChainFor(key crypto.Signer, certs []*x509.Certificate) ([]*x509.Certifi
 	return nil, errors.New("no certificate matches the private key")
 }
 
-// keystoreToPEM is _keystoreToPEM: keytool exports the certificate of the
-// mailboxd alias of the keystore to mailboxd.der, which is written as PEM to
-// mailboxd.pem.
+// keystoreToPEM is _keystoreToPEM: the certificate of the mailboxd alias of
+// the keystore (what keytool -export wrote) goes to mailboxd.der, and as PEM
+// to mailboxd.pem.
 func (m *certMgr) keystoreToPEM() bool {
-	out, code := m.keytool(m.p.keystore, m.lcGet("mailboxd_keystore_password"),
-		"-export", "-file", m.p.mailboxdDER, certKeytoolAlias, m.lcGet("mailboxd_server"))
-	if code != 0 || !m.isFile(m.p.mailboxdDER) {
-		return m.fail("mailboxd: export to '%s' failed(%d):\n%s", m.p.mailboxdDER, code, out)
+	alias := m.lcGet("mailboxd_server")
+
+	der, err := m.exportCert(m.p.keystore, m.lcGet("mailboxd_keystore_password"), alias)
+	if err == nil {
+		err = m.writeFile(m.p.mailboxdDER, der, certModeFile)
 	}
 
-	der, err := m.slurp(m.p.mailboxdDER)
-	if err == nil {
-		_, err = x509.ParseCertificate(der)
+	if err != nil {
+		return m.fail("mailboxd: export to '%s' failed(1):\n%s\n", m.p.mailboxdDER, certErrMessage(err))
 	}
 
-	if err == nil {
+	if _, err = x509.ParseCertificate(der); err == nil {
 		err = m.writeFile(m.p.mailboxdPEM, certPEMBlock("CERTIFICATE", der), certModeFile)
 	}
 
@@ -202,46 +198,30 @@ func (m *certMgr) keystoreToPEM() bool {
 	return true
 }
 
-// certKeytoolAlias is the option of keytool that names an entry.
-const certKeytoolAlias = "-alias"
-
-// certStorePassEnv is the variable that gives keytool its store password
-// (-storepass:env): the password is never on its command line.
-const certStorePassEnv = "ZMCERTMGR_STOREPASS"
-
-// certKeytoolMissing is the status reported when keytool cannot be run.
-const certKeytoolMissing = 127
-
-// keytool is runCacertsKeytool and runMailboxKeytool: keytool on a store as
-// zextras, with the store password in its environment. It returns what
-// keytool printed (the script merged stderr into stdout) and its status.
-func (m *certMgr) keytool(store, pass string, args ...string) (out string, code int) {
-	bin := filepath.Join(m.e.Paths.Base, "common", "bin")
-	if jbin := filepath.Join(m.e.Paths.Base, "java", "bin"); m.isDir(jbin) {
-		bin = jbin
-	}
-
-	stdout, err := m.e.Output(&Cmd{
-		AsZextras: true,
-		Path:      filepath.Join(bin, "keytool"),
-		Args:      append(slices.Clone(args), "-keystore", store, "-storepass:env", certStorePassEnv),
-		Env:       []string{certStorePassEnv + "=" + pass},
-		Quiet:     true,
-	})
-
-	if ce, ok := errors.AsType[*CmdError](err); ok {
-		return string(stdout) + ce.Output, ce.Code
-	}
-
+// exportCert is keytool -export: the certificate of an alias of a keystore.
+func (m *certMgr) exportCert(file, pass, alias string) ([]byte, error) {
+	ts, err := m.openTrustStore(file, pass, false)
 	if err != nil {
-		return err.Error() + "\n", certKeytoolMissing
+		return nil, err
 	}
 
-	return string(stdout), 0
+	der, ok := ts.get(alias)
+	if !ok {
+		return nil, errors.New(certKeytoolNoAlias(alias))
+	}
+
+	return der, nil
+}
+
+// certKeytoolNoAlias is the message of keytool for an alias a keystore does
+// not have.
+func certKeytoolNoAlias(alias string) string {
+	return "keytool error: java.lang.Exception: Alias <" + alias + "> does not exist"
 }
 
 // addcacert is addcacert: the certificate of the file is imported into the
-// truststore (cacerts) with keytool under the alias, replacing the alias.
+// truststore (cacerts) under the alias, replacing the alias, as keytool
+// -delete and -import -noprompt did.
 func (m *certMgr) addcacert(crtf, alias string) (bool, error) {
 	if crtf == "" {
 		return false, errors.New("addcacert: no certfile argument specified")
@@ -261,18 +241,39 @@ func (m *certMgr) addcacert(crtf, alias string) (bool, error) {
 
 	pass := m.lcGet("mailboxd_truststore_password")
 
-	out, code := m.keytool(m.p.cacerts, pass, "-delete", certKeytoolAlias, alias)
-	if code != 0 && !strings.Contains(out, "does not exist") {
-		m.fail("cacerts keytool(-delete -alias %s) returned non-zero(%d):\n%s", alias, code, out)
+	ts, err := m.openTrustStore(m.p.cacerts, pass, true)
+	if err == nil {
+		err = m.importCert(ts, crtf, alias, pass)
 	}
 
-	out, code = m.keytool(m.p.cacerts, pass, "-import", certKeytoolAlias, alias, "-noprompt", "-file", crtf)
-	if code != 0 {
-		return m.fail("cacerts keytool(-import -alias %s -noprompt -file %s) returned non-zero(%d):\n%s",
-			alias, crtf, code, out), nil
+	if err != nil {
+		return m.fail(certImportFailed, crtf, alias, m.p.cacerts, certErrMessage(err)), nil
 	}
 
 	m.say("** NOTE: restart mailboxd to use the imported certificate.\n")
 
 	return true, nil
+}
+
+// certImportFailed is the error of an import into the truststore: the file,
+// the alias, the truststore and why.
+const certImportFailed = "importing '%s' as '%s' into cacerts '%s' failed: %s\n"
+
+// importCert is keytool -delete and -import -noprompt: the certificate of
+// the file replaces the alias, and the store is written.
+func (m *certMgr) importCert(ts trustStore, crtf, alias, pass string) error {
+	data, err := m.slurp(crtf)
+	if err != nil {
+		return err
+	}
+
+	cert, err := certFromFile(data)
+	if err != nil {
+		return err
+	}
+
+	ts.remove(alias)
+	ts.set(alias, cert)
+
+	return m.saveTrustStore(ts, m.p.cacerts, pass)
 }
