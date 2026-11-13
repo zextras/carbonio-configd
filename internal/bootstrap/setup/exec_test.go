@@ -52,3 +52,58 @@ func TestNonZeroExitIsCmdError(t *testing.T) {
 	_, ok = errors.AsType[*CmdError](e.Root("missing"))
 	assert.False(t, ok)
 }
+
+// The zextras environment's PERL5LIB is what zextras.bashrc builds from
+// `perl -V:archname`: "<lib>/<archname>:<lib>". Perl itself is never run.
+func TestZextrasEnv_PerlLibFromArchDirectory(t *testing.T) {
+	const lib = "/opt/zextras/common/lib/perl5"
+
+	tests := []struct {
+		name string
+		dirs []string
+		want string
+	}{
+		{"one arch dir", []string{"x86_64-linux-thread-multi", "auto", "Mail"}, lib + "/x86_64-linux-thread-multi:" + lib},
+		{"no arch dir", []string{"auto", "Mail"}, lib},
+		{"no perl5 dir", nil, lib},
+		{"several: first by name", []string{"b-linux-x", "a-linux-y"}, lib + "/a-linux-y:" + lib},
+		{"several: this machine's", []string{"aarch64-linux-thread-multi", "x86_64-linux-thread-multi"}, lib + "/x86_64-linux-thread-multi:" + lib},
+		{"debian archname", []string{"x86_64-linux-gnu-thread-multi"}, lib + "/x86_64-linux-gnu-thread-multi:" + lib},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e, fakes, _ := testEnv(t)
+			e.perlLib = ""
+
+			for _, d := range tc.dirs {
+				require.NoError(t, fakes.FS.MkdirAll(lib+"/"+d, 0o755))
+			}
+
+			if tc.name == "several: this machine's" {
+				assert.Equal(t, tc.want, perlLib(e.Sys.FS, lib, "amd64"))
+				assert.Equal(t, lib+"/aarch64-linux-thread-multi:"+lib, perlLib(e.Sys.FS, lib, "arm64"))
+
+				return
+			}
+
+			env := e.zextrasEnv()
+			assert.Contains(t, env, "PERL5LIB="+tc.want)
+			assert.Contains(t, env, "PERLLIB="+tc.want)
+
+			for _, c := range fakes.Exec.Calls() {
+				assert.NotEqual(t, "perl", c.Path)
+			}
+		})
+	}
+}
+
+// A regular file named like an arch directory is not one.
+func TestPerlLib_IgnoresFiles(t *testing.T) {
+	e, fakes, _ := testEnv(t)
+
+	require.NoError(t, fakes.FS.MkdirAll("/lib", 0o755))
+	require.NoError(t, fakes.FS.WriteFileAtomic("/lib/x86_64-linux-thread-multi", []byte("x"), 0o644))
+
+	assert.Equal(t, "/lib", perlLib(e.Sys.FS, "/lib", "amd64"))
+}

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -71,10 +72,7 @@ func (e *Env) output(c *Cmd, capture bool) ([]byte, error) {
 	// opens /dev/tty (zmprov's JLine runs stty on it) would otherwise be
 	// stopped by SIGTTOU from its background process group, hanging the run
 	// whenever bootstrap is started from a terminal.
-	cmd, err := e.sysCmd(c)
-	if err != nil {
-		return nil, err
-	}
+	cmd := e.sysCmd(c)
 
 	shown := shownArgs(append([]string{c.Path}, c.Args...))
 	who := "root"
@@ -131,15 +129,12 @@ func (e *Env) output(c *Cmd, capture bool) ([]byte, error) {
 // controlling terminal. An AsZextras command goes through the environment
 // shim, under runuser unless the process already runs as zextras (runuser
 // needs root).
-func (e *Env) sysCmd(c *Cmd) (*sys.Cmd, error) {
+func (e *Env) sysCmd(c *Cmd) *sys.Cmd {
 	if !c.AsZextras {
-		return &sys.Cmd{Path: c.Path, Args: c.Args, Stdin: c.Stdin, Env: c.Env, Setsid: true}, nil
+		return &sys.Cmd{Path: c.Path, Args: c.Args, Stdin: c.Stdin, Env: c.Env, Setsid: true}
 	}
 
-	env, err := e.zextrasEnv()
-	if err != nil {
-		return nil, err
-	}
+	env := e.zextrasEnv()
 
 	shim := append([]string{"-c", zextrasShim, c.Path}, c.Args...)
 	cmd := &sys.Cmd{
@@ -154,7 +149,7 @@ func (e *Env) sysCmd(c *Cmd) (*sys.Cmd, error) {
 		cmd.Path, cmd.Args = "sh", shim
 	}
 
-	return cmd, nil
+	return cmd
 }
 
 // cmdLog is where a command's output goes: always tail (for the error), and
@@ -217,17 +212,47 @@ func lastLines(out string, quiet bool) string {
 	return ": " + masked
 }
 
-// zextrasEnv is the environment zextras.bashrc sets up for a login shell.
-func (e *Env) zextrasEnv() ([]string, error) {
-	if e.perlLib == "" {
-		out, err := sys.Output(e.Ctx, e.Sys.Exec, "perl", "-V:archname")
-		if err != nil {
-			return nil, fmt.Errorf("perl -V:archname: %w", err)
+// perlGoArch maps GOARCH to the leading word of Perl's archname.
+var perlGoArch = map[string]string{"amd64": "x86_64", "arm64": "aarch64"}
+
+// perlLib is the PERL5LIB zextras.bashrc builds with `perl -V:archname`:
+// "<lib>/<archname>:<lib>". Perl is not run; the archname directory is the
+// one under lib named like an archname (arch-os[-flags], e.g.
+// x86_64-linux-thread-multi). When several match, the one for goarch wins,
+// then the first by name; when none exists, the value is just lib.
+func perlLib(fsys sys.FS, lib, goarch string) string {
+	entries, err := fsys.ReadDir(lib)
+	if err != nil {
+		return lib
+	}
+
+	best := ""
+
+	for _, ent := range entries {
+		name := ent.Name()
+		if !ent.IsDir() || !strings.Contains(name, "-linux") {
+			continue
 		}
 
-		arch := strings.Trim(strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(string(out)), "archname="), ";"), "'")
-		lib := e.Paths.Path("common", "lib", "perl5")
-		e.perlLib = lib + "/" + arch + ":" + lib
+		prefer := strings.HasPrefix(name, perlGoArch[goarch]+"-")
+		bestPrefer := strings.HasPrefix(best, perlGoArch[goarch]+"-")
+
+		if best == "" || (prefer && !bestPrefer) || (prefer == bestPrefer && name < best) {
+			best = name
+		}
+	}
+
+	if best == "" {
+		return lib
+	}
+
+	return lib + "/" + best + ":" + lib
+}
+
+// zextrasEnv is the environment zextras.bashrc sets up for a login shell.
+func (e *Env) zextrasEnv() []string {
+	if e.perlLib == "" {
+		e.perlLib = perlLib(e.Sys.FS, e.Paths.Path("common", "lib", "perl5"), runtime.GOARCH)
 	}
 
 	javaHome := e.Paths.Path("common", "lib", "jvm", "java")
@@ -250,5 +275,5 @@ func (e *Env) zextrasEnv() ([]string, error) {
 		"LC_ALL=C.UTF-8",
 		"CLASSPATH=",
 		"LD_LIBRARY_PATH=",
-	}, nil
+	}
 }
