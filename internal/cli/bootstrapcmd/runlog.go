@@ -11,6 +11,7 @@ import (
 
 	"github.com/zextras/carbonio-configd/internal/bootstrap"
 	"github.com/zextras/carbonio-configd/internal/bootstrap/setup"
+	"github.com/zextras/carbonio-configd/internal/version"
 )
 
 // envPrefix is the prefix of the bootstrap's environment keys.
@@ -110,16 +111,18 @@ func logConfig(e *setup.Env, r *bootstrap.Resolved) {
 
 // buildVersion is the module version and commit the binary was built from.
 func buildVersion() string {
+	v := version.Main()
+
 	bi, ok := debug.ReadBuildInfo()
 	if !ok {
-		return "(unknown)"
+		return v
 	}
 
 	for _, s := range bi.Settings {
 		if s.Key == "vcs.revision" && len(s.Value) >= 12 {
-			return bi.Main.Version + " (" + s.Value[:12] + ")"
+			return v + " (" + s.Value[:12] + ")"
 		}
 	}
 
-	return bi.Main.Version
+	return v
 }
