@@ -532,6 +532,7 @@ statuses of their scripts instead.
 | `setup ssh-keygen [rsa]` | `zmsshkeygen` | root, zextras | Generates the key pair and stores the public key in the server entry. Another key type prints `Bad keytype`. |
 | `setup update-authkeys [-a]` | `zmupdateauthkeys` | root, zextras | Rewrites `authorized_keys`; `-a` first asks every server, through the `zmrc` client (see [`setup rc`](#setup-rc)), to update its own (a server that does not answer is logged). |
 | `setup rc <host> [command words...]` | `zmrc` | root, zextras | Runs a `zmrcd` command on another server over SSH; see [`setup rc`](#setup-rc). |
+| `setup rcd` | `zmrcd` | root, zextras | The receiving side of `zmrc`, the forced command of the SSH key: reads one command line on stdin and runs it if it is in a closed table; see [`setup rcd`](#setup-rcd). |
 | `setup syslog` | `zmsyslogsetup` | root | Sets up rsyslog as the "Set up syslog.conf" step does. |
 | `setup dhparam install` | `openssl dhparam` in setup.pl | root, zextras | Installs `conf/dhparam.pem.crb` (ffdhe2048) unless present and sets `zimbraSSLDHParam`. Plain `setup dhparam` does the same, kept for setup.pl; use `install`. |
 | `setup dhparam [get\|set options]` | `zmdhparam` | root, zextras | Reads or stores the DH parameters of `zimbraSSLDHParam`; see [`setup dhparam get` and `set`](#setup-dhparam-get-and-set). |
@@ -543,7 +544,8 @@ statuses of their scripts instead.
 | `setup ldap-enable-replica` | `zmldapenablereplica` | root | The provider overlays on the master, the consumer configuration on a replica. |
 | `setup ldap-enable-mmr [-r RID] [-s SID] -m MMRURI` | `zmldapenable-mmr` | root, zextras | Adds a multi-master agreement with another master. |
 | `setup iptool [-d [-m ipmode]]` | `zmiptool` | root, zextras | Applies `zimbraIPMode` to the Java options and the MySQL bind address. |
-| `setup prov [-r] [-m] [-l] <verb> args...` | `zmprov -r -m -l <verb> ...` (Java, one JVM per call) in setup.pl | root, zextras | The zmprov commands setup.pl runs, natively over LDAP: `cs cd ca aaa mcf ms mc ma md gs gcf gacf ga gc gd gas garpu gamcs`. See [`setup prov`](#setup-prov). |
+| `setup prov [-r] [-m] [-l] <verb> args...` | `zmprov -r -m -l <verb> ...` (Java, one JVM per call) in setup.pl | root, zextras | The zmprov commands setup.pl runs, natively over LDAP: `cs cd ca aaa mcf ms mc ma md gs gcf gacf gad ga gc gd gas garpu gamcs`. See [`setup prov`](#setup-prov). carbonio-core's `clientcertmgr` and `cbpolicydinit` call it too. |
+| `setup gsautil <command> [options]` | `zmgsautil` (`com.zimbra.cs.util.GalSyncAccountUtil`, Java) | root, zextras | `createAccount addDataSource deleteAccount trickleSync fullSync forceSync`, with the options, output, usage text and exit statuses of the tool. See [`setup gsautil`](#setup-gsautil). |
 | `setup random-password [-l] [min max]` | `zmjava com.zimbra.common.util.RandomPassword` | any user | Prints a random password of `min` to `max` characters (24 to 32 when they are not given) from `crypto/rand`; `-l` leaves out the dot, as for a local part. |
 | `setup serverips [--networks]` | `zmserverips` (Perl) | any user | Lists the addresses of `/sbin/ip addr` without the link-local ones, as `addr:<ip> Mask:<mask>`; `--networks` (`-n`) prints the networks (`10.1.5.0/24`, `[::1]/128`). `0` when an address was listed, `1` when none, `2` when `/sbin/ip` cannot run. |
 | `setup iniutil [options] inifile` | `zminiutil` | any user | Reads or edits one ini file (`--list --get --isset --set --setmin --setmax --unset`). |
@@ -565,6 +567,7 @@ given to `ca` is on the command line of the process.
 | `ma <account\|id> [+\|-]attr value...`, `md <domain\|id> [+\|-]attr value...` | Modify an existing account or domain, running the attribute callbacks of the Java provisioning that are ported for them (`CheckPortConflict`, `MailHost`, `PositiveTimeInterval`, `MtaAuthHost`, `DisplayName`, `CosId`, and for a domain `DomainStatus`, which refuses a domain being renamed). An attribute of any other callback (`AccountStatus`: it publishes events and removes the account from distribution lists), and `userPassword` (which would be stored unhashed), are refused. `setup.pl` does not call `ma` or `md` today. |
 | `gs [-e] <server\|id> [attr...]`, `gd [-e] <domain\|id> [attr...]`, `ga [-e] <account\|id> [attr...]`, `gc <cos\|id> [attr...]` | `# name <name>`, the `attr: value` lines sorted by attribute name (one per value, in directory order, empty values skipped) and a blank line, as `ProvUtilDumper`. Without `-e` the values an entry inherits are added: for a server and a domain the global config ones flagged `serverInherited`/`domainInherited`; for an account the ones of its class of service (`zimbraCOSId`, else the domain's `zimbraDomainDefaultCOSId`, else `default`) over the domain's `accountCosDomainInherited` ones. `attr` (any case) or `attr=value` selects. A binary attribute (`zimbraSSLDHParam`) is `attr:: ` and its base64 in lines of 76 characters ended by CRLF, as commons-codec writes it. |
 | `gcf <attr>`, `gacf [attr...]` | The global config attributes, with no header and no blank line. |
+| `gad [-v [-e]] [attr...]` | The domain names, one per line, in the order of the directory (as `zmprov gad` of a fresh process lists them); `-v` dumps the domains as `gd` does, `attr...` selects. `-e` without `-v` is refused. A mailbox that has run for a while may list the domains in the order of its cache; sort the output when the order matters. |
 | `gas [-v [-e]] [service]` | The server names, sorted, of those with the service enabled; `-v` dumps them. |
 | `garpu` | `<host>:<zimbraExtensionBindPort, 7072>/service/extension/nginx-lookup ` (with the trailing blank) for each mail client server with `zimbraReverseProxyLookupTarget` TRUE, then a newline. |
 | `gamcs` | `<zimbraServiceHostname>:<zimbraMemcachedBindPort, 11211> ` for each server running `memcached`, then a newline. The `zmprov` of the installed mailbox has no `gamcs` (setup.pl then always warns that there is no memcached server); the legacy Zimbra one printed this. |
@@ -573,6 +576,40 @@ A failure prints `ERROR: <code> (<message>)` on stderr and exits `2`, as zmprov
 does (`account.NO_SUCH_SERVER (no such server: x)`, `account.NO_SUCH_ACCOUNT`,
 `account.NO_SUCH_DOMAIN`, `account.NO_SUCH_COS`). An unknown verb or a wrong
 number of arguments exits `1`; there is no fallback to the Java zmprov.
+
+`mcf`, `ms` and `md` set any attribute of the schema that has no callback, with
+the value as one argument (a PEM with its newlines included): carbonio-core's
+`clientcertmgr savecrt|cleancrt` sets and clears `zimbraReverseProxyClientCertCA`
+with `setup prov -m -l mcf|ms <server>|md <domain> zimbraReverseProxyClientCertCA <pem>`;
+an empty value deletes the attribute, as in zmprov. The options `-r -m -l` select
+nothing here, so a read (`gad`, `gacf`, `gs`: carbonio-core's `cbpolicydinit`)
+always goes to LDAP, where the Java `zmprov` without `-l` asked the mailbox.
+
+### `setup gsautil`
+
+`setup gsautil <command> [options]` is `zmgsautil`, the port of
+`com.zimbra.cs.util.GalSyncAccountUtil`: carbonio-core's `zmgsautil` wrapper
+`exec`s it, and `gsaupdate` still calls `zmgsautil trickleSync`. It authenticates to
+the admin SOAP API as "Create GAL sync account" does (the LDAP master credentials
+of localconfig, `zimbra_zmprov_default_soap_server:zimbra_admin_service_port`) and
+sends the same requests.
+
+| Command | Options | Request and output |
+| --- | --- | --- |
+| `createAccount` | `-a account -n datasource --domain domain -t zimbra\|ldap -s server [-f folder] [-p polling]` | `CreateGalSyncAccountRequest`; prints `<name>` and `<id>` separated by a tab. |
+| `addDataSource` | `-a account -n datasource --domain domain -t zimbra\|ldap [-f folder] [-p polling]` | `AddGalSyncDataSourceRequest` (no server); prints `<name>` and `<id>` of each account of the answer. |
+| `deleteAccount` | `-a account` or `-i id` | `DeleteGalSyncAccountRequest`, the account by name when given, else by id; prints nothing. |
+| `trickleSync`, `fullSync`, `forceSync` | `-a account` or `-i id`, and `-d datasource-id` or `-n datasource-name` | `SyncGalAccountRequest` for the data source (by id when both are given); `fullSync` adds `fullSync="TRUE"`, `forceSync` `reset="TRUE"`. `-a` is looked up in LDAP (`Error: no such account: <name>`). Prints nothing. |
+
+The options (`-a/--account -i/--id -n/--name -d/--did -x/--domain -f/--folder
+-p/--polling -t/--type -s/--server -h/--help`) parse as the tool's commons-cli
+`GnuParser` does: `--name=value` and `-nvalue` work, the first occurrence of an
+option wins, and every option takes a value (`-h` included). A missing option,
+an unknown command, `-h <x>` or a refused option line prints the usage
+(`error: <reason>` first for a refused option) on stdout and exits `1`. An
+error the server or the directory reports is printed as `Error: <message>` on
+stdout with status `0`, as the tool did; a server that cannot be reached is
+printed on stderr with status `1`. Every request is sent once and may take up to 5 minutes.
 
 ### LDAP and ini tools
 
@@ -790,6 +827,85 @@ Differences from the script:
 - The words are not passed through a shell, as `echo @ARGV | ssh` did: `*`,
   quotes and `$` reach `zmrcd` as typed.
 - It runs as root or zextras (the owners of the key), not as any user.
+
+### `setup rcd`
+
+`zmrcd` is what `zmrc` talks to: the `authorized_keys` of every server holds
+`command="/opt/zextras/libexec/zmrcd" <key>` (written by `setup
+update-authkeys`), so every SSH login with the key of the installation runs
+it; the command line of `zmrc` comes on stdin (the command the client asked
+for, if any, is in `SSH_ORIGINAL_COMMAND`: see `rsync` below).
+carbonio-core installs `libexec/zmrcd` as `exec /opt/zextras/libexec/setup rcd
+"$@"`; the path in `authorized_keys` does not change. The mailbox
+(`RemoteManager`) sends the same line (`HOST:<host> <command>`, without a
+newline) over an exec channel and takes a non-zero exit status as a failure.
+It runs as root or zextras (sshd runs it as zextras) and reads no argument:
+an argument prints the usage and exits `1`.
+
+Same as `rcd.pl`:
+
+- The first line that is not `?` is the whole input: `HOST:<h>[,...]` or
+  `SERVICE:<s>[,...]` (`ALL` is every server with a service), then the command
+  and its arguments, split like `split(' ', $_, 3)`. `?` prints the table (one
+  line per command, with the allowed arguments) and reads the next line. An empty
+  line, or none, does nothing and exits `0`.
+- A host other than the server prints `Remote: HOST:<h> <command> <args>` and
+  runs nothing; the host is the local one when it matches `zimbra_server_hostname`
+  without case. The hosts are de-duplicated and sorted; services and `ALL`
+  come from the directory. Anything else prints `ERROR: Invalid hostlist` on
+  stderr and exits `1`.
+- The command is looked up in a closed table, never run through a shell:
+  first as a whole line (`start mta`, `status`, `zmqstat all`, ...), then by its
+  first word for the commands that take arguments (`zmqaction`, `zmbackupldap`,
+  `zmcertmgr`, `clusvcadm`, `zmclustat`, `zmloggerhostmap`, `rsync`, `certbot`,
+  `dkimutil`), whose arguments must match the expression of the table. An unknown
+  command prints `ERROR: Unknown command: "<command>"`, arguments that do not match
+  `ERROR: args '<args>' not allowed for command '<command>'`, both on stderr with
+  exit status `1`. `?` shows the table.
+- The output is `STARTCMD: <host> <command line>`, what the command printed
+  (a last line without a newline gets one) and `ENDCMD: <host> <command line>`.
+  The bulk commands (`zmqstat`, `zmcollectconfigfiles`, `zmcollectldapzimbra`,
+  `clusvcadm`, `zmclustat`) print neither line. The command's stderr is zmrcd's
+  stderr, and the exit status of the command is the one of zmrcd (after `ENDCMD`).
+  A command that cannot be started prints `ERROR: Can't run <command line>:
+  <reason>` and exits `1`.
+- With `zimbra_zmrcd_logging_enabled=TRUE` (any case) everything printed to
+  stdout, and every error without its `ERROR: ` prefix, is appended to
+  `log/zmrcd.log`. An `rsync` coming over SSH (`SSH_ORIGINAL_COMMAND` starting
+  with `rsync` or `/opt/zextras/common/bin/rsync`) is run in place of reading
+  commands, after the same kind of check (any other program ending in `rsync`:
+  `ERROR: command '<prog>' not allowed`; arguments out of the class:
+  `ERROR: invalid arguments in command [<line>]`).
+
+Differences from the script:
+
+- The arguments are split into words by zmrcd (blanks, quotes and backslash, as
+  the shell did) and given to the program as an argument list: `$`, `*`, `~`,
+  backquotes and the like reach the program as typed, nothing is expanded or
+  globbed. They never get to a shell, and there is none; the pipelines of
+  `zmcollectconfigfiles` and `zmcollectldapzimbra` are two processes connected
+  by a pipe, and the status of a pipeline is the one of its last process.
+  The classes of the arguments are the script's, except that `dkimutil` no
+  longer accepts `|` (its `[a|r]` was meant to be `[ar]`). Arguments with an
+  unbalanced quote (and `dkimutil -|`) are refused with `ERROR: args ... not
+  allowed ...` and exit `1`; the shell failed them with `sh: Syntax error` after
+  `STARTCMD` and `ENDCMD`, exit `2`.
+- `rsync` is still handed what the client sent, so its own options are the
+  limit: an allowed client can pass `-e <command>` to a real `rsync`, which is
+  what the legacy script allowed too. Only keys of the installation can log in.
+- A line over 64 KiB is refused (`ERROR: line too long`). The children read
+  nothing (`/dev/null`), where they inherited the session's input.
+- A command killed by a signal exits `128+<signal>` (Perl exited `0`).
+- The hosts of `SERVICE:`/`ALL` come from the native LDAP client, not from
+  `zmprov gas` and `zmprov gs`. An unreadable `localconfig.xml` or an LDAP that
+  does not answer is `ERROR: reading the local configuration: <reason>` or
+  `ERROR: listing the servers: <reason>` and exit `1`, where the script went
+  on with nothing and exited `0`.
+- The log does not get the output of `slapcat`, `zmcollectconfigfiles` and
+  `zmcollectldapzimbra` (directory data and keys); it still gets their
+  `STARTCMD` and `ENDCMD`.
+- The table keeps the absolute paths of the legacy script
+  (`/opt/zextras/bin/...`, `sudo` for `zmqstat`, `clusvcadm` and `zmclustat`).
 
 ### `setup proxyconfig`
 

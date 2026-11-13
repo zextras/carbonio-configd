@@ -14,14 +14,15 @@ import (
 	"time"
 
 	"github.com/zextras/carbonio-configd/internal/cli/rewrite"
+	carboldap "github.com/zextras/carbonio-configd/internal/ldap"
 	"github.com/zextras/carbonio-configd/internal/logger"
-	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // Readiness windows of the legacy launchers.
 const (
-	// mailboxPortAttempts x mailboxPortInterval: zmmailboxdctl asks zmprov for
-	// zimbraMailPort up to 6 times, 5s apart.
+	// mailboxPortAttempts x mailboxPortInterval: zmmailboxdctl asked zmprov for
+	// zimbraMailPort up to 6 times, 5s apart; the port is now read from LDAP,
+	// with the same attempts.
 	mailboxPortAttempts = 6
 	mailboxPortInterval = 5 * time.Second
 	// mailboxDialAttempts x mailboxDialInterval: then it waits 36 x 5s = 180s
@@ -40,6 +41,9 @@ const (
 	configdReadyInterval = 100 * time.Millisecond
 	configdProbeTimeout  = 3 * time.Second
 
+	// attrMailPort is the attribute the mailbox port is read from.
+	attrMailPort = "zimbraMailPort"
+
 	defaultConfigdPort = 7171
 	configdStatusReply = "SUCCESS ACTIVE"
 )
@@ -54,13 +58,13 @@ func (c *Controller) pause(ctx context.Context, d time.Duration) bool {
 	}
 }
 
-// waitForMailboxPort resolves the mailbox's zimbraMailPort through zmprov and
+// waitForMailboxPort resolves the mailbox's zimbraMailPort from LDAP and
 // waits until localhost accepts connections on it, like the tail of legacy
 // zmmailboxdctl start. It is the default Controller.mailboxReady.
 func (c *Controller) waitForMailboxPort(ctx context.Context, lc map[string]string) error {
-	port := c.resolveMailboxPort(ctx, lc["zimbra_server_hostname"])
-	if port == "" {
-		return errors.New("mailboxd started but zimbraMailPort could not be resolved with zmprov")
+	port, err := c.resolveMailboxPort(ctx, lc)
+	if err != nil {
+		return fmt.Errorf("mailboxd started but zimbraMailPort could not be resolved from LDAP: %w", err)
 	}
 
 	addr := net.JoinHostPort("localhost", port)
@@ -83,39 +87,63 @@ func (c *Controller) waitForMailboxPort(ctx context.Context, lc map[string]strin
 		addr, time.Duration(mailboxDialAttempts)*mailboxDialInterval)
 }
 
-// resolveMailboxPort returns the zimbraMailPort of host ("" when zmprov never
-// answered within the attempts).
-func (c *Controller) resolveMailboxPort(ctx context.Context, host string) string {
+// resolveMailboxPort returns the zimbraMailPort of the local server, trying
+// up to mailboxPortAttempts times; the error is the last failure (also when
+// the context ended while it waited).
+func (c *Controller) resolveMailboxPort(ctx context.Context, lc map[string]string) (string, error) {
+	var last error
+
 	for i := range mailboxPortAttempts {
-		out, err := sys.Output(ctx, c.env.Exec, c.p.bin+"/zmprov", "-l", "gs", host, "zimbraMailPort")
+		port, err := c.mailPortOf(ctx, lc, lc["zimbra_server_hostname"])
 		if err == nil {
-			if port := parseMailPort(string(out)); port != "" {
-				return port
-			}
+			return port, nil
 		}
 
+		last = err
+
 		if i < mailboxPortAttempts-1 && !c.pause(ctx, mailboxPortInterval) {
-			return ""
+			return "", fmt.Errorf("%w (%w)", last, ctx.Err())
 		}
 	}
 
-	return ""
+	return "", last
 }
 
-// parseMailPort extracts N from the "zimbraMailPort: N" line of zmprov output.
-func parseMailPort(out string) string {
-	for line := range strings.SplitSeq(out, "\n") {
-		key, value, ok := strings.Cut(strings.TrimSpace(line), ":")
-		if !ok || key != "zimbraMailPort" {
+// errNoMailPort is a server entry that has no usable zimbraMailPort.
+var errNoMailPort = errors.New("the server has no valid zimbraMailPort")
+
+// readMailPort is "zmprov -l gs <host> zimbraMailPort" over LDAP: the server's
+// own zimbraMailPort, else the global config one it inherits
+// (ldap.Client.GetServerConfig). It is the default Controller.mailPortOf.
+func (c *Controller) readMailPort(ctx context.Context, lc map[string]string, host string) (string, error) {
+	params, err := carboldap.ParamsFrom(ctx, lc, carboldap.PurposeRead, c.env.FS)
+	if err != nil {
+		return "", err
+	}
+
+	client, err := carboldap.NewClient(params)
+	if err != nil {
+		return "", err
+	}
+
+	defer func() { _ = client.Close() }()
+
+	attrs, err := client.GetServerConfig(host)
+	if err != nil {
+		return "", err
+	}
+
+	for name, value := range attrs {
+		if !strings.EqualFold(name, attrMailPort) {
 			continue
 		}
 
 		if _, err := strconv.Atoi(strings.TrimSpace(value)); err == nil {
-			return strings.TrimSpace(value)
+			return strings.TrimSpace(value), nil
 		}
 	}
 
-	return ""
+	return "", errNoMailPort
 }
 
 // configdEndpoint is where the configd daemon listens, from localconfig

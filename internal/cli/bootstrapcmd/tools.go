@@ -9,6 +9,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/user"
 	"strconv"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/zextras/carbonio-configd/internal/bootstrap/setup"
 	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
@@ -42,6 +44,7 @@ var (
 	runIniUtil           = setup.RunIniUtil
 	runCertMgr           = setup.RunCertMgr
 	runRC                = setup.RunRC
+	runRCD               = setup.RunRCD
 )
 
 // lookupZextrasUID is the uid of zextras, -1 when there is no such user.
@@ -285,6 +288,19 @@ func RunRC(ctx context.Context, env sys.System, stdin io.Reader, stdout, stderr 
 	return runRC(e, args, stdin, stdout, stderr)
 }
 
+// RunRCD executes "setup rcd": zmrcd, the receiving side of zmrc, which
+// carbonio-core's wrapper calls and the forced command of the SSH key of the
+// installation runs (see setup.RunRCD). stdin holds the command line; the exit
+// status and the output are the script's. It runs as root or zextras.
+func RunRCD(ctx context.Context, env sys.System, stdin io.Reader, stdout, stderr io.Writer, args []string) int {
+	e, ok := toolEnv(ctx, env, stdout, stderr, "rcd")
+	if !ok {
+		return 1
+	}
+
+	return runRCD(e, args, stdin, stdout, stderr)
+}
+
 // RunIPTool executes "setup iptool": zmiptool (see setup.RunIPTool). The
 // script ran as zextras; it runs as root or zextras here.
 func RunIPTool(ctx context.Context, env sys.System, stdout, stderr io.Writer, args []string) int {
@@ -306,6 +322,24 @@ func RunProv(ctx context.Context, env sys.System, stdout, stderr io.Writer, args
 	}
 
 	return runProv(e, args, stdout, stderr)
+}
+
+// RunGSAUtil executes "setup gsautil <command> [options]": zmgsautil, the GAL
+// sync accounts through the admin SOAP API (see setup.RunGalSyncUtil). It runs
+// as root or zextras, which can read the LDAP credentials.
+func RunGSAUtil(ctx context.Context, env sys.System, stdout, stderr io.Writer, args []string) int {
+	e, ok := toolEnv(ctx, env, stdout, stderr, "gsautil")
+	if !ok {
+		return 1
+	}
+
+	// The tool's output is its own: no step log in it, and no warning of the
+	// SOAP client either: the fault it reports is printed as the tool's error.
+	e.Log = setup.NewLog(io.Discard, nil)
+
+	logger.InitStructuredLogging(&logger.Config{Format: logger.FormatText, Level: slog.LevelError, Output: stderr})
+
+	return setup.RunGalSyncUtil(e, args, stdout, stderr)
 }
 
 // RunRandomPassword executes "setup random-password [-l] [min max]":

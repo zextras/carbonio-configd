@@ -827,10 +827,13 @@ func CreateGalSyncAccount(e *Env, domain, server string) (zxadmin.GalSyncAccount
 	return acct, nil
 }
 
-// svcGALAdmin is the admin API call the GAL sync step makes (an interface so
-// tests need no mailbox).
+// svcGALAdmin is the admin API the GAL sync step and "setup gsautil" call (an
+// interface so tests need no mailbox).
 type svcGALAdmin interface {
 	CreateGalSyncAccount(ctx context.Context, r *zxadmin.GalSyncAccountRequest) (zxadmin.GalSyncAccount, error)
+	AddGalSyncDataSource(ctx context.Context, r *zxadmin.GalSyncAccountRequest) ([]zxadmin.GalSyncAccount, error)
+	DeleteGalSyncAccount(ctx context.Context, account string, byID bool) error
+	SyncGalAccount(ctx context.Context, r *zxadmin.GalSyncRequest) error
 }
 
 // svcOpenGAL opens the admin API of the node (replaced by tests).

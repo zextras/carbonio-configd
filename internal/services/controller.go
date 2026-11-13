@@ -52,6 +52,9 @@ type Controller struct {
 	// reach the network, which stays real; tests replace them.
 	mailboxReady func(ctx context.Context, lc map[string]string) error
 	configdReady func(ctx context.Context) error
+	// mailPortOf reads the zimbraMailPort of a server from LDAP (readMailPort
+	// by default); tests replace it.
+	mailPortOf func(ctx context.Context, lc map[string]string, host string) (string, error)
 
 	noRewrite   bool
 	killTimeout time.Duration
@@ -131,6 +134,10 @@ func NewController(env sys.System, opts ...Option) *Controller {
 
 	if c.mailboxReady == nil {
 		c.mailboxReady = c.waitForMailboxPort
+	}
+
+	if c.mailPortOf == nil {
+		c.mailPortOf = c.readMailPort
 	}
 
 	if c.configdReady == nil {

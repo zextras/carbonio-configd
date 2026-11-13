@@ -326,7 +326,8 @@ left running. Before the stop, `appserver-db` flushes InnoDB dirty pages
 `PreStop` hook, so both orchestration modes get it.
 
 **Mailbox start.** Legacy mode and the systemd leaf wait for `zimbraMailPort` to accept
-connections (zmprov, then TCP, up to 3 minutes). `service start mailbox` regenerates the
+connections (the port is read from LDAP, as `zmprov -l gs <host> zimbraMailPort` did: the server's own
+value, else the global config one, up to 6 attempts 5 s apart; then TCP, up to 3 minutes). `service start mailbox` regenerates the
 zmtlsctl set of configs (`sasl webxml mailbox service zextras zextrasAdmin zimlet`) unless
 `norewrite` is given.
 

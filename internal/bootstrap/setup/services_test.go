@@ -478,6 +478,8 @@ func TestSvcGALSync_Conditions(t *testing.T) {
 
 // svcFakeGAL is the admin API of the GAL sync step.
 type svcFakeGAL struct {
+	svcGALAdmin // the calls the GAL sync step does not make
+
 	got  []zxadmin.GalSyncAccountRequest
 	acct zxadmin.GalSyncAccount
 	err  error

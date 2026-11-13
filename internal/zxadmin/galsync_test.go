@@ -123,7 +123,7 @@ func TestCreateGalSyncAccount_SendsTheRequestOfGalSyncAccountUtil(t *testing.T) 
 }
 
 func TestCreateGalSyncAccount_OptionalPartsAreOmittedAndValuesEscaped(t *testing.T) {
-	body := buildCreateGalSyncAccountEnvelope(&GalSyncAccountRequest{
+	body := buildGalSyncAccountEnvelope(opCreateGalSyncAccount, &GalSyncAccountRequest{
 		Account: "galsync.a&b@example.com", Name: `In"ternal`, Domain: "example.com", Type: "zimbra", Server: "s",
 	})
 
@@ -153,7 +153,7 @@ func TestCreateGalSyncAccount_FaultIsAnErrorWithCodeAndReasonAndIsNotRetried(t *
 }
 
 func TestCreateGalSyncAccount_FaultWithoutDetailCodeKeepsTheReason(t *testing.T) {
-	_, err := parseCreateGalSyncAccount(http.StatusInternalServerError, []byte(
+	_, err := parseGalSyncReply(opCreateGalSyncAccount, http.StatusInternalServerError, []byte(
 		`<Envelope><Body><Fault><faultstring>boom</faultstring></Fault></Body></Envelope>`))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "boom")
@@ -169,12 +169,11 @@ func TestCreateGalSyncAccount_FailuresWithoutAFault(t *testing.T) {
 		{"html error page", http.StatusBadGateway, "<html>bad gateway</html>", "HTTP 502"},
 		{"not xml on 200", http.StatusOK, "nope", "parse CreateGalSyncAccount response"},
 		{"xml error status", http.StatusBadRequest, `<Envelope><Body/></Envelope>`, "HTTP 400"},
-		{"no account", http.StatusOK, `<Envelope><Body><CreateGalSyncAccountResponse/></Body></Envelope>`, "no account"},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := parseCreateGalSyncAccount(tc.status, []byte(tc.body))
+			_, err := parseGalSyncReply(opCreateGalSyncAccount, tc.status, []byte(tc.body))
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tc.want)
 		})
@@ -238,4 +237,131 @@ func TestCreateGalSyncAccount_ContextCancelIsReturned(t *testing.T) {
 
 	_, err := newTestClient(t, srv).CreateGalSyncAccount(ctx, testGalSyncRequest())
 	require.Error(t, err)
+}
+
+func TestCreateGalSyncAccount_ResponseWithoutAccountIsAnError(t *testing.T) {
+	var calls atomic.Int32
+
+	srv := galSyncServer(t, &calls, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`<Envelope><Body><CreateGalSyncAccountResponse/></Body></Envelope>`))
+	})
+
+	_, err := newTestClient(t, srv).CreateGalSyncAccount(context.Background(), testGalSyncRequest())
+	require.ErrorContains(t, err, "no account")
+}
+
+func TestFault_IsReturnedTyped(t *testing.T) {
+	var calls atomic.Int32
+
+	srv := galSyncServer(t, &calls, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(galSyncFault))
+	})
+
+	err := newTestClient(t, srv).DeleteGalSyncAccount(context.Background(), "galsync@example.com", false)
+
+	var fault *Fault
+
+	require.ErrorAs(t, err, &fault)
+	assert.Equal(t, "no such domain: example.com", fault.Reason)
+	assert.Equal(t, "account.NO_SUCH_DOMAIN", fault.Code)
+}
+
+func TestAuthFault_IsReturnedTypedEvenWithHTTP500(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc(soapPath, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`<Envelope><Body><Fault><Reason><Text>authentication failed for [zimbra]</Text></Reason></Fault></Body></Envelope>`))
+	})
+
+	srv := httptest.NewTLSServer(mux)
+	defer srv.Close()
+
+	err := newTestClient(t, srv).SyncGalAccount(context.Background(), &GalSyncRequest{AccountID: "x", DataSourceName: "y"})
+
+	var fault *Fault
+
+	require.ErrorAs(t, err, &fault)
+	assert.Equal(t, "authentication failed for [zimbra]", fault.Reason)
+}
+
+// sentBody runs call against a server answering with an empty success and
+// returns the request the server received.
+func sentBody(t *testing.T, call func(c *Client) error) string {
+	t.Helper()
+
+	var (
+		calls atomic.Int32
+		sent  string
+	)
+
+	srv := galSyncServer(t, &calls, func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		sent = string(raw)
+
+		_, _ = w.Write([]byte(`<Envelope><Body><Response xmlns="urn:zimbraAdmin"/></Body></Envelope>`))
+	})
+
+	require.NoError(t, call(newTestClient(t, srv)))
+
+	return sent
+}
+
+func TestAddGalSyncDataSource_SendsNoServerAndReturnsTheAccounts(t *testing.T) {
+	var (
+		calls atomic.Int32
+		sent  string
+	)
+
+	srv := galSyncServer(t, &calls, func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		sent = string(raw)
+
+		_, _ = w.Write([]byte(`<Envelope><Body><AddGalSyncDataSourceResponse xmlns="urn:zimbraAdmin">` +
+			`<account name="a@example.com" id="id-a"/><account name="b@example.com" id="id-b"/>` +
+			`</AddGalSyncDataSourceResponse></Body></Envelope>`))
+	})
+
+	accounts, err := newTestClient(t, srv).AddGalSyncDataSource(context.Background(), testGalSyncRequest())
+	require.NoError(t, err)
+
+	assert.Equal(t, []GalSyncAccount{{"a@example.com", "id-a"}, {"b@example.com", "id-b"}}, accounts)
+	assert.Contains(t, sent, "<AddGalSyncDataSourceRequest ")
+	assert.NotContains(t, sent, "server=")
+	assert.Contains(t, sent, `name="InternalGAL"`)
+	assert.Contains(t, sent, `<a n="zimbraDataSourcePollingInterval">1d</a>`)
+}
+
+func TestDeleteGalSyncAccount_AccountByNameOrByID(t *testing.T) {
+	byName := sentBody(t, func(c *Client) error { return c.DeleteGalSyncAccount(context.Background(), "g@example.com", false) })
+	byID := sentBody(t, func(c *Client) error { return c.DeleteGalSyncAccount(context.Background(), "id-1", true) })
+
+	assert.Contains(t, byName, `<DeleteGalSyncAccountRequest xmlns="urn:zimbraAdmin"><account by="name">g@example.com</account>`)
+	assert.Contains(t, byID, `<account by="id">id-1</account>`)
+}
+
+func TestSyncGalAccount_DataSourceByIDOrNameWithFullAndReset(t *testing.T) {
+	tests := []struct {
+		name string
+		req  GalSyncRequest
+		want string
+	}{
+		{"trickle by name", GalSyncRequest{AccountID: "a1", DataSourceName: "InternalGAL"},
+			`<account id="a1"><datasource by="name">InternalGAL</datasource></account>`},
+		{"id wins over name", GalSyncRequest{AccountID: "a1", DataSourceID: "d1", DataSourceName: "InternalGAL"},
+			`<datasource by="id">d1</datasource>`},
+		{"full", GalSyncRequest{AccountID: "a1", DataSourceID: "d1", Full: true},
+			`<datasource by="id" fullSync="TRUE">d1</datasource>`},
+		{"force", GalSyncRequest{AccountID: "a1", DataSourceID: "d1", Full: true, Reset: true},
+			`<datasource by="id" fullSync="TRUE" reset="TRUE">d1</datasource>`},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sent := sentBody(t, func(c *Client) error { return c.SyncGalAccount(context.Background(), &tc.req) })
+
+			assert.Contains(t, sent, `<SyncGalAccountRequest xmlns="urn:zimbraAdmin">`)
+			assert.Contains(t, sent, tc.want)
+		})
+	}
 }

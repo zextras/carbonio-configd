@@ -20,6 +20,7 @@ const (
 	VerbGetAccount             = "ga"
 	VerbGetCOS                 = "gc"
 	VerbGetDomain              = "gd"
+	VerbGetAllDomains          = "gad"
 	VerbGetAllServers          = "gas"
 	VerbGetAllReverseProxyURLs = "garpu"
 	VerbGetAllMemcachedServers = "gamcs"
@@ -31,6 +32,8 @@ const (
 	flagExpandOff = "-e"
 	// flagVerbose is "-v" of gas: dump every server.
 	flagVerbose = "-v"
+	// errExpandNeedsVerbose is ProvUtil.ERR_INVALID_ARG_EV.
+	errExpandNeedsVerbose = "arg -e is invalid unless -v is also specified"
 
 	serviceMailbox   = "mailbox"
 	serviceMemcached = "memcached"
@@ -57,6 +60,7 @@ var readVerbs = map[string][2]int{
 	VerbGetAccount:             {1, -1},
 	VerbGetCOS:                 {1, -1},
 	VerbGetDomain:              {1, -1},
+	VerbGetAllDomains:          {0, -1},
 	VerbGetAllServers:          {0, 3},
 	VerbGetAllReverseProxyURLs: {0, 0},
 	VerbGetAllMemcachedServers: {0, 0},
@@ -149,6 +153,8 @@ func (p *Provisioner) read(verb string, args []string, out io.Writer) error {
 		return p.getCOS(args, out)
 	case VerbGetDomain:
 		return p.getEntry(verb, args, out, entryKindOf{p.lookupDomain, p.domainView, nameOf(attrDomainName)})
+	case VerbGetAllDomains:
+		return p.getAllDomains(args, out)
 	case VerbGetAllServers:
 		return p.getAllServers(args, out)
 	case VerbGetAllReverseProxyURLs:
@@ -421,6 +427,80 @@ func (p *Provisioner) cosOfAccount(acct, domain *Entry) (*Entry, error) {
 	return p.cos(name)
 }
 
+// gadArgs are the arguments of gad.
+type gadArgs struct {
+	verbose, noDefaults bool
+	attrs               []string
+}
+
+// parseGadArgs reads "[-v] [-e] [attr...]".
+func parseGadArgs(args []string) (gadArgs, error) {
+	var a gadArgs
+
+	rest := args
+
+	for len(rest) > 0 && (rest[0] == flagVerbose || rest[0] == flagExpandOff) {
+		if rest[0] == flagVerbose {
+			a.verbose = true
+		} else {
+			a.noDefaults = true
+		}
+
+		rest = rest[1:]
+	}
+
+	if a.noDefaults && !a.verbose {
+		return a, &UsageError{Msg: errExpandNeedsVerbose}
+	}
+
+	a.attrs = rest
+
+	return a, nil
+}
+
+// getAllDomains is gad [-v] [-e] [attr...]: the name of every domain, one per
+// line, in the order of the directory search (a fresh ProvUtil run lists them
+// so); -v dumps them, showing only the attrs when some are named.
+func (p *Provisioner) getAllDomains(args []string, out io.Writer) error {
+	a, err := parseGadArgs(args)
+	if err != nil {
+		return err
+	}
+
+	filter, err := newDumpFilter(a.attrs)
+	if err != nil {
+		return err
+	}
+
+	domains, err := p.Dir.Search("", ScopeSub, filterAnd(object("zimbraDomain")))
+	if err != nil {
+		return failWith(err, "unable to list all domains")
+	}
+
+	for i := range domains {
+		name := domains[i].First(attrDomainName)
+
+		if !a.verbose {
+			if _, err := fmt.Fprintln(out, name); err != nil {
+				return err
+			}
+
+			continue
+		}
+
+		view, err := p.domainView(&domains[i], !a.noDefaults)
+		if err != nil {
+			return err
+		}
+
+		if err := p.dumpEntry(out, name, view, filter); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 // gasArgs are the arguments of gas.
 type gasArgs struct {
 	verbose, noDefaults bool
@@ -445,7 +525,7 @@ func parseGasArgs(args []string) (gasArgs, error) {
 	}
 
 	if a.noDefaults && !a.verbose {
-		return a, &UsageError{Msg: "-e is only valid with -v"}
+		return a, &UsageError{Msg: errExpandNeedsVerbose}
 	}
 
 	return a, nil

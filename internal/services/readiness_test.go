@@ -7,7 +7,10 @@ package services
 import (
 	"bufio"
 	"context"
+	"errors"
 	"net"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -18,34 +21,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/zextras/carbonio-configd/internal/sys"
 	"github.com/zextras/carbonio-configd/internal/sys/systest"
+	"github.com/zextras/carbonio-configd/internal/testutil/ldapfake"
 )
-
-func TestParseMailPort(t *testing.T) {
-	t.Parallel()
-
-	for _, tc := range []struct{ name, out, want string }{
-		{"typical", "# name mbox.example.com\nzimbraMailPort: 8080\n", "8080"},
-		{"no trailing newline", "zimbraMailPort: 7070", "7070"},
-		{"indented and spaced", "  zimbraMailPort:   8081  \n", "8081"},
-		{"CRLF", "# name x\r\nzimbraMailPort: 8082\r\n", "8082"},
-		{"no space after colon", "zimbraMailPort:8083\n", "8083"},
-		{"first valid wins", "zimbraMailPort: 80\nzimbraMailPort: 81\n", "80"},
-		{"non numeric", "zimbraMailPort: abc\n", ""},
-		{"other attribute", "zimbraMailSSLPort: 8443\n", ""},
-		{"comment only", "# name host\n", ""},
-		{"empty", "", ""},
-		{"empty value", "zimbraMailPort:\n", ""},
-		{"skips bad then takes good", "zimbraMailPort: x\nzimbraMailPort: 90\n", "90"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.Equal(t, tc.want, parseMailPort(tc.out))
-		})
-	}
-}
 
 // listenPort opens a TCP listener on a random loopback port that accepts and
 // closes connections; it returns the port and a close function.
@@ -74,59 +52,73 @@ func listenPort(t *testing.T) (port string, stop func()) {
 	return port, func() { _ = l.Close() }
 }
 
+// mailPorts stubs Controller.mailPortOf: it answers the results in order (the
+// last one for the calls after them), and counts the calls and the hosts.
+type mailPorts struct {
+	results []mailPortResult
+	calls   atomic.Int32
+	host    atomic.Value
+}
+
+type mailPortResult struct {
+	port string
+	err  error
+}
+
+func (m *mailPorts) lookup(_ context.Context, _ map[string]string, host string) (string, error) {
+	m.host.Store(host)
+
+	i := int(m.calls.Add(1)) - 1
+	if i >= len(m.results) {
+		i = len(m.results) - 1
+	}
+
+	return m.results[i].port, m.results[i].err
+}
+
+var errNoLDAP = errors.New("ldap down")
+
 func TestWaitForMailboxPort_OpenPort(t *testing.T) {
 	t.Parallel()
 
-	ctl, f := newFakeController(t)
+	ctl, _ := newFakeController(t)
 	port, _ := listenPort(t)
-	f.Exec.OnPath(ctl.p.bin+"/zmprov", systest.Reply("# name mbox.example.com\nzimbraMailPort: "+port+"\n"))
+	ports := &mailPorts{results: []mailPortResult{{port: port}}}
+	ctl.mailPortOf = ports.lookup
 
 	err := ctl.waitForMailboxPort(context.Background(), map[string]string{"zimbra_server_hostname": "mbox.example.com"})
 
 	require.NoError(t, err)
-	assert.Contains(t, f.Exec.Lines(), ctl.p.bin+"/zmprov -l gs mbox.example.com zimbraMailPort")
+	assert.Equal(t, "mbox.example.com", ports.host.Load(), "the port of the local server is read")
 }
 
-func TestWaitForMailboxPort_ZmprovRetriesThenSucceeds(t *testing.T) {
+func TestWaitForMailboxPort_LDAPRetriesThenSucceeds(t *testing.T) {
 	t.Parallel()
 
 	ctl, f := newFakeController(t)
 	port, _ := listenPort(t)
-
-	var calls atomic.Int32
-
-	f.Exec.OnPath(ctl.p.bin+"/zmprov", func(*sys.Cmd) (sys.Result, error) {
-		if calls.Add(1) < 3 {
-			return sys.Result{ExitCode: 1}, &sys.ExitError{Code: 1}
-		}
-
-		return sys.Result{Stdout: []byte("zimbraMailPort: " + port + "\n")}, nil
-	})
+	ports := &mailPorts{results: []mailPortResult{{err: errNoLDAP}, {err: errNoLDAP}, {port: port}}}
+	ctl.mailPortOf = ports.lookup
 	pumpClock(t, f.Clock, mailboxPortInterval)
 
 	require.NoError(t, ctl.waitForMailboxPort(context.Background(), map[string]string{"zimbra_server_hostname": "h"}))
-	assert.Equal(t, int32(3), calls.Load())
+	assert.Equal(t, int32(3), ports.calls.Load())
 }
 
 func TestWaitForMailboxPort_PortNeverResolved(t *testing.T) {
 	t.Parallel()
 
 	ctl, f := newFakeController(t)
-
-	var calls atomic.Int32
-
-	f.Exec.OnPath(ctl.p.bin+"/zmprov", func(*sys.Cmd) (sys.Result, error) {
-		calls.Add(1)
-
-		return sys.Result{ExitCode: 1}, &sys.ExitError{Code: 1}
-	})
+	ports := &mailPorts{results: []mailPortResult{{err: errNoLDAP}}}
+	ctl.mailPortOf = ports.lookup
 	pumpClock(t, f.Clock, mailboxPortInterval)
 
 	err := ctl.waitForMailboxPort(context.Background(), map[string]string{"zimbra_server_hostname": "h"})
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "zimbraMailPort could not be resolved")
-	assert.Equal(t, int32(mailboxPortAttempts), calls.Load())
+	assert.Contains(t, err.Error(), "zimbraMailPort could not be resolved from LDAP")
+	assert.ErrorIs(t, err, errNoLDAP, "the last failure is reported")
+	assert.Equal(t, int32(mailboxPortAttempts), ports.calls.Load())
 }
 
 func TestWaitForMailboxPort_PortNeverOpens(t *testing.T) {
@@ -136,7 +128,7 @@ func TestWaitForMailboxPort_PortNeverOpens(t *testing.T) {
 	port, stop := listenPort(t)
 	stop() // nothing listens any more: connection refused
 
-	f.Exec.OnPath(ctl.p.bin+"/zmprov", systest.Reply("zimbraMailPort: "+port+"\n"))
+	ctl.mailPortOf = (&mailPorts{results: []mailPortResult{{port: port}}}).lookup
 	pumpClock(t, f.Clock, mailboxDialInterval)
 
 	start := f.Clock.Now()
@@ -150,18 +142,88 @@ func TestWaitForMailboxPort_PortNeverOpens(t *testing.T) {
 func TestWaitForMailboxPort_ContextCancelled(t *testing.T) {
 	t.Parallel()
 
-	ctl, f := newFakeController(t)
-	port, stop := listenPort(t)
-	stop()
-
-	f.Exec.OnPath(ctl.p.bin+"/zmprov", systest.Reply("zimbraMailPort: "+port+"\n"))
+	ctl, _ := newFakeController(t)
+	ports := &mailPorts{results: []mailPortResult{{err: errNoLDAP}}}
+	ctl.mailPortOf = ports.lookup
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
 	err := ctl.waitForMailboxPort(ctx, map[string]string{"zimbra_server_hostname": "h"})
 
-	require.Error(t, err)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, int32(1), ports.calls.Load(), "no further attempt once the context ended")
+}
+
+const attrsXML = `<attrs><attr id="154" name="zimbraMailPort" type="port" cardinality="single" ` +
+	`optionalIn="globalConfig,server" flags="serverInherited"/></attrs>`
+
+// ldapMailPortConfig is the localconfig of a node whose directory is the fake
+// server, with the attribute schema under a temporary template directory.
+func ldapMailPortConfig(t *testing.T, srv *ldapfake.Server) map[string]string {
+	t.Helper()
+
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "conf", "attrs"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "conf", "attrs", "attrs.xml"), []byte(attrsXML), 0o600))
+
+	return map[string]string{
+		"ldap_url":               srv.URL("ldap", "127.0.0.1"),
+		"zimbra_ldap_userdn":     "uid=zimbra,cn=admins,cn=zimbra",
+		"zimbra_ldap_password":   "secret",
+		"zmconfigd_template_dir": dir,
+	}
+}
+
+func TestReadMailPort_ServerValueThenInheritedGlobalValue(t *testing.T) {
+	t.Parallel()
+
+	srv := ldapfake.New(t, ldapfake.Options{Entries: map[string]map[string][]string{
+		"cn=config,cn=zimbra": {"zimbraMailPort": {"8080"}, "objectClass": {"zimbraGlobalConfig"}},
+		"cn=own.example.com,cn=servers,cn=zimbra": {
+			"zimbraMailPort": {"8181"}, "objectClass": {"zimbraServer"},
+		},
+		"cn=inherit.example.com,cn=servers,cn=zimbra": {"objectClass": {"zimbraServer"}},
+	}})
+	ctl := newRealController(t)
+	lc := ldapMailPortConfig(t, srv)
+
+	port, err := ctl.readMailPort(context.Background(), lc, "own.example.com")
+	require.NoError(t, err)
+	assert.Equal(t, "8181", port, "the value of the server entry wins")
+
+	port, err = ctl.readMailPort(context.Background(), lc, "inherit.example.com")
+	require.NoError(t, err)
+	assert.Equal(t, "8080", port, "a server without the attribute inherits the global config one")
+}
+
+func TestReadMailPort_Failures(t *testing.T) {
+	t.Parallel()
+
+	srv := ldapfake.New(t, ldapfake.Options{Entries: map[string]map[string][]string{
+		"cn=config,cn=zimbra": {"objectClass": {"zimbraGlobalConfig"}},
+		"cn=bad.example.com,cn=servers,cn=zimbra": {
+			"zimbraMailPort": {"http"}, "objectClass": {"zimbraServer"},
+		},
+		"cn=none.example.com,cn=servers,cn=zimbra": {"objectClass": {"zimbraServer"}},
+	}})
+	ctl := newRealController(t)
+	lc := ldapMailPortConfig(t, srv)
+
+	for name, tc := range map[string]struct {
+		host string
+		lc   map[string]string
+		want string
+	}{
+		"no such server":   {"nosuch.example.com", lc, "nosuch.example.com"},
+		"not a number":     {"bad.example.com", lc, "no valid zimbraMailPort"},
+		"no port anywhere": {"none.example.com", lc, "no valid zimbraMailPort"},
+		"no LDAP url":      {"bad.example.com", map[string]string{"zimbra_ldap_userdn": "x", "zimbra_ldap_password": "y"}, "URL"},
+	} {
+		_, err := ctl.readMailPort(context.Background(), tc.lc, tc.host)
+		require.Error(t, err, name)
+		assert.Contains(t, err.Error(), tc.want, name)
+	}
 }
 
 // configdServer answers every connection with reply (one line) after reading
