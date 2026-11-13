@@ -196,6 +196,9 @@ func TestSyslog_UbuntuDropInFile(t *testing.T) {
 	_, err := fakes.FS.Stat(syslogZimbraOld)
 	require.Error(t, err)
 
+	_, err = fakes.FS.Stat(syslogDefaultConf + ".bak")
+	require.Error(t, err, "updateRsyslogd made no backup")
+
 	uid, gid, _ := fakes.FS.Owner(syslogLogFile)
 	assert.Equal(t, [2]int{104, 4}, [2]int{uid, gid}, "syslog:adm")
 	assert.Equal(t, "/var/log/carbonio.log {\n\tcreate 0640 syslog adm\n\tsu zextras zextras\n}\n",

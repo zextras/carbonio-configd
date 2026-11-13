@@ -48,6 +48,9 @@ const certDHParamAttr = "zimbraSSLDHParam"
 const (
 	certCAFile      = "ca.pem"
 	certDHParamFile = "dhparam.pem.crb"
+	// certDHParamMode is what openssl, run as zextras with its 027 umask, gave
+	// the file in setup.pl.
+	certDHParamMode = 0o640
 )
 
 // certRestartLDAP restarts the local LDAP server so it reads the new
@@ -614,7 +617,7 @@ func certApplyDHParam(e *Env) error {
 			return fmt.Errorf("failed to generate dhparam key: %w", err)
 		}
 
-		if err := e.Sys.FS.WriteFileAtomic(dest, data, 0o644); err != nil {
+		if err := e.Sys.FS.WriteFileAtomic(dest, data, certDHParamMode); err != nil {
 			return fmt.Errorf("installing the dhparam key: %w", err)
 		}
 

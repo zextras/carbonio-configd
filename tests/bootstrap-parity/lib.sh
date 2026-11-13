@@ -56,6 +56,10 @@ prepare_container() {
     [[ -z ${extra} ]] || printf '%s\n' "${extra}"
   } | podman exec -i "${name}" bash -c 'cat > /etc/hosts'
   podman exec "${name}" hostnamectl set-hostname "${fqdn}" 2>/dev/null || true
+  # hostnamectl D-Bus-activates systemd-hostnamed, which exits by itself after
+  # ~30 s idle: stop it, or a bootstrap shorter than that (configd) snapshots it
+  # as active while a longer one (setup.pl) does not.
+  podman exec "${name}" systemctl stop systemd-hostnamed.service 2>/dev/null || true
   # Units the package maintainer scripts enable on a live systemd host
   # (recorded at image build time): enable only, nothing is started.
   podman exec "${name}" bash -c 'xargs -a /usr/local/share/parity-enabled-units systemctl enable' >/dev/null 2>&1

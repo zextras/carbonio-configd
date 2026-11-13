@@ -9,6 +9,7 @@ import (
 	"encoding/asn1"
 	"encoding/pem"
 	"errors"
+	"io/fs"
 	"math/big"
 	"os"
 	"os/exec"
@@ -420,6 +421,10 @@ func TestCertDHParam(t *testing.T) {
 		data, err := fakes.FS.ReadFile(dest)
 		require.NoError(t, err)
 		assertFFDHE2048PEM(t, data)
+
+		mode, ok := fakes.FS.Mode(dest)
+		require.True(t, ok)
+		assert.Equal(t, fs.FileMode(0o640), mode.Perm(), "what openssl run as zextras gave the file")
 
 		// zmprov stores the content of the file named by the binary attribute.
 		assert.Equal(t, []string{string(data)}, provTestLDAP().values("cn=config,cn=zimbra", certDHParamAttr))
