@@ -543,8 +543,36 @@ statuses of their scripts instead.
 | `setup ldap-enable-replica` | `zmldapenablereplica` | root | The provider overlays on the master, the consumer configuration on a replica. |
 | `setup ldap-enable-mmr [-r RID] [-s SID] -m MMRURI` | `zmldapenable-mmr` | root, zextras | Adds a multi-master agreement with another master. |
 | `setup iptool [-d [-m ipmode]]` | `zmiptool` | root, zextras | Applies `zimbraIPMode` to the Java options and the MySQL bind address. |
+| `setup prov [-r] [-m] [-l] <verb> args...` | `zmprov -r -m -l <verb> ...` (Java, one JVM per call) in setup.pl | root, zextras | The zmprov commands setup.pl runs, natively over LDAP: `cs cd ca aaa mcf ms mc ma md gs gcf gacf ga gc gd gas garpu gamcs`. See [`setup prov`](#setup-prov). |
+| `setup random-password [-l] [min max]` | `zmjava com.zimbra.common.util.RandomPassword` | any user | Prints a random password of `min` to `max` characters (24 to 32 when they are not given) from `crypto/rand`; `-l` leaves out the dot, as for a local part. |
+| `setup serverips [--networks]` | `zmserverips` (Perl) | any user | Lists the addresses of `/sbin/ip addr` without the link-local ones, as `addr:<ip> Mask:<mask>`; `--networks` (`-n`) prints the networks (`10.1.5.0/24`, `[::1]/128`). `0` when an address was listed, `1` when none, `2` when `/sbin/ip` cannot run. |
 | `setup iniutil [options] inifile` | `zminiutil` | any user | Reads or edits one ini file (`--list --get --isset --set --setmin --setmax --unset`). |
 | `setup certmgr <command> [options]` | `zmcertmgr` (certmgr.pl) | root, zextras | Every command, option, message and exit status of the script, without openssl, keytool or any other process for the keystores: `createca createcrt deployca createcsr deploycrt getcrt savecrt viewcsr viewstagedcrt viewcrt verifycrt verifycrtchain verifycrtkey viewdeployedcrt checkcrtexpiration addcacert migrate`. See [`setup certmgr`](#setup-certmgr). |
+
+### `setup prov`
+
+`setup prov [-r] [-m] [-l] <verb> args...` is the command line of `zmprov` for
+the verbs `setup.pl` uses, so core's `setup.pl` (which `carbonio-bootstrap`
+still runs) starts no JVM: its `$ZMPROV` is `/opt/zextras/libexec/setup prov -r
+-m -l`. `-r -m -l` are accepted and ignored (the native provisioning always
+talks to the LDAP master and replaces multi-valued attributes). It does not log
+its arguments, which may hold a password; as with the Java `zmprov`, a password
+given to `ca` is on the command line of the process.
+
+| Verb | |
+| --- | --- |
+| `cs <server>`, `cd <domain>`, `ca <addr> <password>`, `aaa <account> <alias>`, `mcf`, `ms <server>`, `mc <cos>` | The writes of the bootstrap steps (`internal/provision`); `cs cd ca` print the new id. |
+| `ma <account\|id> [+\|-]attr value...`, `md <domain\|id> [+\|-]attr value...` | Modify an existing account or domain, running the attribute callbacks of the Java provisioning that are ported for them (`CheckPortConflict`, `MailHost`, `PositiveTimeInterval`, `MtaAuthHost`, `DisplayName`, `CosId`, and for a domain `DomainStatus`, which refuses a domain being renamed). An attribute of any other callback (`AccountStatus`: it publishes events and removes the account from distribution lists), and `userPassword` (which would be stored unhashed), are refused. `setup.pl` does not call `ma` or `md` today. |
+| `gs [-e] <server\|id> [attr...]`, `gd [-e] <domain\|id> [attr...]`, `ga [-e] <account\|id> [attr...]`, `gc <cos\|id> [attr...]` | `# name <name>`, the `attr: value` lines sorted by attribute name (one per value, in directory order, empty values skipped) and a blank line, as `ProvUtilDumper`. Without `-e` the values an entry inherits are added: for a server and a domain the global config ones flagged `serverInherited`/`domainInherited`; for an account the ones of its class of service (`zimbraCOSId`, else the domain's `zimbraDomainDefaultCOSId`, else `default`) over the domain's `accountCosDomainInherited` ones. `attr` (any case) or `attr=value` selects. A binary attribute (`zimbraSSLDHParam`) is `attr:: ` and its base64 in lines of 76 characters ended by CRLF, as commons-codec writes it. |
+| `gcf <attr>`, `gacf [attr...]` | The global config attributes, with no header and no blank line. |
+| `gas [-v [-e]] [service]` | The server names, sorted, of those with the service enabled; `-v` dumps them. |
+| `garpu` | `<host>:<zimbraExtensionBindPort, 7072>/service/extension/nginx-lookup ` (with the trailing blank) for each mail client server with `zimbraReverseProxyLookupTarget` TRUE, then a newline. |
+| `gamcs` | `<zimbraServiceHostname>:<zimbraMemcachedBindPort, 11211> ` for each server running `memcached`, then a newline. The `zmprov` of the installed mailbox has no `gamcs` (setup.pl then always warns that there is no memcached server); the legacy Zimbra one printed this. |
+
+A failure prints `ERROR: <code> (<message>)` on stderr and exits `2`, as zmprov
+does (`account.NO_SUCH_SERVER (no such server: x)`, `account.NO_SUCH_ACCOUNT`,
+`account.NO_SUCH_DOMAIN`, `account.NO_SUCH_COS`). An unknown verb or a wrong
+number of arguments exits `1`; there is no fallback to the Java zmprov.
 
 ### LDAP and ini tools
 

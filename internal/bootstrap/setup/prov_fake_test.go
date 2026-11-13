@@ -104,6 +104,7 @@ func (f *provFakeLDAP) set(dn, attr string, values ...string) { f.Set(dn, attr, 
 // addServer creates the server entry of host, as "cs" would.
 func (f *provFakeLDAP) addServer(host string) {
 	f.Set(provServerDN(host), "objectClass", "zimbraServer")
+	f.Set(provServerDN(host), "cn", host)
 	f.Set(provServerDN(host), "zimbraServiceHostname", host)
 }
 

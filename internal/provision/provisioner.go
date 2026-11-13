@@ -7,6 +7,7 @@ package provision
 import (
 	"math/rand/v2"
 	"net"
+	"strings"
 	"time"
 )
 
@@ -19,6 +20,9 @@ const (
 	VerbModifyConfig  = "mcf"
 	VerbModifyServer  = "ms"
 	VerbModifyCOS     = "mc"
+	// VerbModifyAccount and VerbModifyDomain are the zmprov ma and md.
+	VerbModifyAccount = "ma"
+	VerbModifyDomain  = "md"
 )
 
 // Options are what a Provisioner works with.
@@ -93,6 +97,8 @@ func New(o Options) *Provisioner { //nolint:gocritic // the options are given by
 //	mcf [+|-]attr value ...
 //	ms  <server> [+|-]attr value ...
 //	mc  <cos> [+|-]attr value ...
+//	ma  <account> [+|-]attr value ...
+//	md  <domain> [+|-]attr value ...
 func (p *Provisioner) Exec(args []string) (string, error) {
 	if len(args) == 0 {
 		return "", invalidRequest("no command")
@@ -113,7 +119,7 @@ func (p *Provisioner) Exec(args []string) (string, error) {
 		return p.createAccountArgs(rest)
 	case VerbAddAlias:
 		return "", p.AddAlias(rest[0], rest[1])
-	case VerbModifyConfig, VerbModifyServer, VerbModifyCOS:
+	case VerbModifyConfig, VerbModifyServer, VerbModifyCOS, VerbModifyAccount, VerbModifyDomain:
 		return "", p.modifyArgs(verb, rest)
 	default:
 		return "", invalidRequest("unknown command %q", verb)
@@ -127,7 +133,7 @@ func argCount(verb string) int {
 		return 1
 	case VerbCreateAccount, VerbAddAlias, VerbModifyConfig:
 		return 2 // ca: address and password; mcf: one attribute and its value
-	case VerbModifyServer, VerbModifyCOS:
+	case VerbModifyServer, VerbModifyCOS, VerbModifyAccount, VerbModifyDomain:
 		return 3 // the entry, one attribute and its value
 	default:
 		return 0
@@ -165,7 +171,7 @@ func (p *Provisioner) createAccountArgs(rest []string) (string, error) {
 	return p.CreateAccount(rest[0], rest[1], mods)
 }
 
-// modifyArgs runs mcf, ms or mc.
+// modifyArgs runs mcf, ms, mc, ma or md.
 func (p *Provisioner) modifyArgs(verb string, rest []string) error {
 	var (
 		target *Entry
@@ -181,6 +187,14 @@ func (p *Provisioner) modifyArgs(verb string, rest []string) error {
 		kind = kindServer
 		target, err = p.lookupServer(rest[0])
 		rest = rest[1:]
+	case VerbModifyAccount:
+		kind = kindAccount
+		target, err = p.lookupAccount(rest[0])
+		rest = rest[1:]
+	case VerbModifyDomain:
+		kind = kindDomain
+		target, err = p.lookupDomain(rest[0])
+		rest = rest[1:]
 	default:
 		kind = kindCOS
 		target, err = p.lookupCOS(rest[0])
@@ -194,6 +208,12 @@ func (p *Provisioner) modifyArgs(verb string, rest []string) error {
 	mods, err := p.mods(rest)
 	if err != nil {
 		return err
+	}
+
+	if kind == kindAccount {
+		if err := refuseUnhashedPassword(mods); err != nil {
+			return err
+		}
 	}
 
 	return p.modify(kind, target, mods)
@@ -273,4 +293,17 @@ func (p *Provisioner) postModifyReload(ctx *callbackContext, mods Mods) {
 	ctx.entry = fresh
 
 	p.postModify(ctx, mods)
+}
+
+// refuseUnhashedPassword refuses a userPassword modification: the value would
+// be stored as given, not hashed by the directory as the Password Modify
+// operation of ca does.
+func refuseUnhashedPassword(mods Mods) error {
+	for key := range mods {
+		if _, name := split(key); strings.EqualFold(name, attrUserPassword) {
+			return invalidRequest("%s cannot be modified here: the value would be stored unhashed", attrUserPassword)
+		}
+	}
+
+	return nil
 }

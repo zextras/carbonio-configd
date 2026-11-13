@@ -6,6 +6,7 @@ package bootstrapcmd
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"io"
 	"os"
@@ -37,6 +38,7 @@ var (
 	runLDAPEnableReplica = setup.RunLDAPEnableReplica
 	runLDAPEnableMMR     = setup.RunLDAPEnableMMR
 	runIPTool            = setup.RunIPTool
+	runProv              = setup.RunProvCLI
 	runIniUtil           = setup.RunIniUtil
 	runCertMgr           = setup.RunCertMgr
 	runRC                = setup.RunRC
@@ -292,6 +294,31 @@ func RunIPTool(ctx context.Context, env sys.System, stdout, stderr io.Writer, ar
 	}
 
 	return runIPTool(e, args, stdout, stderr)
+}
+
+// RunProv executes "setup prov [-r] [-m] [-l] <verb> args...": the zmprov
+// commands setup.pl runs, natively over LDAP (see setup.RunProvCLI). It runs as
+// root or zextras, which can read the LDAP credentials.
+func RunProv(ctx context.Context, env sys.System, stdout, stderr io.Writer, args []string) int {
+	e, ok := toolEnv(ctx, env, stdout, stderr, "prov")
+	if !ok {
+		return 1
+	}
+
+	return runProv(e, args, stdout, stderr)
+}
+
+// RunRandomPassword executes "setup random-password [-l] [min max]":
+// com.zimbra.common.util.RandomPassword (see setup.RunRandomPassword). It needs
+// neither the node nor a user.
+func RunRandomPassword(_ context.Context, _ sys.System, stdout, stderr io.Writer, args []string) int {
+	return setup.RunRandomPassword(args, rand.Reader, stdout, stderr)
+}
+
+// RunServerIPs executes "setup serverips [--networks]": zmserverips (see
+// setup.RunServerIPs).
+func RunServerIPs(ctx context.Context, env sys.System, stdout, stderr io.Writer, args []string) int {
+	return setup.RunServerIPs(ctx, env.Exec, args, stdout, stderr)
 }
 
 // RunIniUtil executes "setup iniutil": zminiutil (see setup.RunIniUtil). The

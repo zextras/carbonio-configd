@@ -510,6 +510,13 @@ Not a `configd` command: the node bootstrap is the separate
 terminal interface is not linked into the daemon. Flags, keys, the wizard and
 the steps are in [bootstrap.md](bootstrap.md).
 
+The `/opt/zextras/libexec/setup` binary (the same code as `carbonio-bootstrap`)
+also runs the commands the legacy `setup.pl` calls: `setup prov [-r] [-m] [-l]
+<verb> ...` (zmprov: `cs cd ca aaa mcf ms mc ma md gs gcf gacf ga gc gd gas
+garpu gamcs`, natively over LDAP), `setup random-password [-l] [min max]`
+(`RandomPassword`) and `setup serverips [--networks]` (`zmserverips`); see
+[bootstrap.md](bootstrap.md#setup-prov).
+
 ## completion
 
 `configd completion bash|zsh|fish|powershell` prints the completion script of
