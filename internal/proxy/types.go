@@ -192,6 +192,10 @@ type Generator struct {
 	// DryRun indicates whether to actually write files
 	DryRun bool
 
+	// confBody is the main nginx.conf rendered by the current GenerateAll run,
+	// without the trailing result marker; nil when it was not rendered.
+	confBody []byte
+
 	// Verbose enables verbose logging output
 	Verbose bool
 

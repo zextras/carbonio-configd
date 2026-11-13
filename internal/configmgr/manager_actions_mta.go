@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"strings"
+	"sync"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/mtaops"
@@ -91,7 +92,7 @@ func (cm *ConfigManager) doPostconf(ctx context.Context, entries []plan.Postconf
 		})
 	}
 
-	errs = append(errs, cm.executePostconfOps(ctx, ops, specs, retry)...)
+	errs = append(errs, cm.executePostconfOps(ctx, cm.dropUnchangedPostconf(ctx, ops), specs, retry)...)
 
 	// Only successfully applied directives are cleared; the rest stay pending
 	// so the next cycle retries them (legacy clears only after a clean pass).
@@ -177,6 +178,12 @@ func (cm *ConfigManager) doPostconfd(ctx context.Context, entries []plan.Postcon
 		ops = append(ops, mtaops.PostconfdOperation{Key: e.Key})
 	}
 
+	if ops = cm.dropAbsentPostconfd(ctx, ops); len(ops) == 0 {
+		logger.DebugContext(ctx, "No postconf -X key is set in main.cf, nothing to remove")
+
+		return nil, nil
+	}
+
 	if err := cm.mtaExecutor.ExecutePostconfdBatch(ctx, ops); err != nil {
 		logger.ErrorContext(ctx, "Failed to execute postconfd batch",
 			"error", err)
@@ -188,6 +195,107 @@ func (cm *ConfigManager) doPostconfd(ctx context.Context, entries []plan.Postcon
 		"operation_count", len(ops))
 
 	return nil, nil
+}
+
+// mainCfKey is the context key of the main.cf read shared by the postconf and
+// postconf -X steps of one Execute.
+type mainCfKey struct{}
+
+// mainCfRead memoizes one read of main.cf; the two steps run concurrently.
+type mainCfRead struct {
+	once sync.Once
+	conf map[string]string
+	err  error
+}
+
+// withMainCfRead returns ctx carrying a fresh main.cf memo.
+func withMainCfRead(ctx context.Context) context.Context {
+	return context.WithValue(ctx, mainCfKey{}, &mainCfRead{})
+}
+
+// readMainCf returns the explicit main.cf settings, read once per memo (one
+// postconf -n for the whole Execute) or on every call without one. Callers
+// must not modify the map.
+func (cm *ConfigManager) readMainCf(ctx context.Context) (map[string]string, error) {
+	memo, ok := ctx.Value(mainCfKey{}).(*mainCfRead)
+	if !ok {
+		return cm.mtaExecutor.ReadMainCf(ctx)
+	}
+
+	memo.once.Do(func() { memo.conf, memo.err = cm.mtaExecutor.ReadMainCf(ctx) })
+
+	return memo.conf, memo.err
+}
+
+// samePostconfValue reports whether two postfix parameter values are equal up
+// to whitespace, which is how postconf -n wraps and re-indents them.
+func samePostconfValue(a, b string) bool {
+	return strings.Join(strings.Fields(a), " ") == strings.Join(strings.Fields(b), " ")
+}
+
+// dropUnchangedPostconf removes the operations that main.cf already satisfies
+// with one `postconf -n` run, so an unchanged host triggers no staging and no
+// root helper run. Only a parameter main.cf defines explicitly with an equal
+// value is dropped: one that is only default (or only in master.cf) is still
+// set, so main.cf carries it explicitly, and when main.cf cannot be read
+// every operation is kept.
+func (cm *ConfigManager) dropUnchangedPostconf(
+	ctx context.Context, ops []mtaops.PostconfOperation,
+) []mtaops.PostconfOperation {
+	if len(ops) == 0 {
+		return ops
+	}
+
+	current, err := cm.readMainCf(ctx)
+	if err != nil {
+		logger.WarnContext(ctx, "Cannot read main.cf, applying every postconf setting", "error", err)
+
+		return ops
+	}
+
+	changed := make([]mtaops.PostconfOperation, 0, len(ops))
+
+	for _, op := range ops {
+		have, set := current[op.Key]
+		if set && samePostconfValue(have, mtaops.NormalizePostconfValue(op.Value)) {
+			continue
+		}
+
+		changed = append(changed, op)
+	}
+
+	logger.DebugContext(ctx, "Compared postconf settings with main.cf",
+		"operation_count", len(ops), "changed", len(changed))
+
+	return changed
+}
+
+// dropAbsentPostconfd removes the postconf -X operations of keys main.cf does
+// not define explicitly: removing them changes nothing. When main.cf cannot be
+// read every operation is kept.
+func (cm *ConfigManager) dropAbsentPostconfd(
+	ctx context.Context, ops []mtaops.PostconfdOperation,
+) []mtaops.PostconfdOperation {
+	if len(ops) == 0 {
+		return ops
+	}
+
+	current, err := cm.readMainCf(ctx)
+	if err != nil {
+		logger.WarnContext(ctx, "Cannot read main.cf, removing every postconf -X key", "error", err)
+
+		return ops
+	}
+
+	present := make([]mtaops.PostconfdOperation, 0, len(ops))
+
+	for _, op := range ops {
+		if _, set := current[op.Key]; set {
+			present = append(present, op)
+		}
+	}
+
+	return present
 }
 
 // doLdap writes the LDAP attributes of the plan and returns the ones that must

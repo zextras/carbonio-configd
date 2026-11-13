@@ -317,6 +317,26 @@ func (cm *ConfigManager) processRewrite(ctx context.Context, filePath string, re
 		return cm.processPostfixConfRewrite(ctx, filePath, srcPath, destPath)
 	}
 
+	var rendered bytes.Buffer
+
+	lineCount, err := cm.rewriteTransform(ctx, srcPath, &rendered)
+	if err != nil {
+		logger.ErrorContext(ctx, "Failed to transform source file", "source_path", srcPath, "error", err)
+
+		return fmt.Errorf("transform source file %s: %w", srcPath, err)
+	}
+
+	// A target that already holds the rendered content with the wanted mode is
+	// left alone: no temp file, rename or fsync. An edited file differs and is
+	// rewritten, which is how an explicit REWRITE restores a hand-edited file.
+	if mode, modeErr := rewriteFileMode(rewriteEntry.Mode); modeErr == nil &&
+		cm.targetCurrent(destPath, rendered.Bytes(), mode, false) {
+		logger.DebugContext(ctx, "File rewrite skipped, target is up to date",
+			"dest_path", destPath, "lines_processed", lineCount)
+
+		return nil
+	}
+
 	tmpFile, err := cm.env.FS.CreateTemp(filepath.Dir(destPath), ".zmconfigd-rewrite-*.tmp")
 	if err != nil {
 		logger.ErrorContext(ctx, "Failed to create temporary file for rewrite", "error", err)
@@ -327,11 +347,10 @@ func (cm *ConfigManager) processRewrite(ctx context.Context, filePath string, re
 	tmpFileName := tmpFile.Name()
 	defer cm.cleanupRewriteFiles(ctx, nil, tmpFile, tmpFileName)
 
-	lineCount, err := cm.rewriteTransform(ctx, srcPath, tmpFile)
-	if err != nil {
-		logger.ErrorContext(ctx, "Failed to transform source file", "source_path", srcPath, "error", err)
+	if _, err := tmpFile.Write(rendered.Bytes()); err != nil {
+		logger.ErrorContext(ctx, "Failed to write temporary file", "temp_file", tmpFileName, "error", err)
 
-		return fmt.Errorf("transform source file %s: %w", srcPath, err)
+		return fmt.Errorf("write to temp file: %w", err)
 	}
 
 	if err := tmpFile.Close(); err != nil {
@@ -353,6 +372,30 @@ func (cm *ConfigManager) processRewrite(ctx context.Context, filePath string, re
 		"dest_path", destPath, "mode", modeStr, "lines_processed", lineCount)
 
 	return nil
+}
+
+// targetCurrent reports whether destPath already is what a rewrite would leave:
+// a regular file (a symlink is replaced, never treated as current) holding
+// content, with the permission bits of mode and, when rootOwned, owned by
+// root:root as the postfix-conf helper installs it. Any doubt (a stat or read
+// error) reports false, so the rewrite goes ahead.
+func (cm *ConfigManager) targetCurrent(destPath string, content []byte, mode os.FileMode, rootOwned bool) bool {
+	info, err := cm.env.FS.Lstat(destPath)
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != mode.Perm() {
+		return false
+	}
+
+	if rootOwned {
+		// A FileInfo without ownership (a fake filesystem) cannot disagree.
+		if st, ok := info.Sys().(*syscall.Stat_t); ok && (st.Uid != 0 || st.Gid != 0) {
+			return false
+		}
+	}
+
+	//nolint:gosec // G304: destPath is a REWRITE target of configd.cf under the install directory
+	have, err := cm.env.FS.ReadFile(destPath)
+
+	return err == nil && bytes.Equal(have, content)
 }
 
 // postfixClient returns the client of the root helper that owns
@@ -383,6 +426,15 @@ func (cm *ConfigManager) processPostfixConfRewrite(ctx context.Context, filePath
 		logger.ErrorContext(ctx, "Failed to transform source file", "source_path", srcPath, "error", err)
 
 		return fmt.Errorf("transform source file %s: %w", srcPath, err)
+	}
+
+	// Staging and running the helper cost a systemd oneshot, so an installed
+	// file that already is what the helper would produce is not staged.
+	if cm.targetCurrent(destPath, rendered.Bytes(), postfixconf.InstalledFileMode, true) {
+		logger.DebugContext(ctx, "File rewrite skipped, installed file is up to date",
+			"dest_path", destPath, "lines_processed", lineCount)
+
+		return nil
 	}
 
 	if batch, ok := ctx.Value(postfixBatchKey{}).(*postfixRewriteBatch); ok {

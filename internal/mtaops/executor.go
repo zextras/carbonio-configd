@@ -274,6 +274,50 @@ func (e *executor) ReadPostconf(
 	return value, set, nil
 }
 
+// ReadMainCf reads every parameter main.cf defines explicitly with one
+// `postconf -n` run, without modifying anything. The values are unwrapped to a
+// single line, as ReadPostconf returns them for explicitOnly.
+func (e *executor) ReadMainCf(ctx context.Context) (map[string]string, error) {
+	ctx = logger.ContextWithComponentOnce(ctx, "mtaops")
+
+	out, err := sys.Output(ctx, e.env.Exec, e.postconfPath, "-n")
+	if err != nil {
+		return nil, fmt.Errorf("postconf -n failed: %w", err)
+	}
+
+	return parsePostconfAll(string(out)), nil
+}
+
+// parsePostconfAll extracts every "key = value" entry from `postconf -n`
+// output; long values wrapped onto indented continuation lines are unwrapped.
+func parsePostconfAll(out string) map[string]string {
+	entries := make(map[string]string)
+	lines := strings.Split(out, "\n")
+
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+		if line == "" || line[0] == ' ' || line[0] == '\t' {
+			continue
+		}
+
+		name, first, found := strings.Cut(line, "=")
+		if !found {
+			continue
+		}
+
+		name = strings.TrimSpace(name)
+		if !postconfKeyRe.MatchString(name) {
+			continue
+		}
+
+		cont := continuationLines(lines[i+1:])
+		entries[name] = unwrapPostconfValue(append([]string{first}, cont...))
+		i += len(cont)
+	}
+
+	return entries
+}
+
 // parsePostconfEntry extracts the value of key from `postconf -n key` output
 // ("key = value", long values wrapped onto indented continuation lines). set is
 // false when no line defines key.

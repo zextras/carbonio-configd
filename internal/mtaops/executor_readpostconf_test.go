@@ -234,3 +234,42 @@ func TestNormalizePostconfValue(t *testing.T) {
 		})
 	}
 }
+
+func TestExecutor_ReadMainCf(t *testing.T) {
+	t.Parallel()
+
+	ex, fakes := newFakeExecutor(&mockLdapManager{})
+	fakes.Exec.OnPath(postconfBin, systest.Reply(
+		"myhostname = mail.example.com\n"+
+			"mynetworks = 127.0.0.0/8, 10.0.0.0/8,\n\t192.168.0.0/16\n"+
+			"relay_host =\n"+
+			"smtpd_banner = $myhostname ESMTP = ready\n"+
+			"inet_interfaces = all\n"))
+
+	conf, err := ex.ReadMainCf(t.Context())
+
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{
+		"myhostname":      "mail.example.com",
+		"mynetworks":      "127.0.0.0/8, 10.0.0.0/8, 192.168.0.0/16",
+		"relay_host":      "",
+		"smtpd_banner":    "$myhostname ESMTP = ready",
+		"inet_interfaces": "all",
+	}, conf)
+
+	calls := fakes.Exec.Calls()
+	require.Len(t, calls, 1, "one postconf run for every parameter")
+	assert.Equal(t, []string{"-n"}, calls[0].Args)
+}
+
+func TestExecutor_ReadMainCf_Error(t *testing.T) {
+	t.Parallel()
+
+	ex, fakes := newFakeExecutor(&mockLdapManager{})
+	fakes.Exec.OnPath(postconfBin, systest.Fail(1, "postconf: fatal: open main.cf\n"))
+
+	conf, err := ex.ReadMainCf(t.Context())
+
+	require.Error(t, err)
+	assert.Nil(t, conf)
+}

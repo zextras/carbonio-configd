@@ -6,6 +6,7 @@ package configmgr
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -58,7 +59,13 @@ type mockMtaExecutor struct {
 	postconfdErr error
 	ldapErr      error
 	mapfileErr   error
+	// mainCf is what ReadMainCf reports; nil makes the read fail.
+	mainCf map[string]string
 }
+
+// errMainCfUnknown is what the mocks return from ReadMainCf when the test does
+// not describe main.cf: every postconf operation is then applied.
+var errMainCfUnknown = errors.New("main.cf not mocked")
 
 func (m *mockMtaExecutor) ReadPostconf(_ context.Context, _ string, _ bool) (string, bool, error) {
 	return "", false, nil
@@ -1470,4 +1477,15 @@ func TestRunProxygenWithConfigs_WithPopulatedState(t *testing.T) {
 	if err == nil {
 		t.Log("RunProxygenWithConfigs unexpectedly succeeded")
 	}
+}
+
+// ReadMainCf reports mainCf as the explicit main.cf settings; without it the
+// read fails, so the mock behaves like a host whose main.cf is unknown and
+// every operation is applied.
+func (m *mockMtaExecutor) ReadMainCf(_ context.Context) (map[string]string, error) {
+	if m.mainCf == nil {
+		return nil, errMainCfUnknown
+	}
+
+	return m.mainCf, nil
 }
