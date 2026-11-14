@@ -453,8 +453,14 @@ func (c *Controller) defaultRegistry() map[string]*ServiceDef {
 				Label:   svcMailbox,
 				LogFile: c.p.log + "/zmmailboxd.out",
 				Args:    c.mailboxJavaArgs,
-				Mkdirs:  []string{c.p.mailboxd + "/work/service/jsp", c.p.mailboxd + "/work"},
-				Touch:   []string{c.p.log + "/gc.log"},
+				Mkdirs: []string{
+					c.p.mailboxd + "/work/service/jsp", c.p.mailboxd + "/work", c.p.appserverState(),
+				},
+				Touch: []string{c.p.log + "/gc.log"},
+				// Class data sharing (AppCDS), as carbonio-appserver.service does;
+				// a failed preparation starts the JVM without it.
+				Prepare:      c.prepareMailboxCDS,
+				FallbackArgs: c.mailboxJavaArgsNoCDS,
 			},
 			// Start returns once the mail port accepts connections (legacy
 			// zmmailboxdctl start).

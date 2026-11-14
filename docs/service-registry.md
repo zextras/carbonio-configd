@@ -35,12 +35,27 @@ declares at most one (checked for the whole registry by
 | Strategy | Used by | Start | Stop |
 |---|---|---|---|
 | `BinaryPath` (+ `BinaryArgs` or `ArgsFromConfig`, `Detached`, `LogFile`) | memcached, opendkim, saslauthd, nginx, clamd, ldap, configd, ... | spawn the binary; `Detached` gives it its own session and a log file | `GracefulStop` (SIGTERM, bounded wait, SIGKILL through the pidfile) or a kill by `ProcessName` |
-| `Java` (`JavaSpec`) | mailbox, milter | java binary of localconfig, `Args`, log file, `Mkdirs`, `Touch` | kill by `ProcessName` |
+| `Java` (`JavaSpec`) | mailbox, milter | java binary of localconfig, `Args`, log file, `Mkdirs`, `Touch`, optional `Prepare` (failure starts with `FallbackArgs`; mailbox uses it for class data sharing, see below) | kill by `ProcessName` |
 | `Mysqld` (`MysqldSpec`) | appserver-db, antispam-db | `mysqld_safe` with the defaults file of localconfig | SIGTERM and a bounded wait, **never SIGKILL** (InnoDB crash recovery) |
 | `Commands` (`CommandSpec`) | mta (`postfix`) | `Status` probe, `Prepare` steps, `Start` verb | `Stop` verb |
 | `Collectors` (`CollectorSpec`) | stats (`configd stat run <collector>...`) | one process for all the collectors, log `zmstat.out` | pidfiles (process group; the `setup stat` and per-collector processes of earlier releases and the legacy `zmstat-*` Perl collectors are stopped too, also before a start), then identity |
 | `BinaryPath` + `Direct` (`DirectSpec`) + `Companions` | amavis | `Companions` through sudo, skip when running, `Prepare` steps, spawn, bounded wait for the process | `ProcessName`, then each companion |
 | `CustomStart` / `CustomStop` | none today | named hook | named hook |
+
+**Mailbox class data sharing (AppCDS).** Like `carbonio-appserver.service`, the
+legacy mailbox launch starts the JVM with `-XX:SharedArchiveFile=<state>/mailboxd.jsa
+-XX:+AutoCreateSharedArchive` (CDS messages go to `<state>/cds.log`), where
+`<state>` is `/opt/zextras/data/carbonio-appserver`. Before the launch
+`Prepare` writes `<state>/classpath.args` (`-cp mailbox.jar:<every other jar of
+mailbox/jars in directory order>`, passed as `@classpath.args`; the order is
+the readdir one, as the JVM expands `jars/*`, never sorted) and deletes the
+archive when the fingerprint of the argument file, the JDK (`lib/modules`,
+`lib/server/libjvm.so`) and every jar of `mailbox/jars` and `lib/ext` differs
+from `<state>/mailboxd.jsa.inputs`: the JVM writes a missing archive on exit
+but never rewrites a stale one. When the preparation fails the JVM starts
+without CDS, with the old `-cp mailbox.jar:jars/*`; a start never fails
+because of the cache. The JVM identity (`com.zextras.mailbox.Mailbox`, the
+last argument) is unchanged.
 
 `Ready` names the probe a launch waits for: `ReadyLDAP` (anonymous rootDSE
 search, fails fast when the daemon exits), `ReadyConfigd` (`STATUS`),

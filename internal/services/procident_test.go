@@ -476,8 +476,9 @@ func TestRunningPID_RealContainerArgvForms(t *testing.T) {
 	add(114005, argv("/opt/zextras/common/libexec/slapd", "-l", "LOCAL0", "-h",
 		"ldap://carbonio.carbonio-system.svc.cluster.local:389 ldapi:///", "-F", "/opt/zextras/data/ldap/config"),
 		"slapd", false)
-	add(116048, argv("/opt/zextras/common/bin/java", "--enable-preview", "-Dzimbra.config=/opt/zextras/conf/localconfig.xml",
-		"-cp", "/opt/zextras/mailbox/jars/mailbox.jar:/opt/zextras/mailbox/jars/*", "com.zextras.mailbox.Mailbox"),
+	add(116048, argv("/opt/zextras/common/bin/java", "-XX:SharedArchiveFile=/opt/zextras/data/carbonio-appserver/mailboxd.jsa",
+		"-XX:+AutoCreateSharedArchive", "--enable-preview", "-Dzimbra.config=/opt/zextras/conf/localconfig.xml",
+		"@/opt/zextras/data/carbonio-appserver/classpath.args", "com.zextras.mailbox.Mailbox"),
 		"java", false)
 	add(116337, argv("/opt/zextras/common/bin/memcached", "-d", "-U", "0", "-l", "127.0.1.1,127.0.0.1", "-p", "11211"),
 		"memcached", false)

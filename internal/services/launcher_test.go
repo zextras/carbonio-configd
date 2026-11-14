@@ -11,6 +11,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 // --- buildLDAPBindURL ---
@@ -221,15 +223,47 @@ func TestMailboxJavaArgs_NoXssDoubleInjection(t *testing.T) {
 	}
 }
 
-func TestMailboxJavaArgs_ContainsCpAndMainClass(t *testing.T) {
+// The CDS command line: the CDS flags before every other option, the class
+// path as the argument file (no -cp, no wildcard) right before the main class,
+// which stays last (pgrep identity).
+func TestMailboxJavaArgs_CDSFlagsClasspathArgfileAndMainClass(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+	state := ctl.p.data + "/carbonio-appserver"
+
+	args := ctl.mailboxJavaArgs(map[string]string{})
+
+	assert.Equal(t, []string{
+		"-XX:SharedArchiveFile=" + state + "/mailboxd.jsa",
+		"-XX:+AutoCreateSharedArchive",
+		"-Xlog:cds*=off:stdout",
+		"-Xlog:cds*=warning:file=" + state + "/cds.log::filecount=2",
+		"--enable-preview",
+	}, args[:5], "CDS flags go before the other options")
+	assert.Equal(t, []string{"@" + state + "/classpath.args", "com.zextras.mailbox.Mailbox"}, args[len(args)-2:])
+	assert.NotContains(t, args, "-cp")
+	assert.NotContains(t, args, "-classpath")
+}
+
+// The fallback is the command line from before class data sharing.
+func TestMailboxJavaArgsNoCDS_OldClasspathAndNoCDSFlags(t *testing.T) {
 	t.Parallel()
 
 	ctl := newRealController(t)
 
-	lc := map[string]string{}
-	args := ctl.mailboxJavaArgs(lc)
-	assertContains(t, args, "-cp")
-	assertContains(t, args, "com.zextras.mailbox.Mailbox")
+	args := ctl.mailboxJavaArgsNoCDS(map[string]string{})
+
+	assert.Equal(t, []string{
+		"-cp", ctl.p.mailbox + "/jars/mailbox.jar:" + ctl.p.mailbox + "/jars/*", "com.zextras.mailbox.Mailbox",
+	}, args[len(args)-3:])
+	assert.Equal(t, "--enable-preview", args[0])
+
+	for _, a := range args {
+		assert.NotContains(t, a, "SharedArchive")
+		assert.NotContains(t, a, "cds")
+		assert.False(t, strings.HasPrefix(a, "@"), "no argument file: %q", a)
+	}
 }
 
 func TestMailboxJavaArgs_PreviewFlagsOnceBeforeMainClass(t *testing.T) {

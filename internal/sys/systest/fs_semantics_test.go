@@ -356,6 +356,23 @@ func TestFS_ReadDirListsDirectChildrenSorted(t *testing.T) {
 	require.ErrorIs(t, err, fs.ErrNotExist)
 }
 
+func TestFS_ReadDirNamesListsDirectChildren(t *testing.T) {
+	t.Parallel()
+
+	f := systest.New()
+	f.FS.PutDir("/d", 0o755)
+	f.FS.Put("/d/b", nil, 0o600)
+	f.FS.Put("/d/a", nil, 0o600)
+	f.FS.Put("/d/sub/deep", nil, 0o600)
+
+	names, err := f.FS.ReadDirNames("/d")
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"a", "b"}, names)
+
+	_, err = f.FS.ReadDirNames("/missing")
+	require.ErrorIs(t, err, fs.ErrNotExist)
+}
+
 func TestFS_WalkDir(t *testing.T) {
 	t.Parallel()
 
