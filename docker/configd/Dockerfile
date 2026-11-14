@@ -49,7 +49,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
 # (the LDAP attrs schema, conf/attrs, which carbonio-core does not ship).
 # Both are Architecture: all, so they are fetched once on the build platform
 # for every target.
-FROM --platform=$BUILDPLATFORM docker.io/library/ubuntu:jammy AS installer
+FROM --platform=$BUILDPLATFORM docker.io/library/ubuntu:noble AS installer
 
 # Reproducible template source. The Zextras apt repository is not signed
 # (it publishes no InRelease/Release.gpg, so there is no key to verify it
