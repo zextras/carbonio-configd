@@ -66,6 +66,8 @@ func (def *ServiceDef) validateSpecs() error {
 	switch {
 	case def.Java != nil && (def.Java.Args == nil || def.Java.LogFile == ""):
 		return fmt.Errorf("%s: Java launch needs Args and LogFile", def.Name)
+	case def.Java != nil && def.Java.Prepare != nil && def.Java.FallbackArgs == nil:
+		return fmt.Errorf("%s: Java Prepare needs FallbackArgs", def.Name)
 	case def.Mysqld != nil && (def.PidFile == "" || def.ProcessName == "" || def.Mysqld.DefaultsKey == ""):
 		return fmt.Errorf("%s: Mysqld launch needs PidFile, ProcessName and DefaultsKey", def.Name)
 	case def.Commands != nil && (def.BinaryPath == "" || def.Commands.Start == nil):
