@@ -25,11 +25,13 @@ const (
 	// with the same attempts.
 	mailboxPortAttempts = 6
 	mailboxPortInterval = 5 * time.Second
-	// mailboxDialAttempts x mailboxDialInterval: then it waits 36 x 5s = 180s
-	// for the port to accept connections — mailboxd's own DB-connect retry
-	// window, so the JVM has headroom under boot-time contention (CO-4008).
-	mailboxDialAttempts = 36
-	mailboxDialInterval = 5 * time.Second
+	// mailboxDialAttempts x mailboxDialInterval: then it waits up to 180s for
+	// the port to accept connections — mailboxd's own DB-connect retry window,
+	// so the JVM has headroom under boot-time contention (CO-4008). Legacy
+	// zmmailboxdctl polled every 5s; with mailboxd up in ~6s that added up to
+	// 5s to every start, so poll every 250ms over the same window.
+	mailboxDialAttempts = 720
+	mailboxDialInterval = 250 * time.Millisecond
 	mailboxDialTimeout  = 2 * time.Second
 
 	// The daemon answers STATUS only after its first (synchronous) rewrite
