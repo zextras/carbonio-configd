@@ -43,14 +43,14 @@ func (c *Controller) startJava(ctx context.Context, def *ServiceDef) error {
 		return err
 	}
 
-	args := spec.Args(lc)
-
 	for _, dir := range spec.Mkdirs {
 		if err := c.env.FS.MkdirAll(dir, 0o755); err != nil {
 			logger.WarnContext(ctx, "Failed to create "+spec.Label+" work directory",
 				"path", dir, "error", err)
 		}
 	}
+
+	args := c.javaLaunchArgs(ctx, spec, javaBin, lc)
 
 	// Pre-create the files the JVM only needs write access to, with the
 	// right permissions.
@@ -67,6 +67,25 @@ func (c *Controller) startJava(ctx context.Context, def *ServiceDef) error {
 	}
 
 	return c.awaitReady(ctx, def, nil)
+}
+
+// javaLaunchArgs runs the spec's Prepare step, if any, and returns the
+// arguments to launch with: Args, or FallbackArgs when the preparation failed.
+func (c *Controller) javaLaunchArgs(
+	ctx context.Context, spec *JavaSpec, javaBin string, lc map[string]string,
+) []string {
+	if spec.Prepare == nil {
+		return spec.Args(lc)
+	}
+
+	if err := spec.Prepare(ctx, javaBin, lc); err != nil {
+		logger.WarnContext(ctx, "Preparing "+spec.Label+" launch failed, starting with the fallback arguments",
+			"error", err)
+
+		return spec.FallbackArgs(lc)
+	}
+
+	return spec.Args(lc)
 }
 
 // startJavaDetached builds and starts javaBin with args as a fully detached,
@@ -146,7 +165,22 @@ func withoutPreviewArgs(opts []string) []string {
 	return out
 }
 
+// mailboxJavaArgs builds the mailboxd JVM arguments with the flat class path,
+// the ZAL flag and the AOT flags in the argument file prepareMailboxAOT
+// writes. Mirrors carbonio-appserver.service.
 func (c *Controller) mailboxJavaArgs(lc map[string]string) []string {
+	return c.mailboxArgs(lc, []string{"@" + c.mailboxJVMArgsFile()})
+}
+
+// mailboxJavaArgsFallback is the mailboxd command line from before the flat
+// class path: the fallback when the argument file could not be prepared.
+func (c *Controller) mailboxJavaArgsFallback(lc map[string]string) []string {
+	return c.mailboxArgs(lc, []string{"-cp", c.p.mailbox + "/jars/mailbox.jar:" + c.p.mailbox + "/jars/*"})
+}
+
+// mailboxArgs builds the mailboxd JVM arguments: classpath (the -cp pair or an
+// @argfile) before the main class.
+func (c *Controller) mailboxArgs(lc map[string]string, classpath []string) []string {
 	javaXms := lc["mailboxd_java_heap_size"]
 	if javaXms == "" {
 		javaXms = "512"
@@ -181,18 +215,18 @@ func (c *Controller) mailboxJavaArgs(lc map[string]string) []string {
 		javaOpts = strings.TrimSpace(javaOpts + " -Dlog4j.configurationFile=" + log4jProps)
 	}
 
-	args := append(javaPreviewArgs(), "-Dfile.encoding=UTF-8")
+	args := javaPreviewArgs()
+	args = append(args, "-Dfile.encoding=UTF-8")
 	args = append(args, withoutPreviewArgs(strings.Fields(javaOpts))...)
-
-	return append(args,
+	args = append(args,
 		"-Xms"+javaXms+"m",
 		"-Xmx"+javaXmx+"m",
 		"-Djava.io.tmpdir="+c.p.mailboxd+"/work",
 		"-Djava.library.path="+c.p.lib,
 		"-Dzimbra.config="+c.p.conf+"/localconfig.xml",
-		"-cp", c.p.mailbox+"/jars/mailbox.jar:"+c.p.mailbox+"/jars/*",
-		mailboxMainClass,
 	)
+
+	return append(append(args, classpath...), mailboxMainClass)
 }
 
 // milterMainClass is the JVM main class of the milter: the last argument

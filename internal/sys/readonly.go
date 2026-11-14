@@ -122,6 +122,9 @@ func (r readOnlyFS) Lstat(name string) (fs.FileInfo, error) { return r.FS.Lstat(
 // ReadDir implements FS.
 func (r readOnlyFS) ReadDir(name string) ([]fs.DirEntry, error) { return r.FS.ReadDir(name) }
 
+// ReadDirNames implements FS.
+func (r readOnlyFS) ReadDirNames(name string) ([]string, error) { return r.FS.ReadDirNames(name) }
+
 // WalkDir implements FS.
 func (r readOnlyFS) WalkDir(root string, fn fs.WalkDirFunc) error { return r.FS.WalkDir(root, fn) }
 

@@ -456,6 +456,23 @@ func (f *FS) ReadDir(name string) ([]fs.DirEntry, error) {
 	return out, nil
 }
 
+// ReadDirNames implements sys.FS. The in-memory tree has no directory order,
+// so the names come sorted, like ReadDir; a test that needs a specific order
+// wraps the FS and overrides this method.
+func (f *FS) ReadDirNames(name string) ([]string, error) {
+	ents, err := f.ReadDir(name)
+	if err != nil {
+		return nil, err
+	}
+
+	names := make([]string, len(ents))
+	for i, e := range ents {
+		names[i] = e.Name()
+	}
+
+	return names, nil
+}
+
 // WalkDir implements sys.FS (lexical order, like filepath.WalkDir).
 func (f *FS) WalkDir(root string, fn fs.WalkDirFunc) error {
 	st, err := f.Lstat(root)

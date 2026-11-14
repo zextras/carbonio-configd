@@ -44,6 +44,11 @@ type FS interface {
 	Stat(name string) (fs.FileInfo, error)
 	Lstat(name string) (fs.FileInfo, error)
 	ReadDir(name string) ([]fs.DirEntry, error)
+	// ReadDirNames lists the names in a directory in directory order (the
+	// order of readdir, as `ls -U` and the JVM's `jars/*` expansion see it),
+	// unlike ReadDir, which sorts. Only for callers that must reproduce that
+	// order.
+	ReadDirNames(name string) ([]string, error)
 	WalkDir(root string, fn fs.WalkDirFunc) error
 	Glob(pattern string) ([]string, error)
 	Readlink(name string) (string, error)
@@ -108,6 +113,19 @@ func (RealFS) Lstat(name string) (fs.FileInfo, error) { return os.Lstat(name) }
 
 // ReadDir implements FS.
 func (RealFS) ReadDir(name string) ([]fs.DirEntry, error) { return os.ReadDir(name) }
+
+// ReadDirNames implements FS: os.File.Readdirnames returns directory order,
+// where os.ReadDir sorts.
+func (RealFS) ReadDirNames(name string) ([]string, error) {
+	d, err := os.Open(name) //nolint:gosec // G304: see ReadFile
+	if err != nil {
+		return nil, err
+	}
+
+	defer func() { _ = d.Close() }()
+
+	return d.Readdirnames(-1)
+}
 
 // WalkDir implements FS.
 func (RealFS) WalkDir(root string, fn fs.WalkDirFunc) error { return filepath.WalkDir(root, fn) }
