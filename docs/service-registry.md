@@ -35,12 +35,33 @@ declares at most one (checked for the whole registry by
 | Strategy | Used by | Start | Stop |
 |---|---|---|---|
 | `BinaryPath` (+ `BinaryArgs` or `ArgsFromConfig`, `Detached`, `LogFile`) | memcached, opendkim, saslauthd, nginx, clamd, ldap, configd, ... | spawn the binary; `Detached` gives it its own session and a log file | `GracefulStop` (SIGTERM, bounded wait, SIGKILL through the pidfile) or a kill by `ProcessName` |
-| `Java` (`JavaSpec`) | mailbox, milter | java binary of localconfig, `Args`, log file, `Mkdirs`, `Touch` | kill by `ProcessName` |
+| `Java` (`JavaSpec`) | mailbox, milter | java binary of localconfig, `Args`, log file, `Mkdirs`, `Touch`, optional `Prepare` (failure starts with `FallbackArgs`; mailbox uses it for the flat class path and AOT cache, see below) | kill by `ProcessName` |
 | `Mysqld` (`MysqldSpec`) | appserver-db, antispam-db | `mysqld_safe` with the defaults file of localconfig | SIGTERM and a bounded wait, **never SIGKILL** (InnoDB crash recovery) |
 | `Commands` (`CommandSpec`) | mta (`postfix`) | `Status` probe, `Prepare` steps, `Start` verb | `Stop` verb |
 | `Collectors` (`CollectorSpec`) | stats (`configd stat run <collector>...`) | one process for all the collectors, log `zmstat.out` | pidfiles (process group; the `setup stat` and per-collector processes of earlier releases and the legacy `zmstat-*` Perl collectors are stopped too, also before a start), then identity |
 | `BinaryPath` + `Direct` (`DirectSpec`) + `Companions` | amavis | `Companions` through sudo, skip when running, `Prepare` steps, spawn, bounded wait for the process | `ProcessName`, then each companion |
 | `CustomStart` / `CustomStop` | none today | named hook | named hook |
+
+**Mailbox flat class path and AOT cache (CO-4751).** Like
+`carbonio-appserver.service`, the legacy mailbox launch puts the Carbonio
+Advanced extension jars on the mailbox class path (ZAL delegates to its parent
+with `-Dzal.flatClasspath=true`, instead of a child-first loader) so the JDK 25
+AOT cache covers them. `<state>` is `/opt/zextras/data/carbonio-appserver`.
+Before the launch `Prepare` writes `<state>/mailboxd.args`, passed as
+`@mailboxd.args`: the ZAL flag and `-cp mailbox.jar:<every other jar of
+mailbox/jars>:<every jar of lib/ext/carbonio>`, both directories in readdir
+order (as the JVM expands `jars/*`, never sorted; `lib/ext/carbonio` is
+skipped when absent). The AOT flags are added only when `<jdk>/release` says
+JDK 25 or newer (JDK 21 rejects them): `-XX:AOTCache=<state>/mailboxd.aot` when
+the cache exists, otherwise `-XX:AOTCacheOutput=<state>/mailboxd.aot` (the run
+is the training run, the JVM writes the cache at exit), with
+`-Xlog:aot=warning:file=<state>/aot.log`. The cache is deleted when the
+fingerprint of the class path, the JDK (`lib/modules`, `lib/server/libjvm.so`)
+and every jar of `mailbox/jars` and `lib/ext` differs from
+`<state>/mailboxd.aot.inputs`: the JVM never rewrites a stale cache. When the
+preparation fails the JVM starts with the old `-cp mailbox.jar:jars/*`; a start
+never fails because of the cache. The JVM identity
+(`com.zextras.mailbox.Mailbox`, the last argument) is unchanged.
 
 `Ready` names the probe a launch waits for: `ReadyLDAP` (anonymous rootDSE
 search, fails fast when the daemon exits), `ReadyConfigd` (`STATUS`),

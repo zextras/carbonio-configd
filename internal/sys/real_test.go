@@ -143,6 +143,28 @@ func TestRealFS_DirectoryOperations(t *testing.T) {
 	require.ErrorIs(t, err, fs.ErrNotExist)
 }
 
+// ReadDirNames lists every direct child (files, directories, links), in the
+// order readdir yields, which is the file system's: only the set is portable.
+func TestRealFS_ReadDirNames(t *testing.T) {
+	t.Parallel()
+
+	var rfs sys.RealFS
+
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "sub"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "b.jar"), nil, 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "a.jar"), nil, 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "sub", "c.jar"), nil, 0o600))
+	require.NoError(t, os.Symlink("a.jar", filepath.Join(root, "link.jar")))
+
+	names, err := rfs.ReadDirNames(root)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"a.jar", "b.jar", "sub", "link.jar"}, names)
+
+	_, err = rfs.ReadDirNames(filepath.Join(root, "missing"))
+	require.ErrorIs(t, err, fs.ErrNotExist)
+}
+
 func TestRealFS_SymlinkReadlinkLstat(t *testing.T) {
 	t.Parallel()
 
