@@ -59,6 +59,16 @@ func appendUnless(opts, marker, suffix string) string {
 	return opts + suffix
 }
 
+// Localconfig keys exported by LaunchEnv that are also listed in the defaults
+// and docs tables.
+const (
+	keyHeapNewSizePercent = "mailboxd_java_heap_new_size_percent"
+	keyLDAPPort           = "ldap_port"
+	keyMailboxdDirectory  = "mailboxd_directory"
+	keyMySQLErrLogFile    = "mysql_errlogfile"
+	keyMySQLMyCnf         = "mysql_mycnf"
+)
+
 // LaunchEnv derives from an effective localconfig the environment variables
 // the systemd units consume (the former systemd-envscript / systemd.env set).
 func LaunchEnv(lc map[string]string) map[string]string {
@@ -70,24 +80,33 @@ func LaunchEnv(lc map[string]string) map[string]string {
 		" -Dsun.net.inetaddr.ttl="+valueOr(lc, "networkaddress_cache_ttl", "60"))
 	opts = appendUnless(opts, "log4j", " -Dlog4j.configurationFile="+lc["zimbra_log4j_properties"])
 
-	return map[string]string{
-		"antispam_enable_restarts":            lc["antispam_enable_restarts"],
-		"antispam_enable_rule_compilation":    lc["antispam_enable_rule_compilation"],
-		"antispam_enable_rule_updates":        lc["antispam_enable_rule_updates"],
-		"bind_url":                            BindURL(lc),
-		"configd_listen_port":                 lc["zmconfigd_listen_port"],
-		"configd_rewrite_timeout":             lc["zimbra_configrewrite_timeout"],
-		"java_options":                        lc["zimbra_zmjava_options"],
-		"java_xms":                            heap,
-		"java_xmx":                            heap,
-		"ldap_domain":                         LDAPDomain(lc),
-		"ldap_port":                           lc["ldap_port"],
-		"log_directory":                       lc["zimbra_log_directory"],
-		"mailboxd_directory":                  lc["mailboxd_directory"],
-		"mailboxd_java_heap_new_size_percent": valueOr(lc, "mailboxd_java_heap_new_size_percent", "25"),
-		"mail_service_port":                   lc["zimbra_mail_service_port"],
-		"mailboxd_java_options":               opts,
-		"mysql_errlogfile":                    lc["mysql_errlogfile"],
-		"mysql_mycnf":                         lc["mysql_mycnf"],
+	env := map[string]string{
+		"bind_url":                BindURL(lc),
+		"configd_listen_port":     lc["zmconfigd_listen_port"],
+		"configd_rewrite_timeout": lc["zimbra_configrewrite_timeout"],
+		"java_options":            lc["zimbra_zmjava_options"],
+		"java_xms":                heap,
+		"java_xmx":                heap,
+		"ldap_domain":             LDAPDomain(lc),
+		"log_directory":           lc["zimbra_log_directory"],
+		keyHeapNewSizePercent:     valueOr(lc, keyHeapNewSizePercent, "25"),
+		"mail_service_port":       lc["zimbra_mail_service_port"],
 	}
+
+	// Keys exported under their localconfig name.
+	for _, k := range []string{
+		"antispam_enable_restarts",
+		"antispam_enable_rule_compilation",
+		"antispam_enable_rule_updates",
+		keyLDAPPort,
+		keyMailboxdDirectory,
+		keyMySQLErrLogFile,
+		keyMySQLMyCnf,
+	} {
+		env[k] = lc[k]
+	}
+
+	env["mailboxd_java_options"] = opts
+
+	return env
 }

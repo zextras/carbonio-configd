@@ -180,7 +180,7 @@ func (a *app) proxyGenCmd() *cobra.Command {
 
 	noFileCompletion(cmd, "verbose", "server", "prefix", "template-prefix", "include-dir", "config")
 
-	return describeArgs(cmd, [2]string{"[<args> ...]", ""})
+	return describeArgs(cmd, [2]string{argsPlaceholder, ""})
 }
 
 // Run generates the proxy configs.

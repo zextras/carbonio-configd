@@ -15,12 +15,15 @@ type ExecCmd struct {
 	Args []string
 }
 
+// argsPlaceholder is the usage placeholder of trailing program arguments.
+const argsPlaceholder = "[<args> ...]"
+
 func (a *app) execCmd() *cobra.Command {
 	c := &a.cli.Exec
 
 	cmd := a.leaf("exec [--] <program> [<args> ...]",
 		"Run a program with the launch variables derived from localconfig",
-		posArgs([]string{"<program>"}, []string{"[<args> ...]"}, true),
+		posArgs([]string{"<program>"}, []string{argsPlaceholder}, true),
 		func(_ *cobra.Command, args []string) error {
 			c.Args = args
 
@@ -32,7 +35,7 @@ func (a *app) execCmd() *cobra.Command {
 
 	return describeArgs(cmd,
 		[2]string{"<program>", "Program to exec (looked up in PATH unless it has a slash)"},
-		[2]string{"[<args> ...]", `Arguments; "${name}" and "$name" expand over the launch variables, "$$" is "$"`})
+		[2]string{argsPlaceholder, `Arguments; "${name}" and "$name" expand over the launch variables, "$$" is "$"`})
 }
 
 // Run loads localconfig and execs the program; it only returns on failure.

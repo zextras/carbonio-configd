@@ -173,12 +173,12 @@ func expandWord(word string, vars map[string]string) string {
 			continue
 		}
 
-		switch {
-		case word[i+1] == '$':
+		switch word[i+1] {
+		case '$':
 			sb.WriteByte('$')
 
 			i++
-		case word[i+1] == '{':
+		case '{':
 			end := strings.IndexByte(word[i+2:], '}')
 			if end >= 0 && isName(word[i+2:i+2+end]) {
 				sb.WriteString(vars[word[i+2:i+2+end]])
