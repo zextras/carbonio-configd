@@ -51,7 +51,7 @@ type Options struct {
 // exit status to use.
 func Run(o *Options) int {
 	if len(o.Args) == 0 {
-		fmt.Fprintln(o.Stderr, "Error: exec: no program given")
+		_, _ = fmt.Fprintln(o.Stderr, "Error: exec: no program given")
 
 		return exitLoad
 	}
@@ -63,7 +63,7 @@ func Run(o *Options) int {
 
 	lc, err := load()
 	if err != nil {
-		fmt.Fprintf(o.Stderr, "Error: exec: failed to load localconfig: %v\n", err)
+		_, _ = fmt.Fprintf(o.Stderr, "Error: exec: failed to load localconfig: %v\n", err)
 
 		return exitLoad
 	}
@@ -88,7 +88,7 @@ func Run(o *Options) int {
 	prog := o.Args[0]
 	if !strings.Contains(prog, "/") {
 		if prog, err = lookPath(prog); err != nil {
-			fmt.Fprintf(o.Stderr, "Error: exec: %s: %v\n", o.Args[0], err)
+			_, _ = fmt.Fprintf(o.Stderr, "Error: exec: %s: %v\n", o.Args[0], err)
 
 			return statusFor(err)
 		}
@@ -97,7 +97,7 @@ func Run(o *Options) int {
 	argv := append([]string{o.Args[0]}, ExpandArgs(o.Args[1:], vars)...)
 
 	if err := execFn(prog, argv, mergeEnv(environ(), vars)); err != nil {
-		fmt.Fprintf(o.Stderr, "Error: exec: %s: %v\n", prog, err)
+		_, _ = fmt.Fprintf(o.Stderr, "Error: exec: %s: %v\n", prog, err)
 
 		return statusFor(err)
 	}
