@@ -425,7 +425,7 @@ func TestShortErr(t *testing.T) {
 }
 
 // fakeAdvancedInstall makes the fake filesystem look like an Advanced install
-// under CARBONIO_BASE_DIR=testBase, so advancedJARsPresent passes. It sets the
+// under CARBONIO_BASE_DIR=testBase, so AdvancedInstalled passes. It sets the
 // environment, so callers must not be parallel.
 func fakeAdvancedInstall(t *testing.T, fx *fixture) {
 	t.Helper()
@@ -435,23 +435,6 @@ func fakeAdvancedInstall(t *testing.T, fx *fixture) {
 	extDir := testBase + "/lib/ext/carbonio"
 	fx.f.FS.PutDir(extDir, 0o750)
 	fx.f.FS.Put(extDir+"/carbonio-advanced-core-26.6.5.jar", nil, 0o600)
-}
-
-// TestAdvancedJARsPresent drives both branches through CARBONIO_BASE_DIR.
-func TestAdvancedJARsPresent(t *testing.T) {
-	t.Setenv("CARBONIO_BASE_DIR", testBase)
-
-	fx := newFixture(false, svcRegistry("test"))
-
-	if fx.r.advancedJARsPresent() {
-		t.Error("missing ext dir must not count as Advanced installed")
-	}
-
-	fakeAdvancedInstall(t, fx)
-
-	if !fx.r.advancedJARsPresent() {
-		t.Error("carbonio-advanced-*.jar must count as Advanced installed")
-	}
 }
 
 func TestAdvanced_NoJarsPrintsNothing(t *testing.T) {

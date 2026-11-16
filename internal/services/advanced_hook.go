@@ -22,7 +22,7 @@ const (
 // Carbonio Advanced modules until they are ready, mirroring the legacy
 // `advanced_status 2` call in mailboxdctl.sh.
 func (c *Controller) MailboxAdvancedStatusHook(ctx context.Context, _ *ServiceManager) error {
-	if !c.advancedInstalled() {
+	if !c.AdvancedInstalled() {
 		return nil
 	}
 
@@ -56,8 +56,8 @@ func (c *Controller) MailboxAdvancedStatusHook(ctx context.Context, _ *ServiceMa
 	return nil
 }
 
-// advancedInstalled returns true if at least one carbonio-advanced-*.jar is present.
-func (c *Controller) advancedInstalled() bool {
+// AdvancedInstalled returns true if at least one carbonio-advanced-*.jar is present.
+func (c *Controller) AdvancedInstalled() bool {
 	entries, err := c.env.FS.ReadDir(c.p.advancedJARDir)
 	if err != nil {
 		return false

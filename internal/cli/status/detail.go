@@ -249,7 +249,7 @@ func (r *Reporter) procStartTime(pid int) (string, bool) {
 // Advanced prints the Carbonio Advanced module section when the Advanced
 // extension is installed, and nothing otherwise.
 func (r *Reporter) Advanced(ctx context.Context, c *cliutil.Console) {
-	if !r.advancedJARsPresent() {
+	if !r.ctl.AdvancedInstalled() {
 		return
 	}
 
@@ -296,15 +296,4 @@ func shortErr(err error) string {
 	}
 
 	return s
-}
-
-func (r *Reporter) advancedJARsPresent() bool {
-	matches, _ := r.env.FS.ReadDir(cliutil.BasePath("lib", "ext", "carbonio"))
-	for _, m := range matches {
-		if strings.HasPrefix(m.Name(), "carbonio-advanced-") && strings.HasSuffix(m.Name(), ".jar") {
-			return true
-		}
-	}
-
-	return false
 }

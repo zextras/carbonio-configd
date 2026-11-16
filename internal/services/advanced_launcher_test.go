@@ -134,7 +134,7 @@ func TestMailboxAdvancedStatusHook_LocalConfigMissing(t *testing.T) {
 	}
 }
 
-// --- advancedInstalled ---
+// --- AdvancedInstalled ---
 
 func TestAdvancedInstalled(t *testing.T) {
 	t.Parallel()
@@ -220,8 +220,8 @@ func TestAdvancedInstalled(t *testing.T) {
 
 			ctl.p.advancedJARDir = dir
 
-			if got := ctl.advancedInstalled(); got != tt.want {
-				t.Errorf("ctl.advancedInstalled() = %v, want %v", got, tt.want)
+			if got := ctl.AdvancedInstalled(); got != tt.want {
+				t.Errorf("ctl.AdvancedInstalled() = %v, want %v", got, tt.want)
 			}
 		})
 	}
