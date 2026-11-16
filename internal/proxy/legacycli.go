@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
+	"github.com/zextras/carbonio-configd/internal/redact"
 )
 
 // valueTypeNames are the legacy ProxyConfValueType names printed by -d/-D.
@@ -34,7 +35,7 @@ func (g *Generator) ApplyOverrides(ctx context.Context, overrides []string) {
 	ctx = logger.ContextWithComponentOnce(ctx, "proxy")
 
 	for _, o := range overrides {
-		logger.DebugContext(ctx, "Processing config override "+o)
+		logger.DebugContext(ctx, "Processing config override "+redact.Args([]string{o})[0])
 
 		k, v, ok := strings.Cut(o, "=")
 		if !ok || k == "" {
@@ -50,7 +51,7 @@ func (g *Generator) ApplyOverrides(ctx context.Context, overrides []string) {
 			continue
 		}
 
-		logger.InfoContext(ctx, "Overriding config variable "+k+" with "+v)
+		logger.InfoContext(ctx, "Overriding config variable "+k+" with "+redact.ForLog(secretName(k, variable), v))
 
 		variable.ConfigText = &v
 	}
@@ -81,6 +82,12 @@ func (g *Generator) WriteVariables(ctx context.Context, w io.Writer) error {
 			attr = v.Attribute
 		}
 
+		// -d/-D need no privileges: never print a secret variable's values.
+		secret := secretName(k, v)
+		text, _ = redact.Text(redact.ForLog(secret, text))
+		defaultValue := redact.ForLog(secret, printable(v.DefaultValue, none))
+		currentValue := redact.ForLog(secret, printable(v.Value, none))
+
 		_, err = fmt.Fprintf(w,
 			"  NGINX Keyword:         %s\n"+
 				"  Description:           %s\n"+
@@ -90,13 +97,23 @@ func (g *Generator) WriteVariables(ctx context.Context, w io.Writer) error {
 				"  Current Value:         %s\n"+
 				"  Config Text:           %s\n\n",
 			k, v.Description, valueTypeNames[v.ValueType], attr,
-			printable(v.DefaultValue, none), printable(v.Value, none), text)
+			defaultValue, currentValue, text)
 		if err != nil {
 			return fmt.Errorf("write variables: %w", err)
 		}
 	}
 
 	return nil
+}
+
+// secretName returns the name to test with redact.IsSecretKey for variable
+// keyword: the controlling attribute when it is a secret key, else the keyword.
+func secretName(keyword string, v *Variable) string {
+	if redact.IsSecretKey(v.Attribute) {
+		return v.Attribute
+	}
+
+	return keyword
 }
 
 func printable(v any, none string) string {

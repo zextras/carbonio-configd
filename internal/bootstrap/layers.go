@@ -7,6 +7,7 @@ package bootstrap
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -65,6 +66,11 @@ func (r *Resolved) setSecretFile(f *Field, name string, src Source) error {
 	value := strings.TrimSuffix(strings.TrimSuffix(string(data), "\n"), "\r")
 	if err := r.Set(f, value, src); err != nil {
 		return err
+	}
+
+	// Saved configurations are run from other directories: keep the absolute path.
+	if abs, err := filepath.Abs(name); err == nil {
+		name = abs
 	}
 
 	r.secretFiles[f.Path] = name
@@ -189,7 +195,8 @@ func orRoot(path string) string {
 
 // ApplyEnv applies the CARBONIO_BOOTSTRAP_* variables of environ
 // ("NAME=value" entries). An unknown variable, or a secret set both
-// directly and through <VAR>_FILE, is an error.
+// directly and through <VAR>_FILE, is an error. An empty variable
+// (compose-style FOO=${UNSET}) counts as unset, like a null YAML value.
 func (r *Resolved) ApplyEnv(environ []string) error {
 	byEnv := make(map[string]*Field, len(Fields))
 	for _, f := range Fields {
@@ -200,7 +207,7 @@ func (r *Resolved) ApplyEnv(environ []string) error {
 
 	for _, kv := range environ {
 		name, value, ok := strings.Cut(kv, "=")
-		if ok && strings.HasPrefix(name, EnvPrefix) {
+		if ok && value != "" && strings.HasPrefix(name, EnvPrefix) {
 			vars[name] = value
 		}
 	}

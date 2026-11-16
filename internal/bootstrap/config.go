@@ -137,7 +137,7 @@ type HostConfig struct {
 // LDAPConfig locates the LDAP master and holds the passwords of its accounts.
 type LDAPConfig struct {
 	Host            string `yaml:"host" legacy:"LDAPHOST" check:"fqdn"`
-	Port            int    `yaml:"port" legacy:"LDAPPORT"`
+	Port            int    `yaml:"port" legacy:"LDAPPORT" range:"1-65535"`
 	RootPassword    string `yaml:"root_password" legacy:"LDAPROOTPASS,ldap_root_password" secret:"true"`
 	AdminPassword   string `yaml:"admin_password" legacy:"LDAPADMINPASS,zimbra_ldap_password" secret:"true"`
 	PostfixPassword string `yaml:"postfix_password" legacy:"LDAPPOSTPASS,ldap_postfix_password" secret:"true"`
@@ -149,7 +149,7 @@ type LDAPConfig struct {
 	// read-only replica of ldap.host, or a multi-master peer of ldap.host.
 	ReplicationType string `yaml:"replication_type" legacy:"LDAPREPLICATIONTYPE" enum:"master|replica|mmr"`
 	// ServerID is the multi-master server ID (mmr only).
-	ServerID int `yaml:"server_id" legacy:"LDAPSERVERID"`
+	ServerID int `yaml:"server_id" legacy:"LDAPSERVERID" range:"1-4095"`
 	// ReplicationPassword is the password of the replication account.
 	ReplicationPassword string `yaml:"replication_password" legacy:"LDAPREPPASS,ldap_replication_password" secret:"true"`
 	// ForceReplication enables replication on a node whose ldap.host is
@@ -197,19 +197,19 @@ type StoreConfig struct {
 	HamAccount             string     `yaml:"ham_account" legacy:"TRAINSAHAM" check:"email"`
 	VirusQuarantineAccount string     `yaml:"virus_quarantine_account" legacy:"VIRUSQUARANTINE" check:"email"`
 	KeyboardShortcuts      bool       `yaml:"keyboard_shortcuts" legacy:"USEKBSHORTCUTS"`
-	MailboxdMemoryMB       int        `yaml:"mailboxd_memory_mb" legacy:"MAILBOXDMEMORY"`
-	MySQLMemoryPercent     int        `yaml:"mysql_memory_percent" legacy:"MYSQLMEMORYPERCENT"`
+	MailboxdMemoryMB       int        `yaml:"mailboxd_memory_mb" legacy:"MAILBOXDMEMORY" range:"1-"`
+	MySQLMemoryPercent     int        `yaml:"mysql_memory_percent" legacy:"MYSQLMEMORYPERCENT" range:"1-100"`
 	Ports                  StorePorts `yaml:"ports"`
 }
 
 // StorePorts are the ports the mailbox server listens on.
 type StorePorts struct {
-	IMAP  int `yaml:"imap" legacy:"IMAPPORT"`
-	IMAPS int `yaml:"imaps" legacy:"IMAPSSLPORT"`
-	POP3  int `yaml:"pop3" legacy:"POPPORT"`
-	POP3S int `yaml:"pop3s" legacy:"POPSSLPORT"`
-	HTTP  int `yaml:"http" legacy:"HTTPPORT"`
-	HTTPS int `yaml:"https" legacy:"HTTPSPORT"`
+	IMAP  int `yaml:"imap" legacy:"IMAPPORT" range:"1-65535"`
+	IMAPS int `yaml:"imaps" legacy:"IMAPSSLPORT" range:"1-65535"`
+	POP3  int `yaml:"pop3" legacy:"POPPORT" range:"1-65535"`
+	POP3S int `yaml:"pop3s" legacy:"POPSSLPORT" range:"1-65535"`
+	HTTP  int `yaml:"http" legacy:"HTTPPORT" range:"1-65535"`
+	HTTPS int `yaml:"https" legacy:"HTTPSPORT" range:"1-65535"`
 }
 
 // ProxyConfig configures a proxy node.
@@ -223,12 +223,12 @@ type ProxyConfig struct {
 
 // ProxyPorts are the ports the proxy listens on.
 type ProxyPorts struct {
-	IMAP  int `yaml:"imap" legacy:"IMAPPROXYPORT"`
-	IMAPS int `yaml:"imaps" legacy:"IMAPSSLPROXYPORT"`
-	POP3  int `yaml:"pop3" legacy:"POPPROXYPORT"`
-	POP3S int `yaml:"pop3s" legacy:"POPSSLPROXYPORT"`
-	HTTP  int `yaml:"http" legacy:"HTTPPROXYPORT"`
-	HTTPS int `yaml:"https" legacy:"HTTPSPROXYPORT"`
+	IMAP  int `yaml:"imap" legacy:"IMAPPROXYPORT" range:"1-65535"`
+	IMAPS int `yaml:"imaps" legacy:"IMAPSSLPROXYPORT" range:"1-65535"`
+	POP3  int `yaml:"pop3" legacy:"POPPROXYPORT" range:"1-65535"`
+	POP3S int `yaml:"pop3s" legacy:"POPSSLPROXYPORT" range:"1-65535"`
+	HTTP  int `yaml:"http" legacy:"HTTPPROXYPORT" range:"1-65535"`
+	HTTPS int `yaml:"https" legacy:"HTTPSPROXYPORT" range:"1-65535"`
 }
 
 // IsLDAPMaster reports whether the node is the LDAP master: a directory

@@ -13,6 +13,7 @@
 package zxadmin
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -256,16 +257,96 @@ func (c *Client) dropToken(token string) {
 	}
 }
 
+// maxFaultBody bounds how much of a 5xx body is read to look for a SOAP fault.
+const maxFaultBody = 1 << 20
+
+// faultEnvelope is the part of a SOAP reply that carries a fault.
+type faultEnvelope struct {
+	Body struct {
+		Fault *struct {
+			FaultString string `xml:"faultstring"`
+			Reason      struct {
+				Text string `xml:"Text"`
+			} `xml:"Reason"`
+			Detail struct {
+				Error struct {
+					Code string `xml:"Code"`
+				} `xml:"Error"`
+			} `xml:"Detail"`
+		} `xml:"Fault"`
+	} `xml:"Body"`
+}
+
+// soapFault returns the SOAP fault in raw, nil when raw is not a fault.
+func soapFault(op string, raw []byte) *Fault {
+	var env faultEnvelope
+	if err := xml.Unmarshal(raw, &env); err != nil {
+		return nil //nolint:nilerr // not XML, so not a fault
+	}
+
+	if env.Body.Fault == nil {
+		return nil
+	}
+
+	f := env.Body.Fault
+
+	reason := f.Reason.Text
+	if reason == "" {
+		reason = f.FaultString
+	}
+
+	return &Fault{Op: op, Code: f.Detail.Error.Code, Reason: reason}
+}
+
+// authRejected reports whether the fault says the auth token is no longer
+// accepted (service.AUTH_EXPIRED, service.AUTH_REQUIRED).
+func (f *Fault) authRejected() bool {
+	return strings.HasSuffix(f.Code, "AUTH_EXPIRED") || strings.HasSuffix(f.Code, "AUTH_REQUIRED")
+}
+
+// withToken runs call with a valid token. When the server answers with an
+// auth fault (a token it invalidated before our own expiry), the token is
+// dropped and call runs once more with a fresh one; any other result is
+// returned as it is. Safe for calls that must not repeat, since the server
+// refuses an unauthenticated request before it acts.
+func withToken[T any](ctx context.Context, c *Client, call func(token string) (T, error)) (T, error) {
+	for attempt := 0; ; attempt++ {
+		token, err := c.ensureToken(ctx)
+		if err != nil {
+			var zero T
+
+			return zero, err
+		}
+
+		v, err := call(token)
+
+		var fault *Fault
+		if errors.As(err, &fault) && fault.authRejected() {
+			c.dropToken(token)
+
+			if attempt == 0 {
+				logger.WarnContext(ctx, "zxadmin: auth token rejected, authenticating again", "code", fault.Code)
+
+				continue
+			}
+		}
+
+		return v, err
+	}
+}
+
 // GetAllServicesStatus calls the `core getAllServicesStatus` action and
 // returns one entry per advanced module.
 func (c *Client) GetAllServicesStatus(ctx context.Context) ([]ModuleStatus, error) {
 	ctx = logger.ContextWithComponentOnce(ctx, "zxadmin")
 
-	token, err := c.ensureToken(ctx)
-	if err != nil {
-		return nil, err
-	}
+	return withToken(ctx, c, func(token string) ([]ModuleStatus, error) {
+		return c.getAllServicesStatus(ctx, token)
+	})
+}
 
+// getAllServicesStatus is one status request with token.
+func (c *Client) getAllServicesStatus(ctx context.Context, token string) ([]ModuleStatus, error) {
 	// Parameters MUST be in the query string; the dispatcher does not parse
 	// form-encoded bodies. The module name is "ZxCore" (the registered module
 	// id), not the lowercase command name.
@@ -317,6 +398,10 @@ func (c *Client) GetAllServicesStatus(ctx context.Context) ([]ModuleStatus, erro
 		return nil, ErrAdvancedNotRunning
 	}
 
+	if fault := soapFault("status", raw); fault != nil {
+		return nil, fault
+	}
+
 	if resp.StatusCode != http.StatusOK {
 		logger.WarnContext(ctx, "zxadmin: status request returned unexpected status",
 			"status", resp.StatusCode, "body", truncate(string(raw)))
@@ -342,7 +427,7 @@ func authCookie(token string) *http.Cookie {
 }
 
 // doWithRetry sends the request built by newReq, retrying on network errors
-// and 5xx responses with bounded exponential backoff (mirrors the shape of
+// and 5xx responses (other than SOAP faults) with bounded exponential backoff (mirrors the shape of
 // ldap.Client.executeWithRetry); retries is the number of retries after the
 // first attempt. 401/403/404 and other 4xx responses are
 // never retried since they signal a request/auth problem a retry cannot
@@ -388,8 +473,19 @@ func (c *Client) doWithRetry(
 		}
 
 		if resp.StatusCode >= http.StatusInternalServerError {
-			lastErr = fmt.Errorf("HTTP %d", resp.StatusCode)
+			// The admin SOAP endpoint answers every fault with HTTP 500: a
+			// fault is the server's verdict on this request, not a transient
+			// failure, so the caller gets it to act on.
+			raw, rerr := io.ReadAll(io.LimitReader(resp.Body, maxFaultBody))
 			_ = resp.Body.Close()
+
+			if rerr == nil && soapFault("", raw) != nil {
+				resp.Body = io.NopCloser(bytes.NewReader(raw))
+
+				return resp, nil //nolint:nilerr // a fault is an answer, a failed read is retried
+			}
+
+			lastErr = fmt.Errorf("HTTP %d", resp.StatusCode)
 
 			logger.DebugContext(logCtx, "zxadmin: HTTP server error, retrying",
 				"attempt", attempt+1, "max_attempts", retries+1, "status", resp.StatusCode)

@@ -27,6 +27,11 @@ type Sources struct {
 	Ldap   *ldap.Ldap
 	Cache  *cache.ConfigCache
 
+	// HostIPs keeps the last resolved address of each virtual hostname across
+	// runs, so a DNS outage does not change the rendered listen directives.
+	// Nil forgets it with the Generator.
+	HostIPs *HostIPCache
+
 	// Settings holds the legacy ProxyConfGen location/prefix options; the
 	// zero value keeps the defaults.
 	Settings *Settings
@@ -65,6 +70,7 @@ func NewGenerator(ctx context.Context, env sys.System, cfg *config.Config, src S
 		ServerConfig:  src.Server,
 		LdapClient:    src.Ldap,
 		Cache:         src.Cache,
+		hostIPs:       src.HostIPs,
 		upstreamCache: &upstreamQueryCache{},
 		Hostname:      cfg.Hostname,
 		DryRun:        false,

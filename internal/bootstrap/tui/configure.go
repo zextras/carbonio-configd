@@ -168,7 +168,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.BackgroundColorMsg:
 		m.th = newTheme(msg.IsDark(), m.opts.NoColor)
 	case dnsMsg:
-		m.dns[msg.kind] = msg.result
+		// A lookup of a name since edited must not overwrite the current verdict.
+		if msg.result.name == m.dnsAsk[msg.kind] {
+			m.dns[msg.kind] = msg.result
+		}
 	case tea.KeyPressMsg:
 		cmd := m.key(msg)
 		if m.done {

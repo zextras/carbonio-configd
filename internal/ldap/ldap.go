@@ -207,7 +207,7 @@ func (l *Ldap) refreshMasterStatus(ctx context.Context) {
 		return
 	}
 
-	if l.ConfigClient.ProbeDN(ldapAccesslogSuffix) {
+	if l.ConfigClient.ProbeDN(ctx, ldapAccesslogSuffix) {
 		l.IsMaster = true
 
 		logger.DebugContext(ctx, "LDAP config is master")
@@ -224,7 +224,7 @@ func (l *Ldap) refreshMasterStatus(ctx context.Context) {
 // a replace of a non-existent sessionlog directive (ldap.py:99-100). Must be
 // called with a non-nil ConfigClient.
 func (l *Ldap) applyConfigModify(ctx context.Context, dn, attr, val string) error {
-	origValue, present, err := l.ConfigClient.ReadAttribute(dn, attr)
+	origValue, present, err := l.ConfigClient.ReadAttribute(ctx, dn, attr)
 	if err != nil {
 		// On a read failure, fall back to the legacy presence semantics: skip
 		// olcSpSessionlog (treated as absent) and otherwise attempt the replace.
@@ -240,7 +240,7 @@ func (l *Ldap) applyConfigModify(ctx context.Context, dn, attr, val string) erro
 			"attr", attr,
 			"error", err)
 
-		return l.ConfigClient.ModifyAttribute(dn, attr, val)
+		return l.ConfigClient.ModifyAttribute(ctx, dn, attr, val)
 	}
 
 	if origValue == val {
@@ -264,7 +264,7 @@ func (l *Ldap) applyConfigModify(ctx context.Context, dn, attr, val string) erro
 		"attr", attr,
 		"value", val)
 
-	return l.ConfigClient.ModifyAttribute(dn, attr, val)
+	return l.ConfigClient.ModifyAttribute(ctx, dn, attr, val)
 }
 
 // lookupKey mirrors the lookupKey method in jylibs/ldap.py.

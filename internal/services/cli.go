@@ -14,6 +14,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/cli/rewrite"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/sys"
+	"github.com/zextras/carbonio-configd/internal/systemd"
 )
 
 const (
@@ -23,7 +24,7 @@ const (
 )
 
 // systemctlBin is the absolute systemctl path (no PATH lookup).
-const systemctlBin = "/usr/bin/systemctl"
+const systemctlBin = systemd.SystemctlBin
 
 // sudoBin is the absolute sudo path (no PATH lookup).
 const sudoBin = "/usr/bin/sudo"
@@ -53,25 +54,36 @@ type ServiceInfo struct {
 //
 // The verdict is cached for the Controller's lifetime, except when the probe
 // failed (systemctl missing, hung or timed out): that is not an answer, so the
-// call reports legacy mode and the next call probes again instead of pinning
-// the daemon to a mode decided by a transient failure.
+// call reports the last known verdict (legacy mode when none yet) and the next
+// call probes again instead of pinning the daemon to a mode decided by a
+// transient failure. Callers that have a context should use SystemdMode so the
+// probe stops with it.
 func (c *Controller) IsSystemdMode() bool {
+	return c.SystemdMode(context.Background())
+}
+
+// SystemdMode is IsSystemdMode with the probe bound to ctx. The probe runs
+// without modeMu held, so a hung systemctl blocks only the callers that asked
+// for it, each one bounded by its own ctx.
+func (c *Controller) SystemdMode(ctx context.Context) bool {
 	c.modeMu.Lock()
-	defer c.modeMu.Unlock()
+	known, mode := c.modeKnown, c.systemdMode
+	c.modeMu.Unlock()
 
-	if c.modeKnown {
-		return c.systemdMode
+	if known {
+		return mode
 	}
 
-	enabled, err := c.systemd.IsSystemdEnabled(context.Background())
+	enabled, err := c.systemd.IsSystemdEnabled(ctx)
 	if err != nil {
-		logger.WarnContext(context.Background(), "systemd mode probe failed; not caching the verdict",
-			"error", err)
+		logger.WarnContext(ctx, "systemd mode probe failed; not caching the verdict", "error", err)
 
-		return false
+		return mode
 	}
 
+	c.modeMu.Lock()
 	c.systemdMode, c.modeKnown = enabled, true
+	c.modeMu.Unlock()
 
 	return enabled
 }
@@ -511,7 +523,7 @@ func (c *Controller) ServiceReload(ctx context.Context, name string) error {
 		return c.ServiceRestart(ctx, name)
 	}
 
-	if !c.IsSystemdMode() {
+	if !c.SystemdMode(ctx) {
 		return c.reloadWithoutSystemd(ctx, name, def)
 	}
 
@@ -560,7 +572,7 @@ func (c *Controller) ServiceStatus(ctx context.Context, name string) (bool, erro
 		return c.compositeStatus(ctx, def)
 	}
 
-	if c.IsSystemdMode() || def.UseSystemdForStatus {
+	if c.SystemdMode(ctx) || def.UseSystemdForStatus {
 		return c.systemdUnitsActive(ctx, def.SystemdUnits)
 	}
 

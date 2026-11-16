@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 // errLogClosed is a write to a log that could not be reopened.
@@ -52,8 +53,10 @@ func openLog(env *Env, path, heading string, now func() string) (*logFile, error
 		return nil, err
 	}
 
+	// O_NOFOLLOW: the collector may run as root, and a symlink planted at the
+	// path would make it append to (and chown) another file.
 	//nolint:gosec // the log named on the command line
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o666)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND|os.O_CREATE|syscall.O_NOFOLLOW, 0o666)
 	if err != nil {
 		return nil, fmt.Errorf("unable to open log file %s: %w", path, err)
 	}
@@ -95,7 +98,7 @@ func (l *logFile) chown(path string) {
 // into <dir>/<that day>/. A file without a timestamp line (empty, or only a
 // heading) is not stale: the Perl would gzip it onto itself.
 func (l *logFile) rotateStale(today string) error {
-	st, err := os.Stat(l.path)
+	st, err := os.Lstat(l.path)
 	if err != nil || !st.Mode().IsRegular() {
 		return nil //nolint:nilerr // no regular file, nothing to rotate
 	}
@@ -191,14 +194,23 @@ func (l *logFile) rotate(date string) error {
 	// to the file instead of being lost.
 	rotErr := l.rotateFile(date)
 
+	if err := l.reopen(date); err != nil {
+		return errors.Join(rotErr, err)
+	}
+
+	return rotErr
+}
+
+// reopen opens the log again after it was closed: a new heading starts it.
+func (l *logFile) reopen(date string) error {
 	n, err := openLog(l.env, l.path, l.heading, func() string { return date })
 	if err != nil {
-		return errors.Join(rotErr, err)
+		return err
 	}
 
 	l.f = n.f
 
-	return rotErr
+	return nil
 }
 
 func (l *logFile) close() {
@@ -211,8 +223,13 @@ func (l *logFile) close() {
 // rotateFile moves the log to <dir>/<date>/<name>.gz. When that gz (or a bare
 // copy) is already there, the old content comes first, as `cat old new | gzip`.
 func (l *logFile) rotateFile(date string) error {
-	if _, err := os.Stat(l.path); errors.Is(err, fs.ErrNotExist) {
+	st, err := os.Lstat(l.path)
+	if errors.Is(err, fs.ErrNotExist) {
 		return nil // nothing to move
+	}
+
+	if err == nil && !st.Mode().IsRegular() {
+		return fmt.Errorf("%s is not a regular file", l.path)
 	}
 
 	dir, name := filepath.Split(l.path)
@@ -230,7 +247,24 @@ func (l *logFile) rotateFile(date string) error {
 	gz := bare + ".gz"
 
 	tmp := gz + ".tmp"
-	if err := l.writeGz(tmp, gz, bare); err != nil {
+
+	err = l.writeGz(tmp, gz, bare)
+	if errors.Is(err, errBadArchive) {
+		// Keep what is left of a corrupt archive instead of replacing it by
+		// the prefix that could be read.
+		_ = os.Remove(tmp)
+
+		bad := gz + ".bad"
+		if rerr := os.Rename(gz, bad); rerr != nil {
+			return fmt.Errorf("unable to move %s to %s: %w", l.path, gz, errors.Join(err, rerr))
+		}
+
+		l.chown(bad)
+
+		err = l.writeGz(tmp, gz, bare)
+	}
+
+	if err != nil {
 		_ = os.Remove(tmp)
 
 		return fmt.Errorf("unable to move %s to %s: %w", l.path, gz, err)
@@ -280,15 +314,45 @@ func (l *logFile) writeGz(tmp, gz, bare string) error {
 	return out.Close() //nolint:wrapcheck // the caller names the files
 }
 
+// errBadArchive is an earlier rotation of the day that is not a readable gzip.
+var errBadArchive = errors.New("unreadable rotated archive")
+
+// failedWriter remembers a failure of the destination, to tell it from one of
+// the source.
+type failedWriter struct {
+	w   io.Writer
+	err error
+}
+
+func (f *failedWriter) Write(p []byte) (int, error) {
+	n, err := f.w.Write(p)
+	if err != nil {
+		f.err = err
+	}
+
+	return n, err //nolint:wrapcheck // plain write error
+}
+
 // copyOld streams the earlier rotation of the day into w: the gz when there is
-// one (an unreadable gz is dropped, as gzip -d failing is ignored), else the
-// bare file.
+// one, else the bare file. A gz that cannot be read to the end is an
+// errBadArchive, for the caller to set aside (the Perl ignored the failing
+// gzip -d and lost the rest).
 func copyOld(w io.Writer, gz, bare string) error {
 	if f, err := os.Open(gz); err == nil { //nolint:gosec // our own rotated log
 		defer func() { _ = f.Close() }()
 
-		if zr, zerr := gzip.NewReader(f); zerr == nil {
-			_, _ = io.Copy(w, zr) //nolint:gosec // our own rotated log
+		zr, zerr := gzip.NewReader(f)
+		if zerr != nil {
+			return fmt.Errorf("%w: %w", errBadArchive, zerr)
+		}
+
+		fw := &failedWriter{w: w}
+		if _, cerr := io.Copy(fw, zr); cerr != nil { //nolint:gosec // our own rotated log
+			if fw.err != nil {
+				return cerr //nolint:wrapcheck // the caller names the files
+			}
+
+			return fmt.Errorf("%w: %w", errBadArchive, cerr)
 		}
 
 		return nil

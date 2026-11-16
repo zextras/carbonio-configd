@@ -7,6 +7,7 @@ package proxy
 import (
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 )
 
@@ -41,6 +42,72 @@ func validHostToken(s string) bool {
 // validIPLiteral reports whether s parses as an IPv4 or IPv6 address.
 func validIPLiteral(s string) bool {
 	return net.ParseIP(strings.Trim(s, "[]")) != nil
+}
+
+// validIPOrCIDR reports whether s is an IPv4/IPv6 address or a CIDR range, the
+// forms nginx accepts in address lists such as mail_whitelist_ip.
+func validIPOrCIDR(s string) bool {
+	if _, _, err := net.ParseCIDR(s); err == nil {
+		return true
+	}
+
+	return net.ParseIP(s) != nil
+}
+
+// validNginxArg reports whether s can be spliced into a directive as one bare
+// argument: no whitespace or control characters, and none of the characters
+// that end the directive, open or close a block, or open or escape a quote.
+func validNginxArg(s string) bool {
+	if s == "" {
+		return false
+	}
+
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c <= ' ' || c == 0x7f || strings.IndexByte(";{}\"'\\", c) >= 0 {
+			return false
+		}
+	}
+
+	return true
+}
+
+// validQuotedMessage reports whether s can sit inside a double-quoted nginx
+// string: no quote, backslash or control character (a newline would otherwise
+// end the directive).
+func validQuotedMessage(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c < ' ' || c == 0x7f || c == '"' || c == '\\' {
+			return false
+		}
+	}
+
+	return true
+}
+
+// validSizeToken reports whether s is an nginx size such as "10m" or "32k":
+// digits with an optional k/m/g unit.
+func validSizeToken(s string) bool {
+	digits := strings.TrimRight(s, "kKmMgG")
+	if digits == "" || len(s)-len(digits) > 1 {
+		return false
+	}
+
+	for i := 0; i < len(digits); i++ {
+		if digits[i] < '0' || digits[i] > '9' {
+			return false
+		}
+	}
+
+	return true
+}
+
+// validPort reports whether s is a TCP port number.
+func validPort(s string) bool {
+	n, err := strconv.Atoi(s)
+
+	return err == nil && n > 0 && n <= 65535 && s == strconv.Itoa(n)
 }
 
 // validDomainName reports whether s is safe to use as a file name component of

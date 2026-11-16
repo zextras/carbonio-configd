@@ -10,6 +10,7 @@ import (
 	"errors"
 	"io/fs"
 	"net"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -151,7 +152,7 @@ func TestApplyEnv_ListsAndBooleans(t *testing.T) {
 
 	assert.Equal(t, []string{"127.0.0.0/8", "10.0.0.0/8"}, r.Config.MTA.MyNetworks)
 	assert.False(t, r.Config.StartServices)
-	assert.Equal(t, SourceEnv, r.Source("ldap.root_password"), "an empty variable still counts as set")
+	assert.Equal(t, SourceUnset, r.Source("ldap.root_password"), "an empty variable counts as unset")
 }
 
 func TestApplyLegacy(t *testing.T) {
@@ -217,7 +218,10 @@ func TestValidate(t *testing.T) {
 		{"bad hostname", []string{"host.hostname=mail"}, `host.hostname: "mail" is not a fully qualified name`},
 		{"bad address", []string{"admin.account=nobody"}, "is not an email address"},
 		{"bad network", []string{"mta.my_networks=10.0.0.0/33"}, "is not an address or a network"},
-		{"port range", []string{"ldap.port=70000"}, "70000 is not a port"},
+		{"port range", []string{"ldap.port=70000"}, "ldap.port: 70000 is not in 1-65535"},
+		{"mysql percent", []string{"store.mysql_memory_percent=250"}, "250 is not in 1-100"},
+		{"server id", []string{"ldap.server_id=4096"}, "4096 is not in 1-4095"},
+		{"memory", []string{"store.mailboxd_memory_mb=-5"}, "-5 is below 1"},
 		{"port clash", []string{"proxy.ports.http=8080"}, "store.ports.http and proxy.ports.http both use port 8080"},
 		{"no roles", []string{"roles="}, "roles is required"},
 	}
@@ -388,4 +392,69 @@ func TestWizard_AskAllIncludesExplicitKeys(t *testing.T) {
 	assert.Contains(t, out, "Administrator password [Enter: keep]: ")
 	assert.Equal(t, "set.example.com", r.Config.Host.Hostname)
 	assert.Equal(t, SourceFlag, r.Source("host.hostname"), "Enter keeps the value and its source")
+}
+
+func TestCheckInput_RangesPerField(t *testing.T) {
+	var c Config
+
+	// A node with more than 320 GB of memory gets a default above 65535.
+	assert.NoError(t, CheckInput(FieldByPath("store.mailboxd_memory_mb"), &c, "400000"))
+	assert.NoError(t, CheckInput(FieldByPath("ldap.server_id"), &c, "4095"))
+	assert.NoError(t, CheckInput(FieldByPath("store.mysql_memory_percent"), &c, "100"))
+	assert.ErrorContains(t, CheckInput(FieldByPath("store.mysql_memory_percent"), &c, "0"), "not in 1-100")
+	assert.ErrorContains(t, CheckInput(FieldByPath("store.ports.imap"), &c, "0"), "not in 1-65535")
+}
+
+func TestHostnamesAreCaseInsensitive(t *testing.T) {
+	r := NewResolved(readFiles(nil))
+	require.NoError(t, r.ApplySets([]string{"ldap.host=Mail.Example.COM", "roles=directory-server"}))
+	require.NoError(t, r.ApplyDefaults(singleNode))
+
+	assert.Equal(t, "mail.example.com", r.Config.LDAP.Host)
+	assert.True(t, r.Config.IsLDAPMaster())
+}
+
+func TestApplyEnv_EmptyVariableIsUnset(t *testing.T) {
+	r := NewResolved(readFiles(nil))
+
+	require.NoError(t, r.ApplyEnv([]string{"CARBONIO_BOOTSTRAP_LDAP_PORT=", "CARBONIO_BOOTSTRAP_START_SERVICES="}))
+	assert.Equal(t, SourceUnset, r.Source("ldap.port"))
+	assert.Equal(t, SourceUnset, r.Source("start_services"))
+}
+
+func TestSecretFile_IsSavedAsAbsolutePath(t *testing.T) {
+	r := NewResolved(readFiles(map[string]string{"secrets/root": "pw\n"}))
+	require.NoError(t, r.ApplySets([]string{"ldap.root_password_file=secrets/root"}))
+
+	assert.Equal(t, "pw", r.Config.LDAP.RootPassword)
+	assert.True(t, filepath.IsAbs(r.secretFiles["ldap.root_password"]), r.secretFiles["ldap.root_password"])
+}
+
+func TestWizard_SecretsKeepTheirSpaces(t *testing.T) {
+	w := &Wizard{In: bufio.NewReader(strings.NewReader(" pass word \r\n")), Out: &strings.Builder{}}
+
+	got, err := w.readSecret()
+
+	require.NoError(t, err)
+	assert.Equal(t, " pass word ", got)
+}
+
+// deadlineResolver records whether the lookup context has a deadline.
+type deadlineResolver struct{ bounded *bool }
+
+func (d deadlineResolver) LookupHost(ctx context.Context, _ string) ([]string, error) {
+	_, *d.bounded = ctx.Deadline()
+
+	return []string{"10.0.0.1"}, nil
+}
+
+func (deadlineResolver) LookupMX(context.Context, string) ([]*net.MX, error) { return nil, nil }
+
+func TestWizard_DNSChecksAreBounded(t *testing.T) {
+	var bounded bool
+
+	w := &Wizard{Out: &strings.Builder{}, Resolver: deadlineResolver{&bounded}}
+	w.checkDNS(context.Background(), keyHostHostname, &Config{Host: HostConfig{Hostname: "mail.example.com"}})
+
+	assert.True(t, bounded)
 }

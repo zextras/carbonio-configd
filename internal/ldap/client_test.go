@@ -390,7 +390,7 @@ func TestWaitRetry_Elapses(t *testing.T) {
 func TestClient_HandleOperationError_ConnectionError_NilConn(t *testing.T) {
 	c := &Client{}
 	origErr := fmt.Errorf("connection error: %w", context.DeadlineExceeded)
-	result := c.handleOperationError(nil, origErr)
+	result := c.handleOperationError(nil, 0, origErr)
 	if !errors.Is(result, errs.ErrLDAPUnhealthyConnection) {
 		t.Fatalf("handleOperationError() with connection error: want ErrLDAPUnhealthyConnection, got %v", result)
 	}
@@ -401,7 +401,7 @@ func TestClient_HandleOperationError_ConnectionError_NilConn(t *testing.T) {
 func TestClient_HandleOperationError_NonConnectionError(t *testing.T) {
 	c := &Client{}
 	origErr := fmt.Errorf("no such object")
-	result := c.handleOperationError(nil, origErr)
+	result := c.handleOperationError(nil, 0, origErr)
 	if result != origErr {
 		t.Fatalf("handleOperationError() non-connection error: want original error, got %v", result)
 	}
@@ -411,5 +411,5 @@ func TestClient_HandleOperationError_NonConnectionError(t *testing.T) {
 // does not panic.
 func TestClient_ReturnConnection_NilConn(t *testing.T) {
 	c := &Client{}
-	c.returnConnection(nil) // must not panic
+	c.returnConnection(nil, 0) // must not panic
 }

@@ -164,3 +164,57 @@ func TestAtomicWriteOwned_ChownFailureLeavesNoTemp(t *testing.T) {
 		t.Errorf("expected empty dir after failed write, got %d entries", len(entries))
 	}
 }
+
+// A symlinked target keeps its link: the file it points to is replaced
+// atomically and the temp file does not linger beside either.
+func TestAtomicWriteKeepsSymlinkedTarget(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target", "out.conf")
+	link := filepath.Join(dir, "out.conf")
+
+	if err := os.Mkdir(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(target, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := fileutil.AtomicWrite(link, []byte("new"), 0o640); err != nil {
+		t.Fatalf("AtomicWrite failed: %v", err)
+	}
+
+	fi, err := os.Lstat(link)
+	if err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("link was replaced by a regular file (err=%v)", err)
+	}
+
+	data, err := os.ReadFile(target)
+	if err != nil || string(data) != "new" {
+		t.Errorf("target = %q, %v; want new", data, err)
+	}
+
+	for _, d := range []string{dir, filepath.Dir(target)} {
+		tmps, _ := filepath.Glob(filepath.Join(d, ".configd-*.tmp"))
+		if len(tmps) != 0 {
+			t.Errorf("temp files left in %s: %v", d, tmps)
+		}
+	}
+}
+
+func TestAtomicWriteDanglingSymlinkIsAnError(t *testing.T) {
+	dir := t.TempDir()
+	link := filepath.Join(dir, "out.conf")
+
+	if err := os.Symlink(filepath.Join(dir, "missing"), link); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := fileutil.AtomicWrite(link, []byte("x"), 0o640); err == nil {
+		t.Fatal("expected an error for a dangling symlink")
+	}
+}

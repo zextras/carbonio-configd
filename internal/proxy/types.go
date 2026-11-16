@@ -157,6 +157,10 @@ type Generator struct {
 	// Cache is the configuration cache for LDAP queries
 	Cache *cache.ConfigCache
 
+	// hostIPs is the caller-owned last-known address of each virtual hostname
+	// (Sources.HostIPs); nil when the caller keeps none.
+	hostIPs *HostIPCache
+
 	// env is the host boundary: every file, directory and certbot access goes
 	// through it.
 	env sys.System

@@ -22,6 +22,21 @@ type ldapWatch struct {
 	done   chan struct{}
 }
 
+// ended reports whether the watcher goroutine has exited on its own (a panic
+// it recovered from): a running watcher only ends through stop.
+func (w *ldapWatch) ended() bool {
+	if w == nil || w.cancel == nil {
+		return false
+	}
+
+	select {
+	case <-w.done:
+		return true
+	default:
+		return false
+	}
+}
+
 // stop cancels the watcher and waits for its goroutine to exit.
 func (w *ldapWatch) stop() {
 	if w == nil || w.cancel == nil {
@@ -57,8 +72,8 @@ func (t *MainLoopActionTrigger) TriggerReload(ctx context.Context, reason string
 // syncLDAPWatch makes the running watcher match zmconfigd_ldap_change_trigger.
 // It is called once per loop iteration, after the configuration has been
 // loaded: the first call with the key on (the default) starts the watcher, and
-// turning the key off stops it. With the key off nothing is ever
-// started. A change of the poll or debounce seconds takes effect on the next
+// turning the key off stops it. A watcher that died of a panic is started
+// again. With the key off nothing is ever started. A change of the poll or debounce seconds takes effect on the next
 // start.
 //
 // No watcher runs in single-run mode, which exits after one cycle.
@@ -71,6 +86,15 @@ func syncLDAPWatch(ctx context.Context, deps *daemonLoopDeps, cur *ldapWatch) *l
 	case enabled && cur.cancel == nil && ldapSourceAvailable(deps):
 		// The watcher could not start earlier because the LDAP client was
 		// missing; the config manager has since built it.
+		return startLDAPWatch(ctx, deps)
+	case enabled && cur.ended():
+		// The goroutine died of a panic; without a restart change detection
+		// would silently fall back to the regular interval for good.
+		ctx = logger.ContextWithComponent(ctx, "ldapwatch")
+		logger.WarnContext(ctx, "LDAP change watcher ended unexpectedly, restarting")
+
+		cur.stop()
+
 		return startLDAPWatch(ctx, deps)
 	case !enabled && cur != nil:
 		ctx = logger.ContextWithComponent(ctx, "ldapwatch")

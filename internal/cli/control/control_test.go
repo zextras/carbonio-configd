@@ -28,7 +28,7 @@ func testOrchestrator(
 	registry map[string]*services.ServiceDef, lc map[string]string,
 ) (*orchestrator, *systest.Fakes) {
 	f := systest.New()
-	f.Exec.OnCmdline("systemctl is-enabled", systest.Fail(1, "")) // legacy mode
+	f.Exec.OnCmdline("/usr/bin/systemctl is-enabled", systest.Fail(1, "")) // legacy mode
 
 	load := func() (map[string]string, error) { return lc, nil }
 	ctl := services.NewController(f.System(),

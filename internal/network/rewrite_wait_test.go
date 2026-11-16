@@ -6,6 +6,7 @@ package network
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -133,5 +134,25 @@ func TestRewriteReleasedOnShutdown(t *testing.T) {
 
 	if got := <-reply; got != errShuttingDown {
 		t.Errorf("reply = %q, want %q", got, errShuttingDown)
+	}
+}
+
+// A rewrite phase that failed releases the client with an error: callers run
+// "configrewrite X && start X" and must not start X on stale files.
+func TestRewriteFailedPhaseIsReportedToClient(t *testing.T) {
+	done := make(chan struct{})
+	close(done)
+
+	trigger := &MockActionTrigger{wait: &RewriteWait{Done: done, Err: func() error { return errors.New("write failed") }}}
+	handler := &ConfigdRequestHandler{ActionTrigger: trigger}
+
+	if got := handler.HandleRequest(context.Background(), "REWRITE", []string{"mta"}); got != errRewriteFailed {
+		t.Errorf("reply = %q, want %q", got, errRewriteFailed)
+	}
+
+	trigger.wait = &RewriteWait{Done: done, Err: func() error { return nil }}
+
+	if got := handler.HandleRequest(context.Background(), "REWRITE", []string{"mta"}); got != respRewritesComplete {
+		t.Errorf("reply = %q, want %q", got, respRewritesComplete)
 	}
 }

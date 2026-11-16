@@ -103,6 +103,10 @@ func (c *Controller) pidsByIdentity(name string) []int {
 	return slices.DeleteFunc(pids, isSelfOrParent)
 }
 
+// sigkillWait bounds how long gracefulStopPID waits for a SIGKILLed process
+// to disappear.
+const sigkillWait = 2 * time.Second
+
 // gracefulStopPID is the SIGTERM → bounded wait → SIGKILL sequence for one PID.
 // An already-gone process counts as stopped.
 //
@@ -143,6 +147,13 @@ func (c *Controller) gracefulStopPID(ctx context.Context, pid int, serviceName s
 	if err := c.env.Proc.Signal(pid, syscall.SIGKILL); err != nil &&
 		!errors.Is(err, os.ErrProcessDone) && !errors.Is(err, syscall.ESRCH) {
 		return fmt.Errorf("failed to SIGKILL process %d: %w", pid, err)
+	}
+
+	// SIGKILL is not instantaneous: a start that follows (restart) could still
+	// find the dying process holding its lock files or ports.
+	if c.waitForProcessExit(ctx, pid, sigkillWait) == pollTimedOut {
+		logger.WarnContext(ctx, "Service still present after SIGKILL",
+			"service", serviceName, "pid", pid, "timeout", sigkillWait)
 	}
 
 	return nil

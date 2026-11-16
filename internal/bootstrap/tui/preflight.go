@@ -80,7 +80,7 @@ func hostCheck(ctx context.Context, in *PreflightInput) Check {
 }
 
 func lookupHostResult(ctx context.Context, res bootstrap.Resolver, name string) dnsResult {
-	ctx, cancel := context.WithTimeout(ctx, dnsTimeout)
+	ctx, cancel := context.WithTimeout(ctx, bootstrap.DNSTimeout)
 	defer cancel()
 
 	addrs, err := res.LookupHost(ctx, name)
@@ -93,7 +93,7 @@ func mxCheck(ctx context.Context, in *PreflightInput) []Check {
 		return nil
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, dnsTimeout)
+	ctx, cancel := context.WithTimeout(ctx, bootstrap.DNSTimeout)
 	defer cancel()
 
 	mx, err := in.Resolver.LookupMX(ctx, in.Cfg.Domain.Name)

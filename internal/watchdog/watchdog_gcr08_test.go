@@ -7,6 +7,7 @@ package watchdog
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -129,3 +130,60 @@ func TestSystemdMode_WatchdogIsANoOp(t *testing.T) {
 type systemdHost struct{}
 
 func (systemdHost) IsSystemdMode() bool { return true }
+
+// flippableMode is a systemd.Mode whose answer changes at runtime, as the
+// service controller's does once a failed boot-time probe is answered.
+type flippableMode struct{ systemd atomic.Bool }
+
+func (m *flippableMode) IsSystemdMode() bool { return m.systemd.Load() }
+
+// A watchdog started while the mode read as legacy (probe failed at boot)
+// stands down once the host turns out to be systemd-managed: no probe, no
+// restart, and Stop still ends the loop.
+func TestCheckServices_StandsDownWhenModeTurnsSystemd(t *testing.T) {
+	t.Parallel()
+
+	mockSM := NewMockServiceManager()
+	mode := &flippableMode{}
+	h := newHarness(t, Config{
+		ServiceManager: mockSM,
+		State:          state.NewState(),
+		CheckInterval:  50 * time.Millisecond,
+		Systemd:        mode,
+	})
+	h.wd.AddService(context.Background(), "antivirus")
+	h.wd.SetServiceEnabled(context.Background(), "antivirus", true)
+	mockSM.setRunning("antivirus", false)
+
+	h.wd.Start(context.Background())
+
+	if !h.wd.IsEnabled() {
+		t.Fatal("legacy-mode watchdog must start its loop")
+	}
+
+	mode.systemd.Store(true)
+	h.wd.checkServices(context.Background())
+
+	if n := mockSM.getRestartCount("antivirus") + mockSM.getProbeCount("antivirus"); n != 0 {
+		t.Errorf("a tick in systemd mode must not probe or restart, got %d calls", n)
+	}
+
+	h.wd.Stop(context.Background())
+
+	if h.wd.IsEnabled() {
+		t.Error("Stop must end a loop that was started in legacy mode")
+	}
+}
+
+// A non-positive interval must fall back to the default, not panic the ticker.
+func TestNewWatchdog_NonPositiveIntervalUsesDefault(t *testing.T) {
+	t.Parallel()
+
+	for _, interval := range []time.Duration{0, -time.Second} {
+		wd := NewWatchdog(Config{CheckInterval: interval})
+
+		if wd.checkInterval != 60*time.Second {
+			t.Errorf("interval %v: got %v, want the 60s default", interval, wd.checkInterval)
+		}
+	}
+}

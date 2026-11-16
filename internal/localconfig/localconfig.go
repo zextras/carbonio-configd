@@ -23,13 +23,21 @@ func DefaultConfigPath() string {
 	return config.BaseDir() + "/conf/localconfig.xml"
 }
 
-// LocalConfig represents the root of localconfig.xml.
+// LocalConfig represents the root of localconfig.xml, as the writer rewrites it.
 type LocalConfig struct {
-	XMLName xml.Name `xml:"localconfig"`
-	Keys    []Key    `xml:"key"`
+	XMLName xml.Name  `xml:"localconfig"`
+	Keys    []fileKey `xml:"key"`
 }
 
-// Key represents a single configuration key-value pair.
+// fileKey is a key as it is in the file. A nil Value is a key without a
+// <value> element (null, not the empty string): reading and rewriting the file
+// must keep the two apart.
+type fileKey struct {
+	Name  string  `xml:"name,attr"`
+	Value *string `xml:"value"`
+}
+
+// Key represents a single configuration key-value pair to write.
 type Key struct {
 	Name  string `xml:"name,attr"`
 	Value string `xml:"value"`
@@ -54,13 +62,7 @@ func LoadLocalConfigFile(path string) (values map[string]string, nullKeys []stri
 		return nil, nil, fmt.Errorf("failed to read localconfig file: %w", err)
 	}
 
-	var lc struct {
-		XMLName xml.Name `xml:"localconfig"`
-		Keys    []struct {
-			Name  string  `xml:"name,attr"`
-			Value *string `xml:"value"`
-		} `xml:"key"`
-	}
+	var lc LocalConfig
 
 	if err := xml.Unmarshal(data, &lc); err != nil {
 		return nil, nil, fmt.Errorf("failed to parse localconfig XML: %w", err)

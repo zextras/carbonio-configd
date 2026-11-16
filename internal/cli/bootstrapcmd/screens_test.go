@@ -228,3 +228,79 @@ func TestHelpers(t *testing.T) {
 	assert.False(t, useScreens(&Options{Plain: true}, &Deps{Screens: &Screens{}}))
 	assert.False(t, useScreens(&Options{NonInteractive: true}, &Deps{Screens: &Screens{}}))
 }
+
+// recordResolver records the names the preflight looks up.
+type recordResolver struct{ hosts *[]string }
+
+func (r recordResolver) LookupHost(_ context.Context, name string) ([]string, error) {
+	*r.hosts = append(*r.hosts, name)
+
+	return []string{"10.0.0.1"}, nil
+}
+
+func (recordResolver) LookupMX(context.Context, string) ([]*net.MX, error) { return nil, nil }
+
+func TestRunSetup_PreflightChecksTheConfigAsItWasBeforeTheSteps(t *testing.T) {
+	e, _ := runTestEnv(t)
+
+	var looked []string
+
+	steps := []setup.Step{{Title: "rename", Apply: func(e *setup.Env) error {
+		e.Cfg.Host.Hostname = "changed.example.com" // the steps rewrite the configuration
+
+		return nil
+	}}}
+	session := &Session{Feed: tui.NewFeed()}
+	screens := &Screens{
+		Apply: func(_ context.Context, _ io.Reader, _ io.Writer, o *tui.ApplyOptions) error {
+			if err := o.Run(func(setup.Event) {}, func() bool { return false }); err != nil {
+				return err
+			}
+
+			o.Preflight()
+
+			return nil
+		},
+	}
+
+	var out, errb strings.Builder
+
+	status := runSetup(e, strings.NewReader(""), &out, &errb, screenOpts(),
+		&Deps{Host: host{}, Terminal: true, Screens: screens, Session: session, Resolver: recordResolver{&looked}}, steps)
+
+	require.Equal(t, 0, status, errb.String())
+	assert.Equal(t, []string{"mail.example.com"}, looked)
+}
+
+func TestRunSetup_ASignalStopsAfterTheCurrentStepWithoutCancellingIt(t *testing.T) {
+	e, _ := runTestEnv(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	e.Ctx = ctx
+	session := &Session{Feed: tui.NewFeed()}
+
+	var applyCtx context.Context
+
+	screens := &Screens{
+		Apply: func(ctx context.Context, _ io.Reader, _ io.Writer, _ *tui.ApplyOptions) error {
+			applyCtx = ctx
+
+			cancel()
+
+			return nil
+		},
+	}
+
+	var applied []string
+
+	var out, errb strings.Builder
+
+	runSetup(e, strings.NewReader(""), &out, &errb, screenOpts(),
+		&Deps{Host: host{}, Terminal: true, Screens: screens, Session: session}, runTestSteps(&applied))
+
+	require.NotNil(t, applyCtx)
+	assert.NoError(t, applyCtx.Err(), "the screen and the step in flight outlive the signal")
+	assert.NoError(t, e.Ctx.Err())
+}

@@ -110,8 +110,12 @@ type Env struct {
 	// Base is the installation root (/opt/zextras), Dir the directory of the
 	// CSV files and PidDir the one of the pid files.
 	Base, Dir, PidDir string
-	// Chown hands a directory or a log file to zextras (nil: not done).
-	Chown          func(path string) error
+	// Chown hands a directory or a file to zextras by path (nil: not done); it
+	// must not follow a symlink.
+	Chown func(path string) error
+	// ChownFile hands an open file to zextras through its descriptor (nil: not
+	// done); the log of a collector that may run as root goes through it.
+	ChownFile      func(f *os.File) error
 	Stdout, Stderr io.Writer
 	Syslog         Syslog
 	// Signals delivers SIGHUP (rotate) and SIGTERM/SIGINT (stop); nil: the
@@ -174,8 +178,8 @@ type spec struct {
 	// validate vets the parsed command line; its error text goes to stdout
 	// and the exit status is 1.
 	validate func(env *Env, o *options) error
-	// afterOpen is called with the log path each time the file is (re)opened.
-	afterOpen func(env *Env, path string)
+	// afterOpen is called with the log each time the file is (re)opened.
+	afterOpen func(env *Env, lf *logFile)
 	build     func(env *Env, o *options) (Collector, error)
 }
 

@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -25,16 +26,23 @@ import (
 
 // Client represents a connection pool to the LDAP server.
 type Client struct {
+	// identMu guards what a connection is made from (urls, bindDN, password,
+	// startTLS, tlsConfig), which Reconfigure replaces when localconfig changes.
+	identMu  sync.RWMutex
 	urls     []string // Ordered list of LDAP URLs (failover at connect-time)
 	bindDN   string   // Bind DN (e.g., uid=zimbra,cn=admins,cn=zimbra)
 	password string   // Bind password
-	baseDN   string   // Base DN (e.g., cn=zimbra)
 	startTLS bool     // Whether to upgrade ldap:// connections with StartTLS
 
-	// Connection pool
+	baseDN string // Base DN (e.g., cn=zimbra)
+
+	// Connection pool. gen counts the reconfigurations: a connection made
+	// before one is closed instead of pooled, so no connection outlives the
+	// credentials or URLs it was made with.
 	pool     []*ldap.Conn
 	poolSize int
 	poolMu   sync.Mutex
+	gen      uint64
 
 	// closed is closed by Close so a retry backoff wait is abandoned
 	// instead of delaying shutdown. A nil channel (zero-value Client) never
@@ -70,14 +78,14 @@ type Client struct {
 	// then stalls mid-operation cannot block a config cycle indefinitely.
 	opTimeout time.Duration
 
-	// TLS configuration
+	// TLS configuration (guarded by identMu)
 	tlsConfig *tls.Config
 
 	// searchFn, when non-nil, replaces the network Search round-trip for the
 	// high-level getters. Production leaves it nil; tests inject a stub so
 	// GetGlobalConfig, GetDomain, etc. can be exercised without a live server
 	// (same spirit as the dial seam used by the failover tests).
-	searchFn func(baseDN, filter string, attributes []string, scope int) (*ldap.SearchResult, error)
+	searchFn func(ctx context.Context, baseDN, filter string, attributes []string, scope int) (*ldap.SearchResult, error)
 
 	// dial, when non-nil, replaces ldap.DialURL for connect-time dialing so the
 	// failover tests can run without a network listener.
@@ -266,8 +274,9 @@ func (c *Client) popIdle() *ldap.Conn {
 	return nil
 }
 
-// returnConnection returns a connection to the pool.
-func (c *Client) returnConnection(conn *ldap.Conn) {
+// returnConnection returns a connection obtained under generation gen to the
+// pool; a connection from before a Reconfigure is closed instead.
+func (c *Client) returnConnection(conn *ldap.Conn, gen uint64) {
 	if conn == nil || conn.IsClosing() {
 		return
 	}
@@ -275,13 +284,95 @@ func (c *Client) returnConnection(conn *ldap.Conn) {
 	c.poolMu.Lock()
 	defer c.poolMu.Unlock()
 
-	if c.isClosed() || len(c.pool) >= c.poolSize {
+	if c.isClosed() || gen != c.gen || len(c.pool) >= c.poolSize {
 		_ = conn.Close() // Best effort close
 
 		return
 	}
 
 	c.pool = append(c.pool, conn)
+}
+
+// generation returns the current reconfiguration count, to be read before the
+// connection is obtained and handed back to returnConnection.
+func (c *Client) generation() uint64 {
+	c.poolMu.Lock()
+	defer c.poolMu.Unlock()
+
+	return c.gen
+}
+
+// identity is a consistent copy of what a new connection is made from.
+type identity struct {
+	urls     []string
+	bindDN   string
+	password string
+	startTLS bool
+
+	tlsConfig *tls.Config
+}
+
+func (c *Client) identity() identity {
+	c.identMu.RLock()
+	defer c.identMu.RUnlock()
+
+	return identity{urls: c.urls, bindDN: c.bindDN, password: c.password, startTLS: c.startTLS, tlsConfig: c.tlsConfig}
+}
+
+// Reconfigure applies the endpoint, credentials and transport security of cfg
+// (the same fields NewClient reads: URL/URLs, BindDN, Password, StartTLS,
+// TLSConfig) so a rotated password or a changed ldap_url takes effect without
+// a restart. Idle connections are closed and the ones in flight are not
+// pooled again; the next operation connects with the new values. It reports
+// whether anything differed.
+func (c *Client) Reconfigure(cfg *ClientConfig) (changed bool, err error) {
+	urls := cfg.URLs
+	if len(urls) == 0 {
+		urls = ParseURLs(cfg.URL)
+	}
+
+	if len(urls) == 0 {
+		return false, fmt.Errorf("ldap client: no URL configured (URL=%q, URLs=%v)", cfg.URL, cfg.URLs)
+	}
+
+	c.identMu.Lock()
+
+	if slices.Equal(c.urls, urls) && c.bindDN == cfg.BindDN && c.password == cfg.Password &&
+		c.startTLS == cfg.StartTLS && tlsConfigEqual(c.tlsConfig, cfg.TLSConfig) {
+		c.identMu.Unlock()
+
+		return false, nil
+	}
+
+	c.urls, c.bindDN, c.password, c.startTLS, c.tlsConfig = urls, cfg.BindDN, cfg.Password, cfg.StartTLS, cfg.TLSConfig
+	c.identMu.Unlock()
+
+	// Bumped after the identity is stored: an operation that reads the new
+	// generation connects with the new identity.
+	c.poolMu.Lock()
+	defer c.poolMu.Unlock()
+
+	c.gen++
+
+	for _, conn := range c.pool {
+		if conn != nil && !conn.IsClosing() {
+			_ = conn.Close()
+		}
+	}
+
+	c.pool = c.pool[:0]
+
+	return true, nil
+}
+
+// tlsConfigEqual compares the settings the client applies.
+func tlsConfigEqual(a, b *tls.Config) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+
+	return a.InsecureSkipVerify == b.InsecureSkipVerify && //nolint:gosec // comparison only
+		a.MinVersion == b.MinVersion && a.ServerName == b.ServerName && a.RootCAs.Equal(b.RootCAs)
 }
 
 // isClosed reports whether Close has been called. A zero-value Client (nil
@@ -304,14 +395,15 @@ func (c *Client) isClosed() bool {
 func (c *Client) connect(ctx context.Context) (*ldap.Conn, error) {
 	ctx = logger.ContextWithComponentOnce(ctx, "ldap")
 
-	agg := &AggregateDialError{Errors: make([]error, 0, len(c.urls))}
+	id := c.identity()
+	agg := &AggregateDialError{Errors: make([]error, 0, len(id.urls))}
 
-	for _, url := range c.urls {
+	for _, url := range id.urls {
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("ldap connect aborted: %w", err)
 		}
 
-		conn, err := c.dialAndBind(ctx, url)
+		conn, err := c.dialAndBind(ctx, url, id)
 		if err == nil {
 			return conn, nil
 		}
@@ -333,9 +425,9 @@ func (c *Client) connect(ctx context.Context) (*ldap.Conn, error) {
 // and bind are bounded by bindTimeout through a watchdog that closes the
 // connection, because go-ldap's StartTLS waits for the server reply without a
 // deadline; Close on the client aborts them too.
-func (c *Client) dialAndBind(ctx context.Context, rawURL string) (*ldap.Conn, error) {
+func (c *Client) dialAndBind(ctx context.Context, rawURL string, id identity) (*ldap.Conn, error) {
 	dialer := ldap.DialWithDialer(&net.Dialer{Timeout: c.dialTimeout})
-	tlsConfig := c.tlsConfigFor(rawURL)
+	tlsConfig := tlsConfigFor(id.tlsConfig, rawURL)
 
 	dial := c.dial
 	if dial == nil {
@@ -358,7 +450,7 @@ func (c *Client) dialAndBind(ctx context.Context, rawURL string) (*ldap.Conn, er
 	// the per-operation timeout before every request on the bound connection.
 	release := c.watchdog(ctx, conn, budget)
 
-	err = c.upgradeAndBind(conn, rawURL, tlsConfig)
+	err = upgradeAndBind(conn, rawURL, id, tlsConfig)
 
 	if release() {
 		if err == nil {
@@ -382,14 +474,14 @@ func (c *Client) dialAndBind(ctx context.Context, rawURL string) (*ldap.Conn, er
 var errConnectAborted = errors.New("ldap connect aborted")
 
 // upgradeAndBind runs StartTLS (ldap:// URLs when enabled) and the bind.
-func (c *Client) upgradeAndBind(conn *ldap.Conn, rawURL string, tlsConfig *tls.Config) error {
-	if c.startTLS && urlScheme(rawURL) == "ldap" {
+func upgradeAndBind(conn *ldap.Conn, rawURL string, id identity, tlsConfig *tls.Config) error {
+	if id.startTLS && urlScheme(rawURL) == "ldap" {
 		if err := conn.StartTLS(tlsConfig); err != nil {
 			return fmt.Errorf("StartTLS: %w", err)
 		}
 	}
 
-	if err := conn.Bind(c.bindDN, c.password); err != nil {
+	if err := conn.Bind(id.bindDN, id.password); err != nil {
 		return fmt.Errorf("bind: %w", err)
 	}
 
@@ -474,9 +566,17 @@ func (c *Client) executeWithRetry(ctx context.Context, operation func(*ldap.Conn
 			delay = c.nextRetryDelay(delay)
 		}
 
+		gen := c.generation()
+
 		conn, err := c.getConnection(ctx)
 		if err != nil {
 			lastErr = err
+
+			// A bind the server refuses will be refused again; repeating it
+			// per attempt and per URL could trip a password-policy lockout.
+			if refusedByEveryURL(err) {
+				return err
+			}
 
 			continue
 		}
@@ -488,11 +588,11 @@ func (c *Client) executeWithRetry(ctx context.Context, operation func(*ldap.Conn
 
 		err = c.runOperation(ctx, conn, operation)
 		if err == nil {
-			c.returnConnection(conn)
+			c.returnConnection(conn, gen)
 			return nil
 		}
 
-		lastErr = c.handleOperationError(conn, err)
+		lastErr = c.handleOperationError(conn, gen, err)
 
 		if !isLDAPErrorRetryable(lastErr) {
 			return lastErr
@@ -520,13 +620,16 @@ func (c *Client) runOperation(ctx context.Context, conn *ldap.Conn, operation fu
 }
 
 // waitRetry blocks for delay before the next attempt. It reports false when
-// the client is closed first, in which case the caller must stop retrying.
+// the client is closed or its lifecycle context (the daemon's) ends first, in
+// which case the caller must stop retrying.
 func (c *Client) waitRetry(ctx context.Context, delay time.Duration) bool {
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
 
 	select {
 	case <-c.closed:
+		return false
+	case <-c.lifecycle().Done():
 		return false
 	case <-ctx.Done():
 		return false
@@ -548,7 +651,7 @@ func (c *Client) nextRetryDelay(delay time.Duration) time.Duration {
 
 // handleOperationError classifies the error: discards the connection when it is
 // unhealthy, returns it to the pool otherwise. Returns the annotated error.
-func (c *Client) handleOperationError(conn *ldap.Conn, err error) error {
+func (c *Client) handleOperationError(conn *ldap.Conn, gen uint64, err error) error {
 	if isConnectionError(err) {
 		// Discard unhealthy connection and tag the error so callers
 		// can classify it via errors.Is(err, errs.ErrLDAPUnhealthyConnection).
@@ -559,7 +662,7 @@ func (c *Client) handleOperationError(conn *ldap.Conn, err error) error {
 		return fmt.Errorf("%w: %w", errs.ErrLDAPUnhealthyConnection, err)
 	}
 
-	c.returnConnection(conn)
+	c.returnConnection(conn, gen)
 
 	return err
 }
@@ -582,6 +685,12 @@ func isConnectionError(err error) bool {
 			return true
 		case ldap.LDAPResultConnectError:
 			return true
+		case ldap.ErrorNetwork:
+			// go-ldap reports a per-request timeout ("connection timed out")
+			// and a transport failure under this code and leaves the
+			// connection open: reusing it would retry against the same
+			// wedged server instead of failing over.
+			return true
 		default:
 			return false
 		}
@@ -596,6 +705,18 @@ func isConnectionError(err error) bool {
 	}
 
 	return false
+}
+
+// refusedByEveryURL reports whether a connect failure is the server's own
+// refusal (e.g. invalid credentials) at every URL tried, as opposed to a dial,
+// TLS or timeout failure that another attempt may get past.
+func refusedByEveryURL(err error) bool {
+	agg := &AggregateDialError{}
+	if !errors.As(err, &agg) || len(agg.Errors) == 0 {
+		return false
+	}
+
+	return !slices.ContainsFunc(agg.Errors, isLDAPErrorRetryable)
 }
 
 // isLDAPErrorRetryable determines if an LDAP error should be retried.
@@ -626,11 +747,14 @@ func isLDAPErrorRetryable(err error) bool {
 	return true
 }
 
-// Search performs an LDAP search with the given parameters.
-func (c *Client) Search(baseDN, filter string, attributes []string, scope int) (*ldap.SearchResult, error) {
+// Search performs an LDAP search with the given parameters. Cancelling ctx
+// abandons the request in flight and any retry wait.
+func (c *Client) Search(
+	ctx context.Context, baseDN, filter string, attributes []string, scope int,
+) (*ldap.SearchResult, error) {
 	var result *ldap.SearchResult
 
-	err := c.executeWithRetry(c.lifecycle(), func(conn *ldap.Conn) error {
+	err := c.executeWithRetry(ctx, func(conn *ldap.Conn) error {
 		searchRequest := ldap.NewSearchRequest(
 			baseDN,
 			scope,
@@ -658,17 +782,19 @@ func (c *Client) Search(baseDN, filter string, attributes []string, scope int) (
 
 // search dispatches to searchFn when set (tests), otherwise to the real
 // network Search. All high-level getters go through this seam.
-func (c *Client) search(baseDN, filter string, attributes []string, scope int) (*ldap.SearchResult, error) {
+func (c *Client) search(
+	ctx context.Context, baseDN, filter string, attributes []string, scope int,
+) (*ldap.SearchResult, error) {
 	if c.searchFn != nil {
-		return c.searchFn(baseDN, filter, attributes, scope)
+		return c.searchFn(ctx, baseDN, filter, attributes, scope)
 	}
 
-	return c.Search(baseDN, filter, attributes, scope)
+	return c.Search(ctx, baseDN, filter, attributes, scope)
 }
 
 // GetEntry retrieves a single LDAP entry by DN.
-func (c *Client) GetEntry(dn string, attributes []string) (*ldap.Entry, error) {
-	result, err := c.search(dn, ldapFilterAllObjects, attributes, ldap.ScopeBaseObject)
+func (c *Client) GetEntry(ctx context.Context, dn string, attributes []string) (*ldap.Entry, error) {
+	result, err := c.search(ctx, dn, ldapFilterAllObjects, attributes, ldap.ScopeBaseObject)
 	if err != nil {
 		return nil, err
 	}
@@ -684,8 +810,8 @@ func (c *Client) GetEntry(dn string, attributes []string) (*ldap.Entry, error) {
 // base-scoped search. present reports whether the attribute exists on the
 // entry, distinguishing an absent attribute from an empty value. Used for
 // change-detection before a replace (mirrors jylibs/ldap.py).
-func (c *Client) ReadAttribute(dn, attribute string) (value string, present bool, err error) {
-	entry, err := c.GetEntry(dn, []string{attribute})
+func (c *Client) ReadAttribute(ctx context.Context, dn, attribute string) (value string, present bool, err error) {
+	entry, err := c.GetEntry(ctx, dn, []string{attribute})
 	if err != nil {
 		return "", false, err
 	}
@@ -708,8 +834,8 @@ func (c *Client) ReadAttribute(dn, attribute string) (value string, present bool
 // ProbeDN reports whether a base-scoped search on dn succeeds, i.e. the entry
 // exists. Mirrors the cn=accesslog probe in jylibs/ldap.py used to confirm LDAP
 // master status; any search error (including "no such object") yields false.
-func (c *Client) ProbeDN(dn string) bool {
-	_, err := c.search(dn, ldapFilterAllObjects, []string{"1.1"}, ldap.ScopeBaseObject)
+func (c *Client) ProbeDN(ctx context.Context, dn string) bool {
+	_, err := c.search(ctx, dn, ldapFilterAllObjects, []string{"1.1"}, ldap.ScopeBaseObject)
 
 	return err == nil
 }
@@ -717,9 +843,9 @@ func (c *Client) ProbeDN(dn string) bool {
 // getEntityConfig is a helper function to retrieve config for a specific entity.
 // It eliminates duplicate code for GetServerConfig, GetDomain, etc.
 func (c *Client) getEntityConfig(
-	dn, filter string, scope int, entityType, entityName string,
+	ctx context.Context, dn, filter string, scope int, entityType, entityName string,
 ) (map[string]string, error) {
-	result, err := c.search(dn, filter, []string{"*"}, scope)
+	result, err := c.search(ctx, dn, filter, []string{"*"}, scope)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get %s config for %s: %w", entityType, entityName, err)
 	}
@@ -733,8 +859,10 @@ func (c *Client) getEntityConfig(
 
 // getEntityNames is a helper function to retrieve a list of entity names.
 // It eliminates duplicate code for GetAllServers, GetAllDomains, etc.
-func (c *Client) getEntityNames(dn, filter string, scope int, attributeName, entityType string) ([]string, error) {
-	result, err := c.search(dn, filter, []string{attributeName}, scope)
+func (c *Client) getEntityNames(
+	ctx context.Context, dn, filter string, scope int, attributeName, entityType string,
+) ([]string, error) {
+	result, err := c.search(ctx, dn, filter, []string{attributeName}, scope)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get all %s: %w", entityType, err)
 	}
@@ -753,9 +881,9 @@ func (c *Client) getEntityNames(dn, filter string, scope int, attributeName, ent
 // getEntitiesWithAttributes is a helper function to retrieve entities with full attributes.
 // It eliminates duplicate code for GetAllServersWithAttributes, GetAllDomainsWithAttributes, etc.
 func (c *Client) getEntitiesWithAttributes(
-	dn, filter string, scope int, keyAttribute, entityType string,
+	ctx context.Context, dn, filter string, scope int, keyAttribute, entityType string,
 ) (map[string]map[string]string, error) {
-	result, err := c.search(dn, filter, []string{"*"}, scope)
+	result, err := c.search(ctx, dn, filter, []string{"*"}, scope)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get all %s with attributes: %w", entityType, err)
 	}
@@ -773,10 +901,10 @@ func (c *Client) getEntitiesWithAttributes(
 
 // GetGlobalConfig retrieves the global configuration (cn=config,cn=zimbra).
 // Returns a map of attribute name to value, matching zmprov gacf output format.
-func (c *Client) GetGlobalConfig() (map[string]string, error) {
+func (c *Client) GetGlobalConfig(ctx context.Context) (map[string]string, error) {
 	dn := fmt.Sprintf("cn=config,%s", c.baseDN)
 
-	result, err := c.search(dn, ldapFilterAllObjects, []string{"*"}, ldap.ScopeBaseObject)
+	result, err := c.search(ctx, dn, ldapFilterAllObjects, []string{"*"}, ldap.ScopeBaseObject)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get global config: %w", err)
 	}
@@ -793,15 +921,15 @@ func (c *Client) GetGlobalConfig() (map[string]string, error) {
 // flagged serverInherited in the attrs xml schema, the global config value
 // when the server entry does not set it (Config.getServerDefaults applied by
 // Entry.getAttrs in the Java provisioning layer).
-func (c *Client) GetServerConfig(hostname string) (map[string]string, error) {
+func (c *Client) GetServerConfig(ctx context.Context, hostname string) (map[string]string, error) {
 	dn := fmt.Sprintf("cn=%s,cn=servers,%s", ldap.EscapeDN(hostname), c.baseDN)
 
-	server, err := c.getEntityConfig(dn, ldapFilterAllObjects, ldap.ScopeBaseObject, "server", hostname)
+	server, err := c.getEntityConfig(ctx, dn, ldapFilterAllObjects, ldap.ScopeBaseObject, "server", hostname)
 	if err != nil {
 		return nil, err
 	}
 
-	inherited, global, err := c.serverInheritance()
+	inherited, global, err := c.serverInheritance(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("server %s: %w", hostname, err)
 	}
@@ -811,7 +939,7 @@ func (c *Client) GetServerConfig(hostname string) (map[string]string, error) {
 	return server, nil
 }
 
-func (c *Client) serverInheritance() (inherited []string, global map[string]string, err error) {
+func (c *Client) serverInheritance(ctx context.Context) (inherited []string, global map[string]string, err error) {
 	dir := c.attrsDir
 	if dir == "" {
 		dir = defaultAttrsDir()
@@ -822,7 +950,7 @@ func (c *Client) serverInheritance() (inherited []string, global map[string]stri
 		return nil, nil, fmt.Errorf("inherited attributes: %w", err)
 	}
 
-	global, err = c.GetGlobalConfig()
+	global, err = c.GetGlobalConfig(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -858,22 +986,23 @@ func applyServerInherited(server, global map[string]string, inherited []string) 
 
 // GetAllServers retrieves all servers from LDAP.
 // Returns a list of server hostnames, matching zmprov gas output format.
-func (c *Client) GetAllServers() ([]string, error) {
+func (c *Client) GetAllServers(ctx context.Context) ([]string, error) {
 	dn := fmt.Sprintf("cn=servers,%s", c.baseDN)
-	return c.getEntityNames(dn, "(objectClass=zimbraServer)", ldap.ScopeSingleLevel, "cn", "servers")
+	return c.getEntityNames(ctx, dn, "(objectClass=zimbraServer)", ldap.ScopeSingleLevel, "cn", "servers")
 }
 
 // GetAllServersWithAttributes retrieves all servers with full attributes.
 // Returns a map of hostname to attributes, useful for zmprov gas -v equivalent.
-func (c *Client) GetAllServersWithAttributes() (map[string]map[string]string, error) {
+func (c *Client) GetAllServersWithAttributes(ctx context.Context) (map[string]map[string]string, error) {
 	dn := fmt.Sprintf("cn=servers,%s", c.baseDN)
 
-	servers, err := c.getEntitiesWithAttributes(dn, "(objectClass=zimbraServer)", ldap.ScopeSingleLevel, "cn", "servers")
+	servers, err := c.getEntitiesWithAttributes(
+		ctx, dn, "(objectClass=zimbraServer)", ldap.ScopeSingleLevel, "cn", "servers")
 	if err != nil || len(servers) == 0 {
 		return servers, err
 	}
 
-	inherited, global, err := c.serverInheritance()
+	inherited, global, err := c.serverInheritance(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("servers: %w", err)
 	}
@@ -891,32 +1020,32 @@ func (c *Client) GetAllServersWithAttributes() (map[string]map[string]string, er
 // Carbonio stores domain entries under their own DC-based subtrees
 // (e.g. dc=example,dc=com), NOT under cn=domains,cn=zimbra. A subtree
 // search from the root DSE with an objectClass filter is required.
-func (c *Client) GetAllDomains() ([]string, error) {
-	return c.getEntityNames("", "(objectClass=zimbraDomain)", ldap.ScopeWholeSubtree, attrZimbraDomainName, "domains")
+func (c *Client) GetAllDomains(ctx context.Context) ([]string, error) {
+	return c.getEntityNames(ctx, "", "(objectClass=zimbraDomain)", ldap.ScopeWholeSubtree, attrZimbraDomainName, "domains")
 }
 
 // GetDomain retrieves configuration for a specific domain.
 // Returns a map of attribute name to value, matching zmprov gd output format.
-func (c *Client) GetDomain(domain string) (map[string]string, error) {
+func (c *Client) GetDomain(ctx context.Context, domain string) (map[string]string, error) {
 	filter := fmt.Sprintf("(&(objectClass=zimbraDomain)(zimbraDomainName=%s))", ldap.EscapeFilter(domain))
-	return c.getEntityConfig("", filter, ldap.ScopeWholeSubtree, "domain", domain)
+	return c.getEntityConfig(ctx, "", filter, ldap.ScopeWholeSubtree, "domain", domain)
 }
 
 // GetAllDomainsWithAttributes retrieves all domains with full attributes in a single LDAP query.
 // This is significantly faster than calling GetAllDomains() followed by GetDomain() for each domain.
 // Returns a map of domain name to attributes, useful for batch domain queries.
-func (c *Client) GetAllDomainsWithAttributes() (map[string]map[string]string, error) {
+func (c *Client) GetAllDomainsWithAttributes(ctx context.Context) (map[string]map[string]string, error) {
 	return c.getEntitiesWithAttributes(
-		"", "(objectClass=zimbraDomain)", ldap.ScopeWholeSubtree, attrZimbraDomainName, "domains",
+		ctx, "", "(objectClass=zimbraDomain)", ldap.ScopeWholeSubtree, attrZimbraDomainName, "domains",
 	)
 }
 
 // GetEnabledServices returns the list of enabled services for a server hostname.
 // Queries the multi-valued zimbraServiceEnabled attribute from the server LDAP entry.
-func (c *Client) GetEnabledServices(hostname string) ([]string, error) {
+func (c *Client) GetEnabledServices(ctx context.Context, hostname string) ([]string, error) {
 	dn := fmt.Sprintf("cn=%s,cn=servers,%s", ldap.EscapeDN(hostname), c.baseDN)
 
-	result, err := c.search(dn, ldapFilterAllObjects, []string{AttrZimbraServiceEnabled}, ldap.ScopeBaseObject)
+	result, err := c.search(ctx, dn, ldapFilterAllObjects, []string{AttrZimbraServiceEnabled}, ldap.ScopeBaseObject)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get enabled services for %s: %w", hostname, err)
 	}
@@ -929,8 +1058,8 @@ func (c *Client) GetEnabledServices(hostname string) ([]string, error) {
 }
 
 // ModifyAttribute replaces an attribute value on an LDAP entry.
-func (c *Client) ModifyAttribute(dn, attribute, value string) error {
-	return c.executeWithRetry(c.lifecycle(), func(conn *ldap.Conn) error {
+func (c *Client) ModifyAttribute(ctx context.Context, dn, attribute, value string) error {
+	return c.executeWithRetry(ctx, func(conn *ldap.Conn) error {
 		modifyRequest := ldap.NewModifyRequest(dn, nil)
 		modifyRequest.Replace(attribute, []string{value})
 

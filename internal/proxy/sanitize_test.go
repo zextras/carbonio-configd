@@ -63,7 +63,8 @@ func TestGetDomains_DropsUnsafeValues(t *testing.T) {
 		}
 	}
 
-	got := tp.getDomains(context.Background())
+	got, err := tp.getDomains(context.Background())
+	require.NoError(t, err)
 
 	names := make([]string, 0, len(got))
 	for _, d := range got {
@@ -85,7 +86,8 @@ func TestGetServersWithService_DropsUnsafeHostnames(t *testing.T) {
 		}
 	}
 
-	got := tp.getServersWithService(context.Background(), "mailbox")
+	got, err := tp.getServersWithService(context.Background(), "mailbox")
+	require.NoError(t, err)
 
 	require.Len(t, got, 1)
 	assert.Equal(t, "mbox1.example.com", got[0].Hostname)
@@ -150,7 +152,8 @@ func TestCollectVirtualIPAddresses_SkipsInvalidLiterals(t *testing.T) {
 		LdapClient: &ldap.Ldap{NativeClient: &ldap.Client{}},
 	}
 
-	got := g.collectVirtualIPAddresses(ctx, "")
+	got, err := g.collectVirtualIPAddresses(ctx)
+	require.NoError(t, err)
 
 	assert.Equal(t, map[string]bool{"192.0.2.1": true, "2001:db8::1": true}, got)
 }

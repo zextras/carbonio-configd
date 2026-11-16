@@ -12,7 +12,11 @@ import (
 	"io"
 	"net"
 	"strings"
+	"time"
 )
+
+// DNSTimeout bounds one DNS check: a slow resolver never holds a screen or a prompt.
+const DNSTimeout = 3 * time.Second
 
 // ErrAborted is returned when the operator declines the summary.
 var ErrAborted = errors.New("bootstrap configuration aborted")
@@ -276,13 +280,13 @@ func (w *Wizard) secret(r *Resolved, q question, f *Field) (string, error) {
 
 func (w *Wizard) readSecret() (string, error) {
 	if w.ReadSecret == nil {
-		return w.readLine()
+		return w.readInput()
 	}
 
 	s, err := w.ReadSecret()
 	_, _ = fmt.Fprintln(w.Out)
 
-	return strings.TrimSpace(s), err
+	return s, err
 }
 
 func (w *Wizard) line(prompt string) (string, error) {
@@ -292,6 +296,14 @@ func (w *Wizard) line(prompt string) (string, error) {
 }
 
 func (w *Wizard) readLine() (string, error) {
+	s, err := w.readInput()
+
+	return strings.TrimSpace(s), err
+}
+
+// readInput reads one line without its terminator; surrounding spaces stay,
+// as a secret may have them.
+func (w *Wizard) readInput() (string, error) {
 	s, err := w.In.ReadString('\n')
 	if err != nil && (s == "" || !errors.Is(err, io.EOF)) {
 		if errors.Is(err, io.EOF) {
@@ -301,7 +313,7 @@ func (w *Wizard) readLine() (string, error) {
 		return "", err
 	}
 
-	return strings.TrimSpace(s), nil
+	return strings.TrimSuffix(strings.TrimSuffix(s, "\n"), "\r"), nil
 }
 
 // checkDNS warns when the hostname does not resolve, resolves only to
@@ -310,6 +322,10 @@ func (w *Wizard) checkDNS(ctx context.Context, path string, c *Config) {
 	if w.Resolver == nil {
 		return
 	}
+
+	// The TUI bounds the same lookups; a broken resolver must not stall the prompt.
+	ctx, cancel := context.WithTimeout(ctx, DNSTimeout)
+	defer cancel()
 
 	switch path {
 	case keyHostHostname:

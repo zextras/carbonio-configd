@@ -14,7 +14,9 @@ import (
 // file to readers: it creates a temp file in filepath.Dir(path), writes data,
 // fsyncs, chmods to perm, closes, renames the temp file onto path, then fsyncs
 // the parent directory so the rename is durable. The
-// temp file is removed on any failure path.
+// temp file is removed on any failure path. When path is a symlink, the file
+// it points to is replaced and the link stays, so a deliberately symlinked
+// config keeps its link.
 func AtomicWrite(path string, data []byte, perm os.FileMode) error {
 	return AtomicWriteOwned(path, data, perm, -1, -1)
 }
@@ -23,6 +25,16 @@ func AtomicWrite(path string, data []byte, perm os.FileMode) error {
 // before the rename, so the published file is never visible with the wrong
 // owner. A negative uid or gid leaves that id unchanged.
 func AtomicWriteOwned(path string, data []byte, perm os.FileMode, uid, gid int) error {
+	// The rename would otherwise replace the link itself with a regular file.
+	if fi, err := os.Lstat(path); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		resolved, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			return fmt.Errorf("failed to resolve symlink %s: %w", path, err)
+		}
+
+		path = resolved
+	}
+
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".configd-*.tmp")
 	if err != nil {
 		return fmt.Errorf("failed to create temp file: %w", err)

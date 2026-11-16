@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/zextras/carbonio-configd/internal/getopt"
@@ -30,6 +31,9 @@ If logging to a file, rotation occurs when HUP signal is sent or when
 date changes.  Current log is renamed to <dir>/YYYY-MM-DD/mtaqueue.csv
 and a new file is created.
 `
+
+// prometheusTimeout bounds one run of postfix-prometheus.
+const prometheusTimeout = 2 * time.Minute
 
 // queueTotal is the last line of "postqueue -p".
 var queueTotal = regexp.MustCompile(`(\d+) Kbytes in (\d+) Requests`)
@@ -74,6 +78,8 @@ type mtaqueue struct {
 	maxQSize    int
 	backoff     time.Duration
 	maxInterval time.Duration
+	// promRunning is set while a postfix-prometheus run is in flight.
+	promRunning atomic.Bool
 }
 
 // Heading implements Collector.
@@ -119,16 +125,32 @@ func (q *mtaqueue) queue() (kb, msgs string) {
 }
 
 // prometheus starts libexec/postfix-prometheus in the background, as the Perl
-// does on every sample, to refresh the postfix metrics.
+// does on every sample, to refresh the postfix metrics. A run that is still
+// going (a hung postqueue, say) is not stacked under, and each run is bounded
+// by prometheusTimeout.
 func (q *mtaqueue) prometheus() {
-	p, err := q.env.Sys.Exec.Start(context.Background(), &sys.Cmd{
-		Path: filepath.Join(q.env.Base, "libexec", "postfix-prometheus"),
-	})
-	if err != nil {
+	if !q.promRunning.CompareAndSwap(false, true) {
 		return
 	}
 
-	go func() { _ = p.Wait() }()
+	ctx, cancel := context.WithTimeout(context.Background(), prometheusTimeout)
+
+	p, err := q.env.Sys.Exec.Start(ctx, &sys.Cmd{
+		Path: filepath.Join(q.env.Base, "libexec", "postfix-prometheus"),
+	})
+	if err != nil {
+		cancel()
+		q.promRunning.Store(false)
+
+		return
+	}
+
+	go func() {
+		_ = p.Wait()
+
+		cancel()
+		q.promRunning.Store(false)
+	}()
 }
 
 // adapt moves the interval: up by the backoff step while the queue is over the

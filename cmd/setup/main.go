@@ -36,9 +36,11 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 
 	"github.com/spf13/cobra"
 
@@ -65,18 +67,25 @@ func main() {
 	// shared packages' routine INFO lines would only clutter the terminal
 	// (and break the full-screen interface), so they log warnings only.
 	logger.InitStructuredLogging(&logger.Config{Format: logger.FormatText, Level: slog.LevelWarn, Output: os.Stderr})
-	os.Exit(run(os.Args[1:], sys.Real(), os.Stdin, os.Stdout, os.Stderr))
+
+	// SIGINT and SIGTERM cancel the run's context: the commands in flight end
+	// and the setup stops, instead of the process dying in the middle of a step.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	status := run(ctx, os.Args[1:], sys.Real(), os.Stdin, os.Stdout, os.Stderr)
+
+	stop()
+	os.Exit(status)
 }
 
 // run is main with the process boundary injected: it returns the exit status.
-func run(args []string, env sys.System, stdin io.Reader, stdout, stderr io.Writer) int {
+func run(ctx context.Context, args []string, env sys.System, stdin io.Reader, stdout, stderr io.Writer) int {
 	status := 0
 	root := newRootCmd(env, stdin, stdout, stderr, &status)
 	root.SetArgs(legacyArgs(args))
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 
-	if err := root.Execute(); err != nil {
+	if err := root.ExecuteContext(ctx); err != nil {
 		_, _ = fmt.Fprintf(stderr, "Error: %v\n", err)
 
 		return exitUsage
@@ -151,8 +160,8 @@ func newRootCmd(env sys.System, stdin io.Reader, stdout, stderr io.Writer, statu
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		RunE: func(*cobra.Command, []string) error {
-			return runSetup(&rf, env, stdin, stdout, stderr, status)
+		RunE: func(c *cobra.Command, _ []string) error {
+			return runSetup(c.Context(), &rf, env, stdin, stdout, stderr, status)
 		},
 	}
 
@@ -164,12 +173,12 @@ func newRootCmd(env sys.System, stdin io.Reader, stdout, stderr io.Writer, statu
 		Use:   "config",
 		Short: "Resolve, validate and print or save the bootstrap configuration",
 		Args:  cobra.NoArgs,
-		RunE: func(*cobra.Command, []string) error {
+		RunE: func(c *cobra.Command, _ []string) error {
 			if err := cf.check(); err != nil {
 				return err
 			}
 
-			*status = bootstrapcmd.Run(context.Background(), env, stdin, stdout, stderr, cf.options())
+			*status = bootstrapcmd.Run(c.Context(), env, stdin, stdout, stderr, cf.options())
 
 			return nil
 		},
@@ -183,8 +192,8 @@ func newRootCmd(env sys.System, stdin io.Reader, stdout, stderr io.Writer, statu
 		Use:   "run",
 		Short: "Configure this node (the work of the legacy setup.pl)",
 		Args:  cobra.NoArgs,
-		RunE: func(*cobra.Command, []string) error {
-			return runSetup(&sf, env, stdin, stdout, stderr, status)
+		RunE: func(c *cobra.Command, _ []string) error {
+			return runSetup(c.Context(), &sf, env, stdin, stdout, stderr, status)
 		},
 	}
 
@@ -317,12 +326,12 @@ func newGalSyncCmd(env sys.System, stdout, stderr io.Writer, status *int) *cobra
 		Long: "Create galsync.<random>@DOMAIN with the InternalGAL data source on SERVER and print " +
 			"\"<name>\\t<id>\". Must run as root.",
 		Args: cobra.NoArgs,
-		RunE: func(*cobra.Command, []string) error {
+		RunE: func(c *cobra.Command, _ []string) error {
 			if strings.TrimSpace(domain) == "" || strings.TrimSpace(server) == "" {
 				return errors.New("--domain and --server must not be empty")
 			}
 
-			*status = bootstrapcmd.RunGalSyncAccount(context.Background(), env, stdout, stderr, domain, server)
+			*status = bootstrapcmd.RunGalSyncAccount(c.Context(), env, stdout, stderr, domain, server)
 
 			return nil
 		},
@@ -367,8 +376,8 @@ func newStdinToolCmd(use, short string,
 		Short:              short,
 		Long:               short + ". Runs as root or zextras.",
 		DisableFlagParsing: true,
-		RunE: func(_ *cobra.Command, args []string) error {
-			*tio.status = fn(context.Background(), tio.env, tio.stdin, tio.stdout, tio.stderr, args)
+		RunE: func(c *cobra.Command, args []string) error {
+			*tio.status = fn(c.Context(), tio.env, tio.stdin, tio.stdout, tio.stderr, args)
 
 			return nil
 		},
@@ -401,12 +410,14 @@ func addFlags(cmd *cobra.Command, f *flags, run bool) {
 	_ = cmd.RegisterFlagCompletionFunc("set", words())
 }
 
-func runSetup(f *flags, env sys.System, stdin io.Reader, stdout, stderr io.Writer, status *int) error {
+func runSetup(
+	ctx context.Context, f *flags, env sys.System, stdin io.Reader, stdout, stderr io.Writer, status *int,
+) error {
 	if err := f.check(); err != nil {
 		return err
 	}
 
-	*status = bootstrapcmd.RunSetup(context.Background(), env, stdin, stdout, stderr,
+	*status = bootstrapcmd.RunSetup(ctx, env, stdin, stdout, stderr,
 		&bootstrapcmd.RunOptions{Options: *f.options(), DryRun: f.dryRun})
 
 	return nil

@@ -29,6 +29,9 @@ type File interface {
 	Chown(uid, gid int) error
 	// Chmod changes the mode of the open file itself (fchmod).
 	Chmod(mode fs.FileMode) error
+	// Sync commits the file's content to stable storage (fsync), so a file
+	// renamed into place right after survives a crash complete.
+	Sync() error
 }
 
 // FS is the filesystem boundary. Paths are absolute (or relative to the

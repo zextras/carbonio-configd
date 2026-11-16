@@ -196,9 +196,12 @@ func TestResolveStrictServerNamePrefix(t *testing.T) {
 // TestCollectVirtualIPAddressesNilLdap tests collectVirtualIPAddresses when LdapClient is nil
 func TestCollectVirtualIPAddressesNilLdap(t *testing.T) {
 	g := &Generator{env: sys.Real(), LdapClient: nil}
-	result := g.collectVirtualIPAddresses(context.Background(), "#")
-	if result != nil {
-		t.Errorf("expected nil when LdapClient is nil, got %v", result)
+	result, err := g.collectVirtualIPAddresses(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 0 {
+		t.Errorf("expected an empty set when LdapClient is nil, got %v", result)
 	}
 }
 

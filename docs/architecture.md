@@ -103,7 +103,7 @@ logged, and followed by a normal-interval sleep, so a deterministic panic cannot
 | Snapshot + Observe | `configManager.Plan` (first half) | Freezes the loaded configs into an immutable `snapshot.Snapshot`, resolves every lookup `configd.cf` requires and publishes the result |
 | Plan | `plan.Compute` (via `configManager.Plan`) | Pure, deterministic: previous snapshot vs. current snapshot gives a `plan.Plan` whose every entry carries its reasons. If it fails, the claimed clients are requeued (`requeueWaiters`), their sections stay queued, and the loop backs off |
 | Execute | `configManager.Execute` | Mapfiles first (self-heal included), then proxygen, rewrites, postconf, postconfd and LDAP concurrently |
-| Release REWRITE clients | `MainLoopActionTrigger.completeWaiters` | Right after Execute (also when a rewrite step failed, as legacy `notifyAll` in `finally`): the clients claimed for this cycle get `SUCCESS REWRITES COMPLETE`. A client that arrived mid-cycle waits for the next one |
+| Release REWRITE clients | `MainLoopActionTrigger.completeWaiters` | Right after Execute (also when a rewrite step failed, as legacy `notifyAll` in `finally`): the clients claimed for this cycle get `SUCCESS REWRITES COMPLETE`, or `ERROR REWRITE FAILED` when the phase failed, so `configrewrite X && start X` does not start X on stale files. A client that arrived mid-cycle waits for the next one |
 | Back-off | `backOff` | A failed load or MTA parse, a rejected plan or a failed rewrite sleeps 60 s (interruptible by a reload), exports the metrics textfile, and retries without applying restarts, starting the listener or sending the first `READY=1`; a reload being handled is still acknowledged with `READY=1` |
 | Apply restarts | `configManager.ApplyRestarts` | `restart.Policy.Apply`: runs every successful cycle; honours `zmconfigd_enable_config_restarts`, debounce and `--disable-restarts`. Skipped when the rewrite phase failed (legacy skips `doRestarts`); the plan's restarts stay in the carry for the next cycle |
 | Start listener | `network.NewThreadedStreamServer` | Only after the first pass completed (legacy `configd.py` starts it after the first rewrite and restart pass); never in `--once` mode (profiling builds) |
@@ -148,8 +148,8 @@ RESPONSE = RESULT_STRING NEWLINE
 
 | Command | Example | Response |
 |---|---|---|
-| `STATUS` | `STATUS\n` | `SUCCESS ACTIVE\n` |
-| `REWRITE section [section ...]` | `REWRITE proxy mta\n` | `SUCCESS REWRITES COMPLETE\n` once the main loop has rewritten the sections; `ERROR REWRITE TIMEOUT\n` after 60 s (the request stays queued); `ERROR SHUTTING DOWN\n` if the daemon stops meanwhile |
+| `STATUS` | `STATUS\n` | `SUCCESS ACTIVE\n` (answered without waiting for a request slot, so it never queues behind REWRITE clients) |
+| `REWRITE section [section ...]` | `REWRITE proxy mta\n` | `SUCCESS REWRITES COMPLETE\n` once the main loop has rewritten the sections; `ERROR REWRITE FAILED\n` if the rewrite phase that took the request failed (the failed actions are retried by the next cycle); `ERROR REWRITE TIMEOUT\n` after 60 s (the request stays queued); `ERROR SHUTTING DOWN\n` if the daemon stops meanwhile. The section name `all` stands for every section of `zmconfigd.cf` |
 | `REWRITE` with names that are not sections of `zmconfigd.cf` | `REWRITE bogus\n` | Same reply as above: the legacy listener queues such names and no section matches them. configd logs a WARN and drops them, so they never reach the main loop; a request naming only unknown sections is acknowledged without a cycle. Requests are capped at 4096 bytes and 256 arguments |
 | `REWRITE` (no sections) | `REWRITE\n` | `ERROR NO SERVICES LISTED\n` (as the legacy listener) |
 | _(anything else, empty line)_ | `FOO\n` | `ERROR UNKNOWN COMMAND\n` |
@@ -567,7 +567,6 @@ entry no cycle reads is not reported).
 | `internal/state` | Process state; holds the current snapshot behind an `atomic.Pointer` plus first-run, forced and requested bookkeeping |
 | `internal/sys` | Side-effect boundary (exec, fs, proc, clock); `sys.ReadOnly` is its mutation-refusing wrapper, `sys/systest` the recording fakes |
 | `internal/systemd` | `systemctl` detection and unit management, with the legacy init-script fallback |
-| `internal/template` | Atomic template-to-file rewrites |
 | `internal/testutil` | Shared test mocks |
 | `internal/tls` | Mail-mode (`zimbraMailMode`) management behind `configd tls` (legacy `zmtlsctl`) |
 | `internal/tracing` | Span-based execution tracing (`-tags tracing`) |

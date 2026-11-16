@@ -189,7 +189,12 @@ func TestCreateAccount_SetPasswordFailureIsReported(t *testing.T) {
 	require.Error(t, err)
 	assert.True(t, hasCode(err, provision.CodeFailure))
 	assert.NotContains(t, err.Error(), "secret-pass")
-	assert.True(t, r.dir.Exists("uid=p,ou=people,dc=example,dc=com"))
+	assert.False(t, r.dir.Exists("uid=p,ou=people,dc=example,dc=com"), "an account without its password is not left behind")
+
+	delete(r.dir.FailPassword, "uid=p,ou=people,dc=example,dc=com")
+	r.run(t, "ca", "p@example.com", "secret-pass")
+
+	assert.Equal(t, "secret-pass", r.dir.Passwords["uid=p,ou=people,dc=example,dc=com"], "a retry creates the account")
 }
 
 func TestCreateAccount_ClassOfServiceSelection(t *testing.T) {

@@ -370,7 +370,7 @@ func TestServerBoundsConcurrentConnections(t *testing.T) {
 
 	for range clients {
 		go func() {
-			resp, err := roundTrip(serverAddr(server), "STATUS\n")
+			resp, err := roundTrip(serverAddr(server), "REWRITE mta\n")
 			if err == nil && resp != respSuccessActive {
 				err = fmt.Errorf("unexpected response %q", resp)
 			}
@@ -451,14 +451,14 @@ func TestRequestSlotWaitEndsOnShutdown(t *testing.T) {
 	t.Cleanup(func() { close(handler.release) })
 
 	// The first request takes the only slot and blocks in the handler.
-	go func() { _, _ = roundTrip(serverAddr(server), "STATUS\n") }()
+	go func() { _, _ = roundTrip(serverAddr(server), "REWRITE mta\n") }()
 
 	waitUntil(t, func() bool { return handler.inflight.Load() == 1 }, "first request to hold the slot")
 
 	result := make(chan string, 1)
 
 	go func() {
-		resp, _ := roundTrip(serverAddr(server), "STATUS\n")
+		resp, _ := roundTrip(serverAddr(server), "REWRITE mta\n")
 		result <- resp
 	}()
 
@@ -474,6 +474,43 @@ func TestRequestSlotWaitEndsOnShutdown(t *testing.T) {
 		}
 	case <-time.After(testDeadline):
 		t.Fatal("queued request was not released by shutdown")
+	}
+}
+
+// statusAnswersAtOnce is the gate for every command but STATUS, as the real
+// handler is.
+type statusAnswersAtOnce struct{ gate *gateHandler }
+
+func (h statusAnswersAtOnce) HandleRequest(ctx context.Context, command string, args []string) string {
+	if command == cmdStatus {
+		return respSuccessActive
+	}
+
+	return h.gate.HandleRequest(ctx, command, args)
+}
+
+// TestStatusAnswersWhileEverySlotIsHeld verifies the readiness probe is not
+// queued behind REWRITE clients that hold all the slots while they wait for the
+// main loop (up to the REWRITE timeout).
+func TestStatusAnswersWhileEverySlotIsHeld(t *testing.T) {
+	handler := &gateHandler{release: make(chan struct{})}
+	server := NewThreadedStreamServer("127.0.0.1", 0, false, statusAnswersAtOnce{handler})
+	server.slots = make(chan struct{}, 1)
+	startServer(context.Background(), t, server)
+
+	t.Cleanup(func() { close(handler.release) })
+
+	go func() { _, _ = roundTrip(serverAddr(server), "REWRITE mta\n") }()
+
+	waitUntil(t, func() bool { return handler.inflight.Load() == 1 }, "the REWRITE to hold the only slot")
+
+	resp, err := roundTrip(serverAddr(server), "STATUS\n")
+	if err != nil {
+		t.Fatalf("STATUS with every slot held: %v", err)
+	}
+
+	if resp != respSuccessActive {
+		t.Errorf("STATUS = %q, want %q", resp, respSuccessActive)
 	}
 }
 

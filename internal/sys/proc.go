@@ -171,8 +171,13 @@ func (RealProc) Signal(pid int, sig syscall.Signal) error {
 	return proc.Signal(sig) //nolint:wrapcheck // callers match ESRCH/ErrProcessDone/EPERM
 }
 
-// SignalGroup implements Proc.
+// SignalGroup implements Proc. A pgid of 0 or 1 is refused: kill(-1) signals
+// every process the caller may signal and kill(-0) its own group.
 func (RealProc) SignalGroup(pgid int, sig syscall.Signal) error {
+	if pgid <= 1 {
+		return fmt.Errorf("signal group %d: %w", pgid, syscall.EINVAL)
+	}
+
 	return syscall.Kill(-pgid, sig) //nolint:wrapcheck // callers match ESRCH/EPERM
 }
 

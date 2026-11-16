@@ -17,9 +17,12 @@ import (
 	"github.com/zextras/carbonio-configd/internal/watchdog"
 )
 
-// startSdWatchdogKeepAlive launches a goroutine that pings systemd's watchdog at pingInterval.
+// startSdWatchdogKeepAlive launches a goroutine that pings systemd's watchdog at
+// pingInterval for as long as the main loop is alive: a loop stuck past its
+// heartbeat gets no ping, so systemd restarts the daemon instead of the pinger
+// goroutine vouching for a wedged loop.
 func startSdWatchdogKeepAlive(
-	ctx context.Context, clock sys.Clock, notifier *sdnotify.Notifier, pingInterval time.Duration,
+	ctx context.Context, clock sys.Clock, notifier *sdnotify.Notifier, pingInterval time.Duration, hb *loopHeartbeat,
 ) {
 	logger.InfoContext(ctx, "Starting systemd watchdog keep-alive",
 		"ping_interval", pingInterval)
@@ -35,12 +38,23 @@ func startSdWatchdogKeepAlive(
 			case <-ctx.Done():
 				return
 			case <-ticker.C():
-				if err := notifier.WatchdogPing(); err != nil {
-					logger.ErrorContext(ctx, "Failed to send watchdog ping", "error", err)
-				}
+				sendWatchdogPing(ctx, notifier, hb)
 			}
 		}
 	}()
+}
+
+// sendWatchdogPing pings systemd unless the main loop is past its heartbeat.
+func sendWatchdogPing(ctx context.Context, notifier *sdnotify.Notifier, hb *loopHeartbeat) {
+	if !hb.healthy() {
+		logger.ErrorContext(ctx, "Main loop missed its heartbeat, withholding the systemd watchdog ping")
+
+		return
+	}
+
+	if err := notifier.WatchdogPing(); err != nil {
+		logger.ErrorContext(ctx, "Failed to send watchdog ping", "error", err)
+	}
 }
 
 // legacyModeDoc is where the legacy-mode drop-in is explained.
@@ -134,6 +148,7 @@ func bootstrapSystemd(
 	appState *state.State,
 	cancel context.CancelFunc,
 	notifier *sdnotify.Notifier,
+	hb *loopHeartbeat,
 ) chan struct{} {
 	reloadChan := make(chan struct{}, 1)
 	SetupSignalHandler(ctx, appState, cancel, reloadChan, notifier)
@@ -142,7 +157,7 @@ func bootstrapSystemd(
 	// Pings at half the interval so we stay well within the WatchdogSec deadline.
 	if wdInterval, ok := sdnotify.WatchdogEnabled(); ok {
 		pingInterval := wdInterval / 2 //nolint:mnd // half of WatchdogSec is the recommended ping interval
-		startSdWatchdogKeepAlive(ctx, env.Clock, notifier, pingInterval)
+		startSdWatchdogKeepAlive(ctx, env.Clock, notifier, pingInterval, hb)
 	}
 
 	return reloadChan

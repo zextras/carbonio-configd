@@ -12,6 +12,7 @@ import (
 	"runtime/pprof"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -451,4 +452,42 @@ type unsupportedSubscriber struct{}
 
 func (unsupportedSubscriber) Subscribe(context.Context, func(), func()) error {
 	return ldapwatch.ErrSyncUnsupported
+}
+
+// panicOnceSource panics on its first fingerprint read, which kills the watcher
+// goroutine (the panic is recovered), then behaves like watchSource.
+type panicOnceSource struct {
+	watchSource
+
+	panicked atomic.Bool
+}
+
+func (s *panicOnceSource) Fingerprint(ctx context.Context) (ldapwatch.Fingerprint, error) {
+	if s.panicked.CompareAndSwap(false, true) {
+		panic("boom")
+	}
+
+	return s.watchSource.Fingerprint(ctx)
+}
+
+// A watcher whose goroutine died of a panic is started again by the next
+// cycle, instead of leaving change detection off until a restart.
+func TestSyncLDAPWatch_RestartsAWatcherThatPanicked(t *testing.T) {
+	deps, clock, _ := newWatchFixture(t)
+	src := &panicOnceSource{watchSource: watchSource{fp: ldapwatch.Fingerprint{ldapwatch.ComponentGlobal: "g0"}}}
+	deps.ldapSource = src
+	deps.cfg.LdapChangeTrigger = true
+
+	w := syncLDAPWatch(context.Background(), deps, nil)
+	require.NotNil(t, w)
+
+	require.Eventually(t, w.ended, 5*time.Second, time.Millisecond, "the panic ends the watcher goroutine")
+
+	restarted := syncLDAPWatch(context.Background(), deps, w)
+	require.NotSame(t, w, restarted)
+	t.Cleanup(restarted.stop)
+
+	waitForWaiters(t, clock, 1)
+	assert.False(t, restarted.ended())
+	assert.Equal(t, 1, src.polls(), "the restarted watcher took its baseline")
 }

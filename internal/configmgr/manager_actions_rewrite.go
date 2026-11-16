@@ -308,8 +308,19 @@ func (cm *ConfigManager) rewriteAtomicCommit(ctx context.Context, tmpFileName, d
 	return nil
 }
 
+// ErrPathEscapesBaseDir is returned when a REWRITE source or target is not a
+// path inside the base directory.
+var ErrPathEscapesBaseDir = errors.New("path escapes base directory")
+
 // processRewrite processes a single file rewrite.
 func (cm *ConfigManager) processRewrite(ctx context.Context, filePath string, rewriteEntry config.RewriteEntry) error {
+	// Every REWRITE path of zmconfigd.cf is relative to the install (or
+	// template) directory: refuse one that climbs out of it. A target under
+	// common/conf is legitimate and goes through postfix-conf below.
+	if !filepath.IsLocal(filePath) || !filepath.IsLocal(rewriteEntry.Value) {
+		return fmt.Errorf("%w: source=%q target=%q", ErrPathEscapesBaseDir, filePath, rewriteEntry.Value)
+	}
+
 	srcPath := cm.mainConfig.TemplatePath(filePath)
 	destPath := cm.mainConfig.BaseDir + "/" + rewriteEntry.Value
 
@@ -353,8 +364,19 @@ func (cm *ConfigManager) processRewrite(ctx context.Context, filePath string, re
 		return fmt.Errorf("write to temp file: %w", err)
 	}
 
+	// The data must be on disk before the rename publishes it: a crash would
+	// otherwise leave a zero-length or partial config under the final name. A
+	// Close error is a failed write (deferred write errors surface there).
+	if err := tmpFile.Sync(); err != nil {
+		logger.ErrorContext(ctx, "Failed to sync temporary file", "temp_file", tmpFileName, "error", err)
+
+		return fmt.Errorf("sync temp file: %w", err)
+	}
+
 	if err := tmpFile.Close(); err != nil {
-		logger.ErrorContext(ctx, "Error closing temporary file", "error", err)
+		logger.ErrorContext(ctx, "Error closing temporary file", "temp_file", tmpFileName, "error", err)
+
+		return fmt.Errorf("close temp file: %w", err)
 	}
 
 	if err := cm.rewriteAtomicCommit(ctx, tmpFileName, destPath, rewriteEntry.Mode); err != nil {

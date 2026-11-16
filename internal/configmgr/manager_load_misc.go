@@ -47,7 +47,7 @@ func (cm *ConfigManager) LoadMiscConfig(ctx context.Context) error {
 
 				return nil
 			}); err != nil {
-				result = miscCmdResult{cmdName: cmdName, err: err}
+				result = miscCmdResult{cmdName: cmdName, name: cmdName, err: err}
 			}
 
 			resultsChan <- result
@@ -60,8 +60,18 @@ func (cm *ConfigManager) LoadMiscConfig(ctx context.Context) error {
 	successCount := 0
 	published := make(map[string]string, len(miscCommands))
 
+	previous := cm.State.Snapshot()
+
 	for result := range resultsChan {
-		if result.err == nil && result.output != "" {
+		switch {
+		case result.err != nil:
+			// A failed lookup says nothing about the value: keep the previous
+			// one so a transient LDAP error does not turn the variable
+			// undefined and rewrite its sections with empty values.
+			if prev, ok := previous.Misc(result.name); ok {
+				published[result.name] = prev
+			}
+		case result.output != "":
 			successCount++
 			published[result.name] = result.output
 		}
@@ -87,24 +97,30 @@ func (cm *ConfigManager) LoadMiscConfig(ctx context.Context) error {
 // executeMiscCommand fetches a single misc command (via cache or directly)
 // and returns the outcome; the caller publishes it.
 func (cm *ConfigManager) executeMiscCommand(ctx context.Context, cmdName string) miscCmdResult {
+	name := cmdName
+	cmdObj := cm.CommandRegistry.Commands[cmdName]
+
+	if cmdObj != nil {
+		name = cmdObj.Name
+	}
+
 	output, err := cm.resolveMiscOutput(ctx, cmdName)
 	if err != nil {
 		logger.WarnContext(ctx, "Failed to load misc command",
 			"command", cmdName, "error", err)
 
-		return miscCmdResult{cmdName: cmdName, err: err}
+		return miscCmdResult{cmdName: cmdName, name: name, err: err}
 	}
 
 	if output == "" {
-		return miscCmdResult{cmdName: cmdName}
+		return miscCmdResult{cmdName: cmdName, name: name}
 	}
 
-	cmdObj := cm.CommandRegistry.Commands[cmdName]
 	if cmdObj == nil {
 		logger.WarnContext(ctx, "Command object not available for storing result",
 			"command", cmdName)
 
-		return miscCmdResult{cmdName: cmdName, err: fmt.Errorf("command not available")}
+		return miscCmdResult{cmdName: cmdName, name: name, err: fmt.Errorf("command not available")}
 	}
 
 	logger.DebugContext(ctx, "Fetched misc command output",
@@ -133,9 +149,9 @@ func (cm *ConfigManager) resolveMiscOutput(ctx context.Context, cmdName string) 
 	return output, nil
 }
 
-// fetchMiscCommand fetches a single misc command output
-//
-//nolint:unparam // error return required for cache interface compatibility
+// fetchMiscCommand fetches a single misc command output. A command that
+// fails returns an error; an empty output with a zero exit code is a valid
+// "nothing configured" answer.
 func (cm *ConfigManager) fetchMiscCommand(ctx context.Context, cmdName string) (string, error) {
 	cmd := cm.CommandRegistry.Commands[cmdName]
 
@@ -148,14 +164,13 @@ func (cm *ConfigManager) fetchMiscCommand(ctx context.Context, cmdName string) (
 		return "", nil
 	}
 
-	rc, output, _ := cmd.Execute(ctx)
+	rc, output, stderr := cmd.Execute(ctx)
 	if rc != 0 {
-		logger.WarnContext(ctx, "Skipping misc command update",
-			"description", cmd.Desc)
 		logger.DebugContext(ctx, "Command details",
 			"command", cmd.String())
-		// Return empty string, not error (matches original behavior)
-		return "", nil
+
+		return "", fmt.Errorf("misc command %q (%s) failed with exit code %d: %s",
+			cmdName, cmd.Desc, rc, stderr)
 	}
 
 	if output == "" {

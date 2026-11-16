@@ -19,7 +19,7 @@ import (
 // the given localconfig.
 func legacyRunner(lc map[string]string, opts *Options) (*runner, *systest.Fakes) {
 	f := systest.New()
-	f.Exec.OnCmdline("systemctl is-enabled", systest.Fail(1, ""))
+	f.Exec.OnCmdline("/usr/bin/systemctl is-enabled", systest.Fail(1, ""))
 
 	load := func() (map[string]string, error) { return lc, nil }
 	ctl := services.NewController(f.System(),

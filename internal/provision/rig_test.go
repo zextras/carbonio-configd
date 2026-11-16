@@ -76,6 +76,11 @@ func newRig(t *testing.T) *rig {
 
 	r := &rig{dir: provtest.New(), lc: map[string]string{}, files: map[string][]byte{}, ips: map[string][]net.IP{}}
 
+	// The containers of the DIT: the directory refuses an entry without its parent.
+	for _, dn := range []string{"cn=zimbra", "cn=servers,cn=zimbra", "cn=cos,cn=zimbra"} {
+		r.dir.Set(dn, "objectClass", "organizationalRole")
+	}
+
 	r.dir.Set(globalDN, "objectClass", "zimbraGlobalConfig")
 	r.dir.Set(globalDN, "zimbraAccountExtraObjectClass", "amavisAccount")
 	r.dir.Set(globalDN, "zimbraDomainExtraObjectClass", "amavisAccount")

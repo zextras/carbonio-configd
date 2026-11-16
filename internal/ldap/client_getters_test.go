@@ -5,6 +5,7 @@
 package ldap
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -30,7 +31,7 @@ type recordedSearch struct {
 func newGetterTestClient(result *ldap.SearchResult, err error) (*Client, *recordedSearch) {
 	rec := &recordedSearch{}
 	c := &Client{baseDN: defaultBaseDN}
-	c.searchFn = func(baseDN, filter string, attributes []string, scope int) (*ldap.SearchResult, error) {
+	c.searchFn = func(_ context.Context, baseDN, filter string, attributes []string, scope int) (*ldap.SearchResult, error) {
 		rec.baseDN = baseDN
 		rec.filter = filter
 		rec.attributes = attributes
@@ -60,7 +61,7 @@ func TestGetGlobalConfig(t *testing.T) {
 	}}
 	c, rec := newGetterTestClient(result, nil)
 
-	cfg, err := c.GetGlobalConfig()
+	cfg, err := c.GetGlobalConfig(t.Context())
 	require.NoError(t, err)
 	assert.Equal(t, "mail.example.com", cfg["zimbraSmtpHostname"])
 	assert.Equal(t, "cn=config,cn=zimbra", rec.baseDN)
@@ -70,7 +71,7 @@ func TestGetGlobalConfig(t *testing.T) {
 func TestGetGlobalConfig_SearchError(t *testing.T) {
 	c, _ := newGetterTestClient(nil, errors.New("boom"))
 
-	_, err := c.GetGlobalConfig()
+	_, err := c.GetGlobalConfig(t.Context())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to get global config")
 }
@@ -78,7 +79,7 @@ func TestGetGlobalConfig_SearchError(t *testing.T) {
 func TestGetGlobalConfig_NotFound(t *testing.T) {
 	c, _ := newGetterTestClient(&ldap.SearchResult{}, nil)
 
-	_, err := c.GetGlobalConfig()
+	_, err := c.GetGlobalConfig(t.Context())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "global config not found")
 }
@@ -87,7 +88,7 @@ func TestGetGlobalConfig_NotFound(t *testing.T) {
 // and points the schema at the real attrs.xml excerpt in testdata.
 func newServerGetterTestClient(server, global *ldap.Entry) *Client {
 	c := &Client{baseDN: defaultBaseDN, fs: sys.RealFS{}, attrsDir: filepath.Join("testdata", "attrs")}
-	c.searchFn = func(baseDN, _ string, _ []string, _ int) (*ldap.SearchResult, error) {
+	c.searchFn = func(_ context.Context, baseDN, _ string, _ []string, _ int) (*ldap.SearchResult, error) {
 		if baseDN == "cn=config,cn=zimbra" {
 			return &ldap.SearchResult{Entries: []*ldap.Entry{global}}, nil
 		}
@@ -112,7 +113,7 @@ func TestGetServerConfig(t *testing.T) {
 		entryWithAttrs("cn=config,cn=zimbra", map[string][]string{"cn": {"config"}}),
 	)
 
-	cfg, err := c.GetServerConfig("mail.example.com")
+	cfg, err := c.GetServerConfig(t.Context(), "mail.example.com")
 	require.NoError(t, err)
 	// Multi-valued attributes are newline-joined by entryToMap.
 	assert.Equal(t, "proxy\nmta", cfg["zimbraServiceEnabled"])
@@ -139,7 +140,7 @@ func TestGetServerConfig_InheritsGlobal(t *testing.T) {
 		}),
 	)
 
-	cfg, err := c.GetServerConfig("mail.example.com")
+	cfg, err := c.GetServerConfig(t.Context(), "mail.example.com")
 	require.NoError(t, err)
 
 	assert.Equal(t, "TRUE", cfg["zimbraMilterServerEnabled"], "missing serverInherited attr inherited")
@@ -162,7 +163,7 @@ func TestGetServerConfig_SchemaUnreadable(t *testing.T) {
 	c.fs = f.FS
 	c.attrsDir = "/schema"
 
-	_, err := c.GetServerConfig("m")
+	_, err := c.GetServerConfig(t.Context(), "m")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "inherited attributes")
 }
@@ -172,7 +173,7 @@ func TestGetServerConfig_NotFound(t *testing.T) {
 
 	c := newServerGetterTestClient(nil, entryWithAttrs("cn=config,cn=zimbra", nil))
 
-	_, err := c.GetServerConfig("ghost.example.com")
+	_, err := c.GetServerConfig(t.Context(), "ghost.example.com")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "server not found: ghost.example.com")
 }
@@ -185,7 +186,7 @@ func TestGetAllServers(t *testing.T) {
 	}}
 	c, rec := newGetterTestClient(result, nil)
 
-	servers, err := c.GetAllServers()
+	servers, err := c.GetAllServers(t.Context())
 	require.NoError(t, err)
 	assert.Equal(t, []string{"a.example.com", "b.example.com"}, servers)
 	assert.Equal(t, "cn=servers,cn=zimbra", rec.baseDN)
@@ -196,14 +197,14 @@ func TestGetAllServers(t *testing.T) {
 func TestGetAllServers_SearchError(t *testing.T) {
 	c, _ := newGetterTestClient(nil, errors.New("conn refused"))
 
-	_, err := c.GetAllServers()
+	_, err := c.GetAllServers(t.Context())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to get all servers")
 }
 
 func newServersGetterTestClient(global *ldap.Entry, servers ...*ldap.Entry) *Client {
 	c := &Client{baseDN: defaultBaseDN, fs: sys.RealFS{}, attrsDir: filepath.Join("testdata", "attrs")}
-	c.searchFn = func(baseDN, _ string, _ []string, _ int) (*ldap.SearchResult, error) {
+	c.searchFn = func(_ context.Context, baseDN, _ string, _ []string, _ int) (*ldap.SearchResult, error) {
 		if baseDN == "cn=config,cn=zimbra" {
 			return &ldap.SearchResult{Entries: []*ldap.Entry{global}}, nil
 		}
@@ -226,7 +227,7 @@ func TestGetAllServersWithAttributes(t *testing.T) {
 		entryWithAttrs("cn=nokey,cn=servers,cn=zimbra", map[string][]string{"description": {"no cn"}}),
 	)
 
-	servers, err := c.GetAllServersWithAttributes()
+	servers, err := c.GetAllServersWithAttributes(t.Context())
 	require.NoError(t, err)
 	require.Len(t, servers, 1)
 	assert.Equal(t, "mta", servers["a.example.com"]["zimbraServiceEnabled"])
@@ -252,7 +253,7 @@ func TestGetAllServersWithAttributes_InheritsGlobal(t *testing.T) {
 		}),
 	)
 
-	servers, err := c.GetAllServersWithAttributes()
+	servers, err := c.GetAllServersWithAttributes(t.Context())
 	require.NoError(t, err)
 	require.Len(t, servers, 2)
 
@@ -277,7 +278,7 @@ func TestGetAllServersWithAttributes_SchemaUnreadable(t *testing.T) {
 	c.fs = f.FS
 	c.attrsDir = "/schema"
 
-	_, err := c.GetAllServersWithAttributes()
+	_, err := c.GetAllServersWithAttributes(t.Context())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "inherited attributes")
 }
@@ -285,7 +286,7 @@ func TestGetAllServersWithAttributes_SchemaUnreadable(t *testing.T) {
 func TestGetAllServersWithAttributes_SearchError(t *testing.T) {
 	c, _ := newGetterTestClient(nil, errors.New("boom"))
 
-	_, err := c.GetAllServersWithAttributes()
+	_, err := c.GetAllServersWithAttributes(t.Context())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to get all servers with attributes")
 }
@@ -298,7 +299,7 @@ func TestGetAllDomains(t *testing.T) {
 	}}
 	c, rec := newGetterTestClient(result, nil)
 
-	domains, err := c.GetAllDomains()
+	domains, err := c.GetAllDomains(t.Context())
 	require.NoError(t, err)
 	assert.Equal(t, []string{"example.com", "other.net"}, domains)
 	// Domains live under DC-based subtrees: search must start at root DSE.
@@ -309,7 +310,7 @@ func TestGetAllDomains(t *testing.T) {
 func TestGetAllDomains_SearchError(t *testing.T) {
 	c, _ := newGetterTestClient(nil, errors.New("boom"))
 
-	_, err := c.GetAllDomains()
+	_, err := c.GetAllDomains(t.Context())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to get all domains")
 }
@@ -323,7 +324,7 @@ func TestGetDomain(t *testing.T) {
 	}}
 	c, rec := newGetterTestClient(result, nil)
 
-	cfg, err := c.GetDomain("example.com")
+	cfg, err := c.GetDomain(t.Context(), "example.com")
 	require.NoError(t, err)
 	assert.Equal(t, "local", cfg["zimbraDomainType"])
 	assert.Equal(t, "(&(objectClass=zimbraDomain)(zimbraDomainName=example.com))", rec.filter)
@@ -334,7 +335,7 @@ func TestGetDomain_EscapesFilter(t *testing.T) {
 		entryWithAttrs("dc=x", map[string][]string{attrZimbraDomainName: {"x"}}),
 	}}, nil)
 
-	_, err := c.GetDomain("evil)(objectClass=*")
+	_, err := c.GetDomain(t.Context(), "evil)(objectClass=*")
 	require.NoError(t, err)
 	assert.NotContains(t, rec.filter, "evil)(objectClass=*", "filter injection must be escaped")
 }
@@ -342,7 +343,7 @@ func TestGetDomain_EscapesFilter(t *testing.T) {
 func TestGetDomain_NotFound(t *testing.T) {
 	c, _ := newGetterTestClient(&ldap.SearchResult{}, nil)
 
-	_, err := c.GetDomain("ghost.example.com")
+	_, err := c.GetDomain(t.Context(), "ghost.example.com")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "domain not found: ghost.example.com")
 }
@@ -350,7 +351,7 @@ func TestGetDomain_NotFound(t *testing.T) {
 func TestGetDomain_SearchError(t *testing.T) {
 	c, _ := newGetterTestClient(nil, errors.New("boom"))
 
-	_, err := c.GetDomain("example.com")
+	_, err := c.GetDomain(t.Context(), "example.com")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to get domain config for example.com")
 }
@@ -365,7 +366,7 @@ func TestGetAllDomainsWithAttributes(t *testing.T) {
 	}}
 	c, _ := newGetterTestClient(result, nil)
 
-	domains, err := c.GetAllDomainsWithAttributes()
+	domains, err := c.GetAllDomainsWithAttributes(t.Context())
 	require.NoError(t, err)
 	require.Len(t, domains, 1)
 	assert.Equal(t, "local", domains["example.com"]["zimbraDomainType"])
@@ -374,7 +375,7 @@ func TestGetAllDomainsWithAttributes(t *testing.T) {
 func TestGetAllDomainsWithAttributes_SearchError(t *testing.T) {
 	c, _ := newGetterTestClient(nil, errors.New("boom"))
 
-	_, err := c.GetAllDomainsWithAttributes()
+	_, err := c.GetAllDomainsWithAttributes(t.Context())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to get all domains with attributes")
 }
@@ -387,7 +388,7 @@ func TestGetEnabledServices(t *testing.T) {
 	}}
 	c, rec := newGetterTestClient(result, nil)
 
-	services, err := c.GetEnabledServices("mail.example.com")
+	services, err := c.GetEnabledServices(t.Context(), "mail.example.com")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"proxy", "mta", "ldap"}, services)
 	assert.Equal(t, []string{AttrZimbraServiceEnabled}, rec.attributes)
@@ -396,7 +397,7 @@ func TestGetEnabledServices(t *testing.T) {
 func TestGetEnabledServices_NotFound(t *testing.T) {
 	c, _ := newGetterTestClient(&ldap.SearchResult{}, nil)
 
-	_, err := c.GetEnabledServices("ghost.example.com")
+	_, err := c.GetEnabledServices(t.Context(), "ghost.example.com")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "server not found: ghost.example.com")
 }
@@ -404,7 +405,7 @@ func TestGetEnabledServices_NotFound(t *testing.T) {
 func TestGetEnabledServices_SearchError(t *testing.T) {
 	c, _ := newGetterTestClient(nil, errors.New("boom"))
 
-	_, err := c.GetEnabledServices("mail.example.com")
+	_, err := c.GetEnabledServices(t.Context(), "mail.example.com")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to get enabled services")
 }
@@ -418,21 +419,21 @@ func TestGetEntry_AndReadAttribute(t *testing.T) {
 	}}
 	c, _ := newGetterTestClient(result, nil)
 
-	entry, err := c.GetEntry("cn=config,cn=zimbra", []string{"*"})
+	entry, err := c.GetEntry(t.Context(), "cn=config,cn=zimbra", []string{"*"})
 	require.NoError(t, err)
 	assert.Equal(t, "cn=config,cn=zimbra", entry.DN)
 
-	value, present, err := c.ReadAttribute("cn=config,cn=zimbra", "withValue")
+	value, present, err := c.ReadAttribute(t.Context(), "cn=config,cn=zimbra", "withValue")
 	require.NoError(t, err)
 	assert.True(t, present)
 	assert.Equal(t, "v1", value)
 
-	value, present, err = c.ReadAttribute("cn=config,cn=zimbra", "empty")
+	value, present, err = c.ReadAttribute(t.Context(), "cn=config,cn=zimbra", "empty")
 	require.NoError(t, err)
 	assert.True(t, present)
 	assert.Empty(t, value)
 
-	_, present, err = c.ReadAttribute("cn=config,cn=zimbra", "absent")
+	_, present, err = c.ReadAttribute(t.Context(), "cn=config,cn=zimbra", "absent")
 	require.NoError(t, err)
 	assert.False(t, present)
 }
@@ -440,7 +441,7 @@ func TestGetEntry_AndReadAttribute(t *testing.T) {
 func TestGetEntry_NotFound(t *testing.T) {
 	c, _ := newGetterTestClient(&ldap.SearchResult{}, nil)
 
-	_, err := c.GetEntry("cn=ghost", nil)
+	_, err := c.GetEntry(t.Context(), "cn=ghost", nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "entry not found")
 }
@@ -448,14 +449,14 @@ func TestGetEntry_NotFound(t *testing.T) {
 func TestReadAttribute_Error(t *testing.T) {
 	c, _ := newGetterTestClient(nil, errors.New("boom"))
 
-	_, _, err := c.ReadAttribute("cn=x", "attr")
+	_, _, err := c.ReadAttribute(t.Context(), "cn=x", "attr")
 	require.Error(t, err)
 }
 
 func TestProbeDN(t *testing.T) {
 	okClient, _ := newGetterTestClient(&ldap.SearchResult{}, nil)
-	assert.True(t, okClient.ProbeDN("cn=accesslog"))
+	assert.True(t, okClient.ProbeDN(t.Context(), "cn=accesslog"))
 
 	failClient, _ := newGetterTestClient(nil, errors.New("no such object"))
-	assert.False(t, failClient.ProbeDN("cn=accesslog"))
+	assert.False(t, failClient.ProbeDN(t.Context(), "cn=accesslog"))
 }

@@ -33,7 +33,7 @@ func (c *Controller) startService(ctx context.Context, name string, def *Service
 		return nil
 	}
 
-	if !c.IsSystemdMode() {
+	if !c.SystemdMode(ctx) {
 		return c.startWithoutSystemd(ctx, name, def)
 	}
 
@@ -97,7 +97,7 @@ func (c *Controller) stopService(ctx context.Context, name string, def *ServiceD
 		return nil
 	}
 
-	if !c.IsSystemdMode() {
+	if !c.SystemdMode(ctx) {
 		return c.stopWithoutSystemd(ctx, name, def)
 	}
 
@@ -302,7 +302,7 @@ func (c *Controller) startDetached(ctx context.Context, name string, def *Servic
 	// For sd_notify-capable detached daemons, wait for READY=1 before returning.
 	// startWithSDNotify starts the process internally.
 	if def.UseSDNotify {
-		proc, err := c.startWithSDNotify(context.Background(), cmd, name)
+		proc, err := c.startWithSDNotify(ctx, cmd, name)
 		if err != nil {
 			return fmt.Errorf("failed to start %s: %w", name, err)
 		}

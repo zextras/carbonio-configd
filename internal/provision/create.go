@@ -6,7 +6,9 @@ package provision
 
 import (
 	"errors"
+	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -290,11 +292,21 @@ func (p *Provisioner) writeDomain(c *callbackContext, name string, cfg *Entry, m
 	attrs.set(attrOrg, name+suffixDomainName)
 	attrs.set(attrDC, parts[0])
 
-	if err := p.addOrReplace(dns[0], attrs); err != nil {
+	added, err := p.addOrReplace(dns[0], attrs)
+	if err != nil {
 		return "", failWith(err, "unable to create domain: %s", name)
 	}
 
 	if err := p.addDomainBases(dns[0]); err != nil {
+		// A domain entry without its bases cannot be created again: the retry
+		// would report it as existing. A parent entry that was only replaced
+		// has other domains below it and stays.
+		if added {
+			if delErr := p.Dir.Delete(dns[0]); delErr != nil {
+				err = errors.Join(err, fmt.Errorf("removing the domain entry: %w", delErr))
+			}
+		}
+
 		return "", err
 	}
 
@@ -304,14 +316,19 @@ func (p *Provisioner) writeDomain(c *callbackContext, name string, cfg *Entry, m
 }
 
 // addOrReplace creates the entry, or replaces the attributes of the entry that
-// is there (a parent entry created for another domain).
-func (p *Provisioner) addOrReplace(dn string, attrs attrSet) error {
-	err := p.Dir.Add(dn, attrs)
-	if !errors.Is(err, ErrEntryExists) {
-		return err
+// is there (a parent entry created for another domain). It reports whether the
+// entry is new.
+func (p *Provisioner) addOrReplace(dn string, attrs attrSet) (added bool, err error) {
+	err = p.Dir.Add(dn, attrs)
+	if err == nil {
+		return true, nil
 	}
 
-	return p.Dir.ModifyValues(dn, nil, nil, attrs)
+	if !errors.Is(err, ErrEntryExists) {
+		return false, err
+	}
+
+	return false, p.Dir.ModifyValues(dn, nil, nil, attrs)
 }
 
 // createParentDomains is createParentDomains: the entries for the suffixes of
@@ -358,15 +375,26 @@ func (p *Provisioner) addDomainBases(domainDN string) error {
 		attrs attrSet
 	}{{ouPeople + "," + domainDN, people}, {cnGroups + "," + domainDN, groups}}
 
+	var created []string
+
 	for _, b := range bases {
 		err := p.Dir.Add(b.dn, b.attrs)
+		if err == nil {
+			created = append(created, b.dn)
+
+			continue
+		}
+
+		// Leave nothing of this call behind: the retry must start clean.
+		for _, dn := range slices.Backward(created) {
+			err = errors.Join(err, p.Dir.Delete(dn))
+		}
+
 		if errors.Is(err, ErrEntryExists) {
 			return fail(CodeDomainExists, "domain already exists: %s", domainDN)
 		}
 
-		if err != nil {
-			return createFailed(err, b.dn)
-		}
+		return createFailed(err, b.dn)
 	}
 
 	return nil

@@ -95,11 +95,15 @@ func (c *Client) ControlService(
 ) (string, error) {
 	ctx = logger.ContextWithComponentOnce(ctx, "zxadmin")
 
-	token, err := c.ensureToken(ctx)
-	if err != nil {
-		return "", err
-	}
+	return withToken(ctx, c, func(token string) (string, error) {
+		return c.sendServiceAction(ctx, token, moduleID, action, service)
+	})
+}
 
+// sendServiceAction is one action request with token.
+func (c *Client) sendServiceAction(
+	ctx context.Context, token, moduleID string, action ServiceAction, service string,
+) (string, error) {
 	q := url.Values{}
 	q.Set("module", moduleID)
 	q.Set("action", string(action))
@@ -150,6 +154,10 @@ func (c *Client) parseServiceReply(
 
 		return "", ErrAdvancedNotRunning
 	default:
+		if fault := soapFault(string(action), raw); fault != nil {
+			return "", fault
+		}
+
 		return "", fmt.Errorf("zxadmin: %s failed: HTTP %d: %s", action, status, truncate(string(raw)))
 	}
 

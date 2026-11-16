@@ -65,7 +65,9 @@ func TestLoadDomains_GatedByPerVirtualHostname(t *testing.T) {
 	assert.Empty(t, domains)
 }
 
-func TestSyncDomainCerts_GateOffDeletesAllDomainCertFiles(t *testing.T) {
+// With the gate off loadDomains is empty by design, which says nothing about
+// which domains exist: no destructive cleanup may run.
+func TestSyncDomainCerts_GateOffKeepsDomainCertFiles(t *testing.T) {
 	t.Parallel()
 
 	g := newConfigGenerator(t, map[string]string{perVirtualHostnameAttr: "FALSE"}, nil)
@@ -77,7 +79,7 @@ func TestSyncDomainCerts_GateOffDeletesAllDomainCertFiles(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "old.com.crt"), []byte("x"), 0o600))
 
 	require.NoError(t, tp.syncDomainCerts(context.Background()))
-	assert.NoFileExists(t, filepath.Join(dir, "old.com.crt"))
+	assert.FileExists(t, filepath.Join(dir, "old.com.crt"))
 }
 
 func TestLoadAllClientCertCA_DedupAndOrder(t *testing.T) {

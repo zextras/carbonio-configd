@@ -27,11 +27,15 @@ const reloadLocalConfigEnvelope = `<?xml version="1.0" encoding="UTF-8"?>` +
 func (c *Client) ReloadLocalConfig(ctx context.Context) error {
 	ctx = logger.ContextWithComponentOnce(ctx, "zxadmin")
 
-	token, err := c.ensureToken(ctx)
-	if err != nil {
-		return err
-	}
+	_, err := withToken(ctx, c, func(token string) (struct{}, error) {
+		return struct{}{}, c.reloadLocalConfig(ctx, token)
+	})
 
+	return err
+}
+
+// reloadLocalConfig is one reload request with token.
+func (c *Client) reloadLocalConfig(ctx context.Context, token string) error {
 	resp, err := c.doWithRetry(ctx, maxHTTPRetries, func() (*http.Request, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+soapPath,
 			strings.NewReader(reloadLocalConfigEnvelope))
@@ -59,6 +63,10 @@ func (c *Client) ReloadLocalConfig(ctx context.Context) error {
 		c.dropToken(token)
 
 		return fmt.Errorf("zxadmin: reload auth rejected: HTTP %d", resp.StatusCode)
+	}
+
+	if fault := soapFault("reload", raw); fault != nil {
+		return fault
 	}
 
 	if resp.StatusCode != http.StatusOK {

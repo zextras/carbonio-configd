@@ -264,6 +264,10 @@ func applyScreen(e *setup.Env, stdin io.Reader, stdout io.Writer, deps *Deps, st
 		}
 	}
 
+	// The steps rewrite e.Cfg while the preflight runs: it checks the
+	// configuration as it was when the screen opened.
+	cfg := *e.Cfg
+
 	ao := &tui.ApplyOptions{
 		Plan:      plan,
 		Feed:      s.Feed,
@@ -274,7 +278,7 @@ func applyScreen(e *setup.Env, stdin io.Reader, stdout io.Writer, deps *Deps, st
 		NoColor:   noColor(os.Environ()),
 		Preflight: func() []tui.Check {
 			return tui.Preflight(e.Ctx, &tui.PreflightInput{
-				Cfg: e.Cfg, Host: deps.Host, Resolver: deps.Resolver, Root: os.Geteuid() == 0, PortFree: portFree,
+				Cfg: &cfg, Host: deps.Host, Resolver: deps.Resolver, Root: os.Geteuid() == 0, PortFree: portFree,
 			})
 		},
 		Run: func(obs setup.Observer, stop func() bool) error {
@@ -291,6 +295,13 @@ func applyScreen(e *setup.Env, stdin io.Reader, stdout io.Writer, deps *Deps, st
 	if !s.NoticeShown {
 		ao.Notice = s.Notice
 	}
+
+	// A signal asks the run to end after the current step, the way Ctrl-C does:
+	// the screen and the step in flight must outlive the cancelled context.
+	sig := e.Ctx
+	e.Ctx = context.WithoutCancel(sig)
+
+	defer context.AfterFunc(sig, s.Feed.RequestStop)()
 
 	return deps.Screens.Apply(e.Ctx, stdin, stdout, ao)
 }

@@ -222,7 +222,7 @@ func (tp *TemplateProcessor) writeDomainPairToLDAP(ctx context.Context, domainNa
 
 	logger.InfoContext(ctx, "Saving Let's Encrypt certificate/key pair to LDAP", "domain", domainName)
 
-	if err := g.LdapClient.NativeClient.SetDomainSSLCertKey(domainName, pair.cert, pair.key); err != nil {
+	if err := g.LdapClient.NativeClient.SetDomainSSLCertKey(ctx, domainName, pair.cert, pair.key); err != nil {
 		return fmt.Errorf("unable to update certificate and private key for domain %s: %w", domainName, err)
 	}
 

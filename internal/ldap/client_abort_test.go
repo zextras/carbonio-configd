@@ -53,7 +53,7 @@ func searchAbortedBy(t *testing.T, c *Client, srv *ldapfake.Server, abort func()
 	done := make(chan error, 1)
 
 	go func() {
-		_, err := c.Search("cn=zimbra", ldapFilterAllObjects, []string{"cn"}, ldap.ScopeBaseObject)
+		_, err := c.Search(t.Context(), "cn=zimbra", ldapFilterAllObjects, []string{"cn"}, ldap.ScopeBaseObject)
 		done <- err
 	}()
 

@@ -106,6 +106,9 @@ func (f *fd) mailboxdPid() int {
 }
 
 // fdControl handles "stop" and "rotate", which signal the running collector.
+// The collector may run as root and /run/carbonio/stats is writable by
+// zextras, so the pid file is not trusted: only a live collector (not init, not
+// an unrelated process that reused a stale pid) is signalled.
 func fdControl(env *Env, args []string) (int, bool) {
 	if len(args) == 0 || args[0] != "stop" && args[0] != "rotate" {
 		return 0, false
@@ -114,9 +117,17 @@ func fdControl(env *Env, args []string) (int, bool) {
 	pidFile := filepath.Join(env.PidDir, "fd.pid")
 	pid, _ := strconv.Atoi(readPid(pidFile))
 
-	if pid <= 0 {
-		// A corrupt file: kill(-n) would signal a process group.
+	if pid <= 1 {
+		// A corrupt file: kill(-n) would signal a process group and pid 1 is init.
 		_ = os.Remove(pidFile)
+
+		return exitOK, true
+	}
+
+	if !env.alive(pid) {
+		if args[0] == "stop" {
+			_ = os.Remove(pidFile)
+		}
 
 		return exitOK, true
 	}
@@ -127,10 +138,8 @@ func fdControl(env *Env, args []string) (int, bool) {
 		return exitOK, true
 	}
 
-	// stop: kill(0) fails for a stale pid file, TERM is tried before KILL.
-	if env.Sys.Proc.Signal(pid, 0) != nil ||
-		env.Sys.Proc.Signal(pid, syscall.SIGTERM) == nil ||
-		env.Sys.Proc.Signal(pid, syscall.SIGKILL) == nil {
+	// stop: TERM is tried before KILL.
+	if env.Sys.Proc.Signal(pid, syscall.SIGTERM) == nil || env.Sys.Proc.Signal(pid, syscall.SIGKILL) == nil {
 		_ = os.Remove(pidFile)
 	}
 
@@ -150,7 +159,9 @@ func fdValidate(env *Env, o *options) error {
 	}
 
 	for _, p := range zpaths {
-		if rp, err := filepath.EvalSymlinks(p); err == nil && strings.HasPrefix(log, rp) {
+		// Whole path components: "/tmp-x" is not under "/tmp".
+		if rp, err := filepath.EvalSymlinks(p); err == nil &&
+			(log == rp || strings.HasPrefix(log, rp+string(filepath.Separator))) {
 			return nil
 		}
 	}
@@ -180,11 +191,16 @@ func realPath(p string) string {
 }
 
 // fdOwn gives the log to zextras with mode 0640 (the collector may be run by
-// root).
-func fdOwn(env *Env, path string) {
-	if env.Chown != nil {
-		_ = env.Chown(path)
+// root). Owner and mode both go through the open descriptor, so a path swapped
+// after the open cannot redirect either to another file.
+func fdOwn(env *Env, lf *logFile) {
+	if lf.f == nil {
+		return
 	}
 
-	_ = os.Chmod(path, 0o640)
+	if env.ChownFile != nil {
+		_ = env.ChownFile(lf.f)
+	}
+
+	_ = lf.f.Chmod(0o640)
 }

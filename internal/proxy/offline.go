@@ -254,8 +254,8 @@ func (fx *Fixture) serverInfos(service string) []ServerInfo {
 
 // literalHost parses host as an IP literal, bracketed or not; an offline render
 // never uses the DNS.
-func literalHost(_ context.Context, host string) net.IP {
-	return net.ParseIP(strings.Trim(host, "[]"))
+func literalHost(_ context.Context, host string) (net.IP, error) {
+	return net.ParseIP(strings.Trim(host, "[]")), nil
 }
 
 func sortedKeys[V any](m map[string]V) []string {

@@ -299,7 +299,12 @@ func parseMultiValueAttribute(attr string) []string {
 func (g *Generator) makeLoginURLResolver(configKey string) func(context.Context) (any, error) {
 	return func(ctx context.Context) (any, error) {
 		if val, ok := g.getConfigValue(configKey, sourceGlobal); ok {
-			return val, nil
+			if validNginxArg(val) {
+				return val, nil
+			}
+
+			logger.ErrorContext(ctx, "Ignoring unsafe login URL, using default",
+				"attribute", configKey, "url", truncateForLog(val))
 		}
 
 		return staticLoginPath, nil
@@ -322,9 +327,14 @@ func (g *Generator) makeLogoutRedirectResolver(configKey string) func(context.Co
 func (g *Generator) resolveMemcacheServers(ctx context.Context) (any, error) {
 	servers, err := g.getAllMemcachedServers(ctx)
 	if err != nil {
-		// In test environments without zmprov, return empty string instead of error
+		if g.ldapConfigured() {
+			return nil, fmt.Errorf("resolve memcache servers: %w", err)
+		}
+
+		// Offline rendering has no server source: render no memcache servers.
 		logger.WarnContext(ctx, resolverQueryFailed, "error", err)
-		return "", nil //nolint:nilerr // Intentional: fallback for test environments without zmprov
+
+		return "", nil
 	}
 
 	return formatMemcacheServers(servers), nil
@@ -342,7 +352,12 @@ func (g *Generator) resolveErrorPages(ctx context.Context) (any, error) {
 	errURL := ""
 
 	if val, ok := g.getConfigValue("zimbraReverseProxyErrorHandlerURL", sourceGlobal); ok {
-		errURL = val
+		if validNginxArg(val) {
+			errURL = val
+		} else {
+			logger.ErrorContext(ctx, "Ignoring unsafe error handler URL, using default error pages",
+				"url", truncateForLog(val))
+		}
 	}
 
 	var sb strings.Builder
@@ -381,7 +396,12 @@ func (g *Generator) resolveSSLSessionCacheSize(ctx context.Context) (any, error)
 	size := "10m"
 
 	if val, ok := g.getConfigValue("zimbraReverseProxySSLSessionCacheSize", sourceServer, sourceGlobal); ok {
-		size = val
+		if validSizeToken(val) {
+			size = val
+		} else {
+			logger.ErrorContext(ctx, "Ignoring invalid SSL session cache size, using default",
+				"size", truncateForLog(val))
+		}
 	}
 
 	return fmt.Sprintf("shared:SSL:%s", size), nil
@@ -445,7 +465,12 @@ func (g *Generator) resolveHTTPSEnabled(_ context.Context) (any, error) {
 // corresponding :servers variable, so the enabler is always consistent with the
 // rendered server list (no commented-out bare "server" lines).
 func (g *Generator) disableForUpstream(ctx context.Context, spec *upstreamSpec, name string) (any, error) {
-	if g.upstreamHasServers(ctx, spec) {
+	hasServers, err := g.upstreamHasServers(ctx, spec)
+	if err != nil {
+		return nil, err
+	}
+
+	if hasServers {
 		logger.InfoContext(ctx, name+" upstream enabled")
 
 		return "", nil

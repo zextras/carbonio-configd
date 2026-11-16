@@ -26,7 +26,7 @@ func (c *Client) QueryDomains(ctx context.Context) ([]Domain, error) {
 	ctx = logger.ContextWithComponentOnce(ctx, "ldap")
 	t0 := time.Now()
 
-	all, err := c.GetAllDomainsWithAttributes()
+	all, err := c.GetAllDomainsWithAttributes(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get domains with attributes: %w", err)
 	}
@@ -103,10 +103,10 @@ func pickVirtualIP(vips []string, n, i int) string {
 // SetDomainSSLCertKey replaces zimbraSSLCertificate and zimbraSSLPrivateKey on
 // the named domain in a single LDAP modify (legacy mProv.modifyAttrs,
 // ProxyConfGen.java:2590-2597).
-func (c *Client) SetDomainSSLCertKey(domainName, certificate, privateKey string) error {
+func (c *Client) SetDomainSSLCertKey(ctx context.Context, domainName, certificate, privateKey string) error {
 	filter := fmt.Sprintf("(&(objectClass=zimbraDomain)(zimbraDomainName=%s))", ldap.EscapeFilter(domainName))
 
-	result, err := c.search("", filter, []string{attrZimbraDomainName}, ldap.ScopeWholeSubtree)
+	result, err := c.search(ctx, "", filter, []string{attrZimbraDomainName}, ldap.ScopeWholeSubtree)
 	if err != nil {
 		return fmt.Errorf("failed to look up domain %s: %w", domainName, err)
 	}
@@ -117,7 +117,7 @@ func (c *Client) SetDomainSSLCertKey(domainName, certificate, privateKey string)
 
 	dn := result.Entries[0].DN
 
-	return c.executeWithRetry(c.lifecycle(), func(conn *ldap.Conn) error {
+	return c.executeWithRetry(ctx, func(conn *ldap.Conn) error {
 		req := ldap.NewModifyRequest(dn, nil)
 		req.Replace("zimbraSSLCertificate", []string{certificate})
 		req.Replace("zimbraSSLPrivateKey", []string{privateKey})
@@ -144,7 +144,7 @@ func serverHasService(serviceEnabled, serviceName string) bool {
 func (c *Client) QueryServers(ctx context.Context, serviceName string) ([]Server, error) {
 	ctx = logger.ContextWithComponentOnce(ctx, "ldap")
 
-	all, err := c.GetAllServersWithAttributes()
+	all, err := c.GetAllServersWithAttributes(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query servers: %w", err)
 	}

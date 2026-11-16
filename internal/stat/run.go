@@ -193,7 +193,7 @@ func (e *Env) start(sp *spec, o *options) (*runner, error) {
 	}
 
 	if sp.afterOpen != nil && !o.console {
-		sp.afterOpen(e, o.logPath)
+		sp.afterOpen(e, lf)
 	}
 
 	return &runner{env: e, sp: sp, c: c, lf: lf, csv: csv, date: date, interval: o.interval, console: o.console}, nil
@@ -300,7 +300,7 @@ func (r *runner) tick(sched time.Time) {
 		return
 	}
 
-	if err := r.lf.write(lines); err != nil {
+	if err := r.write(lines); err != nil {
 		r.report(err)
 	}
 
@@ -311,6 +311,20 @@ func (r *runner) tick(sched time.Time) {
 	for _, l := range lines {
 		r.env.Syslog.Stats("info", "zmstat "+r.csv+": "+r.c.Heading()+":: "+l)
 	}
+}
+
+// write appends the lines. A log left closed by a failed rotation is reopened
+// first, so one bad moment (a full disk) does not drop every later sample.
+func (r *runner) write(lines []string) error {
+	if !r.console && r.lf.f == nil {
+		if err := r.lf.reopen(r.date); err != nil {
+			return err
+		}
+
+		r.opened()
+	}
+
+	return r.lf.write(lines)
 }
 
 // report prints a collector error as "stat <name>: <error>".
@@ -328,7 +342,12 @@ func (r *runner) rotate(date string) {
 		r.report(err)
 	}
 
-	if r.sp.afterOpen != nil {
-		r.sp.afterOpen(r.env, r.lf.path)
+	r.opened()
+}
+
+// opened runs the collector's hook on a freshly (re)opened log.
+func (r *runner) opened() {
+	if r.sp.afterOpen != nil && r.lf.f != nil {
+		r.sp.afterOpen(r.env, r.lf)
 	}
 }

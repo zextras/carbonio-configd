@@ -5,6 +5,7 @@
 package ldap
 
 import (
+	"context"
 	"maps"
 	"slices"
 
@@ -13,8 +14,8 @@ import (
 
 // AddEntry creates the entry dn with the attributes. A DN that is taken is
 // reported as an error for which IsEntryExists is true, and is not retried.
-func (c *Client) AddEntry(dn string, attrs map[string][]string) error {
-	return c.executeWithRetry(c.lifecycle(), func(conn *ldap.Conn) error {
+func (c *Client) AddEntry(ctx context.Context, dn string, attrs map[string][]string) error {
+	return c.executeWithRetry(ctx, func(conn *ldap.Conn) error {
 		req := ldap.NewAddRequest(dn, nil)
 
 		for _, name := range slices.Sorted(maps.Keys(attrs)) {
@@ -26,8 +27,8 @@ func (c *Client) AddEntry(dn string, attrs map[string][]string) error {
 }
 
 // DeleteEntry removes the entry dn.
-func (c *Client) DeleteEntry(dn string) error {
-	return c.executeWithRetry(c.lifecycle(), func(conn *ldap.Conn) error {
+func (c *Client) DeleteEntry(ctx context.Context, dn string) error {
+	return c.executeWithRetry(ctx, func(conn *ldap.Conn) error {
 		return conn.Del(ldap.NewDelRequest(dn, nil))
 	})
 }
@@ -36,8 +37,8 @@ func (c *Client) DeleteEntry(dn string) error {
 // extended operation (RFC 3062) without the old password: the server hashes it
 // with its own scheme and checks its password policy. The password is sent on
 // the connection only; it is never part of an error.
-func (c *Client) SetPassword(dn, password string) error {
-	return c.executeWithRetry(c.lifecycle(), func(conn *ldap.Conn) error {
+func (c *Client) SetPassword(ctx context.Context, dn, password string) error {
+	return c.executeWithRetry(ctx, func(conn *ldap.Conn) error {
 		_, err := conn.PasswordModify(ldap.NewPasswordModifyRequest(dn, "", password))
 
 		return err

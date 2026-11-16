@@ -538,3 +538,38 @@ func TestConfig_SetRuntimeVals(t *testing.T) {
 		t.Errorf("TemplatePath without template dir = %q", got)
 	}
 }
+
+// An interval of 0 or below would spin the main loop on LDAP (0) or panic
+// time.NewTicker (negative): the value is ignored and the default stays.
+func TestSetValsIgnoresNonPositiveIntervals(t *testing.T) {
+	for _, bad := range []string{"0", "-1", "-300"} {
+		cfg, err := NewConfigWithHostname("")
+		if err != nil {
+			t.Fatalf("NewConfig failed: %v", err)
+		}
+
+		cfg.SetVals(&LocalConfig{Data: testConfigMap(map[string]string{
+			"zmconfigd_interval":                 bad,
+			"zmconfigd_watchdog_interval":        bad,
+			"zmconfigd_restart_debounce_seconds": "-5",
+			"zmconfigd_ldap_change_poll_seconds": bad,
+		})})
+
+		if cfg.Interval != 300 || cfg.WatchdogInterval != 120 || cfg.RestartDebounce != 0 ||
+			cfg.LdapChangePollSeconds != 5 {
+			t.Errorf("%s: interval=%d watchdog=%d debounce=%d poll=%d, want the defaults 300 120 0 5",
+				bad, cfg.Interval, cfg.WatchdogInterval, cfg.RestartDebounce, cfg.LdapChangePollSeconds)
+		}
+	}
+
+	cfg, err := NewConfigWithHostname("")
+	if err != nil {
+		t.Fatalf("NewConfig failed: %v", err)
+	}
+
+	cfg.SetVals(&LocalConfig{Data: testConfigMap(map[string]string{"zmconfigd_interval": "1"})})
+
+	if cfg.Interval != 1 {
+		t.Errorf("Interval = %d, want 1", cfg.Interval)
+	}
+}

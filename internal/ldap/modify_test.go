@@ -36,7 +36,7 @@ func TestModifyOps_EmptyIsNoop(t *testing.T) {
 	assert.Empty(t, modifyOps(nil, nil, nil))
 
 	// No request is sent for it: a nil client would panic on connect.
-	assert.NoError(t, (&Client{}).ModifyValues("cn=config,cn=zimbra", nil, nil, nil))
+	assert.NoError(t, (&Client{}).ModifyValues(t.Context(), "cn=config,cn=zimbra", nil, nil, nil))
 }
 
 func TestSingleValueOps_SplitsAddsAndDeletesOnly(t *testing.T) {

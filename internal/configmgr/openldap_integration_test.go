@@ -279,7 +279,7 @@ func (h *olHarness) checkParity(t *testing.T) {
 	snap := h.cm.State.Snapshot()
 
 	// gacf: every attribute of the entry is in the snapshot with its value.
-	rawGlobal, err := h.client.GetGlobalConfig()
+	rawGlobal, err := h.client.GetGlobalConfig(t.Context())
 	require.NoError(t, err)
 
 	global := snap.GlobalMap()
@@ -289,7 +289,7 @@ func (h *olHarness) checkParity(t *testing.T) {
 	}
 
 	// gs: the snapshot carries what the client returns for the server.
-	rawServer, err := h.client.GetServerConfig(olTestHost)
+	rawServer, err := h.client.GetServerConfig(t.Context(), olTestHost)
 	require.NoError(t, err)
 
 	server := snap.ServerMap()
@@ -299,17 +299,17 @@ func (h *olHarness) checkParity(t *testing.T) {
 	}
 
 	// A server that sets none of the inherited attributes gets the global ones.
-	other, err := h.client.GetServerConfig(olOtherHost)
+	other, err := h.client.GetServerConfig(t.Context(), olOtherHost)
 	require.NoError(t, err)
 	assert.Equal(t, "TRUE", other["zimbraMilterServerEnabled"])
 	assert.Equal(t, rawGlobal["zimbraMtaMyNetworks"], other["zimbraMtaMyNetworks"])
 	assert.Equal(t, "7026", other["zimbraMilterBindPort"])
 
-	servers, err := h.client.GetAllServers()
+	servers, err := h.client.GetAllServers(t.Context())
 	require.NoError(t, err)
 	assert.ElementsMatch(t, []string{olTestHost, olOtherHost}, servers)
 
-	domains, err := h.client.GetAllDomains()
+	domains, err := h.client.GetAllDomains(t.Context())
 	require.NoError(t, err)
 	assert.ElementsMatch(t, []string{"test.example", "alias.example"}, domains)
 }

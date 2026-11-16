@@ -158,17 +158,17 @@ func (g *Generator) GenerateAll(ctx context.Context) error {
 		"duration_seconds", discoverDuration.Seconds())
 
 	if err != nil {
-		return fmt.Errorf("failed to discover templates: %w", err)
+		return g.failGeneration(ctx, fmt.Errorf("failed to discover templates: %w", err))
 	}
 
 	if len(templates) == 0 {
-		return fmt.Errorf("no templates found in %s", g.TemplateDir)
+		return g.failGeneration(ctx, fmt.Errorf("no templates found in %s", g.TemplateDir))
 	}
 
 	// Ensure includes directory exists
 	if !g.DryRun {
 		if err := g.ensureIncludesDir(ctx); err != nil {
-			return fmt.Errorf("failed to create includes directory: %w", err)
+			return g.failGeneration(ctx, fmt.Errorf("failed to create includes directory: %w", err))
 		}
 	}
 
@@ -187,12 +187,12 @@ func (g *Generator) GenerateAll(ctx context.Context) error {
 	// Deploy per-domain certificate/key files before rendering templates that
 	// reference them (legacy ProxyConfGen.java:2224-2240).
 	if err := processor.syncDomainCerts(ctx); err != nil {
-		return fmt.Errorf("failed to sync domain certificates: %w", err)
+		return g.failGeneration(ctx, fmt.Errorf("failed to sync domain certificates: %w", err))
 	}
 
 	if g.ForceDNSResolution {
 		if err := g.checkVirtualHostnames(ctx, processor); err != nil {
-			return err
+			return g.failGeneration(ctx, err)
 		}
 	}
 
@@ -282,6 +282,14 @@ func (g *Generator) processTemplates(
 	return res
 }
 
+// failGeneration records err as the result of this run in nginx.conf and
+// returns it, so an aborted run is never reported as the earlier run's success.
+func (g *Generator) failGeneration(ctx context.Context, err error) error {
+	g.appendConfGenResult(ctx, confGenErrorMarker+err.Error())
+
+	return err
+}
+
 // appendConfGenResult appends "\n#<text>\n" to ConfDir/nginx.conf so that
 // zmnginxctl restart can detect generation problems. Legacy
 // ProxyConfGen.appendConfGenResultToConf: skipped on dry-run and when the file
@@ -296,10 +304,12 @@ func (g *Generator) appendConfGenResult(ctx context.Context, text string) {
 		return
 	}
 
-	marker := "\n#" + text + "\n"
+	// The text may carry newlines (wrapped errors); in nginx.conf they would
+	// end the comment and inject directives.
+	marker := "\n#" + resultMarkerNewlines.Replace(text) + "\n"
 	path := g.confPath()
 
-	if g.refreshResultMarker(ctx, path, marker) {
+	if g.refreshResultMarker(ctx, path, marker) || g.replaceStaleMarker(ctx, path, marker) {
 		return
 	}
 
@@ -315,6 +325,64 @@ func (g *Generator) appendConfGenResult(ctx context.Context, text string) {
 
 	if err := f.Close(); err != nil {
 		logger.WarnContext(ctx, "Failed to close nginx.conf", "error", err)
+	}
+}
+
+var resultMarkerNewlines = strings.NewReplacer("\r", " ", "\n", " ")
+
+// replaceStaleMarker handles a run that aborted before rendering nginx.conf:
+// the file still ends with an earlier run's marker, which is replaced instead
+// of piling markers up run after run. It reports false when the file is
+// missing, unreadable, or has no earlier marker.
+func (g *Generator) replaceStaleMarker(ctx context.Context, path, marker string) bool {
+	if g.confBody != nil {
+		return false
+	}
+
+	//nolint:gosec // G304: path is ConfDir joined with a constant file name
+	existing, err := g.env.FS.ReadFile(path)
+	if err != nil {
+		return false
+	}
+
+	body := trimResultMarkers(existing)
+	if len(body) == len(existing) {
+		return false
+	}
+
+	updated := append(bytes.Clone(body), marker...)
+	if bytes.Equal(updated, existing) {
+		return true
+	}
+
+	if err := g.env.FS.WriteFileAtomic(path, updated, generatedFileMode); err != nil {
+		logger.WarnContext(ctx, "Failed to update generation result in nginx.conf", "error", err)
+	}
+
+	return true
+}
+
+// trimResultMarkers removes the trailing result marker blocks
+// ("\n#__SUCCESS__\n", "\n#__CONF_GEN_ERROR__:...\n") appendConfGenResult wrote.
+func trimResultMarkers(b []byte) []byte {
+	for {
+		trimmed, ok := bytes.CutSuffix(b, []byte("\n"))
+		if !ok {
+			return b
+		}
+
+		i := bytes.LastIndexByte(trimmed, '\n')
+		if i < 0 {
+			return b
+		}
+
+		line := trimmed[i+1:]
+		if !bytes.HasPrefix(line, []byte("#"+confGenSuccessMarker)) &&
+			!bytes.HasPrefix(line, []byte("#"+confGenErrorMarker)) {
+			return b
+		}
+
+		b = b[:i]
 	}
 }
 
@@ -579,7 +647,12 @@ func (g *Generator) outputName(templateName string) (string, bool) {
 // when set) does not resolve: legacy ProxyConfGen -f
 // (ProxyConfGen.fillVarsWithDomainAttrs, mEnforceDNSResolution).
 func (g *Generator) checkVirtualHostnames(ctx context.Context, processor *TemplateProcessor) error {
-	for _, d := range processor.getDomains(ctx) {
+	domains, err := processor.getDomains(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, d := range domains {
 		if d.VirtualHostname == "" {
 			continue
 		}
@@ -589,10 +662,20 @@ func (g *Generator) checkVirtualHostnames(ctx context.Context, processor *Templa
 			host = d.VirtualIPAddress
 		}
 
-		if _, err := net.DefaultResolver.LookupHost(ctx, host); err != nil {
+		if err := lookupHostWithTimeout(ctx, host); err != nil {
 			return fmt.Errorf("virtual host name %q is not resolvable: %w", d.VirtualHostname, err)
 		}
 	}
 
 	return nil
+}
+
+// lookupHostWithTimeout resolves host, giving up after hostLookupTimeout.
+func lookupHostWithTimeout(ctx context.Context, host string) error {
+	ctx, cancel := context.WithTimeout(ctx, hostLookupTimeout)
+	defer cancel()
+
+	_, err := net.DefaultResolver.LookupHost(ctx, host)
+
+	return err
 }

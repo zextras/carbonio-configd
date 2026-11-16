@@ -6,6 +6,7 @@ package logger
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 
 	"github.com/zextras/carbonio-configd/internal/redact"
@@ -197,15 +198,22 @@ func redactString(a slog.Attr, s string, secret bool) (slog.Attr, bool) {
 	return a, false
 }
 
-// redactAny masks an any-valued attribute: wholly when secret, else the text
-// of an error value.
+// redactAny masks an any-valued attribute: wholly when secret, else any
+// credential in the text of an error, or in the printed form of any other
+// value (a []string of arguments, a map, a struct).
 func redactAny(a slog.Attr, v slog.Value, secret bool) (slog.Attr, bool) {
 	if secret && v.Any() != nil {
 		return slog.String(a.Key, redact.Placeholder), true
 	}
 
-	if err, ok := v.Any().(error); ok && err != nil {
-		if text, changed := redact.Text(err.Error()); changed {
+	switch x := v.Any().(type) {
+	case nil:
+	case error:
+		if text, changed := redact.Text(x.Error()); changed {
+			return slog.String(a.Key, text), true
+		}
+	default:
+		if text, changed := redact.Text(fmt.Sprint(x)); changed {
 			return slog.String(a.Key, text), true
 		}
 	}

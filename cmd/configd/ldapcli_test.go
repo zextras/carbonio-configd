@@ -6,6 +6,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"os"
 	"testing"
@@ -31,21 +32,21 @@ type directory struct {
 	gotAdd, gotDel, gotReplace    map[string][]string
 }
 
-func (d *directory) GetGlobalConfig() (map[string]string, error) { return d.global, nil }
+func (d *directory) GetGlobalConfig(context.Context) (map[string]string, error) { return d.global, nil }
 
-func (d *directory) GetServerConfig(host string) (map[string]string, error) {
+func (d *directory) GetServerConfig(_ context.Context, host string) (map[string]string, error) {
 	d.gotServer = host
 
 	return d.server, nil
 }
 
-func (d *directory) Search(base, filter string, attrs []string, scope int) (*goldap.SearchResult, error) {
+func (d *directory) Search(_ context.Context, base, filter string, attrs []string, scope int) (*goldap.SearchResult, error) {
 	d.gotBase, d.gotFilter, d.gotAttrs, d.gotScope = base, filter, attrs, scope
 
 	return &goldap.SearchResult{Entries: d.entries}, nil
 }
 
-func (d *directory) ModifyValues(_ string, add, del, replace map[string][]string) error {
+func (d *directory) ModifyValues(_ context.Context, _ string, add, del, replace map[string][]string) error {
 	d.gotAdd, d.gotDel, d.gotReplace = add, del, replace
 
 	return nil

@@ -170,7 +170,7 @@ func TestAddEntry_SendsTheAttributesInNameOrder(t *testing.T) {
 	s := newWriteServer(t, succeed)
 	c := newClientFor(t, s.url)
 
-	err := c.AddEntry("uid=u,ou=people,dc=x", map[string][]string{
+	err := c.AddEntry(t.Context(), "uid=u,ou=people,dc=x", map[string][]string{
 		"uid":         {"u"},
 		"objectClass": {"top", "person"},
 	})
@@ -185,7 +185,7 @@ func TestAddEntry_ATakenDNIsReportedAndSentOnce(t *testing.T) {
 	s := newWriteServer(t, refuse(goldap.LDAPResultEntryAlreadyExists))
 	c := newClientFor(t, s.url)
 
-	err := c.AddEntry("uid=u,dc=x", map[string][]string{"uid": {"u"}})
+	err := c.AddEntry(t.Context(), "uid=u,dc=x", map[string][]string{"uid": {"u"}})
 
 	require.Error(t, err)
 	assert.True(t, IsEntryExists(err))
@@ -198,7 +198,7 @@ func TestAddEntry_OtherRefusalsAreNotEntryExists(t *testing.T) {
 	s := newWriteServer(t, refuse(goldap.LDAPResultInsufficientAccessRights))
 	c := newClientFor(t, s.url)
 
-	err := c.AddEntry("uid=u,dc=x", map[string][]string{"uid": {"u"}})
+	err := c.AddEntry(t.Context(), "uid=u,dc=x", map[string][]string{"uid": {"u"}})
 
 	require.Error(t, err)
 	assert.False(t, IsEntryExists(err))
@@ -210,7 +210,7 @@ func TestDeleteEntry_SendsTheDN(t *testing.T) {
 	s := newWriteServer(t, succeed)
 	c := newClientFor(t, s.url)
 
-	require.NoError(t, c.DeleteEntry("uid=u,dc=x"))
+	require.NoError(t, c.DeleteEntry(t.Context(), "uid=u,dc=x"))
 	assert.Equal(t, []string{"del uid=u,dc=x"}, s.seen())
 }
 
@@ -220,7 +220,7 @@ func TestDeleteEntry_RefusalIsReturned(t *testing.T) {
 	s := newWriteServer(t, refuse(goldap.LDAPResultNoSuchObject))
 	c := newClientFor(t, s.url)
 
-	err := c.DeleteEntry("uid=gone,dc=x")
+	err := c.DeleteEntry(t.Context(), "uid=gone,dc=x")
 
 	require.Error(t, err)
 	assert.True(t, goldap.IsErrorWithCode(err, goldap.LDAPResultNoSuchObject))
@@ -233,7 +233,7 @@ func TestSetPassword_UsesThePasswordModifyOperationWithoutTheOldPassword(t *test
 	s := newWriteServer(t, succeed)
 	c := newClientFor(t, s.url)
 
-	require.NoError(t, c.SetPassword("uid=u,dc=x", "s3cret"))
+	require.NoError(t, c.SetPassword(t.Context(), "uid=u,dc=x", "s3cret"))
 	assert.Equal(t, []string{"passwd uid=u,dc=x|s3cret"}, s.seen())
 }
 
@@ -243,7 +243,7 @@ func TestSetPassword_APolicyRefusalIsFinalAndDoesNotLeakThePassword(t *testing.T
 	s := newWriteServer(t, refuse(goldap.LDAPResultConstraintViolation))
 	c := newClientFor(t, s.url)
 
-	err := c.SetPassword("uid=u,dc=x", "weak-password")
+	err := c.SetPassword(t.Context(), "uid=u,dc=x", "weak-password")
 
 	require.Error(t, err)
 	assert.True(t, goldap.IsErrorWithCode(err, goldap.LDAPResultConstraintViolation))

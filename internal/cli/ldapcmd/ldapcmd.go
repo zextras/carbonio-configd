@@ -63,10 +63,10 @@ const (
 
 // Conn is the part of *ldap.Client the verbs use.
 type Conn interface {
-	GetGlobalConfig() (map[string]string, error)
-	GetServerConfig(hostname string) (map[string]string, error)
-	Search(baseDN, filter string, attributes []string, scope int) (*goldap.SearchResult, error)
-	ModifyValues(dn string, add, del, replace map[string][]string) error
+	GetGlobalConfig(ctx context.Context) (map[string]string, error)
+	GetServerConfig(ctx context.Context, hostname string) (map[string]string, error)
+	Search(ctx context.Context, baseDN, filter string, attributes []string, scope int) (*goldap.SearchResult, error)
+	ModifyValues(ctx context.Context, dn string, add, del, replace map[string][]string) error
 	Close() error
 }
 
@@ -152,7 +152,7 @@ func execute(ctx context.Context, stdout io.Writer, opts *Options) error {
 
 	defer func() { _ = conn.Close() }()
 
-	return dispatch(stdout, conn, lc, opts)
+	return dispatch(ctx, stdout, conn, lc, opts)
 }
 
 func dialClient(params *carboldap.ClientConfig) (Conn, error) {
@@ -232,23 +232,23 @@ func effectiveConfig(fsys sys.FS, opts *Options) (map[string]string, error) {
 	return lc, nil
 }
 
-func dispatch(stdout io.Writer, conn Conn, lc map[string]string, opts *Options) error {
+func dispatch(ctx context.Context, stdout io.Writer, conn Conn, lc map[string]string, opts *Options) error {
 	switch opts.Verb {
 	case VerbGacf:
-		return globalConfig(stdout, conn, nil, opts.JSON)
+		return globalConfig(ctx, stdout, conn, nil, opts.JSON)
 	case VerbGcf:
-		return globalConfig(stdout, conn, opts.Args, opts.JSON)
+		return globalConfig(ctx, stdout, conn, opts.Args, opts.JSON)
 	case VerbGs:
-		return serverConfig(stdout, conn, lc, opts)
+		return serverConfig(ctx, stdout, conn, lc, opts)
 	case VerbMcf:
-		return modifyConfig(conn, opts.Args)
+		return modifyConfig(ctx, conn, opts.Args)
 	default:
-		return search(stdout, conn, opts)
+		return search(ctx, stdout, conn, opts)
 	}
 }
 
-func globalConfig(stdout io.Writer, conn Conn, only []string, asJSON bool) error {
-	attrs, err := conn.GetGlobalConfig()
+func globalConfig(ctx context.Context, stdout io.Writer, conn Conn, only []string, asJSON bool) error {
+	attrs, err := conn.GetGlobalConfig(ctx)
 	if err != nil {
 		return err
 	}
@@ -256,7 +256,7 @@ func globalConfig(stdout io.Writer, conn Conn, only []string, asJSON bool) error
 	return printAttrs(stdout, pick(carboldap.NormalizeAttrs(attrs), only), asJSON)
 }
 
-func serverConfig(stdout io.Writer, conn Conn, lc map[string]string, opts *Options) error {
+func serverConfig(ctx context.Context, stdout io.Writer, conn Conn, lc map[string]string, opts *Options) error {
 	server := lc[lcKeyHostname]
 	if len(opts.Args) == 1 {
 		server = opts.Args[0]
@@ -266,7 +266,7 @@ func serverConfig(stdout io.Writer, conn Conn, lc map[string]string, opts *Optio
 		return errors.New("gs needs a server: pass one or set zimbra_server_hostname")
 	}
 
-	attrs, err := conn.GetServerConfig(server)
+	attrs, err := conn.GetServerConfig(ctx, server)
 	if err != nil {
 		return err
 	}

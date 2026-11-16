@@ -86,12 +86,18 @@ func ConfigureLogLevel(logConfig *logger.Config) {
 // InitLogging configures structured logging from the environment, like the
 // daemon does, and returns a context carrying a fresh correlation ID.
 func InitLogging(stderr io.Writer) context.Context {
+	return InitLoggingContext(context.Background(), stderr)
+}
+
+// InitLoggingContext is InitLogging for a caller that already has a context
+// (cancellation, deadline): the returned context derives from ctx.
+func InitLoggingContext(ctx context.Context, stderr io.Writer) context.Context {
 	logConfig := logger.DefaultConfig()
 	ConfigureLogFormat(logConfig, stderr)
 	ConfigureLogLevel(logConfig)
 	logger.InitStructuredLogging(logConfig)
 
-	return logger.NewCorrelationID(context.Background())
+	return logger.NewCorrelationID(ctx)
 }
 
 // InitCLILogging configures structured logging for CLI subcommands.

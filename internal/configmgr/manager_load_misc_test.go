@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/zextras/carbonio-configd/internal/commands"
+	"github.com/zextras/carbonio-configd/internal/snapshot"
 	"strings"
 	"testing"
 )
@@ -64,8 +65,8 @@ func TestFetchMiscCommand_CommandFails(t *testing.T) {
 	)
 
 	output, err := cm.fetchMiscCommand(context.Background(), "failcmd")
-	if err != nil {
-		t.Errorf("Expected no error (returns empty on failure), got: %v", err)
+	if err == nil {
+		t.Error("Expected an error when the command fails")
 	}
 
 	if output != "" {
@@ -209,5 +210,36 @@ func TestLoadMiscConfig_PartialFailure(t *testing.T) {
 	// Verify failed commands are not in the data map or are empty
 	if val, ok := cm.State.Snapshot().Misc("garpb"); ok && val != "" {
 		t.Errorf("Expected garpb to not be stored or be empty, got: %s", val)
+	}
+}
+
+// TestLoadMiscConfig_FailedCommandKeepsPreviousValue pins that a failing
+// lookup (e.g. a transient LDAP timeout) keeps the previously published value
+// instead of turning the variable undefined.
+func TestLoadMiscConfig_FailedCommandKeepsPreviousValue(t *testing.T) {
+	cm := newTestConfigManager(t)
+	cm.Cache = nil
+
+	cm.State.UpdateSnapshot(func(s *snapshot.Snapshot) *snapshot.Snapshot {
+		return s.WithMisc(map[string]string{"garpu": "old-proxy", "garpb": "old-backend"})
+	})
+
+	cm.CommandRegistry.Commands["garpu"] = commands.NewCommand("desc", "garpu",
+		func(_ context.Context, _ ...string) (string, error) { return "", fmt.Errorf("ldap timeout") })
+	cm.CommandRegistry.Commands["garpb"] = commands.NewCommand("desc", "garpb",
+		func(_ context.Context, _ ...string) (string, error) { return "new-backend", nil })
+	cm.CommandRegistry.Commands["gamau"] = commands.NewCommand("desc", "gamau",
+		func(_ context.Context, _ ...string) (string, error) { return "new-mta", nil })
+
+	if err := cm.LoadMiscConfig(context.Background()); err != nil {
+		t.Fatalf("LoadMiscConfig: %v", err)
+	}
+
+	snap := cm.State.Snapshot()
+
+	for key, want := range map[string]string{"garpu": "old-proxy", "garpb": "new-backend", "gamau": "new-mta"} {
+		if got, ok := snap.Misc(key); !ok || got != want {
+			t.Errorf("Misc(%q) = %q, %v; want %q", key, got, ok, want)
+		}
 	}
 }

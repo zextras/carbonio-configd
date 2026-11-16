@@ -170,6 +170,18 @@ func TestApply_StopAfterCurrentStep(t *testing.T) {
 
 func press2(m *ApplyModel, k string) { m.Update(keyMsg(k)) }
 
+func TestApply_CtrlCStopsWhileTheLogIsOpen(t *testing.T) {
+	m := newApply(t, 3, nil)
+	m.Init()
+	feed(m, ev(setup.EventStart, 0, 0, nil))
+
+	press2(m, "l")
+	press2(m, "ctrl+c")
+
+	assert.True(t, m.stopping)
+	assert.True(t, m.opts.Feed.Stopping())
+}
+
 func TestApply_OverflowAndRunningInView(t *testing.T) {
 	m := newApply(t, 40, nil)
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})

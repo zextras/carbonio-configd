@@ -27,6 +27,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/mtaops"
 	"github.com/zextras/carbonio-configd/internal/plan"
 	pfclient "github.com/zextras/carbonio-configd/internal/postfixconf/client"
+	"github.com/zextras/carbonio-configd/internal/proxy"
 	"github.com/zextras/carbonio-configd/internal/redact"
 	"github.com/zextras/carbonio-configd/internal/restart"
 	"github.com/zextras/carbonio-configd/internal/services"
@@ -89,6 +90,7 @@ type ConfigManager struct {
 	mtaResolver             mtaops.OperationResolver
 	policy                  *restart.Policy
 	metrics                 *metrics.Registry // operational counters; exported only when configured
+	proxyHostIPs            *proxy.HostIPCache
 
 	// The fields below belong to the (sequential) main loop: the plan of a
 	// cycle is a function of prev (the snapshot the last plan was computed
@@ -132,13 +134,14 @@ func NewConfigManager(ctx context.Context, mainCfg *config.Config,
 		ServiceMgr:      serviceMgr,
 		CommandRegistry: commands.NewRegistry(),
 		env:             env,
+		proxyHostIPs:    proxy.NewHostIPCache(),
 
 		loadLocalConfig: localconfig.LoadEffective,
 	}
 	cm.Transformer = transformer.NewTransformer(cm)
 	cm.mtaExecutor = mtaops.NewExecutor(mainCfg.BaseDir, ldapClient, env, mtaops.WithSystemdMode(cm.systemdMode))
 	cm.mtaResolver = mtaops.NewResolver(mainCfg.BaseDir, env)
-	cm.initNativeLdapClient(ctx)
+	cm.syncLdapClients(ctx)
 	cm.metrics = metrics.New()
 	cm.policy = restart.New(serviceMgr, env.Clock).WithMetrics(cm.metrics)
 
@@ -149,6 +152,15 @@ func NewConfigManager(ctx context.Context, mainCfg *config.Config,
 	}
 
 	return cm
+}
+
+// Close closes the LDAP clients the manager built.
+func (cm *ConfigManager) Close() {
+	for _, c := range []*ldap.Client{cm.NativeLdapClient, cm.ConfigLdapClient} {
+		if c != nil {
+			_ = c.Close()
+		}
+	}
 }
 
 // Services returns the service manager that runs the config-driven restarts;
@@ -166,9 +178,15 @@ func (cm *ConfigManager) Metrics() *metrics.Registry {
 	return cm.metrics
 }
 
-// initNativeLdapClient initializes the native LDAP client from localconfig.
-// If initialization fails, it logs a warning and the LDAP lookups fail until a later cycle can build the client.
-func (cm *ConfigManager) initNativeLdapClient(ctx context.Context) {
+// syncLdapClients builds the native LDAP client from localconfig, or, once it
+// exists, applies the current localconfig to it: a rotated zimbra_ldap_password
+// or a changed ldap_url takes effect on the next cycle without a restart. The
+// clients are reconfigured in place (ldap.Client.Reconfigure) because the
+// registered LDAP commands, the Ldap wrapper and the change watcher all hold
+// them.
+// If a step fails, it logs a warning and the LDAP lookups keep using what was
+// built before, or fail until a later cycle can build the client.
+func (cm *ConfigManager) syncLdapClients(ctx context.Context) {
 	localCfg, err := cm.loadLocalConfig()
 	if err != nil {
 		logger.WarnContext(ctx, "Failed to load localconfig for native LDAP client - LDAP queries will fail",
@@ -186,6 +204,13 @@ func (cm *ConfigManager) initNativeLdapClient(ctx context.Context) {
 	if err != nil {
 		logger.WarnContext(ctx, "LDAP connection parameters missing in localconfig - LDAP queries will fail",
 			"error", err)
+
+		return
+	}
+
+	if cm.NativeLdapClient != nil {
+		cm.reconfigureNativeLdapClient(ctx, params)
+		cm.syncConfigLdapClient(ctx, localCfg)
 
 		return
 	}
@@ -214,12 +239,32 @@ func (cm *ConfigManager) initNativeLdapClient(ctx context.Context) {
 		cm.LdapClient.SetNativeClient(ctx, nativeClient)
 	}
 
-	cm.initConfigLdapClient(ctx, localCfg)
+	cm.syncConfigLdapClient(ctx, localCfg)
 }
 
-// initConfigLdapClient builds the slapd-config (cn=config) write client and
-// wires it into the Ldap wrapper. Config-backend writes (every keymap entry)
-// require binding as the cn=config rootDN over the local ldapi socket; the
+// reconfigureNativeLdapClient applies params to the existing native client.
+func (cm *ConfigManager) reconfigureNativeLdapClient(ctx context.Context, params *ldap.ClientConfig) {
+	changed, err := cm.NativeLdapClient.Reconfigure(params)
+	if err != nil {
+		logger.WarnContext(ctx, "Cannot apply the localconfig to the native LDAP client, keeping the previous one",
+			"error", err)
+
+		return
+	}
+
+	if changed {
+		logger.InfoContext(ctx, "Native LDAP client reconfigured after a localconfig change",
+			"ldap_urls", params.URLs,
+			"bind_dn", params.BindDN,
+			"starttls", params.StartTLS)
+	}
+}
+
+// syncConfigLdapClient builds the slapd-config (cn=config) write client and
+// wires it into the Ldap wrapper, or applies the current ldap_root_password to
+// it. A build that failed once (no root password yet) is retried every cycle.
+//
+// Config-backend writes (every keymap entry) require binding as the cn=config rootDN over the local ldapi socket; the
 // data-suffix client (uid=zimbra) cannot write cn=config (LDAP code 50).
 //
 // Failure here is asymmetric to the data client: the data client logs a
@@ -227,7 +272,7 @@ func (cm *ConfigManager) initNativeLdapClient(ctx context.Context) {
 // a missing root password is logged at error level and writes will fail fast
 // at call time (ModifyAttribute returns a config error) rather than silently
 // using the wrong identity.
-func (cm *ConfigManager) initConfigLdapClient(ctx context.Context, localCfg map[string]string) {
+func (cm *ConfigManager) syncConfigLdapClient(ctx context.Context, localCfg map[string]string) {
 	if cm.LdapClient == nil {
 		return
 	}
@@ -239,7 +284,7 @@ func (cm *ConfigManager) initConfigLdapClient(ctx context.Context, localCfg map[
 		return
 	}
 
-	configClient, err := ldap.NewClient(&ldap.ClientConfig{
+	cfg := &ldap.ClientConfig{
 		URL:      ldap.ConfigBackendURL,
 		BindDN:   ldap.ConfigBackendDN,
 		Password: rootPassword,
@@ -248,7 +293,20 @@ func (cm *ConfigManager) initConfigLdapClient(ctx context.Context, localCfg map[
 		StartTLS: false,
 		FS:       cm.env.FS,
 		Context:  ctx,
-	})
+	}
+
+	if cm.ConfigLdapClient != nil {
+		changed, err := cm.ConfigLdapClient.Reconfigure(cfg)
+		if err != nil {
+			logger.ErrorContext(ctx, "Cannot apply ldap_root_password to the config LDAP client", "error", err)
+		} else if changed {
+			logger.InfoContext(ctx, "Config LDAP client reconfigured after a localconfig change")
+		}
+
+		return
+	}
+
+	configClient, err := ldap.NewClient(cfg)
 	if err != nil {
 		logger.ErrorContext(ctx, "Failed to create config LDAP client - cn=config writes will fail",
 			"error", err)

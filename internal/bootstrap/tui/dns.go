@@ -8,15 +8,11 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/zextras/carbonio-configd/internal/bootstrap"
 )
-
-// dnsTimeout bounds one lookup: a slow resolver never holds the screen.
-const dnsTimeout = 3 * time.Second
 
 // The DNS checks.
 const (
@@ -68,7 +64,7 @@ func (m *Model) domainName() string {
 
 func lookup(res bootstrap.Resolver, kind, name string) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), dnsTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), bootstrap.DNSTimeout)
 		defer cancel()
 
 		if kind == dnsMX {

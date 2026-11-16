@@ -13,8 +13,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -24,10 +26,13 @@ import (
 )
 
 const (
+	cmdStatus            = "STATUS"
+	cmdRewrite           = "REWRITE"
 	errUnknownCommand    = "ERROR UNKNOWN COMMAND"
 	respSuccessActive    = "SUCCESS ACTIVE"
 	respRewritesComplete = "SUCCESS REWRITES COMPLETE"
 	errRewriteTimeout    = "ERROR REWRITE TIMEOUT"
+	errRewriteFailed     = "ERROR REWRITE FAILED"
 	errShuttingDown      = "ERROR SHUTTING DOWN"
 	errNoServicesListed  = "ERROR NO SERVICES LISTED"
 	acceptErrorBackoff   = 100 * time.Millisecond
@@ -75,10 +80,17 @@ var (
 	errAlreadyServing = errors.New("server is already serving")
 )
 
+// AllSections is the REWRITE name that stands for every section of zmconfigd.cf.
+const AllSections = "all"
+
 // RewriteWait lets a REWRITE request wait for the main loop.
 type RewriteWait struct {
 	// Done is closed once the main loop has processed the requested sections.
 	Done <-chan struct{}
+	// Err, when set, is read after Done is closed: a non-nil error means the
+	// rewrite phase that released the client failed, and the client is told so
+	// instead of being answered that the files were written. It may be nil.
+	Err func() error
 	// Cancel drops the request's interest in Done, when the client gave up.
 	// The sections stay queued. It may be nil.
 	Cancel func()
@@ -420,6 +432,15 @@ func (s *ThreadedStreamServer) handleConnection(ctx context.Context, conn net.Co
 		return
 	}
 
+	// STATUS is the readiness probe of the unit start scripts: it only reports
+	// that the listener is up, so it must not queue behind REWRITE clients that
+	// hold every slot while they wait for the main loop.
+	if parts[0] == cmdStatus {
+		s.writeResponse(ctx, conn, s.handler.HandleRequest(ctx, parts[0], parts[1:]))
+
+		return
+	}
+
 	// Only a client that has sent its request competes for a slot, so idle
 	// connections cannot starve real ones.
 	if !s.acquireSlot(ctx) {
@@ -462,9 +483,9 @@ func (h *ConfigdRequestHandler) HandleRequest(ctx context.Context, command strin
 		"args", redact.Args(args))
 
 	switch command {
-	case "STATUS":
+	case cmdStatus:
 		return respSuccessActive
-	case "REWRITE":
+	case cmdRewrite:
 		// Mirror jylibs/listener.py:31-32: REWRITE with no service arguments is
 		// rejected rather than treated as a no-op success.
 		if len(args) == 0 {
@@ -513,6 +534,14 @@ func (h *ConfigdRequestHandler) rewrite(ctx context.Context, sections []string) 
 
 	select {
 	case <-wait.Done:
+		if wait.Err != nil {
+			if err := wait.Err(); err != nil {
+				logger.ErrorContext(ctx, "Rewrite request failed", "sections", sections, "error", err)
+
+				return errRewriteFailed
+			}
+		}
+
 		return respRewritesComplete
 	case <-timer.C:
 		logger.ErrorContext(ctx, "Rewrite request timed out",
@@ -527,7 +556,7 @@ func (h *ConfigdRequestHandler) rewrite(ctx context.Context, sections []string) 
 
 // filterKnown drops, with a warning, the names that are not sections of
 // zmconfigd.cf. The legacy listener accepts them silently and never matches
-// them, so the reply is unchanged.
+// them, so the reply is unchanged. The name "all" stands for every section.
 func (h *ConfigdRequestHandler) filterKnown(ctx context.Context, sections []string) []string {
 	if h.KnownSections == nil {
 		return sections
@@ -541,6 +570,10 @@ func (h *ConfigdRequestHandler) filterKnown(ctx context.Context, sections []stri
 	kept := make([]string, 0, len(sections))
 
 	for _, name := range sections {
+		if name == AllSections {
+			return slices.Sorted(maps.Keys(known))
+		}
+
 		if _, ok := known[name]; !ok {
 			logger.WarnContext(ctx, "Ignoring REWRITE of unknown section",
 				"section", name)

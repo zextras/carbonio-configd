@@ -186,6 +186,40 @@ func TestRunReplacesStalePidFile(t *testing.T) {
 	assert.Equal(t, exitOK, r.stop(t))
 }
 
+// A pid file that names this very process (a reused pid after a container
+// restart) is stale, whatever the liveness probe says.
+func TestCreatePidReplacesOwnPid(t *testing.T) {
+	t.Parallel()
+
+	te := newTestEnv(t, files{})
+	te.PidAlive = func(int) bool { return true }
+
+	pidFile := filepath.Join(te.PidDir, "cpu.pid")
+	require.NoError(t, os.WriteFile(pidFile, []byte("4242\n"), 0o644))
+
+	require.NoError(t, te.createPid("cpu.pid"))
+	assert.Equal(t, "4242", readPid(pidFile))
+	assert.Empty(t, te.stderr.String())
+}
+
+// The pid file is created exclusively: a live collector's file is never
+// truncated, and junk in it is replaced.
+func TestCreatePidKeepsALiveFileAndReplacesJunk(t *testing.T) {
+	t.Parallel()
+
+	te := newTestEnv(t, files{})
+	te.PidAlive = func(pid int) bool { return pid == 9999 }
+
+	pidFile := filepath.Join(te.PidDir, "cpu.pid")
+	require.NoError(t, os.WriteFile(pidFile, []byte("9999\n"), 0o644))
+	require.ErrorIs(t, te.createPid("cpu.pid"), errAlreadyRunning)
+	assert.Equal(t, "9999", readPid(pidFile))
+
+	require.NoError(t, os.WriteFile(pidFile, []byte("junk\n"), 0o644))
+	require.NoError(t, te.createPid("cpu.pid"))
+	assert.Equal(t, "4242", readPid(pidFile))
+}
+
 func TestRunRefusals(t *testing.T) {
 	t.Parallel()
 

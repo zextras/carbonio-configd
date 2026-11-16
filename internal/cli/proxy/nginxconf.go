@@ -27,7 +27,14 @@ type nginxConfOpts struct {
 	noComments bool
 	noEmpty    bool
 	workingDir string
+	// active holds the files being printed, outermost first, to stop an
+	// include cycle.
+	active map[string]bool
 }
+
+// maxNginxConfLine bounds one config line; bufio's default of 64 KiB stops the
+// scan on a longer line (long ssl_ciphers or header values).
+const maxNginxConfLine = 1 << 20
 
 // printNginxConf prints the nginx config at filename, expanding glob patterns and
 // recursively following include directives. Every line is prefixed with prefix,
@@ -44,6 +51,19 @@ func printNginxConf(w io.Writer, filename, prefix string, opts *nginxConfOpts) {
 }
 
 func printNginxConfFile(w io.Writer, filename, prefix string, opts *nginxConfOpts) {
+	if opts.active[filename] {
+		_, _ = fmt.Fprintf(w, "%s# include loop: %s includes itself\n", prefix, filename)
+
+		return
+	}
+
+	if opts.active == nil {
+		opts.active = make(map[string]bool)
+	}
+
+	opts.active[filename] = true
+	defer delete(opts.active, filename)
+
 	if opts.markers {
 		_, _ = fmt.Fprintf(w, "%s# begin:%s\n", prefix, filename)
 	}
@@ -62,6 +82,7 @@ func printNginxConfFile(w io.Writer, filename, prefix string, opts *nginxConfOpt
 	defer func() { _ = f.Close() }()
 
 	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, bufio.MaxScanTokenSize), maxNginxConfLine)
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -78,6 +99,10 @@ func printNginxConfFile(w io.Writer, filename, prefix string, opts *nginxConfOpt
 		}
 
 		printNginxLine(w, line, prefix, opts)
+	}
+
+	if err := scanner.Err(); err != nil {
+		_, _ = fmt.Fprintf(w, "%s# cannot read %s: %v\n", prefix, filename, err)
 	}
 
 	if opts.markers {

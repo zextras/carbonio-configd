@@ -358,7 +358,7 @@ func TestLiveValidationMessages(t *testing.T) {
 	assert.Contains(t, screen(m), "not a number")
 	m.input.SetValue("70000")
 	m.liveCheck()
-	assert.Contains(t, screen(m), "not a port")
+	assert.Contains(t, screen(m), "not in 1-65535")
 	press(m, "enter")
 	assert.Equal(t, 389, m.r.Config.LDAP.Port, "an invalid answer is refused")
 	press(m, "esc")
@@ -653,6 +653,11 @@ func TestDNSLine(t *testing.T) {
 	msg := lookup(res, dnsHost, "other.example.com")()
 	m.Update(msg)
 	assert.Contains(t, screen(m), "! other.example.com does not resolve")
+
+	// A slow lookup of the name that was replaced must not show its verdict.
+	m.Update(lookup(res, dnsHost, "mail.example.com")())
+	assert.Contains(t, screen(m), "! other.example.com does not resolve")
+	assert.NotContains(t, screen(m), "mail.example.com → 10.0.0.5")
 
 	assert.Equal(t, "other.example.com has no MX record", mxResult("other.example.com", nil, nil).detail)
 	assert.Contains(t, hostResult("x.test", []string{"127.0.0.1"}, nil).detail, "loopback")

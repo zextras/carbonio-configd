@@ -90,6 +90,7 @@ func TestAttemptServiceRestart_SuccessWithDependencies(t *testing.T) {
 
 	sm := NewServiceManager(ctl)
 	sm.RestartQueue["testservice"] = true
+	sm.cascading = map[string]bool{"testservice": true}
 
 	sm.SetDependencies(context.Background(), map[string][]string{
 		"testservice": {"amavis"},

@@ -109,7 +109,8 @@ func TestProcessRestarts_CascadeCarriesDependencyReason(t *testing.T) {
 
 	ctx := capturedCtx(&logs)
 
-	require.NoError(t, sm.AddRestartWithReasons(ctx, "parent", []string{"because"}))
+	require.NoError(t, sm.AddRestart(ctx, "parent"))
+	sm.restartReasons["parent"] = []string{"because"}
 
 	lookup := func(key string) string {
 		if key == "SERVICE_CHILD" {
@@ -127,6 +128,28 @@ func TestProcessRestarts_CascadeCarriesDependencyReason(t *testing.T) {
 	assert.Contains(t, lines[0], `reasons=[because]`)
 	assert.Contains(t, lines[1], "service=child")
 	assert.Contains(t, lines[1], `reasons="[dependency of parent]"`)
+}
+
+// A config-driven restart (AddRestartWithReasons) never cascades, whichever
+// caller processes the shared queue: the restart policy plans its dependents.
+func TestProcessRestarts_ConfigDrivenEntryDoesNotCascade(t *testing.T) {
+	t.Parallel()
+
+	ctl, _ := newFakeController(t)
+
+	registerRestartStub(t, ctl, "parent", nil)
+	registerRestartStub(t, ctl, "child", nil)
+
+	sm := NewServiceManager(ctl)
+	sm.Dependencies = map[string][]string{"parent": {"child"}}
+
+	ctx := context.Background()
+
+	require.NoError(t, sm.AddRestartWithReasons(ctx, "parent", []string{"config"}))
+
+	// The watchdog's pass (it gives a lookup) takes the entry over.
+	require.NoError(t, sm.ProcessRestarts(ctx, func(string) string { return "enabled" }))
+	assert.Empty(t, sm.GetPendingRestarts(), "the dependent was not queued")
 }
 
 func TestClearRestarts_ClearsReasons(t *testing.T) {

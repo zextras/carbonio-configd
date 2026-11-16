@@ -15,6 +15,7 @@
 package tls
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"strings"
@@ -28,9 +29,9 @@ import (
 // flow. Declared as an interface so tests can stub LDAP without a server;
 // production callers keep passing the concrete client unchanged.
 type LDAPClient interface {
-	GetEntry(dn string, attributes []string) (*ldap.Entry, error)
-	Search(baseDN, filter string, attributes []string, scope int) (*ldap.SearchResult, error)
-	ModifyAttribute(dn, attribute, value string) error
+	GetEntry(ctx context.Context, dn string, attributes []string) (*ldap.Entry, error)
+	Search(ctx context.Context, baseDN, filter string, attributes []string, scope int) (*ldap.SearchResult, error)
+	ModifyAttribute(ctx context.Context, dn, attribute, value string) error
 }
 
 // LDAP attribute names used by the mail-mode validation flow.
@@ -103,10 +104,10 @@ func ServerBackendDN(hostname, baseDN string) string {
 // reverse-proxy lookup target (zimbraReverseProxyLookupTarget=TRUE). The legacy
 // `zmprov garpb` enumerates servers with this attribute; we check the single
 // local entry since that is all the validation flow needs.
-func IsReverseProxyBackend(c LDAPClient, hostname string) (bool, error) {
+func IsReverseProxyBackend(ctx context.Context, c LDAPClient, hostname string) (bool, error) {
 	dn := ServerBackendDN(hostname, zimbraBaseDN)
 
-	entry, err := c.GetEntry(dn, []string{carboldap.AttrZimbraReverseProxyLookupTarget})
+	entry, err := c.GetEntry(ctx, dn, []string{carboldap.AttrZimbraReverseProxyLookupTarget})
 	if err != nil {
 		return false, fmt.Errorf("lookup backend flag: %w", err)
 	}
@@ -116,10 +117,10 @@ func IsReverseProxyBackend(c LDAPClient, hostname string) (bool, error) {
 
 // EnumerateProxies returns the cn values of every server that has the proxy
 // service enabled (zimbraServiceEnabled=proxy).
-func EnumerateProxies(c LDAPClient) ([]string, error) {
+func EnumerateProxies(ctx context.Context, c LDAPClient) ([]string, error) {
 	filter := "(&(objectClass=zimbraServer)(zimbraServiceEnabled=proxy))"
 
-	res, err := c.Search("cn=servers,cn=zimbra", filter, []string{"cn"}, ldap.ScopeSingleLevel)
+	res, err := c.Search(ctx, "cn=servers,cn=zimbra", filter, []string{"cn"}, ldap.ScopeSingleLevel)
 	if err != nil {
 		return nil, fmt.Errorf("enumerate proxies: %w", err)
 	}
@@ -135,15 +136,16 @@ func EnumerateProxies(c LDAPClient) ([]string, error) {
 }
 
 // GetProxiesForHost returns the proxies specifically designated for `host`
-// (via zimbraReverseProxyAvailableLookupTargets). If none are designated,
+// (via zimbraReverseProxyAvailableLookupTargets, matched exactly: host "mail1"
+// must not select the proxies of "mail10"). If none are designated,
 // it falls back to every proxy in the cluster — mirroring the legacy script.
-func GetProxiesForHost(c LDAPClient, host string) ([]string, error) {
+func GetProxiesForHost(ctx context.Context, c LDAPClient, host string) ([]string, error) {
 	filter := fmt.Sprintf(
-		"(&(objectClass=zimbraServer)(zimbraReverseProxyAvailableLookupTargets=*%s*))",
+		"(&(objectClass=zimbraServer)(zimbraReverseProxyAvailableLookupTargets=%s))",
 		ldap.EscapeFilter(host),
 	)
 
-	res, err := c.Search("cn=servers,cn=zimbra", filter, []string{"cn"}, ldap.ScopeSingleLevel)
+	res, err := c.Search(ctx, "cn=servers,cn=zimbra", filter, []string{"cn"}, ldap.ScopeSingleLevel)
 	if err != nil {
 		return nil, fmt.Errorf("lookup designated proxies: %w", err)
 	}
@@ -159,15 +161,15 @@ func GetProxiesForHost(c LDAPClient, host string) ([]string, error) {
 		return designated, nil
 	}
 
-	return EnumerateProxies(c)
+	return EnumerateProxies(ctx, c)
 }
 
 // ReadProxySettings loads zimbraReverseProxyMailMode and
 // zimbraReverseProxySSLToUpstreamEnabled from a proxy server entry.
-func ReadProxySettings(c LDAPClient, proxy string) (*ProxySettings, error) {
+func ReadProxySettings(ctx context.Context, c LDAPClient, proxy string) (*ProxySettings, error) {
 	dn := ServerBackendDN(proxy, zimbraBaseDN)
 
-	entry, err := c.GetEntry(dn, []string{
+	entry, err := c.GetEntry(ctx, dn, []string{
 		attrReverseProxyMailMode,
 		attrReverseProxySSLToUp,
 	})
@@ -238,10 +240,10 @@ func ValidateMode(requested Mode, s *ProxySettings) error {
 }
 
 // SetMailMode writes zimbraMailMode on the server entry for hostname.
-func SetMailMode(c LDAPClient, hostname string, mode Mode) error {
+func SetMailMode(ctx context.Context, c LDAPClient, hostname string, mode Mode) error {
 	dn := ServerBackendDN(hostname, zimbraBaseDN)
 
-	if err := c.ModifyAttribute(dn, "zimbraMailMode", string(mode)); err != nil {
+	if err := c.ModifyAttribute(ctx, dn, "zimbraMailMode", string(mode)); err != nil {
 		return fmt.Errorf("set zimbraMailMode=%s on %s: %w", mode, hostname, err)
 	}
 

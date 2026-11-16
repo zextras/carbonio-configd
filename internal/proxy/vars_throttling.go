@@ -18,12 +18,8 @@ func (g *Generator) registerThrottlingVariables() {
 		withOverrideType(OverrideConfig),
 		withDescription("Time window for IP-based login limits"),
 	)
-	g.registerVar("mail.limit.ipthrottlemsg", "Login rejected due to IP address throttle",
-		withAttribute("zimbraReverseProxyIpThrottleMsg"),
-		withOverrideType(OverrideConfig),
-		withValueType(ValueTypeString),
-		withDescription("Error message shown when IP is throttled"),
-	)
+	g.registerMessageVar("mail.limit.ipthrottlemsg", "zimbraReverseProxyIpThrottleMsg",
+		"Login rejected due to IP address throttle", "Error message shown when IP is throttled")
 	g.registerVar("mail.limit.userlogin", 0,
 		withAttribute("zimbraReverseProxyUserLoginLimit"),
 		withValueType(ValueTypeInteger),
@@ -36,10 +32,6 @@ func (g *Generator) registerThrottlingVariables() {
 		withOverrideType(OverrideConfig),
 		withDescription("Time window for user-based login limits"),
 	)
-	g.registerVar("mail.limit.userthrottlemsg", "Login rejected due to user throttle",
-		withAttribute("zimbraReverseProxyUserThrottleMsg"),
-		withOverrideType(OverrideConfig),
-		withValueType(ValueTypeString),
-		withDescription("Error message shown when user is throttled"),
-	)
+	g.registerMessageVar("mail.limit.userthrottlemsg", "zimbraReverseProxyUserThrottleMsg",
+		"Login rejected due to user throttle", "Error message shown when user is throttled")
 }

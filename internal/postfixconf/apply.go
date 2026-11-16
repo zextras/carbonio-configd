@@ -17,6 +17,8 @@ import (
 	"sort"
 	"strings"
 	"syscall"
+
+	"github.com/zextras/carbonio-configd/internal/redact"
 )
 
 // RunFunc runs postconf (absolute path, clean environment) and returns its
@@ -61,7 +63,8 @@ func runPostconf(ctx context.Context, path string, args []string) ([]byte, error
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return out, fmt.Errorf("%s %s: %w", path, strings.Join(args, " "), err)
+		// The arguments carry parameter values (possibly secrets): not echoed.
+		return out, fmt.Errorf("%s: %w", path, err)
 	}
 
 	return out, nil
@@ -104,7 +107,9 @@ func (o *Options) lock() (func(), error) {
 }
 
 // Commit validates change and installs it: files, then unset, then set.
-// A validation error leaves everything untouched.
+// A validation error leaves everything untouched. When a postconf step fails,
+// the installed files and main.cf are put back as they were, so master.cf never
+// stays live with the old parameters.
 func (o *Options) Commit(ctx context.Context, change *Change) error {
 	if err := change.Validate(); err != nil {
 		return err
@@ -124,6 +129,11 @@ func (o *Options) Commit(ctx context.Context, change *Change) error {
 		return err
 	}
 
+	backup, err := o.snapshot(conf, change)
+	if err != nil {
+		return err
+	}
+
 	for _, name := range InstallableFiles {
 		data, ok := change.Files[name]
 		if !ok {
@@ -131,11 +141,106 @@ func (o *Options) Commit(ctx context.Context, change *Change) error {
 		}
 
 		if err := o.install(conf, name, data); err != nil {
-			return err
+			return errors.Join(err, o.restore(conf, backup))
 		}
 	}
 
-	return o.runPostconfSteps(ctx, change)
+	if err := o.runPostconfSteps(ctx, change); err != nil {
+		return errors.Join(err, o.restore(conf, backup))
+	}
+
+	return nil
+}
+
+// fileBackup is the content of a conf file before Commit, or its absence.
+type fileBackup struct {
+	name   string
+	data   []byte
+	exists bool
+}
+
+// snapshot reads the files Commit may change: those it installs, and main.cf
+// when the postconf steps will edit it.
+func (o *Options) snapshot(conf *os.File, change *Change) ([]fileBackup, error) {
+	var names []string
+
+	if len(change.Unset) > 0 || len(change.Set) > 0 {
+		names = append(names, MainCf)
+	}
+
+	for _, name := range InstallableFiles {
+		if _, ok := change.Files[name]; ok {
+			names = append(names, name)
+		}
+	}
+
+	backup := make([]fileBackup, 0, len(names))
+
+	for _, name := range names {
+		data, err := readAt(conf, name)
+		if errors.Is(err, os.ErrNotExist) {
+			backup = append(backup, fileBackup{name: name})
+
+			continue
+		}
+
+		if err != nil {
+			return nil, err
+		}
+
+		backup = append(backup, fileBackup{name: name, data: data, exists: true})
+	}
+
+	return backup, nil
+}
+
+// restore puts the snapshotted files back, removing those that did not exist.
+// It tries every file and reports all failures.
+func (o *Options) restore(conf *os.File, backup []fileBackup) error {
+	var errs []error
+
+	dirFD := int(conf.Fd()) //nolint:gosec // fd fits int
+
+	for _, b := range backup {
+		if b.exists {
+			if err := o.install(conf, b.name, b.data); err != nil {
+				errs = append(errs, fmt.Errorf("roll back %s: %w", b.name, err))
+			}
+
+			continue
+		}
+
+		if err := syscall.Unlinkat(dirFD, b.name); err != nil && !errors.Is(err, syscall.ENOENT) {
+			errs = append(errs, fmt.Errorf("roll back %s: %w", b.name, err))
+		}
+	}
+
+	return errors.Join(errs...)
+}
+
+// readAt reads conf/name through the directory descriptor without following a
+// symlink. A missing file yields an error matching os.ErrNotExist.
+func readAt(dir *os.File, name string) ([]byte, error) {
+	fd, err := syscall.Openat(int(dir.Fd()), name, //nolint:gosec // fd fits int
+		syscall.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
+	if errors.Is(err, syscall.ENOENT) {
+		return nil, fmt.Errorf("read %s: %w", name, os.ErrNotExist)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", name, err)
+	}
+
+	f := os.NewFile(uintptr(fd), name) //nolint:gosec // fd from Openat
+
+	defer func() { _ = f.Close() }()
+
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", name, err)
+	}
+
+	return data, nil
 }
 
 // runPostconfSteps runs postconf -X for the unset list, then postconf -e for the
@@ -145,7 +250,7 @@ func (o *Options) runPostconfSteps(ctx context.Context, change *Change) error {
 		// postconf -X silently skips a parameter main.cf does not define
 		// (postconf_edit.c pcf_edit_main), so any failure is real.
 		if out, err := o.run(ctx, append([]string{"-X"}, change.Unset...)); err != nil {
-			return fmt.Errorf("postconf -X failed: %w: %s", err, strings.TrimSpace(string(out)))
+			return fmt.Errorf("postconf -X failed: %w: %s", err, scrub(out))
 		}
 	}
 
@@ -156,11 +261,19 @@ func (o *Options) runPostconfSteps(ctx context.Context, change *Change) error {
 		}
 
 		if out, err := o.run(ctx, args); err != nil {
-			return fmt.Errorf("postconf -e failed: %w: %s", err, strings.TrimSpace(string(out)))
+			return fmt.Errorf("postconf -e failed: %w: %s", err, scrub(out))
 		}
 	}
 
 	return nil
+}
+
+// scrub returns postconf's output for an error message, with private keys and
+// URL passwords masked in case postconf echoes a value.
+func scrub(out []byte) string {
+	text, _ := redact.Text(strings.TrimSpace(string(out)))
+
+	return text
 }
 
 // openConfDir opens ConfDir and refuses to continue unless it is owned by the

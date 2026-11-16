@@ -483,6 +483,18 @@ func TestRealProc_SignalLiveChildAndGroup(t *testing.T) {
 	require.ErrorIs(t, p.SignalGroup(1<<22+54321, syscall.SIGTERM), syscall.ESRCH)
 }
 
+// kill(-1) would signal every process the caller may signal, kill(-0) its own
+// group: neither is accepted as a process group.
+func TestRealProc_SignalGroupRefusesInitAndSelf(t *testing.T) {
+	t.Parallel()
+
+	p := sys.NewRealProc(sys.ProcRoot)
+
+	for _, pgid := range []int{-5, 0, 1} {
+		require.ErrorIs(t, p.SignalGroup(pgid, 0), syscall.EINVAL, "pgid %d", pgid)
+	}
+}
+
 func TestRealProc_LookupGID(t *testing.T) {
 	t.Parallel()
 

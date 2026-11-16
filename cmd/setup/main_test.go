@@ -28,7 +28,7 @@ func exec(t *testing.T, args ...string) (int, string, string) {
 
 	var out, errb strings.Builder
 
-	status := run(args, systest.New().System(), strings.NewReader(""), &out, &errb)
+	status := run(t.Context(), args, systest.New().System(), strings.NewReader(""), &out, &errb)
 
 	return status, out.String(), errb.String()
 }
@@ -121,7 +121,7 @@ func TestToolCommandsAnswerHelpWithoutRunningTheAction(t *testing.T) {
 
 			var out, errb strings.Builder
 
-			status := run([]string{name, spelling}, fake.System(), strings.NewReader(""), &out, &errb)
+			status := run(t.Context(), []string{name, spelling}, fake.System(), strings.NewReader(""), &out, &errb)
 
 			assert.Equal(t, 0, status, "%s %s", name, spelling)
 			assert.Contains(t, out.String(), "Usage:", "%s %s", name, spelling)

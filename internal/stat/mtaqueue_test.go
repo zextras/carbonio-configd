@@ -5,15 +5,82 @@
 package stat
 
 import (
+	"context"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/zextras/carbonio-configd/internal/sys"
 	"github.com/zextras/carbonio-configd/internal/sys/systest"
 )
+
+// hangingExec starts postfix-prometheus as a process that only ends when the
+// test releases it, and counts the starts.
+type hangingExec struct {
+	sys.Exec
+	release chan struct{}
+	mu      sync.Mutex
+	starts  int
+	ctxs    []context.Context
+}
+
+func (h *hangingExec) Start(ctx context.Context, c *sys.Cmd) (sys.Process, error) {
+	if filepath.Base(c.Path) != "postfix-prometheus" {
+		return h.Exec.Start(ctx, c)
+	}
+
+	h.mu.Lock()
+	h.starts++
+	h.ctxs = append(h.ctxs, ctx)
+	h.mu.Unlock()
+
+	return hangingProcess{h.release}, nil
+}
+
+type hangingProcess struct{ release chan struct{} }
+
+func (hangingProcess) Pid() int       { return 1234 }
+func (p hangingProcess) Wait() error  { <-p.release; return nil }
+func (hangingProcess) Release() error { return nil }
+
+// A postfix-prometheus run that has not ended is not stacked under by the next
+// sample, and every run is bounded by a deadline.
+func TestMtaqueuePrometheusDoesNotPileUp(t *testing.T) {
+	t.Parallel()
+
+	te := newTestEnv(t, files{})
+	te.fakes.Exec.OnPath("postqueue", systest.Reply(postqueueOutput("1", "1")))
+
+	h := &hangingExec{Exec: te.Sys.Exec, release: make(chan struct{})}
+	te.Sys.Exec = h
+
+	c, err := mtaqueueSpec().build(te.Env, opts30())
+	require.NoError(t, err)
+
+	te.sample(t, c, 0)
+	te.sample(t, c, 1)
+	te.sample(t, c, 2)
+
+	h.mu.Lock()
+	assert.Equal(t, 1, h.starts)
+	_, hasDeadline := h.ctxs[0].Deadline()
+	h.mu.Unlock()
+	assert.True(t, hasDeadline)
+
+	close(h.release)
+	assert.Eventually(t, func() bool {
+		te.sample(t, c, 3)
+
+		h.mu.Lock()
+		defer h.mu.Unlock()
+
+		return h.starts == 2
+	}, 5*time.Second, time.Millisecond)
+}
 
 func postqueueOutput(kb, reqs string) string {
 	return "-Queue ID-  --Size-- ----Arrival Time---- -Sender/Recipient-------\n" +

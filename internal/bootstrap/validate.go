@@ -128,9 +128,18 @@ func CheckValue(f *Field, c *Config) error {
 	}
 
 	if f.TypeName() == "int" {
-		if n := f.Get(c).(int); n < 1 || n > 65535 {
-			return fmt.Errorf("%s: %d is not a port (1-65535)", f.Path, n)
-		}
+		return checkRange(f, f.Get(c).(int))
+	}
+
+	return nil
+}
+
+func checkRange(f *Field, n int) error {
+	switch {
+	case f.Max == 0 && n < f.Min:
+		return fmt.Errorf("%s: %d is below %d", f.Path, n, f.Min)
+	case f.Max != 0 && (n < f.Min || n > f.Max):
+		return fmt.Errorf("%s: %d is not in %d-%d", f.Path, n, f.Min, f.Max)
 	}
 
 	return nil

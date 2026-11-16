@@ -203,6 +203,25 @@ func TestReadCache_MissingFile(t *testing.T) {
 	}
 }
 
+// TestReadCache_EmptyIsError verifies a blank cache (e.g. truncated by a crash)
+// is an error, not an authoritative empty service list.
+func TestReadCache_EmptyIsError(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+
+	cacheFile := filepath.Join(t.TempDir(), ".zmcontrol.cache")
+	if err := os.WriteFile(cacheFile, []byte("\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ctl.p.cacheFile = cacheFile
+
+	if got, err := ctl.readCache(context.Background()); err == nil {
+		t.Errorf("ctl.readCache() = %v, want an error for an empty cache", got)
+	}
+}
+
 // TestReadCache_SingleService verifies readCache handles a single-entry cache.
 func TestReadCache_SingleService(t *testing.T) {
 	t.Parallel()
@@ -357,7 +376,7 @@ func TestIsLDAPLocal_HostnameNotInURL(t *testing.T) {
 	}
 }
 
-// TestIsLDAPLocal_EmptyHostname verifies behavior when hostname is empty.
+// TestIsLDAPLocal_EmptyHostname verifies an unset hostname is never "local".
 func TestIsLDAPLocal_EmptyHostname(t *testing.T) {
 	t.Parallel()
 
@@ -370,9 +389,40 @@ func TestIsLDAPLocal_EmptyHostname(t *testing.T) {
 		}, nil
 	}
 
-	// strings.Contains(anyString, "") returns true
-	if !ctl.IsLDAPLocal() {
-		t.Error("ctl.IsLDAPLocal() = false, want true (empty hostname is contained in any string)")
+	if ctl.IsLDAPLocal() {
+		t.Error("ctl.IsLDAPLocal() = true, want false for an empty hostname")
+	}
+}
+
+// TestIsLDAPLocal_MatchesWholeHost verifies the host is compared whole, over
+// every URL of a multi-URL ldap_url.
+func TestIsLDAPLocal_MatchesWholeHost(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name, hostname, ldapURL string
+		want                    bool
+	}{
+		{"substring of another host", "mail", "ldap://mail2.example.com:389", false},
+		{"substring in the domain", "example.com", "ldap://mail.example.com:389", false},
+		{"second URL of an HA list", "mail01.example.com",
+			"ldap://ldap-master.example.com:389 ldaps://mail01.example.com:636", true},
+		{"case-insensitive", "Mail01.Example.com", "ldap://mail01.example.com", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctl := newRealController(t)
+			ctl.loadConfig = func() (map[string]string, error) {
+				return map[string]string{"zimbra_server_hostname": tt.hostname, "ldap_url": tt.ldapURL}, nil
+			}
+
+			if got := ctl.IsLDAPLocal(); got != tt.want {
+				t.Errorf("IsLDAPLocal() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 

@@ -5,6 +5,7 @@
 package ldapcmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -101,13 +102,13 @@ func (c *mcfChange) delValue(name, value string) error {
 	return nil
 }
 
-func modifyConfig(conn Conn, args []string) error {
+func modifyConfig(ctx context.Context, conn Conn, args []string) error {
 	change, err := parseMcf(args)
 	if err != nil {
 		return err
 	}
 
-	return conn.ModifyValues(globalConfigDN, change.add, change.del, change.replace)
+	return conn.ModifyValues(ctx, globalConfigDN, change.add, change.del, change.replace)
 }
 
 // searchScope maps --scope to the LDAP scope; empty means sub.
@@ -124,7 +125,7 @@ func searchScope(scope string) (int, error) {
 	}
 }
 
-func search(stdout io.Writer, conn Conn, opts *Options) error {
+func search(ctx context.Context, stdout io.Writer, conn Conn, opts *Options) error {
 	scope, err := searchScope(opts.Scope)
 	if err != nil {
 		return err
@@ -139,7 +140,7 @@ func search(stdout io.Writer, conn Conn, opts *Options) error {
 		filter = defaultSearchFilter
 	}
 
-	result, err := conn.Search(base, filter, opts.Attrs, scope)
+	result, err := conn.Search(ctx, base, filter, opts.Attrs, scope)
 	if err != nil {
 		return err
 	}

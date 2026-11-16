@@ -5,9 +5,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/zextras/carbonio-configd/internal/cli/cliutil"
@@ -206,5 +208,53 @@ func TestSetupProfilingAndTracing_ValidationFails(t *testing.T) {
 
 	if wantErr && (pc != nil || tc != nil) {
 		t.Errorf("configs on failure = (%v, %v), want nil", pc, tc)
+	}
+}
+
+func TestWantsPerlEnv(t *testing.T) {
+	t.Parallel()
+
+	for args, want := range map[string]bool{
+		"":                          true,
+		"status":                    true,
+		"--disable-restarts":        true,
+		"rewrite proxy":             true,
+		"exec /bin/true":            false,
+		"exec -- /bin/true":         false,
+		"--quiet exec /bin/true":    false,
+		"__complete exec":           false,
+		"completion bash":           false,
+		"service restart exec":      true,
+		"ldap search exec":          true,
+		"proxy gen -n exec.conf":    true,
+		"rewrite exec":              true,
+		"exec":                      false,
+		"execute":                   true,
+		"--disable-restarts status": true,
+	} {
+		if got := wantsPerlEnv(strings.Fields(args)); got != want {
+			t.Errorf("wantsPerlEnv(%q) = %v, want %v", args, got, want)
+		}
+	}
+}
+
+// `configd exec` runs its program with the launch variables only: it must not
+// spawn perl to derive PERL5LIB/PERLLIB first.
+func TestRun_ExecDoesNotSetUpPerlEnv(t *testing.T) {
+	unsetEnv(t, "PERL5LIB")
+	unsetEnv(t, "PERLLIB")
+
+	fakes := systest.New()
+
+	var stdout, stderr bytes.Buffer
+
+	run([]string{"configd", "exec"}, fakes.System(), strings.NewReader(""), &stdout, &stderr)
+
+	if ops := fakes.Rec.Strings(); len(ops) != 0 {
+		t.Errorf("exec must not run anything before its program, got %v", ops)
+	}
+
+	if got := os.Getenv("PERL5LIB"); got != "" {
+		t.Errorf("PERL5LIB = %q, want it left unset", got)
 	}
 }

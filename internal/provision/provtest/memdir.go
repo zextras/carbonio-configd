@@ -186,6 +186,13 @@ func (d *Dir) Add(dn string, attrs map[string][]string) error {
 		return provision.ErrEntryExists
 	}
 
+	// LDAP refuses an entry whose parent is missing; a top-level DN has none.
+	if _, parent, found := strings.Cut(dn, ","); found {
+		if _, ok := d.entries[normalize(parent)]; !ok {
+			return fmt.Errorf("no such object: parent of %s", dn)
+		}
+	}
+
 	e := d.entry(dn)
 	for k, v := range attrs {
 		e.attrs[strings.ToLower(k)] = slices.Clone(v)
@@ -231,8 +238,7 @@ func (d *Dir) SetPassword(dn, password string) error {
 // ModifyValues implements provision.Directory with the semantics of the real
 // client: values added are not duplicated, values deleted that are not there are
 // ignored, no value deletes the attribute, replace sets the values. An entry that
-// does not exist is created, which a real directory would refuse: the tests that
-// modify an entry they have not arranged are not made to fail on it.
+// does not exist is an error, as in a real directory.
 func (d *Dir) ModifyValues(dn string, add, del, replace map[string][]string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -243,7 +249,10 @@ func (d *Dir) ModifyValues(dn string, add, del, replace map[string][]string) err
 		return err
 	}
 
-	e := d.entry(dn)
+	e, ok := d.entries[normalize(dn)]
+	if !ok {
+		return fmt.Errorf("no such object: %s", dn)
+	}
 
 	for attr, values := range del {
 		key := strings.ToLower(attr)
@@ -360,7 +369,7 @@ func parseFilter(s string) (matcher, string, error) {
 	attr = strings.ToLower(attr)
 
 	if value == "*" {
-		return func(a map[string][]string) bool { return true }, s[end+1:], nil
+		return func(a map[string][]string) bool { return len(a[attr]) > 0 }, s[end+1:], nil
 	}
 
 	want := unescape(value)

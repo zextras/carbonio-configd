@@ -453,3 +453,73 @@ func TestStopWithSDNotify_RestartKeepsNotifySocket(t *testing.T) {
 		t.Fatalf("start right after stop must see READY=1: %v", err)
 	}
 }
+
+// A daemon that keeps sending STATUS= datagrams never makes a read time out;
+// the readiness deadline must still end the wait.
+func TestWaitForSDNotify_DeadlineWithChattyDaemon(t *testing.T) {
+	t.Parallel()
+
+	ctl, f := newSDController(t)
+
+	addr := &net.UnixAddr{Name: filepath.Join(socketDir(t), "c.sock"), Net: "unixgram"}
+	conn, err := net.ListenUnixgram("unixgram", addr)
+	require.NoError(t, err)
+
+	defer func() { _ = conn.Close() }()
+
+	client, err := net.DialUnix("unixgram", nil, addr)
+	require.NoError(t, err)
+
+	defer func() { _ = client.Close() }()
+
+	stop := make(chan struct{})
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+
+			_, _ = client.Write([]byte("STATUS=still starting\n"))
+			// The deadline is computed on entry; keep the clock past it.
+			f.Clock.Advance(sdNotifyReadyTimeout + time.Second)
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	err = ctl.waitForSDNotify(ctx, conn, "svc", nil)
+
+	close(stop)
+	<-done
+
+	require.ErrorContains(t, err, "did not signal READY=1 within 30 seconds")
+}
+
+// A child that exits 0 before READY is still a failed start, reported without
+// a nil %w operand.
+func TestWaitForSDNotify_CleanExitBeforeReady(t *testing.T) {
+	t.Parallel()
+
+	ctl, _ := newSDController(t)
+
+	addr := &net.UnixAddr{Name: filepath.Join(socketDir(t), "x.sock"), Net: "unixgram"}
+	conn, err := net.ListenUnixgram("unixgram", addr)
+	require.NoError(t, err)
+
+	defer func() { _ = conn.Close() }()
+
+	exited := make(chan error, 1)
+	exited <- nil
+
+	err = ctl.waitForSDNotify(context.Background(), conn, "svc", exited)
+
+	require.ErrorContains(t, err, "svc exited during startup before signaling READY=1 (exit status 0)")
+	require.NotContains(t, err.Error(), "%!w")
+}

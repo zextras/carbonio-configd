@@ -37,21 +37,26 @@ type fakeDirectory struct {
 	entries map[string][]*goldap.Entry
 	errs    map[string]error
 	calls   []searchCall
-	block   chan struct{} // when non-nil, Search waits for it to be closed
+	block   chan struct{} // when non-nil, Search waits for it to be closed or its context to be done
 }
 
 func newDirectory() *fakeDirectory {
 	return &fakeDirectory{entries: map[string][]*goldap.Entry{}, errs: map[string]error{}}
 }
 
-func (d *fakeDirectory) Search(base, filter string, attrs []string, scope int) (*goldap.SearchResult, error) {
+func (d *fakeDirectory) Search(ctx context.Context, base, filter string, attrs []string, scope int) (*goldap.SearchResult, error) {
 	d.mu.Lock()
 	d.calls = append(d.calls, searchCall{base, filter, attrs, scope})
 	block, err, entries := d.block, d.errs[base], d.entries[base]
 	d.mu.Unlock()
 
+	// Like the real client, a search in flight is abandoned with its context.
 	if block != nil {
-		<-block
+		select {
+		case <-block:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
 
 	if err != nil {
@@ -217,8 +222,6 @@ func TestLDAPSourceReturnsPromptlyWhenContextIsCancelled(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("Fingerprint did not return after cancel while a search was in flight")
 	}
-
-	close(d.block) // let the in-flight search finish; its goroutine must end on its own
 
 	require.Eventually(t, func() bool {
 		d.mu.Lock()

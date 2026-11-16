@@ -10,6 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/services"
 	"github.com/zextras/carbonio-configd/internal/state"
@@ -261,5 +264,18 @@ func TestMainLoopActionTrigger_TriggerRewrite_ChannelBlocked(t *testing.T) {
 		t.Error("expected channel to be empty after first read")
 	case <-time.After(10 * time.Millisecond):
 		// Expected: channel is empty
+	}
+}
+
+func TestParseListenPort(t *testing.T) {
+	for raw, want := range map[string]int{"": 7171, "  ": 7171, "7171": 7171, " 8080 ": 8080, "65535": 65535, "0": 0} {
+		got, err := parseListenPort(raw)
+		require.NoError(t, err, raw)
+		assert.Equal(t, want, got, raw)
+	}
+
+	for _, raw := range []string{"abc", "71x1", "-1", "65536", "7171.5"} {
+		_, err := parseListenPort(raw)
+		require.Error(t, err, "%q must be refused, not bound as a random port", raw)
 	}
 }
