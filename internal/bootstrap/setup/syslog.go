@@ -88,14 +88,15 @@ func (t syslogTarget) rules() string {
 // ownMail reports whether line is a mail rule this tool wrote: it names the
 // log host, zimbra (an old install) or carbonio.log. zmsyslogsetup tested only
 // the first two, so with the log host on this node its mail rule piled up on
-// every run; an unset log host matched every line that starts with "mail".
+// every run; and with no log host it matched every line that starts with
+// "mail", the distribution's own rules (mail.err, mail.* -/var/log/maillog).
 func (t syslogTarget) ownMail(line string) bool {
 	rest, ok := strings.CutPrefix(line, "mail")
 	if !ok {
 		return false
 	}
 
-	return t.loghost == "" || strings.Contains(rest, t.loghost) ||
+	return (t.loghost != "" && strings.Contains(rest, t.loghost)) ||
 		strings.Contains(rest, "zimbra") || strings.Contains(rest, syslogLogFile)
 }
 
@@ -180,8 +181,9 @@ func (s *syslogSetup) write(name string, old, data []byte, mode fs.FileMode) err
 
 // update rewrites an existing syslog configuration: the file loses the rules
 // of an earlier run and gets extra appended. With backup the previous content
-// is kept in name+".bak": zmsyslogsetup did that for rsyslog.conf (updateSyslog)
-// but not for the rsyslog.d drop-in file (updateRsyslogd).
+// is kept in name+".bak", once: zmsyslogsetup did that for rsyslog.conf
+// (updateSyslog) but not for the rsyslog.d drop-in file (updateRsyslogd), and
+// a later run must not replace the original with a file this tool rewrote.
 func (s *syslogSetup) update(fn, name string, backup bool, rewrite func(string) string, extra string) error {
 	e := s.e
 
@@ -210,7 +212,7 @@ func (s *syslogSetup) update(fn, name string, backup bool, rewrite func(string) 
 		return nil
 	}
 
-	if backup {
+	if _, err := e.Sys.FS.Lstat(name + ".bak"); backup && err != nil {
 		if err := s.write(name+".bak", nil, old, info.Mode().Perm()); err != nil {
 			return err
 		}

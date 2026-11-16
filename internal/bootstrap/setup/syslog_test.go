@@ -137,6 +137,38 @@ func TestSyslog_KeepsCustomLines(t *testing.T) {
 	assert.EqualValues(t, 0o600, mode, "the mode of the file is kept")
 }
 
+// With no log host the rules of the distribution that start with "mail" are
+// not ours to drop; the ones this tool wrote are.
+func TestSyslog_NoLogHostKeepsTheMailRulesOfTheDistribution(t *testing.T) {
+	e, fakes := syslogRocky(t, "")
+	distro := rockyRsyslog + "mail.*\t\t\t\t-/var/log/maillog\nmail.err\t\t/var/log/mail.err\n"
+	fakes.FS.Put(syslogConf, []byte(distro), 0o644)
+
+	require.NoError(t, ConfigureSyslog(e))
+
+	got := syslogRead(t, fakes, syslogConf)
+	assert.Contains(t, got, "mail.*\t\t\t\t-/var/log/maillog\n")
+	assert.Contains(t, got, "mail.err\t\t/var/log/mail.err\n")
+	assert.Equal(t, 1, strings.Count(got, "mail.*                -/var/log/carbonio.log\n"))
+
+	require.NoError(t, ConfigureSyslog(e))
+	assert.Equal(t, got, syslogRead(t, fakes, syslogConf), "the second run drops only its own rule")
+}
+
+// The backup is the file as it was before this tool touched it, not the
+// result of the previous change.
+func TestSyslog_BackupIsWrittenOnce(t *testing.T) {
+	e, fakes := syslogRocky(t, "log.example.com")
+	require.NoError(t, ConfigureSyslog(e))
+	assert.Equal(t, rockyRsyslog, syslogRead(t, fakes, syslogConf+".bak"))
+
+	svcWithDir(t, &svcFakeDir{global: map[string]string{"zimbraLogHostname": "other.example.com"}})
+	require.NoError(t, ConfigureSyslog(e))
+
+	assert.Contains(t, syslogRead(t, fakes, syslogConf), "@other.example.com")
+	assert.Equal(t, rockyRsyslog, syslogRead(t, fakes, syslogConf+".bak"), "the original is still the backup")
+}
+
 func TestSyslog_RemoteHostForwardsOverUDP(t *testing.T) {
 	e, fakes := syslogRocky(t, "log.example.com")
 

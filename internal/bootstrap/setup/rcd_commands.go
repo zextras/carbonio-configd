@@ -39,6 +39,9 @@ type rcdChecked struct {
 	re *regexp.Regexp
 	// help is how the legacy script printed the expression on "?".
 	help string
+	// valid, when set, is the second check: the words the arguments split
+	// into must be the ones the real callers send (rcd_args.go).
+	valid func(args []string) bool
 	// program is the fixed part of the command line: words, no input.
 	program string
 	quiet   bool
@@ -134,7 +137,7 @@ var rcdCheckedCommands = map[string]rcdChecked{
 			`verifycrt|verifycrtkey|verifycrtchain)\s?` + rcdCertArgs),
 		help: `(viewdeployedcrt|viewstagedcrt|createcsr|createcrt|getcrt|deploycrt|viewcsr|verifycrt|` +
 			`verifycrtkey|verifycrtchain)\s?` + rcdCertHelp,
-		program: rcdBin + "zmcertmgr",
+		program: rcdBin + "zmcertmgr", valid: rcdCertmgrValid,
 	},
 	"clusvcadm": {
 		re: regexp.MustCompile(rcdPathArgs), help: rcdPathHelp,
@@ -150,12 +153,12 @@ var rcdCheckedCommands = map[string]rcdChecked{
 	},
 	rcdPlainRsync: {
 		re: regexp.MustCompile(rcdRsyncArgs), help: `['"a-zA-Z0-9\/\.\-_:@= ]*`,
-		program: rcdPlainRsync,
+		program: rcdPlainRsync, valid: rcdRsyncValid,
 	},
 	"certbot": {
 		re:      regexp.MustCompile(`^(certonly)\s?` + rcdCertArgs),
 		help:    `(certonly)\s?` + rcdCertHelp,
-		program: rcdLibexec + "certbot",
+		program: rcdLibexec + "certbot", valid: rcdCertbotValid,
 	},
 	"dkimutil": {
 		// The legacy class was [a|r], which let a "|" through to the shell.

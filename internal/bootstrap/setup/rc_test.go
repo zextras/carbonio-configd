@@ -298,8 +298,9 @@ func TestRunRC_AuthenticatesWithTheRSAKeyOfZmsshkeygen(t *testing.T) {
 	assert.Equal(t, "ran: status\n", out.String(), errb.String())
 }
 
-// The script ignored the exit status of the remote command, and so does
-// the client: what it printed is still relayed, stderr included.
+// The script ignored the exit status of the remote command, so the client
+// still exits 0 and relays what it printed, stderr included; the status is
+// reported on stderr and to a caller in this process.
 func TestRunRC_RemoteExitStatusIsNotOursAndStderrIsRelayed(t *testing.T) {
 	identity, pub := rcIdentity(t)
 	srv := startRCServer(t, pub, func(_ io.Reader, out, errw io.Writer) int {
@@ -316,7 +317,13 @@ func TestRunRC_RemoteExitStatusIsNotOursAndStderrIsRelayed(t *testing.T) {
 
 	assert.Equal(t, 0, status)
 	assert.Equal(t, "partial\nlast without newline", out.String())
-	assert.Equal(t, "remote complaint\n", errb.String())
+	assert.Equal(t, "remote complaint\nzmrc: the remote command failed with status 3\n", errb.String())
+}
+
+func TestRcWaitError(t *testing.T) {
+	assert.NoError(t, rcWaitError(nil))
+	assert.NoError(t, rcWaitError(&ssh.ExitMissingError{}))
+	assert.ErrorContains(t, rcWaitError(io.ErrUnexpectedEOF), "the connection failed")
 }
 
 func TestRunRC_ConnectionFailuresAreOnStderrWithStatus0(t *testing.T) {

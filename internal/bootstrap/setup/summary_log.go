@@ -42,6 +42,9 @@ func LogSummary(e *Env, results []Result, err error, elapsed time.Duration) {
 		e.Log.Detail("Result: stopped by the operator; run carbonio-bootstrap again to go on")
 	case err != nil:
 		e.Log.Detail("Result: failed: %v", err)
+	case incompleteInstall(e, results):
+		e.Log.Detail("Result: finished with warnings in a required step; " +
+			"the install is not marked complete, run carbonio-bootstrap again")
 	default:
 		e.Log.Detail("Configuration complete.")
 	}

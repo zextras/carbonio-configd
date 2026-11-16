@@ -16,9 +16,11 @@ import (
 	"crypto"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/zextras/carbonio-configd/internal/bootstrap"
+	"github.com/zextras/carbonio-configd/internal/provision"
 	"github.com/zextras/carbonio-configd/internal/services"
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
@@ -68,6 +70,8 @@ type Env struct {
 	rc *rcSeam
 	// rcd replaces parts of zmrcd (tests), like rc.
 	rcd *rcdSeam
+	// schema caches the attribute schema of conf/attrs (see provSchema).
+	schema *provision.Schema
 	// perlLib caches the zextras PERL5LIB.
 	perlLib string
 	// lc caches the effective localconfig until the next write.
@@ -199,13 +203,27 @@ func Run(e *Env, steps []Step, dryRun bool) ([]Result, error) {
 		}
 	}
 
-	if !dryRun {
+	if !dryRun && !incompleteInstall(e, results) {
 		if err := e.history().sessionComplete(); err != nil {
 			return results, err
 		}
 	}
 
 	return results, nil
+}
+
+// incompleteInstall reports whether a new install must not be marked as
+// configured: a named step (the server entry, the admin account, ...) only
+// warned, so the next run has to be a new install again and retry it. On an
+// existing node the stage is already recorded and a warning changes nothing.
+func incompleteInstall(e *Env, results []Result) bool {
+	if e.Facts == nil || !e.Facts.NewInstall {
+		return false
+	}
+
+	return slices.ContainsFunc(results, func(r Result) bool {
+		return r.Outcome == Warned && r.Step.Name != ""
+	})
 }
 
 // observedStep runs one step and reports its end to the observer.

@@ -94,23 +94,28 @@ var svcOpenDir = func(e *Env) (svcDir, error) {
 		return nil, err
 	}
 
-	return svcLDAP{c: c}, nil
+	return svcLDAP{ctx: e.Ctx, c: c}, nil
 }
 
 // svcLDAPClient is the part of the native LDAP client svcLDAP uses.
 type svcLDAPClient interface {
-	Search(baseDN, filter string, attributes []string, scope int) (*ldap.SearchResult, error)
-	GetGlobalConfig() (map[string]string, error)
-	GetAllServersWithAttributes() (map[string]map[string]string, error)
-	ModifyAttribute(dn, attribute, value string) error
+	Search(ctx context.Context, baseDN, filter string, attributes []string, scope int) (*ldap.SearchResult, error)
+	GetGlobalConfig(ctx context.Context) (map[string]string, error)
+	GetAllServersWithAttributes(ctx context.Context) (map[string]map[string]string, error)
+	ModifyAttribute(ctx context.Context, dn, attribute, value string) error
 	BaseDN() string
 	Close() error
 }
 
-type svcLDAP struct{ c svcLDAPClient }
+// svcLDAP is svcDir over the client; ctx is the Env's, under which every
+// request of the step runs.
+type svcLDAP struct {
+	ctx context.Context
+	c   svcLDAPClient
+}
 
 func (d svcLDAP) Exists(filter string) (bool, error) {
-	res, err := d.c.Search("", filter, []string{"zimbraId"}, ldap.ScopeWholeSubtree)
+	res, err := d.c.Search(d.ctx, "", filter, []string{"zimbraId"}, ldap.ScopeWholeSubtree)
 	if err != nil {
 		return false, err
 	}
@@ -118,10 +123,10 @@ func (d svcLDAP) Exists(filter string) (bool, error) {
 	return len(res.Entries) > 0, nil
 }
 
-func (d svcLDAP) Global() (map[string]string, error) { return d.c.GetGlobalConfig() }
+func (d svcLDAP) Global() (map[string]string, error) { return d.c.GetGlobalConfig(d.ctx) }
 
 func (d svcLDAP) MTAServers() (int, error) {
-	all, err := d.c.GetAllServersWithAttributes()
+	all, err := d.c.GetAllServersWithAttributes(d.ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -138,7 +143,7 @@ func (d svcLDAP) MTAServers() (int, error) {
 }
 
 func (d svcLDAP) ServerAttribute(attr string) (map[string]string, error) {
-	all, err := d.c.GetAllServersWithAttributes()
+	all, err := d.c.GetAllServersWithAttributes(d.ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -159,7 +164,7 @@ func (d svcLDAP) ServerAttribute(attr string) (map[string]string, error) {
 }
 
 func (d svcLDAP) SetServerAttribute(host, attr, value string) error {
-	return d.c.ModifyAttribute("cn="+ldap.EscapeDN(host)+",cn=servers,"+d.c.BaseDN(), attr, value)
+	return d.c.ModifyAttribute(d.ctx, "cn="+ldap.EscapeDN(host)+",cn=servers,"+d.c.BaseDN(), attr, value)
 }
 
 func (d svcLDAP) Close() error { return d.c.Close() }
@@ -876,9 +881,10 @@ func StepGALSyncSkipNotice() Step {
 // StepSetupCrontab ports setup.pl setupCrontab (L6071-6112): the ZEXTRAS
 // block of the zextras crontab is replaced by conf/crontabs/crontab plus the
 // directory-server, application-server and mta files of the enabled packages.
-// As in setup.pl a crontab without both markers is dropped. The crontab is
-// read and installed through crontab(1) and stdin, no /tmp files. Done when
-// the crontab already is what would be installed.
+// Unlike setup.pl, the entries of a crontab without both markers are kept
+// below the block, as they are the user's. The crontab is read and installed
+// through crontab(1) and stdin, no /tmp files. Done when the crontab already
+// is what would be installed.
 func StepSetupCrontab() Step {
 	return Step{
 		Name:  svcStageCrontab,
@@ -908,10 +914,12 @@ func StepSetupCrontab() Step {
 
 // svcCrontab returns the crontab to install and the current one.
 func svcCrontab(e *Env) (want, cur string, err error) {
-	out, _ := e.Output(&Cmd{Path: svcCrontabBin, Args: []string{"-u", config.ZextrasUser, "-l"}, Quiet: true})
-	cur = string(out)
+	cur, err = svcCurrentCrontab(e)
+	if err != nil {
+		return "", "", err
+	}
 
-	rest := ""
+	rest := cur
 	if strings.Contains(cur, "ZEXTRAS-START") && strings.Contains(cur, "ZEXTRAS-END") {
 		rest = svcStripBlock(cur)
 	}
@@ -958,6 +966,22 @@ func svcCrontab(e *Env) (want, cur string, err error) {
 	b.WriteString(rest)
 
 	return b.String(), cur, nil
+}
+
+// svcCurrentCrontab is crontab -l of the zextras user: empty when the user has
+// no crontab, an error for any other failure, as installing over a crontab
+// that could not be read would drop its entries.
+func svcCurrentCrontab(e *Env) (string, error) {
+	out, err := e.Output(&Cmd{Path: svcCrontabBin, Args: []string{"-u", config.ZextrasUser, "-l"}, Quiet: true})
+	if ce, ok := errors.AsType[*CmdError](err); ok && strings.Contains(ce.Output, "no crontab for") {
+		return "", nil
+	}
+
+	if err != nil {
+		return "", fmt.Errorf("reading the %s crontab: %w", config.ZextrasUser, err)
+	}
+
+	return string(out), nil
 }
 
 // svcStripBlock is sed '/# ZEXTRAS-START/,/# ZEXTRAS-END/d'.

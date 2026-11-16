@@ -19,11 +19,11 @@ import (
 
 // certDirectory is the LDAP access of zmcertmgr: the client of the node.
 type certDirectory interface {
-	GetGlobalConfig() (map[string]string, error)
-	GetServerConfig(hostname string) (map[string]string, error)
-	GetAllServers() ([]string, error)
+	GetGlobalConfig(ctx context.Context) (map[string]string, error)
+	GetServerConfig(ctx context.Context, hostname string) (map[string]string, error)
+	GetAllServers(ctx context.Context) ([]string, error)
 	BaseDN() string
-	ModifyValues(dn string, add, del, replace map[string][]string) error
+	ModifyValues(ctx context.Context, dn string, add, del, replace map[string][]string) error
 	Close() error
 }
 
@@ -113,9 +113,9 @@ func (m *certMgr) getConfKey(key, loc string) (val string, ok bool) {
 	var attrs map[string]string
 
 	if loc == certScopeGlobal {
-		attrs, err = d.GetGlobalConfig()
+		attrs, err = d.GetGlobalConfig(m.ldapContext())
 	} else {
-		attrs, err = d.GetServerConfig(m.serverHost(loc))
+		attrs, err = d.GetServerConfig(m.ldapContext(), m.serverHost(loc))
 	}
 
 	if err != nil {
@@ -180,10 +180,10 @@ func (m *certMgr) modifyAttr(key, loc, value string) error {
 	}
 
 	if value == "" {
-		return d.ModifyValues(dn, nil, map[string][]string{key: nil}, nil)
+		return d.ModifyValues(m.ldapContext(), dn, nil, map[string][]string{key: nil}, nil)
 	}
 
-	return d.ModifyValues(dn, nil, nil, map[string][]string{key: {value}})
+	return d.ModifyValues(m.ldapContext(), dn, nil, nil, map[string][]string{key: {value}})
 }
 
 // allServers is `zmprov -m -l gas`: the servers of the directory, sorted; an
@@ -194,7 +194,7 @@ func (m *certMgr) allServers() []string {
 		return nil
 	}
 
-	servers, err := d.GetAllServers()
+	servers, err := d.GetAllServers(m.ldapContext())
 	if err != nil {
 		return nil
 	}

@@ -5,6 +5,7 @@
 package setup
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -27,15 +28,17 @@ type existFakeLDAP struct {
 	closed    bool
 }
 
-func (f *existFakeLDAP) GetServerConfig(host string) (map[string]string, error) {
+func (f *existFakeLDAP) GetServerConfig(_ context.Context, host string) (map[string]string, error) {
 	f.hostAsked = host
 
 	return f.server, f.serverErr
 }
 
-func (f *existFakeLDAP) GetGlobalConfig() (map[string]string, error) { return f.global, f.globalErr }
+func (f *existFakeLDAP) GetGlobalConfig(context.Context) (map[string]string, error) {
+	return f.global, f.globalErr
+}
 
-func (f *existFakeLDAP) ReadAttribute(dn, attr string) (string, bool, error) {
+func (f *existFakeLDAP) ReadAttribute(_ context.Context, dn, attr string) (string, bool, error) {
 	if dn != "cn=default,cn=cos,cn=zimbra" {
 		return "", false, errors.New("no such object " + dn)
 	}

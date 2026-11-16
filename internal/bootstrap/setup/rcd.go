@@ -6,6 +6,7 @@ package setup
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -94,7 +95,7 @@ func rcdExecve(path string, argv []string) error {
 
 // rcdServerLister is the part of the LDAP client that lists the servers.
 type rcdServerLister interface {
-	GetAllServersWithAttributes() (map[string]map[string]string, error)
+	GetAllServersWithAttributes(ctx context.Context) (map[string]map[string]string, error)
 }
 
 // rcdServices is the directory side of the host lists: the servers and their
@@ -107,11 +108,11 @@ func rcdServices(e *Env) (map[string][]string, error) {
 
 	defer func() { _ = c.Close() }()
 
-	return rcdServiceMap(c)
+	return rcdServiceMap(e.Ctx, c)
 }
 
-func rcdServiceMap(l rcdServerLister) (map[string][]string, error) {
-	all, err := l.GetAllServersWithAttributes()
+func rcdServiceMap(ctx context.Context, l rcdServerLister) (map[string][]string, error) {
+	all, err := l.GetAllServersWithAttributes(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -291,7 +292,7 @@ func (s *rcdSession) rsync() (status int, done bool) {
 	}
 
 	words, ok := rcdWords(cmd)
-	if !ok || !rcdCheckedCommands[rcdPlainRsync].re.MatchString(cmd) {
+	if !ok || !rcdCheckedCommands[rcdPlainRsync].re.MatchString(cmd) || !rcdRsyncValid(words[1:]) {
 		return s.fail("invalid arguments in command [" + cmd + "]"), true
 	}
 
@@ -504,7 +505,7 @@ func (s *rcdSession) runOn(host, command, args string) int {
 	program, _ := rcdWords(c.program)
 	words, valid := rcdWords(args)
 
-	if !valid || !c.re.MatchString(args) {
+	if !valid || !c.re.MatchString(args) || (c.valid != nil && !c.valid(words)) {
 		return s.fail("args '" + args + "' not allowed for command '" + command + "'")
 	}
 

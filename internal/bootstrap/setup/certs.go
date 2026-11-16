@@ -76,7 +76,7 @@ var certGlobalConfig = func(e *Env) (map[string]string, error) {
 
 	defer func() { _ = c.Close() }()
 
-	return c.GetGlobalConfig()
+	return c.GetGlobalConfig(e.Ctx)
 }
 
 func certFile(e *Env, elem ...string) string { return e.Paths.Path(elem...) }
@@ -617,11 +617,12 @@ func certApplyDHParam(e *Env) error {
 			return fmt.Errorf("failed to generate dhparam key: %w", err)
 		}
 
-		if err := e.Sys.FS.WriteFileAtomic(dest, data, certDHParamMode); err != nil {
+		uid, gid, err := zextrasOwner(e)
+		if err != nil {
 			return fmt.Errorf("installing the dhparam key: %w", err)
 		}
 
-		if err := e.Root("chown", "zextras:zextras", dest); err != nil {
+		if err := writeOwned(e, dest, data, certDHParamMode, uid, gid); err != nil {
 			return fmt.Errorf("installing the dhparam key: %w", err)
 		}
 	}

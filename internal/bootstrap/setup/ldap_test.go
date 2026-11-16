@@ -50,6 +50,8 @@ type ldapFake struct {
 	modifyErr func(dn string) error
 	// replaceErr fails every replace.
 	replaceErr error
+	// setPwErr fails every password set.
+	setPwErr error
 	// attrs are the attributes of every add, by DN.
 	attrs map[string][]ldapLDIFAttr
 	// mods are the changes of the modifies, "dn|add|attr|v1,v2".
@@ -116,7 +118,7 @@ func (c ldapFakeConn) Modify(dn string, mods []ldapMod) error {
 func (c ldapFakeConn) SetPassword(userDN, _ string) error {
 	c.f.setPw = append(c.f.setPw, userDN)
 
-	return nil
+	return c.f.setPwErr
 }
 
 func (c ldapFakeConn) Search(base, filter string, _ bool, _ []string) ([]ldapEntry, error) {
@@ -425,7 +427,10 @@ func TestLdapPreStartWritesHashesAndLocalConfig(t *testing.T) {
 
 	mode, _ := fakes.FS.Mode("/opt/zextras/conf/carbonio.ldif")
 	assert.Equal(t, os.FileMode(0o640), mode.Perm()) // as setup.pl left it
-	assert.Contains(t, ldapAllLines(fakes), "chown zextras:zextras /opt/zextras/conf/carbonio.ldif")
+	uid, gid, ok := fakes.FS.Owner("/opt/zextras/conf/carbonio.ldif")
+	require.True(t, ok)
+	assert.Equal(t, [2]int{998, 997}, [2]int{uid, gid})
+	assert.NotContains(t, ldapAllLines(fakes), "chown zextras:zextras /opt/zextras/conf/carbonio.ldif", "no chown by path")
 	ldapAssertNoSecret(t, fakes)
 }
 
@@ -523,6 +528,24 @@ func TestLdapSetPassword_AccountFallsBackToRootAndRecordsHash(t *testing.T) {
 	ldapAssertNoSecret(t, fakes)
 }
 
+// localconfig holds the password services bind with: it follows the directory,
+// never leads it.
+func TestLdapSetPassword_LocalConfigKeepsTheOldPasswordWhenTheDirectoryRefusesTheNewOne(t *testing.T) {
+	e, _, f := ldapTestEnv(t)
+	require.NoError(t, e.SetLC(map[string]string{
+		ldapLCMasterURL: "ldap://" + ldapTestHost + ":389", "ldap_postfix_password": "old",
+	}))
+
+	f.bindOK = func(dn, pw string) bool { return dn == ldapConfigDN && pw != ldapTestPost }
+	f.setPwErr = errors.New("constraint violation")
+
+	require.ErrorContains(t, ldapSetPassword(e, f.kit(), ldapAcctPostfix, ldapTestPost), "constraint violation")
+
+	lc, err := e.LC()
+	require.NoError(t, err)
+	assert.Equal(t, "old", lc["ldap_postfix_password"])
+}
+
 func TestLdapSetPassword_AcceptedPasswordIsNotChanged(t *testing.T) {
 	e, _, f := ldapTestEnv(t)
 	require.NoError(t, e.SetLC(map[string]string{ldapLCMasterURL: "ldap://" + ldapTestHost + ":389"}))
@@ -605,16 +628,18 @@ func TestLdapStepConfigSetupLdap_NewMasterOrder(t *testing.T) {
 
 	require.NoError(t, s.Apply(e))
 
-	// stop, then start, then postLdapStart binds as cn=config, then the four
-	// account passwords are set
+	// stop, then start, then postLdapStart binds as cn=config, then the
+	// passwords of the admin and the four accounts are set: the admin entry
+	// of an earlier attempt is not replaced by the load
 	assert.Equal(t, []string{"stop", "start", "bind cn=config",
+		"bind " + ldapDNAdminForTest, "bind cn=config",
 		"bind " + ldapDNReplica, "bind cn=config",
 		"bind " + ldapDNPostfix, "bind cn=config",
 		"bind " + ldapDNAmavis, "bind cn=config",
 		"bind " + ldapDNNginx, "bind cn=config",
 		"bind cn=config"}, f.events, "the last bind is the enabling of the provider")
 	assert.Len(t, f.adds, 10, "the LDIF entries, then the accesslog database and the overlays")
-	assert.Equal(t, []string{ldapDNReplica, ldapDNPostfix, ldapDNAmavis, ldapDNNginx}, f.setPw)
+	assert.Equal(t, []string{ldapDNAdminForTest, ldapDNReplica, ldapDNPostfix, ldapDNAmavis, ldapDNNginx}, f.setPw)
 
 	assert.Contains(t, f.adds, "olcOverlay={1}accesslog,olcDatabase={3}mdb,cn=config")
 	assert.NotContains(t, ldapAllLines(fakes), "zmldapenablereplica")

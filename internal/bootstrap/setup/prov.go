@@ -12,7 +12,6 @@ import (
 	"maps"
 	"slices"
 	"strings"
-	"sync"
 
 	"github.com/zextras/carbonio-configd/internal/ldap"
 	"github.com/zextras/carbonio-configd/internal/localconfig"
@@ -70,17 +69,14 @@ var provOpenLDAP = func(e *Env) (provDirectory, error) {
 		return nil, err
 	}
 
-	return ldapDirectory{c}, nil
+	return ldapDirectory{Client: c, ctx: e.Ctx}, nil
 }
 
-// provSchemas keeps the attribute schema each Env read, so a run of many
-// commands parses it once.
-var provSchemas sync.Map // *Env -> *provision.Schema
-
-// provSchema is the attribute schema of the node, conf/attrs/*.xml.
+// provSchema is the attribute schema of the node, conf/attrs/*.xml, read once
+// per Env so a run of many commands parses it once.
 func (e *Env) provSchema() (*provision.Schema, error) {
-	if s, ok := provSchemas.Load(e); ok {
-		return s.(*provision.Schema), nil
+	if e.schema != nil {
+		return e.schema, nil
 	}
 
 	s, err := provision.LoadSchema(e.Sys.FS, e.Paths.Path("conf", "attrs"))
@@ -88,7 +84,7 @@ func (e *Env) provSchema() (*provision.Schema, error) {
 		return nil, err
 	}
 
-	provSchemas.Store(e, s)
+	e.schema = s
 
 	return s, nil
 }

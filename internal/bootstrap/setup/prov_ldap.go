@@ -5,6 +5,7 @@
 package setup
 
 import (
+	"context"
 	"strings"
 
 	goldap "github.com/go-ldap/ldap/v3"
@@ -15,7 +16,11 @@ import (
 
 // ldapDirectory is the provision.Directory of a node: the LDAP client with the
 // write credentials.
-type ldapDirectory struct{ *ldap.Client }
+type ldapDirectory struct {
+	*ldap.Client
+	// ctx is the Env's: provision.Directory takes none.
+	ctx context.Context
+}
 
 // searchScopes maps the provisioning scopes to the LDAP ones.
 var searchScopes = map[provision.Scope]int{
@@ -29,7 +34,7 @@ var searchScopes = map[provision.Scope]int{
 func (d ldapDirectory) Search(
 	base string, scope provision.Scope, filter string, attrs ...string,
 ) ([]provision.Entry, error) {
-	res, err := d.Client.Search(base, filter, attrs, searchScopes[scope])
+	res, err := d.Client.Search(d.ctx, base, filter, attrs, searchScopes[scope])
 	if err != nil {
 		if goldap.IsErrorWithCode(err, goldap.LDAPResultNoSuchObject) {
 			return nil, nil
@@ -58,7 +63,7 @@ func (d ldapDirectory) Search(
 
 // Add implements provision.Directory.
 func (d ldapDirectory) Add(dn string, attrs map[string][]string) error {
-	err := d.AddEntry(dn, attrs)
+	err := d.AddEntry(d.ctx, dn, attrs)
 	if ldap.IsEntryExists(err) {
 		return provision.ErrEntryExists
 	}
@@ -67,4 +72,14 @@ func (d ldapDirectory) Add(dn string, attrs map[string][]string) error {
 }
 
 // Delete implements provision.Directory.
-func (d ldapDirectory) Delete(dn string) error { return d.DeleteEntry(dn) }
+func (d ldapDirectory) Delete(dn string) error { return d.DeleteEntry(d.ctx, dn) }
+
+// ModifyValues implements provision.Directory.
+func (d ldapDirectory) ModifyValues(dn string, add, del, replace map[string][]string) error {
+	return d.Client.ModifyValues(d.ctx, dn, add, del, replace)
+}
+
+// SetPassword implements provision.Directory.
+func (d ldapDirectory) SetPassword(dn, password string) error {
+	return d.Client.SetPassword(d.ctx, dn, password)
+}

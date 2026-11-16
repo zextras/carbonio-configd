@@ -336,15 +336,26 @@ func TestRunRCD_CheckedCommandsPassTheirArgumentsAsArgv(t *testing.T) {
 		{"zmcertmgr viewdeployedcrt", []string{rcdBinDir + "zmcertmgr", "viewdeployedcrt"}},
 		{`zmcertmgr createcsr self -new -subject "/C=IT/CN=a b" -subjectAltNames 'x.example.com,y.example.com'`,
 			[]string{rcdBinDir + "zmcertmgr", "createcsr", "self", "-new", "-subject", "/C=IT/CN=a b", "-subjectAltNames", "x.example.com,y.example.com"}},
-		{`zmcertmgr createcsr -subjectAltNames '*.example.com'`, []string{rcdBinDir + "zmcertmgr", "createcsr", "-subjectAltNames", "*.example.com"}},
-		{`zmcertmgr createcsr a\ b ''`, []string{rcdBinDir + "zmcertmgr", "createcsr", "a b", ""}},
-		{`zmcertmgr createcsr "a\"b" "c\d"`, []string{rcdBinDir + "zmcertmgr", "createcsr", `a"b`, `c\d`}},
-		{"zmcertmgr verifycrtchain /ca.pem /c.pem", []string{rcdBinDir + "zmcertmgr", "verifycrtchain", "/ca.pem", "/c.pem"}},
-		{"certbot certonly --agree-tos -n -d a.example.com", []string{libexec + "certbot", "certonly", "--agree-tos", "-n", "-d", "a.example.com"}},
+		{`zmcertmgr createcsr self -subjectAltNames '*.example.com'`,
+			[]string{rcdBinDir + "zmcertmgr", "createcsr", "self", "-subjectAltNames", "*.example.com"}},
+		{`zmcertmgr createcsr comm -subject a\ b -digest sha256 -keysize 3072`,
+			[]string{rcdBinDir + "zmcertmgr", "createcsr", "comm", "-subject", "a b", "-digest", "sha256", "-keysize", "3072"}},
+		{`zmcertmgr createcsr self -subject "a\"b" -subjectAltNames "c\d"`,
+			[]string{rcdBinDir + "zmcertmgr", "createcsr", "self", "-subject", `a"b`, "-subjectAltNames", `c\d`}},
+		{"zmcertmgr createcrt -new -days 365 -allserver", []string{rcdBinDir + "zmcertmgr", "createcrt", "-new", "-days", "365", "-allserver"}},
+		{"zmcertmgr getcrt self -allservers", []string{rcdBinDir + "zmcertmgr", "getcrt", "self", "-allservers"}},
+		{"zmcertmgr deploycrt comm /opt/zextras/data/tmp/x/crt /opt/zextras/data/tmp/x/chain -allserver",
+			[]string{rcdBinDir + "zmcertmgr", "deploycrt", "comm", "/opt/zextras/data/tmp/x/crt", "/opt/zextras/data/tmp/x/chain", "-allserver"}},
+		{"zmcertmgr viewdeployedcrt ldap", []string{rcdBinDir + "zmcertmgr", "viewdeployedcrt", "ldap"}},
+		{"zmcertmgr verifycrtchain /opt/zextras/data/tmp/ca.pem /opt/zextras/data/tmp/c.pem",
+			[]string{rcdBinDir + "zmcertmgr", "verifycrtchain", "/opt/zextras/data/tmp/ca.pem", "/opt/zextras/data/tmp/c.pem"}},
+		{"certbot certonly --agree-tos --email admin@example.com -n --keep --webroot -w /opt/zextras --cert-name a.example.com -d a.example.com -d b.example.com",
+			[]string{libexec + "certbot", "certonly", "--agree-tos", "--email", "admin@example.com", "-n", "--keep", "--webroot", "-w", "/opt/zextras",
+				"--cert-name", "a.example.com", "-d", "a.example.com", "-d", "b.example.com"}},
 		{"dkimutil", []string{libexec + "zmdkimkeyutil"}},
 		{"dkimutil -a", []string{libexec + "zmdkimkeyutil", "-a"}},
 		{"dkimutil -r -d a.b.example.org", []string{libexec + "zmdkimkeyutil", "-r", "-d", "a.b.example.org"}},
-		{"rsync -av src:/x dst", []string{"rsync", "-av", "src:/x", "dst"}},
+		{"rsync --server -vlogDtpre.iLsfxC . /opt/zextras/backup", []string{"rsync", "--server", "-vlogDtpre.iLsfxC", ".", "/opt/zextras/backup"}},
 	} {
 		t.Run(tc.line, func(t *testing.T) {
 			r := newRCDRig(t)
@@ -414,6 +425,33 @@ func TestRunRCD_RefusesArgumentsOutsideTheirAlphabet(t *testing.T) {
 		{"zmcertmgr", `createcsr "unterminated`},
 		{"zmcertmgr", "createcsr 'unterminated"},
 		{"certbot", "renew"},
+		{"certbot", "certonly --deploy-hook 'cp /x /y'"},
+		{"certbot", "certonly --post-hook x -d a.example.com"},
+		{"certbot", "certonly --manual-auth-hook x"},
+		{"certbot", "certonly --config-dir /tmp/x"},
+		{"certbot", "certonly --work-dir /tmp/x"},
+		{"certbot", "certonly --logs-dir /tmp/x"},
+		{"certbot", "certonly --config /tmp/x"},
+		{"certbot", "certonly -w /etc"},
+		{"certbot", "certonly -w /opt/zextras/../etc"},
+		{"certbot", "certonly -d"},
+		{"certbot", "certonly -d -n"},
+		{"certbot", "certonly a.example.com"},
+		{"certbot", "certonly -d a.example.com --agree-tos=1"},
+		{"zmcertmgr", "createcsr self -hook x"},
+		{"zmcertmgr", "createcsr -new"},
+		{"zmcertmgr", "createcsr self -keysize abc"},
+		{"zmcertmgr", "createcsr self -digest sha256;"},
+		{"zmcertmgr", "createcsr self -subject"},
+		{"zmcertmgr", "createcsr self -debug"},
+		{"zmcertmgr", "getcrt self -localonly"},
+		{"zmcertmgr", "deploycrt comm /etc/passwd /opt/zextras/x"},
+		{"zmcertmgr", "deploycrt comm /opt/zextras/a /opt/zextras/b /opt/zextras/c"},
+		{"zmcertmgr", "verifycrtkey /opt/zextras/k"},
+		{"zmcertmgr", "verifycrtchain /opt/zextras/../etc/a /opt/zextras/b"},
+		{"zmcertmgr", "viewdeployedcrt nothing"},
+		{"zmcertmgr", "viewstagedcrt self /etc/passwd"},
+		{"zmcertmgr", "viewcsr other"},
 		{"certbot", "certonly; id"},
 		{"dkimutil", "-|"},
 		{"dkimutil", "-x"},
@@ -421,6 +459,16 @@ func TestRunRCD_RefusesArgumentsOutsideTheirAlphabet(t *testing.T) {
 		{"dkimutil", "-d a.b.abcde"},
 		{"dkimutil", "-a -d example.com;id"},
 		{"dkimutil", "-d a.b.c|d"},
+		{"rsync", "-av src:/x dst"},
+		{"rsync", `-e "sh -c id" a b:c`},
+		{"rsync", "--server -e'sh -c id' . /opt/zextras/x"},
+		{"rsync", "--server --rsh=sh . /opt/zextras/x"},
+		{"rsync", "--server --rsync-path=sh . /opt/zextras/x"},
+		{"rsync", "--server -vlogDtpre.iLsfxC . /etc"},
+		{"rsync", "--server -vlogDtpre.iLsfxC . /opt/zextras/../etc"},
+		{"rsync", "--server --sender -vlogDtpre.iLsfxC ."},
+		{"rsync", "--server -vlogDtpre.iLsfxC /opt/zextras/x"},
+		{"rsync", "--server -vlogDtpre.iLsfxC . -e"},
 		{"rsync", "a;id"},
 		{"rsync", "$(x)"},
 		{"rsync", `a\b`},
@@ -783,9 +831,11 @@ func TestRunRCD_RunsAnRsyncOfSSHInPlaceOfTheLoop(t *testing.T) {
 	}{
 		{"rsync --server -vlogDtpre.iLsfxCIvu . /opt/zextras/backup",
 			[]string{"rsync", "--server", "-vlogDtpre.iLsfxCIvu", ".", "/opt/zextras/backup"}},
-		{"/opt/zextras/common/bin/rsync --server -av . /dst", []string{"/opt/zextras/common/bin/rsync", "--server", "-av", ".", "/dst"}},
-		{"rsync --server --exclude='a b' . /dst", []string{"rsync", "--server", "--exclude=a b", ".", "/dst"}},
-		{`rsync --server -e"x y" "a b"`, []string{"rsync", "--server", "-ex y", "a b"}},
+		{"/opt/zextras/common/bin/rsync --server -av . /opt/zextras/dst", []string{"/opt/zextras/common/bin/rsync", "--server", "-av", ".", "/opt/zextras/dst"}},
+		{"rsync --server --exclude='a b' . /opt/zextras/dst", []string{"rsync", "--server", "--exclude=a b", ".", "/opt/zextras/dst"}},
+		{"rsync --server --sender -vlogDtpre.iLsfxC --numeric-ids --timeout=60 . /opt/zextras/store/ /opt/zextras/index",
+			[]string{"rsync", "--server", "--sender", "-vlogDtpre.iLsfxC", "--numeric-ids", "--timeout=60", ".", "/opt/zextras/store/", "/opt/zextras/index"}},
+		{"rsync --server -e.LsfxC --partial-dir=.rsync-partial . backup/x", []string{"rsync", "--server", "-e.LsfxC", "--partial-dir=.rsync-partial", ".", "backup/x"}},
 	} {
 		r := newRCDRig(t)
 		r.original = tc.original
@@ -802,13 +852,13 @@ func TestRunRCD_RunsAnRsyncOfSSHInPlaceOfTheLoop(t *testing.T) {
 
 func TestRunRCD_AnRsyncThatCannotBeExecutedIsTheSessionsError(t *testing.T) {
 	r := newRCDRig(t)
-	r.original = "rsync --server . /d"
+	r.original = "rsync --server . /opt/zextras/d"
 	r.execErr = &fs.PathError{Err: syscall.ENOENT}
 
 	status, _, errs := r.run("")
 
 	assert.Equal(t, 1, status)
-	assert.Equal(t, "ERROR: Can't run rsync --server . /d: No such file or directory\n", errs)
+	assert.Equal(t, "ERROR: Can't run rsync --server . /opt/zextras/d: No such file or directory\n", errs)
 }
 
 func TestRunRCD_RefusesAnRsyncThatIsNotTheOneOfTheNode(t *testing.T) {
@@ -818,6 +868,13 @@ func TestRunRCD_RefusesAnRsyncThatIsNotTheOneOfTheNode(t *testing.T) {
 		{"./rsync x", "command './rsync' not allowed"},
 		{"xrsync --server x", "command 'xrsync' not allowed"},
 		{"rsyncx\t--server", ""}, // not rsync at all: goes on to the commands
+		{`rsync --server -e"x y" "a b"`, `invalid arguments in command [rsync --server -e"x y" "a b"]`},
+		{`rsync -e "sh -c id" a b:c`, `invalid arguments in command [rsync -e "sh -c id" a b:c]`},
+		{"rsync --server --rsh=sh . /opt/zextras/x", "invalid arguments in command [rsync --server --rsh=sh . /opt/zextras/x]"},
+		{"rsync --server --rsync-path=sh . /opt/zextras/x", "invalid arguments in command [rsync --server --rsync-path=sh . /opt/zextras/x]"},
+		{"rsync --server --daemon . /opt/zextras/x", "invalid arguments in command [rsync --server --daemon . /opt/zextras/x]"},
+		{"rsync --server -av . /etc/shadow", "invalid arguments in command [rsync --server -av . /etc/shadow]"},
+		{"rsync --server -av . /opt/zextras/../etc", "invalid arguments in command [rsync --server -av . /opt/zextras/../etc]"},
 		{"rsync --server x;id", "invalid arguments in command [rsync --server x;id]"},
 		{"rsync --server $(id)", "invalid arguments in command [rsync --server $(id)]"},
 		{"rsync --server `id`", "invalid arguments in command [rsync --server `id`]"},
@@ -866,15 +923,15 @@ func TestRunRCD_ALoggedRsyncIsWrittenToTheLog(t *testing.T) {
 	r := newRCDRig(t)
 	r.e.lc[rcdLoggingKey] = "TRUE"
 	r.fakes.FS.PutDir("/opt/zextras/log", 0o755)
-	r.original = "rsync --server . /d"
+	r.original = "rsync --server . /opt/zextras/d"
 
 	_, _, _ = r.run("")
 
-	assert.Equal(t, "exec'ing: rsync --server . /d\nCan't run rsync --server . /d: Permission denied\n", rcdLog(t, r))
+	assert.Equal(t, "exec'ing: rsync --server . /opt/zextras/d\nCan't run rsync --server . /opt/zextras/d: Permission denied\n", rcdLog(t, r))
 }
 
 func TestRCDServiceMap_ListsEnabledServicesOfEveryServer(t *testing.T) {
-	m, err := rcdServiceMap(rcdListerFunc(func() (map[string]map[string]string, error) {
+	m, err := rcdServiceMap(context.Background(), rcdListerFunc(func() (map[string]map[string]string, error) {
 		return map[string]map[string]string{
 			"a": {"zimbraServiceEnabled": "mta\nproxy", "zimbraId": "1"},
 			"b": {"ZIMBRASERVICEENABLED": "mailbox"},
@@ -885,13 +942,13 @@ func TestRCDServiceMap_ListsEnabledServicesOfEveryServer(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, map[string][]string{"a": {"mta", "proxy"}, "b": {"mailbox"}}, m, "a server with no service is not a host of ALL")
 
-	_, err = rcdServiceMap(rcdListerFunc(func() (map[string]map[string]string, error) { return nil, errors.New("down") }))
+	_, err = rcdServiceMap(context.Background(), rcdListerFunc(func() (map[string]map[string]string, error) { return nil, errors.New("down") }))
 	require.EqualError(t, err, "down")
 }
 
 type rcdListerFunc func() (map[string]map[string]string, error)
 
-func (f rcdListerFunc) GetAllServersWithAttributes() (map[string]map[string]string, error) {
+func (f rcdListerFunc) GetAllServersWithAttributes(context.Context) (map[string]map[string]string, error) {
 	return f()
 }
 

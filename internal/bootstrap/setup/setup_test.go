@@ -31,6 +31,10 @@ func testEnv(t *testing.T) (*Env, *systest.Fakes, *bytes.Buffer) {
 	}
 	e.perlLib = "/opt/zextras/common/lib/perl5"
 
+	// What root asks the system for before it gives a file to zextras.
+	fakes.Exec.OnCmdline("id -u zextras", systest.Reply("998\n"))
+	fakes.Exec.OnCmdline("id -g zextras", systest.Reply("997\n"))
+
 	installProvFake(t, e)
 
 	return e, fakes, out
@@ -81,6 +85,44 @@ func TestRun_ChecksBeforeApplyingAndRecordsStages(t *testing.T) {
 	assert.False(t, f.NewInstall)
 }
 
+// A new install whose key step (the server entry, the admin account) only
+// warned is not marked configured, so the next run is a new install again and
+// retries it; on a configured node the warning changes nothing.
+func TestRun_NamedWarnedStepKeepsANewInstallUnfinished(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		newInstall bool
+		complete   bool
+	}{
+		{"new install", true, false},
+		{"configured node", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e, fakes, _ := testEnv(t)
+			e.Facts.NewInstall = tc.newInstall
+
+			steps := []Step{
+				{Name: "configCreateServerEntry", Title: "A", Optional: true,
+					Apply: func(*Env) error { return errors.New("LDAP down") }},
+				{Name: "configB", Title: "B", Apply: func(*Env) error { return nil }},
+			}
+
+			results, err := Run(e, steps, false)
+			require.NoError(t, err)
+			assert.Equal(t, Warned, results[0].Outcome)
+
+			hist, _ := fakes.FS.Data(e.Paths.History)
+			assert.Equal(t, tc.complete, strings.Contains(string(hist), "CONFIGURED END"))
+			assert.Equal(t, tc.complete, strings.Contains(string(hist), "CONFIG SESSION COMPLETE"))
+			assert.Contains(t, string(hist), "CONFIGURED configB", "the steps that worked are still recorded")
+
+			var f Facts
+			f.ReadHistory([]byte("1: INSTALLED carbonio-core\n" + string(hist)))
+			assert.Equal(t, !tc.complete, f.NewInstall, "what the next run detects")
+		})
+	}
+}
+
 func TestRun_StopsAtFailureAndDryRunChangesNothing(t *testing.T) {
 	e, fakes, _ := testEnv(t)
 
@@ -116,8 +158,11 @@ func TestReadHistory(t *testing.T) {
 		"upgrade after configuration": {
 			"1: INSTALLED carbonio-core\n2: CONFIGURED END\n3: INSTALL SESSION START\n4: INSTALLED carbonio-core\n", true,
 		},
-		"interrupted session": {
-			"1: INSTALLED carbonio-core\n2: CONFIGURED END\n3: CONFIG SESSION START\n4: CONFIGURED BEGIN\n", true,
+		"interrupted rerun on a configured node": {
+			"1: INSTALLED carbonio-core\n2: CONFIGURED END\n3: CONFIG SESSION START\n4: CONFIGURED BEGIN\n", false,
+		},
+		"interrupted first session": {
+			"1: INSTALLED carbonio-core\n2: CONFIG SESSION START\n3: CONFIGURED BEGIN\n4: CONFIGURED ldap\n", true,
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

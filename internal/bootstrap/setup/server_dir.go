@@ -5,6 +5,7 @@
 package setup
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"strings"
@@ -57,7 +58,7 @@ var srvOpenDir = func(e *Env) (srvDirectory, error) {
 		return nil, err
 	}
 
-	return &srvLDAP{c: c}, nil
+	return &srvLDAP{ctx: e.Ctx, c: c}, nil
 }
 
 // srvRead opens the directory for fn and closes it.
@@ -73,12 +74,15 @@ func srvRead(e *Env, fn func(d srvDirectory) error) error {
 }
 
 // srvLDAP is srvDirectory over the native client.
-type srvLDAP struct{ c *ldap.Client }
+type srvLDAP struct {
+	ctx context.Context
+	c   *ldap.Client
+}
 
 func (d *srvLDAP) Close() error { return d.c.Close() }
 
 func (d *srvLDAP) search(base, filter string, scope int) ([]srvEntry, error) {
-	res, err := d.c.Search(base, filter, []string{"*"}, scope)
+	res, err := d.c.Search(d.ctx, base, filter, []string{"*"}, scope)
 	if err != nil {
 		return nil, err
 	}

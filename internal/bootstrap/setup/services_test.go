@@ -315,6 +315,7 @@ func TestSvcConfigCreateDomain_ExistingAccountsAreNotRecreated(t *testing.T) {
 	})
 	provTestLDAP().set("dc=example,dc=com", "objectClass", "zimbraDomain")
 	provTestLDAP().set("dc=example,dc=com", "zimbraDomainName", "example.com")
+	provTestLDAP().set("ou=people,dc=example,dc=com", "objectClass", "organizationalRole")
 	provTestLDAP().set(provServerDN("mail.example.com"), "zimbraServiceEnabled", "service")
 
 	require.NoError(t, StepConfigCreateDomain().Apply(e))
@@ -644,14 +645,56 @@ func TestSvcCrontab_DoneWhenUnchanged(t *testing.T) {
 	assert.True(t, done)
 }
 
-func TestSvcCrontab_WithoutMarkersStartsFresh(t *testing.T) {
-	e, fakes := svcCronEnv(t, "5 5 * * * mine\n")
-	require.NoError(t, StepSetupCrontab().Apply(e))
+// svcCronListFails is crontab -l exiting 1 with msg on stderr.
+func svcCronListFails(msg string) systest.Handler {
+	return func(*sys.Cmd) (sys.Result, error) {
+		return sys.Result{ExitCode: 1, Stderr: []byte(msg)}, &sys.ExitError{Code: 1}
+	}
+}
+
+func svcCronInstalled(t *testing.T, fakes *systest.Fakes) string {
+	t.Helper()
 
 	for _, c := range fakes.Exec.Calls() {
 		if c.Path == "crontab" && c.Args[len(c.Args)-1] == "-" {
-			assert.Equal(t, svcTestCronBase+svcCrontabEndLine+"\n", svcStdin(t, c))
+			return svcStdin(t, c)
 		}
+	}
+
+	t.Fatal("no crontab was installed")
+
+	return ""
+}
+
+func TestSvcCrontab_WithoutMarkersKeepsTheEntries(t *testing.T) {
+	e, fakes := svcCronEnv(t, "5 5 * * * mine\n")
+	require.NoError(t, StepSetupCrontab().Apply(e))
+
+	assert.Equal(t, svcTestCronBase+svcCrontabEndLine+"\n5 5 * * * mine\n", svcCronInstalled(t, fakes))
+}
+
+func TestSvcCrontab_NoCrontabYetStartsFresh(t *testing.T) {
+	e, fakes := svcCronEnv(t, "")
+	fakes.Exec.When(func(c *sys.Cmd) bool { return c.Path == "crontab" && c.Args[len(c.Args)-1] == "-l" },
+		svcCronListFails("no crontab for zextras\n"))
+	require.NoError(t, StepSetupCrontab().Apply(e))
+
+	assert.Equal(t, svcTestCronBase+svcCrontabEndLine+"\n", svcCronInstalled(t, fakes))
+}
+
+// A crontab that could not be read is not replaced by one without its entries.
+func TestSvcCrontab_UnreadableCrontabIsAnErrorAndNothingIsInstalled(t *testing.T) {
+	e, fakes := svcCronEnv(t, "")
+	fakes.Exec.When(func(c *sys.Cmd) bool { return c.Path == "crontab" && c.Args[len(c.Args)-1] == "-l" },
+		svcCronListFails("cron: cannot open the spool\n"))
+
+	s := StepSetupCrontab()
+	_, err := s.Done(e)
+	require.ErrorContains(t, err, "crontab")
+	require.Error(t, s.Apply(e))
+
+	for _, c := range fakes.Exec.Calls() {
+		assert.NotEqual(t, "-", c.Args[len(c.Args)-1], "nothing was installed")
 	}
 }
 

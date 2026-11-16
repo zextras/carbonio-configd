@@ -34,11 +34,18 @@ var certServices = []string{certSvcLDAP, certSvcMailboxd, certSvcMTA, certSvcPro
 
 // Commands and services that the code refers to by name.
 const (
-	certCmdCheckExpiry = "checkcrtexpiration"
-	certCmdCreateCA    = "createca"
-	certCmdCreateCRT   = "createcrt"
-	certCmdVerifyCRT   = "verifycrt"
-	certCmdViewStaged  = "viewstagedcrt"
+	certCmdCheckExpiry  = "checkcrtexpiration"
+	certCmdCreateCA     = "createca"
+	certCmdCreateCRT    = "createcrt"
+	certCmdVerifyCRT    = "verifycrt"
+	certCmdViewStaged   = "viewstagedcrt"
+	certCmdCreateCSR    = "createcsr"
+	certCmdDeployCRT    = "deploycrt"
+	certCmdGetCRT       = "getcrt"
+	certCmdVerifyChain  = "verifycrtchain"
+	certCmdVerifyKey    = "verifycrtkey"
+	certCmdViewCSR      = "viewcsr"
+	certCmdViewDeployed = "viewdeployedcrt"
 
 	certSvcAll      = "all"
 	certSvcLDAP     = "ldap"
@@ -81,22 +88,22 @@ type certCmdFunc func(m *certMgr, args []string) (ok bool, err error)
 
 // certCmdFuncs are the methods of the commands.
 var certCmdFuncs = map[string]certCmdFunc{
-	"addcacert":        (*certMgr).cmdAddCACert,
-	certCmdCheckExpiry: (*certMgr).checkcrtexpiration,
-	certCmdCreateCA:    func(m *certMgr, _ []string) (bool, error) { return m.createca() },
-	certCmdCreateCRT:   func(m *certMgr, _ []string) (bool, error) { return m.createcrt() },
-	"createcsr":        (*certMgr).cmdCreateCSR,
-	"deployca":         func(m *certMgr, _ []string) (bool, error) { return m.deployca() },
-	"deploycrt":        (*certMgr).deploycrt,
-	"getcrt":           (*certMgr).cmdGetCrt,
-	"migrate":          func(m *certMgr, _ []string) (bool, error) { return m.migrate() },
-	"savecrt":          (*certMgr).cmdSaveCrt,
-	certCmdVerifyCRT:   (*certMgr).cmdVerifyCrt,
-	"verifycrtchain":   (*certMgr).cmdVerifyCrtChain,
-	"verifycrtkey":     (*certMgr).cmdVerifyCrtKey,
-	"viewcsr":          (*certMgr).viewcsr,
-	"viewdeployedcrt":  (*certMgr).viewdeployedcrt,
-	certCmdViewStaged:  (*certMgr).viewstagedcrt,
+	"addcacert":         (*certMgr).cmdAddCACert,
+	certCmdCheckExpiry:  (*certMgr).checkcrtexpiration,
+	certCmdCreateCA:     func(m *certMgr, _ []string) (bool, error) { return m.createca() },
+	certCmdCreateCRT:    func(m *certMgr, _ []string) (bool, error) { return m.createcrt() },
+	certCmdCreateCSR:    (*certMgr).cmdCreateCSR,
+	"deployca":          func(m *certMgr, _ []string) (bool, error) { return m.deployca() },
+	certCmdDeployCRT:    (*certMgr).deploycrt,
+	certCmdGetCRT:       (*certMgr).cmdGetCrt,
+	"migrate":           func(m *certMgr, _ []string) (bool, error) { return m.migrate() },
+	"savecrt":           (*certMgr).cmdSaveCrt,
+	certCmdVerifyCRT:    (*certMgr).cmdVerifyCrt,
+	certCmdVerifyChain:  (*certMgr).cmdVerifyCrtChain,
+	certCmdVerifyKey:    (*certMgr).cmdVerifyCrtKey,
+	certCmdViewCSR:      (*certMgr).viewcsr,
+	certCmdViewDeployed: (*certMgr).viewdeployedcrt,
+	certCmdViewStaged:   (*certMgr).viewstagedcrt,
 }
 
 // certUsage is what the script does with a command line that asks for help or

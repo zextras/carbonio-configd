@@ -6,6 +6,7 @@ package setup
 
 import (
 	"bytes"
+	"context"
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
@@ -177,7 +178,7 @@ func TestSSHKeygen_Failures(t *testing.T) {
 	t.Run("filesystem refuses", func(t *testing.T) {
 		e, fakes, _ := sshEnv(t)
 		svcWithDir(t, &svcFakeDir{})
-		sshFail(fakes, "WriteFileAtomic", "disk full")
+		sshFail(fakes, "CreateTemp", "disk full")
 
 		require.ErrorContains(t, GenerateSSHKey(e), "disk full")
 	})
@@ -228,6 +229,27 @@ func TestSSHAuthKeys_ReplacesTheHostLineKeepsTheOthersAddsTheNew(t *testing.T) {
 	assert.Contains(t, logs.String(), "Key for host-d.example.com NOT FOUND")
 	assert.NotContains(t, logs.String(), "Key for host-a.example.com NOT FOUND")
 	assert.Empty(t, fakes.Exec.Lines(), "no zmupdateauthkeys, no zmprov")
+}
+
+// zimbraSshPublicKey is written to LDAP by every node: a value with a line
+// break or an options prefix must not add a line of its own to authorized_keys.
+func TestSSHAuthKeys_IgnoresValuesThatAreNotASingleKeyLine(t *testing.T) {
+	e, fakes, logs := sshEnv(t)
+	svcWithDir(t, &svcFakeDir{keys: map[string]string{
+		"host-a.example.com": sshTestKeyA,
+		"host-b.example.com": "ssh-rsa AAAAb host-b.example.com\nssh-rsa AAAAevil host-b.example.com",
+		"host-c.example.com": "command=\"/bin/sh\" ssh-rsa AAAAc host-c.example.com",
+		"host-d.example.com": "ssh-ed25519 AAAAd host-d.example.com",
+		"host-e.example.com": "ssh-rsa AAAAe\x00 host-e.example.com",
+	}})
+
+	require.NoError(t, UpdateAuthKeys(e))
+
+	assert.Equal(t, sshTestCmd+sshTestKeyA+"\n", string(assertSSHFile(t, fakes, sshTestAuthPath, 0o644)))
+
+	for _, h := range []string{"b", "c", "d", "e"} {
+		assert.Contains(t, logs.String(), "Key for host-"+h+".example.com is not a single ssh-rsa line")
+	}
 }
 
 func TestSSHAuthKeys_SecondRunChangesNothing(t *testing.T) {
@@ -301,7 +323,7 @@ func TestSSHAuthKeys_Failures(t *testing.T) {
 	t.Run("write fails", func(t *testing.T) {
 		e, fakes, _ := sshEnv(t)
 		svcWithDir(t, &svcFakeDir{})
-		sshFail(fakes, "WriteFileAtomic", "read-only filesystem")
+		sshFail(fakes, "CreateTemp", "read-only filesystem")
 
 		require.ErrorContains(t, UpdateAuthKeys(e), "read-only filesystem")
 	})
@@ -326,11 +348,11 @@ type sshFakeLDAP struct {
 	value   string
 }
 
-func (c *sshFakeLDAP) GetAllServersWithAttributes() (map[string]map[string]string, error) {
+func (c *sshFakeLDAP) GetAllServersWithAttributes(context.Context) (map[string]map[string]string, error) {
 	return c.servers, c.err
 }
 
-func (c *sshFakeLDAP) ModifyAttribute(dn, attr, value string) error {
+func (c *sshFakeLDAP) ModifyAttribute(_ context.Context, dn, attr, value string) error {
 	c.dn, c.attr, c.value = dn, attr, value
 
 	return c.err
@@ -345,28 +367,28 @@ func TestSvcLDAP_ServerAttribute(t *testing.T) {
 		"c.example.com": {"zimbraServiceEnabled": "mta"},
 	}}
 
-	got, err := svcLDAP{c: c}.ServerAttribute("zimbraSshPublicKey")
+	got, err := svcLDAP{ctx: context.Background(), c: c}.ServerAttribute("zimbraSshPublicKey")
 	require.NoError(t, err)
 	assert.Equal(t, map[string]string{
 		"a.example.com": sshTestKeyA, "b.example.com": sshTestKeyB, "c.example.com": "",
 	}, got, "every server is listed, the attribute name matched in any case")
 
 	c.err = errors.New("ldap down")
-	_, err = svcLDAP{c: c}.ServerAttribute("zimbraSshPublicKey")
+	_, err = svcLDAP{ctx: context.Background(), c: c}.ServerAttribute("zimbraSshPublicKey")
 	require.ErrorContains(t, err, "ldap down")
 }
 
 func TestSvcLDAP_SetServerAttributeModifiesTheServerEntry(t *testing.T) {
 	c := &sshFakeLDAP{}
 
-	require.NoError(t, svcLDAP{c: c}.SetServerAttribute("store.example.com", "zimbraSshPublicKey", sshTestKeyA))
+	require.NoError(t, svcLDAP{ctx: context.Background(), c: c}.SetServerAttribute("store.example.com", "zimbraSshPublicKey", sshTestKeyA))
 	assert.Equal(t, "cn=store.example.com,cn=servers,cn=zimbra", c.dn)
 	assert.Equal(t, "zimbraSshPublicKey", c.attr)
 	assert.Equal(t, sshTestKeyA, c.value)
 }
 
 func TestSSHKeygen_DirectoryAndOwnershipFailuresStopBeforeTheKeyIsWritten(t *testing.T) {
-	for _, op := range []string{"MkdirAll", "Chmod", "Chown"} {
+	for _, op := range []string{"MkdirAll", "OpenFile"} {
 		t.Run(op, func(t *testing.T) {
 			e, fakes, _ := sshEnv(t)
 			dir := &svcFakeDir{}

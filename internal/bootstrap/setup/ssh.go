@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -172,6 +173,12 @@ func UpdateAuthKeys(e *Env) error {
 			continue
 		}
 
+		if !sshValidKey(key) {
+			e.Log.Warn("Key for %s is not a single ssh-rsa line: ignored", host)
+
+			continue
+		}
+
 		e.Log.Detail("Updating keys for %s", host)
 
 		lines = append(sshDropHost(lines, key), zmrcd+key)
@@ -207,11 +214,26 @@ func UpdateAuthKeysEverywhere(e *Env) error {
 		errw.Flush()
 
 		if err != nil {
-			e.Log.Detail("Updating authkeys on remote server %s failed: %v", host, err)
+			e.Log.Warn("Updating authkeys on remote server %s failed: %v", host, err)
 		}
 	}
 
 	return UpdateAuthKeys(e)
+}
+
+// sshKeyBlob is the base64 of a public key.
+var sshKeyBlob = regexp.MustCompile(`^[A-Za-z0-9+/]+=*$`)
+
+// sshValidKey reports whether key is what zmsshkeygen publishes: "ssh-rsa
+// <base64> <host>" on one line (the host may be missing, as zmupdateauthkeys
+// allowed). The value comes from LDAP and is written into
+// authorized_keys behind the forced zmrcd command: a newline or an options
+// prefix in it would add a line with other options, or none.
+func sshValidKey(key string) bool {
+	f := strings.Fields(key)
+
+	return (len(f) == sshKeyComment || len(f) == sshKeyComment-1) && f[0] == "ssh-rsa" && sshKeyBlob.MatchString(f[1]) &&
+		!strings.ContainsFunc(key, func(r rune) bool { return r != ' ' && (r < ' ' || r == 0x7f) })
 }
 
 // sshSplitKeys returns the lines of an authorized_keys file the way the
@@ -284,26 +306,10 @@ func sshEnsureDir(e *Env, dir string, uid, gid int) error {
 		return fmt.Errorf("creating %s: %w", dir, err)
 	}
 
-	if err := e.Sys.FS.Chmod(dir, sshDirMode); err != nil {
-		return fmt.Errorf("chmod %s: %w", dir, err)
-	}
-
-	if err := e.Sys.FS.Chown(dir, uid, gid); err != nil {
-		return fmt.Errorf("chown %s: %w", dir, err)
-	}
-
-	return nil
+	return ownDir(e, dir, sshDirMode, uid, gid)
 }
 
-// sshWriteOwned replaces name atomically with data, then gives it to zextras.
+// sshWriteOwned replaces name atomically with data, owned by zextras from the start.
 func sshWriteOwned(e *Env, name string, data []byte, perm fs.FileMode, uid, gid int) error {
-	if err := e.Sys.FS.WriteFileAtomic(name, data, perm); err != nil {
-		return fmt.Errorf("writing %s: %w", name, err)
-	}
-
-	if err := e.Sys.FS.Chown(name, uid, gid); err != nil {
-		return fmt.Errorf("chown %s: %w", name, err)
-	}
-
-	return nil
+	return writeOwned(e, name, data, perm, uid, gid)
 }

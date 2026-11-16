@@ -188,13 +188,15 @@ func ldapChangePassword(e *Env, k *ldapKit, a ldapAccount, password string, onRe
 	}
 	defer conn.Close()
 
-	if err := ldapRecordPassword(e, a, password); err != nil {
-		return err
-	}
-
 	dn := ldapAccountDN(a, lc)
 
 	if err := ldapEnsurePassword(conn, a, dn, curRoot, password, onReplica); err != nil {
+		return err
+	}
+
+	// localconfig follows only a password the directory took: services that
+	// bind with it would otherwise fail until a rerun.
+	if err := ldapRecordPassword(e, a, password); err != nil {
 		return err
 	}
 
@@ -337,12 +339,13 @@ func ldapStoreLDIFPassword(e *Env, dn, hash string) error {
 	return ldapWriteOwned(e, path, out)
 }
 
-// ldapWriteOwned writes a file that holds password hashes: mode 0600,
+// ldapWriteOwned writes a file that holds password hashes: mode 0640,
 // owned by the zextras user the tools read it as.
 func ldapWriteOwned(e *Env, path string, data []byte) error {
-	if err := e.Sys.FS.WriteFileAtomic(path, data, 0o640); err != nil {
-		return fmt.Errorf("writing %s: %w", path, err)
+	uid, gid, err := zextrasOwner(e)
+	if err != nil {
+		return err
 	}
 
-	return e.Root("chown", "zextras:zextras", path)
+	return writeOwned(e, path, data, 0o640, uid, gid)
 }
