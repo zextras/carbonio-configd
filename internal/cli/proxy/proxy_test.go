@@ -138,8 +138,8 @@ func TestModifyProtocol(t *testing.T) {
 
 			conn := &fakeConn{modErr: tt.modErr}
 
-			code := modifyProtocol(context.Background(), &stdout, &stderr, conn, "cn=h,cn=servers,cn=zimbra",
-				"IMAP", "zimbraReverseProxyMailImapEnabled", tt.value)
+			code := modifyProtocol("IMAP", "zimbraReverseProxyMailImapEnabled", tt.value)(
+				context.Background(), &stdout, &stderr, conn, "cn=h,cn=servers,cn=zimbra")
 
 			if code != tt.wantCode || stdout.String() != tt.wantStdout || stderr.String() != tt.wantStderr {
 				t.Errorf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())

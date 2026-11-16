@@ -199,33 +199,34 @@ func setProxyProtocol(ctx context.Context, stdout, stderr io.Writer, protocol, v
 		return 1
 	}
 
-	return withLDAP(ctx, stdout, stderr,
-		func(ctx context.Context, stdout, stderr io.Writer, conn ldapConn, dn string) int {
-			return modifyProtocol(ctx, stdout, stderr, conn, dn, protocol, attr, value)
-		})
+	return withLDAP(ctx, stdout, stderr, modifyProtocol(protocol, attr, value))
 }
 
+// modifyProtocol is the withLDAP step that sets attr (the switch of protocol)
+// to value on the server entry dn.
 func modifyProtocol(
-	ctx context.Context, stdout, stderr io.Writer, conn ldapConn, dn, protocol, attr, value string,
-) int {
-	err := conn.ModifyAttribute(ctx, dn, attr, value)
+	protocol, attr, value string,
+) func(ctx context.Context, stdout, stderr io.Writer, conn ldapConn, dn string) int {
+	return func(ctx context.Context, stdout, stderr io.Writer, conn ldapConn, dn string) int {
+		err := conn.ModifyAttribute(ctx, dn, attr, value)
 
-	_ = conn.Close()
+		_ = conn.Close()
 
-	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "Error: failed to set %s=%s: %v\n", attr, value, err)
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "Error: failed to set %s=%s: %v\n", attr, value, err)
 
-		return 1
+			return 1
+		}
+
+		action := "Enabled"
+		if value == "FALSE" {
+			action = "Disabled"
+		}
+
+		_, _ = fmt.Fprintf(stdout, "%s %s proxy\n", action, protocol)
+
+		return 0
 	}
-
-	action := "Enabled"
-	if value == "FALSE" {
-		action = "Disabled"
-	}
-
-	_, _ = fmt.Fprintf(stdout, "%s %s proxy\n", action, protocol)
-
-	return 0
 }
 
 func showProxyStatus(ctx context.Context, stdout, stderr io.Writer, conn ldapConn, dn string) int {

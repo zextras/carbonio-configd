@@ -93,46 +93,42 @@ func (k rcdOptKind) valid(v string) bool {
 // not fit, including "--" and "-".
 func rcdOptions(words []string, spec map[string]rcdOptKind, norm func(string) string) (rest []string, ok bool) {
 	for i := 0; i < len(words); i++ {
-		w := words[i]
-		if !strings.HasPrefix(w, "-") {
-			rest = append(rest, w)
+		if !strings.HasPrefix(words[i], "-") {
+			rest = append(rest, words[i])
 
 			continue
 		}
 
-		name, value, inline := w, "", false
-		if strings.HasPrefix(w, "--") {
-			name, value, inline = strings.Cut(w, "=")
-		}
-
-		kind, listed := spec[norm(name)]
-		if !listed {
-			return nil, false
-		}
-
-		if kind == rcdOptFlag {
-			if inline {
-				return nil, false
-			}
-
-			continue
-		}
-
-		if !inline {
-			if i+1 >= len(words) {
-				return nil, false
-			}
-
-			i++
-			value = words[i]
-		}
-
-		if !kind.valid(value) {
+		if i, ok = rcdOption(words, i, spec, norm); !ok {
 			return nil, false
 		}
 	}
 
 	return rest, true
+}
+
+// rcdOption checks the option at words[i] (see rcdOptions) and returns the
+// index of its last word: i itself, or i+1 when the value is the next word.
+func rcdOption(words []string, i int, spec map[string]rcdOptKind, norm func(string) string) (last int, ok bool) {
+	name, value, inline := words[i], "", false
+	if strings.HasPrefix(name, "--") {
+		name, value, inline = strings.Cut(name, "=")
+	}
+
+	kind, listed := spec[norm(name)]
+
+	switch {
+	case !listed:
+		return i, false
+	case kind == rcdOptFlag:
+		return i, !inline
+	case inline:
+		return i, kind.valid(value)
+	case i+1 >= len(words):
+		return i, false
+	default:
+		return i + 1, kind.valid(words[i+1])
+	}
 }
 
 func rcdExact(name string) string { return name }
