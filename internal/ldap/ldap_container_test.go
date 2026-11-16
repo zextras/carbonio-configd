@@ -105,7 +105,7 @@ func TestContainer_Ldap_ModifyAttribute(t *testing.T) {
 	const dn = ldapCnConfig
 	const attr = "olcLogLevel"
 
-	before, err := client.getEntityConfig(dn, ldapFilterAllObjects, ldap.ScopeBaseObject, "config", dn)
+	before, err := client.getEntityConfig(t.Context(), dn, ldapFilterAllObjects, ldap.ScopeBaseObject, "config", dn)
 	if err != nil {
 		t.Fatalf("read before: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestContainer_Ldap_ModifyAttribute(t *testing.T) {
 		t.Fatalf("Ldap.ModifyAttribute: %v", err)
 	}
 
-	after, err := client.getEntityConfig(dn, ldapFilterAllObjects, ldap.ScopeBaseObject, "config", dn)
+	after, err := client.getEntityConfig(t.Context(), dn, ldapFilterAllObjects, ldap.ScopeBaseObject, "config", dn)
 	if err != nil {
 		t.Fatalf("read after: %v", err)
 	}

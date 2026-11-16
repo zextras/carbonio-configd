@@ -58,3 +58,18 @@ func TestRewriteWithoutKnownSectionsPassesThrough(t *testing.T) {
 		t.Fatalf("forwarded %v, want %v", trigger.lastConfigs, want)
 	}
 }
+
+// "all" stands for every section of zmconfigd.cf, as `configd rewrite all`
+// documents.
+func TestRewriteAllExpandsToEverySection(t *testing.T) {
+	trigger := &MockActionTrigger{}
+	h := knownHandler(trigger)
+
+	if got := h.HandleRequest(context.Background(), "REWRITE", []string{"all"}); got != respRewritesComplete {
+		t.Fatalf("reply = %q, want %q", got, respRewritesComplete)
+	}
+
+	if want := []string{"mta", "proxy"}; !slices.Equal(trigger.lastConfigs, want) {
+		t.Fatalf("forwarded %v, want %v", trigger.lastConfigs, want)
+	}
+}

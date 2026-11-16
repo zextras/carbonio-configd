@@ -60,7 +60,7 @@ func TestSearch_UnknownScopeSkipsTheQuery(t *testing.T) {
 
 	conn := &fakeConn{}
 
-	err := search(&bytes.Buffer{}, conn, &Options{Verb: VerbSearch, Scope: "galaxy"})
+	err := search(t.Context(), &bytes.Buffer{}, conn, &Options{Verb: VerbSearch, Scope: "galaxy"})
 
 	assert.ErrorContains(t, err, "unknown scope")
 	assert.Empty(t, conn.gotBase, "no search was sent")
@@ -69,7 +69,7 @@ func TestSearch_UnknownScopeSkipsTheQuery(t *testing.T) {
 func TestSearch_QueryFailureIsReturned(t *testing.T) {
 	t.Parallel()
 
-	err := search(&bytes.Buffer{}, &fakeConn{err: errors.New("no such object")}, &Options{Verb: VerbSearch})
+	err := search(t.Context(), &bytes.Buffer{}, &fakeConn{err: errors.New("no such object")}, &Options{Verb: VerbSearch})
 
 	assert.EqualError(t, err, "no such object")
 }
@@ -79,7 +79,7 @@ func TestModifyConfig_RejectsMalformedChangesWithoutModifying(t *testing.T) {
 
 	conn := &fakeConn{}
 
-	err := modifyConfig(conn, []string{"zimbraMailMode"})
+	err := modifyConfig(t.Context(), conn, []string{"zimbraMailMode"})
 
 	assert.Error(t, err)
 	assert.Empty(t, conn.gotDN, "nothing was sent to the directory")
@@ -88,7 +88,7 @@ func TestModifyConfig_RejectsMalformedChangesWithoutModifying(t *testing.T) {
 func TestServerConfig_QueryFailureIsReturned(t *testing.T) {
 	t.Parallel()
 
-	err := serverConfig(&bytes.Buffer{}, &fakeConn{err: errors.New("denied")}, nil,
+	err := serverConfig(t.Context(), &bytes.Buffer{}, &fakeConn{err: errors.New("denied")}, nil,
 		&Options{Verb: VerbGs, Args: []string{"mbox.example"}})
 
 	assert.EqualError(t, err, "denied")

@@ -29,13 +29,15 @@ var secretKeyTokens = []string{
 	"api_key",
 	"_pwd",
 	"bindpw",
+	"rootpw",
 	"creds",
 }
 
 // secretKeySuffixes are case-insensitive key suffixes that mark a secret
-// (e.g. ssl_key, ldap_root_pw). A bare "key" substring is deliberately not a
-// token: it would match harmless names such as "zimbraMailKeyPort".
-var secretKeySuffixes = []string{"_key", "_pass", "_pw", "_pin"}
+// (e.g. ssl_key, ldap_root_pw, olcRootPW). A bare "key" substring is
+// deliberately not a token: it would match harmless names such as
+// "zimbraMailKeyPort".
+var secretKeySuffixes = []string{"_key", "_pass", "pw", "_pin"}
 
 // IsSecretKey reports whether the configuration key name denotes a secret whose
 // value must never be written to the logs.
@@ -82,8 +84,10 @@ var pemPrivateKey = regexp.MustCompile(
 	`-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----(?s:.*?)(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|\z)`)
 
 // urlUserinfo matches the password part of the userinfo of a URL (the text
-// between the colon after the user name and the at sign before the host).
-var urlUserinfo = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://[^/\s:@]*:)[^\s@]+(@)`)
+// between the colon after the user name and the last at sign of the
+// whitespace-delimited token, so a password that contains "@" or "/" does not
+// leak its tail).
+var urlUserinfo = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://[^/\s:@]*:)\S+(@)`)
 
 // Text returns s with every PEM private key block and every URL userinfo
 // password replaced by Placeholder and reports whether anything was replaced.
@@ -121,12 +125,12 @@ func Args(argv []string) []string {
 		out[i] = arg
 
 		if name, _, isAssign := strings.Cut(arg, "="); isAssign {
-			if IsSecretKey(strings.TrimLeft(name, "-")) {
+			if isSecretArg(name) {
 				out[i] = name + "=" + Placeholder
 
 				continue
 			}
-		} else if strings.HasPrefix(arg, "-") && IsSecretKey(strings.TrimLeft(arg, "-")) {
+		} else if strings.HasPrefix(arg, "-") && isSecretArg(arg) {
 			maskNext = true
 
 			continue
@@ -136,6 +140,15 @@ func Args(argv []string) []string {
 	}
 
 	return out
+}
+
+// isSecretArg reports whether a command-line argument name (with or without
+// leading dashes) takes a secret: a secret key, or the password flags of the
+// OpenLDAP tools (-w, -pw).
+func isSecretArg(name string) bool {
+	name = strings.TrimLeft(name, "-")
+
+	return name == "w" || name == "pw" || IsSecretKey(name)
 }
 
 // valueAttrNames are the log attribute names that carry the value of the

@@ -318,7 +318,9 @@ func ldapConfigNewMaster(e *Env, k *ldapKit) error {
 		return fmt.Errorf("initializing ldap failed (%d): %w", rc, err)
 	}
 
-	for _, a := range []ldapAccount{ldapAcctReplica, ldapAcctPostfix, ldapAcctAmavis, ldapAcctNginx} {
+	// The admin is in the list for a rerun: its entry may already be there with
+	// the hash of an earlier attempt, and postLdapStart skips existing entries.
+	for _, a := range []ldapAccount{ldapAcctAdmin, ldapAcctReplica, ldapAcctPostfix, ldapAcctAmavis, ldapAcctNginx} {
 		pw := a.get(&e.Cfg.LDAP)
 		if pw == "" {
 			continue
@@ -521,7 +523,7 @@ func StepConfigLDAPSchemaVersion() Step {
 			}
 			defer func() { _ = client.Close() }()
 
-			cfg, err := client.GetGlobalConfig()
+			cfg, err := client.GetGlobalConfig(e.Ctx)
 
 			return err == nil && cfg[ldapSchemaAttr] == want, nil
 		},

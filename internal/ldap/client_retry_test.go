@@ -109,3 +109,147 @@ func TestClient_ExecuteWithRetry_ServerFailuresAreRetried(t *testing.T) {
 		})
 	}
 }
+
+// A bind the server refuses is refused again on every attempt: it is made once
+// per URL, then the error comes back, so a wrong password cannot trip a
+// password-policy lockout by being retried.
+func TestClient_ExecuteWithRetry_RefusedBindIsNotRetried(t *testing.T) {
+	t.Parallel()
+
+	srv := ldapfake.New(t, ldapfake.Options{RefuseBind: true})
+
+	c, err := NewClient(&ClientConfig{
+		URLs:        []string{srv.URL("ldap", "127.0.0.1")},
+		BindDN:      "uid=zimbra,cn=admins,cn=zimbra",
+		Password:    "wrong",
+		MaxRetries:  3,
+		RetryDelay:  time.Millisecond,
+		DialTimeout: 2 * time.Second,
+		BindTimeout: 2 * time.Second,
+		OpTimeout:   2 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+
+	t.Cleanup(func() { _ = c.Close() })
+
+	err = c.executeWithRetry(t.Context(), func(*ldap.Conn) error { return nil })
+	if !ldap.IsErrorWithCode(err, ldap.LDAPResultInvalidCredentials) {
+		t.Fatalf("err = %v, want invalid credentials", err)
+	}
+
+	if got := srv.Binds(); got != 1 {
+		t.Errorf("binds = %d, want 1", got)
+	}
+}
+
+// Reconfigure makes the next operation connect with the new URLs and
+// credentials: the idle connection made with the old ones is dropped, and an
+// unchanged configuration leaves the pool alone.
+func TestClient_Reconfigure_AppliesNewIdentity(t *testing.T) {
+	t.Parallel()
+
+	oldSrv := ldapfake.New(t, ldapfake.Options{})
+	newSrv := ldapfake.New(t, ldapfake.Options{})
+
+	cfg := &ClientConfig{
+		URLs:        []string{oldSrv.URL("ldap", "127.0.0.1")},
+		BindDN:      "uid=zimbra,cn=admins,cn=zimbra",
+		Password:    "old",
+		DialTimeout: 2 * time.Second,
+		BindTimeout: 2 * time.Second,
+		OpTimeout:   2 * time.Second,
+	}
+
+	c, err := NewClient(cfg)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+
+	t.Cleanup(func() { _ = c.Close() })
+
+	noop := func(*ldap.Conn) error { return nil }
+
+	if err := c.executeWithRetry(t.Context(), noop); err != nil {
+		t.Fatalf("first operation: %v", err)
+	}
+
+	same := *cfg
+
+	changed, err := c.Reconfigure(&same)
+	if err != nil || changed {
+		t.Fatalf("Reconfigure(same) = %v, %v; want unchanged", changed, err)
+	}
+
+	if err := c.executeWithRetry(t.Context(), noop); err != nil {
+		t.Fatalf("second operation: %v", err)
+	}
+
+	if got := oldSrv.Binds(); got != 1 {
+		t.Fatalf("old server binds = %d, want 1 (the pooled connection is reused)", got)
+	}
+
+	next := *cfg
+	next.URLs = []string{newSrv.URL("ldap", "127.0.0.1")}
+	next.Password = "new"
+
+	changed, err = c.Reconfigure(&next)
+	if err != nil || !changed {
+		t.Fatalf("Reconfigure(new) = %v, %v; want changed", changed, err)
+	}
+
+	if err := c.executeWithRetry(t.Context(), noop); err != nil {
+		t.Fatalf("operation after Reconfigure: %v", err)
+	}
+
+	if got := newSrv.Binds(); got != 1 {
+		t.Errorf("new server binds = %d, want 1", got)
+	}
+
+	if got := oldSrv.Binds(); got != 1 {
+		t.Errorf("old server binds = %d, want still 1", got)
+	}
+}
+
+// A connection that was in flight while the client was reconfigured is closed
+// when it comes back, not pooled with the old credentials.
+func TestClient_Reconfigure_DoesNotPoolStaleConnection(t *testing.T) {
+	t.Parallel()
+
+	c := retryClient(t)
+
+	gen := c.generation()
+
+	conn, err := c.getConnection(t.Context())
+	if err != nil {
+		t.Fatalf("getConnection: %v", err)
+	}
+
+	changed, err := c.Reconfigure(&ClientConfig{
+		URLs: c.identity().urls, BindDN: "uid=other", Password: "rotated",
+	})
+	if err != nil || !changed {
+		t.Fatalf("Reconfigure = %v, %v; want changed", changed, err)
+	}
+
+	c.returnConnection(conn, gen)
+
+	if len(c.pool) != 0 {
+		t.Errorf("pool holds %d connections, want 0", len(c.pool))
+	}
+
+	if !conn.IsClosing() {
+		t.Error("the stale connection was not closed")
+	}
+}
+
+func TestClient_Reconfigure_RejectsEmptyURL(t *testing.T) {
+	t.Parallel()
+
+	c := retryClient(t)
+
+	if _, err := c.Reconfigure(&ClientConfig{BindDN: "x", Password: "y"}); err == nil {
+		t.Error("expected an error for a configuration without URL")
+	}
+}

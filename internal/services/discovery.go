@@ -7,13 +7,11 @@ package services
 import (
 	"context"
 	"fmt"
-	"io/fs"
-	"os"
+	"net/url"
 	"strings"
 
 	carboldap "github.com/zextras/carbonio-configd/internal/ldap"
 	"github.com/zextras/carbonio-configd/internal/logger"
-	"github.com/zextras/carbonio-configd/internal/sys"
 )
 
 // legacyServiceNames are service names from LDAP that should be ignored.
@@ -58,7 +56,7 @@ func (c *Controller) DiscoverEnabledServices(ctx context.Context) ([]string, err
 
 	defer func() { _ = client.Close() }()
 
-	raw, err := client.GetEnabledServices(hostname)
+	raw, err := client.GetEnabledServices(ctx, hostname)
 	if err != nil {
 		logger.WarnContext(ctx, "LDAP query failed, trying cache", "error", err)
 
@@ -95,7 +93,9 @@ func (c *Controller) DiscoverEnabledServices(ctx context.Context) ([]string, err
 	return services, nil
 }
 
-// IsLDAPLocal returns true if the LDAP URL contains the local hostname.
+// IsLDAPLocal returns true if one of the ldap_url URLs points at the local
+// hostname. The host is compared whole (case-insensitively): a substring match
+// would take "mail" for "mail2.example.com", and an unset hostname for any URL.
 func (c *Controller) IsLDAPLocal() bool {
 	lc, err := c.loadConfig()
 	if err != nil {
@@ -103,9 +103,18 @@ func (c *Controller) IsLDAPLocal() bool {
 	}
 
 	hostname := lc["zimbra_server_hostname"]
-	ldapURL := lc["ldap_url"]
+	if hostname == "" {
+		return false
+	}
 
-	return strings.Contains(ldapURL, hostname)
+	for _, raw := range carboldap.ParseURLs(lc["ldap_url"]) {
+		u, parseErr := url.Parse(raw)
+		if parseErr == nil && strings.EqualFold(u.Hostname(), hostname) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // MapLDAPServiceToRegistry maps an LDAP zimbraServiceEnabled value to its
@@ -133,8 +142,6 @@ func (c *Controller) readCache(ctx context.Context) ([]string, error) {
 		return nil, fmt.Errorf("cannot determine enabled services: LDAP unreachable and cache missing")
 	}
 
-	logger.WarnContext(ctx, "Using cached service list — may be inaccurate", "cache", c.p.cacheFile)
-
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
 	services := make([]string, 0, len(lines))
 
@@ -145,29 +152,23 @@ func (c *Controller) readCache(ctx context.Context) ([]string, error) {
 		}
 	}
 
+	// DiscoverEnabledServices always lists zmconfigd, so a cache written by it
+	// is never empty: an empty one is damaged and would make `control start`
+	// start nothing.
+	if len(services) == 0 {
+		return nil, fmt.Errorf("cannot determine enabled services: LDAP unreachable and cache %s is empty",
+			c.p.cacheFile)
+	}
+
+	logger.WarnContext(ctx, "Using cached service list — may be inaccurate", "cache", c.p.cacheFile)
+
 	return services, nil
 }
 
 func (c *Controller) writeCache(ctx context.Context, services []string) {
 	content := strings.Join(services, "\n") + "\n"
 	// #nosec G306 - cache file needs to be readable by zextras group
-	if err := writeFile(c.env.FS, c.p.cacheFile, []byte(content), 0o600); err != nil {
+	if err := c.env.FS.WriteFileAtomic(c.p.cacheFile, []byte(content), 0o600); err != nil {
 		logger.WarnContext(ctx, "Failed to write service cache", "error", err)
 	}
-}
-
-// writeFile writes data to name like os.WriteFile (create or truncate, no
-// atomic rename), through the filesystem boundary.
-func writeFile(fsys sys.FS, name string, data []byte, perm fs.FileMode) error {
-	f, err := fsys.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
-	if err != nil {
-		return err //nolint:wrapcheck // same error os.WriteFile returns
-	}
-
-	_, err = f.Write(data)
-	if closeErr := f.Close(); err == nil {
-		err = closeErr
-	}
-
-	return err //nolint:wrapcheck // same error os.WriteFile returns
 }

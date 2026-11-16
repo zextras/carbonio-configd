@@ -51,7 +51,8 @@ type rcSeam struct {
 // stdout. Like the script it exits 1 only when there is no host: a
 // connection that fails or an exit status of the remote command are not
 // exit statuses (the script's `close` ignored them); the reason of a
-// connection that fails is printed on stderr.
+// connection that fails, or the status of a remote command that failed, is
+// printed on stderr.
 func RunRC(e *Env, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 || args[0] == "" {
 		_, _ = fmt.Fprint(stdout, RCUsage)
@@ -77,8 +78,8 @@ func rcLine(host, command string) string { return "HOST:" + host + " " + command
 // rcRun sends in to the zmrcd of host and relays its output to out (the
 // standard error of the session goes to errw). The error is a failure to
 // reach the remote command: the key, the connection, the authentication, the
-// session. The exit status of the remote command is ignored, as the script
-// did.
+// session, or a remote command that exited non-zero: the process exits 0 in
+// both cases, as the script did, but a caller in this process can tell.
 func (e *Env) rcRun(host string, in io.Reader, out, errw io.Writer) error {
 	if e.rc != nil && e.rc.run != nil {
 		return e.rc.run(host, in, out, errw)
@@ -238,15 +239,18 @@ func (e *Env) rcSession(ctx context.Context, client *ssh.Client, in io.Reader, o
 	}
 }
 
-// rcWaitError is the error of the end of a session: the exit status of the
-// remote command (or its absence) is not one.
+// rcWaitError is the error of the end of a session: a non-zero exit status of
+// the remote command is one; a missing status is not (nothing says it failed).
 func rcWaitError(err error) error {
 	var exit *ssh.ExitError
 
 	var missing *ssh.ExitMissingError
 
-	if err == nil || errors.As(err, &exit) || errors.As(err, &missing) {
+	switch {
+	case err == nil, errors.As(err, &missing):
 		return nil
+	case errors.As(err, &exit):
+		return fmt.Errorf("the remote command failed with status %d", exit.ExitStatus())
 	}
 
 	return fmt.Errorf("the connection failed: %w", err)

@@ -73,13 +73,13 @@ func readOrEmptyLocalConfig(path string) (*LocalConfig, error) {
 func setKey(lc *LocalConfig, pair Key) {
 	for i := range lc.Keys {
 		if lc.Keys[i].Name == pair.Name {
-			lc.Keys[i].Value = pair.Value
+			lc.Keys[i].Value = &pair.Value
 
 			return
 		}
 	}
 
-	lc.Keys = append(lc.Keys, pair)
+	lc.Keys = append(lc.Keys, fileKey{Name: pair.Name, Value: &pair.Value})
 }
 
 // KeyNotSetError reports a key that is neither configured in localconfig.xml nor
@@ -116,7 +116,7 @@ func RemoveKeys(path string, keys []string) error {
 func removeKey(lc *LocalConfig, key string) bool {
 	before := len(lc.Keys)
 
-	lc.Keys = slices.DeleteFunc(lc.Keys, func(k Key) bool { return k.Name == key })
+	lc.Keys = slices.DeleteFunc(lc.Keys, func(k fileKey) bool { return k.Name == key })
 
 	return len(lc.Keys) != before
 }

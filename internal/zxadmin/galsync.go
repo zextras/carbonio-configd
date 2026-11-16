@@ -206,17 +206,6 @@ type galSyncEnvelope struct {
 				ID   string `xml:"id,attr"`
 			} `xml:"account"`
 		} `xml:",any"`
-		Fault *struct {
-			FaultString string `xml:"faultstring"`
-			Reason      struct {
-				Text string `xml:"Text"`
-			} `xml:"Reason"`
-			Detail struct {
-				Error struct {
-					Code string `xml:"Code"`
-				} `xml:"Error"`
-			} `xml:"Detail"`
-		} `xml:"Fault"`
 	} `xml:"Body"`
 }
 
@@ -227,11 +216,13 @@ type galSyncEnvelope struct {
 func (c *Client) callGalSync(ctx context.Context, op, envelope string) ([]GalSyncAccount, error) {
 	ctx = logger.ContextWithComponentOnce(ctx, "zxadmin")
 
-	token, err := c.ensureToken(ctx)
-	if err != nil {
-		return nil, err
-	}
+	return withToken(ctx, c, func(token string) ([]GalSyncAccount, error) {
+		return c.sendGalSync(ctx, token, op, envelope)
+	})
+}
 
+// sendGalSync is one GAL sync request with token.
+func (c *Client) sendGalSync(ctx context.Context, token, op, envelope string) ([]GalSyncAccount, error) {
 	ctx, cancel := context.WithTimeout(ctx, galSyncTimeout)
 	defer cancel()
 
@@ -279,13 +270,8 @@ func parseGalSyncReply(op string, status int, raw []byte) ([]GalSyncAccount, err
 		return nil, fmt.Errorf("zxadmin: parse %s response: %w", op, err)
 	}
 
-	if f := env.Body.Fault; f != nil {
-		reason := f.Reason.Text
-		if reason == "" {
-			reason = f.FaultString
-		}
-
-		return nil, &Fault{Op: op, Code: f.Detail.Error.Code, Reason: reason}
+	if fault := soapFault(op, raw); fault != nil {
+		return nil, fault
 	}
 
 	if status != http.StatusOK {

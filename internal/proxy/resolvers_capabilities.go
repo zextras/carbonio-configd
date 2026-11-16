@@ -8,7 +8,9 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/zextras/carbonio-configd/internal/config"
 	"github.com/zextras/carbonio-configd/internal/logger"
@@ -74,8 +76,14 @@ const compressionMIMETypes = `    application/atom+xml
 // as CO-3565.
 func (g *Generator) resolveLookupHandlers(ctx context.Context) (any, error) {
 	extensionPort := "7072"
+
 	if val, ok := g.getConfigValue("zimbraExtensionBindPort", sourceGlobal); ok {
-		extensionPort = val
+		if validPort(val) {
+			extensionPort = val
+		} else {
+			logger.ErrorContext(ctx, "Ignoring invalid extension bind port, using default",
+				"port", truncateForLog(val))
+		}
 	}
 
 	rawHosts := ""
@@ -83,11 +91,14 @@ func (g *Generator) resolveLookupHandlers(ctx context.Context) (any, error) {
 		rawHosts = val
 	}
 
-	hosts := strings.Fields(normalizeMultiValue(rawHosts))
+	hosts := validLookupHosts(ctx, strings.Fields(normalizeMultiValue(rawHosts)))
+	if len(hosts) == 0 && strings.TrimSpace(rawHosts) != "" {
+		return nil, fmt.Errorf("zimbraReverseProxyAvailableLookupTargets has no valid host")
+	}
 
 	if len(hosts) == 0 {
 		if val, ok := g.getConfigValue("zimbra_server_hostname", sourceLocal); ok && val != "" {
-			hosts = []string{val}
+			hosts = validLookupHosts(ctx, []string{val})
 		}
 	}
 
@@ -107,12 +118,48 @@ func (g *Generator) resolveLookupHandlers(ctx context.Context) (any, error) {
 	return strings.Join(urls, " "), nil
 }
 
-// resolveHostToIP returns the first IP for host, or host itself when DNS
-// fails. Logs a WARN on lookup failure so an operator can spot a bad entry.
+// validLookupHosts drops the hosts that are not plain host tokens, since they
+// are spliced into the zm_lookup_handlers URLs.
+func validLookupHosts(ctx context.Context, hosts []string) []string {
+	return slices.DeleteFunc(hosts, func(host string) bool {
+		if validHostToken(host) {
+			return false
+		}
+
+		logger.ErrorContext(ctx, "Skipping invalid lookup target host", "host", truncateForLog(host))
+
+		return true
+	})
+}
+
+// hostLookupTimeout bounds the DNS lookup of one lookup target.
+const hostLookupTimeout = 5 * time.Second
+
+// resolveHostToIP returns the first IPv4 address for host (the legacy
+// InetAddress.getByName preference), else the first address, in URL host form
+// (IPv6 bracketed). It returns host itself when DNS fails. Logs a WARN on
+// lookup failure so an operator can spot a bad entry.
 func resolveHostToIP(ctx context.Context, host string) string {
+	ctx, cancel := context.WithTimeout(ctx, hostLookupTimeout)
+	defer cancel()
+
 	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
 	if err == nil && len(ips) > 0 {
-		return ips[0].String()
+		ip := ips[0].IP
+
+		for _, candidate := range ips {
+			if candidate.IP.To4() != nil {
+				ip = candidate.IP
+
+				break
+			}
+		}
+
+		if ip.To4() == nil {
+			return "[" + ip.String() + "]"
+		}
+
+		return ip.String()
 	}
 
 	logger.WarnContext(ctx, "Failed to resolve lookup host to IP, using hostname",

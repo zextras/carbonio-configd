@@ -37,6 +37,7 @@ const (
 	resultNoSuchObject   int64   = 32
 	resultProtocolError  int64   = 2
 	resultUnavailableErr int64   = 52
+	resultInvalidCreds   int64   = 49
 )
 
 // Options selects the behaviour of a Server.
@@ -57,6 +58,8 @@ type Options struct {
 	// HangOn is "starttls", "bind" or "search": the server reads that request
 	// and never answers, like a wedged slapd.
 	HangOn string
+	// RefuseBind makes every simple bind fail with invalidCredentials.
+	RefuseBind bool
 }
 
 // Server is a minimal in-process LDAP server: it answers StartTLS,
@@ -198,6 +201,10 @@ func (ss *session) dispatch(id int64, req *ber.Packet) bool {
 
 		if ss.s.opts.HangOn == "bind" {
 			return ss.hang()
+		}
+
+		if ss.s.opts.RefuseBind {
+			return writePacket(ss.conn, result(id, opBindResponse, resultInvalidCreds)) == nil
 		}
 
 		return writePacket(ss.conn, result(id, opBindResponse, resultSuccess)) == nil

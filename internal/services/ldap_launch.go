@@ -105,7 +105,7 @@ func (c *Controller) awaitLDAPReady(ctx context.Context, lc map[string]string, e
 		case <-ctx.Done():
 			return ctx.Err()
 		case waitErr := <-exited:
-			return fmt.Errorf("%s exited during startup before becoming ready: %w", service, waitErr)
+			return exitedBeforeReady(service, "becoming ready", waitErr)
 		case <-ticker.C():
 			if c.env.Clock.Now().After(deadline) {
 				return fmt.Errorf("%s did not become ready within %s", service, ldapReadyTimeout)

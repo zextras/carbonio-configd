@@ -6,6 +6,7 @@ package setup
 
 import (
 	"bytes"
+	"context"
 	"crypto"
 	"crypto/x509"
 	"errors"
@@ -68,17 +69,19 @@ type cmDir struct {
 	modErr  error
 }
 
-func (d *cmDir) GetGlobalConfig() (map[string]string, error) { return d.global, d.readErr }
+func (d *cmDir) GetGlobalConfig(context.Context) (map[string]string, error) {
+	return d.global, d.readErr
+}
 
-func (d *cmDir) GetServerConfig(host string) (map[string]string, error) {
+func (d *cmDir) GetServerConfig(_ context.Context, host string) (map[string]string, error) {
 	return d.servers[host], d.readErr
 }
 
-func (d *cmDir) GetAllServers() ([]string, error) { return d.all, d.readErr }
-func (d *cmDir) BaseDN() string                   { return "cn=zimbra" }
-func (d *cmDir) Close() error                     { return nil }
+func (d *cmDir) GetAllServers(context.Context) ([]string, error) { return d.all, d.readErr }
+func (d *cmDir) BaseDN() string                                  { return "cn=zimbra" }
+func (d *cmDir) Close() error                                    { return nil }
 
-func (d *cmDir) ModifyValues(dn string, _, del, replace map[string][]string) error {
+func (d *cmDir) ModifyValues(_ context.Context, dn string, _, del, replace map[string][]string) error {
 	if d.modErr != nil {
 		return d.modErr
 	}

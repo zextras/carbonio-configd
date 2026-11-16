@@ -5,6 +5,7 @@
 package setup
 
 import (
+	"context"
 	"strconv"
 	"testing"
 
@@ -25,7 +26,7 @@ func newProvDirectory(t *testing.T, s *lwServer) ldapDirectory {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = c.Close() })
 
-	return ldapDirectory{c}
+	return ldapDirectory{Client: c, ctx: context.Background()}
 }
 
 func TestLDAPDirectorySearch_MapsScopesAndLowercasesAttributeNames(t *testing.T) {
@@ -157,7 +158,7 @@ func TestProvOpenLDAP_AnIncompleteLocalConfigIsRefused(t *testing.T) {
 
 func TestRunProv_AnUnreadableSchemaIsReported(t *testing.T) {
 	e, _, _ := testEnv(t)
-	provSchemas.Delete(e)
+	e.schema = nil
 
 	err := e.Prov("mcf", "zimbraDefaultDomainName", "example.com")
 

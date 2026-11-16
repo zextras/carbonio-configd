@@ -182,8 +182,7 @@ func main() {
 func run(argv []string, env sys.System, stdin io.Reader, stdout, stderr io.Writer) int {
 	std := &stdio{In: stdin, Out: stdout, Err: stderr, Args: argv}
 
-	// Shell completion asks for a list of words, and must stay quick and quiet.
-	if !isCompletionRequest(argv[1:]) {
+	if wantsPerlEnv(argv[1:]) {
 		if err := ensureZextrasPerlEnv(context.Background(), env); err != nil {
 			_, _ = fmt.Fprintf(stderr, "Warning: perl environment not set: %v\n", err)
 		}
@@ -197,6 +196,21 @@ func run(argv []string, env sys.System, stdin io.Reader, stdout, stderr io.Write
 	err := root.Execute()
 
 	return a.exitStatus(err, name, stderr)
+}
+
+// wantsPerlEnv reports whether the command needs the Carbonio perl variables.
+// Shell completion asks for a list of words and must stay quick and quiet; and
+// `configd exec` hands the program the launch variables derived from
+// localconfig, so it must not add PERL5LIB/PERLLIB (nor spawn perl to find
+// them) to an environment the caller prepared.
+func wantsPerlEnv(args []string) bool {
+	if isCompletionRequest(args) {
+		return false
+	}
+
+	i := slices.IndexFunc(args, func(a string) bool { return !strings.HasPrefix(a, "-") })
+
+	return i < 0 || args[i] != "exec"
 }
 
 // isCompletionRequest reports whether args ask for a completion: the hidden

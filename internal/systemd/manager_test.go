@@ -65,7 +65,7 @@ func TestIsEnabled(t *testing.T) {
 	t.Parallel()
 
 	f := systest.New()
-	f.Exec.OnCmdline("systemctl is-enabled bad.target", systest.Fail(1, "disabled"))
+	f.Exec.OnCmdline("/usr/bin/systemctl is-enabled bad.target", systest.Fail(1, "disabled"))
 	m := NewManager(f.System())
 
 	enabled, err := m.IsEnabled(context.Background(), "good.target")
@@ -76,8 +76,8 @@ func TestIsEnabled(t *testing.T) {
 	require.NoError(t, err, "a non-zero exit is an answer, not an error")
 	assert.False(t, enabled)
 	assert.Equal(t, []string{
-		"systemctl is-enabled good.target",
-		"systemctl is-enabled bad.target",
+		"/usr/bin/systemctl is-enabled good.target",
+		"/usr/bin/systemctl is-enabled bad.target",
 	}, f.Exec.Lines())
 }
 
@@ -100,10 +100,10 @@ func TestIsSystemdEnabled(t *testing.T) {
 			t.Parallel()
 
 			f := systest.New()
-			f.Exec.OnCmdline("systemctl is-enabled", systest.Fail(1, ""))
+			f.Exec.OnCmdline("/usr/bin/systemctl is-enabled", systest.Fail(1, ""))
 
 			for target := range tt.enabled {
-				f.Exec.OnCmdline("systemctl is-enabled "+target, systest.Reply("enabled"))
+				f.Exec.OnCmdline("/usr/bin/systemctl is-enabled "+target, systest.Reply("enabled"))
 			}
 
 			m := NewManager(f.System())
@@ -148,8 +148,8 @@ func TestIsSystemdEnabled_EnabledTargetWinsOverProbeFailure(t *testing.T) {
 	t.Parallel()
 
 	f := systest.New()
-	f.Exec.OnCmdline("systemctl is-enabled", systest.Reply("enabled"))
-	f.Exec.FailStart(func(c *sys.Cmd) bool { return c.String() == "systemctl is-enabled "+carbonioTargets[0] },
+	f.Exec.OnCmdline("/usr/bin/systemctl is-enabled", systest.Reply("enabled"))
+	f.Exec.FailStart(func(c *sys.Cmd) bool { return c.String() == "/usr/bin/systemctl is-enabled "+carbonioTargets[0] },
 		errors.New("exec: systemctl: transient"))
 
 	got, err := NewManager(f.System()).IsSystemdEnabled(context.Background())

@@ -117,7 +117,8 @@ func TestControlStart_RewritesOnceUpFrontThenStartsNoRewrite(t *testing.T) {
 }
 
 func TestControlStart_NothingToStartDoesNotRewrite(t *testing.T) {
-	rf := newRewriteFlow(t, nil)
+	// configd is always in the enabled list and is already running here.
+	rf := newRewriteFlow(t, nil, "configd")
 
 	c, _ := newConsole()
 

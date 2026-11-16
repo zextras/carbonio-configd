@@ -8,6 +8,7 @@
 package tls
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"testing"
@@ -106,7 +107,7 @@ func newTLSTestClient(t *testing.T) *carboldap.Client {
 func firstServer(t *testing.T, client *carboldap.Client) string {
 	t.Helper()
 
-	servers, err := client.GetAllServers()
+	servers, err := client.GetAllServers(context.Background())
 	if err != nil {
 		t.Fatalf("failed to list servers: %v", err)
 	}
@@ -121,12 +122,12 @@ func TestContainer_IsReverseProxyBackend(t *testing.T) {
 	client := newTLSTestClient(t)
 	hostname := firstServer(t, client)
 
-	_, err := IsReverseProxyBackend(client, hostname)
+	_, err := IsReverseProxyBackend(context.Background(), client, hostname)
 	if err != nil {
 		t.Fatalf("IsReverseProxyBackend(%q): %v", hostname, err)
 	}
 
-	_, err = IsReverseProxyBackend(client, "no-such-host.invalid")
+	_, err = IsReverseProxyBackend(context.Background(), client, "no-such-host.invalid")
 	if err == nil {
 		t.Fatal("expected error for non-existent server")
 	}
@@ -135,7 +136,7 @@ func TestContainer_IsReverseProxyBackend(t *testing.T) {
 func TestContainer_EnumerateProxies(t *testing.T) {
 	client := newTLSTestClient(t)
 
-	proxies, err := EnumerateProxies(client)
+	proxies, err := EnumerateProxies(context.Background(), client)
 	if err != nil {
 		t.Fatalf("EnumerateProxies: %v", err)
 	}
@@ -148,7 +149,7 @@ func TestContainer_GetProxiesForHost(t *testing.T) {
 	client := newTLSTestClient(t)
 	hostname := firstServer(t, client)
 
-	proxies, err := GetProxiesForHost(client, hostname)
+	proxies, err := GetProxiesForHost(context.Background(), client, hostname)
 	if err != nil {
 		t.Fatalf("GetProxiesForHost(%q): %v", hostname, err)
 	}
@@ -161,7 +162,7 @@ func TestContainer_ReadProxySettings(t *testing.T) {
 	client := newTLSTestClient(t)
 	hostname := firstServer(t, client)
 
-	settings, err := ReadProxySettings(client, hostname)
+	settings, err := ReadProxySettings(context.Background(), client, hostname)
 	if err != nil {
 		t.Logf("ReadProxySettings(%q) returned error (acceptable): %v", hostname, err)
 		return
@@ -176,11 +177,11 @@ func TestContainer_SetMailMode(t *testing.T) {
 	client := newTLSTestClient(t)
 	hostname := firstServer(t, client)
 
-	if err := SetMailMode(client, hostname, ModeHTTPS); err != nil {
+	if err := SetMailMode(context.Background(), client, hostname, ModeHTTPS); err != nil {
 		t.Fatalf("SetMailMode(%q, %q): %v", hostname, ModeHTTPS, err)
 	}
 
-	entry, err := client.GetEntry(ServerBackendDN(hostname, "cn=zimbra"), []string{"zimbraMailMode"})
+	entry, err := client.GetEntry(context.Background(), ServerBackendDN(hostname, "cn=zimbra"), []string{"zimbraMailMode"})
 	if err != nil {
 		t.Fatalf("GetEntry after SetMailMode: %v", err)
 	}

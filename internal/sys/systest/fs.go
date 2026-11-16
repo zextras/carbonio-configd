@@ -339,6 +339,18 @@ func (m *memFile) Close() error {
 	return nil
 }
 
+// Sync implements sys.File: memory is already as stable as it gets.
+func (m *memFile) Sync() error {
+	m.fs.mu.Lock()
+	defer m.fs.mu.Unlock()
+
+	if m.closed {
+		return os.ErrClosed
+	}
+
+	return nil
+}
+
 // Chown implements sys.File: the owner of the open file (fchown).
 func (m *memFile) Chown(uid, gid int) error {
 	m.fs.rec.Recordf("fs.fchown", fmtPathIDs, m.name, uid, gid)

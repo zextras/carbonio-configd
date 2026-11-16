@@ -6,6 +6,7 @@ package provision
 
 import (
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 )
@@ -78,13 +79,19 @@ func (p *Provisioner) CreateAccount(address, password string, mods Mods) (string
 		return "", err
 	}
 
-	p.finishCreate(c, kindNone, dn, mods)
-
 	if password != "" && !attrs.has(attrUserPassword) {
 		if err := p.Dir.SetPassword(dn, password); err != nil {
-			return id, failWith(err, "unable to set the password of %s", address)
+			// Kept, the account would have no password and a retry would only
+			// find it existing.
+			if delErr := p.Dir.Delete(dn); delErr != nil {
+				err = errors.Join(err, fmt.Errorf("removing the account: %w", delErr))
+			}
+
+			return "", failWith(err, "unable to set the password of %s", address)
 		}
 	}
+
+	p.finishCreate(c, kindNone, dn, mods)
 
 	return id, nil
 }

@@ -7,6 +7,7 @@ package proxy
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/zextras/carbonio-configd/internal/logger"
@@ -115,7 +116,7 @@ func (g *Generator) resolveDHParamEnabled(ctx context.Context) (any, error) {
 // resolveMailWhitelistIPs renders zimbraReverseProxyIPThrottleWhitelist as nginx
 // mail_whitelist_ip directives, one per IP, matching legacy ServersVar formatting
 // apart from indentation (continuation lines are indented by the renderer).
-func (g *Generator) resolveMailWhitelistIPs(_ context.Context) (any, error) {
+func (g *Generator) resolveMailWhitelistIPs(ctx context.Context) (any, error) {
 	raw, ok := g.getConfigValue("zimbraReverseProxyIPThrottleWhitelist", sourceServer, sourceGlobal)
 	if !ok || raw == "" {
 		return "", nil
@@ -129,6 +130,13 @@ func (g *Generator) resolveMailWhitelistIPs(_ context.Context) (any, error) {
 	var sb strings.Builder
 
 	for _, ip := range ips {
+		// The token is spliced into a directive: "1.2.3.4;}" must not pass.
+		if !validIPOrCIDR(ip) {
+			logger.ErrorContext(ctx, "Skipping invalid mail whitelist address", "address", truncateForLog(ip))
+
+			continue
+		}
+
 		sb.WriteString("mail_whitelist_ip    ")
 		sb.WriteString(ip)
 		sb.WriteString(";\n")
@@ -137,13 +145,32 @@ func (g *Generator) resolveMailWhitelistIPs(_ context.Context) (any, error) {
 	return sb.String(), nil
 }
 
+// ldapConfigured reports whether a native LDAP client is available. Without
+// one (offline rendering, tests) there is no server source at all.
+func (g *Generator) ldapConfigured() bool {
+	return g.LdapClient != nil && g.LdapClient.NativeClient != nil
+}
+
+// unavailableOffline is the error path of the availability enablers. With LDAP
+// configured a failed backend query is an error, since "unavailable" would
+// comment out the upstream and nginx would reload into an outage; without LDAP
+// there is nothing to query, so the backend is simply unavailable.
+func (g *Generator) unavailableOffline(ctx context.Context, err error) (any, error) {
+	if g.ldapConfigured() {
+		return nil, fmt.Errorf("query reverse proxy backends: %w", err)
+	}
+
+	logger.WarnContext(ctx, resolverQueryFailed, "error", err)
+
+	return false, nil
+}
+
 // resolveWebAvailable returns true when at least one webclient upstream server is configured.
 // Mirrors legacy ZMWebAvailableVar (ProxyConfGen.java:1702).
 func (g *Generator) resolveWebAvailable(ctx context.Context) (any, error) {
 	servers, err := g.reverseProxyBackendsRaw(ctx, false)
 	if err != nil {
-		logger.WarnContext(ctx, resolverQueryFailed, "error", err)
-		return false, nil //nolint:nilerr // test environments without zmprov return empty
+		return g.unavailableOffline(ctx, err)
 	}
 
 	return len(servers) > 0, nil

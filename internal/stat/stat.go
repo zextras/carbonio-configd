@@ -91,6 +91,13 @@ func (e *Env) niceRoundWait(interval time.Duration) time.Duration {
 // exist and be a collector (its command line is a zmstat-* script, "configd stat" or, of the release before,
 // "setup stat").
 func (e *Env) alive(pid int) bool {
+	// A pid file naming this very process is a leftover whose pid was reused
+	// (a container restart with a persistent /run): it is never another
+	// collector.
+	if pid == e.Pid {
+		return false
+	}
+
 	if e.PidAlive != nil {
 		return e.PidAlive(pid)
 	}
@@ -121,21 +128,10 @@ var errAlreadyRunning = errors.New("already running")
 
 // createPid is Stat.pm createPidFile: a pid file of a live collector means
 // errAlreadyRunning (the caller exits 0 after the message), a stale one is
-// replaced.
+// replaced. The file is created with O_EXCL so two collectors starting at once
+// cannot both pass.
 func (e *Env) createPid(name string) error {
 	pidFile := filepath.Join(e.PidDir, name)
-
-	if _, err := os.Stat(pidFile); err == nil {
-		if pid, err := strconv.Atoi(readPid(pidFile)); err == nil && pid > 0 {
-			if e.alive(pid) {
-				_, _ = fmt.Fprintf(e.Stderr, "%s: Already running as pid %d\n", name, pid)
-
-				return errAlreadyRunning
-			}
-
-			_ = os.Remove(pidFile)
-		}
-	}
 
 	if _, err := os.Stat(e.Dir); err != nil {
 		return fmt.Errorf("%s does not exist", e.Dir)
@@ -145,15 +141,31 @@ func (e *Env) createPid(name string) error {
 		_ = os.Mkdir(e.PidDir, 0o755)
 	}
 
-	f, err := os.OpenFile(pidFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o666) //nolint:gosec // a pid file
-	if err != nil {
-		return fmt.Errorf("unable to create pid file %s: %w", pidFile, err)
+	// Two rounds: the first may find a stale file to remove, the second only
+	// loses to a collector that created its file in between.
+	for range 2 {
+		f, err := os.OpenFile(pidFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o666) //nolint:gosec // a pid file
+		if err == nil {
+			_, werr := fmt.Fprintf(f, "%d\n", e.Pid)
+			cerr := f.Close()
+
+			return errors.Join(werr, cerr)
+		}
+
+		if !errors.Is(err, fs.ErrExist) {
+			return fmt.Errorf("unable to create pid file %s: %w", pidFile, err)
+		}
+
+		if pid, perr := strconv.Atoi(readPid(pidFile)); perr == nil && pid > 0 && e.alive(pid) {
+			_, _ = fmt.Fprintf(e.Stderr, "%s: Already running as pid %d\n", name, pid)
+
+			return errAlreadyRunning
+		}
+
+		_ = os.Remove(pidFile)
 	}
 
-	_, werr := fmt.Fprintf(f, "%d\n", e.Pid)
-	cerr := f.Close()
-
-	return errors.Join(werr, cerr)
+	return fmt.Errorf("unable to create pid file %s: %w", pidFile, fs.ErrExist)
 }
 
 // removePid deletes the pid file when it still names this process.

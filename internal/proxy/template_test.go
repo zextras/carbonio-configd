@@ -884,7 +884,10 @@ func TestGetDomainsNilLdap(t *testing.T) {
 	g := &Generator{env: sys.Real(), LdapClient: nil}
 	tp := NewTemplateProcessor(g, g.env.FS, "", "")
 
-	domains := tp.getDomains(context.Background())
+	domains, err := tp.getDomains(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(domains) != 0 {
 		t.Errorf("expected empty domains when LdapClient is nil, got %d", len(domains))
 	}
@@ -900,7 +903,10 @@ func TestGetDomainsWithProvider(t *testing.T) {
 		}
 	}
 
-	domains := tp.getDomains(context.Background())
+	domains, err := tp.getDomains(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(domains) != 1 {
 		t.Fatalf("expected 1 domain, got %d", len(domains))
 	}
@@ -914,7 +920,10 @@ func TestGetServersWithServiceNilLdap(t *testing.T) {
 	g := &Generator{env: sys.Real(), LdapClient: nil}
 	tp := NewTemplateProcessor(g, g.env.FS, "", "")
 
-	servers := tp.getServersWithService(context.Background(), "mailbox")
+	servers, err := tp.getServersWithService(context.Background(), "mailbox")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(servers) != 0 {
 		t.Errorf("expected empty servers when LdapClient is nil, got %d", len(servers))
 	}
@@ -931,7 +940,10 @@ func TestGetServersWithServiceWithProvider(t *testing.T) {
 		return nil
 	}
 
-	servers := tp.getServersWithService(context.Background(), "mailbox")
+	servers, err := tp.getServersWithService(context.Background(), "mailbox")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(servers) != 1 {
 		t.Fatalf("expected 1 server, got %d", len(servers))
 	}
@@ -1014,7 +1026,10 @@ func TestGetDomainsWithMultipleProviderDomainsSorted(t *testing.T) {
 		}
 	}
 
-	domains := tp.getDomains(context.Background())
+	domains, err := tp.getDomains(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(domains) != 3 {
 		t.Fatalf("expected 3 domains, got %d", len(domains))
 	}
@@ -1036,7 +1051,10 @@ func TestGetServersWithServiceSorted(t *testing.T) {
 		}
 	}
 
-	servers := tp.getServersWithService(context.Background(), "mailbox")
+	servers, err := tp.getServersWithService(context.Background(), "mailbox")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(servers) != 3 {
 		t.Fatalf("expected 3 servers, got %d", len(servers))
 	}

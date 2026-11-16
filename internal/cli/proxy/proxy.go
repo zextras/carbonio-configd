@@ -13,6 +13,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/go-ldap/ldap/v3"
@@ -87,8 +89,8 @@ type Options struct {
 // ldapConn is the subset of the LDAP client the enable/disable/status
 // actions use.
 type ldapConn interface {
-	ModifyAttribute(dn, attribute, value string) error
-	GetEntry(dn string, attributes []string) (*ldap.Entry, error)
+	ModifyAttribute(ctx context.Context, dn, attribute, value string) error
+	GetEntry(ctx context.Context, dn string, attributes []string) (*ldap.Entry, error)
 	Close() error
 }
 
@@ -99,7 +101,7 @@ func Run(ctx context.Context, env sys.System, stdout, stderr io.Writer, opts *Op
 	case ActionConf:
 		return runConf(env.FS, stdout, stderr, opts)
 	case ActionStatus:
-		return withLDAP(stdout, stderr, showProxyStatus)
+		return withLDAP(ctx, stdout, stderr, showProxyStatus)
 	case ActionGen:
 		return runGen(ctx, stdout, stderr, opts)
 	case ActionTemplateFmt, ActionTemplateLint, ActionTemplateRender:
@@ -120,7 +122,7 @@ func Run(ctx context.Context, env sys.System, stdout, stderr io.Writer, opts *Op
 			value = "FALSE"
 		}
 
-		return setProxyProtocol(stdout, stderr, opts.Protocol, value)
+		return setProxyProtocol(ctx, stdout, stderr, opts.Protocol, value)
 	}
 
 	_, _ = fmt.Fprintf(stderr, "Unknown proxy action: %s\n", opts.Action)
@@ -163,7 +165,10 @@ func contactDaemon(stderr io.Writer, opts *Options) int {
 
 // withLDAP loads localconfig, dials LDAP and runs fn against the connection.
 // Failures are reported on stderr and yield exit status 1.
-func withLDAP(stdout, stderr io.Writer, fn func(stdout, stderr io.Writer, conn ldapConn, serverDN string) int) int {
+func withLDAP(
+	ctx context.Context, stdout, stderr io.Writer,
+	fn func(ctx context.Context, stdout, stderr io.Writer, conn ldapConn, serverDN string) int,
+) int {
 	lc, err := localconfig.LoadEffective()
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "Error loading localconfig: %v\n", err)
@@ -178,55 +183,62 @@ func withLDAP(stdout, stderr io.Writer, fn func(stdout, stderr io.Writer, conn l
 		return 1
 	}
 
-	return fn(stdout, stderr, client, serverDN(lc[cliutil.LCKeyZimbraServerHostname]))
+	return fn(ctx, stdout, stderr, client, serverDN(lc[cliutil.LCKeyZimbraServerHostname]))
 }
 
 func serverDN(hostname string) string {
 	return fmt.Sprintf("cn=%s,cn=servers,cn=zimbra", hostname)
 }
 
-func setProxyProtocol(stdout, stderr io.Writer, protocol, value string) int {
+func setProxyProtocol(ctx context.Context, stdout, stderr io.Writer, protocol, value string) int {
 	attr, ok := proxyProtocols[strings.ToLower(protocol)]
 	if !ok {
 		_, _ = fmt.Fprintf(stderr, "Unknown protocol: %s\n", protocol)
-		_, _ = fmt.Fprintln(stderr, "Valid protocols: http, https, imap, imaps, pop3, pop3s")
+		_, _ = fmt.Fprintln(stderr, "Valid protocols: http, https, mail, imap, imaps, pop3, pop3s")
 
 		return 1
 	}
 
-	return withLDAP(stdout, stderr, func(stdout, stderr io.Writer, conn ldapConn, dn string) int {
-		return modifyProtocol(stdout, stderr, conn, dn, protocol, attr, value)
-	})
+	return withLDAP(ctx, stdout, stderr, modifyProtocol(protocol, attr, value))
 }
 
-func modifyProtocol(stdout, stderr io.Writer, conn ldapConn, dn, protocol, attr, value string) int {
-	err := conn.ModifyAttribute(dn, attr, value)
+// modifyProtocol is the withLDAP step that sets attr (the switch of protocol)
+// to value on the server entry dn.
+func modifyProtocol(
+	protocol, attr, value string,
+) func(ctx context.Context, stdout, stderr io.Writer, conn ldapConn, dn string) int {
+	return func(ctx context.Context, stdout, stderr io.Writer, conn ldapConn, dn string) int {
+		err := conn.ModifyAttribute(ctx, dn, attr, value)
 
-	_ = conn.Close()
+		_ = conn.Close()
 
-	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "Error: failed to set %s=%s: %v\n", attr, value, err)
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "Error: failed to set %s=%s: %v\n", attr, value, err)
 
-		return 1
+			return 1
+		}
+
+		action := "Enabled"
+		if value == "FALSE" {
+			action = "Disabled"
+		}
+
+		_, _ = fmt.Fprintf(stdout, "%s %s proxy\n", action, protocol)
+
+		return 0
 	}
-
-	action := "Enabled"
-	if value == "FALSE" {
-		action = "Disabled"
-	}
-
-	_, _ = fmt.Fprintf(stdout, "%s %s proxy\n", action, protocol)
-
-	return 0
 }
 
-func showProxyStatus(stdout, stderr io.Writer, conn ldapConn, dn string) int {
-	attrs := make([]string, 0, len(proxyProtocols))
-	for _, attr := range proxyProtocols {
-		attrs = append(attrs, attr)
+func showProxyStatus(ctx context.Context, stdout, stderr io.Writer, conn ldapConn, dn string) int {
+	// Sorted, so the output does not depend on map iteration order.
+	protocols := slices.Sorted(maps.Keys(proxyProtocols))
+
+	attrs := make([]string, 0, len(protocols))
+	for _, protocol := range protocols {
+		attrs = append(attrs, proxyProtocols[protocol])
 	}
 
-	entry, err := conn.GetEntry(dn, attrs)
+	entry, err := conn.GetEntry(ctx, dn, attrs)
 
 	_ = conn.Close()
 
@@ -238,10 +250,10 @@ func showProxyStatus(stdout, stderr io.Writer, conn ldapConn, dn string) int {
 
 	_, _ = fmt.Fprintln(stdout, "Proxy Protocol Status:")
 
-	for protocol, attr := range proxyProtocols {
+	for _, protocol := range protocols {
 		proxyStatus := "disabled"
 
-		if strings.EqualFold(entry.GetAttributeValue(attr), "TRUE") {
+		if strings.EqualFold(entry.GetAttributeValue(proxyProtocols[protocol]), "TRUE") {
 			proxyStatus = "enabled"
 		}
 

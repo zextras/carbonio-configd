@@ -23,6 +23,10 @@ import (
 // (libsystemd's sd_booted(3)).
 const runSystemdDir = "/run/systemd/system"
 
+// SystemctlBin is the absolute systemctl path (no PATH lookup: configd runs as
+// root or zextras and must not execute whatever PATH resolves first).
+const SystemctlBin = "/usr/bin/systemctl"
+
 // Manager provides an interface for interacting with systemd. Every host
 // effect goes through the injected sys.System.
 type Manager struct {
@@ -66,7 +70,7 @@ func (m *Manager) IsBooted() bool {
 func (m *Manager) IsEnabled(ctx context.Context, unit string) (bool, error) {
 	ctx = logger.ContextWithComponent(ctx, "systemd")
 
-	_, err := m.env.Exec.Run(ctx, &sys.Cmd{Path: "systemctl", Args: []string{"is-enabled", unit}})
+	_, err := m.env.Exec.Run(ctx, &sys.Cmd{Path: SystemctlBin, Args: []string{"is-enabled", unit}})
 	if err == nil {
 		return true, nil
 	}

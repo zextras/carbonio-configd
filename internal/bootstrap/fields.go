@@ -57,6 +57,9 @@ type Field struct {
 	Enum []string
 	// Check names the format of the value (see the check tag), or "".
 	Check string
+	// Min and Max bound an int field (see the range tag); Max 0: no upper
+	// bound.
+	Min, Max int
 
 	index []int
 	kind  reflect.Kind
@@ -107,6 +110,10 @@ func collectFields(t reflect.Type, prefix string, index []int) []*Field {
 			kind:   sf.Type.Kind(),
 		}
 
+		if r := sf.Tag.Get("range"); r != "" {
+			f.Min, f.Max = parseRange(r)
+		}
+
 		if e := sf.Tag.Get("enum"); e != "" {
 			f.Enum = strings.Split(e, "|")
 		}
@@ -115,6 +122,25 @@ func collectFields(t reflect.Type, prefix string, index []int) []*Field {
 	}
 
 	return out
+}
+
+// parseRange parses a range tag, "min-max" or "min-" (no upper bound). A
+// malformed tag is a programming error.
+func parseRange(tag string) (lo, hi int) {
+	a, b, _ := strings.Cut(tag, "-")
+
+	lo, err := strconv.Atoi(a)
+	if err != nil {
+		panic("bootstrap: bad range tag " + tag)
+	}
+
+	if b != "" {
+		if hi, err = strconv.Atoi(b); err != nil {
+			panic("bootstrap: bad range tag " + tag)
+		}
+	}
+
+	return lo, hi
 }
 
 func splitTag(tag string) []string {
@@ -191,6 +217,12 @@ func (f *Field) Set(c *Config, raw string) error {
 	default:
 		if err := f.checkEnum(raw); err != nil {
 			return err
+		}
+
+		// Names are case-insensitive: store them lower case so that the
+		// comparisons of ldap.host with host.hostname hold for any spelling.
+		if f.Check == "fqdn" {
+			raw = strings.ToLower(raw)
 		}
 
 		v.SetString(raw)

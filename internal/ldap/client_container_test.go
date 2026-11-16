@@ -117,7 +117,7 @@ func newTestClient(t *testing.T) *Client {
 func TestContainer_Search(t *testing.T) {
 	client := newTestClient(t)
 
-	result, err := client.Search("cn=config,cn=zimbra", "(objectClass=*)", []string{"*"}, ldap.ScopeBaseObject)
+	result, err := client.Search(t.Context(), "cn=config,cn=zimbra", "(objectClass=*)", []string{"*"}, ldap.ScopeBaseObject)
 	if err != nil {
 		t.Fatalf("Search ScopeBaseObject: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestContainer_Search(t *testing.T) {
 		t.Fatal("Search ScopeBaseObject returned no entries")
 	}
 
-	result, err = client.Search("cn=servers,cn=zimbra", "(objectClass=zimbraServer)", []string{"cn"}, ldap.ScopeSingleLevel)
+	result, err = client.Search(t.Context(), "cn=servers,cn=zimbra", "(objectClass=zimbraServer)", []string{"cn"}, ldap.ScopeSingleLevel)
 	if err != nil {
 		t.Fatalf("Search ScopeSingleLevel: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestContainer_Search(t *testing.T) {
 func TestContainer_GetEntry(t *testing.T) {
 	client := newTestClient(t)
 
-	entry, err := client.GetEntry("cn=config,cn=zimbra", []string{"*"})
+	entry, err := client.GetEntry(t.Context(), "cn=config,cn=zimbra", []string{"*"})
 	if err != nil {
 		t.Fatalf("GetEntry cn=config,cn=zimbra: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestContainer_GetEntry(t *testing.T) {
 		t.Fatal("GetEntry returned nil")
 	}
 
-	_, err = client.GetEntry("cn=nonexistent,cn=zimbra", []string{"*"})
+	_, err = client.GetEntry(t.Context(), "cn=nonexistent,cn=zimbra", []string{"*"})
 	if err == nil {
 		t.Fatal("GetEntry nonexistent: expected error, got nil")
 	}
@@ -154,7 +154,7 @@ func TestContainer_GetEntry(t *testing.T) {
 func TestContainer_GetGlobalConfig(t *testing.T) {
 	client := newTestClient(t)
 
-	config, err := client.GetGlobalConfig()
+	config, err := client.GetGlobalConfig(t.Context())
 	if err != nil {
 		t.Fatalf("GetGlobalConfig: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestContainer_GetGlobalConfig(t *testing.T) {
 func TestContainer_GetServerConfig(t *testing.T) {
 	client := newTestClient(t)
 
-	servers, err := client.GetAllServers()
+	servers, err := client.GetAllServers(t.Context())
 	if err != nil {
 		t.Fatalf("GetAllServers: %v", err)
 	}
@@ -174,7 +174,7 @@ func TestContainer_GetServerConfig(t *testing.T) {
 		t.Fatal("no servers in container")
 	}
 
-	config, err := client.GetServerConfig(servers[0])
+	config, err := client.GetServerConfig(t.Context(), servers[0])
 	if err != nil {
 		t.Fatalf("GetServerConfig(%s): %v", servers[0], err)
 	}
@@ -186,7 +186,7 @@ func TestContainer_GetServerConfig(t *testing.T) {
 func TestContainer_GetAllServers(t *testing.T) {
 	client := newTestClient(t)
 
-	servers, err := client.GetAllServers()
+	servers, err := client.GetAllServers(t.Context())
 	if err != nil {
 		t.Fatalf("GetAllServers: %v", err)
 	}
@@ -198,7 +198,7 @@ func TestContainer_GetAllServers(t *testing.T) {
 func TestContainer_GetAllServersWithAttributes(t *testing.T) {
 	client := newTestClient(t)
 
-	servers, err := client.GetAllServersWithAttributes()
+	servers, err := client.GetAllServersWithAttributes(t.Context())
 	if err != nil {
 		t.Fatalf("GetAllServersWithAttributes: %v", err)
 	}
@@ -215,7 +215,7 @@ func TestContainer_GetAllServersWithAttributes(t *testing.T) {
 func TestContainer_GetAllDomains(t *testing.T) {
 	client := newTestClient(t)
 
-	domains, err := client.GetAllDomains()
+	domains, err := client.GetAllDomains(t.Context())
 	if err != nil {
 		t.Fatalf("GetAllDomains: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestContainer_GetAllDomains(t *testing.T) {
 func TestContainer_GetDomain(t *testing.T) {
 	client := newTestClient(t)
 
-	domains, err := client.GetAllDomains()
+	domains, err := client.GetAllDomains(t.Context())
 	if err != nil {
 		t.Fatalf("GetAllDomains: %v", err)
 	}
@@ -235,7 +235,7 @@ func TestContainer_GetDomain(t *testing.T) {
 		t.Fatal("no domains in container")
 	}
 
-	config, err := client.GetDomain(domains[0])
+	config, err := client.GetDomain(t.Context(), domains[0])
 	if err != nil {
 		t.Fatalf("GetDomain(%s): %v", domains[0], err)
 	}
@@ -243,7 +243,7 @@ func TestContainer_GetDomain(t *testing.T) {
 		t.Fatalf("GetDomain(%s) returned empty map", domains[0])
 	}
 
-	_, err = client.GetDomain("nonexistent.invalid.tld")
+	_, err = client.GetDomain(t.Context(), "nonexistent.invalid.tld")
 	if err == nil {
 		t.Fatal("GetDomain nonexistent: expected error, got nil")
 	}
@@ -252,7 +252,7 @@ func TestContainer_GetDomain(t *testing.T) {
 func TestContainer_GetAllDomainsWithAttributes(t *testing.T) {
 	client := newTestClient(t)
 
-	domains, err := client.GetAllDomainsWithAttributes()
+	domains, err := client.GetAllDomainsWithAttributes(t.Context())
 	if err != nil {
 		t.Fatalf("GetAllDomainsWithAttributes: %v", err)
 	}
@@ -264,7 +264,7 @@ func TestContainer_GetAllDomainsWithAttributes(t *testing.T) {
 func TestContainer_GetEnabledServices(t *testing.T) {
 	client := newTestClient(t)
 
-	servers, err := client.GetAllServers()
+	servers, err := client.GetAllServers(t.Context())
 	if err != nil {
 		t.Fatalf("GetAllServers: %v", err)
 	}
@@ -272,7 +272,7 @@ func TestContainer_GetEnabledServices(t *testing.T) {
 		t.Fatal("no servers in container")
 	}
 
-	services, err := client.GetEnabledServices(servers[0])
+	services, err := client.GetEnabledServices(t.Context(), servers[0])
 	if err != nil {
 		t.Fatalf("GetEnabledServices(%s): %v", servers[0], err)
 	}
@@ -288,18 +288,18 @@ func TestContainer_ModifyAttribute(t *testing.T) {
 	const testAttr = "description"
 	const testValue = "configd-test-marker"
 
-	config, err := client.GetGlobalConfig()
+	config, err := client.GetGlobalConfig(t.Context())
 	if err != nil {
 		t.Fatalf("GetGlobalConfig: %v", err)
 	}
 	original := config[testAttr]
 
-	err = client.ModifyAttribute(testDN, testAttr, testValue)
+	err = client.ModifyAttribute(t.Context(), testDN, testAttr, testValue)
 	if err != nil {
 		t.Fatalf("ModifyAttribute: %v", err)
 	}
 
-	config, err = client.GetGlobalConfig()
+	config, err = client.GetGlobalConfig(t.Context())
 	if err != nil {
 		t.Fatalf("GetGlobalConfig after modify: %v", err)
 	}
@@ -308,7 +308,7 @@ func TestContainer_ModifyAttribute(t *testing.T) {
 	}
 
 	if original != "" {
-		if err := client.ModifyAttribute(testDN, testAttr, original); err != nil {
+		if err := client.ModifyAttribute(t.Context(), testDN, testAttr, original); err != nil {
 			t.Fatalf("ModifyAttribute restore: %v", err)
 		}
 	}
@@ -318,7 +318,7 @@ func TestContainer_ConnectionPoolReuse(t *testing.T) {
 	client := newTestClient(t)
 
 	for i := range 5 {
-		_, err := client.GetGlobalConfig()
+		_, err := client.GetGlobalConfig(t.Context())
 		if err != nil {
 			t.Fatalf("GetGlobalConfig iteration %d: %v", i, err)
 		}

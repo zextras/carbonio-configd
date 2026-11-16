@@ -5,6 +5,7 @@
 package cliutil
 
 import (
+	"context"
 	"crypto/tls"
 	"maps"
 	"os"
@@ -29,7 +30,7 @@ func searchOnce(t *testing.T, lc map[string]string) error {
 
 	defer func() { _ = client.Close() }()
 
-	_, err = client.Search("cn=zimbra", "(objectClass=*)", []string{"cn"}, ldap.ScopeBaseObject)
+	_, err = client.Search(context.Background(), "cn=zimbra", "(objectClass=*)", []string{"cn"}, ldap.ScopeBaseObject)
 
 	return err //nolint:wrapcheck // test helper
 }

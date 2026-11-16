@@ -12,6 +12,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func createTestConfig(t *testing.T) string {
@@ -240,8 +243,8 @@ func TestSaveLocalConfig_AtomicWrite(t *testing.T) {
 	path := filepath.Join(dir, "localconfig.xml")
 
 	config := &LocalConfig{
-		Keys: []Key{
-			{Name: "test_key", Value: "test_value"},
+		Keys: []fileKey{
+			{Name: "test_key", Value: ptr("test_value")},
 		},
 	}
 
@@ -622,4 +625,54 @@ func TestWithFileLock_RefusesSymlinkedLockFile(t *testing.T) {
 	if called {
 		t.Error("fn must not run when the lock file is a symlink")
 	}
+}
+
+func ptr(s string) *string { return &s }
+
+// A key without a <value> is null, not empty: rewriting the file for another
+// key must not turn it into <value></value>.
+func TestSetKeysAndRemoveKeysKeepNullKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "localconfig.xml")
+	require.NoError(t, os.WriteFile(path, []byte(`<?xml version="1.0"?>
+<localconfig>
+  <key name="null_key"/>
+  <key name="empty_key"><value></value></key>
+  <key name="other"><value>x</value></key>
+</localconfig>
+`), 0o600))
+
+	check := func(step string) {
+		t.Helper()
+
+		values, nullKeys, err := LoadLocalConfigFile(path)
+		require.NoError(t, err, step)
+		assert.Equal(t, []string{"null_key"}, nullKeys, step)
+		assert.Equal(t, "", values["empty_key"], step)
+		assert.Contains(t, values, "empty_key", step)
+	}
+
+	require.NoError(t, setOne(path, "added", "v"))
+	check("after SetKeys")
+
+	require.NoError(t, RemoveKeys(path, []string{"other"}))
+	check("after RemoveKeys")
+}
+
+// A symlinked localconfig.xml stays a link when a key is set.
+func TestSetKeysKeepsSymlinkedFile(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.xml")
+	link := filepath.Join(dir, "localconfig.xml")
+	require.NoError(t, os.WriteFile(target, []byte("<localconfig></localconfig>"), 0o600))
+	require.NoError(t, os.Symlink(target, link))
+
+	require.NoError(t, setOne(link, "k", "v"))
+
+	fi, err := os.Lstat(link)
+	require.NoError(t, err)
+	assert.NotZero(t, fi.Mode()&os.ModeSymlink, "the link must survive")
+
+	values, err := LoadLocalConfigFromFile(target)
+	require.NoError(t, err)
+	assert.Equal(t, "v", values["k"])
 }

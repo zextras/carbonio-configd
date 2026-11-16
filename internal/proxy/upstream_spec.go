@@ -94,9 +94,8 @@ func (g *Generator) makeUpstreamResolver(spec *upstreamSpec) func(context.Contex
 	return func(ctx context.Context) (any, error) {
 		candidates, err := g.upstreamCandidates(ctx, spec)
 		if err != nil {
-			logger.WarnContext(ctx, resolverQueryFailed, "error", err)
-
-			return "", nil //nolint:nilerr // Intentional: fallback to empty in degraded/test environments
+			// Rendering no upstreams would make nginx reload into an outage.
+			return nil, fmt.Errorf("resolve upstream servers: %w", err)
 		}
 
 		directives := g.upstreamDirectives(ctx, spec, candidates)
@@ -155,14 +154,16 @@ func (g *Generator) resolveServerPort(attrs map[string]string, fixedPort int, po
 // server. It is used by the *.disable enabler variables so that the enable/disable
 // decision is always consistent with the rendered server list (same spec, same
 // source, same isValidUpstream gate) — mirroring Java EwsEnablerVar/LoginEnablerVar
-// which check the same upstream attribute the servers var reads.
-func (g *Generator) upstreamHasServers(ctx context.Context, spec *upstreamSpec) bool {
+// which check the same upstream attribute the servers var reads. A failed
+// server query is an error, not "no servers": the enabler would comment out
+// the upstream block.
+func (g *Generator) upstreamHasServers(ctx context.Context, spec *upstreamSpec) (bool, error) {
 	candidates, err := g.upstreamCandidates(ctx, spec)
 	if err != nil {
-		return false
+		return false, fmt.Errorf("resolve upstream servers: %w", err)
 	}
 
-	return len(g.upstreamDirectives(ctx, spec, candidates)) > 0
+	return len(g.upstreamDirectives(ctx, spec, candidates)) > 0, nil
 }
 
 // upstreamCandidate is a server under consideration for an upstream block.
@@ -226,8 +227,10 @@ func selectByServices(byHost map[string]map[string]string, services []string) ma
 	selected := make(map[string]map[string]string)
 
 	for _, attrs := range byHost {
-		if serverEnablesAnyService(attrs, services) {
-			selected[serverHostname(attrs)] = attrs
+		// A server indexed by its cn has no hostname to put in "server host:port;".
+		host := serverHostname(attrs)
+		if host != "" && serverEnablesAnyService(attrs, services) {
+			selected[host] = attrs
 		}
 	}
 
@@ -250,7 +253,7 @@ func (g *Generator) getServerAttrsByHostname(ctx context.Context) (map[string]ma
 		return map[string]map[string]string{}, nil
 	}
 
-	serversMap, err := g.LdapClient.NativeClient.GetAllServersWithAttributes()
+	serversMap, err := g.LdapClient.NativeClient.GetAllServersWithAttributes(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query LDAP servers: %w", err)
 	}

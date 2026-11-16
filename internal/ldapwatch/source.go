@@ -36,7 +36,7 @@ var watchedAttrs = []string{"entryCSN", "modifyTimestamp"}
 // Searcher is the LDAP search the source needs; *ldap.Client of
 // internal/ldap satisfies it.
 type Searcher interface {
-	Search(baseDN, filter string, attributes []string, scope int) (*goldap.SearchResult, error)
+	Search(ctx context.Context, baseDN, filter string, attributes []string, scope int) (*goldap.SearchResult, error)
 }
 
 type query struct {
@@ -69,29 +69,9 @@ func NewLDAPSource(searcher Searcher, baseDN string) *LDAPSource {
 	}
 }
 
-type fingerprintResult struct {
-	fp  Fingerprint
-	err error
-}
-
-// Fingerprint implements Source. The LDAP client API takes no context, so the
-// searches run in their own goroutine and the call returns as soon as ctx is
-// done; the goroutine ends with the in-flight search, which the client bounds
-// with its operation timeout.
+// Fingerprint implements Source. Cancelling ctx abandons the search in flight.
 func (s *LDAPSource) Fingerprint(ctx context.Context) (Fingerprint, error) {
-	done := make(chan fingerprintResult, 1)
-
-	go func() {
-		fp, err := s.collect(ctx)
-		done <- fingerprintResult{fp, err}
-	}()
-
-	select {
-	case r := <-done:
-		return r.fp, r.err
-	case <-ctx.Done():
-		return nil, ctx.Err() //nolint:wrapcheck // callers want the bare context error
-	}
+	return s.collect(ctx)
 }
 
 // collect runs every query, stopping early once ctx is done.
@@ -103,7 +83,7 @@ func (s *LDAPSource) collect(ctx context.Context) (Fingerprint, error) {
 			return nil, err //nolint:wrapcheck // callers want the bare context error
 		}
 
-		res, err := s.searcher.Search(q.baseDN, q.filter, watchedAttrs, q.scope)
+		res, err := s.searcher.Search(ctx, q.baseDN, q.filter, watchedAttrs, q.scope)
 		if err != nil {
 			return nil, fmt.Errorf("fingerprint %s: %w", q.component, err)
 		}

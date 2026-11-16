@@ -411,7 +411,13 @@ func TestCertDHParam(t *testing.T) {
 
 		require.NoError(t, StepGenerateDHParam().Apply(e))
 
-		assert.Equal(t, "chown zextras:zextras "+dest, certTestCmds(fakes)[0])
+		uid, gid, ok := fakes.FS.Owner(dest)
+		require.True(t, ok)
+		assert.Equal(t, [2]int{998, 997}, [2]int{uid, gid}, "owned by zextras from the temp file on, not chowned by path")
+
+		for _, c := range certTestCmds(fakes) {
+			assert.NotContains(t, c, "chown")
+		}
 
 		for _, c := range certTestCmds(fakes) {
 			assert.NotContains(t, c, "openssl")

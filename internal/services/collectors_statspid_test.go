@@ -95,6 +95,40 @@ func TestStartCollectors_RunsOneProcess(t *testing.T) {
 	assert.True(t, f.FS.Exists(ctl.p.log+"/zmstat.out"))
 }
 
+// startCtxExec records the context each Start receives.
+type startCtxExec struct {
+	sys.Exec
+	ctx context.Context //nolint:containedctx // the test inspects it
+}
+
+func (e *startCtxExec) Start(ctx context.Context, c *sys.Cmd) (sys.Process, error) {
+	e.ctx = ctx
+
+	return e.Exec.Start(ctx, c) //nolint:wrapcheck // test double
+}
+
+// TestStartCollectors_OutlivesCallerContext: the collectors are a daemon, so
+// the caller's context (a request, or the daemon's shutdown context) must not
+// be what kills them, and the handle is released so an exit leaves no zombie.
+func TestStartCollectors_OutlivesCallerContext(t *testing.T) {
+	t.Parallel()
+
+	ctl, f := newFakeController(t)
+	f.FS.Put(ctl.p.bin+"/configd", []byte("x"), 0o755)
+	f.FS.PutDir(ctl.p.log, 0o755)
+
+	exec := &startCtxExec{Exec: ctl.env.Exec}
+	ctl.env.Exec = exec
+
+	ctx, cancel := context.WithCancel(context.Background())
+	require.NoError(t, ctl.startCollectors(ctx, ctl.registry[svcStats]))
+	cancel()
+
+	require.NotNil(t, exec.ctx)
+	assert.NoError(t, exec.ctx.Err(), "cancelling the caller's context must not reach the collectors")
+	assert.Len(t, f.Rec.Of("exec.release"), 1, "the child handle is released")
+}
+
 // TestStartCollectors_EveryOptionalCollector: all three keys TRUE add the
 // optional collectors after the base ones, in their order.
 func TestStartCollectors_EveryOptionalCollector(t *testing.T) {

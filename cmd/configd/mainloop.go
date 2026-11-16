@@ -7,9 +7,11 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"maps"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -58,6 +60,9 @@ type MainLoopActionTrigger struct {
 // rewriteWaiter is one REWRITE client waiting for the main loop.
 type rewriteWaiter struct {
 	done chan struct{}
+	// err is the outcome of the rewrite phase that released the client. It is
+	// written before done is closed.
+	err error
 }
 
 // TriggerRewrite is called by the network handler to signal a rewrite. The
@@ -103,7 +108,7 @@ func (t *MainLoopActionTrigger) TriggerRewrite(ctx context.Context, configs []st
 		logger.DebugContext(ctx, "Reload channel blocked, main loop already processing or not ready")
 	}
 
-	return &network.RewriteWait{Done: w.done, Cancel: func() { t.forget(w) }}
+	return &network.RewriteWait{Done: w.done, Err: func() error { return w.err }, Cancel: func() { t.forget(w) }}
 }
 
 // forget drops a client that gave up (timeout, shutdown). Its sections stay
@@ -126,12 +131,14 @@ func (t *MainLoopActionTrigger) claimWaiters() {
 	t.waiting = nil
 }
 
-// completeWaiters releases the clients of the cycle whose rewrite phase ended.
-func (t *MainLoopActionTrigger) completeWaiters() {
+// completeWaiters releases the clients of the cycle whose rewrite phase ended
+// with err (nil: it succeeded), so a client whose rewrite failed is told.
+func (t *MainLoopActionTrigger) completeWaiters(err error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	for _, w := range t.inflight {
+		w.err = err
 		close(w.done)
 	}
 
@@ -210,9 +217,24 @@ func runForcedMode(ctx context.Context, args *Args, rt *runtime) int {
 		logger.FatalContext(ctx, "Failed to load configs for forced run", "error", err)
 	}
 
+	expandForcedAll(appState)
 	buildServiceDependencies(ctx, rt.sm, appState)
 
 	return executeForced(ctx, rt.cm, mainCfg.Progname)
+}
+
+// expandForcedAll turns the forced name "all" into every section of the parsed
+// zmconfigd.cf: the sections are known only once the configuration is loaded.
+func expandForcedAll(appState *state.State) {
+	if _, ok := appState.ForcedConfig[network.AllSections]; !ok {
+		return
+	}
+
+	delete(appState.ForcedConfig, network.AllSections)
+
+	for name := range appState.GetMtaConfig().Sections {
+		appState.ForcedConfig[name] = name
+	}
 }
 
 // executeForced plans and executes the forced rewrites of a loaded
@@ -307,6 +329,26 @@ func runLoadAndParse(
 	return loadDur, parseDur, nil
 }
 
+// defaultListenPort is the REWRITE/STATUS port of the legacy daemon.
+const defaultListenPort = 7171
+
+// parseListenPort reads zmconfigd_listen_port: unset means the legacy default,
+// anything that is not a TCP port is refused instead of silently becoming port
+// 0 (a random port no client knows).
+func parseListenPort(raw string) (int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return defaultListenPort, nil
+	}
+
+	port, err := strconv.Atoi(raw)
+	if err != nil || port < 0 || port > 65535 {
+		return 0, fmt.Errorf("zmconfigd_listen_port %q is not a TCP port (0-65535)", raw)
+	}
+
+	return port, nil
+}
+
 // maybeStartListener starts the network listener on the first non-forced, non-once run.
 // Returns the existing server unchanged when conditions are not met.
 func maybeStartListener(
@@ -322,7 +364,12 @@ func maybeStartListener(
 
 	snap := appState.Snapshot()
 	listenerPortStr, _ := snap.Local("zmconfigd_listen_port")
-	listenerPort, _ := strconv.Atoi(listenerPortStr)
+
+	listenerPort, err := parseListenPort(listenerPortStr)
+	if err != nil {
+		logger.FatalContext(ctx, "Invalid zmconfigd_listen_port", "error", err)
+	}
+
 	listenerAddr := "127.0.0.1"
 	ipv6 := false
 
@@ -406,7 +453,8 @@ const (
 // It returns the phase timings, the plan of the cycle and how the phases ended;
 // the caller backs off after phasesPlanFailed and phasesRewriteFailed. REWRITE
 // clients are released once the rewrite phase is over, as lAction.notifyAll()
-// does in configd.py, even when it failed.
+// does in configd.py, even when it failed; a failed phase is reported to them
+// as an error rather than as completed rewrites.
 func runConfigPhases(
 	ctx context.Context, deps *daemonLoopDeps,
 ) (timings phaseTimings, pl *plan.Plan, result phaseResult) {
@@ -429,6 +477,7 @@ func runConfigPhases(
 	// Plan takes the requested sections: the clients registered until now wait
 	// for this cycle.
 	deps.trigger.claimWaiters()
+	deps.heartbeat.expect(planBudget)
 
 	pl, err := configManager.Plan(ctx)
 	if err != nil {
@@ -460,13 +509,16 @@ func runConfigPhases(
 
 	result = phasesCompleted
 
-	if err := configManager.Execute(ctx, pl); err != nil {
-		logger.ErrorContext(ctx, "Error during config rewrites", "error", err)
+	deps.heartbeat.expect(executeBudget)
+
+	execErr := configManager.Execute(ctx, pl)
+	if execErr != nil {
+		logger.ErrorContext(ctx, "Error during config rewrites", "error", execErr)
 
 		result = phasesRewriteFailed
 	}
 
-	deps.trigger.completeWaiters()
+	deps.trigger.completeWaiters(execErr)
 
 	timings.rewrites = time.Since(phaseStart)
 
@@ -489,6 +541,9 @@ type daemonLoopDeps struct {
 	notifier       *sdnotify.Notifier
 	trigger        *MainLoopActionTrigger
 	reloadChan     chan struct{}
+	// heartbeat tells the systemd keep-alive the loop is alive; nil (tests)
+	// disables the check.
+	heartbeat *loopHeartbeat
 	// validate checks the service hooks against the first parsed zmconfigd.cf;
 	// a failure ends the daemon. Nil (hosts, tests) skips the check.
 	validate func(conf *config.MtaConfig, watchdogOn bool) error
@@ -498,6 +553,14 @@ type daemonLoopDeps struct {
 	// with ldapSource (nil: the watcher polls).
 	ldapSource     ldapwatch.Source
 	ldapSubscriber ldapwatch.Subscriber
+}
+
+// sleep waits like SleepWithContext, first telling the heartbeat that the loop
+// is alive for the whole wait.
+func (deps *daemonLoopDeps) sleep(ctx context.Context, d time.Duration, reloadChan <-chan struct{}) bool {
+	deps.heartbeat.expect(d + sleepSlack)
+
+	return SleepWithContext(ctx, deps.env.Clock, d, reloadChan)
 }
 
 // loopIterState carries mutable per-iteration counters between runs.
@@ -559,7 +622,7 @@ func runLoopIterationSafe(ctx context.Context, deps *daemonLoopDeps, st *loopIte
 
 		logger.ErrorContext(ctx, "Main loop iteration panicked, backing off",
 			"interval_seconds", deps.cfg.Interval)
-		SleepWithContext(ctx, deps.env.Clock, time.Duration(deps.cfg.Interval)*time.Second, deps.reloadChan)
+		deps.sleep(ctx, time.Duration(deps.cfg.Interval)*time.Second, deps.reloadChan)
 	}()
 
 	defer recoverGoroutine(ctx, "main-loop")
@@ -573,6 +636,8 @@ func runLoopIterationSafe(ctx context.Context, deps *daemonLoopDeps, st *loopIte
 // runLoopIteration performs one main-loop iteration. It returns iterExit
 // when the daemon should stop and iterContinue when the loop should run again.
 func runLoopIteration(ctx context.Context, deps *daemonLoopDeps, st *loopIterState) iterOutcome {
+	deps.heartbeat.expect(loadBudget)
+
 	if outcome := consumeReloadSignal(ctx, deps.reloadChan, st); outcome == iterExit {
 		return iterExit
 	}
@@ -627,6 +692,8 @@ func runCycle(ctx context.Context, deps *daemonLoopDeps, st *loopIterState, dur 
 		return iterExit
 	}
 
+	deps.heartbeat.expect(restartBudget)
+
 	restartsDur := runRestartsPhase(ctx, deps.configManager, deps.trigger, pl)
 
 	// As in configd.py, the listener starts only after the first rewrite and
@@ -649,7 +716,7 @@ func runCycle(ctx context.Context, deps *daemonLoopDeps, st *loopIterState, dur 
 func backOff(ctx context.Context, deps *daemonLoopDeps, st *loopIterState) {
 	signalReady(ctx, deps, st)
 
-	if SleepWithContext(ctx, deps.env.Clock, 60*time.Second, deps.reloadChan) {
+	if deps.sleep(ctx, 60*time.Second, deps.reloadChan) {
 		st.reloadSignaled = true
 	}
 }
@@ -700,7 +767,7 @@ func handleIdleSleep(ctx context.Context, deps *daemonLoopDeps, st *loopIterStat
 	logger.DebugContext(ctx, "Skipping idle config poll", "reason", "no_events_since_last_check")
 	logger.DebugContext(ctx, "Sleeping", "interval_seconds", deps.cfg.Interval)
 
-	if SleepWithContext(ctx, deps.env.Clock, time.Duration(deps.cfg.Interval)*time.Second, deps.reloadChan) {
+	if deps.sleep(ctx, time.Duration(deps.cfg.Interval)*time.Second, deps.reloadChan) {
 		st.reloadSignaled = true
 	}
 }
@@ -794,7 +861,7 @@ func finalizeIteration(
 
 	logger.DebugContext(ctx, "Sleeping for interval", "interval_seconds", deps.cfg.Interval)
 
-	if SleepWithContext(ctx, deps.env.Clock, time.Duration(deps.cfg.Interval)*time.Second, deps.reloadChan) {
+	if deps.sleep(ctx, time.Duration(deps.cfg.Interval)*time.Second, deps.reloadChan) {
 		st.reloadSignaled = true
 	}
 
@@ -808,11 +875,13 @@ func RunMainLoop(ctx context.Context, rt *runtime, args *Args, notifier *sdnotif
 	// Create cancellable context for graceful shutdown
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	defer rt.cm.Close()
 
 	wd := bootstrapWatchdog(ctx, rt)
 
 	// Bootstrap systemd integration
-	reloadChan := bootstrapSystemd(ctx, rt.env, rt.state, cancel, notifier)
+	heartbeat := newLoopHeartbeat(rt.env.Clock)
+	reloadChan := bootstrapSystemd(ctx, rt.env, rt.state, cancel, notifier, heartbeat)
 
 	// Start watchdog in daemon mode (not for forced configs)
 	if !args.HasForcedConfigs() {
@@ -841,6 +910,7 @@ func RunMainLoop(ctx context.Context, rt *runtime, args *Args, notifier *sdnotif
 		notifier:       notifier,
 		trigger:        mainLoopTrigger,
 		reloadChan:     reloadChan,
+		heartbeat:      heartbeat,
 		validate:       rt.validateHooks,
 	})
 }

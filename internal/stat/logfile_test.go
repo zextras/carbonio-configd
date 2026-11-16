@@ -5,10 +5,12 @@
 package stat
 
 import (
+	"bytes"
 	"compress/gzip"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -189,7 +191,9 @@ func TestRotateMergesBareCopy(t *testing.T) {
 	assert.NoFileExists(t, filepath.Join(rdir, "x.csv"))
 }
 
-func TestRotateDropsUnreadableArchive(t *testing.T) {
+// A rotated archive that cannot be read is set aside as .bad, not replaced by
+// whatever prefix could be decoded.
+func TestRotateKeepsUnreadableArchive(t *testing.T) {
 	t.Parallel()
 
 	te := newTestEnv(t, files{})
@@ -204,6 +208,33 @@ func TestRotateDropsUnreadableArchive(t *testing.T) {
 	l.close()
 
 	assert.Equal(t, logHeading+"\n", readGz(t, filepath.Join(rdir, "x.csv.gz")))
+	assert.Equal(t, "not gzip", readFile(t, filepath.Join(rdir, "x.csv.gz.bad")))
+}
+
+func TestRotateKeepsTruncatedArchive(t *testing.T) {
+	t.Parallel()
+
+	te := newTestEnv(t, files{})
+	path := filepath.Join(te.Dir, "x.csv")
+	rdir := filepath.Join(te.Dir, "2026-01-01")
+	require.NoError(t, os.Mkdir(rdir, 0o755))
+
+	var buf bytes.Buffer
+
+	zw := gzip.NewWriter(&buf)
+	_, err := zw.Write([]byte(strings.Repeat("01/01/2026 00:00:00, 1, 2\n", 200)))
+	require.NoError(t, err)
+	require.NoError(t, zw.Close())
+
+	truncated := buf.Bytes()[:buf.Len()-12]
+	require.NoError(t, os.WriteFile(filepath.Join(rdir, "x.csv.gz"), truncated, 0o644))
+
+	l, err := openLog(te.Env, path, logHeading, today)
+	require.NoError(t, err)
+	require.NoError(t, l.rotate("2026-01-01"))
+	l.close()
+
+	assert.Equal(t, string(truncated), readFile(t, filepath.Join(rdir, "x.csv.gz.bad")))
 }
 
 func TestRotateWhereTheDayDirectoryIsAFile(t *testing.T) {
@@ -294,4 +325,48 @@ func TestRotateReportsBothTheMoveAndTheReopenFailure(t *testing.T) {
 	require.ErrorContains(t, err, "unable to create log rotation directory")
 	require.ErrorContains(t, err, "unable to open log file")
 	require.ErrorIs(t, l.write([]string{"x"}), errLogClosed)
+}
+
+// The collector may run as root: a symlink at the log path is refused, not
+// followed.
+func TestOpenLogRefusesASymlink(t *testing.T) {
+	t.Parallel()
+
+	te := newTestEnv(t, files{})
+	target := filepath.Join(te.Dir, "target")
+	require.NoError(t, os.WriteFile(target, []byte("keep\n"), 0o644))
+	require.NoError(t, os.Symlink(target, filepath.Join(te.Dir, "x.csv")))
+
+	_, err := openLog(te.Env, filepath.Join(te.Dir, "x.csv"), logHeading, today)
+	require.ErrorContains(t, err, "unable to open log file")
+	assert.Equal(t, "keep\n", readFile(t, target))
+}
+
+// A log left closed by a failed reopen is opened again by the next write
+// instead of dropping every sample until the next rotation.
+func TestRunnerReopensAClosedLog(t *testing.T) {
+	t.Parallel()
+
+	te := newTestEnv(t, files{})
+	dir := filepath.Join(te.Dir, "logs")
+	path := filepath.Join(dir, "x.csv")
+
+	l, err := openLog(te.Env, path, logHeading, today)
+	require.NoError(t, err)
+
+	defer l.close()
+
+	require.NoError(t, os.Rename(dir, dir+".old"))
+	require.NoError(t, os.WriteFile(dir, nil, 0o644))
+	require.Error(t, l.rotate("2026-01-01"))
+
+	r := &runner{env: te.Env, lf: l, date: "2026-01-01", sp: &spec{}}
+
+	// The disk is still bad: the sample is reported, not written.
+	require.Error(t, r.write([]string{"lost"}))
+
+	require.NoError(t, os.Remove(dir))
+	require.NoError(t, os.Rename(dir+".old", dir))
+	require.NoError(t, r.write([]string{"kept"}))
+	assert.Contains(t, readFile(t, path), "kept\n")
 }

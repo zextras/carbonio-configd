@@ -190,6 +190,8 @@ func TestServiceStatus_StalePidfileRecycledPid(t *testing.T) {
 		ProcessName: ctl.p.common + "/sbin/clamd",
 	})
 
+	ctl.SystemdMode(context.Background()) // the one-time mode probe logs; it is not what is under test
+
 	var logs bytes.Buffer
 
 	ctx := logger.ContextWithLogger(context.Background(),

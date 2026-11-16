@@ -139,13 +139,13 @@ func caPool(ctx context.Context, lc map[string]string, fsys sys.FS) *x509.CertPo
 	return pool
 }
 
-// tlsConfigFor returns the TLS configuration for one URL: a clone of the base
+// tlsConfigFor returns the TLS configuration for one URL: a clone of base
 // configuration with ServerName set from the URL host (crypto/tls refuses an
 // empty ServerName on StartTLS, and ldaps:// needs it for hostname checks).
-func (c *Client) tlsConfigFor(rawURL string) *tls.Config {
+func tlsConfigFor(base *tls.Config, rawURL string) *tls.Config {
 	var cfg *tls.Config
-	if c.tlsConfig != nil {
-		cfg = c.tlsConfig.Clone()
+	if base != nil {
+		cfg = base.Clone()
 	} else {
 		cfg = &tls.Config{MinVersion: tls.VersionTLS12}
 	}

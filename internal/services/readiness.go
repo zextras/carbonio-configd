@@ -130,7 +130,7 @@ func (c *Controller) readMailPort(ctx context.Context, lc map[string]string, hos
 
 	defer func() { _ = client.Close() }()
 
-	attrs, err := client.GetServerConfig(host)
+	attrs, err := client.GetServerConfig(ctx, host)
 	if err != nil {
 		return "", err
 	}

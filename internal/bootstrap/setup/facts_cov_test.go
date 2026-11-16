@@ -52,7 +52,7 @@ type factsCovLDAP struct {
 	closed    bool
 }
 
-func (l *factsCovLDAP) GetServerConfig(host string) (map[string]string, error) {
+func (l *factsCovLDAP) GetServerConfig(_ context.Context, host string) (map[string]string, error) {
 	l.hostAsked = host
 
 	return l.entry, l.err

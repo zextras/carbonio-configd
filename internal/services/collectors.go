@@ -95,7 +95,9 @@ func (c *Controller) startCollectors(ctx context.Context, def *ServiceDef) error
 	c.killOldCollectors(ctx)
 
 	// One argument per collector: its command line, as the zmstat script took it.
-	proc, err := c.env.Exec.Start(ctx, &sys.Cmd{
+	// The process is a long-lived daemon that must outlive ctx (a request or the
+	// daemon's own shutdown context would kill it), as in startDetached.
+	proc, err := c.env.Exec.Start(context.Background(), &sys.Cmd{
 		Path:   binaryPath,
 		Args:   append(slices.Clone(spec.Args), collectors...),
 		Stdout: logFd,
@@ -108,6 +110,9 @@ func (c *Controller) startCollectors(ctx context.Context, def *ServiceDef) error
 
 	logger.InfoContext(ctx, "Started stats collectors",
 		"collectors", collectors, "pid", proc.Pid(), "log", logFile, "piddir", c.p.statsPidDir)
+
+	// Nothing waits for the collectors: free the handle so an exit leaves no zombie.
+	c.releaseChild("stats", proc)
 
 	return nil
 }

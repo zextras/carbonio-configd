@@ -65,6 +65,12 @@ func TestLdapChangeTriggerKeys(t *testing.T) {
 				"zmconfigd_ldap_change_debounce_seconds": "later",
 			}, true, 5, 2,
 		},
+		{
+			"out-of-range timings keep the defaults", map[string]string{
+				"zmconfigd_ldap_change_poll_seconds":     "0",
+				"zmconfigd_ldap_change_debounce_seconds": "-3",
+			}, true, 5, 2,
+		},
 	}
 
 	for _, tt := range tests {

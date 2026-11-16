@@ -48,6 +48,7 @@ func (cm *ConfigManager) NewProxyGenerator(ctx context.Context, settings proxy.S
 			Server:   snap.ServerConfig(),
 			Ldap:     cm.LdapClient,
 			Cache:    cm.Cache,
+			HostIPs:  cm.proxyHostIPs,
 			Settings: &settings,
 		})
 	if err != nil {

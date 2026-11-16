@@ -30,7 +30,10 @@ func (g *Generator) resolveListenAddresses(ctx context.Context) (any, error) {
 	logger.DebugContext(ctx, "Resolved strict server name prefix for listen addresses",
 		"prefix", strictServerNamePrefix)
 
-	addressSet := g.collectVirtualIPAddresses(ctx, strictServerNamePrefix)
+	addressSet, err := g.collectVirtualIPAddresses(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	// If no addresses found, return expanded placeholder (matches Java: addresses.isEmpty())
 	if len(addressSet) == 0 {
@@ -77,15 +80,16 @@ func (g *Generator) resolveStrictServerNamePrefix(ctx context.Context) string {
 }
 
 // collectVirtualIPAddresses returns the set of virtual IP addresses from all LDAP domains.
-// When LDAP is unavailable or fails, returns nil (fallback handled by the caller).
-func (g *Generator) collectVirtualIPAddresses(ctx context.Context, fallback string) map[string]bool {
-	if g.LdapClient == nil {
-		return nil
+// Without an LDAP client the set is empty (fallback handled by the caller); a
+// failed query is an error.
+func (g *Generator) collectVirtualIPAddresses(ctx context.Context) (map[string]bool, error) {
+	if !g.ldapConfigured() {
+		return map[string]bool{}, nil
 	}
 
-	domains, ok := g.queryDomains(ctx, fallback)
-	if !ok {
-		return nil
+	domains, err := g.queryDomains(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	addressSet := make(map[string]bool)
@@ -106,41 +110,52 @@ func (g *Generator) collectVirtualIPAddresses(ctx context.Context, fallback stri
 		addressSet[domain.VirtualIPAddress] = true
 	}
 
-	return addressSet
+	return addressSet, nil
 }
 
 // queryDomains fetches domains from LDAP, using the cache when available.
-// Returns (domains, true) on success or (nil, false) when the caller should fall back.
-func (g *Generator) queryDomains(ctx context.Context, _ string) ([]ldap.Domain, bool) {
-	if g.LdapClient == nil || g.LdapClient.NativeClient == nil {
-		return nil, false
-	}
-
+func (g *Generator) queryDomains(ctx context.Context) ([]ldap.Domain, error) {
 	// Legacy loads no domains (hence no virtual IP listen addresses) unless
 	// per-virtual-hostname config is enabled (ProxyConfGen.java:253-255).
 	if !g.perVirtualHostnameEnabled() {
-		return []ldap.Domain{}, true
+		return []ldap.Domain{}, nil
 	}
 
-	if g.Cache != nil {
-		cachedData, err := g.Cache.GetCachedConfig(ctx, "ldap:domains", func() (any, error) {
-			return g.LdapClient.NativeClient.QueryDomains(ctx)
-		})
-		if err != nil {
-			return nil, false //nolint:nilerr // Intentional: fallback to placeholder on LDAP failure
-		}
-
-		domains, ok := cachedData.([]ldap.Domain)
-
-		return domains, ok
+	if g.Cache == nil {
+		return g.queryDomainsLDAP(ctx)
 	}
 
+	cachedData, err := g.Cache.GetCachedConfig(ctx, domainCacheKey, func() (any, error) {
+		return g.LdapClient.NativeClient.QueryDomains(ctx)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to query domains from LDAP: %w", err)
+	}
+
+	domains, ok := cachedData.([]ldap.Domain)
+	if !ok {
+		return nil, fmt.Errorf("unexpected cached domains type %T", cachedData)
+	}
+
+	return domains, nil
+}
+
+func (g *Generator) queryDomainsLDAP(ctx context.Context) ([]ldap.Domain, error) {
 	domains, err := g.LdapClient.NativeClient.QueryDomains(ctx)
 	if err != nil {
-		return nil, false //nolint:nilerr // Intentional: fallback to placeholder on LDAP failure
+		return nil, fmt.Errorf("failed to query domains from LDAP: %w", err)
 	}
 
-	return domains, true
+	return domains, nil
+}
+
+// listenHost brackets an IPv6 literal as nginx's listen directive requires.
+func listenHost(addr string) string {
+	if strings.Contains(addr, ":") && !strings.HasPrefix(addr, "[") {
+		return "[" + addr + "]"
+	}
+
+	return addr
 }
 
 // formatListenDirectives formats the sorted address set into nginx listen directives.
@@ -159,7 +174,7 @@ func (g *Generator) formatListenDirectives(addressSet map[string]bool, prefix, h
 			sb.WriteString("\n")
 		}
 
-		fmt.Fprintf(&sb, "%s    listen                  %s:%s default_server;", prefix, addr, httpsPort)
+		fmt.Fprintf(&sb, "%s    listen                  %s:%s default_server;", prefix, listenHost(addr), httpsPort)
 	}
 
 	return sb.String()
@@ -184,9 +199,7 @@ func (g *Generator) resolveLookupTargetAvailable(ctx context.Context) (any, erro
 func (g *Generator) resolveWebUpstreamTargetAvailable(ctx context.Context) (any, error) {
 	servers, err := g.reverseProxyBackendsRaw(ctx, false)
 	if err != nil {
-		// If we can't get backends, assume none are available (fail safe)
-		// We return nil error because this is a variable resolution, not a fatal error
-		return false, nil //nolint:nilerr // Intentional: fallback for variable resolution
+		return g.unavailableOffline(ctx, err)
 	}
 
 	return len(servers) > 0, nil
@@ -202,7 +215,12 @@ func (g *Generator) resolveSaslHostFromIP(ctx context.Context) (any, error) {
 	saslHost := nginxOff
 
 	if val, ok := g.getConfigValue("zimbraReverseProxySaslHostFromIP", sourceGlobal); ok {
-		saslHost = val
+		if validNginxArg(val) {
+			saslHost = val
+		} else {
+			logger.ErrorContext(ctx, "Ignoring unsafe SASL host-from-IP value, using default",
+				"value", truncateForLog(val))
+		}
 	}
 
 	return saslHost, nil

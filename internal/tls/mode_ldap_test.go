@@ -5,6 +5,7 @@
 package tls
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -26,7 +27,7 @@ type stubLDAP struct {
 	modified      []string // "dn|attr|value" per ModifyAttribute call
 }
 
-func (s *stubLDAP) GetEntry(dn string, _ []string) (*ldap.Entry, error) {
+func (s *stubLDAP) GetEntry(_ context.Context, dn string, _ []string) (*ldap.Entry, error) {
 	if s.getEntryErr != nil {
 		return nil, s.getEntryErr
 	}
@@ -39,7 +40,7 @@ func (s *stubLDAP) GetEntry(dn string, _ []string) (*ldap.Entry, error) {
 	return entry, nil
 }
 
-func (s *stubLDAP) Search(_, filter string, _ []string, _ int) (*ldap.SearchResult, error) {
+func (s *stubLDAP) Search(_ context.Context, _, filter string, _ []string, _ int) (*ldap.SearchResult, error) {
 	s.searchFilters = append(s.searchFilters, filter)
 	if s.searchErr != nil {
 		return nil, s.searchErr
@@ -55,7 +56,7 @@ func (s *stubLDAP) Search(_, filter string, _ []string, _ int) (*ldap.SearchResu
 	return res, nil
 }
 
-func (s *stubLDAP) ModifyAttribute(dn, attribute, value string) error {
+func (s *stubLDAP) ModifyAttribute(_ context.Context, dn, attribute, value string) error {
 	s.modified = append(s.modified, dn+"|"+attribute+"|"+value)
 
 	return s.modifyErr
@@ -98,7 +99,7 @@ func TestIsReverseProxyBackend(t *testing.T) {
 				"cn=mail.example.com,cn=servers,cn=zimbra": serverEntry("mail.example.com", attrs),
 			}}
 
-			got, err := IsReverseProxyBackend(stub, "mail.example.com")
+			got, err := IsReverseProxyBackend(context.Background(), stub, "mail.example.com")
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, got)
 		})
@@ -108,7 +109,7 @@ func TestIsReverseProxyBackend(t *testing.T) {
 func TestIsReverseProxyBackend_Error(t *testing.T) {
 	stub := &stubLDAP{getEntryErr: errors.New("ldap down")}
 
-	_, err := IsReverseProxyBackend(stub, "mail.example.com")
+	_, err := IsReverseProxyBackend(context.Background(), stub, "mail.example.com")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "lookup backend flag")
 }
@@ -121,7 +122,7 @@ func TestEnumerateProxies(t *testing.T) {
 		),
 	}}
 
-	proxies, err := EnumerateProxies(stub)
+	proxies, err := EnumerateProxies(context.Background(), stub)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"proxy1.example.com", "proxy2.example.com"}, proxies)
 	require.Len(t, stub.searchFilters, 1)
@@ -131,7 +132,7 @@ func TestEnumerateProxies(t *testing.T) {
 func TestEnumerateProxies_Error(t *testing.T) {
 	stub := &stubLDAP{searchErr: errors.New("ldap down")}
 
-	_, err := EnumerateProxies(stub)
+	_, err := EnumerateProxies(context.Background(), stub)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "enumerate proxies")
 }
@@ -141,11 +142,13 @@ func TestGetProxiesForHost_Designated(t *testing.T) {
 		searchResult(serverEntry("proxy1.example.com", nil)),
 	}}
 
-	proxies, err := GetProxiesForHost(stub, "mail.example.com")
+	proxies, err := GetProxiesForHost(context.Background(), stub, "mail.example.com")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"proxy1.example.com"}, proxies)
 	require.Len(t, stub.searchFilters, 1, "designated hit must not fall back")
-	assert.Contains(t, stub.searchFilters[0], "zimbraReverseProxyAvailableLookupTargets")
+	// An exact match: "mail1" must not select the proxies designated for "mail10".
+	assert.Equal(t, "(&(objectClass=zimbraServer)(zimbraReverseProxyAvailableLookupTargets=mail.example.com))",
+		stub.searchFilters[0])
 }
 
 func TestGetProxiesForHost_FallbackToAllProxies(t *testing.T) {
@@ -154,7 +157,7 @@ func TestGetProxiesForHost_FallbackToAllProxies(t *testing.T) {
 		searchResult(serverEntry("proxy1.example.com", nil), serverEntry("proxy2.example.com", nil)),
 	}}
 
-	proxies, err := GetProxiesForHost(stub, "mail.example.com")
+	proxies, err := GetProxiesForHost(context.Background(), stub, "mail.example.com")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"proxy1.example.com", "proxy2.example.com"}, proxies)
 	require.Len(t, stub.searchFilters, 2, "must fall back to EnumerateProxies")
@@ -163,7 +166,7 @@ func TestGetProxiesForHost_FallbackToAllProxies(t *testing.T) {
 func TestGetProxiesForHost_Error(t *testing.T) {
 	stub := &stubLDAP{searchErr: errors.New("ldap down")}
 
-	_, err := GetProxiesForHost(stub, "mail.example.com")
+	_, err := GetProxiesForHost(context.Background(), stub, "mail.example.com")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "lookup designated proxies")
 }
@@ -205,7 +208,7 @@ func TestReadProxySettings(t *testing.T) {
 				"cn=proxy1.example.com,cn=servers,cn=zimbra": serverEntry("proxy1.example.com", tt.attrs),
 			}}
 
-			s, err := ReadProxySettings(stub, "proxy1.example.com")
+			s, err := ReadProxySettings(context.Background(), stub, "proxy1.example.com")
 			require.NoError(t, err)
 			assert.Equal(t, "proxy1.example.com", s.Proxy)
 			assert.Equal(t, tt.wantMode, s.MailMode)
@@ -218,7 +221,7 @@ func TestReadProxySettings(t *testing.T) {
 func TestReadProxySettings_Error(t *testing.T) {
 	stub := &stubLDAP{getEntryErr: errors.New("ldap down")}
 
-	_, err := ReadProxySettings(stub, "proxy1.example.com")
+	_, err := ReadProxySettings(context.Background(), stub, "proxy1.example.com")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "read proxy settings for proxy1.example.com")
 }
@@ -226,7 +229,7 @@ func TestReadProxySettings_Error(t *testing.T) {
 func TestSetMailMode(t *testing.T) {
 	stub := &stubLDAP{}
 
-	require.NoError(t, SetMailMode(stub, "mail.example.com", ModeHTTPS))
+	require.NoError(t, SetMailMode(context.Background(), stub, "mail.example.com", ModeHTTPS))
 	require.Len(t, stub.modified, 1)
 	assert.Equal(t, "cn=mail.example.com,cn=servers,cn=zimbra|zimbraMailMode|https", stub.modified[0])
 }
@@ -234,7 +237,7 @@ func TestSetMailMode(t *testing.T) {
 func TestSetMailMode_Error(t *testing.T) {
 	stub := &stubLDAP{modifyErr: errors.New("modify denied")}
 
-	err := SetMailMode(stub, "mail.example.com", ModeBoth)
+	err := SetMailMode(context.Background(), stub, "mail.example.com", ModeBoth)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "set zimbraMailMode=both on mail.example.com")
 }

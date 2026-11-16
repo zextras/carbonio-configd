@@ -27,7 +27,7 @@ type factsServices interface {
 
 // factsLDAPReader is the part of the LDAP client the facts use.
 type factsLDAPReader interface {
-	GetServerConfig(hostname string) (map[string]string, error)
+	GetServerConfig(ctx context.Context, hostname string) (map[string]string, error)
 	Close() error
 }
 
@@ -77,7 +77,7 @@ var serviceToPackage = map[string]string{
 	"service-discover": PkgCore,
 	"stats":            PkgCore,
 	"memcached":        "carbonio-memcached",
-	"proxy":            "carbonio-proxy",
+	certSvcProxy:       "carbonio-proxy",
 	"service":          PkgAppserver,
 }
 
@@ -137,6 +137,10 @@ func (f *Facts) EnabledRoles() []string {
 // setup.pl getInstallStatus.
 func (f *Facts) ReadHistory(data []byte) {
 	installed := false
+	// configured is sticky: a later session that stops before its END (a
+	// failed rerun on a live node) clears the stage marks below but does not
+	// turn the node back into a new install. Only a new INSTALL SESSION does.
+	configured := false
 	f.Configured = map[string]bool{}
 
 	sc := bufio.NewScanner(bytes.NewReader(data))
@@ -151,7 +155,7 @@ func (f *Facts) ReadHistory(data []byte) {
 
 			continue
 		case strings.Contains(line, "INSTALL SESSION START"):
-			installed = false
+			installed, configured = false, false
 			f.Configured = map[string]bool{}
 
 			continue
@@ -167,10 +171,11 @@ func (f *Facts) ReadHistory(data []byte) {
 			installed = true
 		case op == "CONFIGURED":
 			f.Configured[stage] = true
+			configured = configured || stage == "END"
 		}
 	}
 
-	f.NewInstall = installed && !f.Configured["END"]
+	f.NewInstall = installed && !configured
 }
 
 // DetectFacts reads the facts of the node. On an existing install it reads
@@ -250,7 +255,7 @@ func (f *Facts) readServerEntry(e *Env) error {
 	}
 	defer func() { _ = client.Close() }()
 
-	entry, err := client.GetServerConfig(host)
+	entry, err := client.GetServerConfig(e.Ctx, host)
 	if err != nil {
 		return fmt.Errorf("reading server %s: %w", host, err)
 	}

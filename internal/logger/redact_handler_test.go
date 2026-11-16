@@ -201,3 +201,18 @@ func TestRedactHandler_SecretGroupKeyMasksChildren(t *testing.T) {
 	assert.NotContains(t, out, "hunter3")
 	assert.Contains(t, out, redact.Placeholder)
 }
+
+// An any-valued attribute that is not an error (an argument list, a map) is
+// scanned for credentials in its printed form too.
+func TestRedactHandler_ScansNonErrorAnyValues(t *testing.T) {
+	t.Parallel()
+
+	args := []string{"ldapsearch", "-H", "ldap://admin:" + "hunter2" + "@host:389"}
+	out := emit(t, true, FormatText, "run", slog.Any("args", args))
+
+	assert.NotContains(t, out, "hunter2")
+	assert.Contains(t, out, redact.Placeholder)
+
+	clean := emit(t, true, FormatText, "run", slog.Any("args", []string{"a", "b"}))
+	assert.Contains(t, clean, "[a b]")
+}

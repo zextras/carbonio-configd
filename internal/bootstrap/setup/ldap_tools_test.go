@@ -92,11 +92,16 @@ func TestLdapSchema_InstallsRenamedSchemasInTheOrderOfTheScript(t *testing.T) {
 
 		mode, _ := fakes.FS.Mode(dir + "/" + c.file)
 		assert.Equal(t, "-rw-------", mode.String(), c.file)
-		assert.Contains(t, ldapAllLines(fakes), "chown zextras:zextras "+dir+"/"+c.file)
+		uid, gid, ok := fakes.FS.Owner(dir + "/" + c.file)
+		require.True(t, ok, c.file)
+		assert.Equal(t, [2]int{998, 997}, [2]int{uid, gid}, c.file)
 	}
 
 	assert.False(t, fakes.FS.Exists(dir+"/core.ldif.orig"), "ldapschema.sh removes the sed backups")
-	assert.Contains(t, ldapAllLines(fakes), "chown zextras:zextras "+dir+"\n")
+	uid, gid, ok := fakes.FS.Owner(dir)
+	require.True(t, ok)
+	assert.Equal(t, [2]int{998, 997}, [2]int{uid, gid})
+	assert.NotContains(t, ldapAllLines(fakes), "chown zextras:zextras", "no chown by path")
 	mode, _ := fakes.FS.Mode(dir)
 	assert.Equal(t, "drwxr-x---", mode.String(), "the directory is 750")
 }

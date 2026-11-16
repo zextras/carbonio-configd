@@ -43,6 +43,13 @@ func TestIsConnectionError(t *testing.T) {
 			expected: true,
 		},
 		{
+			// go-ldap's per-request timeout: the connection is still open but
+			// wedged, so it must be discarded, not pooled.
+			name:     "network error code - request timeout",
+			err:      ldap.NewError(ldap.ErrorNetwork, errors.New("ldap: connection timed out")),
+			expected: true,
+		},
+		{
 			name:     "no such object - not connection error",
 			err:      ldap.NewError(ldap.LDAPResultNoSuchObject, errors.New("not found")),
 			expected: false,
@@ -248,7 +255,7 @@ func TestClient_ReturnConnection_NilConnection(t *testing.T) {
 		t.Fatalf("expected no error, got %v", err)
 	}
 
-	client.returnConnection(nil)
+	client.returnConnection(nil, 0)
 
 	if len(client.pool) != 0 {
 		t.Errorf("expected empty pool, got %d connections", len(client.pool))

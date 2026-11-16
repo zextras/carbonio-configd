@@ -34,21 +34,23 @@ type fakeConn struct {
 	closed                     bool
 }
 
-func (f *fakeConn) GetGlobalConfig() (map[string]string, error) { return f.global, f.err }
+func (f *fakeConn) GetGlobalConfig(context.Context) (map[string]string, error) {
+	return f.global, f.err
+}
 
-func (f *fakeConn) GetServerConfig(host string) (map[string]string, error) {
+func (f *fakeConn) GetServerConfig(_ context.Context, host string) (map[string]string, error) {
 	f.gotServer = host
 
 	return f.server, f.err
 }
 
-func (f *fakeConn) Search(base, filter string, attrs []string, scope int) (*goldap.SearchResult, error) {
+func (f *fakeConn) Search(_ context.Context, base, filter string, attrs []string, scope int) (*goldap.SearchResult, error) {
 	f.gotBase, f.gotFilter, f.gotAttrs, f.gotScope = base, filter, attrs, scope
 
 	return f.result, f.err
 }
 
-func (f *fakeConn) ModifyValues(dn string, add, del, replace map[string][]string) error {
+func (f *fakeConn) ModifyValues(_ context.Context, dn string, add, del, replace map[string][]string) error {
 	f.gotDN, f.gotAdd, f.gotDel, f.gotReplace = dn, add, del, replace
 
 	return f.err

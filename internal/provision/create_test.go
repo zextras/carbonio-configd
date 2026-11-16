@@ -5,9 +5,11 @@
 package provision_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/zextras/carbonio-configd/internal/provision"
 )
@@ -133,4 +135,33 @@ func TestCreateDomain_ReplacesAParentEntryOfTheSameDN(t *testing.T) {
 	assert.Contains(t, r.dir.Values(domainDN, "objectClass"), "zimbraDomain")
 	assert.Equal(t, []string{"example.com domain"}, r.dir.Values(domainDN, "o"))
 	assert.True(t, r.dir.Exists("dc=sub,dc="+"example,dc=com"), "the sub domain is untouched")
+}
+
+func TestCreateDomain_FailedBasesLeaveNoDomainBehind(t *testing.T) {
+	r := newRig(t)
+	r.dir.FailAdd["cn=groups,"+domainDN] = errors.New("boom")
+
+	_, err := r.Exec([]string{"cd", "example.com"})
+
+	require.Error(t, err)
+	assert.False(t, hasCode(err, provision.CodeDomainExists))
+	assert.False(t, r.dir.Exists(domainDN), "the domain entry is removed")
+	assert.False(t, r.dir.Exists("ou=people,"+domainDN), "so is the base that was created")
+
+	delete(r.dir.FailAdd, "cn=groups,"+domainDN)
+	r.run(t, "cd", "example.com")
+
+	assert.True(t, r.dir.Exists("cn=groups,"+domainDN), "a retry creates the domain")
+}
+
+func TestCreateDomain_FailedBasesKeepAReplacedParent(t *testing.T) {
+	r := newRig(t)
+	r.run(t, "cd", "sub.example.com")
+	r.dir.FailAdd["cn=groups,"+domainDN] = errors.New("boom")
+
+	_, err := r.Exec([]string{"cd", "example.com"})
+
+	require.Error(t, err)
+	assert.True(t, r.dir.Exists("dc=sub,"+domainDN), "the entry of the other domain below stays")
+	assert.True(t, r.dir.Exists(domainDN), "a parent entry that was only replaced is not deleted")
 }

@@ -10,6 +10,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -132,7 +133,7 @@ func newCycleFixture(t *testing.T) *cycleFixture {
 	ctx := context.Background()
 	rec, notifier := newNotifyRecorder(t)
 	fakes := systest.New()
-	fakes.Exec.OnCmdline("systemctl is-enabled", systest.Fail(1, "")) // legacy (non-systemd) restart mode
+	fakes.Exec.OnCmdline("/usr/bin/systemctl is-enabled", systest.Fail(1, "")) // legacy (non-systemd) restart mode
 	env := fakes.System()
 	env.Clock = sys.Real().Clock
 
@@ -424,9 +425,20 @@ func TestRewriteWaiters(t *testing.T) {
 		tr.claimWaiters()
 		assert.False(t, released(w), "claimed but not yet rewritten")
 
-		tr.completeWaiters()
+		tr.completeWaiters(nil)
 		assert.True(t, released(w))
 		assert.Equal(t, []string{"mta"}, tr.State.TakeRequestedConfigs(), "the loop, not the trigger, takes the sections")
+	})
+
+	t.Run("a failed rewrite phase is reported to the released client", func(t *testing.T) {
+		tr := newTrigger()
+		w := tr.TriggerRewrite(context.Background(), []string{"mta"})
+
+		tr.claimWaiters()
+		tr.completeWaiters(errors.New("write failed"))
+
+		require.True(t, released(w))
+		require.Error(t, w.Err())
 	})
 
 	t.Run("not released by a cycle that started before the request", func(t *testing.T) {
@@ -435,11 +447,11 @@ func TestRewriteWaiters(t *testing.T) {
 
 		w := tr.TriggerRewrite(context.Background(), []string{"mta"})
 
-		tr.completeWaiters()
+		tr.completeWaiters(nil)
 		assert.False(t, released(w))
 
 		tr.claimWaiters()
-		tr.completeWaiters()
+		tr.completeWaiters(nil)
 		assert.True(t, released(w), "released by the next cycle")
 	})
 
@@ -452,7 +464,7 @@ func TestRewriteWaiters(t *testing.T) {
 		assert.False(t, released(w))
 
 		tr.claimWaiters()
-		tr.completeWaiters()
+		tr.completeWaiters(nil)
 		assert.True(t, released(w))
 	})
 
@@ -487,7 +499,7 @@ func TestRewriteWaiters(t *testing.T) {
 		w.Cancel()
 
 		tr.claimWaiters()
-		tr.completeWaiters()
+		tr.completeWaiters(nil)
 		assert.False(t, released(w))
 		assert.Equal(t, []string{"mta"}, tr.State.TakeRequestedConfigs())
 	})

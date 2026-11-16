@@ -27,7 +27,7 @@ func TestStartSdWatchdogKeepAlive_StopsOnCancel(t *testing.T) {
 	clock := systest.New().Clock
 	ctx, cancel := context.WithCancel(context.Background())
 
-	startSdWatchdogKeepAlive(ctx, clock, notifier, time.Millisecond)
+	startSdWatchdogKeepAlive(ctx, clock, notifier, time.Millisecond, nil)
 	require.Eventually(t, func() bool { return clock.Waiters() == 1 }, time.Second, time.Millisecond)
 
 	// One ping interval elapses, then the goroutine observes ctx.Done and
@@ -44,7 +44,7 @@ func TestBootstrapSystemd_ReturnsBufferedReloadChan(t *testing.T) {
 	_, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	reloadChan := bootstrapSystemd(context.Background(), systest.New().System(), state.NewState(), cancel, notifier)
+	reloadChan := bootstrapSystemd(context.Background(), systest.New().System(), state.NewState(), cancel, notifier, nil)
 	require.NotNil(t, reloadChan)
 	require.Equal(t, 1, cap(reloadChan))
 }

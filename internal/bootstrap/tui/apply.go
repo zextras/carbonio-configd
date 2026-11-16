@@ -252,6 +252,8 @@ func (m *ApplyModel) key(k string) tea.Cmd {
 	switch {
 	case m.welcome:
 		return m.keyWelcome(k)
+	case k == keyCtrlC:
+		m.interrupt()
 	case m.logView:
 		m.keyLog(k)
 	case k == "l":
@@ -260,8 +262,6 @@ func (m *ApplyModel) key(k string) tea.Cmd {
 		m.vp.SetHeight(m.h - 5)
 		m.vp.SetContentLines(m.opts.Feed.logLines())
 		m.vp.GotoBottom()
-	case k == keyCtrlC:
-		m.interrupt()
 	case m.finished && (k == "q" || k == keyEnter || k == keyEsc):
 		m.quit = true
 	}

@@ -210,12 +210,32 @@ func localStr(data *ConfigMap, key string, dst *string) {
 	}
 }
 
+// parseLocalInt is the integer value of data[key], when present and parseable.
+func parseLocalInt(data *ConfigMap, key string) (int, bool) {
+	v, ok := data.Get(key)
+	if !ok || v == "" {
+		return 0, false
+	}
+
+	i, err := strconv.Atoi(v)
+
+	return i, err == nil
+}
+
 // localInt sets *dst to the integer value of data[key] when present and parseable.
 func localInt(data *ConfigMap, key string, dst *int) {
-	if v, ok := data.Get(key); ok && v != "" {
-		if i, err := strconv.Atoi(v); err == nil {
-			*dst = i
-		}
+	if i, ok := parseLocalInt(data, key); ok {
+		*dst = i
+	}
+}
+
+// localIntMin is localInt that ignores a value below minimum and keeps the
+// current one (the default, or what the last good load set). An interval of 0
+// would make the main loop spin on LDAP and a negative one panics
+// time.NewTicker.
+func localIntMin(data *ConfigMap, key string, dst *int, minimum int) {
+	if i, ok := parseLocalInt(data, key); ok && i >= minimum {
+		*dst = i
 	}
 }
 
@@ -298,8 +318,8 @@ func (c *Config) SetVals(localConfig *LocalConfig) {
 	localStr(data, "ldap_master_url", &c.LdapMasterURL)
 
 	localInt(data, "zmconfigd_log_level", &c.LogLevel)
-	localInt(data, "zmconfigd_interval", &c.Interval)
-	localInt(data, "zmconfigd_watchdog_interval", &c.WatchdogInterval)
+	localIntMin(data, "zmconfigd_interval", &c.Interval, 1)
+	localIntMin(data, "zmconfigd_watchdog_interval", &c.WatchdogInterval, 1)
 
 	// Off unless TRUE: skipping idle polls hides changes made directly in LDAP
 	// (zmprov, admin console), which legacy configd.py detects on every interval.
@@ -307,14 +327,14 @@ func (c *Config) SetVals(localConfig *LocalConfig) {
 	localBoolTrue(data, "zmconfigd_debug", &c.Debug)
 	localBoolNotFalse(data, "zmconfigd_watchdog", &c.Watchdog)
 	localBoolNotFalse(data, "zmconfigd_enable_config_restarts", &c.RestartConfig)
-	localInt(data, "zmconfigd_restart_debounce_seconds", &c.RestartDebounce)
+	localIntMin(data, "zmconfigd_restart_debounce_seconds", &c.RestartDebounce, 0)
 	localStr(data, "zmconfigd_metrics_textfile", &c.MetricsTextfile)
 	localBoolTrue(data, "zmconfigd_cycle_summary", &c.CycleSummary)
 
 	// LDAP change watcher: on unless false, no, 0 or off (opt-out).
 	localBoolUnlessOff(data, "zmconfigd_ldap_change_trigger", &c.LdapChangeTrigger)
-	localInt(data, "zmconfigd_ldap_change_poll_seconds", &c.LdapChangePollSeconds)
-	localInt(data, "zmconfigd_ldap_change_debounce_seconds", &c.LdapChangeDebounceSeconds)
+	localIntMin(data, "zmconfigd_ldap_change_poll_seconds", &c.LdapChangePollSeconds, 1)
+	localIntMin(data, "zmconfigd_ldap_change_debounce_seconds", &c.LdapChangeDebounceSeconds, 0)
 
 	c.SetRuntimeVals(localConfig)
 

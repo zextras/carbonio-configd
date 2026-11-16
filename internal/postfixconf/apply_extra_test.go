@@ -6,6 +6,7 @@ package postfixconf
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -333,4 +334,86 @@ func TestReadEntryRejectsBadStagedFiles(t *testing.T) {
 			t.Fatal("an unknown staging entry must be refused")
 		}
 	})
+}
+
+func TestCommitPostconfFailureRollsBackFiles(t *testing.T) {
+	t.Parallel()
+
+	const (
+		oldMaster = "# old master.cf\n"
+		oldMain   = "relayhost = old\n"
+		secret    = "s3cr3t-relay-password"
+	)
+
+	for _, tc := range []struct {
+		name        string
+		existing    bool
+		wantRestore string
+	}{
+		{"existing master.cf is restored", true, oldMaster},
+		{"new master.cf is removed", false, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			e := newEnv(t)
+			e.runErr = errors.New("exit status 1")
+			e.runOut = "postconf: fatal: bad value\n"
+
+			masterPath := filepath.Join(e.conf, MasterCf)
+			mainPath := filepath.Join(e.conf, MainCf)
+
+			if err := os.WriteFile(mainPath, []byte(oldMain), 0o644); err != nil { //nolint:gosec // test
+				t.Fatal(err)
+			}
+
+			if tc.existing {
+				if err := os.WriteFile(masterPath, []byte(oldMaster), 0o644); err != nil { //nolint:gosec // test
+					t.Fatal(err)
+				}
+			}
+
+			err := e.opts.Commit(context.Background(), &Change{
+				Files: map[string][]byte{MasterCf: []byte(goodMaster)},
+				Set:   []KV{{Key: "relayhost", Value: secret}},
+			})
+			if err == nil || errors.Is(err, ErrValidation) {
+				t.Fatalf("err = %v, want a postconf failure", err)
+			}
+
+			if strings.Contains(err.Error(), secret) {
+				t.Errorf("error echoes the value being set: %v", err)
+			}
+
+			got, readErr := os.ReadFile(masterPath)
+			if tc.existing {
+				if readErr != nil || string(got) != tc.wantRestore {
+					t.Errorf("master.cf = %q (%v), want the old content", got, readErr)
+				}
+			} else if !errors.Is(readErr, os.ErrNotExist) {
+				t.Errorf("master.cf still installed after rollback: %q (%v)", got, readErr)
+			}
+
+			if got, _ := os.ReadFile(mainPath); string(got) != oldMain {
+				t.Errorf("main.cf = %q, want it restored", got)
+			}
+		})
+	}
+}
+
+func TestCommitSuccessKeepsInstalledFiles(t *testing.T) {
+	t.Parallel()
+
+	e := newEnv(t)
+
+	if err := e.opts.Commit(context.Background(), &Change{
+		Files: map[string][]byte{MasterCf: []byte(goodMaster)},
+		Set:   []KV{{Key: "relayhost", Value: "b"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if got, _ := os.ReadFile(filepath.Join(e.conf, MasterCf)); string(got) != goodMaster {
+		t.Errorf("master.cf = %q, want the new content", got)
+	}
 }

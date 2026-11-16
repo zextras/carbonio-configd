@@ -46,7 +46,7 @@ func TestNativeClient_RealLDAP_GlobalConfig(t *testing.T) {
 
 	// Test GetGlobalConfig
 	t.Run("GetGlobalConfig", func(t *testing.T) {
-		globalConfig, err := client.GetGlobalConfig()
+		globalConfig, err := client.GetGlobalConfig(t.Context())
 		if err != nil {
 			t.Fatalf("GetGlobalConfig failed: %v", err)
 		}
@@ -103,7 +103,7 @@ func TestNativeClient_RealLDAP_ServerConfig(t *testing.T) {
 
 	// Test GetServerConfig
 	t.Run("GetServerConfig", func(t *testing.T) {
-		serverConfig, err := client.GetServerConfig(hostname)
+		serverConfig, err := client.GetServerConfig(t.Context(), hostname)
 		if err != nil {
 			t.Fatalf("GetServerConfig failed: %v", err)
 		}
@@ -160,7 +160,7 @@ func TestNativeClient_RealLDAP_AllServers(t *testing.T) {
 
 	// Test GetAllServers
 	t.Run("GetAllServers", func(t *testing.T) {
-		servers, err := client.GetAllServers()
+		servers, err := client.GetAllServers(t.Context())
 		if err != nil {
 			t.Fatalf("GetAllServers failed: %v", err)
 		}
@@ -177,7 +177,7 @@ func TestNativeClient_RealLDAP_AllServers(t *testing.T) {
 
 	// Test GetAllServersWithAttributes
 	t.Run("GetAllServersWithAttributes", func(t *testing.T) {
-		serversWithAttrs, err := client.GetAllServersWithAttributes()
+		serversWithAttrs, err := client.GetAllServersWithAttributes(t.Context())
 		if err != nil {
 			t.Fatalf("GetAllServersWithAttributes failed: %v", err)
 		}
@@ -226,7 +226,7 @@ func TestNativeClient_RealLDAP_Domains(t *testing.T) {
 
 	// Test GetAllDomains
 	t.Run("GetAllDomains", func(t *testing.T) {
-		domains, err := client.GetAllDomains()
+		domains, err := client.GetAllDomains(t.Context())
 		if err != nil {
 			t.Fatalf("GetAllDomains failed: %v", err)
 		}
@@ -243,7 +243,7 @@ func TestNativeClient_RealLDAP_Domains(t *testing.T) {
 		// Test GetDomain for the first domain
 		if len(domains) > 0 {
 			t.Run("GetDomain", func(t *testing.T) {
-				domainAttrs, err := client.GetDomain(domains[0])
+				domainAttrs, err := client.GetDomain(t.Context(), domains[0])
 				if err != nil {
 					t.Fatalf("GetDomain(%s) failed: %v", domains[0], err)
 				}

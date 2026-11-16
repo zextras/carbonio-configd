@@ -8,9 +8,11 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"maps"
 	"testing"
 
 	goldap "github.com/go-ldap/ldap/v3"
+	"github.com/stretchr/testify/require"
 
 	"github.com/zextras/carbonio-configd/internal/commands"
 	"github.com/zextras/carbonio-configd/internal/config"
@@ -47,7 +49,7 @@ func TestInitNativeLdapClient_StartTLSFromLoadedLocalconfig(t *testing.T) {
 		mainConfig:      &config.Config{}, // not yet populated, as at construction time
 		CommandRegistry: commands.NewRegistry(),
 	}
-	cm.initNativeLdapClient(context.Background())
+	cm.syncLdapClients(context.Background())
 
 	if cm.NativeLdapClient == nil {
 		t.Fatal("NativeLdapClient not initialised")
@@ -55,7 +57,7 @@ func TestInitNativeLdapClient_StartTLSFromLoadedLocalconfig(t *testing.T) {
 
 	t.Cleanup(func() { _ = cm.NativeLdapClient.Close() })
 
-	if _, err := cm.NativeLdapClient.Search("cn=zimbra", "(objectClass=*)", []string{"cn"}, goldap.ScopeBaseObject); err != nil {
+	if _, err := cm.NativeLdapClient.Search(t.Context(), "cn=zimbra", "(objectClass=*)", []string{"cn"}, goldap.ScopeBaseObject); err != nil {
 		t.Fatalf("search: %v", err)
 	}
 
@@ -78,7 +80,7 @@ func TestInitNativeLdapClient_LoadFails(t *testing.T) {
 		mainConfig:      &config.Config{},
 		CommandRegistry: commands.NewRegistry(),
 	}
-	cm.initNativeLdapClient(context.Background())
+	cm.syncLdapClients(context.Background())
 
 	if cm.NativeLdapClient != nil {
 		t.Error("NativeLdapClient should be nil when load fails")
@@ -101,7 +103,7 @@ func TestInitNativeLdapClient_MissingURL(t *testing.T) {
 		mainConfig:      &config.Config{},
 		CommandRegistry: commands.NewRegistry(),
 	}
-	cm.initNativeLdapClient(context.Background())
+	cm.syncLdapClients(context.Background())
 
 	if cm.NativeLdapClient != nil {
 		t.Error("NativeLdapClient should be nil when ldap_url is missing")
@@ -125,7 +127,7 @@ func TestInitNativeLdapClient_WhitespaceURL(t *testing.T) {
 		mainConfig:      &config.Config{},
 		CommandRegistry: commands.NewRegistry(),
 	}
-	cm.initNativeLdapClient(context.Background())
+	cm.syncLdapClients(context.Background())
 
 	if cm.NativeLdapClient != nil {
 		t.Error("NativeLdapClient should be nil when ldap_url has only whitespace")
@@ -148,7 +150,7 @@ func TestInitNativeLdapClient_MissingBindDN(t *testing.T) {
 		mainConfig:      &config.Config{},
 		CommandRegistry: commands.NewRegistry(),
 	}
-	cm.initNativeLdapClient(context.Background())
+	cm.syncLdapClients(context.Background())
 
 	if cm.NativeLdapClient != nil {
 		t.Error("NativeLdapClient should be nil when bind DN is missing")
@@ -171,7 +173,7 @@ func TestInitNativeLdapClient_MissingPassword(t *testing.T) {
 		mainConfig:      &config.Config{},
 		CommandRegistry: commands.NewRegistry(),
 	}
-	cm.initNativeLdapClient(context.Background())
+	cm.syncLdapClients(context.Background())
 
 	if cm.NativeLdapClient != nil {
 		t.Error("NativeLdapClient should be nil when password is missing")
@@ -198,7 +200,7 @@ func TestInitNativeLdapClient_MultiURLSucceedsBuilding(t *testing.T) {
 		mainConfig:      &config.Config{},
 		CommandRegistry: commands.NewRegistry(),
 	}
-	cm.initNativeLdapClient(context.Background())
+	cm.syncLdapClients(context.Background())
 
 	if cm.NativeLdapClient == nil {
 		t.Fatal("NativeLdapClient should be created when localconfig is complete (multi-URL form)")
@@ -224,7 +226,7 @@ func TestInitNativeLdapClient_ConfigClientWiredWithRootPassword(t *testing.T) {
 		CommandRegistry: commands.NewRegistry(),
 		LdapClient:      ldap.NewLdap(context.Background(), &config.Config{}),
 	}
-	cm.initNativeLdapClient(context.Background())
+	cm.syncLdapClients(context.Background())
 
 	if cm.ConfigLdapClient == nil {
 		t.Fatal("ConfigLdapClient should be created when ldap_root_password is present")
@@ -256,14 +258,14 @@ func TestInitNativeLdapClient_ConfigClientNilWithoutRootPassword(t *testing.T) {
 		CommandRegistry: commands.NewRegistry(),
 		LdapClient:      ldap.NewLdap(context.Background(), &config.Config{}),
 	}
-	cm.initNativeLdapClient(context.Background())
+	cm.syncLdapClients(context.Background())
 
 	if cm.ConfigLdapClient != nil {
 		t.Error("ConfigLdapClient should be nil when ldap_root_password is absent")
 	}
 }
 
-func TestEnsureNativeLdapClient_RetriesUntilLocalconfigIsReady(t *testing.T) {
+func TestSyncLdapClients_RetriesUntilLocalconfigIsReady(t *testing.T) {
 	t.Parallel()
 
 	srv := ldapfake.New(t, ldapfake.Options{})
@@ -288,7 +290,7 @@ func TestEnsureNativeLdapClient_RetriesUntilLocalconfigIsReady(t *testing.T) {
 		CommandRegistry: commands.NewRegistry(),
 	}
 
-	cm.ensureNativeLdapClient(context.Background())
+	cm.syncLdapClients(context.Background())
 
 	if cm.NativeLdapClient != nil {
 		t.Fatal("client must stay nil while localconfig is not ready")
@@ -296,7 +298,7 @@ func TestEnsureNativeLdapClient_RetriesUntilLocalconfigIsReady(t *testing.T) {
 
 	ready = true
 
-	cm.ensureNativeLdapClient(context.Background())
+	cm.syncLdapClients(context.Background())
 
 	if cm.NativeLdapClient == nil {
 		t.Fatal("client not built on retry")
@@ -310,9 +312,105 @@ func TestEnsureNativeLdapClient_RetriesUntilLocalconfigIsReady(t *testing.T) {
 
 	built := cm.NativeLdapClient
 
-	cm.ensureNativeLdapClient(context.Background())
+	cm.syncLdapClients(context.Background())
 
 	if cm.NativeLdapClient != built {
 		t.Error("an existing client must not be rebuilt")
 	}
+}
+
+// A rotated zimbra_ldap_password or a moved ldap_url reaches the native client
+// on the next sync, in place: the registered commands and the watcher hold the
+// same client.
+func TestSyncLdapClients_AppliesLocalconfigChanges(t *testing.T) {
+	t.Parallel()
+
+	first := ldapfake.New(t, ldapfake.Options{})
+	second := ldapfake.New(t, ldapfake.Options{})
+
+	lc := map[string]string{
+		"ldap_url":             first.URL("ldap", "127.0.0.1"),
+		"zimbra_ldap_userdn":   "uid=zimbra,cn=admins,cn=zimbra",
+		"zimbra_ldap_password": "old",
+	}
+
+	cm := &ConfigManager{
+		env:             hostEnv(),
+		loadLocalConfig: func() (map[string]string, error) { return maps.Clone(lc), nil },
+		mainConfig:      &config.Config{},
+		CommandRegistry: commands.NewRegistry(),
+	}
+
+	search := func() error {
+		_, err := cm.NativeLdapClient.Search(t.Context(), "cn=zimbra", "(objectClass=*)", []string{"cn"}, goldap.ScopeBaseObject)
+
+		return err
+	}
+
+	cm.syncLdapClients(t.Context())
+	require.NotNil(t, cm.NativeLdapClient)
+	t.Cleanup(cm.Close)
+
+	built := cm.NativeLdapClient
+
+	require.NoError(t, search())
+	require.Equal(t, 1, first.Binds())
+
+	cm.syncLdapClients(t.Context())
+	require.NoError(t, search())
+	require.Equal(t, 1, first.Binds(), "an unchanged localconfig keeps the pooled connection")
+
+	lc["ldap_url"] = second.URL("ldap", "127.0.0.1")
+	lc["zimbra_ldap_password"] = "new"
+
+	cm.syncLdapClients(t.Context())
+	require.Same(t, built, cm.NativeLdapClient, "reconfigured in place, not replaced")
+	require.NoError(t, search())
+	require.Equal(t, 1, second.Binds(), "the next operation connects to the new URL")
+	require.Equal(t, 1, first.Binds())
+}
+
+// The cn=config client failed once (no ldap_root_password yet) is built by a
+// later sync, and a changed root password is applied to it afterwards.
+func TestSyncLdapClients_RetriesAndReconfiguresConfigClient(t *testing.T) {
+	t.Parallel()
+
+	srv := ldapfake.New(t, ldapfake.Options{})
+
+	lc := map[string]string{
+		"ldap_url":             srv.URL("ldap", "127.0.0.1"),
+		"zimbra_ldap_userdn":   "uid=zimbra,cn=admins,cn=zimbra",
+		"zimbra_ldap_password": "secret",
+	}
+
+	cm := &ConfigManager{
+		env:             hostEnv(),
+		loadLocalConfig: func() (map[string]string, error) { return maps.Clone(lc), nil },
+		mainConfig:      &config.Config{},
+		CommandRegistry: commands.NewRegistry(),
+		LdapClient:      ldap.NewLdap(t.Context(), &config.Config{}),
+	}
+
+	cm.syncLdapClients(t.Context())
+	t.Cleanup(cm.Close)
+	require.NotNil(t, cm.NativeLdapClient)
+	require.Nil(t, cm.ConfigLdapClient, "no ldap_root_password yet")
+
+	lc["ldap_root_password"] = "root1"
+
+	cm.syncLdapClients(t.Context())
+	require.NotNil(t, cm.ConfigLdapClient, "the failed config client is retried")
+
+	configClient := cm.ConfigLdapClient
+
+	lc["ldap_root_password"] = "root2"
+
+	cm.syncLdapClients(t.Context())
+	require.Same(t, configClient, cm.ConfigLdapClient)
+
+	changed, err := configClient.Reconfigure(&ldap.ClientConfig{
+		URL: ldap.ConfigBackendURL, BindDN: ldap.ConfigBackendDN, Password: "root2",
+	})
+	require.NoError(t, err)
+	require.False(t, changed, "the new root password was already applied by the sync")
 }

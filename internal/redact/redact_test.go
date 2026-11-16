@@ -29,6 +29,8 @@ func TestIsSecretKey(t *testing.T) {
 		{"ssl_private_key", true},
 		{"ssl_key", true},
 		{"ldap_root_pw", true},
+		{"olcRootPW", true},
+		{"olcRootDN", false},
 		{"ldap_bind_pwd", true},
 		{"ldap_bindpw", true},
 		{"zimbraSomeCreds", true},
@@ -156,4 +158,24 @@ func TestText_URLUserinfoPasswordWithSlash(t *testing.T) {
 	assert.True(t, changed)
 	assert.NotContains(t, got, "pa/ss")
 	assert.Contains(t, got, "@host:389/base")
+}
+
+func TestText_URLUserinfoPasswordWithAt(t *testing.T) {
+	t.Parallel()
+
+	got, changed := Text("ldap://admin:p@ss@word@host:389/base")
+
+	assert.True(t, changed)
+	assert.NotContains(t, got, "ss@word")
+	assert.Equal(t, "ldap://admin:"+Placeholder+"@host:389/base", got)
+}
+
+func TestArgs_PasswordFlagsOfTheLDAPTools(t *testing.T) {
+	t.Parallel()
+
+	got := Args([]string{"ldapsearch", "-x", "-w", "hunter2", "-D", "cn=admin", "--pw", "hunter3", "-w=hunter4"})
+
+	assert.Equal(t, []string{
+		"ldapsearch", "-x", "-w", Placeholder, "-D", "cn=admin", "--pw", Placeholder, "-w=" + Placeholder,
+	}, got)
 }

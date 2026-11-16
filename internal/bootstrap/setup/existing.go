@@ -5,6 +5,7 @@
 package setup
 
 import (
+	"context"
 	"maps"
 	"regexp"
 	"strconv"
@@ -34,9 +35,9 @@ const (
 // existLDAPReader is the part of the native LDAP client ExistingValues reads.
 // *ldap.Client implements it; the tests use a fake.
 type existLDAPReader interface {
-	GetServerConfig(hostname string) (map[string]string, error)
-	GetGlobalConfig() (map[string]string, error)
-	ReadAttribute(dn, attribute string) (value string, present bool, err error)
+	GetServerConfig(ctx context.Context, hostname string) (map[string]string, error)
+	GetGlobalConfig(ctx context.Context) (map[string]string, error)
+	ReadAttribute(ctx context.Context, dn, attribute string) (value string, present bool, err error)
 	BaseDN() string
 	Close() error
 }
@@ -294,7 +295,7 @@ func existFromLDAP(e *Env, v existValues, open existOpenLDAP) {
 	}
 	defer func() { _ = c.Close() }()
 
-	global, err := c.GetGlobalConfig()
+	global, err := c.GetGlobalConfig(e.Ctx)
 	if err != nil {
 		e.Log.Warn("Cannot read the existing LDAP configuration: %v", err)
 
@@ -303,7 +304,7 @@ func existFromLDAP(e *Env, v existValues, open existOpenLDAP) {
 
 	var ports existPorts
 
-	if server, err := c.GetServerConfig(v[existKeyHostname]); err == nil && server["zimbraId"] != "" {
+	if server, err := c.GetServerConfig(e.Ctx, v[existKeyHostname]); err == nil && server["zimbraId"] != "" {
 		existFromServer(e, v, server, &ports)
 	}
 
@@ -361,13 +362,13 @@ func existFromGlobal(v existValues, global map[string]string) {
 func existFromCOS(e *Env, v existValues, c existLDAPReader) {
 	dn := "cn=default,cn=cos," + c.BaseDN()
 
-	if val, ok, err := c.ReadAttribute(dn, "zimbraPrefUseKeyboardShortcuts"); err == nil && ok {
+	if val, ok, err := c.ReadAttribute(e.Ctx, dn, "zimbraPrefUseKeyboardShortcuts"); err == nil && ok {
 		v.setBool("store.keyboard_shortcuts", val)
 	} else if err != nil {
 		e.Log.Detail("default COS not read: %v", err)
 	}
 
-	if val, ok, err := c.ReadAttribute(dn, "zimbraPrefTimeZoneId"); err == nil && ok {
+	if val, ok, err := c.ReadAttribute(e.Ctx, dn, "zimbraPrefTimeZoneId"); err == nil && ok {
 		v.set("host.timezone", val)
 	}
 }

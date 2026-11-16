@@ -113,7 +113,8 @@ type Config struct {
 
 // NewWatchdog creates a new Watchdog instance.
 func NewWatchdog(cfg Config) *Watchdog { //nolint:gocritic // hugeParam: construction-time value object
-	if cfg.CheckInterval == 0 {
+	// A non-positive interval would panic the ticker.
+	if cfg.CheckInterval <= 0 {
 		cfg.CheckInterval = 60 * time.Second // Default: 60 seconds
 	}
 
@@ -138,7 +139,9 @@ func (w *Watchdog) SetMetrics(reg *metrics.Registry) {
 }
 
 // Start begins the watchdog monitoring loop. In systemd mode it only logs that
-// the watchdog is off.
+// the watchdog is off. The mode is asked again on every tick: a probe that
+// failed at boot reads as legacy, and the loop must then stand down once the
+// answer turns out to be systemd.
 func (w *Watchdog) Start(ctx context.Context) {
 	ctx = logger.ContextWithComponentOnce(ctx, "watchdog")
 
@@ -179,15 +182,15 @@ func (w *Watchdog) Start(ctx context.Context) {
 func (w *Watchdog) Stop(ctx context.Context) {
 	ctx = logger.ContextWithComponentOnce(ctx, "watchdog")
 
-	if systemd.Managed(w.systemd) {
-		return
-	}
-
 	w.mu.Lock()
 
 	if !w.enabled {
 		w.mu.Unlock()
-		logger.WarnContext(ctx, "Watchdog not running")
+
+		// In systemd mode Start never ran the loop: nothing to stop, nothing to say.
+		if !systemd.Managed(w.systemd) {
+			logger.WarnContext(ctx, "Watchdog not running")
+		}
 
 		return
 	}
@@ -294,6 +297,12 @@ func (w *Watchdog) checkServices(ctx context.Context) {
 	}
 
 	w.mu.Unlock()
+
+	if systemd.Managed(w.systemd) {
+		logger.DebugContext(ctx, "Skipping health check in systemd mode: unit Restart= policies recover crashed services")
+
+		return
+	}
 
 	logger.DebugContext(ctx, "Checking service health")
 

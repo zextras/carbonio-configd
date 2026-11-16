@@ -116,7 +116,7 @@ Asks the running daemon to rewrite the named `zmconfigd.cf` sections and waits
 for it (legacy `configrewrite`; `/opt/zextras/libexec/configrewrite` is the
 wrapper).
 
-- The request is **synchronous**: the daemon replies `SUCCESS REWRITES COMPLETE` only after its main loop has rewritten the sections, `ERROR REWRITE TIMEOUT` after 60 s (the request stays queued for the next cycle), `ERROR NO SERVICES LISTED` for an empty list.
+- The request is **synchronous**: the daemon replies `SUCCESS REWRITES COMPLETE` only after its main loop has rewritten the sections, `ERROR REWRITE FAILED` when that rewrite phase failed, `ERROR REWRITE TIMEOUT` after 60 s (the request stays queued for the next cycle), `ERROR NO SERVICES LISTED` for an empty list. `all` stands for every section of `zmconfigd.cf` (the standalone fallback expands it after loading the configuration).
 - The client waits up to `zimbra_configrewrite_timeout` seconds for the reply (default `120`, longer than the daemon's 60 s so the daemon's timeout arrives first).
 - It exits `0` on success and `1` on an `ERROR` reply, timeout or lost connection.
 - Only when **nothing listens** on the daemon port (tried on both loopback families, IPv4 and IPv6) does it fall back to a standalone forced rewrite in its own process, as legacy `zmconfigd <sections>` did; the exit code is `1` if its plan or a rewrite failed. A daemon that is alive but failing is never bypassed.

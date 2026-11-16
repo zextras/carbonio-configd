@@ -110,6 +110,9 @@ func (r readOnlyFile) Name() string { return r.f.Name() }
 // Chown implements File.
 func (r readOnlyFile) Chown(_, _ int) error { return refused("chown", r.f.Name()) }
 
+// Sync implements File.
+func (r readOnlyFile) Sync() error { return r.f.Sync() }
+
 // Chmod implements File.
 func (r readOnlyFile) Chmod(_ fs.FileMode) error { return refused("chmod", r.f.Name()) }
 

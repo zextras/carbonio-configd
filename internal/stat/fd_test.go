@@ -60,7 +60,8 @@ func TestFDMissingFileNr(t *testing.T) {
 }
 
 // stat-fd.pl lines 26-44: "stop" kills the running collector (TERM, then KILL)
-// and removes its pid file, also a stale one; "rotate" sends it SIGHUP.
+// and removes its pid file, also a stale one; "rotate" sends it SIGHUP. A pid
+// that is not a live collector is never signalled.
 func TestFDControl(t *testing.T) {
 	t.Parallel()
 
@@ -71,9 +72,10 @@ func TestFDControl(t *testing.T) {
 		wantPidFile bool
 	}{
 		"stop a running collector": {args: []string{"stop"}, running: true,
-			wantSignals: []syscall.Signal{0, syscall.SIGTERM}},
-		"stop with a stale pid file": {args: []string{"stop"}, wantSignals: []syscall.Signal{0}},
-		"rotate":                     {args: []string{"rotate"}, running: true, wantSignals: []syscall.Signal{syscall.SIGHUP}, wantPidFile: true},
+			wantSignals: []syscall.Signal{syscall.SIGTERM}},
+		"stop with a stale pid file":   {args: []string{"stop"}},
+		"rotate with a stale pid file": {args: []string{"rotate"}, wantPidFile: true},
+		"rotate":                       {args: []string{"rotate"}, running: true, wantSignals: []syscall.Signal{syscall.SIGHUP}, wantPidFile: true},
 	} {
 		te := newTestEnv(t, files{})
 		pidFile := filepath.Join(te.PidDir, "fd.pid")
@@ -81,6 +83,7 @@ func TestFDControl(t *testing.T) {
 
 		if tc.running {
 			te.fakes.Proc.Add(sys.ProcEntry{PID: 555})
+			te.PidAlive = func(pid int) bool { return pid == 555 }
 		}
 
 		code, done := fdControl(te.Env, tc.args)
@@ -103,8 +106,9 @@ func TestFDControl(t *testing.T) {
 func TestFDControlIgnoresNonPositivePid(t *testing.T) {
 	t.Parallel()
 
-	for _, content := range []string{"-5\n", "0\n", "junk\n"} {
+	for _, content := range []string{"-5\n", "0\n", "1\n", "junk\n"} {
 		te := newTestEnv(t, files{})
+		te.PidAlive = func(int) bool { return true }
 		pidFile := filepath.Join(te.PidDir, "fd.pid")
 		require.NoError(t, os.WriteFile(pidFile, []byte(content), 0o644))
 
@@ -158,6 +162,8 @@ func TestFDValidate(t *testing.T) {
 		"in the log directory":    {opts: options{logPath: filepath.Join(te.Base, "log", "x", "fd.csv")}},
 		"console":                 {opts: options{console: true, logPath: "-"}},
 		"outside":                 {opts: options{logPath: "/etc/fd.csv"}, want: refusal},
+		"sibling of /tmp":         {opts: options{logPath: "/tmp-evil/fd.csv"}, want: refusal},
+		"sibling of /var/log":     {opts: options{logPath: "/var/log-evil/fd.csv"}, want: refusal},
 		"symlink out":             {opts: options{logPath: filepath.Join(te.Dir, "escape", "fd.csv")}, want: refusal},
 	} {
 		err := fdValidate(te.Env, &tc.opts)
@@ -179,17 +185,46 @@ func TestFDOwn(t *testing.T) {
 
 	te := newTestEnv(t, files{})
 
-	var chowned []string
+	var chowned []string // names of the files chowned through their descriptor
 
-	te.Chown = func(p string) error { chowned = append(chowned, p); return nil }
+	te.ChownFile = func(f *os.File) error { chowned = append(chowned, f.Name()); return nil }
+	te.Chown = func(string) error { t.Error("the log must not be chowned by path"); return nil }
 
 	path := filepath.Join(te.Dir, "fd.csv")
-	require.NoError(t, os.WriteFile(path, nil, 0o666))
+	lf, err := openLog(te.Env, path, "h", today)
+	require.NoError(t, err)
 
-	fdOwn(te.Env, path)
+	defer lf.close()
+
+	fdOwn(te.Env, lf)
 
 	st, err := os.Stat(path)
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0o640), st.Mode().Perm())
 	assert.Equal(t, []string{path}, chowned)
+}
+
+// A path swapped for a symlink between the open and fdOwn does not redirect the
+// mode change: it goes through the descriptor.
+func TestFDOwnIgnoresASwappedPath(t *testing.T) {
+	t.Parallel()
+
+	te := newTestEnv(t, files{})
+	path := filepath.Join(te.Dir, "fd.csv")
+
+	lf, err := openLog(te.Env, path, "h", today)
+	require.NoError(t, err)
+
+	defer lf.close()
+
+	victim := filepath.Join(te.Dir, "victim")
+	require.NoError(t, os.WriteFile(victim, []byte("keep\n"), 0o600))
+	require.NoError(t, os.Remove(path))
+	require.NoError(t, os.Symlink(victim, path))
+
+	fdOwn(te.Env, lf)
+
+	st, err := os.Stat(victim)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), st.Mode().Perm())
 }

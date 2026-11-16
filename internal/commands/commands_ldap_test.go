@@ -23,15 +23,15 @@ type stubProvisioningLDAP struct {
 	err          error
 }
 
-func (s *stubProvisioningLDAP) GetServerConfig(string) (map[string]string, error) {
+func (s *stubProvisioningLDAP) GetServerConfig(context.Context, string) (map[string]string, error) {
 	return s.serverConfig, s.err
 }
 
-func (s *stubProvisioningLDAP) GetGlobalConfig() (map[string]string, error) {
+func (s *stubProvisioningLDAP) GetGlobalConfig(context.Context) (map[string]string, error) {
 	return s.globalConfig, s.err
 }
 
-func (s *stubProvisioningLDAP) GetAllServersWithAttributes() (map[string]map[string]string, error) {
+func (s *stubProvisioningLDAP) GetAllServersWithAttributes(context.Context) (map[string]map[string]string, error) {
 	return s.allServers, s.err
 }
 

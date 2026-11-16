@@ -5,8 +5,12 @@
 package proxy
 
 import (
+	"context"
 	"fmt"
 	"strings"
+
+	"github.com/zextras/carbonio-configd/internal/config"
+	"github.com/zextras/carbonio-configd/internal/logger"
 )
 
 // registerMailVariables registers mail proxy configuration variables
@@ -133,12 +137,8 @@ func (g *Generator) registerMailVariables() {
 		withOverrideType(OverrideConfig),
 		withDescription("Time interval (ms) after which User Login Counter is reset"),
 	)
-	g.registerVar("mail.userrej", "Login rejected for this user",
-		withAttribute("zimbraReverseProxyUserThrottleMsg"),
-		withOverrideType(OverrideConfig),
-		withValueType(ValueTypeString),
-		withDescription("Rejection message for User throttle"),
-	)
+	g.registerMessageVar("mail.userrej", "zimbraReverseProxyUserThrottleMsg",
+		"Login rejected for this user", "Rejection message for User throttle")
 	g.registerVar("mail.whitelist.ttl", 300000,
 		withAttribute("zimbraReverseProxyIPThrottleWhitelistTime"),
 		withValueType(ValueTypeTimeInSec),
@@ -213,11 +213,38 @@ func (g *Generator) registerMailVariables() {
 		"Time interval (ms) after which POP3 Login Counter is reset")
 	g.registerThrottleTTLVar("mail.ipttl", "zimbraReverseProxyIPLoginLimitTime",
 		"Time interval (ms) after which IP Login Counter is reset")
-	g.registerVar("mail.iprej", "Login rejected from this IP",
-		withAttribute("zimbraReverseProxyIpThrottleMsg"),
+	g.registerMessageVar("mail.iprej", "zimbraReverseProxyIpThrottleMsg",
+		"Login rejected from this IP", "Rejection message for IP throttle")
+}
+
+// registerMessageVar registers a login rejection message. The templates quote
+// it, so a global-config value carrying a quote, backslash or newline would
+// break out of the string and is replaced by the default.
+func (g *Generator) registerMessageVar(key, attr, defaultMsg, desc string) {
+	g.registerVar(key, defaultMsg,
+		withAttribute(attr),
 		withOverrideType(OverrideConfig),
 		withValueType(ValueTypeString),
-		withDescription("Rejection message for IP throttle"),
+		withCustomResolver(func(ctx context.Context) (any, error) {
+			var data *config.ConfigMap
+			if g.GlobalConfig != nil {
+				data = g.GlobalConfig.Data
+			}
+
+			val, ok := lookupAttr(data, attr)
+			if !ok {
+				return defaultMsg, nil
+			}
+
+			if !validQuotedMessage(val) {
+				logger.ErrorContext(ctx, "Ignoring unsafe message, using default", "attribute", attr)
+
+				return defaultMsg, nil
+			}
+
+			return val, nil
+		}),
+		withDescription(desc),
 	)
 }
 

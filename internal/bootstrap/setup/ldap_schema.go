@@ -84,18 +84,19 @@ func ldapInstallSchema(e *Env, out io.Writer) error {
 		return fmt.Errorf("creating %s: %w", dir, err)
 	}
 
-	if err := e.Root("chown", "zextras:zextras", dir); err != nil {
+	uid, gid, err := zextrasOwner(e)
+	if err != nil {
 		return err
 	}
 
-	if err := e.Sys.FS.Chmod(dir, 0o750); err != nil {
-		return fmt.Errorf("chmod %s: %w", dir, err)
+	if err := ownDir(e, dir, 0o750, uid, gid); err != nil {
+		return err
 	}
 
 	for _, f := range ldapSchemaFiles {
 		ldapPrintf(out, "Installing %s schema...\n", f.title)
 
-		if err := ldapInstallOneSchema(e, dir, f); err != nil {
+		if err := ldapInstallOneSchema(e, dir, uid, gid, f); err != nil {
 			return err
 		}
 	}
@@ -111,7 +112,7 @@ func ldapInstallSchema(e *Env, out io.Writer) error {
 	return nil
 }
 
-func ldapInstallOneSchema(e *Env, dir string, f ldapSchemaFile) error {
+func ldapInstallOneSchema(e *Env, dir string, uid, gid int, f ldapSchemaFile) error {
 	src := e.Paths.Path("common", "etc", "openldap", f.source)
 
 	data, err := e.Sys.FS.ReadFile(src)
@@ -121,11 +122,7 @@ func ldapInstallOneSchema(e *Env, dir string, f ldapSchemaFile) error {
 
 	dst := filepath.Join(dir, fmt.Sprintf("cn={%d}%s", f.index, f.dest))
 
-	if err := e.Sys.FS.WriteFileAtomic(dst, ldapRenameSchema(data, f), 0o600); err != nil {
-		return fmt.Errorf("writing %s: %w", dst, err)
-	}
-
-	return e.Root("chown", "zextras:zextras", dst)
+	return writeOwned(e, dst, ldapRenameSchema(data, f), 0o600, uid, gid)
 }
 
 // RunLDAPSchema is zmldapschema: it takes no options (the script ignored what

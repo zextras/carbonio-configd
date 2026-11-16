@@ -16,6 +16,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/services"
 	"github.com/zextras/carbonio-configd/internal/sys"
+	"github.com/zextras/carbonio-configd/internal/systemd"
 	"github.com/zextras/carbonio-configd/internal/zxadmin"
 )
 
@@ -91,7 +92,7 @@ func (r *Reporter) PrintServiceStatus(ctx context.Context, c *cliutil.Console, n
 // actually spawned — on hosts with no unit at all (ubuntu-jammy, rocky-8)
 // that yielded "Since: n/a" for a healthy daemon.
 func (r *Reporter) showServiceDetail(ctx context.Context, c *cliutil.Console, def *services.ServiceDef) {
-	if r.ctl.IsSystemdMode() {
+	if r.ctl.SystemdMode(ctx) {
 		for _, unit := range def.SystemdUnits {
 			r.showUnitDetail(ctx, c, unit)
 		}
@@ -114,7 +115,7 @@ func (r *Reporter) showServiceDetail(ctx context.Context, c *cliutil.Console, de
 func (r *Reporter) showUnitDetail(ctx context.Context, c *cliutil.Console, unit string) {
 	// Get MainPID and ActiveEnterTimestamp from systemctl show
 	// #nosec G702 - unit name comes from internal registry, not user input
-	out, err := sys.Output(ctx, r.env.Exec, "systemctl", "show", unit,
+	out, err := sys.Output(ctx, r.env.Exec, systemd.SystemctlBin, "show", unit,
 		"--property=MainPID,ActiveEnterTimestamp,MemoryCurrent")
 	if err != nil {
 		return
@@ -166,7 +167,7 @@ func (r *Reporter) ServiceDetail(ctx context.Context, name string, running bool)
 		return ""
 	}
 
-	if r.ctl.IsSystemdMode() {
+	if r.ctl.SystemdMode(ctx) {
 		return r.serviceDetailFromSystemd(ctx, def)
 	}
 
@@ -182,7 +183,7 @@ func (r *Reporter) serviceDetailFromSystemd(ctx context.Context, def *services.S
 	}
 
 	// #nosec G204 — unit from internal registry
-	out, err := sys.Output(ctx, r.env.Exec, "systemctl", "show", def.SystemdUnits[0],
+	out, err := sys.Output(ctx, r.env.Exec, systemd.SystemctlBin, "show", def.SystemdUnits[0],
 		"--property=MainPID,ActiveEnterTimestamp")
 	if err != nil {
 		return ""

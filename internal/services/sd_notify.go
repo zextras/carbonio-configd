@@ -158,8 +158,14 @@ func (c *Controller) waitForSDNotify(
 		case waitErr := <-exited:
 			// Child process exited before signaling READY=1. Fail immediately
 			// rather than waiting out the full deadline.
-			return fmt.Errorf("%s exited during startup before signaling READY=1: %w", service, waitErr)
+			return exitedBeforeReady(service, "signaling READY=1", waitErr)
 		default:
+		}
+
+		// Checked on every pass, not only after a failed read: a daemon that
+		// keeps sending STATUS= datagrams never makes a read time out.
+		if c.env.Clock.Now().After(deadline) {
+			return fmt.Errorf("%s did not signal READY=1 within 30 seconds", service)
 		}
 
 		_ = conn.SetReadDeadline(time.Now().Add(time.Second))
@@ -173,10 +179,6 @@ func (c *Controller) waitForSDNotify(
 			continue
 		}
 
-		if c.env.Clock.Now().After(deadline) {
-			return fmt.Errorf("%s did not signal READY=1 within 30 seconds", service)
-		}
-
 		var netErr net.Error
 		if errors.As(err, &netErr) && netErr.Timeout() {
 			continue
@@ -184,4 +186,15 @@ func (c *Controller) waitForSDNotify(
 
 		return fmt.Errorf("notify socket read error for %s: %w", service, err)
 	}
+}
+
+// exitedBeforeReady is the error for a child that exited while it was being
+// waited on for readiness. waitErr is nil for a clean exit (status 0), which
+// is still a failed start.
+func exitedBeforeReady(service, readiness string, waitErr error) error {
+	if waitErr == nil {
+		return fmt.Errorf("%s exited during startup before %s (exit status 0)", service, readiness)
+	}
+
+	return fmt.Errorf("%s exited during startup before %s: %w", service, readiness, waitErr)
 }

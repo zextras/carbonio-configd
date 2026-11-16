@@ -33,9 +33,9 @@ const (
 // LDAP-backed provisioning commands. An interface so tests can stub the
 // LDAP round-trips; production passes the concrete client unchanged.
 type provisioningLDAP interface {
-	GetServerConfig(hostname string) (map[string]string, error)
-	GetGlobalConfig() (map[string]string, error)
-	GetAllServersWithAttributes() (map[string]map[string]string, error)
+	GetServerConfig(ctx context.Context, hostname string) (map[string]string, error)
+	GetGlobalConfig(ctx context.Context) (map[string]string, error)
+	GetAllServersWithAttributes(ctx context.Context) (map[string]map[string]string, error)
 }
 
 // CommandExecutor holds an LDAP client and provides methods for
@@ -207,7 +207,7 @@ func (e *CommandExecutor) ServerAttrs(ctx context.Context, hostname string) (map
 	logger.DebugContext(ctx, "Using native LDAP client for server query",
 		"hostname", hostname)
 
-	serverAttrs, err := e.ldapClient.GetServerConfig(hostname)
+	serverAttrs, err := e.ldapClient.GetServerConfig(ctx, hostname)
 	if err != nil {
 		return nil, fmt.Errorf("native LDAP query failed for server %s: %w", hostname, err)
 	}
@@ -228,7 +228,7 @@ func (e *CommandExecutor) GlobalAttrs(ctx context.Context) (map[string]string, e
 
 	logger.DebugContext(ctx, "Using native LDAP client for global config query")
 
-	globalAttrs, err := e.ldapClient.GetGlobalConfig()
+	globalAttrs, err := e.ldapClient.GetGlobalConfig(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("native LDAP query failed for global config: %w", err)
 	}
@@ -267,7 +267,7 @@ func (e *CommandExecutor) getAllServersWithAttribute(
 		"command", cmdName)
 
 	// Get all servers with full attributes
-	servers, err := e.ldapClient.GetAllServersWithAttributes()
+	servers, err := e.ldapClient.GetAllServersWithAttributes(ctx)
 	if err != nil {
 		return "", fmt.Errorf("%s: failed to query servers: %w", cmdName, err)
 	}
@@ -307,7 +307,7 @@ func (e *CommandExecutor) gamau(ctx context.Context, args ...string) (string, er
 	// zimbraMtaAuthTarget, build URLUtil.getMtaAuthURL(server) =
 	// zimbra_admin_service_scheme ("https://") + host + ":" + zimbraMtaAuthPort
 	// (default 7073) + AdminConstants.ADMIN_SERVICE_URI ("/service/admin/soap/").
-	servers, err := e.ldapClient.GetAllServersWithAttributes()
+	servers, err := e.ldapClient.GetAllServersWithAttributes(ctx)
 	if err != nil {
 		return "", fmt.Errorf("gamau: failed to query servers: %w", err)
 	}
@@ -394,7 +394,7 @@ func (e *CommandExecutor) garpb(ctx context.Context, args ...string) (string, er
 		return "", err
 	}
 
-	servers, err := e.ldapClient.GetAllServersWithAttributes()
+	servers, err := e.ldapClient.GetAllServersWithAttributes(ctx)
 	if err != nil {
 		return "", fmt.Errorf("garpb: failed to query servers: %w", err)
 	}

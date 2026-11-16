@@ -130,4 +130,23 @@ func TestRunForcedMode(t *testing.T) {
 		assert.Equal(t, 1, f.state.Forced)
 		assert.Equal(t, "mta", f.state.ForcedConfig["mta"])
 	})
+
+	// The standalone fallback of "configd rewrite all": "all" is no section,
+	// so it must become every section of this node. The fixture enables only
+	// mta, so the proxy section is dropped at parse time and stays out.
+	t.Run("all expands to every section of the node", func(t *testing.T) {
+		t.Parallel()
+
+		f := newLoadFixture(t, "SECTION mta\nSECTION proxy\nSECTION amavis\n")
+		rt := &runtime{
+			state: f.state,
+			cfg:   f.cfg,
+			cm:    f.cm,
+			sm:    f.cm.Services(),
+		}
+
+		code := runForcedMode(t.Context(), &Args{ForcedConfigs: []string{"all"}}, rt)
+		assert.Equal(t, 0, code)
+		assert.Equal(t, map[string]string{"mta": "mta", "amavis": "amavis"}, f.state.ForcedConfig)
+	})
 }

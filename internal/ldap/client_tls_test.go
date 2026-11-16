@@ -49,8 +49,10 @@ func tlsTestClient(t *testing.T, url string, startTLS bool, cfg *tls.Config) *Cl
 
 // searchRoot runs a trivial base search so a test can prove the connection is
 // usable end to end.
-func searchRoot(c *Client) error {
-	_, err := c.Search("cn=zimbra", ldapFilterAllObjects, []string{"cn"}, ldap.ScopeBaseObject)
+func searchRoot(t *testing.T, c *Client) error {
+	t.Helper()
+
+	_, err := c.Search(t.Context(), "cn=zimbra", ldapFilterAllObjects, []string{"cn"}, ldap.ScopeBaseObject)
 
 	return err
 }
@@ -77,7 +79,7 @@ func TestClient_StartTLS_VerifiesAgainstRootCAs(t *testing.T) {
 		c := tlsTestClient(t, srv.URL("ldap", host), true,
 			&tls.Config{RootCAs: poolOf(t, pk.CAPEM), MinVersion: tls.VersionTLS12})
 
-		if err := searchRoot(c); err != nil {
+		if err := searchRoot(t, c); err != nil {
 			t.Fatalf("host %s: search over StartTLS: %v", host, err)
 		}
 	}
@@ -114,7 +116,7 @@ func TestClient_StartTLS_RejectsUntrustedAndMismatchedCert(t *testing.T) {
 			c := tlsTestClient(t, srv.URL("ldap", "127.0.0.1"), true,
 				&tls.Config{RootCAs: poolOf(t, tt.trust), MinVersion: tls.VersionTLS12})
 
-			if err := searchRoot(c); err == nil {
+			if err := searchRoot(t, c); err == nil {
 				t.Fatal("search succeeded against a server whose certificate must be rejected")
 			}
 
@@ -138,16 +140,16 @@ func TestClient_StartTLS_EmptyServerNameIsFilledFromURL(t *testing.T) {
 	c := tlsTestClient(t, srv.URL("ldap", "127.0.0.1"), true,
 		&tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12}) //nolint:gosec // exercising ServerName defaulting
 
-	if err := searchRoot(c); err != nil {
+	if err := searchRoot(t, c); err != nil {
 		t.Fatalf("search: %v", err)
 	}
 
-	got := c.tlsConfigFor("ldap://ldap.example.com:389")
+	got := tlsConfigFor(c.tlsConfig, "ldap://ldap.example.com:389")
 	if got.ServerName != "ldap.example.com" {
 		t.Errorf("ServerName = %q, want ldap.example.com", got.ServerName)
 	}
 
-	if (&Client{}).tlsConfigFor("ldaps://[::1]:636").ServerName != "::1" {
+	if tlsConfigFor(nil, "ldaps://[::1]:636").ServerName != "::1" {
 		t.Error("IPv6 host must be unbracketed")
 	}
 }
@@ -165,7 +167,7 @@ func TestClient_LDAPS_UsesTLSFromFirstByte(t *testing.T) {
 	c := tlsTestClient(t, srv.URL("ldaps", "localhost"), true,
 		&tls.Config{RootCAs: poolOf(t, pk.CAPEM), MinVersion: tls.VersionTLS12})
 
-	if err := searchRoot(c); err != nil {
+	if err := searchRoot(t, c); err != nil {
 		t.Fatalf("search over ldaps: %v", err)
 	}
 
@@ -175,7 +177,7 @@ func TestClient_LDAPS_UsesTLSFromFirstByte(t *testing.T) {
 
 	bad := tlsTestClient(t, srv.URL("ldaps", "localhost"), false,
 		&tls.Config{RootCAs: x509.NewCertPool(), MinVersion: tls.VersionTLS12})
-	if err := searchRoot(bad); err == nil {
+	if err := searchRoot(t, bad); err == nil {
 		t.Fatal("ldaps search succeeded without trusting the CA")
 	}
 }
@@ -186,7 +188,7 @@ func TestClient_StartTLSDisabled_StaysPlain(t *testing.T) {
 	srv := ldapfake.New(t, ldapfake.Options{})
 	c := tlsTestClient(t, srv.URL("ldap", "127.0.0.1"), false, nil)
 
-	if err := searchRoot(c); err != nil {
+	if err := searchRoot(t, c); err != nil {
 		t.Fatalf("plain search: %v", err)
 	}
 
@@ -201,7 +203,7 @@ func TestClient_StartTLSRefused_FailsClosed(t *testing.T) {
 	srv := ldapfake.New(t, ldapfake.Options{NoStartTLS: true})
 	c := tlsTestClient(t, srv.URL("ldap", "127.0.0.1"), true, nil)
 
-	if err := searchRoot(c); err == nil {
+	if err := searchRoot(t, c); err == nil {
 		t.Fatal("search succeeded although the server refused StartTLS")
 	}
 
@@ -306,7 +308,7 @@ func TestClient_ReturnConnectionAfterClose_ClosesIt(t *testing.T) {
 	}
 
 	_ = c.Close()
-	c.returnConnection(conn)
+	c.returnConnection(conn, c.generation())
 
 	if len(c.pool) != 0 {
 		t.Error("connection returned to the pool of a closed client")
@@ -398,7 +400,7 @@ func TestResolveTLS_TrustsCarbonioCA(t *testing.T) {
 	}
 
 	c := tlsTestClient(t, srv.URL("ldap", "127.0.0.1"), setup.StartTLS, setup.Config)
-	if err := searchRoot(c); err != nil {
+	if err := searchRoot(t, c); err != nil {
 		t.Fatalf("search with the Carbonio CA from conf/ca/ca.pem: %v", err)
 	}
 
@@ -408,7 +410,7 @@ func TestResolveTLS_TrustsCarbonioCA(t *testing.T) {
 	setup = ResolveTLS(context.Background(), lc, sys.RealFS{})
 
 	c2 := tlsTestClient(t, srv.URL("ldap", "127.0.0.1"), setup.StartTLS, setup.Config)
-	if err := searchRoot(c2); err == nil {
+	if err := searchRoot(t, c2); err == nil {
 		t.Fatal("self-signed server accepted without its CA being trusted")
 	}
 }

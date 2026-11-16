@@ -16,7 +16,6 @@ import (
 
 	"github.com/zextras/carbonio-configd/internal/cli/cliutil"
 	"github.com/zextras/carbonio-configd/internal/cli/rewrite"
-	carboldap "github.com/zextras/carbonio-configd/internal/ldap"
 	"github.com/zextras/carbonio-configd/internal/localconfig"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	configtls "github.com/zextras/carbonio-configd/internal/tls"
@@ -47,12 +46,12 @@ type Options struct {
 // Run executes the tls command and returns the process exit status: validate
 // the requested mode against the cluster's proxies, apply zimbraMailMode to
 // the local server entry, then rewrite the affected configs.
-func Run(_ context.Context, stdout, stderr io.Writer, opts *Options) int {
+func Run(ctx context.Context, stdout, stderr io.Writer, opts *Options) int {
 	if !cliutil.RequireZextras(stderr) {
 		return 1
 	}
 
-	ctx := cliutil.InitLogging(stderr)
+	ctx = cliutil.InitLoggingContext(ctx, stderr)
 	ctx = logger.ContextWithComponent(ctx, "tls")
 
 	lc, err := localconfig.LoadEffective()
@@ -87,7 +86,7 @@ func run(ctx context.Context, stdout, stderr io.Writer, opts *Options, lc map[st
 			return 1
 		}
 
-		if code := applyMailMode(stdout, stderr, lc, hostname, mode, opts.Force); code != 0 {
+		if code := applyMailMode(ctx, stdout, stderr, lc, hostname, mode, opts.Force); code != 0 {
 			return code
 		}
 	}
@@ -114,8 +113,8 @@ func run(ctx context.Context, stdout, stderr io.Writer, opts *Options, lc map[st
 //  3. Write zimbraMailMode on the local server entry.
 //
 // It returns the exit status (0 on success); failures are reported on stderr.
-func applyMailMode(stdout, stderr io.Writer, lc map[string]string, hostname string, mode configtls.Mode,
-	force bool,
+func applyMailMode(
+	ctx context.Context, stdout, stderr io.Writer, lc map[string]string, hostname string, mode configtls.Mode, force bool,
 ) int {
 	client, err := cliutil.OpenWriteLDAPClient(lc)
 	if err != nil {
@@ -127,7 +126,7 @@ func applyMailMode(stdout, stderr io.Writer, lc map[string]string, hostname stri
 	defer func() { _ = client.Close() }()
 
 	if !force {
-		if err := validateAgainstProxies(stdout, stderr, client, hostname, mode); err != nil {
+		if err := validateAgainstProxies(ctx, stdout, stderr, client, hostname, mode); err != nil {
 			_, _ = fmt.Fprintf(stderr, errFmt, err)
 			_, _ = fmt.Fprintln(stderr, "Re-run with --force to bypass proxy cross-constraint validation.")
 			_, _ = fmt.Fprintf(stderr, errFmt, fmt.Errorf("proxy validation failed"))
@@ -138,7 +137,7 @@ func applyMailMode(stdout, stderr io.Writer, lc map[string]string, hostname stri
 
 	_, _ = fmt.Fprintf(stdout, "Attempting to set ldap config zimbraMailMode %s on host %s...", mode, hostname)
 
-	if err := configtls.SetMailMode(client, hostname, mode); err != nil {
+	if err := configtls.SetMailMode(ctx, client, hostname, mode); err != nil {
 		_, _ = fmt.Fprintln(stdout, "failed.")
 		_, _ = fmt.Fprintf(stderr, errFmt, err)
 		_, _ = fmt.Fprintf(stderr, errFmt, fmt.Errorf("set mail mode: %w", err))
@@ -154,15 +153,15 @@ func applyMailMode(stdout, stderr io.Writer, lc map[string]string, hostname stri
 // validateAgainstProxies returns nil if validation can be skipped (host not
 // a reverse-proxy backend or no proxies present) OR if every designated proxy
 // accepts the requested mode. Returns a descriptive error on the first
-// violation it encounters.
+// violation it encounters, or when the backend lookup itself fails.
 func validateAgainstProxies(
-	stdout, stderr io.Writer, client *carboldap.Client, hostname string, mode configtls.Mode,
+	ctx context.Context, stdout, stderr io.Writer, client configtls.LDAPClient, hostname string, mode configtls.Mode,
 ) error {
-	isBackend, err := configtls.IsReverseProxyBackend(client, hostname)
+	isBackend, err := configtls.IsReverseProxyBackend(ctx, client, hostname)
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "Warning: %v — skipping proxy validation\n", err)
-
-		return nil
+		// Fail closed: a transient LDAP error must not let an unvalidated mode
+		// through; --force is the explicit way around the validation.
+		return fmt.Errorf("cannot tell whether %s is a reverse-proxy backend: %w", hostname, err)
 	}
 
 	if !isBackend {
@@ -174,7 +173,7 @@ func validateAgainstProxies(
 		return nil
 	}
 
-	proxies, err := configtls.GetProxiesForHost(client, hostname)
+	proxies, err := configtls.GetProxiesForHost(ctx, client, hostname)
 	if err != nil {
 		return fmt.Errorf("enumerate proxies: %w", err)
 	}
@@ -196,7 +195,7 @@ func validateAgainstProxies(
 		_, _ = fmt.Fprintf(stdout, "Attempting to query proxy (%s) settings for zimbraReverseProxyMailMode "+
 			"and zimbraReverseProxySSLToUpstreamEnabled.\n", proxy)
 
-		settings, err := configtls.ReadProxySettings(client, proxy)
+		settings, err := configtls.ReadProxySettings(ctx, client, proxy)
 		if err != nil {
 			lastErr = err
 

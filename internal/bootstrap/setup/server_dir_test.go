@@ -5,6 +5,7 @@
 package setup
 
 import (
+	"context"
 	"os"
 	"testing"
 
@@ -29,7 +30,7 @@ func lwSrvDir(t *testing.T, s *lwServer) *srvLDAP {
 	})
 	require.NoError(t, err)
 
-	d := &srvLDAP{c: c}
+	d := &srvLDAP{ctx: context.Background(), c: c}
 	t.Cleanup(func() { _ = d.Close() })
 
 	return d

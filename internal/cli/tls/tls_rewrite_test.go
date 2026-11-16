@@ -71,6 +71,8 @@ func TestRun_LDAPUnreachable(t *testing.T) {
 		"ldap_master_url":        "ldap://" + addr,
 	}
 
+	// Without --force an unreadable directory stops the change before anything
+	// is written; with --force the validation is skipped and the write fails.
 	for _, force := range []bool{false, true} {
 		var stdout, stderr bytes.Buffer
 
@@ -80,16 +82,25 @@ func TestRun_LDAPUnreachable(t *testing.T) {
 			t.Errorf("force=%v: exit code = %d, want 1", force, code)
 		}
 
-		if want := "Attempting to set ldap config zimbraMailMode https on host h...failed.\n"; stdout.String() != want {
-			t.Errorf("force=%v: stdout = %q, want %q", force, stdout.String(), want)
+		if force {
+			if want := "Attempting to set ldap config zimbraMailMode https on host h...failed.\n"; stdout.String() != want {
+				t.Errorf("force=%v: stdout = %q, want %q", force, stdout.String(), want)
+			}
+
+			if !strings.Contains(stderr.String(), "Error: set mail mode:") {
+				t.Errorf("force=%v: stderr = %q, want set-mail-mode error", force, stderr.String())
+			}
+
+			continue
 		}
 
-		if !strings.Contains(stderr.String(), "Error: set mail mode:") {
-			t.Errorf("force=%v: stderr = %q, want set-mail-mode error", force, stderr.String())
+		if stdout.String() != "" {
+			t.Errorf("force=false: stdout = %q, want nothing written", stdout.String())
 		}
 
-		if skipped := strings.Contains(stderr.String(), "skipping proxy validation"); skipped == force {
-			t.Errorf("force=%v: proxy validation skipped=%v", force, skipped)
+		if !strings.Contains(stderr.String(), "proxy validation failed") ||
+			!strings.Contains(stderr.String(), "Re-run with --force") {
+			t.Errorf("force=false: stderr = %q, want a failed validation", stderr.String())
 		}
 	}
 }

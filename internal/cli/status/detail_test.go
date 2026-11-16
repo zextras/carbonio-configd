@@ -41,7 +41,7 @@ func newFixture(systemd bool, registry map[string]*services.ServiceDef) *fixture
 	if systemd {
 		f.FS.PutDir("/run/systemd/system", 0o755) // sd_booted(3)
 	} else {
-		f.Exec.OnCmdline("systemctl is-enabled", systest.Fail(1, ""))
+		f.Exec.OnCmdline("/usr/bin/systemctl is-enabled", systest.Fail(1, ""))
 	}
 
 	load := func() (map[string]string, error) { return map[string]string{}, nil }
@@ -84,7 +84,7 @@ func newConsole() (*cliutil.Console, *bytes.Buffer) {
 
 // TestShowServiceDetail_LegacyReportsPidAndSince is the regression guard for
 // the "Since: n/a" bug: with no Carbonio target enabled the detail must come
-// from /proc, never from systemctl show of a unit that may not even exist.
+// from /proc, never from /usr/bin/systemctl show of a unit that may not even exist.
 func TestShowServiceDetail_LegacyReportsPidAndSince(t *testing.T) {
 	t.Parallel()
 
@@ -107,8 +107,8 @@ func TestShowServiceDetail_LegacyReportsPidAndSince(t *testing.T) {
 	}
 
 	for _, line := range fx.f.Exec.Lines() {
-		if strings.HasPrefix(line, "systemctl show") {
-			t.Errorf("legacy detail must not query systemctl show: %q", line)
+		if strings.HasPrefix(line, "/usr/bin/systemctl show") {
+			t.Errorf("legacy detail must not query /usr/bin/systemctl show: %q", line)
 		}
 	}
 }
@@ -134,7 +134,7 @@ func TestShowUnitDetail_UnknownUnitPrintsNoSince(t *testing.T) {
 	t.Parallel()
 
 	fx := newFixture(true, svcRegistry("test"))
-	fx.f.Exec.OnCmdline("systemctl show", func(*sys.Cmd) (sys.Result, error) {
+	fx.f.Exec.OnCmdline("/usr/bin/systemctl show", func(*sys.Cmd) (sys.Result, error) {
 		return sys.Result{Stdout: []byte("MainPID=0\nActiveEnterTimestamp=n/a\nMemoryCurrent=[not set]\n")}, nil
 	})
 
@@ -150,7 +150,7 @@ func TestShowUnitDetail_PrintsProperties(t *testing.T) {
 	t.Parallel()
 
 	fx := newFixture(true, svcRegistry("test"))
-	fx.f.Exec.OnCmdline("systemctl show", func(*sys.Cmd) (sys.Result, error) {
+	fx.f.Exec.OnCmdline("/usr/bin/systemctl show", func(*sys.Cmd) (sys.Result, error) {
 		return sys.Result{Stdout: []byte("MainPID=456\nActiveEnterTimestamp=Mon 2026-01-05 10:00:00 UTC\nMemoryCurrent=1024\n")}, nil
 	})
 
@@ -268,12 +268,12 @@ func TestPrintServiceStatus_RunningShowsDetail(t *testing.T) {
 }
 
 // TestShowServiceDetail_SystemdModeQueriesUnit covers the strict-systemd
-// branch: the detail comes from `systemctl show` of each unit.
+// branch: the detail comes from `/usr/bin/systemctl show` of each unit.
 func TestShowServiceDetail_SystemdModeQueriesUnit(t *testing.T) {
 	t.Parallel()
 
 	fx := newFixture(true, svcRegistry("test"))
-	fx.f.Exec.OnCmdline("systemctl show", func(*sys.Cmd) (sys.Result, error) {
+	fx.f.Exec.OnCmdline("/usr/bin/systemctl show", func(*sys.Cmd) (sys.Result, error) {
 		return sys.Result{Stdout: []byte("MainPID=77\nActiveEnterTimestamp=Mon 2026-01-05 10:00:00 UTC\n")}, nil
 	})
 
@@ -281,7 +281,7 @@ func TestShowServiceDetail_SystemdModeQueriesUnit(t *testing.T) {
 	fx.r.showServiceDetail(context.Background(), c, fx.ctl.LookupService("test"))
 
 	if !strings.Contains(out.String(), "PID: 77") || !strings.Contains(out.String(), "Since: ") {
-		t.Errorf("expected unit detail from systemctl show, got %q", out)
+		t.Errorf("expected unit detail from /usr/bin/systemctl show, got %q", out)
 	}
 }
 
@@ -344,7 +344,7 @@ func TestServiceDetailFromSystemd(t *testing.T) {
 	}
 
 	fx := newFixture(true, svcRegistry("test"))
-	fx.f.Exec.OnCmdline("systemctl show", func(*sys.Cmd) (sys.Result, error) {
+	fx.f.Exec.OnCmdline("/usr/bin/systemctl show", func(*sys.Cmd) (sys.Result, error) {
 		return sys.Result{Stdout: []byte("MainPID=77\nActiveEnterTimestamp=Mon 2026-01-05 10:00:00 UTC\n")}, nil
 	})
 

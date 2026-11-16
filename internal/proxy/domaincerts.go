@@ -86,7 +86,12 @@ func (tp *TemplateProcessor) syncDomainCerts(ctx context.Context) error {
 
 	g := tp.generator
 
-	tp.deleteCertbotConfigs(ctx, domains)
+	// Both cleanups delete data of "removed" domains, so they only run when the
+	// full domain list is known (a failed or filtered load must not wipe certs).
+	cleanup, canCleanup := tp.cleanupDomains(ctx, domains)
+	if canCleanup {
+		tp.deleteCertbotConfigs(ctx, cleanup)
+	}
 
 	if domains, err = tp.saveCertbotPairsToLDAP(ctx, domains); err != nil {
 		return err
@@ -100,13 +105,16 @@ func (tp *TemplateProcessor) syncDomainCerts(ctx context.Context) error {
 		return err
 	}
 
-	tp.removeObsoleteDomainCerts(ctx, g.domainCertsDir(), domains)
+	if canCleanup {
+		tp.removeObsoleteDomainCerts(ctx, g.domainCertsDir(), cleanup)
+	}
 
 	return nil
 }
 
 // deployDomainCerts writes <domain>.crt/.key for every domain holding both
-// PEMs (legacy ProxyConfGen.java:2416-2431; dry-run only logs, :2421).
+// PEMs (legacy ProxyConfGen.java:2416-2431; dry-run only logs, :2421), and
+// <domain>.client.ca.crt for every domain with its own client CA.
 func (tp *TemplateProcessor) deployDomainCerts(ctx context.Context, domains []DomainInfo) error {
 	g := tp.generator
 
@@ -122,18 +130,32 @@ func (tp *TemplateProcessor) deployDomainCerts(ctx context.Context, domains []Do
 	}
 
 	for i := range domains {
-		d := &domains[i]
-		// Legacy only deploys a pair when both cert and key are present.
-		if d.SSLCertificate == "" || d.SSLPrivateKey == "" {
-			continue
+		if err := deployDomainFiles(ctx, g, &domains[i]); err != nil {
+			return err
 		}
+	}
 
+	return nil
+}
+
+// deployDomainFiles writes the cert/key pair and the client CA of one domain.
+func deployDomainFiles(ctx context.Context, g *Generator, d *DomainInfo) error {
+	// Legacy only deploys a pair when both cert and key are present.
+	if d.SSLCertificate != "" && d.SSLPrivateKey != "" {
 		if err := writeIfChanged(ctx, g.env.FS, g.domainCertFilePath(d.Name, sslCrtExt), d.SSLCertificate); err != nil {
 			return fmt.Errorf("unable to write certificate for domain %s: %w", d.Name, err)
 		}
 
 		if err := writeIfChanged(ctx, g.env.FS, g.domainCertFilePath(d.Name, sslKeyExt), d.SSLPrivateKey); err != nil {
 			return fmt.Errorf("unable to write private key for domain %s: %w", d.Name, err)
+		}
+	}
+
+	// setDomainClientCertVariables points ssl.clientcertca at this file for
+	// every domain with a client CA, so nginx -t fails if it is missing.
+	if d.ClientCertCA != "" {
+		if err := writeIfChanged(ctx, g.env.FS, g.domainCertFilePath(d.Name, sslClientCAExt), d.ClientCertCA); err != nil {
+			return fmt.Errorf("unable to write client CA for domain %s: %w", d.Name, err)
 		}
 	}
 

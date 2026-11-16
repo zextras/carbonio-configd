@@ -53,8 +53,14 @@ type TemplateProcessor struct {
 	domainProvider func() []DomainInfo
 	serverProvider func(serviceName string) []ServerInfo
 	// hostResolver replaces the DNS lookup of a virtual hostname (offline rendering);
-	// nil resolves through the DNS.
-	hostResolver func(ctx context.Context, host string) net.IP
+	// nil resolves through the DNS. It returns a nil address and no error when the
+	// host has no record, and an error when the lookup itself failed.
+	hostResolver func(ctx context.Context, host string) (net.IP, error)
+	// hostIPs memoizes hostResolver per host for the processor's lifetime: every
+	// explode template resolves every domain, and one unresolvable host would
+	// otherwise cost a DNS timeout per template and could flip between runs of
+	// the same pass.
+	hostIPs map[string]net.IP
 }
 
 // NewTemplateProcessor creates a new template processor

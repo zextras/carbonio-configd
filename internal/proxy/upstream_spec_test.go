@@ -290,7 +290,10 @@ func TestUpstreamHasServers_ErrorPath(t *testing.T) {
 		upstreamCache: &upstreamQueryCache{serverAttrsByHost: map[string]map[string]string{}},
 	}
 	spec := &upstreamSpec{services: []string{"mailbox"}, fixedPort: 8080}
-	result := g.upstreamHasServers(context.Background(), spec)
+	result, err := g.upstreamHasServers(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if result {
 		t.Errorf("expected false (no servers), got true")
 	}
@@ -383,7 +386,7 @@ func TestGetServerAttrsByHostname_LDAPQueryError(t *testing.T) {
 
 // TestMakeUpstreamResolver_LDAPError verifies the error-fallback path in the
 // makeUpstreamResolver closure: when upstreamCandidates fails (LDAP error),
-// the resolver returns ("", nil) instead of propagating the error.
+// the resolver returns the error instead of rendering no upstreams.
 func TestMakeUpstreamResolver_LDAPError(t *testing.T) {
 	l := ldap.NewLdap(context.Background(), &config.Config{})
 	l.NativeClient = new(ldap.Client) // zero-value → LDAP query fails
@@ -397,18 +400,14 @@ func TestMakeUpstreamResolver_LDAPError(t *testing.T) {
 
 	spec := &upstreamSpec{services: []string{"mailbox"}, fixedPort: 8080}
 	resolver := g.makeUpstreamResolver(spec)
-	val, err := resolver(context.Background())
-	if err != nil {
-		t.Errorf("expected nil error (fallback on LDAP error), got %v", err)
-	}
-	s, _ := val.(string)
-	if s != "" {
-		t.Errorf("expected empty string on LDAP error, got %q", s)
+	if _, err := resolver(context.Background()); err == nil {
+		t.Error("expected the LDAP error to be returned, got nil")
 	}
 }
 
-// TestUpstreamHasServers_LDAPError verifies upstreamHasServers returns false
-// when upstreamCandidates returns an error (LDAP failure).
+// TestUpstreamHasServers_LDAPError verifies upstreamHasServers reports the
+// error when upstreamCandidates fails (LDAP failure) instead of "no servers",
+// which would comment out the upstream block.
 func TestUpstreamHasServers_LDAPError(t *testing.T) {
 	l := ldap.NewLdap(context.Background(), &config.Config{})
 	l.NativeClient = new(ldap.Client)
@@ -421,8 +420,8 @@ func TestUpstreamHasServers_LDAPError(t *testing.T) {
 	}
 
 	spec := &upstreamSpec{services: []string{"mailbox"}, fixedPort: 8080}
-	if g.upstreamHasServers(context.Background(), spec) {
-		t.Error("expected false when LDAP query fails, got true")
+	if has, err := g.upstreamHasServers(context.Background(), spec); err == nil || has {
+		t.Errorf("expected an error when the LDAP query fails, got has=%v err=%v", has, err)
 	}
 }
 

@@ -31,7 +31,7 @@ type modeExec struct {
 }
 
 func (m modeExec) Run(ctx context.Context, c *sys.Cmd) (sys.Result, error) {
-	if c.Path == "systemctl" && len(c.Args) > 0 && c.Args[0] == "is-enabled" {
+	if c.Path == systemctlBin && len(c.Args) > 0 && c.Args[0] == "is-enabled" {
 		if m.strict {
 			return sys.Result{}, nil
 		}

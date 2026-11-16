@@ -119,7 +119,10 @@ func (tp *TemplateProcessor) processExplodeDomain(
 
 	// Get domains from generator (for now, use a mock implementation)
 	// In production, this would query LDAP for all domains with virtual hostnames
-	domains := tp.getDomains(ctx)
+	domains, err := tp.getDomains(ctx)
+	if err != nil {
+		return err
+	}
 
 	if len(domains) == 0 {
 		logger.DebugContext(ctx, "No domains found for explode directive")
@@ -194,7 +197,10 @@ func (tp *TemplateProcessor) processExplodeServer(ctx context.Context, serviceNa
 
 	// Get servers from generator (for now, use a mock implementation)
 	// In production, this would query LDAP for all servers with the specified service
-	servers := tp.getServersWithService(ctx, serviceName)
+	servers, err := tp.getServersWithService(ctx, serviceName)
+	if err != nil {
+		return err
+	}
 
 	if len(servers) == 0 {
 		logger.DebugContext(ctx, "No servers found with service",
@@ -302,17 +308,20 @@ func isNilCache(c interface {
 	return ok && cc == nil
 }
 
-func (tp *TemplateProcessor) getDomains(ctx context.Context) []DomainInfo {
+// getDomains returns the domains for explode processing. With no domain source
+// (offline rendering) there are none; a failed LDAP query is an error, since
+// rendering no domain blocks would drop every virtual host from nginx.
+func (tp *TemplateProcessor) getDomains(ctx context.Context) ([]DomainInfo, error) {
 	domains, err := tp.loadDomains(ctx)
-	if err != nil {
-		if !errors.Is(err, errNoDomainSource) {
-			logger.ErrorContext(ctx, "Domain query failed", "error", err)
-		}
-
-		return []DomainInfo{}
+	if errors.Is(err, errNoDomainSource) {
+		return []DomainInfo{}, nil
 	}
 
-	return domains
+	if err != nil {
+		return nil, fmt.Errorf("failed to load domains: %w", err)
+	}
+
+	return domains, nil
 }
 
 // errNoDomainSource means neither a test provider nor an LDAP client is available.
@@ -393,6 +402,44 @@ func (tp *TemplateProcessor) loadDomains(ctx context.Context) ([]DomainInfo, err
 	return domainInfos, nil
 }
 
+// cleanupDomains returns the domains whose certificate files must survive the
+// destructive cleanups (certbot delete, obsolete domaincerts files), and
+// whether those cleanups may run at all. loadDomains only returns domains with
+// a vhn and cert/CA attributes, so a domain that has not got those yet would
+// look removed. The cleanups therefore need every domain name from LDAP, and
+// never run when per-vhn configuration is disabled (loadDomains is empty then
+// by design) or the full list could not be read. An injected provider is
+// authoritative.
+func (tp *TemplateProcessor) cleanupDomains(ctx context.Context, loaded []DomainInfo) ([]DomainInfo, bool) {
+	if !tp.generator.perVirtualHostnameEnabled() {
+		logger.InfoContext(ctx, "Per-virtual-hostname configuration disabled, skipping domain certificate cleanup")
+
+		return nil, false
+	}
+
+	if tp.domainProvider != nil {
+		return loaded, true
+	}
+
+	names, err := tp.generator.LdapClient.NativeClient.GetAllDomains(ctx)
+	if err != nil {
+		logger.WarnContext(ctx, "Cannot list all domains, skipping domain certificate cleanup", "error", err)
+
+		return nil, false
+	}
+
+	all := slices.Clone(loaded)
+
+	for _, name := range names {
+		// An empty name would match every file name.
+		if name != "" {
+			all = append(all, DomainInfo{Name: name})
+		}
+	}
+
+	return all, true
+}
+
 // dropUnsafeDomains removes domains whose LDAP-provided virtual hostname, IP
 // or SSL paths could not be rendered into nginx configuration without
 // changing its structure. A domain is dropped rather than repaired or given
@@ -420,7 +467,10 @@ func (tp *TemplateProcessor) dropUnsafeDomains(ctx context.Context, domains []Do
 //	Returns: zimbraId, zimbraServiceHostname
 //
 // For testing, this function checks for an injected serverProvider function.
-func (tp *TemplateProcessor) getServersWithService(ctx context.Context, serviceName string) []ServerInfo {
+// Without an LDAP client (offline rendering) there are no servers; a failed
+// query is an error, since rendering no server blocks would drop the upstreams
+// from nginx.
+func (tp *TemplateProcessor) getServersWithService(ctx context.Context, serviceName string) ([]ServerInfo, error) {
 	var serverInfos []ServerInfo
 
 	// Resolve the server source: injected provider (for testing), no LDAP
@@ -432,7 +482,7 @@ func (tp *TemplateProcessor) getServersWithService(ctx context.Context, serviceN
 		logger.DebugContext(ctx, "No LDAP client available, returning empty list",
 			"service", serviceName)
 
-		return []ServerInfo{}
+		return []ServerInfo{}, nil
 	default:
 		cacheKey := fmt.Sprintf("ldap:servers:%s", serviceName)
 
@@ -441,8 +491,7 @@ func (tp *TemplateProcessor) getServersWithService(ctx context.Context, serviceN
 				return tp.generator.LdapClient.NativeClient.QueryServers(ctx, serviceName)
 			})
 		if err != nil {
-			logger.ErrorContext(ctx, "Server query failed", "error", err, "service", serviceName)
-			return []ServerInfo{}
+			return nil, fmt.Errorf("failed to load servers with service %s: %w", serviceName, err)
 		}
 
 		serverInfos = make([]ServerInfo, 0, len(servers))
@@ -459,7 +508,13 @@ func (tp *TemplateProcessor) getServersWithService(ctx context.Context, serviceN
 	}
 
 	serverInfos = slices.DeleteFunc(serverInfos, func(si ServerInfo) bool {
-		if si.Hostname == "" || validHostToken(si.Hostname) {
+		if si.Hostname == "" {
+			logger.ErrorContext(ctx, "Skipping server without hostname", "service", serviceName, "id", si.ID)
+
+			return true
+		}
+
+		if validHostToken(si.Hostname) {
 			return false
 		}
 
@@ -478,7 +533,7 @@ func (tp *TemplateProcessor) getServersWithService(ctx context.Context, serviceN
 		return strings.Compare(a.ID, b.ID)
 	})
 
-	return serverInfos
+	return serverInfos, nil
 }
 
 // domainMeetsRequirements checks if domain meets the requirements specified in explode args
@@ -519,12 +574,7 @@ func (tp *TemplateProcessor) virtualIPPrefix(ctx context.Context, domain *Domain
 		host = domain.VirtualHostname
 	}
 
-	resolve := tp.hostResolver
-	if resolve == nil {
-		resolve = resolveVirtualHost
-	}
-
-	ip := resolve(ctx, host)
+	ip := tp.hostIP(ctx, host)
 
 	switch {
 	case ip == nil:
@@ -540,20 +590,73 @@ func (tp *TemplateProcessor) virtualIPPrefix(ctx context.Context, domain *Domain
 	}
 }
 
-// resolveVirtualHost parses host as an IP literal (an IPv6 one may be
-// bracketed) or resolves it, like InetAddress.getByName. It returns nil when
-// host does not resolve.
-func resolveVirtualHost(ctx context.Context, host string) net.IP {
-	if ip := net.ParseIP(strings.Trim(host, "[]")); ip != nil {
+// hostIP returns the address of host, looked up once per processor. A failed
+// lookup (timeout, unreachable resolver) keeps the last address a previous run
+// resolved, so a DNS outage does not flip the listen prefix; an answer that the
+// host has no record forgets it.
+func (tp *TemplateProcessor) hostIP(ctx context.Context, host string) net.IP {
+	if ip, seen := tp.hostIPs[host]; seen {
 		return ip
 	}
 
-	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
-	if err != nil || len(ips) == 0 {
-		return nil
+	resolve := tp.hostResolver
+	if resolve == nil {
+		resolve = resolveVirtualHost
 	}
 
-	return ips[0].IP
+	ip, err := resolve(ctx, host)
+
+	switch {
+	case ip != nil:
+		tp.generator.hostIPs.remember(host, ip)
+	case lookupFailed(err):
+		if ip = tp.generator.hostIPs.lastKnown(host); ip != nil {
+			logger.WarnContext(ctx, "Virtual host lookup failed, keeping its last known address",
+				"host", truncateForLog(host), "address", ip.String(), "error", err)
+		}
+	default:
+		tp.generator.hostIPs.forget(host)
+	}
+
+	if tp.hostIPs == nil {
+		tp.hostIPs = make(map[string]net.IP)
+	}
+
+	tp.hostIPs[host] = ip
+
+	return ip
+}
+
+// resolveVirtualHost parses host as an IP literal (an IPv6 one may be
+// bracketed) or resolves it, like InetAddress.getByName. It returns nil when
+// host does not resolve.
+func resolveVirtualHost(ctx context.Context, host string) (net.IP, error) {
+	if ip := net.ParseIP(strings.Trim(host, "[]")); ip != nil {
+		return ip, nil
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, hostLookupTimeout)
+	defer cancel()
+
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil || len(ips) == 0 {
+		return nil, err
+	}
+
+	return ips[0].IP, nil
+}
+
+// lookupFailed reports whether err means the lookup itself failed (timeout,
+// unreachable resolver), as opposed to the DNS answering that the host has no
+// record.
+func lookupFailed(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	var dnsErr *net.DNSError
+
+	return !errors.As(err, &dnsErr) || !dnsErr.IsNotFound
 }
 
 // setDomainVariables sets domain-specific variables for template processing.

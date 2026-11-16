@@ -140,7 +140,7 @@ func TestModifyValues_SendsOneRequestDeletesThenAddsThenReplaces(t *testing.T) {
 	s := newModifyServer(t, func(int, string) uint8 { return goldap.LDAPResultSuccess })
 	c := newServerClient(t, s)
 
-	err := c.ModifyValues("cn=config,cn=zimbra",
+	err := c.ModifyValues(t.Context(), "cn=config,cn=zimbra",
 		map[string][]string{"zimbraMtaRestriction": {"a", "b"}},
 		map[string][]string{"zimbraGone": nil},
 		map[string][]string{"zimbraMailMode": {"https"}})
@@ -170,7 +170,7 @@ func TestModifyValues_ReappliesOneValueAtATimeWhenTheEntryAlreadyConverged(t *te
 	})
 	c := newServerClient(t, s)
 
-	err := c.ModifyValues("cn=config,cn=zimbra",
+	err := c.ModifyValues(t.Context(), "cn=config,cn=zimbra",
 		map[string][]string{"attr": {"a", "b"}},
 		map[string][]string{"other": {"x", "y"}},
 		map[string][]string{"mode": {"1", "2"}})
@@ -198,7 +198,7 @@ func TestModifyValues_OtherRefusalsAreReturnedAndStopTheReapply(t *testing.T) {
 	})
 	c := newServerClient(t, s)
 
-	err := c.ModifyValues("cn=config,cn=zimbra", map[string][]string{"a": {"1", "2", "3"}}, nil, nil)
+	err := c.ModifyValues(t.Context(), "cn=config,cn=zimbra", map[string][]string{"a": {"1", "2", "3"}}, nil, nil)
 
 	require.Error(t, err)
 	assert.True(t, goldap.IsErrorWithCode(err, goldap.LDAPResultInsufficientAccessRights), strconv.Quote(err.Error()))
@@ -211,7 +211,7 @@ func TestModifyValues_RefusalOfTheWholeRequestIsReturnedWhenNotConverged(t *test
 	s := newModifyServer(t, func(int, string) uint8 { return goldap.LDAPResultInsufficientAccessRights })
 	c := newServerClient(t, s)
 
-	err := c.ModifyValues("cn=config,cn=zimbra", nil, nil, map[string][]string{"a": {"1"}})
+	err := c.ModifyValues(t.Context(), "cn=config,cn=zimbra", nil, nil, map[string][]string{"a": {"1"}})
 
 	require.Error(t, err)
 	assert.True(t, goldap.IsErrorWithCode(err, goldap.LDAPResultInsufficientAccessRights))

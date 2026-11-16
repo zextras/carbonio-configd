@@ -63,6 +63,9 @@ func installProvFake(t *testing.T, e *Env) *provFakeLDAP {
 	f.Set("cn=default,cn=cos,cn=zimbra", "objectClass", "zimbraCOS")
 	f.Set("cn=default,cn=cos,cn=zimbra", "zimbraId", "0f1e2d3c-0000-4000-8000-000000000001")
 
+	// The directory refuses an entry whose parent is missing.
+	f.Set("cn=servers,cn=zimbra", "objectClass", "organizationalRole")
+
 	f.addServer("mail.example.com")
 	f.addServer("mta.example.com")
 	f.addServer("ldap1.example.com")
@@ -78,12 +81,9 @@ func installProvFake(t *testing.T, e *Env) *provFakeLDAP {
 		return f, nil
 	}
 
-	provSchemas.Store(e, provTestSchema(t))
+	e.schema = provTestSchema(t)
 
-	t.Cleanup(func() {
-		provTestFake.Store(oldFake)
-		provSchemas.Delete(e)
-	})
+	t.Cleanup(func() { provTestFake.Store(oldFake) })
 
 	return f
 }

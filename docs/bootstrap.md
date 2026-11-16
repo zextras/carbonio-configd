@@ -273,7 +273,8 @@ carbonio-bootstrap config --legacy-config /opt/zextras/config.12345 --output /et
 
 `carbonio-bootstrap run` (as root) takes the flags of `config`, plus
 `--dry-run`. It reads the node first: whether this is a new install
-(`.install_history`, as `setup.pl`), the installed and enabled packages, and
+(`.install_history`, as `setup.pl`: the node is new until a `CONFIGURED END`
+is recorded, and a rerun that stops early keeps that mark), the installed and enabled packages, and
 on an existing install the values in localconfig and LDAP. A new node whose
 `ldap.host` is another, reachable node also reads the master's values. Then
 it runs the steps of `setup.pl` in its order:
@@ -286,14 +287,23 @@ it runs the steps of `setup.pl` in its order:
 3. Default domain and accounts, SQL, syslog, service start (systemd targets,
    or `zmcontrol`), GAL sync account, crontab, ssh keys.
 
+The crontab step replaces the block between `ZEXTRAS-START` and `ZEXTRAS-END`
+of the zextras crontab and keeps every other entry, also when the crontab has
+no markers (`setup.pl` dropped it then). A `crontab -l` that fails for another
+reason than "no crontab for zextras" fails the step, so entries are never
+replaced by a crontab built without them.
+
 The syslog step runs in process (`setup syslog`, which is also what
 `libexec/zmsyslogsetup` calls): it adds the local0, auth and mail rules to
 `/etc/rsyslog.conf` (Ubuntu with `/etc/rsyslog.d`: to `60-carbonio.conf`, and
 the catch-all rules of `50-default.conf` lose those facilities), forwards to
 `zimbraLogHostname` over UDP when that is another host, creates
 `/var/log/carbonio.log`, sets the owner in `/etc/logrotate.d/carbonio` and
-restarts rsyslog only if a file changed. A changed `/etc/rsyslog.conf` is kept
-in `rsyslog.conf.bak`; the drop-in `50-default.conf` has no backup, as with
+restarts rsyslog only if a file changed. A rerun drops only the mail rules it
+wrote (those naming the log host, `zimbra` or `carbonio.log`), never the
+distribution's own `mail*` rules. A changed `/etc/rsyslog.conf` is kept
+in `rsyslog.conf.bak`, written once so that it stays the file as it was before
+the first change; the drop-in `50-default.conf` has no backup, as with
 `zmsyslogsetup`. Only rsyslog is handled; syslog-ng and
 `/etc/syslog.conf` are not.
 
@@ -320,6 +330,16 @@ servers": a service that does not start fails the run (setup.pl went on and
 the GAL sync account step then failed against a stopped mailbox). Each
 finished step is recorded in `.install_history` as `setup.pl` did
 (`CONFIGURED <stage>`).
+
+On a new install, a step that has a stage and only warned (the server entry,
+the default domain and admin account) leaves the install unfinished: `run`
+does not record `CONFIGURED END` and `CONFIG SESSION COMPLETE`, the log ends
+with "finished with warnings in a required step; the install is not marked
+complete", and the next run is a new install again and retries it. A rerun on
+a configured node is not affected: an earlier `CONFIGURED END` stays valid
+until a new `INSTALL SESSION START`, even when the rerun stops half way. A new
+master that is run again also sets the admin password in the directory, as
+the entry loaded by an earlier attempt keeps its old hash.
 
 The run logs to `/opt/zextras/log/bootstrap.<date>.log` (mode `0600`):
 
@@ -468,8 +488,17 @@ Go, without starting a process:
   `zimbraSshPublicKey` the lines of that host are replaced by
   `command="/opt/zextras/libexec/zmrcd" <key>`, in the format the script
   wrote, so the other nodes can keep running the script. A server without a
-  key is logged as `Key for <server> NOT FOUND`. The remote mode
+  key is logged as `Key for <server> NOT FOUND`; a value that is not a single
+  `ssh-rsa <key> [<host>]` line (a line break, an options prefix, another key
+  type) is ignored with a warning, so LDAP cannot add lines to the file. The
+  remote mode
   (`zmupdateauthkeys -a`) is not part of the bootstrap.
+- The files that root gives to `zextras` (`conf/carbonio.ldif`, the LDAP
+  schemas, `dhparam.pem.crb`, `.ssh` and its files) are written to a new
+  temporary file that is chmodded and chowned through its descriptor and
+  renamed over the target; directories are opened without following a link.
+  Nothing is chowned by path, so a link planted in a directory zextras can
+  write is replaced or refused, never followed.
 
 The tools stay in carbonio-core; the bootstrap no longer calls them. The
 `zextras` user and group ids are read from `zimbra_uid` and `zimbra_gid` of
@@ -779,8 +808,8 @@ Differences from the script:
   `zmrc` exited `0` whatever happened, so a server that could not be reached
   was taken as done; the failure to reach it (key, connection, authentication)
   is now reported as `ERROR: zmrc: <command> failed(1):`, with what the server
-  printed and the reason, and the deploy goes on with the other servers. The
-  exit status of the remote command is still ignored.
+  printed and the reason, and the deploy goes on with the other servers. A
+  remote command that exits non-zero is reported the same way.
 - `zmssl.cnf` is still rendered from `conf/zmssl.cnf.in` for the tools that
   read it, but the CA's alternative names follow the current settings; the
   servers come from LDAP directly (`zmprov gas` and `mcf`/`ms` are not run)
@@ -811,7 +840,10 @@ Same as `rc.pl`:
   first line it waits as long as the command takes.
 - No host (or an empty one): `Usage: zmrc <hostname> [command words...]` on
   stdout and exit status `1`. Every other case exits `0`, whatever the remote
-  command did: its exit status is ignored, as `close P` ignored it.
+  command did, as `close P` ignored its exit status; the process itself
+  prints `zmrc: the remote command failed with status <n>` on stderr, and a
+  caller in the bootstrap (`zmupdateauthkeys -a`, `-allservers`) treats it as
+  a failure of that server.
 
 Differences from the script:
 
@@ -878,6 +910,28 @@ Same as `rcd.pl`:
   commands, after the same kind of check (any other program ending in `rsync`:
   `ERROR: command '<prog>' not allowed`; arguments out of the class:
   `ERROR: invalid arguments in command [<line>]`).
+- `rsync`, `certbot` and `zmcertmgr` get a second check after the character
+  class, on the words, as the options of these programs can run other
+  programs or write anywhere. The shape is the one the callers use:
+  - `rsync` must be `rsync --server [--sender] -<flags> [<options>] . <path>...`.
+    The short flags are an allow-list without `e` (only the `-e.<letters>`
+    compatibility flags that the server form carries), and the long options
+    are an allow-list too: no `--rsh`, `--rsync-path`, `--daemon`,
+    `--config`, `--log-file`, `--files-from` or `--filter`. The same applies
+    to the `HOST:x rsync ...` form on stdin.
+  - `certbot` must be `certonly` with `--agree-tos`, `--email`, `-n`,
+    `--keep`, `--webroot -w`, `--cert-name`, `-d` and the like, as the
+    mailbox sends them; hooks (`--*-hook`), `--config*`, `--work-dir` and
+    `--logs-dir` are refused.
+  - `zmcertmgr` must be one of the commands of the table with the options
+    the mailbox and `carbonio-bootstrap` use (`createcsr`, `createcrt`,
+    `deploycrt`, `getcrt`, `verifycrtchain`, `verifycrtkey`, `viewcsr`,
+    `viewstagedcrt`, `viewdeployedcrt`), with the type or service where one
+    is due.
+  - Every path in them must be below `/opt/zextras` (relative ones are taken
+    from it), without `..`, and no word may begin with `-` where a path is
+    due. A refusal is the `args ... not allowed` error, or
+    `invalid arguments in command [<line>]` for an `rsync` over SSH.
 
 Differences from the script:
 
@@ -892,9 +946,10 @@ Differences from the script:
   unbalanced quote (and `dkimutil -|`) are refused with `ERROR: args ... not
   allowed ...` and exit `1`; the shell failed them with `sh: Syntax error` after
   `STARTCMD` and `ENDCMD`, exit `2`.
-- `rsync` is still handed what the client sent, so its own options are the
-  limit: an allowed client can pass `-e <command>` to a real `rsync`, which is
-  what the legacy script allowed too. Only keys of the installation can log in.
+- `rsync`, `certbot` and `zmcertmgr` are checked word by word (see above): the
+  script let a client pass `-e <command>` to `rsync`, a hook to `certbot` or
+  any path to `zmcertmgr`, and so ran programs of its choice as zextras.
+  Only keys of the installation can log in.
 - A line over 64 KiB is refused (`ERROR: line too long`). The children read
   nothing (`/dev/null`), where they inherited the session's input.
 - A command killed by a signal exits `128+<signal>` (Perl exited `0`).

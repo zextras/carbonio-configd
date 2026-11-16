@@ -95,7 +95,7 @@ func TestQueryDomains_MultipleVirtualHostnames(t *testing.T) {
 func TestSetDomainSSLCertKey_UnknownDomain(t *testing.T) {
 	c, _ := newGetterTestClient(&ldap.SearchResult{}, nil)
 
-	err := c.SetDomainSSLCertKey("nope.com", "c", "k")
+	err := c.SetDomainSSLCertKey(t.Context(), "nope.com", "c", "k")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no such domain")
 }
@@ -103,7 +103,7 @@ func TestSetDomainSSLCertKey_UnknownDomain(t *testing.T) {
 func TestSetDomainSSLCertKey_LookupError(t *testing.T) {
 	c, _ := newGetterTestClient(nil, errors.New("ldap down"))
 
-	err := c.SetDomainSSLCertKey("x.com", "c", "k")
+	err := c.SetDomainSSLCertKey(t.Context(), "x.com", "c", "k")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to look up domain")
 }

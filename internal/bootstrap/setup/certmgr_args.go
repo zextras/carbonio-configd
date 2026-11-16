@@ -23,6 +23,8 @@ const (
 	certOptNewkey   = "newkey"
 	certOptKeysize  = "keysize"
 	certOptDigest   = "digest"
+	certOptNoDefSAN = "nodefaultsubjectaltname"
+	certOptAllsvr   = "allserver"
 	certOptSubject  = "subject"
 	certOptSANs     = "subjectaltnames"
 	certOptDefSAN   = "defaultsubjectaltname"
@@ -66,27 +68,27 @@ var certCommands = map[string]*certCommand{
 	certCmdCheckExpiry: {
 		opts: []string{certOptDays}, xargs: []int{0, 1}, xinfo: certServicesRef,
 	},
-	"createcsr": {needType: true, opts: append(slices.Clone(certCreateOpts), certOptSANs, certOptDefSAN)},
+	certCmdCreateCSR: {needType: true, opts: append(slices.Clone(certCreateOpts), certOptSANs, certOptDefSAN)},
 	certCmdCreateCRT: {
 		opts: append(slices.Clone(certCreateOpts), certOptSANs, certOptDays, certOptAllsvrs, certOptDefSAN),
 	},
 	"deployca": {opts: []string{certOptLocal}},
-	"deploycrt": {
+	certCmdDeployCRT: {
 		needType: true, opts: []string{certOptAllsvrs, certOptDeploy, certOptLocal}, xargs: []int{0, 2},
 		xinfo: "<<self>|<comm [certfile ca_chain_file]>> [-localonly] [-allservers] [[-deploy " +
 			certServicesRef + "] ...]",
 	},
-	"getcrt":         {needType: true, opts: []string{certOptAllsvrs}},
+	certCmdGetCRT:    {needType: true, opts: []string{certOptAllsvrs}},
 	"savecrt":        {needType: true, opts: []string{certOptAllsvrs}},
 	certCmdVerifyCRT: {needType: true, xargs: []int{0, 1, 2, 3}, xinfo: "[[[priv_key] [certfile]] [ca_chain_file]]"},
-	"verifycrtchain": {
+	certCmdVerifyChain: {
 		xargs: []int{2}, xinfo: "<ca_chain_file> <certfile>",
 	},
-	"verifycrtkey":    {xargs: []int{2}, xinfo: "<priv_key> <certfile>"},
-	"viewcsr":         {needType: true, xargs: []int{0, 1}, xinfo: "<csr_file>"},
-	certCmdViewStaged: {needType: true, xargs: []int{0, 1}, xinfo: "<crt_file>"},
-	"viewdeployedcrt": {xargs: []int{0, 1}, xinfo: certServicesRef},
-	"migrate":         {},
+	certCmdVerifyKey:    {xargs: []int{2}, xinfo: "<priv_key> <certfile>"},
+	certCmdViewCSR:      {needType: true, xargs: []int{0, 1}, xinfo: "<csr_file>"},
+	certCmdViewStaged:   {needType: true, xargs: []int{0, 1}, xinfo: "<crt_file>"},
+	certCmdViewDeployed: {xargs: []int{0, 1}, xinfo: certServicesRef},
+	"migrate":           {},
 }
 
 // certCommandAliases are the names that run another command. "viewcrt" is

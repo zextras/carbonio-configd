@@ -5,6 +5,7 @@
 package ldap
 
 import (
+	"context"
 	"maps"
 	"slices"
 
@@ -41,19 +42,19 @@ type modifyOp struct {
 // remove-then-add of one attribute stays atomic. When the server refuses it with
 // result 16 or 20 the operations are re-applied one value at a time and those
 // two results are ignored, which is what makes the call idempotent.
-func (c *Client) ModifyValues(dn string, add, del, replace map[string][]string) error {
+func (c *Client) ModifyValues(ctx context.Context, dn string, add, del, replace map[string][]string) error {
 	ops := modifyOps(add, del, replace)
 	if len(ops) == 0 {
 		return nil
 	}
 
-	err := c.modify(dn, ops)
+	err := c.modify(ctx, dn, ops)
 	if !isAlreadyConverged(err) {
 		return err
 	}
 
 	for _, op := range singleValueOps(ops) {
-		if err := c.modify(dn, []modifyOp{op}); err != nil && !isAlreadyConverged(err) {
+		if err := c.modify(ctx, dn, []modifyOp{op}); err != nil && !isAlreadyConverged(err) {
 			return err
 		}
 	}
@@ -99,8 +100,8 @@ func modifyOps(add, del, replace map[string][]string) []modifyOp {
 }
 
 // modify sends ops to dn as one modify request.
-func (c *Client) modify(dn string, ops []modifyOp) error {
-	return c.executeWithRetry(c.lifecycle(), func(conn *ldap.Conn) error {
+func (c *Client) modify(ctx context.Context, dn string, ops []modifyOp) error {
+	return c.executeWithRetry(ctx, func(conn *ldap.Conn) error {
 		req := ldap.NewModifyRequest(dn, nil)
 
 		for _, op := range ops {

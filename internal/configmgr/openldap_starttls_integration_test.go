@@ -53,8 +53,8 @@ func carbonioHome(t *testing.T, caPEM []byte) string {
 	return home
 }
 
-func searchConfig(c *ldap.Client) error {
-	_, err := c.Search("cn=config,cn=zimbra", "(objectClass=*)", []string{"cn"}, goldap.ScopeBaseObject)
+func searchConfig(ctx context.Context, c *ldap.Client) error {
+	_, err := c.Search(ctx, "cn=config,cn=zimbra", "(objectClass=*)", []string{"cn"}, goldap.ScopeBaseObject)
 
 	return err //nolint:wrapcheck // test helper
 }
@@ -86,7 +86,7 @@ func TestOpenLDAP_StartTLS(t *testing.T) {
 
 		defer func() { _ = c.Close() }()
 
-		require.Error(t, searchConfig(c), "slapd must demand TLS: the fixture would not prove StartTLS otherwise")
+		require.Error(t, searchConfig(t.Context(), c), "slapd must demand TLS: the fixture would not prove StartTLS otherwise")
 	})
 
 	t.Run("CLI writer client (cliutil.OpenWriteLDAPClient)", func(t *testing.T) {
@@ -95,22 +95,22 @@ func TestOpenLDAP_StartTLS(t *testing.T) {
 
 		defer func() { _ = c.Close() }()
 
-		require.NoError(t, searchConfig(c))
+		require.NoError(t, searchConfig(t.Context(), c))
 	})
 
-	t.Run("daemon client (initNativeLdapClient)", func(t *testing.T) {
+	t.Run("daemon client (syncLdapClients)", func(t *testing.T) {
 		cm := &ConfigManager{
 			env:             hostEnv(),
 			loadLocalConfig: func() (map[string]string, error) { return lc, nil },
 			mainConfig:      &config.Config{},
 			CommandRegistry: commands.NewRegistry(),
 		}
-		cm.initNativeLdapClient(context.Background())
+		cm.syncLdapClients(context.Background())
 		require.NotNil(t, cm.NativeLdapClient)
 
 		defer func() { _ = cm.NativeLdapClient.Close() }()
 
-		require.NoError(t, searchConfig(cm.NativeLdapClient))
+		require.NoError(t, searchConfig(t.Context(), cm.NativeLdapClient))
 	})
 
 	t.Run("ldaps with the Carbonio CA", func(t *testing.T) {
@@ -124,7 +124,7 @@ func TestOpenLDAP_StartTLS(t *testing.T) {
 
 		defer func() { _ = c.Close() }()
 
-		require.NoError(t, searchConfig(c))
+		require.NoError(t, searchConfig(t.Context(), c))
 	})
 
 	t.Run("untrusted CA is rejected, no downgrade to clear text", func(t *testing.T) {
@@ -140,7 +140,7 @@ func TestOpenLDAP_StartTLS(t *testing.T) {
 
 		defer func() { _ = c.Close() }()
 
-		require.Error(t, searchConfig(c))
+		require.Error(t, searchConfig(t.Context(), c))
 	})
 
 	t.Run("untrusted certificates allowed (legacy default)", func(t *testing.T) {
@@ -158,6 +158,6 @@ func TestOpenLDAP_StartTLS(t *testing.T) {
 
 		defer func() { _ = c.Close() }()
 
-		require.NoError(t, searchConfig(c))
+		require.NoError(t, searchConfig(t.Context(), c))
 	})
 }

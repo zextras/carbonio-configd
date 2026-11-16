@@ -310,3 +310,67 @@ func TestNginxIncludeRegex(t *testing.T) {
 		}
 	}
 }
+
+func TestPrintNginxConfFile_IncludeCycleStops(t *testing.T) {
+	t.Parallel()
+
+	fk := systest.New()
+	fk.FS.Put("/etc/nginx/a.conf", []byte("working_directory /etc/nginx;\ninclude b.conf;\n"), 0o600)
+	fk.FS.Put("/etc/nginx/b.conf", []byte("include a.conf;\nlisten 80;\n"), 0o600)
+
+	var buf bytes.Buffer
+	printNginxConf(&buf, "/etc/nginx/a.conf", "", &nginxConfOpts{fs: fk.FS})
+
+	got := buf.String()
+	if !strings.Contains(got, "# include loop: /etc/nginx/a.conf includes itself") {
+		t.Errorf("expected include loop notice, got %q", got)
+	}
+
+	if !strings.Contains(got, "listen 80;") {
+		t.Errorf("the rest of the file must still print, got %q", got)
+	}
+}
+
+func TestPrintNginxConfFile_RepeatedIncludeIsNotACycle(t *testing.T) {
+	t.Parallel()
+
+	fk := systest.New()
+	fk.FS.Put("/etc/nginx/a.conf", []byte("working_directory /etc/nginx;\ninclude c.conf;\ninclude c.conf;\n"), 0o600)
+	fk.FS.Put("/etc/nginx/c.conf", []byte("listen 80;\n"), 0o600)
+
+	var buf bytes.Buffer
+	printNginxConf(&buf, "/etc/nginx/a.conf", "", &nginxConfOpts{fs: fk.FS})
+
+	if strings.Contains(buf.String(), "include loop") || strings.Count(buf.String(), "listen 80;") != 2 {
+		t.Errorf("a file included twice in sequence must print twice, got %q", buf.String())
+	}
+}
+
+func TestPrintNginxConfFile_LongLine(t *testing.T) {
+	t.Parallel()
+
+	fk := systest.New()
+	long := "ssl_ciphers " + strings.Repeat("A", 200*1024) + ";"
+	fk.FS.Put("/etc/nginx/a.conf", []byte(long+"\nlisten 80;\n"), 0o600)
+
+	var buf bytes.Buffer
+	printNginxConfFile(&buf, "/etc/nginx/a.conf", "", &nginxConfOpts{fs: fk.FS})
+
+	if !strings.Contains(buf.String(), long) || !strings.Contains(buf.String(), "listen 80;") {
+		t.Error("a line longer than bufio's default must print in full, followed by the rest")
+	}
+}
+
+func TestPrintNginxConfFile_OversizedLineReported(t *testing.T) {
+	t.Parallel()
+
+	fk := systest.New()
+	fk.FS.Put("/etc/nginx/a.conf", []byte(strings.Repeat("A", maxNginxConfLine+10)), 0o600)
+
+	var buf bytes.Buffer
+	printNginxConfFile(&buf, "/etc/nginx/a.conf", "", &nginxConfOpts{fs: fk.FS})
+
+	if !strings.Contains(buf.String(), "# cannot read /etc/nginx/a.conf:") {
+		t.Errorf("a scan failure must be reported, got %.80q", buf.String())
+	}
+}

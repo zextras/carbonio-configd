@@ -62,6 +62,7 @@ func TestViaDaemon(t *testing.T) {
 		{name: "daemon on the other family", network: networkTCP6, reply: "SUCCESS REWRITES COMPLETE", wantCode: 0},
 		{name: "daemon not running", wantStandalone: true, wantCode: 3},
 		{name: "daemon answers error", network: networkTCP4, reply: "ERROR REWRITE TIMEOUT", wantCode: 1},
+		{name: "daemon reports a failed rewrite", network: networkTCP4, reply: "ERROR REWRITE FAILED", wantCode: 1},
 		{name: "daemon on the other family answers error", network: networkTCP6, reply: "ERROR REWRITE TIMEOUT", wantCode: 1},
 	}
 
