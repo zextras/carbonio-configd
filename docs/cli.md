@@ -394,6 +394,46 @@ shows its environment value and is refused by `-e`/`-u`. A key with no value
 (a null default such as `mysql_bind_address`) prints nothing and warns
 `null valued key`.
 
+## exec
+
+```bash
+configd exec [--] <program> [args...]
+```
+
+Launcher for systemd units; replaces `systemd-envscript` and the shared
+`/opt/zextras/data/systemd.env`. It reads the effective localconfig on every
+start (same reader, defaults and `${}` resolution as `localconfig -m shell`, no
+LDAP, no logging beyond errors, a few ms), exports the variables below into the
+environment of the program, overriding inherited values of the same names, expands
+the arguments and `execve`s the program (same PID; looked up in `PATH` unless it
+contains a `/`). A localconfig that cannot be loaded prints a message on stderr
+and exits `1`, so the unit fails loudly. An exec failure exits `127` (not found)
+or `126`.
+
+Exported variables: `antispam_enable_restarts`, `antispam_enable_rule_compilation`,
+`antispam_enable_rule_updates` (same-named keys), `bind_url` (`ldap_bind_url`, else
+the first word of `ldap_url`), `ldap_domain` (host of the first bind URL),
+`configd_listen_port` (`zmconfigd_listen_port`), `configd_rewrite_timeout`
+(`zimbra_configrewrite_timeout`), `java_options` (`zimbra_zmjava_options`),
+`java_xms` and `java_xmx` (`mailboxd_java_heap_size`, default `512`), `ldap_port`,
+`log_directory` (`zimbra_log_directory`), `mailboxd_directory`,
+`mailboxd_java_heap_new_size_percent` (default `25`), `mail_service_port`
+(`zimbra_mail_service_port`), `mailboxd_java_options` (the key plus ` -Xss<mailboxd_thread_stack_size|256k>`,
+` -Dsun.net.inetaddr.ttl=<networkaddress_cache_ttl|60>` and
+` -Dlog4j.configurationFile=<zimbra_log4j_properties>`, each only when the options do not
+already contain `Xss`, `sun.net.inetaddr.ttl` or `log4j`), `mysql_errlogfile`, `mysql_mycnf`.
+
+Arguments are expanded like systemd `ExecStart=`, using only these variables:
+`${name}` is replaced inside the word (empty if the value is empty), a word that
+is exactly `$name` is split on whitespace into separate arguments (dropped if
+empty), `$$` is a literal `$`. Unknown names expand to nothing. In a unit,
+escape the references (`$${name}`, `$$name`) so systemd hands them to `configd exec`.
+
+```bash
+configd exec -- /bin/sh -c 'echo $java_xms'           # prints the heap size
+ExecStart=/opt/zextras/bin/configd exec -- /usr/bin/java -Xms$${java_xms}m $$mailboxd_java_options -jar x.jar
+```
+
 ## proxy
 
 ```bash
