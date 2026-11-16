@@ -144,3 +144,38 @@ func TestStopPaths_TimeoutStillEscalatesToSIGKILL(t *testing.T) {
 		assert.Equal(t, 1, signalsOf(f, syscall.SIGKILL))
 	})
 }
+
+// After the SIGKILL, gracefulStopPID returns only once the process has left
+// the table, so a restart's start never races the dying process for its lock
+// files or ports.
+func TestGracefulStopPID_WaitsForTheKilledProcessToGo(t *testing.T) {
+	t.Parallel()
+
+	ctl, f := newStubbornProcess(t)
+	f.Proc.KillLinger[stubbornPID] = 3
+	pumpClock(t, f.Clock, 50*time.Millisecond)
+
+	require.NoError(t, ctl.gracefulStopPID(context.Background(), stubbornPID, "svc", time.Second))
+
+	assert.Equal(t, 1, signalsOf(f, syscall.SIGKILL))
+	assert.False(t, f.Proc.Alive(stubbornPID), "returned while the killed process was still present")
+}
+
+// A process that never goes away after SIGKILL (stuck in the kernel) does not
+// hang the stop: the wait is bounded by sigkillWait.
+func TestGracefulStopPID_KillWaitIsBounded(t *testing.T) {
+	t.Parallel()
+
+	ctl, f := newStubbornProcess(t)
+	f.Proc.KillLinger[stubbornPID] = 1 << 30
+	pumpClock(t, f.Clock, 50*time.Millisecond)
+
+	start := f.Clock.Now()
+
+	require.NoError(t, ctl.gracefulStopPID(context.Background(), stubbornPID, "svc", time.Second))
+
+	waited := f.Clock.Now().Sub(start)
+	assert.GreaterOrEqual(t, waited, time.Second+sigkillWait, "gave up before the SIGKILL wait")
+	assert.Less(t, waited, time.Second+sigkillWait+time.Second, "waited past the SIGKILL bound")
+	assert.True(t, f.Proc.Alive(stubbornPID))
+}

@@ -79,8 +79,8 @@ func statEnv(env sys.System, stdout, stderr io.Writer) *stat.Env {
 	e.User = userName(uid)
 
 	if uid == 0 {
-		e.Chown = chownToZextras
-		e.ChownFile = chownFileToZextras
+		e.Chown = lchownTo(config.ZextrasUser)
+		e.ChownFile = fchownTo(config.ZextrasUser)
 	}
 
 	return e
@@ -96,48 +96,52 @@ func userName(uid int) string {
 	return u.Username
 }
 
-// zextrasIDs is the uid and gid of the zextras user.
-func zextrasIDs() (uid, gid int, err error) {
-	u, err := user.Lookup(config.ZextrasUser)
+// userIDs is the uid and gid of the user name.
+func userIDs(name string) (uid, gid int, err error) {
+	u, err := user.Lookup(name)
 	if err != nil {
-		return 0, 0, fmt.Errorf("look up %s: %w", config.ZextrasUser, err)
+		return 0, 0, fmt.Errorf("look up %s: %w", name, err)
 	}
 
 	uid, err = strconv.Atoi(u.Uid)
 	if err != nil {
-		return 0, 0, fmt.Errorf("uid of %s: %w", config.ZextrasUser, err)
+		return 0, 0, fmt.Errorf("uid of %s: %w", name, err)
 	}
 
 	gid, err = strconv.Atoi(u.Gid)
 	if err != nil {
-		return 0, 0, fmt.Errorf("gid of %s: %w", config.ZextrasUser, err)
+		return 0, 0, fmt.Errorf("gid of %s: %w", name, err)
 	}
 
 	return uid, gid, nil
 }
 
-// chownToZextras gives a directory or file to zextras (the collectors that run
-// as root create files the zextras collectors and tools must read). It does
-// not follow a symlink: root must never chown what a link planted by another
-// user points to.
-func chownToZextras(path string) error {
-	uid, gid, err := zextrasIDs()
-	if err != nil {
-		return err
-	}
+// lchownTo gives a directory or file to the user name (the collectors that
+// run as root create files the zextras collectors and tools must read). It
+// does not follow a symlink: root must never chown what a link planted by
+// another user points to.
+func lchownTo(name string) func(path string) error {
+	return func(path string) error {
+		uid, gid, err := userIDs(name)
+		if err != nil {
+			return err
+		}
 
-	return os.Lchown(path, uid, gid) //nolint:wrapcheck // plain syscall error
+		return os.Lchown(path, uid, gid) //nolint:wrapcheck // plain syscall error
+	}
 }
 
-// chownFileToZextras gives an open file to zextras through its descriptor
+// fchownTo gives an open file to the user name through its descriptor
 // (fchown), so a path swapped after the open cannot redirect it.
-func chownFileToZextras(f *os.File) error {
-	uid, gid, err := zextrasIDs()
-	if err != nil {
-		return err
-	}
+func fchownTo(name string) func(f *os.File) error {
+	return func(f *os.File) error {
+		uid, gid, err := userIDs(name)
+		if err != nil {
+			return err
+		}
 
-	return f.Chown(uid, gid) //nolint:wrapcheck // plain syscall error
+		return f.Chown(uid, gid) //nolint:wrapcheck // plain syscall error
+	}
 }
 
 // statfs is statfs(2).

@@ -29,6 +29,7 @@ type Proc struct {
 	mu      sync.Mutex
 	table   map[int]sys.ProcEntry
 	zombies map[int]bool
+	dying   map[int]bool // SIGKILLed, gone once KillLinger runs out
 	signals []Signal
 	gids    map[string]int
 
@@ -41,15 +42,19 @@ type Proc struct {
 	// SurviveTerm keeps a process alive after SIGTERM, to exercise
 	// escalation; SIGKILL always removes it.
 	SurviveTerm map[int]bool
+	// KillLinger keeps a SIGKILLed process visible for that many Alive
+	// checks, as a real process stays in the table until the kernel has
+	// torn it down.
+	KillLinger map[int]int
 }
 
 // NewProc returns an empty process table. The fake process is pid 100, child
 // of 99, running as uid 1000 with umask 0027.
 func NewProc(rec *Recorder) *Proc {
 	return &Proc{
-		rec: rec, table: map[int]sys.ProcEntry{}, zombies: map[int]bool{}, gids: map[string]int{},
+		rec: rec, table: map[int]sys.ProcEntry{}, zombies: map[int]bool{}, dying: map[int]bool{}, gids: map[string]int{},
 		SelfPID: 100, ParentPID: 99, UserID: 1000, UmaskValue: 0o027,
-		SurviveTerm: map[int]bool{},
+		SurviveTerm: map[int]bool{}, KillLinger: map[int]int{},
 	}
 }
 
@@ -121,6 +126,16 @@ func (p *Proc) Alive(pid int) bool {
 	defer p.mu.Unlock()
 
 	_, ok := p.table[pid]
+	if ok && p.dying[pid] {
+		if p.KillLinger[pid] <= 0 {
+			delete(p.table, pid)
+			delete(p.dying, pid)
+
+			return false
+		}
+
+		p.KillLinger[pid]--
+	}
 
 	return ok && !p.zombies[pid]
 }
@@ -157,6 +172,12 @@ func (p *Proc) deliver(pid int, sig syscall.Signal, group bool) error {
 	}
 
 	if sig == syscall.SIGTERM && p.SurviveTerm[pid] {
+		return nil
+	}
+
+	if sig == syscall.SIGKILL && p.KillLinger[pid] > 0 {
+		p.dying[pid] = true
+
 		return nil
 	}
 
