@@ -45,6 +45,13 @@ On jammy and rocky-8 the `postinst` only kills the legacy `zmconfigd` JVM.
 Runtime dependencies are `libsystemd0` and `polkitd` (apt), `systemd-libs` and
 `polkit` (yum).
 
+## Environment of the units
+
+Units that need localconfig-derived settings (heap size, bind URL, ports, ...)
+wrap their command with [`configd exec`](cli.md#exec), which reads localconfig on
+each start and exports the variables to the program: there is no shared env file
+and no ordering on configd for the environment. Requires `carbonio-configd>=1.13.0`.
+
 ## The systemd unit
 
 `carbonio-configd.service` (`Type=notify`, `NotifyAccess=main`, user

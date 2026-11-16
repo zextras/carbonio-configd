@@ -31,6 +31,7 @@ type CLI struct {
 	TracingArgs
 
 	Localconfig LocalconfigCmd
+	Exec        ExecCmd
 	Service     ServiceCmd
 	Status      StatusCmd
 	Control     ControlCmd
@@ -86,6 +87,7 @@ func newRootCmd(name string, cli *CLI, env sys.System, std *stdio) (*cobra.Comma
 
 	root.AddCommand(
 		a.localconfigCmd(),
+		a.execCmd(),
 		a.serviceCmd(),
 		a.statusCmd(),
 		a.controlCmd(),

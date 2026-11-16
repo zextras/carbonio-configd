@@ -10,12 +10,12 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"strings"
 	"time"
 
 	"github.com/go-ldap/ldap/v3"
 
 	carboldap "github.com/zextras/carbonio-configd/internal/ldap"
+	"github.com/zextras/carbonio-configd/internal/localconfig"
 	"github.com/zextras/carbonio-configd/internal/logger"
 )
 
@@ -52,17 +52,11 @@ const (
 const ldapStopTimeout = 10 * time.Second
 
 // buildLDAPBindURL constructs the LDAP bind URL from localconfig.
-// Matches the old shell script logic: prefer ldap_bind_url, fall back to
-// the first URL in ldap_url, then reconstruct from zimbra_server_hostname/ldap_port.
+// Prefers ldap_bind_url, then the first URL in ldap_url (localconfig.BindURL,
+// shared with `configd exec`), then reconstruct from zimbra_server_hostname/ldap_port.
 func buildLDAPBindURL(lc map[string]string) string {
-	// Prefer explicit bind URL (may contain multiple space-separated URLs)
-	if bindURL := lc["ldap_bind_url"]; bindURL != "" {
+	if bindURL := localconfig.BindURL(lc); bindURL != "" {
 		return bindURL
-	}
-
-	// Fall back to first URL in ldap_url (matches ldap.sh lines 57-60)
-	if urls := strings.Fields(lc["ldap_url"]); len(urls) > 0 {
-		return urls[0]
 	}
 
 	// Last resort: reconstruct from individual keys
