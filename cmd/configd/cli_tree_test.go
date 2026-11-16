@@ -393,7 +393,7 @@ func TestCommandTree_Visible(t *testing.T) {
 	}
 
 	assert.ElementsMatch(t, []string{
-		"completion", "control", "init", "ldap", "localconfig", "plan", "proxy", "release",
+		"completion", "control", "exec", "init", "ldap", "localconfig", "plan", "proxy", "release",
 		"rewrite", "service", "shadow", "stat", "status", "tls",
 	}, names(root))
 
