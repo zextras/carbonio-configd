@@ -283,7 +283,8 @@ starting the JVM brings the database up, stopping the JVM leaves it up.
 ## control
 
 ```bash
-configd control start|startup|stop|shutdown|restart|status
+configd control start|startup|stop|shutdown|restart [<module> [<service>]]
+configd control status
 ```
 
 `zmcontrol`: orchestrates every service enabled on this host (from
@@ -298,6 +299,28 @@ prints `<name> is not running after start` and exits `1`, so a service that the 
 restarted or that died right after its start is not reported as `Done`.
 Remote hosts (`zmcontrol -H`) are not supported here, the wrapper rejects `-H`;
 use `/opt/zextras/libexec/zmrc`.
+
+With a `<module>`, `start`, `stop` and `restart` (and their aliases) control one Carbonio Advanced
+module, or with `<service>` one of its services, instead of every service of the host. The request
+goes to the running mailboxd (`POST /service/extension/zextras`, actions `doStartService`,
+`doStopService`, `doRestartService`), so it works the same on systemd and on legacy hosts and
+needs mailboxd up. The module is one of `addressbook`, `admin`, `auth`, `backup`, `config`,
+`mailreplica`, `mobile`, `powerstore`; without `<service>` the whole module (the service switch
+`module`) is controlled. The output is
+
+```
+Host mail.example.com
+	Restarting backup module...Done.
+```
+
+(`<module> <service> service` when a service is given). A refusal prints `Failed.` and exits `1`
+with the server's message on stderr (`Error: ...`). The module call is bounded to 5 minutes and is
+never retried. These are rejected before any request, with exit `1`: an unknown module, a malformed
+service name (`[A-Za-z0-9_][A-Za-z0-9_.-]*`), Carbonio Advanced not installed, and `core` with or
+without a service: stopping or restarting the core module unregisters the Advanced HTTP handler of
+mailboxd and only a mailbox restart brings it back, so restart the mailbox instead
+(`systemctl restart carbonio-appserver.service`, or `zmmailboxdctl restart` on a legacy host).
+When mailboxd answers 404 the extension did not boot: `Error: Carbonio Advanced is not running`.
 
 ## status
 
@@ -549,7 +572,7 @@ is a `#!/bin/bash` one-liner around the binary, so scripts keep working.
 
 | Legacy command | Runs |
 |---|---|
-| `zmcontrol start\|startup\|stop\|shutdown\|restart\|status` | `configd control <action>` |
+| `zmcontrol start\|startup\|stop\|shutdown\|restart [<module> [<service>]]\|status` | `configd control <action> [<module> [<service>]]` |
 | `zmcontrol -v` / `-V` | `configd release` / `configd release --packages` |
 | `zmcontrol -H host …` | rejected (never worked in `control.pl`): use `/opt/zextras/libexec/zmrc` |
 | `zmlocalconfig …` | `configd localconfig …` |

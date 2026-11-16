@@ -18,6 +18,7 @@ import (
 	"github.com/zextras/carbonio-configd/internal/cli/status"
 	"github.com/zextras/carbonio-configd/internal/services"
 	"github.com/zextras/carbonio-configd/internal/sys"
+	"github.com/zextras/carbonio-configd/internal/zxadmin"
 )
 
 // Action is the "configd control" subcommand to run.
@@ -35,6 +36,11 @@ const (
 // Options are the parsed arguments of "configd control".
 type Options struct {
 	Action Action
+	// Module restricts start/stop/restart to one Carbonio Advanced module,
+	// driven through the running mailboxd; Service narrows it to one service
+	// of the module (default: the module as a whole).
+	Module  string
+	Service string
 }
 
 // orchestrator carries what one "configd control" invocation drives: the
@@ -44,12 +50,15 @@ type orchestrator struct {
 	reporter *status.Reporter
 	// svcStatus probes one service; defaults to ctl.ServiceStatus.
 	svcStatus func(ctx context.Context, name string) (bool, error)
+	// newClient returns the client of the Advanced module actions.
+	newClient func() (*zxadmin.Client, error)
 }
 
 func newOrchestrator(env sys.System) *orchestrator {
 	ctl := services.NewController(env)
 
-	return &orchestrator{ctl: ctl, reporter: status.NewReporter(env, ctl), svcStatus: ctl.ServiceStatus}
+	return &orchestrator{ctl: ctl, reporter: status.NewReporter(env, ctl),
+		svcStatus: ctl.ServiceStatus, newClient: newModuleClient}
 }
 
 // Run executes "configd control" and returns the exit status. Every action
@@ -84,6 +93,10 @@ func (o *orchestrator) run(ctx context.Context, stdout, stderr io.Writer, opts *
 }
 
 func (o *orchestrator) dispatch(ctx context.Context, c *cliutil.Console, opts *Options) error {
+	if opts.Module != "" {
+		return o.controlModule(ctx, c, opts)
+	}
+
 	switch opts.Action {
 	case ActionStart:
 		return o.start(ctx, c)

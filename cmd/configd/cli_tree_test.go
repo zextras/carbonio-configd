@@ -123,7 +123,16 @@ func TestCommandTree_Parse(t *testing.T) {
 
 		{name: "control needs a verb", argv: []string{"control"}, wantErr: `expected one of "start", "startup", "stop", "shutdown", "restart", ...`},
 		{name: "control shutdown", argv: []string{"control", "shutdown"}, want: "control shutdown"},
-		{name: "control verbs take nothing", argv: []string{"control", "start", "x"}, wantErr: "unexpected argument x"},
+		{name: "control verb takes a module and a service", argv: []string{"control", "restart", "backup", "svc"},
+			want: "control restart", check: func(t *testing.T, cli *CLI) {
+				assert.Equal(t, ControlTarget{Module: "backup", Service: "svc"}, cli.Control.Restart.ControlTarget)
+			}},
+		{name: "control verb takes a module", argv: []string{"control", "stop", "backup"}, want: "control stop",
+			check: func(t *testing.T, cli *CLI) {
+				assert.Equal(t, ControlTarget{Module: "backup"}, cli.Control.Stop.ControlTarget)
+			}},
+		{name: "control verb takes at most two", argv: []string{"control", "start", "a", "b", "c"}, wantErr: "unexpected argument c"},
+		{name: "control status takes nothing", argv: []string{"control", "status", "backup"}, wantErr: "unexpected argument backup"},
 
 		{name: "init needs a component", argv: []string{"init"}, wantErr: `expected "<component>"`},
 		{name: "init --force", argv: []string{"init", "mta", "-f"}, want: "init", check: func(t *testing.T, cli *CLI) {

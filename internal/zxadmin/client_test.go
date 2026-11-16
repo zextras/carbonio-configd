@@ -844,3 +844,168 @@ func TestNew_VerifiesServerCertificate(t *testing.T) {
 		})
 	}
 }
+
+// serviceActionServer serves auth and the /zextras endpoint with handler,
+// counting the action requests.
+func serviceActionServer(t *testing.T, handler http.HandlerFunc) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+
+	var calls atomic.Int32
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(soapPath, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(goodAuthResponse)) })
+	mux.HandleFunc(statusPath, func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		handler(w, r)
+	})
+
+	srv := httptest.NewTLSServer(mux)
+	t.Cleanup(srv.Close)
+
+	return srv, &calls
+}
+
+func TestControlService_Success(t *testing.T) {
+	srv, _ := serviceActionServer(t, func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if r.Method != http.MethodPost || q.Get("module") != "ZxBackup" || q.Get("action") != "doStopService" ||
+			q.Get("service_name") != "module" {
+			t.Errorf("request = %s %s", r.Method, r.URL.RawQuery)
+		}
+
+		if ck, err := r.Cookie(authCookieName); err != nil || ck.Value != "fake-token-xyz" {
+			t.Errorf("auth cookie = %v, %v", ck, err)
+		}
+
+		_, _ = w.Write([]byte(`{"response":{"message":"service stopped"},"ok":true}`))
+	})
+
+	msg, err := newTestClient(t, srv).ControlService(context.Background(), "ZxBackup", ServiceStop, ModuleService)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if msg != "service stopped" {
+		t.Errorf("message = %q, want %q", msg, "service stopped")
+	}
+}
+
+func TestControlService_Failures(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		wantCode string
+		wantMsg  string
+	}{
+		{
+			name:     "plain error",
+			body:     `{"ok":false,"error":{"code":"SERVICE_NOT_FOUND","message":"Service not found","details":{},"stackTrace":["a.b.C"]}}`,
+			wantCode: "SERVICE_NOT_FOUND", wantMsg: "Service not found",
+		},
+		{
+			name: "placeholder from details",
+			body: `{"ok":false,"error":{"code":"SERVICE_CONDITIONS_NOT_MET",` +
+				`"message":"Service conditions not met: {reason}","details":{"reason":"too many accounts"}}}`,
+			wantCode: "SERVICE_CONDITIONS_NOT_MET", wantMsg: "Service conditions not met: too many accounts",
+		},
+		{
+			name: "multi-line detail",
+			body: `{"ok":false,"error":{"code":"UNABLE_TO_START_MANDATORY_SERVICE","message":"{message}",` +
+				`"details":{"message":"could not be started, since\n- zxlink-x"}}}`,
+			wantCode: "UNABLE_TO_START_MANDATORY_SERVICE", wantMsg: "could not be started, since\n- zxlink-x",
+		},
+		{
+			name:     "exception key",
+			body:     `{"ok":false,"exception":{"code":"MODULE_NOT_FOUND","message":"Module not found","details":{}}}`,
+			wantCode: "MODULE_NOT_FOUND", wantMsg: "Module not found",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv, calls := serviceActionServer(t, func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(tt.body))
+			})
+
+			_, err := newTestClient(t, srv).ControlService(context.Background(), "ZxBackup", ServiceStart, "svc")
+
+			var se *ServiceError
+			if !errors.As(err, &se) {
+				t.Fatalf("error = %v, want *ServiceError", err)
+			}
+
+			if se.Code != tt.wantCode || se.Error() != tt.wantMsg {
+				t.Errorf("got %q / %q, want %q / %q", se.Code, se.Error(), tt.wantCode, tt.wantMsg)
+			}
+
+			if strings.Contains(err.Error(), "a.b.C") {
+				t.Errorf("stack trace leaked into %q", err)
+			}
+
+			if n := calls.Load(); n != 1 {
+				t.Errorf("action sent %d times, want 1", n)
+			}
+		})
+	}
+}
+
+func TestControlService_HandlerMissing(t *testing.T) {
+	srv, _ := serviceActionServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "<html>not found</html>", http.StatusNotFound)
+	})
+
+	_, err := newTestClient(t, srv).ControlService(context.Background(), "ZxBackup", ServiceRestart, ModuleService)
+	if !errors.Is(err, ErrAdvancedNotRunning) {
+		t.Fatalf("error = %v, want ErrAdvancedNotRunning", err)
+	}
+}
+
+func TestControlService_AuthRejectedDropsToken(t *testing.T) {
+	authCalls := 0
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(soapPath, func(w http.ResponseWriter, _ *http.Request) {
+		authCalls++
+		_, _ = w.Write([]byte(goodAuthResponse))
+	})
+	mux.HandleFunc(statusPath, func(w http.ResponseWriter, _ *http.Request) {
+		if authCalls == 1 {
+			w.WriteHeader(http.StatusUnauthorized)
+
+			return
+		}
+
+		_, _ = w.Write([]byte(`{"response":{"message":"service started"},"ok":true}`))
+	})
+
+	srv := httptest.NewTLSServer(mux)
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+
+	if _, err := c.ControlService(context.Background(), "ZxBackup", ServiceStart, ModuleService); err == nil {
+		t.Fatal("expected an error on 401")
+	}
+
+	if _, err := c.ControlService(context.Background(), "ZxBackup", ServiceStart, ModuleService); err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+
+	if authCalls != 2 {
+		t.Errorf("authCalls = %d, want 2 (token dropped after 401)", authCalls)
+	}
+}
+
+func TestControlService_ServerErrorIsNotRetried(t *testing.T) {
+	srv, calls := serviceActionServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+
+	if _, err := newTestClient(t, srv).ControlService(context.Background(), "ZxBackup", ServiceRestart, ModuleService); err == nil {
+		t.Fatal("expected an error on HTTP 500")
+	}
+
+	if n := calls.Load(); n != 1 {
+		t.Errorf("action sent %d times, want 1", n)
+	}
+}
