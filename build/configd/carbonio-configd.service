@@ -23,8 +23,6 @@ StartLimitIntervalSec=0
 [Service]
 Type=notify
 User=zextras
-EnvironmentFile=-/opt/zextras/data/systemd.env
-ExecStartPre=/opt/zextras/bin/systemd-envscript
 # Bounded wait for ldap_url (same resolution and TLS rules as the daemon); returns at
 # once when no LDAP URL is configured, fails after 120 s.
 ExecStartPre=/opt/zextras/bin/configd ldap wait --timeout 120s

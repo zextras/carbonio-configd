@@ -37,7 +37,7 @@ to this package ([cli.md](cli.md#legacy-wrappers)).
 
 Maintainer scripts (systemd distributions):
 
-- `postinst`: reload systemd, kill a still-running legacy Jython `zmconfigd` JVM (waits up to 10 s), then on a fresh install `enable --now --no-block` (only `enable` when the `zextras` user or `systemd-envscript` does not exist yet, as configd is configured before `carbonio-core` on a fresh install); on upgrade `restart --no-block`. Never blocks the package manager on LDAP.
+- `postinst`: reload systemd, kill a still-running legacy Jython `zmconfigd` JVM (waits up to 10 s), then on a fresh install `enable --now --no-block` (only `enable` when the `zextras` user does not exist yet, as configd is configured before `carbonio-core` on a fresh install); on upgrade `restart --no-block`. Never blocks the package manager on LDAP.
 - `prerm`: `disable --now` on removal, `stop` on upgrade.
 
 On jammy and rocky-8 the `postinst` only kills the legacy `zmconfigd` JVM.
@@ -58,7 +58,7 @@ and no ordering on configd for the environment. Requires `carbonio-configd>=1.13
 `zextras`):
 
 - part of `carbonio-appserver`, `carbonio-directory-server`, `carbonio-mta` and `carbonio-proxy` targets (`PartOf=`/`WantedBy=`); `After=network-online.target carbonio-openldap.service`;
-- `ExecStartPre=` runs `/opt/zextras/bin/systemd-envscript`, then runs `configd ldap wait --timeout 120s`: it waits up to 120 s for one of the `ldap_url` URLs (resolved from localconfig and with the same TLS rules as the daemon, space-separated lists fail over) to accept a connection, and fails the start after that. When no `ldap_url` is configured it prints a warning and succeeds at once, because the daemon itself starts without LDAP (its LDAP queries fail until it is configured);
+- `ExecStartPre=` runs `configd ldap wait --timeout 120s`: it waits up to 120 s for one of the `ldap_url` URLs (resolved from localconfig and with the same TLS rules as the daemon, space-separated lists fail over) to accept a connection, and fails the start after that. When no `ldap_url` is configured it prints a warning and succeeds at once, because the daemon itself starts without LDAP (its LDAP queries fail until it is configured);
 - `ExecStart=/opt/zextras/bin/configd`, `ExecReload=/bin/kill -HUP $MAINPID`;
 - `WatchdogSec=120`: configd pings systemd every 60 s once READY has been sent (the watchdog only counts after `READY=1`, so a slow first pass is not penalised), but only while the main loop is alive: each stage (load, plan, rewrite, restarts) and each sleep declares how long it may take (10, 5, 15 and 30 minutes, or the sleep plus one minute), and a loop past that gets no ping, so systemd restarts a wedged daemon;
 - `TimeoutStartSec=300`, `TimeoutStopSec=10`, `KillMode=mixed` (in systemd mode the unit's cgroup holds only the daemon and its short-lived helpers, `zmprov`, `postconf`, `systemctl`: SIGTERM to the daemon, SIGKILL to a helper still around; `legacy-mode.conf` below sets `process`), `KillSignal=SIGTERM`;
