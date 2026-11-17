@@ -34,6 +34,13 @@ depends__rocky_9=(
   "systemd-libs"
   "polkit"
 )
+# carbonio-core < 4.7.0 shipped carbonio-configd.service. Replaces lets dpkg take
+# the file over when configd is unpacked before core is upgraded (CO-4776).
+# Noble only: it is the only Debian package that ships the unit, and on RPM yap
+# would turn replaces into Obsoletes.
+replaces__ubuntu_noble=(
+  "carbonio-core<4.7.0"
+)
 source=(
   "${pkgname}-wrappers-completion.bash"
   "${pkgname}.rules"
