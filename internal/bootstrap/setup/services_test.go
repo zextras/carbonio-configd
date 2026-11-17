@@ -760,7 +760,6 @@ func TestSvcCrontab_SystemdWithoutBlockIsDone(t *testing.T) {
 	done, err := StepSetupCrontab().Done(e)
 	require.NoError(t, err)
 	assert.True(t, done)
-
 }
 
 func TestSvcCrontab_SystemdNoCrontabIsDone(t *testing.T) {
