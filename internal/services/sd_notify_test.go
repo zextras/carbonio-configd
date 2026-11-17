@@ -496,7 +496,10 @@ func TestWaitForSDNotify_DeadlineWithChattyDaemon(t *testing.T) {
 
 	err = ctl.waitForSDNotify(ctx, conn, "svc", nil)
 
+	// Nobody reads the socket any more, so the writer may be blocked on a full
+	// receive buffer: closing the client wakes that Write.
 	close(stop)
+	_ = client.Close()
 	<-done
 
 	require.ErrorContains(t, err, "did not signal READY=1 within 30 seconds")
