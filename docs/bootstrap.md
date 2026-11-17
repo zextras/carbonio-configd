@@ -293,6 +293,11 @@ no markers (`setup.pl` dropped it then). A `crontab -l` that fails for another
 reason than "no crontab for zextras" fails the step, so entries are never
 replaced by a crontab built without them.
 
+On systemd nodes the scheduled jobs are timers shipped by carbonio-core, so the
+step installs no block: it removes the `ZEXTRAS-START`..`ZEXTRAS-END` block left
+by older versions, keeps the user's entries, and runs `crontab -u zextras -r`
+when nothing else is left. Without a block the step is done.
+
 The syslog step runs in process (`setup syslog`, which is also what
 `libexec/zmsyslogsetup` calls): it adds the local0, auth and mail rules to
 `/etc/rsyslog.conf` (Ubuntu with `/etc/rsyslog.d`: to `60-carbonio.conf`, and

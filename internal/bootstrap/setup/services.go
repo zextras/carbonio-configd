@@ -885,11 +885,21 @@ func StepGALSyncSkipNotice() Step {
 // below the block, as they are the user's. The crontab is read and installed
 // through crontab(1) and stdin, no /tmp files. Done when the crontab already
 // is what would be installed.
+//
+// On systemd nodes the scheduled jobs are timers shipped by carbonio-core, so
+// the block is not installed: one left by an older version is removed, the
+// user's entries are kept, and the crontab is deleted when nothing is left.
 func StepSetupCrontab() Step {
 	return Step{
 		Name:  svcStageCrontab,
 		Title: "Set up the zextras crontab",
 		Done: func(e *Env) (bool, error) {
+			if e.Facts.Systemd {
+				cur, err := svcCurrentCrontab(e)
+
+				return !strings.Contains(cur, svcCrontabStart), err
+			}
+
 			want, cur, err := svcCrontab(e)
 			if err != nil {
 				return false, err
@@ -898,6 +908,10 @@ func StepSetupCrontab() Step {
 			return want == cur, nil
 		},
 		Apply: func(e *Env) error {
+			if e.Facts.Systemd {
+				return svcDropCrontabBlock(e)
+			}
+
 			want, _, err := svcCrontab(e)
 			if err != nil {
 				return err
@@ -910,6 +924,30 @@ func StepSetupCrontab() Step {
 			})
 		},
 	}
+}
+
+// svcDropCrontabBlock removes the ZEXTRAS block from the zextras crontab,
+// keeping the other entries; a crontab left blank is removed.
+func svcDropCrontabBlock(e *Env) error {
+	cur, err := svcCurrentCrontab(e)
+	if err != nil {
+		return err
+	}
+
+	if !strings.Contains(cur, svcCrontabStart) {
+		return nil
+	}
+
+	rest := svcStripBlock(cur)
+	if strings.TrimSpace(rest) == "" {
+		return e.Run(&Cmd{Path: svcCrontabBin, Args: []string{"-u", config.ZextrasUser, "-r"}})
+	}
+
+	return e.Run(&Cmd{
+		Path:  svcCrontabBin,
+		Args:  []string{"-u", config.ZextrasUser, "-"},
+		Stdin: strings.NewReader(rest),
+	})
 }
 
 // svcCrontab returns the crontab to install and the current one.
