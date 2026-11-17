@@ -713,3 +713,63 @@ func TestSvcRandomPassword(t *testing.T) {
 	assert.Len(t, a, 16)
 	assert.NotEqual(t, a, b)
 }
+
+func TestSvcCrontab_SystemdDropsBlockKeepsUserEntries(t *testing.T) {
+	current := "MAILTO=x\n# ZEXTRAS-START\nold line\n# ZEXTRAS-END -- DO NOT EDIT\n5 5 * * * mine\n"
+	e, fakes := svcCronEnv(t, current, svcPkgDirectory)
+	e.Facts.Systemd = true
+
+	s := StepSetupCrontab()
+	done, err := s.Done(e)
+	require.NoError(t, err)
+	require.False(t, done)
+	require.NoError(t, s.Apply(e))
+
+	assert.Equal(t, "MAILTO=x\n5 5 * * * mine\n", svcCronInstalled(t, fakes))
+}
+
+func TestSvcCrontab_SystemdRemovesBlockOnlyCrontab(t *testing.T) {
+	e, fakes := svcCronEnv(t, "# SPDX-FileCopyrightText: 2024 Zextras\n#\n# SPDX-License-Identifier: AGPL-3.0-only\n\n"+
+		"# ZEXTRAS-START\nold\n# ZEXTRAS-END -- DO NOT EDIT\n")
+	e.Facts.Systemd = true
+
+	require.NoError(t, StepSetupCrontab().Apply(e))
+
+	var removed, installed bool
+
+	for _, c := range fakes.Exec.Calls() {
+		if c.Path != "crontab" {
+			continue
+		}
+
+		switch c.Args[len(c.Args)-1] {
+		case "-r":
+			removed = true
+		case "-":
+			installed = true
+		}
+	}
+
+	assert.True(t, removed)
+	assert.False(t, installed)
+}
+
+func TestSvcCrontab_SystemdWithoutBlockIsDone(t *testing.T) {
+	e, _ := svcCronEnv(t, "5 5 * * * mine\n")
+	e.Facts.Systemd = true
+
+	done, err := StepSetupCrontab().Done(e)
+	require.NoError(t, err)
+	assert.True(t, done)
+}
+
+func TestSvcCrontab_SystemdNoCrontabIsDone(t *testing.T) {
+	e, fakes := svcCronEnv(t, "")
+	e.Facts.Systemd = true
+	fakes.Exec.When(func(c *sys.Cmd) bool { return c.Path == "crontab" && c.Args[len(c.Args)-1] == "-l" },
+		svcCronListFails("no crontab for zextras\n"))
+
+	done, err := StepSetupCrontab().Done(e)
+	require.NoError(t, err)
+	assert.True(t, done)
+}
