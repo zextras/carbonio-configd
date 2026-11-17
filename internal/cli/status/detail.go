@@ -181,8 +181,16 @@ func (r *Reporter) ServiceDetail(ctx context.Context, name string, running bool)
 // A service may list several units of which only some exist on the host
 // (antispam: carbonio-antispam, the optional local mariadb, then
 // carbonio-mailthreat), so the detail is the first unit with a main process,
-// else the first one that was ever activated.
+// else the first one that was ever activated. A composite with a
+// DetailMember shows that member's units, as the legacy probe does
+// (antivirus is clamd, not the amavisd it shares with antispam).
 func (r *Reporter) serviceDetailFromSystemd(ctx context.Context, def *services.ServiceDef) string {
+	if def.DetailMember != "" {
+		if member := r.ctl.LookupService(def.DetailMember); member != nil {
+			def = member
+		}
+	}
+
 	var fallback string
 
 	for _, unit := range def.SystemdUnits {
