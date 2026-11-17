@@ -194,34 +194,42 @@ func (r *Reporter) serviceDetailFromSystemd(ctx context.Context, def *services.S
 	var fallback string
 
 	for _, unit := range def.SystemdUnits {
-		// #nosec G204 — unit from internal registry
-		out, err := sys.Output(ctx, r.env.Exec, systemd.SystemctlBin, "show", unit,
-			"--property=MainPID,ActiveEnterTimestamp")
-		if err != nil {
-			continue
-		}
+		pid, since := r.unitProcess(ctx, unit)
 
-		props := parseSystemctlShow(string(out))
-		since := props["ActiveEnterTimestamp"]
-
-		if since == "n/a" {
-			since = ""
-		}
-
-		if pid := props["MainPID"]; pid != "" && pid != "0" {
-			if since == "" {
-				return "(pid " + pid + ")"
-			}
-
+		switch {
+		case pid != "" && since != "":
 			return "(pid " + pid + ", since " + since + ")"
-		}
-
-		if fallback == "" && since != "" {
+		case pid != "":
+			return "(pid " + pid + ")"
+		case fallback == "" && since != "":
 			fallback = "(since " + since + ")"
 		}
 	}
 
 	return fallback
+}
+
+// unitProcess is a unit's main PID and activation time from systemctl show,
+// each empty when systemd has none (MainPID 0, never activated, unknown unit).
+func (r *Reporter) unitProcess(ctx context.Context, unit string) (pid, since string) {
+	// #nosec G204 — unit from internal registry
+	out, err := sys.Output(ctx, r.env.Exec, systemd.SystemctlBin, "show", unit,
+		"--property=MainPID,ActiveEnterTimestamp")
+	if err != nil {
+		return "", ""
+	}
+
+	props := parseSystemctlShow(string(out))
+
+	if pid = props["MainPID"]; pid == "0" {
+		pid = ""
+	}
+
+	if since = props["ActiveEnterTimestamp"]; since == "n/a" {
+		since = ""
+	}
+
+	return pid, since
 }
 
 // serviceDetailFromProc reads PID and start time from /proc directly, so
