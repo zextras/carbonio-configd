@@ -177,41 +177,43 @@ func (r *Reporter) ServiceDetail(ctx context.Context, name string, running bool)
 // serviceDetailFromSystemd reads MainPID and ActiveEnterTimestamp from
 // systemctl show. Correct only when strict systemd mode is active — that's
 // the mode in which every start/stop actually went through systemd.
+//
+// A service may list several units of which only some exist on the host
+// (antispam: carbonio-antispam, the optional local mariadb, then
+// carbonio-mailthreat), so the detail is the first unit with a main process,
+// else the first one that was ever activated.
 func (r *Reporter) serviceDetailFromSystemd(ctx context.Context, def *services.ServiceDef) string {
-	if len(def.SystemdUnits) == 0 {
-		return ""
-	}
+	var fallback string
 
-	// #nosec G204 — unit from internal registry
-	out, err := sys.Output(ctx, r.env.Exec, systemd.SystemctlBin, "show", def.SystemdUnits[0],
-		"--property=MainPID,ActiveEnterTimestamp")
-	if err != nil {
-		return ""
-	}
+	for _, unit := range def.SystemdUnits {
+		// #nosec G204 — unit from internal registry
+		out, err := sys.Output(ctx, r.env.Exec, systemd.SystemctlBin, "show", unit,
+			"--property=MainPID,ActiveEnterTimestamp")
+		if err != nil {
+			continue
+		}
 
-	props := make(map[string]string)
+		props := parseSystemctlShow(string(out))
+		since := props["ActiveEnterTimestamp"]
 
-	for line := range strings.SplitSeq(string(out), "\n") {
-		if k, v, ok := strings.Cut(line, "="); ok {
-			props[k] = v
+		if since == "n/a" {
+			since = ""
+		}
+
+		if pid := props["MainPID"]; pid != "" && pid != "0" {
+			if since == "" {
+				return "(pid " + pid + ")"
+			}
+
+			return "(pid " + pid + ", since " + since + ")"
+		}
+
+		if fallback == "" && since != "" {
+			fallback = "(since " + since + ")"
 		}
 	}
 
-	var parts []string
-
-	if pid := props["MainPID"]; pid != "" && pid != "0" {
-		parts = append(parts, "pid "+pid)
-	}
-
-	if ts := props["ActiveEnterTimestamp"]; ts != "" {
-		parts = append(parts, "since "+ts)
-	}
-
-	if len(parts) == 0 {
-		return ""
-	}
-
-	return "(" + strings.Join(parts, ", ") + ")"
+	return fallback
 }
 
 // serviceDetailFromProc reads PID and start time from /proc directly, so
