@@ -190,10 +190,10 @@ _create_staging() {
 
 _enable_start() {
   # Fresh install: configd is configured before carbonio-core (dependency
-  # order), so the zextras user and systemd-envscript may not exist yet.
-  # Only start when they do; otherwise enable and let the stack start it.
+  # order), so the zextras user may not exist yet.
+  # Only start when it does; otherwise enable and let the stack start it.
   # --no-block: never stall the package manager on LDAP readiness.
-  if id zextras &>/dev/null && [ -x /opt/zextras/bin/systemd-envscript ]; then
+  if id zextras &>/dev/null; then
     systemctl enable --now --no-block carbonio-configd.service &>/dev/null || :
   else
     systemctl enable carbonio-configd.service &>/dev/null || :
