@@ -197,7 +197,6 @@
 /opt/zextras/conf/zmconfigd/smtpd_relay_restrictions.cf	f	755	zextras:zextras	917685375a55cc3ed5301d194e2f59197e23108fb3dd3adc04f29bbfee7e814d
 /opt/zextras/conf/zmconfigd/smtpd_sender_login_maps.cf	f	755	zextras:zextras	8b8c7545e1cea94edf0de9b18205100e4a5f6f7b62c80521706342d5d1040f49
 /opt/zextras/conf/zmconfigd/smtpd_sender_restrictions.cf	f	755	zextras:zextras	ec1e0af11ff3b9e7cd6073e06fdfdb13ad256d2de4366c564dfe46fe5fbbafce
-/opt/zextras/conf/zmlogrotate	f	644	zextras:zextras	d8b7f26e3628fed29de6b0b504e489cd466300d606ad377569b5609113a4a4af
 /opt/zextras/conf/zmssl.cnf	f	640	zextras:zextras	6fc60cd12c0c4a8dd69a4b49730280eeb6e57976328885e6891c94a79cd23c10
 /opt/zextras/conf/zmssl.cnf.in	f	755	zextras:zextras	fb2564379b87ef48a2367843e91945561407afdaea3d5c2d569d2c5df805975e
 /etc/rsyslog.d	d	755	root:root	-
@@ -206,7 +205,7 @@
 /etc/logrotate.d	d	755	root:root	-
 /etc/logrotate.d/alternatives	f	644	root:root	edd383958ce315a642cdfa6aa3fbe2779aa5c674b305fe910449b90cee594c58
 /etc/logrotate.d/apt	f	644	root:root	fcc2510172fd914ca22762c4b2dc43d36152e65becf8e84abec59f7652da5e3f
-/etc/logrotate.d/carbonio	f	644	root:root	468abc3b5e870ee8d3048dcd4cc2831b304856f1a2d93f0ab105f174d513c826
+/etc/logrotate.d/carbonio	f	644	root:root	b1607477f239fe68dca05873faa896b764098fe9f86593bb347f3dc9110f0d6d
 /etc/logrotate.d/dpkg	f	644	root:root	e4103352545278e47a88b2ca2f2d3681ca474d400d8057ba6ac4f18d71c32042
 /etc/logrotate.d/razor	f	644	root:root	f8e077a3dc7038a7aa9fb1d9678be57ac8d87eb36f629cbf7fd09cb663fdf79f
 /etc/logrotate.d/rsyslog	f	644	root:root	1e493ae5151c429d214d2f43e69da4431e6293abf755a7b3d367f7180f3f005e
