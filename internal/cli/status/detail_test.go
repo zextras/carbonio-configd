@@ -354,6 +354,50 @@ func TestServiceDetailFromSystemd(t *testing.T) {
 	}
 }
 
+// A service whose first unit is not installed on the host (antispam without
+// its local mariadb) reports the pid of the unit that actually runs.
+func TestServiceDetailFromSystemd_UsesTheUnitThatRuns(t *testing.T) {
+	t.Parallel()
+
+	fx := newFixture(true, svcRegistry("test"))
+	fx.f.Exec.OnCmdline("/usr/bin/systemctl show carbonio-antispam.service", func(*sys.Cmd) (sys.Result, error) {
+		return sys.Result{Stdout: []byte("MainPID=0\nActiveEnterTimestamp=\n")}, nil
+	})
+	fx.f.Exec.OnCmdline("/usr/bin/systemctl show carbonio-mailthreat.service", func(*sys.Cmd) (sys.Result, error) {
+		return sys.Result{Stdout: []byte("MainPID=83309\nActiveEnterTimestamp=Tue 2026-11-17 00:45:02 UTC\n")}, nil
+	})
+
+	def := &services.ServiceDef{
+		Name: "antispam", DisplayName: "antispam",
+		SystemdUnits: []string{"carbonio-antispam.service", "carbonio-mailthreat.service"},
+	}
+
+	got := fx.r.serviceDetailFromSystemd(context.Background(), def)
+	if want := "(pid 83309, since Tue 2026-11-17 00:45:02 UTC)"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// A unit without a main process (oneshot) still shows when it started, and
+// systemd's "n/a" for a never-activated unit is not shown.
+func TestServiceDetailFromSystemd_NoMainPID(t *testing.T) {
+	t.Parallel()
+
+	for out, want := range map[string]string{
+		"MainPID=0\nActiveEnterTimestamp=Mon 2026-01-05 10:00:00 UTC\n": "(since Mon 2026-01-05 10:00:00 UTC)",
+		"MainPID=0\nActiveEnterTimestamp=n/a\n":                         "",
+	} {
+		fx := newFixture(true, svcRegistry("test"))
+		fx.f.Exec.OnCmdline("/usr/bin/systemctl show", func(*sys.Cmd) (sys.Result, error) {
+			return sys.Result{Stdout: []byte(out)}, nil
+		})
+
+		if got := fx.r.serviceDetailFromSystemd(context.Background(), fx.ctl.LookupService("test")); got != want {
+			t.Errorf("%q: got %q, want %q", out, got, want)
+		}
+	}
+}
+
 func TestServiceDetailFromProc_ZeroPID(t *testing.T) {
 	t.Parallel()
 
