@@ -11,7 +11,7 @@ import (
 	"slices"
 	"strings"
 
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 )
 
 // ReadFileFunc reads a file; secrets given as <key>_file go through it.
