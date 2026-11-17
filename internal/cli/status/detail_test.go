@@ -378,6 +378,31 @@ func TestServiceDetailFromSystemd_UsesTheUnitThatRuns(t *testing.T) {
 	}
 }
 
+// antivirus lists the amavisd unit it shares with antispam first, but its
+// detail is its DetailMember's (clamd), as in legacy mode.
+func TestServiceDetailFromSystemd_UsesTheDetailMember(t *testing.T) {
+	t.Parallel()
+
+	fx := newFixture(true, map[string]*services.ServiceDef{
+		"antivirus": {
+			Name: "antivirus", DisplayName: "antivirus", DetailMember: "clamd",
+			SystemdUnits: []string{"carbonio-mailthreat.service", "carbonio-antivirus.service"},
+		},
+		"clamd": {Name: "clamd", DisplayName: "clamd", SystemdUnits: []string{"carbonio-antivirus.service"}},
+	})
+	fx.f.Exec.OnCmdline("/usr/bin/systemctl show carbonio-mailthreat.service", func(*sys.Cmd) (sys.Result, error) {
+		return sys.Result{Stdout: []byte("MainPID=83309\nActiveEnterTimestamp=Tue 2026-11-17 00:45:02 UTC\n")}, nil
+	})
+	fx.f.Exec.OnCmdline("/usr/bin/systemctl show carbonio-antivirus.service", func(*sys.Cmd) (sys.Result, error) {
+		return sys.Result{Stdout: []byte("MainPID=80669\nActiveEnterTimestamp=Tue 2026-11-17 00:30:33 UTC\n")}, nil
+	})
+
+	got := fx.r.serviceDetailFromSystemd(context.Background(), fx.ctl.LookupService("antivirus"))
+	if want := "(pid 80669, since Tue 2026-11-17 00:30:33 UTC)"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
 // A unit without a main process (oneshot) still shows when it started, and
 // systemd's "n/a" for a never-activated unit is not shown.
 func TestServiceDetailFromSystemd_NoMainPID(t *testing.T) {

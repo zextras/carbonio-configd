@@ -181,39 +181,55 @@ func (r *Reporter) ServiceDetail(ctx context.Context, name string, running bool)
 // A service may list several units of which only some exist on the host
 // (antispam: carbonio-antispam, the optional local mariadb, then
 // carbonio-mailthreat), so the detail is the first unit with a main process,
-// else the first one that was ever activated.
+// else the first one that was ever activated. A composite with a
+// DetailMember shows that member's units, as the legacy probe does
+// (antivirus is clamd, not the amavisd it shares with antispam).
 func (r *Reporter) serviceDetailFromSystemd(ctx context.Context, def *services.ServiceDef) string {
+	if def.DetailMember != "" {
+		if member := r.ctl.LookupService(def.DetailMember); member != nil {
+			def = member
+		}
+	}
+
 	var fallback string
 
 	for _, unit := range def.SystemdUnits {
-		// #nosec G204 — unit from internal registry
-		out, err := sys.Output(ctx, r.env.Exec, systemd.SystemctlBin, "show", unit,
-			"--property=MainPID,ActiveEnterTimestamp")
-		if err != nil {
-			continue
-		}
+		pid, since := r.unitProcess(ctx, unit)
 
-		props := parseSystemctlShow(string(out))
-		since := props["ActiveEnterTimestamp"]
-
-		if since == "n/a" {
-			since = ""
-		}
-
-		if pid := props["MainPID"]; pid != "" && pid != "0" {
-			if since == "" {
-				return "(pid " + pid + ")"
-			}
-
+		switch {
+		case pid != "" && since != "":
 			return "(pid " + pid + ", since " + since + ")"
-		}
-
-		if fallback == "" && since != "" {
+		case pid != "":
+			return "(pid " + pid + ")"
+		case fallback == "" && since != "":
 			fallback = "(since " + since + ")"
 		}
 	}
 
 	return fallback
+}
+
+// unitProcess is a unit's main PID and activation time from systemctl show,
+// each empty when systemd has none (MainPID 0, never activated, unknown unit).
+func (r *Reporter) unitProcess(ctx context.Context, unit string) (pid, since string) {
+	// #nosec G204 — unit from internal registry
+	out, err := sys.Output(ctx, r.env.Exec, systemd.SystemctlBin, "show", unit,
+		"--property=MainPID,ActiveEnterTimestamp")
+	if err != nil {
+		return "", ""
+	}
+
+	props := parseSystemctlShow(string(out))
+
+	if pid = props["MainPID"]; pid == "0" {
+		pid = ""
+	}
+
+	if since = props["ActiveEnterTimestamp"]; since == "n/a" {
+		since = ""
+	}
+
+	return pid, since
 }
 
 // serviceDetailFromProc reads PID and start time from /proc directly, so
