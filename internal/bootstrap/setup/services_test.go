@@ -729,7 +729,8 @@ func TestSvcCrontab_SystemdDropsBlockKeepsUserEntries(t *testing.T) {
 }
 
 func TestSvcCrontab_SystemdRemovesBlockOnlyCrontab(t *testing.T) {
-	e, fakes := svcCronEnv(t, "# ZEXTRAS-START\nold\n# ZEXTRAS-END -- DO NOT EDIT\n")
+	e, fakes := svcCronEnv(t, "# SPDX-FileCopyrightText: 2024 Zextras\n#\n# SPDX-License-Identifier: AGPL-3.0-only\n\n"+
+		"# ZEXTRAS-START\nold\n# ZEXTRAS-END -- DO NOT EDIT\n")
 	e.Facts.Systemd = true
 
 	require.NoError(t, StepSetupCrontab().Apply(e))

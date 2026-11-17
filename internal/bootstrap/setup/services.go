@@ -939,7 +939,7 @@ func svcDropCrontabBlock(e *Env) error {
 	}
 
 	rest := svcStripBlock(cur)
-	if strings.TrimSpace(rest) == "" {
+	if svcCrontabEmpty(rest) {
 		return e.Run(&Cmd{Path: svcCrontabBin, Args: []string{"-u", config.ZextrasUser, "-r"}})
 	}
 
@@ -948,6 +948,18 @@ func svcDropCrontabBlock(e *Env) error {
 		Args:  []string{"-u", config.ZextrasUser, "-"},
 		Stdin: strings.NewReader(rest),
 	})
+}
+
+// svcCrontabEmpty is true when s has only blank and comment lines, such as the
+// SPDX header that precedes the ZEXTRAS block.
+func svcCrontabEmpty(s string) bool {
+	for line := range strings.SplitSeq(s, "\n") {
+		if t := strings.TrimSpace(line); t != "" && !strings.HasPrefix(t, "#") {
+			return false
+		}
+	}
+
+	return true
 }
 
 // svcCrontab returns the crontab to install and the current one.
