@@ -176,9 +176,8 @@ func (g *Generator) resolveWebAvailable(ctx context.Context) (any, error) {
 	return len(servers) > 0, nil
 }
 
-// resolveLookupAvailable returns true when there is at least one lookup target.
-// Mirrors legacy ZMLookupAvailableVar (ProxyConfGen.java:1701), which counted the
-// handlers after the lookup-target fallback, not the raw attribute.
+// resolveLookupAvailable returns true when there is at least one lookup target,
+// counting the lookup-target servers when no explicit list is set.
 func (g *Generator) resolveLookupAvailable(ctx context.Context) (any, error) {
 	hosts, err := g.lookupTargetHosts(ctx)
 	if err != nil {
