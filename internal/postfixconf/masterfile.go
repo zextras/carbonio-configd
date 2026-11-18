@@ -176,7 +176,21 @@ func validateEntry(text string) error {
 // validateArgs checks the daemon arguments: -o overrides, option clusters,
 // brace forms and user= attributes.
 func validateArgs(service, command string, args []string) error {
+	inCommand := false
+
 	for i := 0; i < len(args); i++ {
+		// pipe(8)/spawn(8) stop option parsing at their first non-option
+		// argument, so everything after argv= is the delivery command line
+		// (e.g. "gopp -carbonio postfixpolicy"), not daemon options.
+		// -o overrides there are still checked: being refused costs nothing.
+		if inCommand || (command == "pipe" || command == "spawn") && strings.HasPrefix(args[i], "argv=") {
+			inCommand = true
+
+			if strings.HasPrefix(args[i], "-") && !strings.HasPrefix(args[i], "-o") {
+				continue
+			}
+		}
+
 		next, err := validateArg(service, command, args, i)
 		if err != nil {
 			return err
