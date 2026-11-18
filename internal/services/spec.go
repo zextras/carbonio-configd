@@ -38,7 +38,7 @@ const (
 	ReadyMailboxPort ReadyKind = "mailbox-port"
 )
 
-// JavaSpec launches a JVM service (mailbox, milter): the java binary of
+// JavaSpec launches a JVM service (mailbox): the java binary of
 // localconfig, the Args the service needs, a detached session logging to
 // LogFile.
 type JavaSpec struct {

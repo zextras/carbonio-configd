@@ -143,7 +143,6 @@ func TestDefaultRegistry_DeclaresTheLaunchStrategies(t *testing.T) {
 
 	want := map[string]string{
 		svcMailbox:     "Java",
-		svcMilter:      "Java",
 		svcAppserverDB: "Mysqld",
 		svcAntispamDB:  "Mysqld",
 		serviceMTA:     "Commands",

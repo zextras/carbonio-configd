@@ -224,7 +224,7 @@ verbs systemd uses for `systemctl reload-or-restart` / `try-reload-or-restart`
 allowlist of units (`carbonio-antispam`, `-antivirus`, `-appserver-db`,
 `-appserver`, `-configd`, `-freshclam`, `-mailthreat`, `-memcached`, `-milter`,
 `-nginx`, `-opendkim`, `-openldap`, `-policyd`, `-postfix`, `-postfix-conf`,
-`-saslauthd`, `-stats` and `service-discover`, all `.service`;
+`-saslauthd`, `-stats` and `service-discover`, all `.service` (`carbonio-milter` and `carbonio-policyd` are owned by the `carbonio-gopolicyd` package and run `gopp`);
 `carbonio-postfix-conf.service`, the [root helper](#postfix-configuration-is-root-owned),
 may only be started). Other verbs (`enable`,
 `disable`, `mask`, ...) on those units are explicitly denied, and other units

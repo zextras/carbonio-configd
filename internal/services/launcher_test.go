@@ -248,24 +248,6 @@ func TestMailboxJavaArgs_PreviewFlagsOnceBeforeMainClass(t *testing.T) {
 	}
 }
 
-// --- milterJavaArgs ---
-
-func TestMilterJavaArgs_PreviewFlagsOnceBeforeMainClass(t *testing.T) {
-	t.Parallel()
-
-	ctl := newRealController(t)
-
-	for name, opts := range map[string]string{
-		"absent":  "-Xmx256m",
-		"present": "--enable-preview -Xmx256m --enable-native-access=ALL-UNNAMED",
-	} {
-		t.Run(name, func(t *testing.T) {
-			assertPreviewFlagsOnce(t, ctl.milterJavaArgs(map[string]string{"zimbra_zmjava_options": opts}),
-				"com.zimbra.cs.milter.MilterServer")
-		})
-	}
-}
-
 // assertPreviewFlagsOnce checks each preview flag appears exactly once and
 // precedes the main class (JVM options after it would be program arguments).
 func assertPreviewFlagsOnce(t *testing.T, args []string, mainClass string) {
@@ -287,99 +269,6 @@ func assertPreviewFlagsOnce(t *testing.T, args []string, mainClass string) {
 		if count != 1 || idx > mainIdx {
 			t.Errorf("%s: want once before %s, got count=%d in %v", flag, mainClass, count, args)
 		}
-	}
-}
-
-func TestMilterJavaArgs_DefaultJavaOpts(t *testing.T) {
-	t.Parallel()
-
-	ctl := newRealController(t)
-
-	lc := map[string]string{}
-	args := ctl.milterJavaArgs(lc)
-
-	assertContains(t, args, "-client")
-
-	// Must contain -Xmx256m from defaults
-	assertContains(t, args, "-Xmx256m")
-}
-
-func TestMilterJavaArgs_CustomJavaOpts(t *testing.T) {
-	t.Parallel()
-
-	ctl := newRealController(t)
-
-	lc := map[string]string{
-		"zimbra_zmjava_options": "-Xmx512m -Xms128m",
-	}
-	args := ctl.milterJavaArgs(lc)
-	assertContains(t, args, "-Xmx512m")
-	assertContains(t, args, "-Xms128m")
-}
-
-func TestMilterJavaArgs_CustomLibPath(t *testing.T) {
-	t.Parallel()
-
-	ctl := newRealController(t)
-
-	lc := map[string]string{
-		"zimbra_zmjava_java_library_path": "/custom/lib",
-	}
-	args := ctl.milterJavaArgs(lc)
-	assertContainsPrefix(t, args, "-Djava.library.path=/custom/lib")
-}
-
-func TestMilterJavaArgs_DefaultLibPath(t *testing.T) {
-	t.Parallel()
-
-	ctl := newRealController(t)
-
-	lc := map[string]string{}
-	args := ctl.milterJavaArgs(lc)
-	assertContainsPrefix(t, args, "-Djava.library.path=")
-}
-
-func TestMilterJavaArgs_ContainsMainClass(t *testing.T) {
-	t.Parallel()
-
-	ctl := newRealController(t)
-
-	lc := map[string]string{}
-	args := ctl.milterJavaArgs(lc)
-	assertContains(t, args, "com.zimbra.cs.milter.MilterServer")
-}
-
-func TestMilterJavaArgs_ContainsClasspath(t *testing.T) {
-	t.Parallel()
-
-	ctl := newRealController(t)
-
-	lc := map[string]string{}
-	args := ctl.milterJavaArgs(lc)
-	assertContains(t, args, "-classpath")
-}
-
-func TestMilterJavaArgs_ContainsZimbraHome(t *testing.T) {
-	t.Parallel()
-
-	ctl := newRealController(t)
-
-	lc := map[string]string{}
-	args := ctl.milterJavaArgs(lc)
-	assertContainsPrefix(t, args, "-Dzimbra.home=")
-}
-
-func TestMilterJavaArgs_TLSProtocols(t *testing.T) {
-	t.Parallel()
-
-	ctl := newRealController(t)
-
-	// Default opts must contain TLS settings.
-	lc := map[string]string{}
-	args := ctl.milterJavaArgs(lc)
-	joined := strings.Join(args, " ")
-	if !strings.Contains(joined, "TLSv1") {
-		t.Error("expected TLS protocol flags in default milter args")
 	}
 }
 

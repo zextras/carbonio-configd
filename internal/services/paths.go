@@ -41,10 +41,12 @@ type paths struct {
 	advancedJARDir string
 	configrewrite  string
 
-	milterOptions    string
-	cbpolicydDB      string
-	cbpolicydInitBin string
-	clamdDir         string
+	milterOptions  string
+	cbpolicydDB    string
+	gopp           string
+	goppMilterCfg  string
+	goppPolicydCfg string
+	clamdDir       string
 
 	// amavisDir is amavisd's data directory (quarantine, tmp, var,
 	// .spamassassin); amavisd and amavisMC are the amavisd and amavis-mc
@@ -102,7 +104,9 @@ func newPaths(base, run string) paths {
 
 	p.milterOptions = p.conf + "/mta_milter_options"
 	p.cbpolicydDB = p.data + "/cbpolicyd/db/cbpolicyd.sqlitedb"
-	p.cbpolicydInitBin = p.libexec + "/zmcbpolicydinit"
+	p.gopp = p.common + "/bin/gopp"
+	p.goppMilterCfg = p.conf + "/gopp-milter.cfg"
+	p.goppPolicydCfg = p.conf + "/gopp-policyd.cfg"
 	p.clamdDir = p.data + "/clamav/db"
 	p.amavisDir = p.data + "/amavisd"
 	p.amavisd = p.common + "/sbin/amavisd"

@@ -616,7 +616,7 @@ the value as one argument (a PEM with its newlines included): carbonio-core's
 `clientcertmgr savecrt|cleancrt` sets and clears `zimbraReverseProxyClientCertCA`
 with `setup prov -m -l mcf|ms <server>|md <domain> zimbraReverseProxyClientCertCA <pem>`;
 an empty value deletes the attribute, as in zmprov. The options `-r -m -l` select
-nothing here, so a read (`gad`, `gacf`, `gs`: carbonio-core's `cbpolicydinit`)
+nothing here, so a read (`gad`, `gacf`, `gs`)
 always goes to LDAP, where the Java `zmprov` without `-l` asked the mailbox.
 
 ### `setup gsautil`

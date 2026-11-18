@@ -34,8 +34,8 @@ declares at most one (checked for the whole registry by
 
 | Strategy | Used by | Start | Stop |
 |---|---|---|---|
-| `BinaryPath` (+ `BinaryArgs` or `ArgsFromConfig`, `Detached`, `LogFile`) | memcached, opendkim, saslauthd, nginx, clamd, ldap, configd, ... | spawn the binary; `Detached` gives it its own session and a log file | `GracefulStop` (SIGTERM, bounded wait, SIGKILL through the pidfile) or a kill by `ProcessName` |
-| `Java` (`JavaSpec`) | mailbox, milter | java binary of localconfig, `Args`, log file, `Mkdirs`, `Touch` | kill by `ProcessName` |
+| `BinaryPath` (+ `BinaryArgs` or `ArgsFromConfig`, `Detached`, `LogFile`) | memcached, opendkim, saslauthd, milter and cbpolicyd (both `gopp -carbonio -role <role>`, `Detached` + `UseSDNotify`, identity `gopp -role <role>`), nginx, clamd, ldap, configd, ... | spawn the binary; `Detached` gives it its own session and a log file | `GracefulStop` (SIGTERM, bounded wait, SIGKILL through the pidfile) or a kill by `ProcessName` |
+| `Java` (`JavaSpec`) | mailbox | java binary of localconfig, `Args`, log file, `Mkdirs`, `Touch` | kill by `ProcessName` |
 | `Mysqld` (`MysqldSpec`) | appserver-db, antispam-db | `mysqld_safe` with the defaults file of localconfig | SIGTERM and a bounded wait, **never SIGKILL** (InnoDB crash recovery) |
 | `Commands` (`CommandSpec`) | mta (`postfix`) | `Status` probe, `Prepare` steps, `Start` verb | `Stop` verb |
 | `Collectors` (`CollectorSpec`) | stats (`configd stat run <collector>...`) | one process for all the collectors, log `zmstat.out` | pidfiles (process group; the `setup stat` and per-collector processes of earlier releases and the legacy `zmstat-*` Perl collectors are stopped too, also before a start), then identity |
@@ -56,7 +56,7 @@ The work around a launch is an ordered list of `Step`s (`spec.go`, run by
 |---|---|---|
 | `Mkdir` | create directories (0755) | clamd, amavis, cbpolicyd |
 | `RemoveStale` | remove the sub-directories of `Dir` named `Prefix*` | amavis (`tmp/amavis-*`) |
-| `Run` | run a command, with `Sudo`, `IfExists` (skip quietly when the path is absent), `SkipOnNoRewrite` (`norewrite` starts), `BestEffort` | amavis (`zmaltermimeconfig`), mta (`postalias`), cbpolicyd (database init) |
+| `Run` | run a command, with `Sudo`, `IfExists` (skip quietly when the path is absent), `SkipOnNoRewrite` (`norewrite` starts), `BestEffort` | amavis (`zmaltermimeconfig`), mta (`postalias`), cbpolicyd (`gopp -carbonio db init`) |
 | `Hook` | a named function, see below | mta |
 
 `UnlessExists` makes any step a one-time initialization (the cbpolicyd database).

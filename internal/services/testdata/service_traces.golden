@@ -1591,7 +1591,8 @@ exec.start /opt/zextras/common/sbin/opendkim -f -x /opt/zextras/conf/opendkim.co
 
 ## cbpolicyd | legacy start cold
 exec /opt/zextras/libexec/configrewrite cbpolicyd
-exec /opt/zextras/common/bin/cbpolicyd --config /opt/zextras/conf/cbpolicyd.conf
+fs.open /opt/zextras/log/cbpolicyd.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/gopp -carbonio -role cbpolicyd -c /opt/zextras/conf/gopp-policyd.cfg
 => ok
 
 ## cbpolicyd | legacy start running
@@ -1613,20 +1614,24 @@ proc.signal 1001 15
 ## cbpolicyd | legacy restart running
 proc.signal 1001 15
 exec /opt/zextras/libexec/configrewrite cbpolicyd
-exec /opt/zextras/common/bin/cbpolicyd --config /opt/zextras/conf/cbpolicyd.conf
+fs.open /opt/zextras/log/cbpolicyd.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/gopp -carbonio -role cbpolicyd -c /opt/zextras/conf/gopp-policyd.cfg
 => ok
 
 ## cbpolicyd | legacy reload running
 proc.signal 1001 15
-exec /opt/zextras/common/bin/cbpolicyd --config /opt/zextras/conf/cbpolicyd.conf
+fs.open /opt/zextras/log/cbpolicyd.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/gopp -carbonio -role cbpolicyd -c /opt/zextras/conf/gopp-policyd.cfg
 => ok
 
 ## cbpolicyd | legacy reload stopped
-exec /opt/zextras/common/bin/cbpolicyd --config /opt/zextras/conf/cbpolicyd.conf
+fs.open /opt/zextras/log/cbpolicyd.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/gopp -carbonio -role cbpolicyd -c /opt/zextras/conf/gopp-policyd.cfg
 => ok
 
 ## cbpolicyd | legacy start-systemd cold
-exec /opt/zextras/common/bin/cbpolicyd --config /opt/zextras/conf/cbpolicyd.conf
+fs.open /opt/zextras/log/cbpolicyd.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/gopp -carbonio -role cbpolicyd -c /opt/zextras/conf/gopp-policyd.cfg
 => ok
 
 ## cbpolicyd | legacy stop-systemd running
@@ -1664,7 +1669,8 @@ exec /usr/bin/systemctl is-active carbonio-policyd.service
 => running=true ok
 
 ## cbpolicyd | systemd start-systemd
-exec /opt/zextras/common/bin/cbpolicyd --config /opt/zextras/conf/cbpolicyd.conf
+fs.open /opt/zextras/log/cbpolicyd.out flag=0x441 perm=0640
+exec.start /opt/zextras/common/bin/gopp -carbonio -role cbpolicyd -c /opt/zextras/conf/gopp-policyd.cfg
 => ok
 
 ## cbpolicyd | systemd stop-systemd
@@ -1759,7 +1765,7 @@ exec /opt/zextras/common/sbin/saslauthd -r -a zimbra
 
 ## milter | legacy start cold
 fs.open /opt/zextras/log/milter.out flag=0x441 perm=0640
-exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -client -Xmx256m -Dhttps.protocols=TLSv1.2,TLSv1.3 -Djdk.tls.client.protocols=TLSv1.2,TLSv1.3 -Djava.net.preferIPv4Stack=true -Dzimbra.home=/opt/zextras -Djava.library.path=/opt/zextras/lib -classpath /opt/zextras/mailbox/jars/*:/opt/zextras/conf -Dlog4j.configurationFile=file:/opt/zextras/conf/milter.log4j.properties -Dzimbra.config=/opt/zextras/conf/localconfig.xml com.zimbra.cs.milter.MilterServer
+exec.start /opt/zextras/common/bin/gopp -carbonio -role milter -c /opt/zextras/conf/gopp-milter.cfg
 => ok
 
 ## milter | legacy start running
@@ -1781,23 +1787,23 @@ proc.signal 1001 15
 ## milter | legacy restart running
 proc.signal 1001 15
 fs.open /opt/zextras/log/milter.out flag=0x441 perm=0640
-exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -client -Xmx256m -Dhttps.protocols=TLSv1.2,TLSv1.3 -Djdk.tls.client.protocols=TLSv1.2,TLSv1.3 -Djava.net.preferIPv4Stack=true -Dzimbra.home=/opt/zextras -Djava.library.path=/opt/zextras/lib -classpath /opt/zextras/mailbox/jars/*:/opt/zextras/conf -Dlog4j.configurationFile=file:/opt/zextras/conf/milter.log4j.properties -Dzimbra.config=/opt/zextras/conf/localconfig.xml com.zimbra.cs.milter.MilterServer
+exec.start /opt/zextras/common/bin/gopp -carbonio -role milter -c /opt/zextras/conf/gopp-milter.cfg
 => ok
 
 ## milter | legacy reload running
 proc.signal 1001 15
 fs.open /opt/zextras/log/milter.out flag=0x441 perm=0640
-exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -client -Xmx256m -Dhttps.protocols=TLSv1.2,TLSv1.3 -Djdk.tls.client.protocols=TLSv1.2,TLSv1.3 -Djava.net.preferIPv4Stack=true -Dzimbra.home=/opt/zextras -Djava.library.path=/opt/zextras/lib -classpath /opt/zextras/mailbox/jars/*:/opt/zextras/conf -Dlog4j.configurationFile=file:/opt/zextras/conf/milter.log4j.properties -Dzimbra.config=/opt/zextras/conf/localconfig.xml com.zimbra.cs.milter.MilterServer
+exec.start /opt/zextras/common/bin/gopp -carbonio -role milter -c /opt/zextras/conf/gopp-milter.cfg
 => ok
 
 ## milter | legacy reload stopped
 fs.open /opt/zextras/log/milter.out flag=0x441 perm=0640
-exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -client -Xmx256m -Dhttps.protocols=TLSv1.2,TLSv1.3 -Djdk.tls.client.protocols=TLSv1.2,TLSv1.3 -Djava.net.preferIPv4Stack=true -Dzimbra.home=/opt/zextras -Djava.library.path=/opt/zextras/lib -classpath /opt/zextras/mailbox/jars/*:/opt/zextras/conf -Dlog4j.configurationFile=file:/opt/zextras/conf/milter.log4j.properties -Dzimbra.config=/opt/zextras/conf/localconfig.xml com.zimbra.cs.milter.MilterServer
+exec.start /opt/zextras/common/bin/gopp -carbonio -role milter -c /opt/zextras/conf/gopp-milter.cfg
 => ok
 
 ## milter | legacy start-systemd cold
 fs.open /opt/zextras/log/milter.out flag=0x441 perm=0640
-exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -client -Xmx256m -Dhttps.protocols=TLSv1.2,TLSv1.3 -Djdk.tls.client.protocols=TLSv1.2,TLSv1.3 -Djava.net.preferIPv4Stack=true -Dzimbra.home=/opt/zextras -Djava.library.path=/opt/zextras/lib -classpath /opt/zextras/mailbox/jars/*:/opt/zextras/conf -Dlog4j.configurationFile=file:/opt/zextras/conf/milter.log4j.properties -Dzimbra.config=/opt/zextras/conf/localconfig.xml com.zimbra.cs.milter.MilterServer
+exec.start /opt/zextras/common/bin/gopp -carbonio -role milter -c /opt/zextras/conf/gopp-milter.cfg
 => ok
 
 ## milter | legacy stop-systemd running
@@ -1837,7 +1843,7 @@ exec /usr/bin/systemctl is-active carbonio-milter.service
 
 ## milter | systemd start-systemd
 fs.open /opt/zextras/log/milter.out flag=0x441 perm=0640
-exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -client -Xmx256m -Dhttps.protocols=TLSv1.2,TLSv1.3 -Djdk.tls.client.protocols=TLSv1.2,TLSv1.3 -Djava.net.preferIPv4Stack=true -Dzimbra.home=/opt/zextras -Djava.library.path=/opt/zextras/lib -classpath /opt/zextras/mailbox/jars/*:/opt/zextras/conf -Dlog4j.configurationFile=file:/opt/zextras/conf/milter.log4j.properties -Dzimbra.config=/opt/zextras/conf/localconfig.xml com.zimbra.cs.milter.MilterServer
+exec.start /opt/zextras/common/bin/gopp -carbonio -role milter -c /opt/zextras/conf/gopp-milter.cfg
 => ok
 
 ## milter | systemd stop-systemd
@@ -1850,7 +1856,7 @@ exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAM
 exec /opt/zextras/libexec/configrewrite sasl
 exec /opt/zextras/common/sbin/saslauthd -r -a zimbra
 fs.open /opt/zextras/log/milter.out flag=0x441 perm=0640
-exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -client -Xmx256m -Dhttps.protocols=TLSv1.2,TLSv1.3 -Djdk.tls.client.protocols=TLSv1.2,TLSv1.3 -Djava.net.preferIPv4Stack=true -Dzimbra.home=/opt/zextras -Djava.library.path=/opt/zextras/lib -classpath /opt/zextras/mailbox/jars/*:/opt/zextras/conf -Dlog4j.configurationFile=file:/opt/zextras/conf/milter.log4j.properties -Dzimbra.config=/opt/zextras/conf/localconfig.xml com.zimbra.cs.milter.MilterServer
+exec.start /opt/zextras/common/bin/gopp -carbonio -role milter -c /opt/zextras/conf/gopp-milter.cfg
 exec /opt/zextras/libexec/configrewrite antispam antivirus opendkim mta sasl
 exec /usr/bin/sudo -n /opt/zextras/common/sbin/postfix status
 fs.mkdir /opt/zextras/data/postfix/conf-staging mode=0700
@@ -1900,7 +1906,7 @@ exec /opt/zextras/libexec/configrewrite antispam antivirus opendkim mta sasl
 exec /opt/zextras/libexec/configrewrite sasl
 exec /opt/zextras/common/sbin/saslauthd -r -a zimbra
 fs.open /opt/zextras/log/milter.out flag=0x441 perm=0640
-exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -client -Xmx256m -Dhttps.protocols=TLSv1.2,TLSv1.3 -Djdk.tls.client.protocols=TLSv1.2,TLSv1.3 -Djava.net.preferIPv4Stack=true -Dzimbra.home=/opt/zextras -Djava.library.path=/opt/zextras/lib -classpath /opt/zextras/mailbox/jars/*:/opt/zextras/conf -Dlog4j.configurationFile=file:/opt/zextras/conf/milter.log4j.properties -Dzimbra.config=/opt/zextras/conf/localconfig.xml com.zimbra.cs.milter.MilterServer
+exec.start /opt/zextras/common/bin/gopp -carbonio -role milter -c /opt/zextras/conf/gopp-milter.cfg
 fs.mkdir /opt/zextras/conf mode=0755
 fs.write-atomic /opt/zextras/conf/ldap-vmm.cf mode=0640
 fs.write-atomic /opt/zextras/conf/ldap-vmd.cf mode=0640
@@ -1925,7 +1931,7 @@ exec /usr/bin/sudo -n /opt/zextras/common/sbin/postfix reload
 exec /opt/zextras/libexec/configrewrite sasl
 exec /opt/zextras/common/sbin/saslauthd -r -a zimbra
 fs.open /opt/zextras/log/milter.out flag=0x441 perm=0640
-exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -client -Xmx256m -Dhttps.protocols=TLSv1.2,TLSv1.3 -Djdk.tls.client.protocols=TLSv1.2,TLSv1.3 -Djava.net.preferIPv4Stack=true -Dzimbra.home=/opt/zextras -Djava.library.path=/opt/zextras/lib -classpath /opt/zextras/mailbox/jars/*:/opt/zextras/conf -Dlog4j.configurationFile=file:/opt/zextras/conf/milter.log4j.properties -Dzimbra.config=/opt/zextras/conf/localconfig.xml com.zimbra.cs.milter.MilterServer
+exec.start /opt/zextras/common/bin/gopp -carbonio -role milter -c /opt/zextras/conf/gopp-milter.cfg
 fs.mkdir /opt/zextras/conf mode=0755
 fs.write-atomic /opt/zextras/conf/ldap-vmm.cf mode=0640
 fs.write-atomic /opt/zextras/conf/ldap-vmd.cf mode=0640
@@ -1950,7 +1956,7 @@ exec /usr/bin/sudo -n /opt/zextras/common/sbin/postfix reload
 exec /opt/zextras/libexec/configrewrite sasl
 exec /opt/zextras/common/sbin/saslauthd -r -a zimbra
 fs.open /opt/zextras/log/milter.out flag=0x441 perm=0640
-exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -client -Xmx256m -Dhttps.protocols=TLSv1.2,TLSv1.3 -Djdk.tls.client.protocols=TLSv1.2,TLSv1.3 -Djava.net.preferIPv4Stack=true -Dzimbra.home=/opt/zextras -Djava.library.path=/opt/zextras/lib -classpath /opt/zextras/mailbox/jars/*:/opt/zextras/conf -Dlog4j.configurationFile=file:/opt/zextras/conf/milter.log4j.properties -Dzimbra.config=/opt/zextras/conf/localconfig.xml com.zimbra.cs.milter.MilterServer
+exec.start /opt/zextras/common/bin/gopp -carbonio -role milter -c /opt/zextras/conf/gopp-milter.cfg
 fs.mkdir /opt/zextras/conf mode=0755
 fs.write-atomic /opt/zextras/conf/ldap-vmm.cf mode=0640
 fs.write-atomic /opt/zextras/conf/ldap-vmd.cf mode=0640

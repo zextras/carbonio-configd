@@ -126,7 +126,7 @@ func (c *Controller) javaBinary(ctx context.Context, lc map[string]string) (stri
 
 // javaPreviewArgs returns the JVM flags required by mailbox jars compiled with
 // Java preview features (class file version 65.65535). Mirrors the legacy
-// zmmailboxdctl / zmmilterctl launchers.
+// zmmailboxdctl launcher.
 func javaPreviewArgs() []string {
 	return []string{"--enable-preview", "--enable-native-access=ALL-UNNAMED"}
 }
@@ -192,43 +192,5 @@ func (c *Controller) mailboxJavaArgs(lc map[string]string) []string {
 		"-Dzimbra.config="+c.p.conf+"/localconfig.xml",
 		"-cp", c.p.mailbox+"/jars/mailbox.jar:"+c.p.mailbox+"/jars/*",
 		mailboxMainClass,
-	)
-}
-
-// milterMainClass is the JVM main class of the milter: the last argument
-// milterJavaArgs hands to java, and the identity (ServiceDef.ProcessName)
-// under which the running JVM is recognised — legacy zmmilterctl's
-// `pgrep -f '/opt/zextras/.*/java.*milter.MilterServer'`, as an exact argv
-// token.
-const milterMainClass = "com.zimbra.cs.milter.MilterServer"
-
-// milterJavaArgs builds JVM arguments for MilterServer.
-// Mirrors the legacy milterctl.sh / carbonio-milter.service command.
-func (c *Controller) milterJavaArgs(lc map[string]string) []string {
-	javaOpts := lc["zimbra_zmjava_options"]
-	if javaOpts == "" {
-		javaOpts = "-Xmx256m" +
-			" -Dhttps.protocols=TLSv1.2,TLSv1.3" +
-			" -Djdk.tls.client.protocols=TLSv1.2,TLSv1.3" +
-			" -Djava.net.preferIPv4Stack=true"
-	}
-
-	javaLibPath := lc["zimbra_zmjava_java_library_path"]
-	if javaLibPath == "" {
-		javaLibPath = c.p.base + "/lib"
-	}
-
-	log4jFile := c.p.conf + "/milter.log4j.properties"
-
-	args := append(javaPreviewArgs(), "-client")
-	args = append(args, withoutPreviewArgs(strings.Fields(javaOpts))...)
-
-	return append(args,
-		"-Dzimbra.home="+c.p.base,
-		"-Djava.library.path="+javaLibPath,
-		"-classpath", c.p.mailbox+"/jars/*:"+c.p.conf,
-		"-Dlog4j.configurationFile=file:"+log4jFile,
-		"-Dzimbra.config="+c.p.conf+"/localconfig.xml",
-		milterMainClass,
 	)
 }

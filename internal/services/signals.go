@@ -22,7 +22,7 @@ var ErrUnsupportedVerb = errors.New("verb not supported by this service")
 var ErrNoStatsPidFiles = errors.New("no stats collector pid files found")
 
 // ServiceRefresh delivers the service's RefreshSignal to its main process
-// (milter: SIGCONT, which makes MilterServer re-read its configuration). The
+// (milter: SIGCONT, which invalidates gopp's ACL cache). The
 // report's Signaled list is empty when the service is not running — a
 // successful no-op, as for legacy zmmilterctl refresh. It signals the process
 // directly in both orchestration modes: neither systemd nor the legacy

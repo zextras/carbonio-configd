@@ -19,7 +19,7 @@ func TestServiceRefresh_MilterSendsSIGCONT(t *testing.T) {
 	t.Parallel()
 
 	ctl, f := newFakeController(t)
-	f.Proc.Add(sys.ProcEntry{PID: 700, Argv: []string{"java", "-cp", "x", milterMainClass}})
+	f.Proc.Add(sys.ProcEntry{PID: 700, Argv: []string{"/opt/zextras/common/bin/gopp", "-carbonio", "-role", "milter", "-c", "/opt/zextras/conf/gopp-milter.cfg"}})
 
 	report, err := ctl.ServiceRefresh(context.Background(), svcMilter)
 
