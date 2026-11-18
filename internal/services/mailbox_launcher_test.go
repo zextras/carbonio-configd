@@ -160,12 +160,12 @@ func TestMailboxJavaArgs_Defaults(t *testing.T) {
 
 	found := false
 	for _, a := range args {
-		if a == "-Xms512m" {
+		if a == "-Xms256m" {
 			found = true
 		}
 	}
 	if !found {
-		t.Error("expected default -Xms512m when mailboxd_java_heap_size empty")
+		t.Error("expected default -Xms256m when mailboxd_java_heap_min_size empty")
 	}
 }
 
@@ -185,8 +185,8 @@ func TestMailboxJavaArgs_CustomHeapAndOptions(t *testing.T) {
 	has := func(s string) bool {
 		return slices.Contains(args, s)
 	}
-	if !has("-Xms2048m") {
-		t.Error("expected -Xms2048m")
+	if !has("-Xms256m") {
+		t.Error("expected -Xms256m")
 	}
 	if !has("-Xmx2048m") {
 		t.Error("expected -Xmx2048m")
