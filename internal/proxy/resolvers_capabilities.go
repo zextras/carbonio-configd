@@ -75,6 +75,7 @@ func (g *Generator) resolveLookupHandlers(ctx context.Context) (any, error) {
 
 	if len(targets) == 0 {
 		host := loopbackIPv4
+
 		if val, ok := g.getConfigValue("zimbra_server_hostname", sourceLocal); ok {
 			if hosts := validLookupHosts(ctx, []string{val}); len(hosts) != 0 {
 				host = hosts[0]
@@ -139,6 +140,7 @@ func (g *Generator) lookupTargets(ctx context.Context) ([]lookupTarget, error) {
 	}
 
 	var targets []lookupTarget
+
 	for _, host := range sortedKeys(byHost) {
 		attrs := byHost[host]
 		if attrs[zimbraServiceHostnameAttr] != "" && strings.EqualFold(attrs[zimbraReverseProxyLookupTargetAttr], "TRUE") {
