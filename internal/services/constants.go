@@ -100,6 +100,10 @@ const (
 	saslMechZimbra = "zimbra"
 )
 
+// goppCarbonio makes gopp read the Carbonio layout and localconfig; every
+// milter, cbpolicyd and db init command line starts with it.
+const goppCarbonio = "-carbonio"
+
 // Legacy zimbraServiceEnabled values that no longer map to a real service.
 const (
 	ldapServiceZimbra = "zimbra"
