@@ -179,12 +179,12 @@ func (g *Generator) resolveWebAvailable(ctx context.Context) (any, error) {
 // resolveLookupAvailable returns true when there is at least one lookup target,
 // counting the lookup-target servers when no explicit list is set.
 func (g *Generator) resolveLookupAvailable(ctx context.Context) (any, error) {
-	hosts, err := g.lookupTargetHosts(ctx)
+	targets, err := g.lookupTargets(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	return len(hosts) > 0, nil
+	return len(targets) > 0, nil
 }
 
 // resolveWebSSLDhparamEnabled returns true when the web SSL DH parameter file exists on disk.
