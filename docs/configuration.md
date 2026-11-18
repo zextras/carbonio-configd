@@ -64,10 +64,6 @@ descriptions of the opt-in and container keys are in
 The keys `zmconfigd_log_level` (`3`) and `zmconfigd_debug` are parsed but do
 not change the log level; use `CONFIGD_LOG_LEVEL` below.
 
-The two keys of the legacy table `zmconfigd_startup_pause` and
-`zmconfigd_max_failed_restarts` exist in the defaults registry but nothing in
-this daemon reads them.
-
 Restart behaviour (what restarts, the hybrid policy on systemd hosts, the
 watchdog's retry rules) is described in [restart-behavior.md](restart-behavior.md).
 

@@ -9,7 +9,7 @@ package localconfig
 // lcDocs holds the documentation printed by the legacy "zmlocalconfig -i"
 // and "zmlocalconfig --all": the default-locale ZsMsg.properties text of every
 // KnownKey declared in LC.java, with its @Supported and @Reloadable flags
-// (carbonio-mailbox tag v4.38.16).
+// (carbonio-mailbox tag v4.40.22).
 var lcDocs = map[string]KeyDoc{
 	"antispam_backup_retention": {
 		Doc:       "Number of revisions of the antispam database backup to retain.",
@@ -73,14 +73,6 @@ var lcDocs = map[string]KeyDoc{
 		Doc:       "Password to be used with the client SSL TrustManager keystore.",
 		Supported: true,
 	},
-	"client_use_native_proxy_selector": {
-		Doc:       "Whether to use native code for reading system proxy data",
-		Supported: true,
-	},
-	"client_use_system_proxy": {
-		Doc:       "Whether to use system proxies",
-		Supported: true,
-	},
 	"compute_aggregate_quota_threads": {
 		Doc:       "Thread pool size for computing domain aggregate quota usage",
 		Supported: true,
@@ -109,22 +101,6 @@ var lcDocs = map[string]KeyDoc{
 	},
 	"derby_properties": {
 		Doc:       "Path to derby configuration properties file.",
-		Supported: true,
-	},
-	"external_store_delete_max_ioexceptions": {
-		Doc:       "Maximum number of consecutive IOExceptions before aborting during mailbox deletion",
-		Supported: true,
-	},
-	"external_store_local_cache_max_bytes": {
-		Doc:       "Maximum number of bytes to keep in ExternalStoreManager’s local file cache.",
-		Supported: true,
-	},
-	"external_store_local_cache_max_files": {
-		Doc:       "Maximum number of files to keep in ExternalStoreManager’s local file cache.",
-		Supported: true,
-	},
-	"external_store_local_cache_min_lifetime": {
-		Doc:       "Minimum time (ms) to keep idle entries in ExternalStoreManager’s local file cache.",
 		Supported: true,
 	},
 	"filter_null_env_sender_for_dsn_redirect": {
@@ -959,10 +935,6 @@ var lcDocs = map[string]KeyDoc{
 	"zimbra_index_disable_perf_counters": {
 		Doc: "If false, Lucene read and write IO are tracked by Zimbra performance monitoring. A " +
 			"true value disables Lucene IO monitoring.",
-	},
-	"zimbra_index_elasticsearch_url_base": {
-		Doc:       "ElasticSearch REST API base URL.",
-		Supported: true,
 	},
 	"zimbra_index_lucene_io_impl": {
 		Doc: "Lucene FSDirectory implementation used for indexing IO. Possible values nio - Use " +

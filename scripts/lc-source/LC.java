@@ -126,9 +126,6 @@ public final class LC {
   public static final KnownKey skins_directory =
       KnownKey.newKey("${mailboxd_directory}/webapps/zimbra/skins");
 
-  public static final KnownKey zimbra_disk_cache_servlet_flush = KnownKey.newKey(true);
-  public static final KnownKey zimbra_disk_cache_servlet_size = KnownKey.newKey(1000);
-
   @Supported
   public static final KnownKey zimbra_store_sweeper_max_age =
       KnownKey.newKey(480); // 480 mins = 8 hours
@@ -207,10 +204,6 @@ public final class LC {
 
   @Supported
   public static final KnownKey zimbra_index_lucene_max_terms_per_query = KnownKey.newKey(50000);
-
-  @Supported
-  public static final KnownKey zimbra_index_elasticsearch_url_base =
-      KnownKey.newKey("http://localhost:9200/");
 
   @Supported
   public static final KnownKey zimbra_index_wildcard_max_terms_expanded = KnownKey.newKey(20000);
@@ -649,8 +642,6 @@ public final class LC {
   public static final KnownKey zmconfigd_interval = KnownKey.newKey(60);
   public static final KnownKey zmconfigd_log_level = KnownKey.newKey(3);
   public static final KnownKey zmconfigd_listen_port = KnownKey.newKey(7171);
-  public static final KnownKey zmconfigd_max_failed_restarts = KnownKey.newKey(3);
-  public static final KnownKey zmconfigd_startup_pause = KnownKey.newKey(60);
 
   public static final KnownKey zimbra_configrewrite_timeout = KnownKey.newKey(120);
 
@@ -677,8 +668,6 @@ public final class LC {
       KnownKey.newKey("com.zimbra.cs.store.file.FileBlobStore");
   public static final KnownKey zimbra_class_index_store_factory =
       KnownKey.newKey("com.zimbra.cs.index.LuceneIndex$Factory");
-  // public static final KnownKey zimbra_class_index_store_factory =
-  // KnownKey.newKey("com.zimbra.cs.index.elasticsearch.ElasticSearchIndex$Factory");
   public static final KnownKey zimbra_class_application =
       KnownKey.newKey("com.zimbra.cs.util.ZimbraApplication");
   public static final KnownKey zimbra_class_rulerewriterfactory =
@@ -691,9 +680,6 @@ public final class LC {
       KnownKey.newKey("com.zimbra.soap.SoapSessionFactory");
   public static final KnownKey zimbra_class_dbconnfactory =
       KnownKey.newKey("com.zimbra.cs.db.ZimbraConnectionFactory");
-  public static final KnownKey zimbra_class_customproxyselector =
-      KnownKey.newKey(
-          ""); // intentionally has no value; set one if u want to use a custom proxy selector
   public static final KnownKey zimbra_class_galgroupinfoprovider =
       KnownKey.newKey("com.zimbra.cs.gal.GalGroupInfoProvider");
   public static final KnownKey zimbra_class_jsieve_comparators_ascii_casemap =
@@ -908,10 +894,6 @@ public final class LC {
 
   public static final KnownKey httpclient_convertd_so_timeout = KnownKey.newKey(-1);
   public static final KnownKey httpclient_convertd_keepalive_connections = KnownKey.newKey(true);
-
-  @Supported public static final KnownKey client_use_system_proxy = KnownKey.newKey(false);
-
-  @Supported public static final KnownKey client_use_native_proxy_selector = KnownKey.newKey(false);
 
   public static final KnownKey shared_mime_info_globs =
       KnownKey.newKey("${zimbra_home}/conf/globs2");
@@ -1163,20 +1145,6 @@ public final class LC {
       KnownKey.newKey(360); // 120 mins = 2 hours
 
   @Supported
-  public static final KnownKey external_store_local_cache_max_bytes =
-      KnownKey.newKey(1024 * 1024 * 1024); // 1GB
-
-  @Supported
-  public static final KnownKey external_store_local_cache_max_files = KnownKey.newKey(10000);
-
-  @Supported
-  public static final KnownKey external_store_local_cache_min_lifetime =
-      KnownKey.newKey(Constants.MILLIS_PER_MINUTE);
-
-  @Supported
-  public static final KnownKey external_store_delete_max_ioexceptions = KnownKey.newKey(25);
-
-  @Supported
   public static final KnownKey redis_service_uri = KnownKey.newKey("redis://zmc-redis:6379");
 
   @Supported public static final KnownKey redis_num_pubsub_channels = KnownKey.newKey(100);
@@ -1283,10 +1251,6 @@ public final class LC {
   public static final KnownKey public_share_advertising_scope =
       KnownKey.newKey(PUBLIC_SHARE_VISIBILITY.samePrimaryDomain.toString());
 
-  // Triton integration
-  public static final KnownKey triton_store_url = KnownKey.newKey("");
-  public static final KnownKey triton_hash_type = KnownKey.newKey("SHA0");
-  public static final KnownKey triton_upload_buffer_size = KnownKey.newKey(25000);
   public static final KnownKey uncompressed_cache_min_lifetime =
       KnownKey.newKey(Constants.MILLIS_PER_MINUTE);
   public static final KnownKey check_dl_membership_enabled = KnownKey.newKey(true);
@@ -1306,8 +1270,6 @@ public final class LC {
   @Supported @Reloadable
   public static final KnownKey imap_max_time_to_wait_for_catchup_millis = KnownKey.newKey(30000);
 
-  // Remote IMAP
-  @Reloadable public static final KnownKey imap_always_use_remote_store = KnownKey.newKey(false);
   // owasp handler
   public static final KnownKey zimbra_use_owasp_html_sanitizer = KnownKey.newKey(true);
   public static final KnownKey owasp_policy_file = KnownKey.newKey("${zimbra_home}/conf/owasp_policy.xml");
@@ -1372,15 +1334,6 @@ public final class LC {
           KnownKey key = (KnownKey) field.get(null);
           // Automatically set the key name with the variable name.
           key.setKey(field.getName());
-
-          // process annotations
-          if (field.isAnnotationPresent(Supported.class)) {
-            key.setSupported(true);
-          }
-          if (field.isAnnotationPresent(Reloadable.class)) {
-            key.setReloadable(true);
-          }
-
         } catch (Throwable never) {
           assert false : never;
         }
@@ -1448,7 +1401,7 @@ public final class LC {
 
   /**
    * This annotation represents a supported local config setting. To make a new setting show up in
-   * the zmlocalconfig -i command, use this annotation
+   * the configd localconfig -i command, use this annotation
    *
    * @author jpowers
    */
