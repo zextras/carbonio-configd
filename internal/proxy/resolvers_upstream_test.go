@@ -7,6 +7,7 @@ package proxy
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -100,6 +101,72 @@ func TestResolveLookupHandlers(t *testing.T) {
 				if c := strings.Count(str, "https://"); c != 2 {
 					t.Errorf("expected 2 https:// URLs for multi-host input, got %d in %q", c, str)
 				}
+			}
+		})
+	}
+}
+
+// TestLookupTargetsFallBackToLookupTargetServers covers an empty
+// zimbraReverseProxyAvailableLookupTargets on a proxy-only node: like the legacy
+// ZMLookupHandlerVar, the servers with zimbraReverseProxyLookupTarget=TRUE are
+// the lookup handlers, and lookup.available follows them.
+func TestLookupTargetsFallBackToLookupTargetServers(t *testing.T) {
+	const handler = "https://%s:7072/service/extension/nginx-lookup"
+
+	lookupTargets := []UpstreamServer{{Host: "127.0.0.2", Port: 8080}, {Host: "127.0.0.3", Port: 8080}}
+
+	tests := []struct {
+		name          string
+		globalData    map[string]string
+		lookupServers []UpstreamServer
+		wantHandlers  string
+		wantAvailable bool
+	}{
+		{
+			name:          "empty list uses the lookup target servers",
+			lookupServers: lookupTargets,
+			wantHandlers:  fmt.Sprintf(handler, "127.0.0.2") + " " + fmt.Sprintf(handler, "127.0.0.3"),
+			wantAvailable: true,
+		},
+		{
+			name:          "explicit list wins over the lookup target servers",
+			globalData:    map[string]string{"zimbraReverseProxyAvailableLookupTargets": "127.0.0.9"},
+			lookupServers: lookupTargets,
+			wantHandlers:  fmt.Sprintf(handler, "127.0.0.9"),
+			wantAvailable: true,
+		},
+		{
+			name:          "no lookup target keeps the local hostname and is unavailable",
+			wantHandlers:  fmt.Sprintf(handler, "127.0.0.1"),
+			wantAvailable: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := &Generator{
+				env:          sys.Real(),
+				GlobalConfig: &config.GlobalConfig{Data: configtest.NewConfigMapFrom(tt.globalData)},
+				LocalConfig: &config.LocalConfig{Data: configtest.NewConfigMapFrom(map[string]string{
+					"zimbra_server_hostname": "127.0.0.1",
+				})},
+				upstreamCache: &upstreamQueryCache{backendsPopulated: true, reverseProxyBackends: tt.lookupServers},
+			}
+
+			handlers, err := g.resolveLookupHandlers(context.Background())
+			if err != nil {
+				t.Fatalf("resolveLookupHandlers failed: %v", err)
+			}
+			if handlers != tt.wantHandlers {
+				t.Errorf("handlers = %q, want %q", handlers, tt.wantHandlers)
+			}
+
+			available, err := g.resolveLookupAvailable(context.Background())
+			if err != nil {
+				t.Fatalf("resolveLookupAvailable failed: %v", err)
+			}
+			if available != tt.wantAvailable {
+				t.Errorf("lookup.available = %v, want %v", available, tt.wantAvailable)
 			}
 		})
 	}
