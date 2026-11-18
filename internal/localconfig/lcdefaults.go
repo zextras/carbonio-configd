@@ -7,7 +7,7 @@
 package localconfig
 
 // lcDefaults is a verbatim port of every KnownKey default declared in
-// carbonio-mailbox (tag v4.38.16) common/src/main/java/com/zimbra/common/localconfig/LC.java.
+// carbonio-mailbox (tag v4.40.22) common/src/main/java/com/zimbra/common/localconfig/LC.java.
 //
 // configd is the only local-config implementation left on a Carbonio node: the
 // Java LocalConfigCLI is gone and both /opt/zextras/bin/zmlocalconfig and
@@ -76,8 +76,6 @@ var lcDefaults = map[string]string{
 	"cli_httpclient_soaphttptransport_so_timeout":                "2147483647",
 	"client_ssl_truststore":                                      "${mailboxd_truststore}",
 	"client_ssl_truststore_password":                             "${mailboxd_truststore_password}",
-	"client_use_native_proxy_selector":                           "false",
-	"client_use_system_proxy":                                    "false",
 	"command_line_editing_enabled":                               "true",
 	"common_passwords_txt":                                       "${zimbra_home}/conf/common-passwords.txt",
 	"compute_aggregate_quota_threads":                            "10",
@@ -110,10 +108,6 @@ var lcDefaults = map[string]string{
 	"enable_delegated_admin_ldap_access":                         "true",
 	"ews_service_wsdl_location":                                  "/opt/zextras/lib/ext/zimbraews/",
 	"exchange_free_busy_interval_min":                            "15",
-	"external_store_delete_max_ioexceptions":                     "25",
-	"external_store_local_cache_max_bytes":                       "1073741824",
-	"external_store_local_cache_max_files":                       "10000",
-	"external_store_local_cache_min_lifetime":                    "60000",
 	"files_service_url":                                          "http://127.78.0.7:20002",
 	"filter_null_env_sender_for_dsn_redirect":                    "true",
 	"folder_tag_cache_lock_timeout_seconds":                      "10",
@@ -147,7 +141,6 @@ var lcDefaults = map[string]string{
 	"httpclient_soaphttptransport_so_timeout":                    "300000",
 	"ignore_imap_uid_range_search":                               "true",
 	"im_dnsutil_dnsoverride":                                     "",
-	"imap_always_use_remote_store":                               "false",
 	"imap_authenticated_max_idle_time":                           "1800",
 	"imap_max_consecutive_error":                                 "5",
 	"imap_max_idle_time":                                         "60",
@@ -406,9 +399,6 @@ var lcDefaults = map[string]string{
 	"timezone_file":                                              "${zimbra_home}/conf/timezones.ics",
 	"tombstone_max_age_ms":                                       "8035200000",
 	"transaction_threadlocal_cache_expiry_seconds":               "300",
-	"triton_hash_type":                                           "SHA0",
-	"triton_store_url":                                           "",
-	"triton_upload_buffer_size":                                  "25000",
 	"uncompressed_cache_min_lifetime":                            "60000",
 	"wsdl_use_public_service_hostname":                           "true",
 	"xml_invalid_chars_regex":                                    "\\&\\#(?:x([0-9a-fA-F]+)|([0-9]+))\\;",
@@ -482,7 +472,6 @@ var lcDefaults = map[string]string{
 	"zimbra_class_accessmanager":                                 "com.zimbra.cs.account.accesscontrol.ACLAccessManager",
 	"zimbra_class_application":                                   "com.zimbra.cs.util.ZimbraApplication",
 	"zimbra_class_attrmanager":                                   "com.zimbra.cs.account.AttributeManager",
-	"zimbra_class_customproxyselector":                           "",
 	"zimbra_class_database":                                      "com.zimbra.cs.db.MariaDB",
 	"zimbra_class_datasourcemanager":                             "com.zimbra.cs.datasource.DataSourceManager",
 	"zimbra_class_dbconnfactory":                                 "com.zimbra.cs.db.ZimbraConnectionFactory",
@@ -508,8 +497,6 @@ var lcDefaults = map[string]string{
 	"zimbra_deregistered_authtoken_queue_size":                   "5000",
 	"zimbra_deserialize_classes":                                 "",
 	"zimbra_directory_max_search_result":                         "5000",
-	"zimbra_disk_cache_servlet_flush":                            "true",
-	"zimbra_disk_cache_servlet_size":                             "1000",
 	"zimbra_enable_text_extraction":                              "true",
 	"zimbra_ews_autodiscover_use_service_url":                    "false",
 	"zimbra_extension_common_directory":                          "${zimbra_home}/lib/ext-common",
@@ -530,7 +517,6 @@ var lcDefaults = map[string]string{
 	"zimbra_index_deferred_items_failure_delay":                  "300",
 	"zimbra_index_directory":                                     "${zimbra_home}/index",
 	"zimbra_index_disable_perf_counters":                         "false",
-	"zimbra_index_elasticsearch_url_base":                        "http://localhost:9200/",
 	"zimbra_index_lucene_io_impl":                                "nio",
 	"zimbra_index_lucene_max_buffered_docs":                      "200",
 	"zimbra_index_lucene_max_merge":                              "2147483647",
@@ -628,8 +614,6 @@ var lcDefaults = map[string]string{
 	"zmconfigd_interval":                                         "60",
 	"zmconfigd_listen_port":                                      "7171",
 	"zmconfigd_log_level":                                        "3",
-	"zmconfigd_max_failed_restarts":                              "3",
-	"zmconfigd_startup_pause":                                    "60",
 	"zmdisklog_critical_threshold":                               "95",
 	"zmdisklog_warn_threshold":                                   "85",
 	"zmprov_safeguarded_attrs":                                   "zimbraServiceEnabled,zimbraServiceInstalled",
