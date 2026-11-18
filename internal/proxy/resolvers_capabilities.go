@@ -66,7 +66,7 @@ const compressionMIMETypes = `    application/atom+xml
 
 // resolveLookupHandlers constructs the nginx zm_lookup_handlers value as a
 // space-separated list of "https://<host>:<port>/service/extension/nginx-lookup"
-// URLs, one per entry in zimbraReverseProxyAvailableLookupTargets.
+// URLs, one per lookup target (see lookupTargetHosts).
 //
 // LDAP multi-valued attributes arrive joined with newlines (entryToMap in
 // internal/ldap), so the raw value can carry several hostnames. The earlier
@@ -86,14 +86,9 @@ func (g *Generator) resolveLookupHandlers(ctx context.Context) (any, error) {
 		}
 	}
 
-	rawHosts := ""
-	if val, ok := g.getConfigValue("zimbraReverseProxyAvailableLookupTargets", sourceGlobal); ok {
-		rawHosts = val
-	}
-
-	hosts := validLookupHosts(ctx, strings.Fields(normalizeMultiValue(rawHosts)))
-	if len(hosts) == 0 && strings.TrimSpace(rawHosts) != "" {
-		return nil, fmt.Errorf("zimbraReverseProxyAvailableLookupTargets has no valid host")
+	hosts, err := g.lookupTargetHosts(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	if len(hosts) == 0 {
@@ -116,6 +111,42 @@ func (g *Generator) resolveLookupHandlers(ctx context.Context) (any, error) {
 	}
 
 	return strings.Join(urls, " "), nil
+}
+
+// lookupTargetHosts returns the hosts that serve nginx route lookups: the
+// values of zimbraReverseProxyAvailableLookupTargets when set, otherwise every
+// server with zimbraReverseProxyLookupTarget=TRUE, as the legacy
+// ZMLookupHandlerVar did. Without that fallback a proxy on its own node gets
+// no lookup handler although the mailboxes are lookup targets.
+// An empty result means there is no lookup target.
+func (g *Generator) lookupTargetHosts(ctx context.Context) ([]string, error) {
+	rawHosts, _ := g.getConfigValue("zimbraReverseProxyAvailableLookupTargets", sourceGlobal)
+	if strings.TrimSpace(rawHosts) != "" {
+		hosts := validLookupHosts(ctx, strings.Fields(normalizeMultiValue(rawHosts)))
+		if len(hosts) == 0 {
+			return nil, fmt.Errorf("zimbraReverseProxyAvailableLookupTargets has no valid host")
+		}
+
+		return hosts, nil
+	}
+
+	servers, err := g.reverseProxyBackendsRaw(ctx, false)
+	if err != nil {
+		if g.ldapConfigured() {
+			return nil, fmt.Errorf("query lookup target servers: %w", err)
+		}
+
+		logger.WarnContext(ctx, resolverQueryFailed, "error", err)
+
+		return nil, nil
+	}
+
+	hosts := make([]string, 0, len(servers))
+	for _, server := range servers {
+		hosts = append(hosts, server.Host)
+	}
+
+	return validLookupHosts(ctx, hosts), nil
 }
 
 // validLookupHosts drops the hosts that are not plain host tokens, since they

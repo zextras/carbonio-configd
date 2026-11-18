@@ -176,15 +176,15 @@ func (g *Generator) resolveWebAvailable(ctx context.Context) (any, error) {
 	return len(servers) > 0, nil
 }
 
-// resolveLookupAvailable returns true when at least one lookup handler is configured.
-// Mirrors legacy ZMLookupAvailableVar (ProxyConfGen.java:1701).
-func (g *Generator) resolveLookupAvailable(_ context.Context) (any, error) {
-	val, ok := g.getConfigValue("zimbraReverseProxyAvailableLookupTargets", sourceGlobal)
-	if !ok {
-		return false, nil
+// resolveLookupAvailable returns true when there is at least one lookup target,
+// counting the lookup-target servers when no explicit list is set.
+func (g *Generator) resolveLookupAvailable(ctx context.Context) (any, error) {
+	hosts, err := g.lookupTargetHosts(ctx)
+	if err != nil {
+		return nil, err
 	}
 
-	return len(strings.Fields(strings.ReplaceAll(val, "\n", " "))) > 0, nil
+	return len(hosts) > 0, nil
 }
 
 // resolveWebSSLDhparamEnabled returns true when the web SSL DH parameter file exists on disk.
