@@ -415,7 +415,8 @@ Exported variables: `antispam_enable_restarts`, `antispam_enable_rule_compilatio
 the first word of `ldap_url`), `ldap_domain` (host of the first bind URL),
 `configd_listen_port` (`zmconfigd_listen_port`), `configd_rewrite_timeout`
 (`zimbra_configrewrite_timeout`), `java_options` (`zimbra_zmjava_options`),
-`java_xms` and `java_xmx` (`mailboxd_java_heap_size`, default `512`), `ldap_port`,
+`java_xmx` (`mailboxd_java_heap_size`, default `512`), `java_xms`
+(`mailboxd_java_heap_min_size`, default `256`, capped at `java_xmx`), `ldap_port`,
 `log_directory` (`zimbra_log_directory`), `mailboxd_directory`,
 `mailboxd_java_heap_new_size_percent` (default `25`), `mail_service_port`
 (`zimbra_mail_service_port`), `mailboxd_java_options` (the key plus ` -Xss<mailboxd_thread_stack_size|256k>`,

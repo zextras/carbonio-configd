@@ -110,8 +110,8 @@ func TestMailboxJavaArgs_DefaultHeapAndStack(t *testing.T) {
 	lc := map[string]string{}
 	args := ctl.mailboxJavaArgs(lc)
 
-	// Must contain -Xms512m and -Xmx512m defaults.
-	assertContains(t, args, "-Xms512m")
+	// Must contain -Xms256m and -Xmx512m defaults.
+	assertContains(t, args, "-Xms256m")
 	assertContains(t, args, "-Xmx512m")
 
 	// Must contain default thread stack
@@ -132,8 +132,12 @@ func TestMailboxJavaArgs_CustomHeap(t *testing.T) {
 		"mailboxd_java_heap_size": "2048",
 	}
 	args := ctl.mailboxJavaArgs(lc)
-	assertContains(t, args, "-Xms2048m")
+	assertContains(t, args, "-Xms256m")
 	assertContains(t, args, "-Xmx2048m")
+
+	lc["mailboxd_java_heap_min_size"] = "2048"
+	args = ctl.mailboxJavaArgs(lc)
+	assertContains(t, args, "-Xms2048m")
 }
 
 func TestMailboxJavaArgs_CustomThreadStack(t *testing.T) {

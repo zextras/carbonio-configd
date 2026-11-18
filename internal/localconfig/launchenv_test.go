@@ -51,6 +51,7 @@ func TestLaunchEnv(t *testing.T) {
 		"zimbra_configrewrite_timeout":        "30",
 		"zimbra_zmjava_options":               "-Xmx256m",
 		"mailboxd_java_heap_size":             "2048",
+		"mailboxd_java_heap_min_size":         "1024",
 		"ldap_port":                           "389",
 		"zimbra_log_directory":                "/opt/zextras/log",
 		"mailboxd_directory":                  "/opt/zextras/mailboxd",
@@ -73,7 +74,7 @@ func TestLaunchEnv(t *testing.T) {
 		"configd_listen_port":                 "7171",
 		"configd_rewrite_timeout":             "30",
 		"java_options":                        "-Xmx256m",
-		"java_xms":                            "2048",
+		"java_xms":                            "1024",
 		"java_xmx":                            "2048",
 		"ldap_domain":                         "l1.example.com",
 		"ldap_port":                           "389",
@@ -90,12 +91,20 @@ func TestLaunchEnv(t *testing.T) {
 		t.Parallel()
 
 		got := LaunchEnv(map[string]string{"zimbra_log4j_properties": "/l4j"})
-		assert.Equal(t, "512", got["java_xms"])
+		assert.Equal(t, "256", got["java_xms"])
 		assert.Equal(t, "512", got["java_xmx"])
 		assert.Equal(t, "25", got["mailboxd_java_heap_new_size_percent"])
 		assert.Equal(t, " -Xss256k -Dsun.net.inetaddr.ttl=60 -Dlog4j.configurationFile=/l4j", got["mailboxd_java_options"])
 		assert.Empty(t, got["bind_url"])
 		assert.Empty(t, got["ldap_domain"])
+	})
+
+	t.Run("min size capped at heap size", func(t *testing.T) {
+		t.Parallel()
+
+		got := LaunchEnv(map[string]string{"mailboxd_java_heap_size": "200"})
+		assert.Equal(t, "200", got["java_xms"])
+		assert.Equal(t, "200", got["java_xmx"])
 	})
 
 	tests := []struct {

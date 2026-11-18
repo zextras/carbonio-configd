@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/zextras/carbonio-configd/internal/localconfig"
 	"github.com/zextras/carbonio-configd/internal/logger"
 	"github.com/zextras/carbonio-configd/internal/sys"
 )
@@ -147,12 +148,7 @@ func withoutPreviewArgs(opts []string) []string {
 }
 
 func (c *Controller) mailboxJavaArgs(lc map[string]string) []string {
-	javaXms := lc["mailboxd_java_heap_size"]
-	if javaXms == "" {
-		javaXms = "512"
-	}
-
-	javaXmx := javaXms
+	javaXms, javaXmx := localconfig.MailboxHeap(lc)
 	javaOpts := lc["mailboxd_java_options"]
 	javaOpts = strings.ReplaceAll(javaOpts,
 		"-Xlog:gc*=info,safepoint=info:file="+c.p.log+"/gc.log:time:filecount=20,filesize=10m", "")

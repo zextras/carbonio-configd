@@ -4,7 +4,10 @@
 
 package localconfig
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 // BindURL returns the LDAP bind URL a localconfig names: ldap_bind_url when it
 // is non-empty (it may list several space-separated URLs), else the first URL
@@ -69,10 +72,27 @@ const (
 	keyMySQLMyCnf         = "mysql_mycnf"
 )
 
+// MailboxHeap returns mailboxd's -Xms and -Xmx in MB: -Xmx is
+// mailboxd_java_heap_size (default 512), -Xms is mailboxd_java_heap_min_size
+// (default 256) capped at -Xmx. A smaller -Xms lets G1 return unused heap.
+// A non-numeric value is passed through as -Xms, so the JVM reports it.
+func MailboxHeap(lc map[string]string) (xms, xmx string) {
+	xmx = valueOr(lc, "mailboxd_java_heap_size", "512")
+	xms = valueOr(lc, "mailboxd_java_heap_min_size", "256")
+
+	minMB, errMin := strconv.Atoi(xms)
+	maxMB, errMax := strconv.Atoi(xmx)
+	if errMin == nil && errMax == nil && minMB > maxMB {
+		xms = xmx
+	}
+
+	return xms, xmx
+}
+
 // LaunchEnv derives from an effective localconfig the environment variables
 // the systemd units consume (the former systemd-envscript / systemd.env set).
 func LaunchEnv(lc map[string]string) map[string]string {
-	heap := valueOr(lc, "mailboxd_java_heap_size", "512")
+	xms, xmx := MailboxHeap(lc)
 
 	opts := lc["mailboxd_java_options"]
 	opts = appendUnless(opts, "Xss", " -Xss"+valueOr(lc, "mailboxd_thread_stack_size", "256k"))
@@ -85,8 +105,8 @@ func LaunchEnv(lc map[string]string) map[string]string {
 		"configd_listen_port":     lc["zmconfigd_listen_port"],
 		"configd_rewrite_timeout": lc["zimbra_configrewrite_timeout"],
 		"java_options":            lc["zimbra_zmjava_options"],
-		"java_xms":                heap,
-		"java_xmx":                heap,
+		"java_xms":                xms,
+		"java_xmx":                xmx,
 		"ldap_domain":             LDAPDomain(lc),
 		"log_directory":           lc["zimbra_log_directory"],
 		keyHeapNewSizePercent:     valueOr(lc, keyHeapNewSizePercent, "25"),
