@@ -12,12 +12,6 @@ func (g *Generator) registerTimeoutVariables() {
 		withOverrideType(OverrideConfig),
 		withDescription("Time to wait before sending auth request to upstream"),
 	)
-	g.registerVar("mail.inactivity.timeout", "1h",
-		withAttribute("zimbraReverseProxyInactivityTimeout"),
-		withValueType(ValueTypeTime),
-		withOverrideType(OverrideConfig),
-		withDescription("Inactivity timeout for mail connections"),
-	)
 	g.registerVar("web.upstream.connect.timeout", 25,
 		withAttribute("zimbraReverseProxyUpstreamConnectTimeout"),
 		withValueType(ValueTypeInteger),

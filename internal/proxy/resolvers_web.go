@@ -323,23 +323,6 @@ func (g *Generator) makeLogoutRedirectResolver(configKey string) func(context.Co
 	}
 }
 
-// resolveMemcacheServers returns the list of memcache servers
-func (g *Generator) resolveMemcacheServers(ctx context.Context) (any, error) {
-	servers, err := g.getAllMemcachedServers(ctx)
-	if err != nil {
-		if g.ldapConfigured() {
-			return nil, fmt.Errorf("resolve memcache servers: %w", err)
-		}
-
-		// Offline rendering has no server source: render no memcache servers.
-		logger.WarnContext(ctx, resolverQueryFailed, "error", err)
-
-		return "", nil
-	}
-
-	return formatMemcacheServers(servers), nil
-}
-
 // ============================================================================
 // Error Pages Resolver
 // ============================================================================

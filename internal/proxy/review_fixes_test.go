@@ -161,9 +161,6 @@ func TestLDAPFailureFailsClosed(t *testing.T) {
 		_, err := g.resolveWebAvailable(ctx)
 		require.Error(t, err)
 
-		_, err = g.resolveMemcacheServers(ctx)
-		require.Error(t, err)
-
 		_, err = tp.getServersWithService(ctx, "mailbox")
 		require.Error(t, err)
 
@@ -182,10 +179,6 @@ func TestLDAPFailureFailsClosed(t *testing.T) {
 		got, err := g.resolveWebAvailable(ctx)
 		require.NoError(t, err)
 		assert.Equal(t, false, got)
-
-		got, err = g.resolveMemcacheServers(ctx)
-		require.NoError(t, err)
-		assert.Equal(t, "", got)
 	})
 }
 

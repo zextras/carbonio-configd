@@ -82,9 +82,6 @@ func (g *Generator) RegisterVariables(_ context.Context) {
 
 	// Throttling and rate limit variables
 	g.registerThrottlingVariables()
-
-	// XMPP/Bosh variables
-	g.registerXMPPVariables()
 }
 
 // lookupAttr returns the value of attr from data.
