@@ -23,27 +23,18 @@ const (
 	zimbraMailPortAttr                 = "zimbraMailPort"
 	zimbraMailSSLPortAttr              = "zimbraMailSSLPort"
 	zimbraServiceEnabledAttr           = "zimbraServiceEnabled"
-	zimbraMemcachedBindPortAttr        = "zimbraMemcachedBindPort"
 	localhostName                      = "localhost"
 	mailModeHTTP                       = "http"
 	mailModeMixed                      = "mixed"
 	mailModeHTTPS                      = "https"
 	mailModeRedirect                   = "redirect"
-	memcachedService                   = "memcached"
 	defaultMailPort                    = 80
 	defaultMailSSLPort                 = 443
-	defaultMemcachedPort               = 11211
 )
 
 // errNativeLDAPClientNotInitialized is returned when a native-LDAP-backed
 // lookup is attempted without a configured LdapClient/NativeClient.
 var errNativeLDAPClientNotInitialized = errors.New("native LDAP client not initialized")
-
-// MemcacheServer represents a memcached server
-type MemcacheServer struct {
-	Hostname string // zimbraServiceHostname
-	Port     int    // zimbraMemcachedBindPort
-}
 
 // buildReverseProxyBackends filters byHost (as returned by
 // getServerAttrsByHostname) down to servers that qualify as reverse proxy
@@ -223,81 +214,4 @@ func (g *Generator) backendsByParams(ssl bool) backendParams {
 	}
 
 	return p
-}
-
-// buildMemcachedServers filters byHost (as returned by
-// getServerAttrsByHostname) down to servers that have the memcached service
-// enabled (zimbraServiceEnabled contains "memcached") and a non-empty
-// zimbraServiceHostname. Results are sorted by hostname.
-func buildMemcachedServers(byHost map[string]map[string]string) []MemcacheServer {
-	var servers []MemcacheServer
-
-	for _, attrs := range byHost {
-		hostname := attrs[zimbraServiceHostnameAttr]
-		if hostname == "" || !serverEnablesAnyService(attrs, []string{memcachedService}) {
-			continue
-		}
-
-		if port := atoiOr(attrs[zimbraMemcachedBindPortAttr], defaultMemcachedPort); port > 0 {
-			servers = append(servers, MemcacheServer{Hostname: hostname, Port: port})
-		}
-	}
-
-	slices.SortFunc(servers, func(a, b MemcacheServer) int { return strings.Compare(a.Hostname, b.Hostname) })
-
-	return servers
-}
-
-// getAllMemcachedServers queries all memcached servers
-// This is equivalent to the Jython gamcs() function
-// Results are cached to avoid repeated expensive LDAP calls.
-func (g *Generator) getAllMemcachedServers(ctx context.Context) ([]MemcacheServer, error) {
-	if g.upstreamCache != nil {
-		g.upstreamCache.mu.Lock()
-		defer g.upstreamCache.mu.Unlock()
-	}
-
-	// Check cache first
-	if g.upstreamCache != nil && g.upstreamCache.memcachedPopulated {
-		logger.DebugContext(ctx, "Using cached memcached servers",
-			"server_count", len(g.upstreamCache.memcachedServers))
-
-		return g.upstreamCache.memcachedServers, nil
-	}
-
-	logger.DebugContext(ctx, "Querying all memcached servers (cache miss)")
-
-	byHost, err := g.serverAttrsForQuery(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	servers := buildMemcachedServers(byHost)
-
-	logger.DebugContext(ctx, "Found memcached servers",
-		"server_count", len(servers))
-
-	// Cache the result
-	if g.upstreamCache != nil {
-		g.upstreamCache.memcachedServers = servers
-		g.upstreamCache.memcachedPopulated = true
-	}
-
-	return servers, nil
-}
-
-// formatMemcacheServers formats memcache servers for nginx config
-// Returns server directive lines without indentation: the template renderer
-// indents continuation lines to the placeholder's column.
-func formatMemcacheServers(servers []MemcacheServer) string {
-	if len(servers) == 0 {
-		return ""
-	}
-
-	lines := make([]string, 0, len(servers))
-	for _, s := range servers {
-		lines = append(lines, fmt.Sprintf("servers   %s:%d;", s.Hostname, s.Port))
-	}
-
-	return strings.Join(lines, "\n")
 }

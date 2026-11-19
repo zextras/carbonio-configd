@@ -44,7 +44,6 @@ func TestUpstreamQueriesAreCached(t *testing.T) {
 		zimbraMailPortAttr:                 "8080",
 		zimbraMailSSLPortAttr:              "8443",
 		zimbraServiceEnabledAttr:           "memcached",
-		zimbraMemcachedBindPortAttr:        "11211",
 	}
 
 	g := &Generator{
@@ -58,13 +57,8 @@ func TestUpstreamQueriesAreCached(t *testing.T) {
 	backendsSSL, err := g.getAllReverseProxyBackendsSSL(ctx)
 	require.NoError(t, err)
 
-	memcached, err := g.getAllMemcachedServers(ctx)
-	require.NoError(t, err)
-	require.Len(t, memcached, 1)
-
 	// Mutate the source: cached lists must not change.
 	attrs[zimbraServiceHostnameAttr] = "changed.example.com"
-	attrs[zimbraMemcachedBindPortAttr] = "1"
 
 	backends2, err := g.getAllReverseProxyBackends(ctx)
 	require.NoError(t, err)
@@ -73,8 +67,4 @@ func TestUpstreamQueriesAreCached(t *testing.T) {
 	backendsSSL2, err := g.getAllReverseProxyBackendsSSL(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, backendsSSL, backendsSSL2)
-
-	memcached2, err := g.getAllMemcachedServers(ctx)
-	require.NoError(t, err)
-	assert.Equal(t, memcached, memcached2)
 }

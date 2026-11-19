@@ -191,57 +191,6 @@ func TestLookupTargetsFallBackToLookupTargetServers(t *testing.T) {
 	}
 }
 
-// TestResolveMemcacheServers tests resolveMemcacheServers with cached data
-func TestResolveMemcacheServers(t *testing.T) {
-	t.Run("returns formatted memcache servers from cache", func(t *testing.T) {
-		g := &Generator{
-			env: sys.Real(),
-			upstreamCache: &upstreamQueryCache{
-				memcachedPopulated: true,
-				memcachedServers: []MemcacheServer{
-					{Hostname: "mc1.example.com", Port: 11211},
-					{Hostname: "mc2.example.com", Port: 11212},
-				},
-			},
-		}
-		result, err := g.resolveMemcacheServers(context.Background())
-		if err != nil {
-			t.Fatalf("resolveMemcacheServers failed: %v", err)
-		}
-		str, ok := result.(string)
-		if !ok {
-			t.Fatalf("expected string, got %T", result)
-		}
-		if !strings.Contains(str, "mc1.example.com:11211") {
-			t.Errorf("expected mc1 in result, got %q", str)
-		}
-		if !strings.Contains(str, "mc2.example.com:11212") {
-			t.Errorf("expected mc2 in result, got %q", str)
-		}
-	})
-
-	t.Run("returns empty string when no servers in cache", func(t *testing.T) {
-		g := &Generator{
-			env: sys.Real(),
-			upstreamCache: &upstreamQueryCache{
-				memcachedPopulated: true,
-				memcachedServers:   []MemcacheServer{},
-			},
-		}
-		result, err := g.resolveMemcacheServers(context.Background())
-		if err != nil {
-			t.Fatalf("resolveMemcacheServers failed: %v", err)
-		}
-		str, ok := result.(string)
-		if !ok {
-			t.Fatalf("expected string, got %T", result)
-		}
-		if str != "" {
-			t.Errorf("expected empty string, got %q", str)
-		}
-	})
-}
-
 // TestResolveUpstreamFairShmSize tests resolveUpstreamFairShmSize branches
 func TestResolveUpstreamFairShmSize(t *testing.T) {
 	t.Run("returns default 32k when not configured", func(t *testing.T) {

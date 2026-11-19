@@ -6,12 +6,6 @@ package proxy
 
 // registerMemcacheVariables registers memcache configuration variables
 func (g *Generator) registerMemcacheVariables() {
-	g.registerVar("memcache.:servers", "",
-		withValueType(ValueTypeCustom),
-		withOverrideType(OverrideCustom),
-		withDescription("List of memcache servers"),
-		withCustomResolver(g.resolveMemcacheServers),
-	)
 	g.registerVar("memcache.timeout", "3000ms",
 		withAttribute("zimbraReverseProxyCacheFetchTimeout"),
 		withValueType(ValueTypeTime),
@@ -29,10 +23,5 @@ func (g *Generator) registerMemcacheVariables() {
 		withValueType(ValueTypeTime),
 		withOverrideType(OverrideConfig),
 		withDescription("Memcache entry time-to-live"),
-	)
-	g.registerVar("memcache.servers", []string{},
-		withOverrideType(OverrideConfig),
-		withDescription("List of memcached servers for route caching"),
-		withCustomResolver(g.resolveMemcacheServers),
 	)
 }

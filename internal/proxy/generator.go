@@ -463,13 +463,6 @@ func (g *Generator) PrefetchUpstreamData(ctx context.Context) error {
 		}, errChan)
 	})
 
-	// Prefetch getAllMemcachedServers
-	wg.Go(func() {
-		g.prefetchOperation(ctx, "getAllMemcachedServers", func() (any, error) {
-			return g.getAllMemcachedServers(ctx)
-		}, errChan)
-	})
-
 	// Wait for all prefetch operations to complete
 	wg.Wait()
 	close(errChan)

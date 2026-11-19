@@ -257,17 +257,14 @@ type upstreamQueryCache struct {
 	reverseProxyBackends []UpstreamServer
 	// reverseProxyBackendsSSL caches getAllReverseProxyBackendsSSL() result
 	reverseProxyBackendsSSL []UpstreamServer
-	// memcachedServers caches getAllMemcachedServers() result
-	memcachedServers []MemcacheServer
 	// serverAttrsByHost caches all servers indexed by zimbraServiceHostname with
 	// their full attribute maps, used by the Java-faithful upstream resolvers.
 	serverAttrsByHost map[string]map[string]string
-	// backendsPopulated, backendsSSLPopulated and memcachedPopulated record, per
+	// backendsPopulated and backendsSSLPopulated record, per
 	// list, whether the corresponding query already ran. They are independent:
 	// a shared flag made whichever list was requested second return empty.
 	backendsPopulated    bool
 	backendsSSLPopulated bool
-	memcachedPopulated   bool
 	// mu serialises cache reads/writes (PrefetchUpstreamData queries concurrently).
 	mu sync.Mutex
 	// attrsMu guards serverAttrsByHost.

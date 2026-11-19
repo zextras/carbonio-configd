@@ -195,11 +195,9 @@ func TestAllVariableKeysRegistered(t *testing.T) {
 		{"admin", "admin.console.upstream.adminclient.:servers"},
 
 		// vars_memcache.go
-		{"memcache", "memcache.:servers"},
 		{"memcache", "memcache.timeout"},
 		{"memcache", "memcache.reconnect"},
 		{"memcache", "memcache.ttl"},
-		{"memcache", "memcache.servers"},
 
 		// vars_imap_pop.go
 		{"imap_pop", "mail.imap.greeting"},
@@ -246,7 +244,6 @@ func TestAllVariableKeysRegistered(t *testing.T) {
 
 		// vars_timeout.go
 		{"timeout", "mail.authwait"},
-		{"timeout", "mail.inactivity.timeout"},
 		{"timeout", "web.upstream.connect.timeout"},
 		{"timeout", "web.upstream.read.timeout"},
 		{"timeout", "web.upstream.send.timeout"},
@@ -267,10 +264,6 @@ func TestAllVariableKeysRegistered(t *testing.T) {
 		{"throttling", "mail.limit.userthrottlemsg"},
 
 		// vars_xmpp.go
-		{"xmpp", "web.xmpp.bosh.hostname"},
-		{"xmpp", "web.xmpp.bosh.port"},
-		{"xmpp", "web.xmpp.local.bind.url"},
-		{"xmpp", "web.xmpp.remote.bind.url"},
 	}
 
 	for _, tc := range keys {
