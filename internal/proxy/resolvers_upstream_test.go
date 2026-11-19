@@ -115,7 +115,9 @@ func TestLookupTargetsFallBackToLookupTargetServers(t *testing.T) {
 			zimbraMailModeAttr: "http", zimbraMailPortAttr: "0", "zimbraExtensionBindPort": "9090",
 		},
 		"127.0.0.3": {zimbraServiceHostnameAttr: "127.0.0.3", zimbraReverseProxyLookupTargetAttr: "TRUE"},
-		"127.0.0.4": {zimbraServiceHostnameAttr: "127.0.0.4", zimbraReverseProxyLookupTargetAttr: "FALSE"},
+		"127.0.0.4": {
+			zimbraServiceHostnameAttr: "127.0.0.4", zimbraReverseProxyLookupTargetAttr: "FALSE", extensionBindPortAttr: "9091",
+		},
 	}
 
 	tests := []struct {
@@ -134,10 +136,13 @@ func TestLookupTargetsFallBackToLookupTargetServers(t *testing.T) {
 			wantAvailable: true,
 		},
 		{
-			name:          "global list wins over discovery",
-			globalData:    map[string]string{"zimbraReverseProxyAvailableLookupTargets": "127.0.0.9"},
+			name: "explicit list uses mailbox port regardless of lookup flag and global port for unknown host",
+			globalData: map[string]string{
+				"zimbraReverseProxyAvailableLookupTargets": "127.0.0.4\n127.0.0.9",
+				extensionBindPortAttr:                      "7073",
+			},
 			lookupServers: lookupTargets,
-			wantHandlers:  fmt.Sprintf(handler, "127.0.0.9:7072"),
+			wantHandlers:  fmt.Sprintf(handler, "127.0.0.4:9091") + " " + fmt.Sprintf(handler, "127.0.0.9:7073"),
 			wantAvailable: true,
 		},
 		{

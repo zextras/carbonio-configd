@@ -121,14 +121,20 @@ func lookupPort(ctx context.Context, port, fallback string) string {
 func (g *Generator) lookupTargets(ctx context.Context) ([]lookupTarget, error) {
 	rawHosts, _ := g.getConfigValue("zimbraReverseProxyAvailableLookupTargets", sourceServer, sourceGlobal)
 	if strings.TrimSpace(rawHosts) != "" {
+		// LDAP joins multi-valued targets with newlines; leaving them in a URL breaks nginx (CO-3565).
 		hosts := validLookupHosts(ctx, strings.Fields(normalizeMultiValue(rawHosts)))
 		if len(hosts) == 0 {
 			return nil, fmt.Errorf("zimbraReverseProxyAvailableLookupTargets has no valid host")
 		}
 
+		byHost, err := g.getServerAttrsByHostname(ctx)
+		if err != nil {
+			logger.WarnContext(ctx, "Cannot read mailbox extension ports; using fallback for explicit lookup targets", "error", err)
+		}
+
 		targets := make([]lookupTarget, 0, len(hosts))
 		for _, host := range hosts {
-			targets = append(targets, lookupTarget{host: host})
+			targets = append(targets, lookupTarget{host: host, port: byHost[host][extensionBindPortAttr]})
 		}
 
 		return targets, nil
