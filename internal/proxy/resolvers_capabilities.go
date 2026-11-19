@@ -129,7 +129,7 @@ func (g *Generator) lookupTargets(ctx context.Context) ([]lookupTarget, error) {
 
 		byHost, err := g.getServerAttrsByHostname(ctx)
 		if err != nil {
-			logger.WarnContext(ctx, "Cannot read mailbox extension ports; using fallback for explicit lookup targets", "error", err)
+			logger.WarnContext(ctx, "Cannot read mailbox extension ports; using fallback ports", "error", err)
 		}
 
 		targets := make([]lookupTarget, 0, len(hosts))
