@@ -66,87 +66,95 @@ const compressionMIMETypes = `    application/atom+xml
 
 // resolveLookupHandlers constructs the nginx zm_lookup_handlers value as a
 // space-separated list of "https://<host>:<port>/service/extension/nginx-lookup"
-// URLs, one per lookup target (see lookupTargetHosts).
-//
-// LDAP multi-valued attributes arrive joined with newlines (entryToMap in
-// internal/ldap), so the raw value can carry several hostnames. The earlier
-// implementation treated the whole blob as a single hostname, which produced
-// `https://<host1>\n<host2>:7072/...` in nginx.conf.zmlookup and made nginx
-// fail to start with "invalid URL prefix" — same multi-token-not-split family
-// as CO-3565.
+// URLs, one per lookup target.
 func (g *Generator) resolveLookupHandlers(ctx context.Context) (any, error) {
-	extensionPort := "7072"
-
-	if val, ok := g.getConfigValue("zimbraExtensionBindPort", sourceGlobal); ok {
-		if validPort(val) {
-			extensionPort = val
-		} else {
-			logger.ErrorContext(ctx, "Ignoring invalid extension bind port, using default",
-				"port", truncateForLog(val))
-		}
-	}
-
-	hosts, err := g.lookupTargetHosts(ctx)
+	targets, err := g.lookupTargets(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	if len(hosts) == 0 {
-		if val, ok := g.getConfigValue("zimbra_server_hostname", sourceLocal); ok && val != "" {
-			hosts = validLookupHosts(ctx, []string{val})
+	if len(targets) == 0 {
+		host := loopbackIPv4
+
+		if val, ok := g.getConfigValue("zimbra_server_hostname", sourceLocal); ok {
+			if hosts := validLookupHosts(ctx, []string{val}); len(hosts) != 0 {
+				host = hosts[0]
+			}
 		}
+
+		targets = []lookupTarget{{host: host}}
 	}
 
-	if len(hosts) == 0 {
-		hosts = []string{loopbackIPv4}
-	}
+	globalPort, _ := g.getConfigValue(extensionBindPortAttr, sourceGlobal)
+	defaultPort := lookupPort(ctx, globalPort, "7072")
+	urls := make([]string, 0, len(targets))
 
-	urls := make([]string, 0, len(hosts))
-	for _, host := range hosts {
-		urls = append(urls, fmt.Sprintf(
-			"https://%s:%s/service/extension/nginx-lookup",
-			resolveHostToIP(ctx, host),
-			extensionPort,
-		))
+	for _, target := range targets {
+		urls = append(urls, fmt.Sprintf("https://%s:%s/service/extension/nginx-lookup",
+			resolveHostToIP(ctx, target.host), lookupPort(ctx, target.port, defaultPort)))
 	}
 
 	return strings.Join(urls, " "), nil
 }
 
-// lookupTargetHosts returns the hosts that serve nginx route lookups: the
-// values of zimbraReverseProxyAvailableLookupTargets when set, otherwise every
-// server with zimbraReverseProxyLookupTarget=TRUE, as the legacy
-// ZMLookupHandlerVar did. Without that fallback a proxy on its own node gets
-// no lookup handler although the mailboxes are lookup targets.
-// An empty result means there is no lookup target.
-func (g *Generator) lookupTargetHosts(ctx context.Context) ([]string, error) {
-	rawHosts, _ := g.getConfigValue("zimbraReverseProxyAvailableLookupTargets", sourceGlobal)
+const extensionBindPortAttr = "zimbraExtensionBindPort"
+
+type lookupTarget struct {
+	host string
+	port string // Empty means inherit the global extension port.
+}
+
+func lookupPort(ctx context.Context, port, fallback string) string {
+	if port != "" {
+		if validPort(port) {
+			return port
+		}
+
+		logger.ErrorContext(ctx, "Ignoring invalid extension bind port", "port", truncateForLog(port))
+	}
+
+	return fallback
+}
+
+// lookupTargets respects an explicit list without requiring LDAP. Discovery
+// uses the extension listener, independent of the mailbox's HTTP(S) port.
+func (g *Generator) lookupTargets(ctx context.Context) ([]lookupTarget, error) {
+	rawHosts, _ := g.getConfigValue("zimbraReverseProxyAvailableLookupTargets", sourceServer, sourceGlobal)
 	if strings.TrimSpace(rawHosts) != "" {
+		// LDAP joins multi-valued targets with newlines; leaving them in a URL breaks nginx (CO-3565).
 		hosts := validLookupHosts(ctx, strings.Fields(normalizeMultiValue(rawHosts)))
 		if len(hosts) == 0 {
 			return nil, fmt.Errorf("zimbraReverseProxyAvailableLookupTargets has no valid host")
 		}
 
-		return hosts, nil
-	}
-
-	servers, err := g.reverseProxyBackendsRaw(ctx, false)
-	if err != nil {
-		if g.ldapConfigured() {
-			return nil, fmt.Errorf("query lookup target servers: %w", err)
+		byHost, err := g.getServerAttrsByHostname(ctx)
+		if err != nil {
+			logger.WarnContext(ctx, "Cannot read mailbox extension ports; using fallback ports", "error", err)
 		}
 
-		logger.WarnContext(ctx, resolverQueryFailed, "error", err)
+		targets := make([]lookupTarget, 0, len(hosts))
+		for _, host := range hosts {
+			targets = append(targets, lookupTarget{host: host, port: byHost[host][extensionBindPortAttr]})
+		}
 
-		return nil, nil
+		return targets, nil
 	}
 
-	hosts := make([]string, 0, len(servers))
-	for _, server := range servers {
-		hosts = append(hosts, server.Host)
+	byHost, err := g.getServerAttrsByHostname(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("query lookup target servers: %w", err)
 	}
 
-	return validLookupHosts(ctx, hosts), nil
+	var targets []lookupTarget
+
+	for _, host := range sortedKeys(byHost) {
+		attrs := byHost[host]
+		if attrs[zimbraServiceHostnameAttr] != "" && strings.EqualFold(attrs[zimbraReverseProxyLookupTargetAttr], "TRUE") {
+			targets = append(targets, lookupTarget{host: host, port: attrs[extensionBindPortAttr]})
+		}
+	}
+
+	return targets, nil
 }
 
 // validLookupHosts drops the hosts that are not plain host tokens, since they
@@ -166,10 +174,7 @@ func validLookupHosts(ctx context.Context, hosts []string) []string {
 // hostLookupTimeout bounds the DNS lookup of one lookup target.
 const hostLookupTimeout = 5 * time.Second
 
-// resolveHostToIP returns the first IPv4 address for host (the legacy
-// InetAddress.getByName preference), else the first address, in URL host form
-// (IPv6 bracketed). It returns host itself when DNS fails. Logs a WARN on
-// lookup failure so an operator can spot a bad entry.
+// resolveHostToIP prefers IPv4, brackets IPv6 for URLs, and keeps the hostname if DNS fails.
 func resolveHostToIP(ctx context.Context, host string) string {
 	ctx, cancel := context.WithTimeout(ctx, hostLookupTimeout)
 	defer cancel()

@@ -106,38 +106,56 @@ func TestResolveLookupHandlers(t *testing.T) {
 	}
 }
 
-// TestLookupTargetsFallBackToLookupTargetServers covers an empty
-// zimbraReverseProxyAvailableLookupTargets on a proxy-only node: like the legacy
-// ZMLookupHandlerVar, the servers with zimbraReverseProxyLookupTarget=TRUE are
-// the lookup handlers, and lookup.available follows them.
 func TestLookupTargetsFallBackToLookupTargetServers(t *testing.T) {
-	const handler = "https://%s:7072/service/extension/nginx-lookup"
+	const handler = "https://%s/service/extension/nginx-lookup"
 
-	lookupTargets := []UpstreamServer{{Host: "127.0.0.2", Port: 8080}, {Host: "127.0.0.3", Port: 8080}}
+	lookupTargets := map[string]map[string]string{
+		"127.0.0.2": {
+			zimbraServiceHostnameAttr: "127.0.0.2", zimbraReverseProxyLookupTargetAttr: "TRUE",
+			zimbraMailModeAttr: "http", zimbraMailPortAttr: "0", "zimbraExtensionBindPort": "9090",
+		},
+		"127.0.0.3": {zimbraServiceHostnameAttr: "127.0.0.3", zimbraReverseProxyLookupTargetAttr: "TRUE"},
+		"127.0.0.4": {
+			zimbraServiceHostnameAttr: "127.0.0.4", zimbraReverseProxyLookupTargetAttr: "FALSE", extensionBindPortAttr: "9091",
+		},
+	}
 
 	tests := []struct {
 		name          string
 		globalData    map[string]string
-		lookupServers []UpstreamServer
+		serverData    map[string]string
+		lookupServers map[string]map[string]string
 		wantHandlers  string
 		wantAvailable bool
 	}{
 		{
-			name:          "empty list uses the lookup target servers",
+			name:          "discovery uses extension ports independently of web ports",
+			globalData:    map[string]string{"zimbraExtensionBindPort": "7073"},
 			lookupServers: lookupTargets,
-			wantHandlers:  fmt.Sprintf(handler, "127.0.0.2") + " " + fmt.Sprintf(handler, "127.0.0.3"),
+			wantHandlers:  fmt.Sprintf(handler, "127.0.0.2:9090") + " " + fmt.Sprintf(handler, "127.0.0.3:7073"),
 			wantAvailable: true,
 		},
 		{
-			name:          "explicit list wins over the lookup target servers",
+			name: "explicit list uses mailbox port regardless of lookup flag and global port for unknown host",
+			globalData: map[string]string{
+				"zimbraReverseProxyAvailableLookupTargets": "127.0.0.4\n127.0.0.9",
+				extensionBindPortAttr:                      "7073",
+			},
+			lookupServers: lookupTargets,
+			wantHandlers:  fmt.Sprintf(handler, "127.0.0.4:9091") + " " + fmt.Sprintf(handler, "127.0.0.9:7073"),
+			wantAvailable: true,
+		},
+		{
+			name:          "proxy list wins over global list and discovery",
+			serverData:    map[string]string{"zimbraReverseProxyAvailableLookupTargets": "127.0.0.8"},
 			globalData:    map[string]string{"zimbraReverseProxyAvailableLookupTargets": "127.0.0.9"},
 			lookupServers: lookupTargets,
-			wantHandlers:  fmt.Sprintf(handler, "127.0.0.9"),
+			wantHandlers:  fmt.Sprintf(handler, "127.0.0.8:7072"),
 			wantAvailable: true,
 		},
 		{
 			name:          "no lookup target keeps the local hostname and is unavailable",
-			wantHandlers:  fmt.Sprintf(handler, "127.0.0.1"),
+			wantHandlers:  fmt.Sprintf(handler, "127.0.0.7:7072"),
 			wantAvailable: false,
 		},
 	}
@@ -147,10 +165,11 @@ func TestLookupTargetsFallBackToLookupTargetServers(t *testing.T) {
 			g := &Generator{
 				env:          sys.Real(),
 				GlobalConfig: &config.GlobalConfig{Data: configtest.NewConfigMapFrom(tt.globalData)},
+				ServerConfig: &config.ServerConfig{Data: configtest.NewConfigMapFrom(tt.serverData)},
 				LocalConfig: &config.LocalConfig{Data: configtest.NewConfigMapFrom(map[string]string{
-					"zimbra_server_hostname": "127.0.0.1",
+					"zimbra_server_hostname": "127.0.0.7",
 				})},
-				upstreamCache: &upstreamQueryCache{backendsPopulated: true, reverseProxyBackends: tt.lookupServers},
+				upstreamCache: &upstreamQueryCache{serverAttrsByHost: tt.lookupServers},
 			}
 
 			handlers, err := g.resolveLookupHandlers(context.Background())

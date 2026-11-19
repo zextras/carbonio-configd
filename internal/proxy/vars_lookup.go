@@ -22,7 +22,7 @@ func (g *Generator) registerLookupVariables() {
 	g.registerVar("lookup.available", false,
 		withValueType(ValueTypeEnabler),
 		withOverrideType(OverrideCustom),
-		withDescription("Whether at least one lookup handler is configured (legacy ZMLookupAvailableVar)"),
+		withDescription("Whether at least one lookup target is available"),
 		withCustomResolver(g.resolveLookupAvailable),
 	)
 	g.registerVar("lookup.caching.enabled", true,
