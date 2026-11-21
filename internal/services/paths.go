@@ -130,6 +130,14 @@ func newPaths(base, run string) paths {
 	return p
 }
 
+// appserverState is the state directory of the mailbox JVM (the
+// StateDirectory of carbonio-appserver.service on systemd hosts): the java
+// argument file, the AOT cache and its log. Legacy hosts have
+// no systemd to create it; data is group-writable for zextras.
+func (p *paths) appserverState() string {
+	return p.data + "/carbonio-appserver"
+}
+
 // sdNotifySocket returns the NOTIFY_SOCKET path used for a service. The path
 // is service-addressable (not per-invocation) so the stop-side listener can
 // recreate it and receive STOPPING=1 datagrams from the daemon started by an

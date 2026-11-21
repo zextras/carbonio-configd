@@ -453,8 +453,15 @@ func (c *Controller) defaultRegistry() map[string]*ServiceDef {
 				Label:   svcMailbox,
 				LogFile: c.p.log + "/zmmailboxd.out",
 				Args:    c.mailboxJavaArgs,
-				Mkdirs:  []string{c.p.mailboxd + "/work/service/jsp", c.p.mailboxd + "/work"},
-				Touch:   []string{c.p.log + "/gc.log"},
+				Mkdirs: []string{
+					c.p.mailboxd + "/work/service/jsp", c.p.mailboxd + "/work", c.p.appserverState(),
+				},
+				Touch: []string{c.p.log + "/gc.log"},
+				// Flat class path and AOT cache (JDK 25+), as
+				// carbonio-appserver.service does; a failed preparation starts
+				// the JVM with the previous command line.
+				Prepare:      c.prepareMailboxAOT,
+				FallbackArgs: c.mailboxJavaArgsFallback,
 			},
 			// Start returns once the mail port accepts connections (legacy
 			// zmmailboxdctl start).

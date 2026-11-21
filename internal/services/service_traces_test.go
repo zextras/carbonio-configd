@@ -117,6 +117,22 @@ func (h *traceHost) install() {
 	}
 
 	f.FS.Put("/fake/java/bin/java", []byte("x"), 0o755)
+	f.FS.Put("/fake/java/lib/modules", []byte("modules"), 0o644)
+	f.FS.Put("/fake/java/lib/server/libjvm.so", []byte("libjvm"), 0o755)
+	f.FS.Put("/fake/java/release", []byte("JAVA_VERSION=\"25.0.1\"\n"), 0o644)
+
+	// The fake tree has no implicit directories for reads: the ones the mailbox
+	// launch lists, walks and resolves must exist.
+	for _, dir := range []string{
+		"/fake", "/fake/java", "/fake/java/bin", "/fake/java/lib", "/fake/java/lib/server",
+		ctl.p.mailbox + "/jars", ctl.p.lib + "/ext", ctl.p.lib + "/ext/carbonio",
+	} {
+		f.FS.PutDir(dir, 0o755)
+	}
+
+	f.FS.Put(ctl.p.mailbox+"/jars/mailbox.jar", []byte("mailbox"), 0o644)
+	f.FS.Put(ctl.p.mailbox+"/jars/zimbra-common.jar", []byte("common"), 0o644)
+	f.FS.Put(ctl.p.lib+"/ext/carbonio/ext.jar", []byte("ext"), 0o644)
 	f.FS.Put(ctl.p.common+"/sbin/amavisd", []byte("x"), 0o755)
 	f.FS.Put(ctl.p.aliases, []byte("root: admin\n"), 0o644)
 	f.FS.Put(ctl.p.cacheFile, []byte("antispam\nmailbox\n"), 0o644)

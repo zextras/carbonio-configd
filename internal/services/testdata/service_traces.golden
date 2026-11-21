@@ -351,9 +351,13 @@ fs.open /opt/zextras/log/mysqld_safe_appserver-db.out flag=0x441 perm=0640
 exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/my.cnf --external-locking --log-error=/opt/zextras/log/mysql_error.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
 fs.mkdir /opt/zextras/mailboxd/work/service/jsp mode=0755
 fs.mkdir /opt/zextras/mailboxd/work mode=0755
+fs.mkdir /opt/zextras/data/carbonio-appserver mode=0755
+fs.remove /opt/zextras/data/carbonio-appserver/mailboxd.aot
+fs.write-atomic /opt/zextras/data/carbonio-appserver/mailboxd.aot.inputs mode=0644
+fs.write-atomic /opt/zextras/data/carbonio-appserver/mailboxd.args mode=0644
 fs.open /opt/zextras/log/gc.log flag=0x41 perm=0640
 fs.open /opt/zextras/log/zmmailboxd.out flag=0x441 perm=0640
-exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -Dfile.encoding=UTF-8 -Xss256k -Dsun.net.inetaddr.ttl=60 -Xms1024m -Xmx1024m -Djava.io.tmpdir=/opt/zextras/mailboxd/work -Djava.library.path=/opt/zextras/lib -Dzimbra.config=/opt/zextras/conf/localconfig.xml -cp /opt/zextras/mailbox/jars/mailbox.jar:/opt/zextras/mailbox/jars/* com.zextras.mailbox.Mailbox
+exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -Dfile.encoding=UTF-8 -Xss256k -Dsun.net.inetaddr.ttl=60 -Xms1024m -Xmx1024m -Djava.io.tmpdir=/opt/zextras/mailboxd/work -Djava.library.path=/opt/zextras/lib -Dzimbra.config=/opt/zextras/conf/localconfig.xml @/opt/zextras/data/carbonio-appserver/mailboxd.args com.zextras.mailbox.Mailbox
 => ok
 
 ## store | legacy start running
@@ -387,9 +391,13 @@ fs.open /opt/zextras/log/mysqld_safe_appserver-db.out flag=0x441 perm=0640
 exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/my.cnf --external-locking --log-error=/opt/zextras/log/mysql_error.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
 fs.mkdir /opt/zextras/mailboxd/work/service/jsp mode=0755
 fs.mkdir /opt/zextras/mailboxd/work mode=0755
+fs.mkdir /opt/zextras/data/carbonio-appserver mode=0755
+fs.remove /opt/zextras/data/carbonio-appserver/mailboxd.aot
+fs.write-atomic /opt/zextras/data/carbonio-appserver/mailboxd.aot.inputs mode=0644
+fs.write-atomic /opt/zextras/data/carbonio-appserver/mailboxd.args mode=0644
 fs.open /opt/zextras/log/gc.log flag=0x41 perm=0640
 fs.open /opt/zextras/log/zmmailboxd.out flag=0x441 perm=0640
-exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -Dfile.encoding=UTF-8 -Xss256k -Dsun.net.inetaddr.ttl=60 -Xms1024m -Xmx1024m -Djava.io.tmpdir=/opt/zextras/mailboxd/work -Djava.library.path=/opt/zextras/lib -Dzimbra.config=/opt/zextras/conf/localconfig.xml -cp /opt/zextras/mailbox/jars/mailbox.jar:/opt/zextras/mailbox/jars/* com.zextras.mailbox.Mailbox
+exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -Dfile.encoding=UTF-8 -Xss256k -Dsun.net.inetaddr.ttl=60 -Xms1024m -Xmx1024m -Djava.io.tmpdir=/opt/zextras/mailboxd/work -Djava.library.path=/opt/zextras/lib -Dzimbra.config=/opt/zextras/conf/localconfig.xml @/opt/zextras/data/carbonio-appserver/mailboxd.args com.zextras.mailbox.Mailbox
 => ok
 
 ## store | legacy reload running
@@ -403,9 +411,13 @@ fs.open /opt/zextras/log/mysqld_safe_appserver-db.out flag=0x441 perm=0640
 exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/my.cnf --external-locking --log-error=/opt/zextras/log/mysql_error.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
 fs.mkdir /opt/zextras/mailboxd/work/service/jsp mode=0755
 fs.mkdir /opt/zextras/mailboxd/work mode=0755
+fs.mkdir /opt/zextras/data/carbonio-appserver mode=0755
+fs.remove /opt/zextras/data/carbonio-appserver/mailboxd.aot
+fs.write-atomic /opt/zextras/data/carbonio-appserver/mailboxd.aot.inputs mode=0644
+fs.write-atomic /opt/zextras/data/carbonio-appserver/mailboxd.args mode=0644
 fs.open /opt/zextras/log/gc.log flag=0x41 perm=0640
 fs.open /opt/zextras/log/zmmailboxd.out flag=0x441 perm=0640
-exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -Dfile.encoding=UTF-8 -Xss256k -Dsun.net.inetaddr.ttl=60 -Xms1024m -Xmx1024m -Djava.io.tmpdir=/opt/zextras/mailboxd/work -Djava.library.path=/opt/zextras/lib -Dzimbra.config=/opt/zextras/conf/localconfig.xml -cp /opt/zextras/mailbox/jars/mailbox.jar:/opt/zextras/mailbox/jars/* com.zextras.mailbox.Mailbox
+exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -Dfile.encoding=UTF-8 -Xss256k -Dsun.net.inetaddr.ttl=60 -Xms1024m -Xmx1024m -Djava.io.tmpdir=/opt/zextras/mailboxd/work -Djava.library.path=/opt/zextras/lib -Dzimbra.config=/opt/zextras/conf/localconfig.xml @/opt/zextras/data/carbonio-appserver/mailboxd.args com.zextras.mailbox.Mailbox
 => ok
 
 ## store | legacy reload stopped
@@ -417,9 +429,13 @@ fs.open /opt/zextras/log/mysqld_safe_appserver-db.out flag=0x441 perm=0640
 exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/my.cnf --external-locking --log-error=/opt/zextras/log/mysql_error.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
 fs.mkdir /opt/zextras/mailboxd/work/service/jsp mode=0755
 fs.mkdir /opt/zextras/mailboxd/work mode=0755
+fs.mkdir /opt/zextras/data/carbonio-appserver mode=0755
+fs.remove /opt/zextras/data/carbonio-appserver/mailboxd.aot
+fs.write-atomic /opt/zextras/data/carbonio-appserver/mailboxd.aot.inputs mode=0644
+fs.write-atomic /opt/zextras/data/carbonio-appserver/mailboxd.args mode=0644
 fs.open /opt/zextras/log/gc.log flag=0x41 perm=0640
 fs.open /opt/zextras/log/zmmailboxd.out flag=0x441 perm=0640
-exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -Dfile.encoding=UTF-8 -Xss256k -Dsun.net.inetaddr.ttl=60 -Xms1024m -Xmx1024m -Djava.io.tmpdir=/opt/zextras/mailboxd/work -Djava.library.path=/opt/zextras/lib -Dzimbra.config=/opt/zextras/conf/localconfig.xml -cp /opt/zextras/mailbox/jars/mailbox.jar:/opt/zextras/mailbox/jars/* com.zextras.mailbox.Mailbox
+exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -Dfile.encoding=UTF-8 -Xss256k -Dsun.net.inetaddr.ttl=60 -Xms1024m -Xmx1024m -Djava.io.tmpdir=/opt/zextras/mailboxd/work -Djava.library.path=/opt/zextras/lib -Dzimbra.config=/opt/zextras/conf/localconfig.xml @/opt/zextras/data/carbonio-appserver/mailboxd.args com.zextras.mailbox.Mailbox
 => ok
 
 ## store | legacy start-systemd cold
@@ -427,9 +443,13 @@ fs.open /opt/zextras/log/mysqld_safe_appserver-db.out flag=0x441 perm=0640
 exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/my.cnf --external-locking --log-error=/opt/zextras/log/mysql_error.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
 fs.mkdir /opt/zextras/mailboxd/work/service/jsp mode=0755
 fs.mkdir /opt/zextras/mailboxd/work mode=0755
+fs.mkdir /opt/zextras/data/carbonio-appserver mode=0755
+fs.remove /opt/zextras/data/carbonio-appserver/mailboxd.aot
+fs.write-atomic /opt/zextras/data/carbonio-appserver/mailboxd.aot.inputs mode=0644
+fs.write-atomic /opt/zextras/data/carbonio-appserver/mailboxd.args mode=0644
 fs.open /opt/zextras/log/gc.log flag=0x41 perm=0640
 fs.open /opt/zextras/log/zmmailboxd.out flag=0x441 perm=0640
-exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -Dfile.encoding=UTF-8 -Xss256k -Dsun.net.inetaddr.ttl=60 -Xms1024m -Xmx1024m -Djava.io.tmpdir=/opt/zextras/mailboxd/work -Djava.library.path=/opt/zextras/lib -Dzimbra.config=/opt/zextras/conf/localconfig.xml -cp /opt/zextras/mailbox/jars/mailbox.jar:/opt/zextras/mailbox/jars/* com.zextras.mailbox.Mailbox
+exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -Dfile.encoding=UTF-8 -Xss256k -Dsun.net.inetaddr.ttl=60 -Xms1024m -Xmx1024m -Djava.io.tmpdir=/opt/zextras/mailboxd/work -Djava.library.path=/opt/zextras/lib -Dzimbra.config=/opt/zextras/conf/localconfig.xml @/opt/zextras/data/carbonio-appserver/mailboxd.args com.zextras.mailbox.Mailbox
 => ok
 
 ## store | legacy stop-systemd running
@@ -484,9 +504,13 @@ fs.open /opt/zextras/log/mysqld_safe_appserver-db.out flag=0x441 perm=0640
 exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf/my.cnf --external-locking --log-error=/opt/zextras/log/mysql_error.log --malloc-lib=/opt/zextras/common/lib/libjemalloc.so --ledir=/opt/zextras/common/sbin
 fs.mkdir /opt/zextras/mailboxd/work/service/jsp mode=0755
 fs.mkdir /opt/zextras/mailboxd/work mode=0755
+fs.mkdir /opt/zextras/data/carbonio-appserver mode=0755
+fs.remove /opt/zextras/data/carbonio-appserver/mailboxd.aot
+fs.write-atomic /opt/zextras/data/carbonio-appserver/mailboxd.aot.inputs mode=0644
+fs.write-atomic /opt/zextras/data/carbonio-appserver/mailboxd.args mode=0644
 fs.open /opt/zextras/log/gc.log flag=0x41 perm=0640
 fs.open /opt/zextras/log/zmmailboxd.out flag=0x441 perm=0640
-exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -Dfile.encoding=UTF-8 -Xss256k -Dsun.net.inetaddr.ttl=60 -Xms1024m -Xmx1024m -Djava.io.tmpdir=/opt/zextras/mailboxd/work -Djava.library.path=/opt/zextras/lib -Dzimbra.config=/opt/zextras/conf/localconfig.xml -cp /opt/zextras/mailbox/jars/mailbox.jar:/opt/zextras/mailbox/jars/* com.zextras.mailbox.Mailbox
+exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -Dfile.encoding=UTF-8 -Xss256k -Dsun.net.inetaddr.ttl=60 -Xms1024m -Xmx1024m -Djava.io.tmpdir=/opt/zextras/mailboxd/work -Djava.library.path=/opt/zextras/lib -Dzimbra.config=/opt/zextras/conf/localconfig.xml @/opt/zextras/data/carbonio-appserver/mailboxd.args com.zextras.mailbox.Mailbox
 => ok
 
 ## store | systemd stop-systemd
@@ -502,9 +526,13 @@ exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf
 exec /opt/zextras/libexec/configrewrite sasl mailbox
 fs.mkdir /opt/zextras/mailboxd/work/service/jsp mode=0755
 fs.mkdir /opt/zextras/mailboxd/work mode=0755
+fs.mkdir /opt/zextras/data/carbonio-appserver mode=0755
+fs.remove /opt/zextras/data/carbonio-appserver/mailboxd.aot
+fs.write-atomic /opt/zextras/data/carbonio-appserver/mailboxd.aot.inputs mode=0644
+fs.write-atomic /opt/zextras/data/carbonio-appserver/mailboxd.args mode=0644
 fs.open /opt/zextras/log/gc.log flag=0x41 perm=0640
 fs.open /opt/zextras/log/zmmailboxd.out flag=0x441 perm=0640
-exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -Dfile.encoding=UTF-8 -Xss256k -Dsun.net.inetaddr.ttl=60 -Xms1024m -Xmx1024m -Djava.io.tmpdir=/opt/zextras/mailboxd/work -Djava.library.path=/opt/zextras/lib -Dzimbra.config=/opt/zextras/conf/localconfig.xml -cp /opt/zextras/mailbox/jars/mailbox.jar:/opt/zextras/mailbox/jars/* com.zextras.mailbox.Mailbox
+exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -Dfile.encoding=UTF-8 -Xss256k -Dsun.net.inetaddr.ttl=60 -Xms1024m -Xmx1024m -Djava.io.tmpdir=/opt/zextras/mailboxd/work -Djava.library.path=/opt/zextras/lib -Dzimbra.config=/opt/zextras/conf/localconfig.xml @/opt/zextras/data/carbonio-appserver/mailboxd.args com.zextras.mailbox.Mailbox
 => ok
 
 ## mailbox | legacy start running
@@ -530,34 +558,50 @@ exec.start /opt/zextras/common/bin/mysqld_safe --defaults-file=/opt/zextras/conf
 exec /opt/zextras/libexec/configrewrite sasl mailbox
 fs.mkdir /opt/zextras/mailboxd/work/service/jsp mode=0755
 fs.mkdir /opt/zextras/mailboxd/work mode=0755
+fs.mkdir /opt/zextras/data/carbonio-appserver mode=0755
+fs.remove /opt/zextras/data/carbonio-appserver/mailboxd.aot
+fs.write-atomic /opt/zextras/data/carbonio-appserver/mailboxd.aot.inputs mode=0644
+fs.write-atomic /opt/zextras/data/carbonio-appserver/mailboxd.args mode=0644
 fs.open /opt/zextras/log/gc.log flag=0x41 perm=0640
 fs.open /opt/zextras/log/zmmailboxd.out flag=0x441 perm=0640
-exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -Dfile.encoding=UTF-8 -Xss256k -Dsun.net.inetaddr.ttl=60 -Xms1024m -Xmx1024m -Djava.io.tmpdir=/opt/zextras/mailboxd/work -Djava.library.path=/opt/zextras/lib -Dzimbra.config=/opt/zextras/conf/localconfig.xml -cp /opt/zextras/mailbox/jars/mailbox.jar:/opt/zextras/mailbox/jars/* com.zextras.mailbox.Mailbox
+exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -Dfile.encoding=UTF-8 -Xss256k -Dsun.net.inetaddr.ttl=60 -Xms1024m -Xmx1024m -Djava.io.tmpdir=/opt/zextras/mailboxd/work -Djava.library.path=/opt/zextras/lib -Dzimbra.config=/opt/zextras/conf/localconfig.xml @/opt/zextras/data/carbonio-appserver/mailboxd.args com.zextras.mailbox.Mailbox
 => ok
 
 ## mailbox | legacy reload running
 proc.signal 1001 15
 fs.mkdir /opt/zextras/mailboxd/work/service/jsp mode=0755
 fs.mkdir /opt/zextras/mailboxd/work mode=0755
+fs.mkdir /opt/zextras/data/carbonio-appserver mode=0755
+fs.remove /opt/zextras/data/carbonio-appserver/mailboxd.aot
+fs.write-atomic /opt/zextras/data/carbonio-appserver/mailboxd.aot.inputs mode=0644
+fs.write-atomic /opt/zextras/data/carbonio-appserver/mailboxd.args mode=0644
 fs.open /opt/zextras/log/gc.log flag=0x41 perm=0640
 fs.open /opt/zextras/log/zmmailboxd.out flag=0x441 perm=0640
-exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -Dfile.encoding=UTF-8 -Xss256k -Dsun.net.inetaddr.ttl=60 -Xms1024m -Xmx1024m -Djava.io.tmpdir=/opt/zextras/mailboxd/work -Djava.library.path=/opt/zextras/lib -Dzimbra.config=/opt/zextras/conf/localconfig.xml -cp /opt/zextras/mailbox/jars/mailbox.jar:/opt/zextras/mailbox/jars/* com.zextras.mailbox.Mailbox
+exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -Dfile.encoding=UTF-8 -Xss256k -Dsun.net.inetaddr.ttl=60 -Xms1024m -Xmx1024m -Djava.io.tmpdir=/opt/zextras/mailboxd/work -Djava.library.path=/opt/zextras/lib -Dzimbra.config=/opt/zextras/conf/localconfig.xml @/opt/zextras/data/carbonio-appserver/mailboxd.args com.zextras.mailbox.Mailbox
 => ok
 
 ## mailbox | legacy reload stopped
 fs.mkdir /opt/zextras/mailboxd/work/service/jsp mode=0755
 fs.mkdir /opt/zextras/mailboxd/work mode=0755
+fs.mkdir /opt/zextras/data/carbonio-appserver mode=0755
+fs.remove /opt/zextras/data/carbonio-appserver/mailboxd.aot
+fs.write-atomic /opt/zextras/data/carbonio-appserver/mailboxd.aot.inputs mode=0644
+fs.write-atomic /opt/zextras/data/carbonio-appserver/mailboxd.args mode=0644
 fs.open /opt/zextras/log/gc.log flag=0x41 perm=0640
 fs.open /opt/zextras/log/zmmailboxd.out flag=0x441 perm=0640
-exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -Dfile.encoding=UTF-8 -Xss256k -Dsun.net.inetaddr.ttl=60 -Xms1024m -Xmx1024m -Djava.io.tmpdir=/opt/zextras/mailboxd/work -Djava.library.path=/opt/zextras/lib -Dzimbra.config=/opt/zextras/conf/localconfig.xml -cp /opt/zextras/mailbox/jars/mailbox.jar:/opt/zextras/mailbox/jars/* com.zextras.mailbox.Mailbox
+exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -Dfile.encoding=UTF-8 -Xss256k -Dsun.net.inetaddr.ttl=60 -Xms1024m -Xmx1024m -Djava.io.tmpdir=/opt/zextras/mailboxd/work -Djava.library.path=/opt/zextras/lib -Dzimbra.config=/opt/zextras/conf/localconfig.xml @/opt/zextras/data/carbonio-appserver/mailboxd.args com.zextras.mailbox.Mailbox
 => ok
 
 ## mailbox | legacy start-systemd cold
 fs.mkdir /opt/zextras/mailboxd/work/service/jsp mode=0755
 fs.mkdir /opt/zextras/mailboxd/work mode=0755
+fs.mkdir /opt/zextras/data/carbonio-appserver mode=0755
+fs.remove /opt/zextras/data/carbonio-appserver/mailboxd.aot
+fs.write-atomic /opt/zextras/data/carbonio-appserver/mailboxd.aot.inputs mode=0644
+fs.write-atomic /opt/zextras/data/carbonio-appserver/mailboxd.args mode=0644
 fs.open /opt/zextras/log/gc.log flag=0x41 perm=0640
 fs.open /opt/zextras/log/zmmailboxd.out flag=0x441 perm=0640
-exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -Dfile.encoding=UTF-8 -Xss256k -Dsun.net.inetaddr.ttl=60 -Xms1024m -Xmx1024m -Djava.io.tmpdir=/opt/zextras/mailboxd/work -Djava.library.path=/opt/zextras/lib -Dzimbra.config=/opt/zextras/conf/localconfig.xml -cp /opt/zextras/mailbox/jars/mailbox.jar:/opt/zextras/mailbox/jars/* com.zextras.mailbox.Mailbox
+exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -Dfile.encoding=UTF-8 -Xss256k -Dsun.net.inetaddr.ttl=60 -Xms1024m -Xmx1024m -Djava.io.tmpdir=/opt/zextras/mailboxd/work -Djava.library.path=/opt/zextras/lib -Dzimbra.config=/opt/zextras/conf/localconfig.xml @/opt/zextras/data/carbonio-appserver/mailboxd.args com.zextras.mailbox.Mailbox
 => ok
 
 ## mailbox | legacy stop-systemd running
@@ -597,9 +641,13 @@ exec /usr/bin/systemctl is-active carbonio-appserver.service
 ## mailbox | systemd start-systemd
 fs.mkdir /opt/zextras/mailboxd/work/service/jsp mode=0755
 fs.mkdir /opt/zextras/mailboxd/work mode=0755
+fs.mkdir /opt/zextras/data/carbonio-appserver mode=0755
+fs.remove /opt/zextras/data/carbonio-appserver/mailboxd.aot
+fs.write-atomic /opt/zextras/data/carbonio-appserver/mailboxd.aot.inputs mode=0644
+fs.write-atomic /opt/zextras/data/carbonio-appserver/mailboxd.args mode=0644
 fs.open /opt/zextras/log/gc.log flag=0x41 perm=0640
 fs.open /opt/zextras/log/zmmailboxd.out flag=0x441 perm=0640
-exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -Dfile.encoding=UTF-8 -Xss256k -Dsun.net.inetaddr.ttl=60 -Xms1024m -Xmx1024m -Djava.io.tmpdir=/opt/zextras/mailboxd/work -Djava.library.path=/opt/zextras/lib -Dzimbra.config=/opt/zextras/conf/localconfig.xml -cp /opt/zextras/mailbox/jars/mailbox.jar:/opt/zextras/mailbox/jars/* com.zextras.mailbox.Mailbox
+exec.start /fake/java/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -Dfile.encoding=UTF-8 -Xss256k -Dsun.net.inetaddr.ttl=60 -Xms1024m -Xmx1024m -Djava.io.tmpdir=/opt/zextras/mailboxd/work -Djava.library.path=/opt/zextras/lib -Dzimbra.config=/opt/zextras/conf/localconfig.xml @/opt/zextras/data/carbonio-appserver/mailboxd.args com.zextras.mailbox.Mailbox
 => ok
 
 ## mailbox | systemd stop-systemd
