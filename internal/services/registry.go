@@ -240,15 +240,19 @@ func (c *Controller) defaultRegistry() map[string]*ServiceDef {
 			Name:          svcCbpolicyd,
 			DisplayName:   svcCbpolicyd,
 			SystemdUnits:  []string{unitPolicyd},
-			BinaryPath:    c.p.common + "/bin/cbpolicyd",
-			BinaryArgs:    []string{"--config", c.p.conf + "/cbpolicyd.conf"},
-			PidFile:       c.p.run + "/cbpolicyd.pid",
-			ProcessName:   c.p.common + "/bin/cbpolicyd",
+			BinaryPath:    c.p.gopp,
+			BinaryArgs:    []string{goppCarbonio, "-role", "cbpolicyd", "-c", c.p.goppPolicydCfg},
+			ProcessName:   c.p.gopp + " -role cbpolicyd",
 			ConfigRewrite: []string{svcCbpolicyd},
-			// Legacy cbpolicyd start: create the sqlite database once.
+			Detached:      true,
+			UseSDNotify:   true,
+			// gopp creates the sqlite database once (idempotent).
 			Setup: []Step{
 				{UnlessExists: c.p.cbpolicydDB, Mkdir: []string{filepath.Dir(c.p.cbpolicydDB)}},
-				{UnlessExists: c.p.cbpolicydDB, Run: &RunStep{Path: c.p.cbpolicydInitBin}},
+				{UnlessExists: c.p.cbpolicydDB, Run: &RunStep{
+					Path: c.p.gopp,
+					Args: []string{goppCarbonio, "db", "init", "-c", c.p.goppPolicydCfg},
+				}},
 			},
 		},
 		svcStats: {
@@ -296,14 +300,13 @@ func (c *Controller) defaultRegistry() map[string]*ServiceDef {
 			Name:         svcMilter,
 			DisplayName:  svcMilter,
 			SystemdUnits: []string{"carbonio-milter.service"},
-			ProcessName:  milterMainClass,
+			BinaryPath:   c.p.gopp,
+			BinaryArgs:   []string{goppCarbonio, "-role", "milter", "-c", c.p.goppMilterCfg},
+			ProcessName:  c.p.gopp + " -role milter",
 			EnableCheck:  c.milterEnabled,
-			Java: &JavaSpec{
-				Label:   "milter",
-				LogFile: c.p.log + "/milter.out",
-				Args:    c.milterJavaArgs,
-			},
-			// zmmilterctl refresh: SIGCONT makes MilterServer re-read its config.
+			Detached:     true,
+			UseSDNotify:  true,
+			// zmmilterctl refresh: SIGCONT invalidates gopp's ACL cache.
 			RefreshSignal: syscall.SIGCONT,
 		},
 		svcAmavis: {

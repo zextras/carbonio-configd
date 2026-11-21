@@ -22,6 +22,17 @@ var (
 	maxprocRe     = regexp.MustCompile(`^(-|\d+)$`)
 )
 
+// The delivery daemons whose argv= attribute is a command line.
+const (
+	cmdPipe  = "pipe"
+	cmdSpawn = "spawn"
+)
+
+// runsCommandLine reports whether command is pipe(8) or spawn(8).
+func runsCommandLine(command string) bool {
+	return command == cmdPipe || command == cmdSpawn
+}
+
 var (
 	masterTypes = map[string]struct{}{
 		"inet": {}, "unix": {}, "unix-dgram": {}, "fifo": {}, "pass": {},
@@ -34,9 +45,9 @@ var (
 	masterCommands = map[string]struct{}{
 		"anvil": {}, "bounce": {}, "cleanup": {}, "discard": {}, "dnsblog": {},
 		"error": {}, "flush": {}, "local": {}, "lmtp": {}, "oqmgr": {},
-		"pickup": {}, "pipe": {}, "postlogd": {}, "postscreen": {},
+		"pickup": {}, cmdPipe: {}, "postlogd": {}, "postscreen": {},
 		"proxymap": {}, "qmgr": {}, "scache": {}, "showq": {}, "smtp": {},
-		"smtpd": {}, "spawn": {}, "tlsmgr": {}, "tlsproxy": {},
+		"smtpd": {}, cmdSpawn: {}, "tlsmgr": {}, "tlsproxy": {},
 		"trivial-rewrite": {}, "verify": {}, "virtual": {},
 	}
 
@@ -176,7 +187,21 @@ func validateEntry(text string) error {
 // validateArgs checks the daemon arguments: -o overrides, option clusters,
 // brace forms and user= attributes.
 func validateArgs(service, command string, args []string) error {
+	inCommand := false
+
 	for i := 0; i < len(args); i++ {
+		// pipe(8)/spawn(8) stop option parsing at their first non-option
+		// argument, so everything after argv= is the delivery command line
+		// (e.g. "gopp -carbonio postfixpolicy"), not daemon options.
+		// -o overrides there are still checked: being refused costs nothing.
+		if inCommand || runsCommandLine(command) && strings.HasPrefix(args[i], "argv=") {
+			inCommand = true
+
+			if strings.HasPrefix(args[i], "-") && !strings.HasPrefix(args[i], "-o") {
+				continue
+			}
+		}
+
 		next, err := validateArg(service, command, args, i)
 		if err != nil {
 			return err
@@ -233,7 +258,7 @@ var pipeMacroRe = regexp.MustCompile(`\$\{[A-Za-z_]+\}`)
 // stripMacros removes ${name} macros from tok for the brace check when the
 // service is a pipe or spawn (their argv= attribute is the delivery command line).
 func stripMacros(command, tok string) string {
-	if command != "pipe" && command != "spawn" {
+	if !runsCommandLine(command) {
 		return tok
 	}
 

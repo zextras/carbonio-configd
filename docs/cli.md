@@ -195,7 +195,7 @@ Controls one service: the verbs of the legacy `zm*ctl` scripts.
 | `kill` | alias of `stop` (legacy scripts treat them alike) |
 | `reload` | reload; `norewrite` honoured |
 | `status` | detailed status (pid, uptime); exit `1` and `<service> is not running.` when it is stopped |
-| `refresh` | make the service re-read its configuration: defined only for `milter` (sends `SIGCONT` to the JVM) |
+| `refresh` | make the service re-read its configuration: defined only for `milter` (sends `SIGCONT` to gopp, which invalidates its ACL cache) |
 | `rotate` | make the service reopen its logs: defined only for `stats` (`SIGHUP` to the stats process, which rotates the log of every collector) |
 
 `norewrite` is a positional word, accepted by every verb but meaningful only
@@ -243,9 +243,9 @@ Registry names (what `service list` shows, start order top to bottom):
 | `clamd` | clamd alone (legacy `zmclamdctl`) | `carbonio-antivirus` |
 | `freshclam` | freshclam | `carbonio-freshclam` |
 | `opendkim` | opendkim | `carbonio-opendkim` |
-| `cbpolicyd` | cbpolicyd (creates its sqlite DB on first start) | `carbonio-policyd` |
+| `cbpolicyd` | `gopp -carbonio -role cbpolicyd` (`gopp -carbonio db init` creates its sqlite DB on first start; config `gopp-policyd.cfg` rendered from `gopp-policyd.cfg.in`) | `carbonio-policyd` |
 | `saslauthd` | saslauthd | `carbonio-saslauthd` |
-| `milter` | milter JVM; only started when enabled in `mta_milter_options` | `carbonio-milter` |
+| `milter` | `gopp -carbonio -role milter` (config `gopp-milter.cfg`); only started when enabled in `mta_milter_options` | `carbonio-milter` |
 | `mta` | Postfix (depends on `saslauthd` and `milter`) | `carbonio-postfix` |
 | `stats` | the zmstat collectors, all in one process (`configd stat run <collector>...`) | `carbonio-stats` |
 

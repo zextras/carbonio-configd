@@ -102,7 +102,7 @@ tlsmgr    unix  -       -       n       1000?   1       tlsmgr
 	-o smtpd_tls_wrappermode=yes
 	-o smtpd_client_restrictions=
 policy    unix  -       n       n       -       0       spawn
-	user=zimbra argv=/usr/bin/perl /opt/zextras/libexec/zmpostfixpolicyd
+	user=zextras argv=/opt/zextras/common/bin/gopp -carbonio postfixpolicy
 `
 
 const goodEntry = "smtp inet n - n - - smtpd"
@@ -140,6 +140,8 @@ func TestValidateMasterCf(t *testing.T) {
 		{"pipe stray brace", "m unix - n n - - pipe user=vmail argv=/x {recipient\n", "outside a -o"},
 		{"pipe -o override still checked", "m unix - n n - - pipe user=vmail argv=/x -o daemon_directory=/t\n", "not allowed"},
 		{"spawn as user", "ok unix - - n - - spawn user=zextras argv=/bin/true\n", ""},
+		{"spawn argv dash options", "ok unix - - n - - spawn user=zextras argv=/opt/zextras/common/bin/gopp -carbonio postfixpolicy\n", ""},
+		{"dash option before argv", "ok unix - - n - - spawn -carbonio user=zextras argv=/bin/true\n", "option"},
 		{"deny key via -o", goodEntry + " -o daemon_directory=/tmp\n", "not allowed"},
 		{"deny key attached", goodEntry + " -odaemon_directory=/tmp\n", "not allowed"},
 		{"deny key in cluster", goodEntry + " -vodaemon_directory=/tmp\n", "option"},

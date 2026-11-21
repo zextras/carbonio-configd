@@ -54,7 +54,7 @@ func TestCbpolicydInitDB_DBMissingNoBinary(t *testing.T) {
 
 	ctl.p.cbpolicydDB = dbFile
 
-	ctl.p.cbpolicydInitBin = filepath.Join(tmp, "nonexistent-bin")
+	ctl.p.gopp = filepath.Join(tmp, "nonexistent-bin")
 
 	ctl.registry = ctl.defaultRegistry() // the Setup steps carry the paths set above
 
@@ -77,12 +77,12 @@ func TestCbpolicydInitDB_DBMissingBinaryFails(t *testing.T) {
 	tmp := t.TempDir()
 	dbFile := filepath.Join(tmp, "subdir", "cbpolicyd.sqlitedb")
 
-	initBin := filepath.Join(tmp, "zmcbpolicydinit")
+	initBin := filepath.Join(tmp, "gopp")
 	writeExecutable(t, initBin, []byte("#!/bin/sh\necho 'init error'; exit 1\n"))
 
 	ctl.p.cbpolicydDB = dbFile
 
-	ctl.p.cbpolicydInitBin = initBin
+	ctl.p.gopp = initBin
 
 	ctl.registry = ctl.defaultRegistry() // the Setup steps carry the paths set above
 
@@ -104,12 +104,12 @@ func TestCbpolicydInitDB_DBMissingBinarySucceeds(t *testing.T) {
 	tmp := t.TempDir()
 	dbFile := filepath.Join(tmp, "subdir", "cbpolicyd.sqlitedb")
 
-	initBin := filepath.Join(tmp, "zmcbpolicydinit")
+	initBin := filepath.Join(tmp, "gopp")
 	writeExecutable(t, initBin, []byte("#!/bin/sh\nexit 0\n"))
 
 	ctl.p.cbpolicydDB = dbFile
 
-	ctl.p.cbpolicydInitBin = initBin
+	ctl.p.gopp = initBin
 
 	ctl.registry = ctl.defaultRegistry() // the Setup steps carry the paths set above
 

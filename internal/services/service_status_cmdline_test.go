@@ -6,6 +6,7 @@ package services
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/zextras/carbonio-configd/internal/sys"
@@ -50,7 +51,7 @@ func TestServiceStatus_IgnoresProcessesMentioningTheName(t *testing.T) {
 				t.Errorf("unrelated process %v: ServiceStatus = %v, %v; want false, nil", tc.unrelated, running, err)
 			}
 
-			f.Proc.Add(sys.ProcEntry{PID: 4002, Argv: []string{def.ProcessName, "-d"}})
+			f.Proc.Add(sys.ProcEntry{PID: 4002, Argv: append(strings.Fields(def.ProcessName), "-d")})
 
 			if running, err := ctl.ServiceStatus(context.Background(), tc.service); err != nil || !running {
 				t.Errorf("process %q: ServiceStatus = %v, %v; want true, nil", def.ProcessName, running, err)

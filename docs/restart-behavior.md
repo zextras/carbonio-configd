@@ -259,7 +259,7 @@ control path, not a per-instance flag — each of those functions bifurcates int
    strategy the `ServiceDef` declares (`Java`, `Mysqld`, `Commands`, `Collectors`, else
    `BinaryPath`/`ProcessName`, see `service-registry.md`). `systemctl` is never invoked. There
    is no `zm*ctl` fallback: services whose legacy launch is too dynamic for a static
-   `BinaryPath` (mailbox, stats, mta, ldap, milter, antispam, amavis, ...) declare what the old
+   `BinaryPath` (mailbox, stats, mta, ldap, antispam, amavis, ...) declare what the old
    `/opt/zextras/bin/zm*ctl` scripts did as data — spec fields, ordered `Setup`/`Prepare`
    steps, `Companions` — instead of shelling out to them. Stops that are only a bounded
    SIGTERM wait (slapd/LMDB) are data too: `ServiceDef.GracefulStop`.
@@ -343,7 +343,7 @@ wrappers run `exec configd service "${1:-}" <name> "${@:2}"`.
 | `start`, `restart`, `reload` | `norewrite` (or `--no-rewrite`) skips the config regeneration |
 | `stop`, `kill` | stop (kill is a legacy alias) |
 | `status` | stopped: `<name> is not running.` on stdout, exit 1, nothing on stderr |
-| `refresh` | signals the service to re-read its config: `milter` gets SIGCONT; a stopped service prints `<name> is not currently running` (exit 0) |
+| `refresh` | signals the service to re-read its config: `milter` (gopp) gets SIGCONT, which invalidates its ACL cache; a stopped service prints `<name> is not currently running` (exit 0) |
 | `rotate` | `stats`: SIGHUP to every collector in the stats pidfile directory; no pidfile → exit 1 |
 | anything else | usage line on stderr, exit 1 |
 
