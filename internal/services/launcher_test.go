@@ -11,6 +11,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 // --- buildLDAPBindURL ---
@@ -221,15 +223,41 @@ func TestMailboxJavaArgs_NoXssDoubleInjection(t *testing.T) {
 	}
 }
 
-func TestMailboxJavaArgs_ContainsCpAndMainClass(t *testing.T) {
+// The command line: the class path, ZAL flag and AOT flags come from the
+// argument file (no -cp, no wildcard) right before the main class, which stays
+// last (pgrep identity).
+func TestMailboxJavaArgs_ArgfileAndMainClass(t *testing.T) {
+	t.Parallel()
+
+	ctl := newRealController(t)
+	state := ctl.p.data + "/carbonio-appserver"
+
+	args := ctl.mailboxJavaArgs(map[string]string{})
+
+	assert.Equal(t, "--enable-preview", args[0])
+	assert.Equal(t, []string{"@" + state + "/mailboxd.args", "com.zextras.mailbox.Mailbox"}, args[len(args)-2:])
+	assert.NotContains(t, args, "-cp")
+	assert.NotContains(t, args, "-classpath")
+}
+
+// The fallback is the command line from before the flat class path.
+func TestMailboxJavaArgsFallback_OldClasspathAndNoAOTFlags(t *testing.T) {
 	t.Parallel()
 
 	ctl := newRealController(t)
 
-	lc := map[string]string{}
-	args := ctl.mailboxJavaArgs(lc)
-	assertContains(t, args, "-cp")
-	assertContains(t, args, "com.zextras.mailbox.Mailbox")
+	args := ctl.mailboxJavaArgsFallback(map[string]string{})
+
+	assert.Equal(t, []string{
+		"-cp", ctl.p.mailbox + "/jars/mailbox.jar:" + ctl.p.mailbox + "/jars/*", "com.zextras.mailbox.Mailbox",
+	}, args[len(args)-3:])
+	assert.Equal(t, "--enable-preview", args[0])
+
+	for _, a := range args {
+		assert.NotContains(t, a, "AOT")
+		assert.NotContains(t, a, "flatClasspath")
+		assert.False(t, strings.HasPrefix(a, "@"), "no argument file: %q", a)
+	}
 }
 
 func TestMailboxJavaArgs_PreviewFlagsOnceBeforeMainClass(t *testing.T) {

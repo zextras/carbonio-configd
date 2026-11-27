@@ -50,6 +50,14 @@ type JavaSpec struct {
 	Args func(lc map[string]string) []string
 	// Mkdirs are directories created (best effort, 0755) before the launch.
 	Mkdirs []string
+	// Prepare, when set, runs after Mkdirs and before the launch, with the
+	// java binary about to be started. The step is an optimisation, never a
+	// precondition: when it fails the start goes on with FallbackArgs
+	// instead of Args.
+	Prepare func(ctx context.Context, javaBin string, lc map[string]string) error
+	// FallbackArgs builds the argument list used when Prepare fails. It is
+	// required with Prepare.
+	FallbackArgs func(lc map[string]string) []string
 	// Touch are files pre-created (0640) when missing, so the JVM, which only
 	// needs write access, finds them with the right owner.
 	Touch []string
