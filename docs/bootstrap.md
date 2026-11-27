@@ -578,7 +578,7 @@ statuses of their scripts instead.
 | `setup ldap-enable-replica` | `zmldapenablereplica` | root | The provider overlays on the master, the consumer configuration on a replica. |
 | `setup ldap-enable-mmr [-r RID] [-s SID] -m MMRURI` | `zmldapenable-mmr` | root, zextras | Adds a multi-master agreement with another master. |
 | `setup iptool [-d [-m ipmode]]` | `zmiptool` | root, zextras | Applies `zimbraIPMode` to the Java options and the MySQL bind address. |
-| `setup prov [-r] [-m] [-l] <verb> args...` | `zmprov -r -m -l <verb> ...` (Java, one JVM per call) in setup.pl | root, zextras | The zmprov commands setup.pl runs, natively over LDAP: `cs cd ca aaa mcf ms mc ma md gs gcf gacf gad ga gc gd gas garpu gamcs`. See [`setup prov`](#setup-prov). carbonio-core's `clientcertmgr` and `cbpolicydinit` call it too. |
+| `setup prov [-r] [-m] [-l] <verb> args...` | `zmprov -r -m -l <verb> ...` (Java, one JVM per call) in setup.pl | root, zextras | The zmprov commands setup.pl runs, natively over LDAP: `cs cd ca aaa mcf ms mc ma md gs gcf gacf gad ga gc gd gas garpu gamcs`. See [`setup prov`](#setup-prov). carbonio-core's `clientcertmgr` calls it too. |
 | `setup gsautil <command> [options]` | `zmgsautil` (`com.zimbra.cs.util.GalSyncAccountUtil`, Java) | root, zextras | `createAccount addDataSource deleteAccount trickleSync fullSync forceSync`, with the options, output, usage text and exit statuses of the tool. See [`setup gsautil`](#setup-gsautil). |
 | `setup random-password [-l] [min max]` | `zmjava com.zimbra.common.util.RandomPassword` | any user | Prints a random password of `min` to `max` characters (24 to 32 when they are not given) from `crypto/rand`; `-l` leaves out the dot, as for a local part. |
 | `setup serverips [--networks]` | `zmserverips` (Perl) | any user | Lists the addresses of `/sbin/ip addr` without the link-local ones, as `addr:<ip> Mask:<mask>`; `--networks` (`-n`) prints the networks (`10.1.5.0/24`, `[::1]/128`). `0` when an address was listed, `1` when none, `2` when `/sbin/ip` cannot run. |
@@ -616,7 +616,7 @@ the value as one argument (a PEM with its newlines included): carbonio-core's
 `clientcertmgr savecrt|cleancrt` sets and clears `zimbraReverseProxyClientCertCA`
 with `setup prov -m -l mcf|ms <server>|md <domain> zimbraReverseProxyClientCertCA <pem>`;
 an empty value deletes the attribute, as in zmprov. The options `-r -m -l` select
-nothing here, so a read (`gad`, `gacf`, `gs`: carbonio-core's `cbpolicydinit`)
+nothing here, so a read (`gad`, `gacf`, `gs`)
 always goes to LDAP, where the Java `zmprov` without `-l` asked the mailbox.
 
 ### `setup gsautil`

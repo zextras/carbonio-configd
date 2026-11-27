@@ -494,8 +494,8 @@ func TestRunningPID_RealContainerArgvForms(t *testing.T) {
 		"--quiet", "--daemon", "--checks=12"), "freshclam", false)
 	add(116538, argv("/opt/zextras/common/sbin/opendkim", "-x", "/opt/zextras/conf/opendkim.conf", "-u", "zextras"),
 		"opendkim", false)
-	add(116562, argv("/opt/zextras/common/lib/jvm/java/bin/java", "-client", "-Dzimbra.home=/opt/zextras",
-		"-classpath", "/opt/zextras/lib/ext/*", "com.zimbra.cs.milter.MilterServer"), "java", false)
+	add(116562, argv("/opt/zextras/common/bin/gopp", "-carbonio", "-role", "milter",
+		"-c", "/opt/zextras/conf/gopp-milter.cfg"), "gopp", false)
 	add(116657, argv("/opt/zextras/common/sbin/saslauthd", "-r", "-a", "zimbra"), "saslauthd", false)
 	add(116775, argv("/opt/zextras/common/libexec/master", "-w"), "master", false)
 	add(116776, argv("pickup", "-l", "-t", "unix", "-u"), "pickup", false)
